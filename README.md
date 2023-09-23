@@ -27,7 +27,7 @@ done
 # Create configuration files for 1000 user accounts.
 # * Private account states are stored in one local wallet `accounts.json`.
 # * `initial_accounts.txt` is used to mint the corresponding initial balances at startup on the server side.
-./client --committee committee.json --accounts accounts.json create_accounts 1000 --initial-funding 100 >> initial_accounts.txt
+./client --committee committee.json --accounts accounts.json create_accounts 1000 --initial_funding 100 >> initial_accounts.txt
 
 # Start servers
 for I in 1 2 3 4
