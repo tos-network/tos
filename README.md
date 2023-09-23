@@ -69,4 +69,4 @@ cd ../..
 
 ## License
 
-The content of this repository is licensed as [Apache 2.0](https://github.com/tos-network/tos/blob/main/LICENSE)
+The content of this repository is licensed as [Apache 2.0](https://github.com/tos-network/tos/blob/master/LICENSE)
