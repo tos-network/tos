@@ -68,7 +68,7 @@ fn make_authority_mass_clients(
 fn make_client_state(
     accounts: &AccountsConfig,
     committee_config: &CommitteeConfig,
-    address: TosAddress,
+    address: Address,
     buffer_size: usize,
     send_timeout: std::time::Duration,
     recv_timeout: std::time::Duration,
@@ -82,7 +82,7 @@ fn make_client_state(
         account.key.copy(),
         committee,
         authority_clients,
-        account.next_sequence_number,
+        account.nonce,
         account.sent_certificates.clone(),
         account.received_certificates.clone(),
         account.balance,
@@ -93,7 +93,7 @@ fn make_client_state(
 fn make_benchmark_transfer_orders(
     accounts_config: &mut AccountsConfig,
     max_orders: usize,
-) -> (Vec<TransferOrder>, Vec<(TosAddress, Bytes)>) {
+) -> (Vec<TransferOrder>, Vec<(Address, Bytes)>) {
     let mut orders = Vec::new();
     let mut serialized_orders = Vec::new();
     // TODO: deterministic sequence of orders to recover from interrupted benchmarks.
@@ -101,13 +101,13 @@ fn make_benchmark_transfer_orders(
     for account in accounts_config.accounts_mut() {
         let transfer = Transfer {
             sender: account.address,
-            recipient: Address::Tos(next_recipient),
+            recipient: next_recipient,
             amount: Amount::from(1),
-            sequence_number: account.next_sequence_number,
+            sequence_number: account.nonce,
             user_data: UserData::default(),
         };
         debug!("Preparing transfer order: {:?}", transfer);
-        account.next_sequence_number = account.next_sequence_number.increment().unwrap();
+        account.nonce = account.nonce.increment().unwrap();
         next_recipient = account.address;
         let order = TransferOrder::new(transfer.clone(), &account.key);
         orders.push(order.clone());
@@ -124,7 +124,7 @@ fn make_benchmark_transfer_orders(
 fn make_benchmark_certificates_from_orders_and_server_configs(
     orders: Vec<TransferOrder>,
     server_config: Vec<&str>,
-) -> Vec<(TosAddress, Bytes)> {
+) -> Vec<(Address, Bytes)> {
     let mut keys = Vec::new();
     for file in server_config {
         let server_config = AuthorityServerConfig::read(file).expect("Fail to read server config");
@@ -159,7 +159,7 @@ fn make_benchmark_certificates_from_orders_and_server_configs(
 fn make_benchmark_certificates_from_votes(
     committee_config: &CommitteeConfig,
     votes: Vec<SignedTransferOrder>,
-) -> Vec<(TosAddress, Bytes)> {
+) -> Vec<(Address, Bytes)> {
     let committee = Committee::new(committee_config.voting_rights());
     let mut aggregators = HashMap::new();
     let mut certificates = Vec::new();
@@ -205,7 +205,7 @@ async fn mass_broadcast_orders(
     send_timeout: std::time::Duration,
     recv_timeout: std::time::Duration,
     max_in_flight: u64,
-    orders: Vec<(TosAddress, Bytes)>,
+    orders: Vec<(Address, Bytes)>,
 ) -> Vec<Bytes> {
     let time_start = Instant::now();
     info!("Broadcasting {} {} orders", orders.len(), phase);
@@ -246,7 +246,7 @@ async fn mass_broadcast_orders(
 
 fn mass_update_recipients(
     accounts_config: &mut AccountsConfig,
-    certificates: Vec<(TosAddress, Bytes)>,
+    certificates: Vec<(Address, Bytes)>,
 ) {
     for (_sender, buf) in certificates {
         if let Ok(SerializedMessage::Cert(certificate)) = deserialize_message(&buf[..]) {

@@ -39,7 +39,7 @@ pub enum TosError {
     #[fail(
         display = "The given sequence number must match the next expected sequence number of the account"
     )]
-    UnexpectedSequenceNumber,
+    UnexpectedNonce,
     #[fail(
         display = "The transferred amount must be not exceed the current account balance: {:?}",
         current_balance
@@ -74,7 +74,7 @@ pub enum TosError {
     #[fail(display = "Signatures in a certificate must be from different authorities.")]
     CertificateAuthorityReuse,
     #[fail(display = "Sequence numbers above the maximal value are not usable for transfers.")]
-    InvalidSequenceNumber,
+    InvalidNonce,
     #[fail(display = "Sequence number overflow.")]
     SequenceOverflow,
     #[fail(display = "Sequence number underflow.")]

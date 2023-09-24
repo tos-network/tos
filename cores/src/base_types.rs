@@ -2,6 +2,7 @@
 // Copyright (c) Tos  Network.
 // SPDX-License-Identifier: Apache-2.0
 
+use base58::{ToBase58, FromBase58};
 use ed25519_dalek as dalek;
 use ed25519_dalek::{Signer, Verifier};
 
@@ -26,38 +27,37 @@ pub struct Balance(i128);
 #[derive(
     Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Hash, Default, Debug, Serialize, Deserialize,
 )]
-pub struct SequenceNumber(u64);
+pub struct Nonce(u64);
 
 pub type ShardId = u32;
-pub type VersionNumber = SequenceNumber;
+pub type VersionNumber = Nonce;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Default, Debug, Serialize, Deserialize)]
 pub struct UserData(pub Option<[u8; 32]>);
 
-// TODO: Make sure secrets are not copyable and movable to control where they are in memory
+/// A signature key-pair.
 pub struct KeyPair(dalek::Keypair);
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Hash, Serialize, Deserialize)]
-pub struct PublicKeyBytes(pub [u8; dalek::PUBLIC_KEY_LENGTH]);
+pub struct PublicKey(pub [u8; dalek::PUBLIC_KEY_LENGTH]);
 
-pub type PrimaryAddress = PublicKeyBytes;
-pub type TosAddress = PublicKeyBytes;
-pub type AuthorityName = PublicKeyBytes;
+pub type Address = PublicKey;
+pub type AuthorityName = PublicKey;
 
-pub fn get_key_pair() -> (TosAddress, KeyPair) {
+pub fn get_key_pair() -> (Address, KeyPair) {
     let mut csprng = OsRng;
     let keypair = dalek::Keypair::generate(&mut csprng);
-    (PublicKeyBytes(keypair.public.to_bytes()), KeyPair(keypair))
+    (PublicKey(keypair.public.to_bytes()), KeyPair(keypair))
 }
 
-pub fn address_as_base64<S>(key: &PublicKeyBytes, serializer: S) -> Result<S::Ok, S::Error>
+pub fn address_as_base58<S>(key: &PublicKey, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::ser::Serializer,
 {
     serializer.serialize_str(&encode_address(key))
 }
 
-pub fn address_from_base64<'de, D>(deserializer: D) -> Result<PublicKeyBytes, D::Error>
+pub fn address_from_base58<'de, D>(deserializer: D) -> Result<PublicKey, D::Error>
 where
     D: serde::de::Deserializer<'de>,
 {
@@ -66,21 +66,21 @@ where
     Ok(value)
 }
 
-pub fn encode_address(key: &PublicKeyBytes) -> String {
-    base64::encode(&key.0[..])
+pub fn encode_address(key: &PublicKey) -> String {
+    ToBase58::to_base58(&key.0[..])
 }
 
-pub fn decode_address(s: &str) -> Result<PublicKeyBytes, failure::Error> {
-    let value = base64::decode(s)?;
+pub fn decode_address(s: &str) -> Result<PublicKey, failure::Error> {
+    let value = FromBase58::from_base58(s).unwrap();
     let mut address = [0u8; dalek::PUBLIC_KEY_LENGTH];
     address.copy_from_slice(&value[..dalek::PUBLIC_KEY_LENGTH]);
-    Ok(PublicKeyBytes(address))
+    Ok(PublicKey(address))
 }
 
 #[cfg(test)]
-pub fn dbg_addr(name: u8) -> TosAddress {
+pub fn dbg_addr(name: u8) -> Address {
     let addr = [name; dalek::PUBLIC_KEY_LENGTH];
-    PublicKeyBytes(addr)
+    PublicKey(addr)
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
@@ -126,9 +126,9 @@ impl std::fmt::Debug for Signature {
     }
 }
 
-impl std::fmt::Debug for PublicKeyBytes {
+impl std::fmt::Debug for PublicKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        let s = base64::encode(&self.0);
+        let s = encode_address(&self);
         write!(f, "{}", s)?;
         Ok(())
     }
@@ -216,16 +216,16 @@ impl TryFrom<Balance> for Amount {
     }
 }
 
-impl SequenceNumber {
+impl Nonce {
     pub fn new() -> Self {
-        SequenceNumber(0)
+        Nonce(0)
     }
 
     pub fn max() -> Self {
-        SequenceNumber(0x7fff_ffff_ffff_ffff)
+        Nonce(0x7fff_ffff_ffff_ffff)
     }
 
-    pub fn increment(self) -> Result<SequenceNumber, TosError> {
+    pub fn increment(self) -> Result<Nonce, TosError> {
         let val = self.0.checked_add(1);
         match val {
             None => Err(TosError::SequenceOverflow),
@@ -233,7 +233,7 @@ impl SequenceNumber {
         }
     }
 
-    pub fn decrement(self) -> Result<SequenceNumber, TosError> {
+    pub fn decrement(self) -> Result<Nonce, TosError> {
         let val = self.0.checked_sub(1);
         match val {
             None => Err(TosError::SequenceUnderflow),
@@ -242,8 +242,8 @@ impl SequenceNumber {
     }
 }
 
-impl From<SequenceNumber> for u64 {
-    fn from(val: SequenceNumber) -> Self {
+impl From<Nonce> for u64 {
+    fn from(val: Nonce) -> Self {
         val.0
     }
 }
@@ -260,14 +260,14 @@ impl From<i128> for Balance {
     }
 }
 
-impl From<u64> for SequenceNumber {
+impl From<u64> for Nonce {
     fn from(value: u64) -> Self {
-        SequenceNumber(value)
+        Nonce(value)
     }
 }
 
-impl From<SequenceNumber> for usize {
-    fn from(value: SequenceNumber) -> Self {
+impl From<Nonce> for usize {
+    fn from(value: Nonce) -> Self {
         value.0 as usize
     }
 }
@@ -309,7 +309,7 @@ impl Signature {
     fn check_internal<T>(
         &self,
         value: &T,
-        author: TosAddress,
+        author: Address,
     ) -> Result<(), dalek::SignatureError>
     where
         T: Signable<Vec<u8>>,
@@ -320,7 +320,7 @@ impl Signature {
         public_key.verify(&message, &self.0)
     }
 
-    pub fn check<T>(&self, value: &T, author: TosAddress) -> Result<(), TosError>
+    pub fn check<T>(&self, value: &T, author: Address) -> Result<(), TosError>
     where
         T: Signable<Vec<u8>>,
     {
@@ -333,7 +333,7 @@ impl Signature {
     fn verify_batch_internal<'a, T, I>(value: &'a T, votes: I) -> Result<(), dalek::SignatureError>
     where
         T: Signable<Vec<u8>>,
-        I: IntoIterator<Item = &'a (TosAddress, Signature)>,
+        I: IntoIterator<Item = &'a (Address, Signature)>,
     {
         let mut msg = Vec::new();
         value.write(&mut msg);
@@ -351,7 +351,7 @@ impl Signature {
     pub fn verify_batch<'a, T, I>(value: &'a T, votes: I) -> Result<(), TosError>
     where
         T: Signable<Vec<u8>>,
-        I: IntoIterator<Item = &'a (TosAddress, Signature)>,
+        I: IntoIterator<Item = &'a (Address, Signature)>,
     {
         Signature::verify_batch_internal(value, votes).map_err(|error| {
             TosError::InvalidSignature {

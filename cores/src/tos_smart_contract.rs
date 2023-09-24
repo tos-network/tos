@@ -15,7 +15,7 @@ pub struct AccountOnchainState {
     /// Prevent spending actions from this account to Primary to be redeemed more than once.
     /// It is the responsability of the owner of the account to redeem the previous action
     /// before initiating a new one. Otherwise, money can be lost.
-    last_redeemed: Option<SequenceNumber>,
+    last_redeemed: Option<Nonce>,
 }
 
 #[derive(Eq, PartialEq, Clone, Debug)]
@@ -23,7 +23,7 @@ pub struct TosSmartContractState {
     /// Committee of this Tos instance.
     committee: Committee,
     /// Onchain states of Tos smart contract.
-    pub accounts: BTreeMap<TosAddress, AccountOnchainState>,
+    pub accounts: BTreeMap<Address, AccountOnchainState>,
     /// Primary coins in the smart contract.
     total_balance: Amount,
     /// The latest transaction index included in the blockchain.

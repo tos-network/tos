@@ -1,9 +1,30 @@
 #!/bin/bash
 
-rm -f ../target/release/*.json
-rm -f ../target/release/*.txt
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+RELEASE_DIR="$BASE_DIR/target/release"
 
-cd ../target/release
+echo "Base directory: $BASE_DIR"
+echo "Release directory: $RELEASE_DIR"
+
+cd $RELEASE_DIR
+
+# Re-Run
+json_files=( $RELEASE_DIR/*.json )
+for file in "${json_files[@]}"; do
+  if [ -e "$file" ]; then
+   rm -f "$file"
+   echo "deleted : $file"
+  fi
+done
+
+account_files=( $RELEASE_DIR/*.txt )
+for file in "${account_files[@]}"; do
+  if [ -e "$file" ]; then
+   rm -f "$file"
+   echo "deleted : $file"
+  fi
+done
 
 # Create configuration files for 4 authorities with 4 shards each.
 # * Private server states are stored in `server*.json`.
@@ -13,10 +34,15 @@ do
     ./server --server server"$I".json generate --host 127.0.0.1 --port 9"$I"00 --shards 4 >> committee.json
 done
 
+sleep 1
+
 # Create configuration files for 1000 user accounts.
 # * Private account states are stored in one local wallet `accounts.json`.
 # * `initial_accounts.txt` is used to mint the corresponding initial balances at startup on the server side.
 ./client --committee committee.json --accounts accounts.json create_accounts 1000 --initial-funding 100 >> initial_accounts.txt
+
+# cat initial_accounts.txt
+# cat accounts.json
 
 # Start servers
 for I in 1 2 3 4
@@ -25,7 +51,9 @@ do
     do
         ./server --server server"$I".json run --shard "$J" --initial-accounts initial_accounts.txt --committee committee.json &
     done
- done
+done
+
+sleep 1
 
 # Query (locally cached) balance for first and last user account
 ACCOUNT1="`head -n 1 initial_accounts.txt | awk -F: '{ print $1 }'`"
@@ -48,3 +76,5 @@ grep "$ACCOUNT1" accounts.json
 
 # Kill servers
 kill %1 %2 %3 %4 %5 %6 %7 %8 %9 %10 %11 %12 %13 %14 %15 %16
+
+cd $BASE_DIR

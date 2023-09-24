@@ -39,7 +39,7 @@ pub trait AuthorityClient {
 
 pub struct ClientState<AuthorityClient> {
     /// Our Tos address.
-    address: TosAddress,
+    address: Address,
     /// Our signature key.
     secret: KeyPair,
     /// Our Tos committee.
@@ -48,17 +48,17 @@ pub struct ClientState<AuthorityClient> {
     authority_clients: HashMap<AuthorityName, AuthorityClient>,
     /// Expected sequence number for the next certified transfer.
     /// This is also the number of transfer certificates that we have created.
-    next_sequence_number: SequenceNumber,
+    nonce: Nonce,
     /// Pending transfer.
     pending_transfer: Option<TransferOrder>,
 
     // The remaining fields are used to minimize networking, and may not always be persisted locally.
     /// Transfer certificates that we have created ("sent").
-    /// Normally, `sent_certificates` should contain one certificate for each index in `0..next_sequence_number`.
+    /// Normally, `sent_certificates` should contain one certificate for each index in `0..nonce`.
     sent_certificates: Vec<CertifiedTransferOrder>,
     /// Known received certificates, indexed by sender and sequence number.
     /// TODO: API to search and download yet unknown `received_certificates`.
-    received_certificates: BTreeMap<(TosAddress, SequenceNumber), CertifiedTransferOrder>,
+    received_certificates: BTreeMap<(Address, Nonce), CertifiedTransferOrder>,
     /// The known spendable balance (including a possible initial funding, excluding unknown sent
     /// or received certificates).
     balance: Balance,
@@ -70,15 +70,7 @@ pub trait Client {
     fn transfer_to_tos(
         &mut self,
         amount: Amount,
-        recipient: TosAddress,
-        user_data: UserData,
-    ) -> AsyncResult<CertifiedTransferOrder, failure::Error>;
-
-    /// Send money to a Primary account.
-    fn transfer_to_primary(
-        &mut self,
-        amount: Amount,
-        recipient: PrimaryAddress,
+        recipient: Address,
         user_data: UserData,
     ) -> AsyncResult<CertifiedTransferOrder, failure::Error>;
 
@@ -94,7 +86,7 @@ pub trait Client {
     fn transfer_to_tos_unsafe_unconfirmed(
         &mut self,
         amount: Amount,
-        recipient: TosAddress,
+        recipient: Address,
         user_data: UserData,
     ) -> AsyncResult<CertifiedTransferOrder, failure::Error>;
 
@@ -107,11 +99,11 @@ pub trait Client {
 impl<A> ClientState<A> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        address: TosAddress,
+        address: Address,
         secret: KeyPair,
         committee: Committee,
         authority_clients: HashMap<AuthorityName, A>,
-        next_sequence_number: SequenceNumber,
+        nonce: Nonce,
         sent_certificates: Vec<CertifiedTransferOrder>,
         received_certificates: Vec<CertifiedTransferOrder>,
         balance: Balance,
@@ -121,7 +113,7 @@ impl<A> ClientState<A> {
             secret,
             committee,
             authority_clients,
-            next_sequence_number,
+            nonce,
             pending_transfer: None,
             sent_certificates,
             received_certificates: received_certificates
@@ -132,12 +124,12 @@ impl<A> ClientState<A> {
         }
     }
 
-    pub fn address(&self) -> TosAddress {
+    pub fn address(&self) -> Address {
         self.address
     }
 
-    pub fn next_sequence_number(&self) -> SequenceNumber {
-        self.next_sequence_number
+    pub fn nonce(&self) -> Nonce {
+        self.nonce
     }
 
     pub fn balance(&self) -> Balance {
@@ -161,11 +153,11 @@ impl<A> ClientState<A> {
 struct CertificateRequester<A> {
     committee: Committee,
     authority_clients: Vec<A>,
-    sender: TosAddress,
+    sender: Address,
 }
 
 impl<A> CertificateRequester<A> {
-    fn new(committee: Committee, authority_clients: Vec<A>, sender: TosAddress) -> Self {
+    fn new(committee: Committee, authority_clients: Vec<A>, sender: Address) -> Self {
         Self {
             committee,
             authority_clients,
@@ -178,13 +170,13 @@ impl<A> Requester for CertificateRequester<A>
 where
     A: AuthorityClient + Send + Sync + 'static + Clone,
 {
-    type Key = SequenceNumber;
+    type Key = Nonce;
     type Value = Result<CertifiedTransferOrder, TosError>;
 
     /// Try to find a certificate for the given sender and sequence number.
     fn query(
         &mut self,
-        sequence_number: SequenceNumber,
+        sequence_number: Nonce,
     ) -> AsyncResult<CertifiedTransferOrder, TosError> {
         Box::pin(async move {
             let request = AccountInfoRequest {
@@ -220,7 +212,7 @@ where
 #[derive(Clone)]
 enum CommunicateAction {
     SendOrder(TransferOrder),
-    SynchronizeNextSequenceNumber(SequenceNumber),
+    SynchronizeNextNonce(Nonce),
 }
 
 impl<A> ClientState<A>
@@ -230,8 +222,8 @@ where
     #[cfg(test)]
     async fn request_certificate(
         &mut self,
-        sender: TosAddress,
-        sequence_number: SequenceNumber,
+        sender: Address,
+        sequence_number: Nonce,
     ) -> Result<CertifiedTransferOrder, TosError> {
         CertificateRequester::new(
             self.committee.clone(),
@@ -247,8 +239,8 @@ where
     #[cfg(test)]
     async fn get_strong_majority_sequence_number(
         &mut self,
-        sender: TosAddress,
-    ) -> SequenceNumber {
+        sender: Address,
+    ) -> Nonce {
         let request = AccountInfoRequest {
             sender,
             request_sequence_number: None,
@@ -261,7 +253,7 @@ where
                 let fut = client.handle_account_info_request(request.clone());
                 async move {
                     match fut.await {
-                        Ok(info) => Some((*name, info.next_sequence_number)),
+                        Ok(info) => Some((*name, info.nonce)),
                         _ => None,
                     }
                 }
@@ -352,13 +344,13 @@ where
     /// The corresponding sequence numbers should be consecutive and increasing.
     async fn communicate_transfers(
         &mut self,
-        sender: TosAddress,
+        sender: Address,
         known_certificates: Vec<CertifiedTransferOrder>,
         action: CommunicateAction,
     ) -> Result<Vec<CertifiedTransferOrder>, failure::Error> {
         let target_sequence_number = match &action {
             CommunicateAction::SendOrder(order) => order.transfer.sequence_number,
-            CommunicateAction::SynchronizeNextSequenceNumber(seq) => *seq,
+            CommunicateAction::SynchronizeNextNonce(seq) => *seq,
         };
         let requester = CertificateRequester::new(
             self.committee.clone(),
@@ -389,7 +381,7 @@ where
                         request_received_transfers_excluding_first_nth: None,
                     };
                     let response = client.handle_account_info_request(request).await?;
-                    let current_sequence_number = response.next_sequence_number;
+                    let current_sequence_number = response.nonce;
                     // Download each missing certificate in reverse order using the downloader.
                     let mut missing_certificates = Vec::new();
                     let mut number = target_sequence_number.decrement();
@@ -459,7 +451,7 @@ where
     }
 
     /// Make sure we have all our certificates with sequence number
-    /// in the range 0..self.next_sequence_number
+    /// in the range 0..self.nonce
     async fn download_sent_certificates(
         &self,
     ) -> Result<Vec<CertifiedTransferOrder>, TosError> {
@@ -474,13 +466,13 @@ where
             .map(|cert| cert.value.transfer.sequence_number)
             .collect();
         let mut sent_certificates = self.sent_certificates.clone();
-        let mut number = SequenceNumber::from(0);
-        while number < self.next_sequence_number {
+        let mut number = Nonce::from(0);
+        while number < self.nonce {
             if !known_sequence_numbers.contains(&number) {
                 let certificate = requester.query(number).await?;
                 sent_certificates.push(certificate);
             }
-            number = number.increment().unwrap_or_else(|_| SequenceNumber::max());
+            number = number.increment().unwrap_or_else(|_| Nonce::max());
         }
         sent_certificates.sort_by_key(|cert| cert.value.transfer.sequence_number);
         Ok(sent_certificates)
@@ -506,7 +498,7 @@ where
             sender: self.address,
             recipient,
             amount,
-            sequence_number: self.next_sequence_number,
+            sequence_number: self.nonce,
             user_data,
         };
         let order = TransferOrder::new(transfer, &self.secret);
@@ -524,16 +516,16 @@ where
         sent_certificates: Vec<CertifiedTransferOrder>,
     ) -> Result<(), TosError> {
         let mut new_balance = self.balance;
-        let mut new_next_sequence_number = self.next_sequence_number;
+        let mut new_nonce = self.nonce;
         for new_cert in &sent_certificates {
             new_balance = new_balance.try_sub(new_cert.value.transfer.amount.into())?;
-            if new_cert.value.transfer.sequence_number >= new_next_sequence_number {
-                new_next_sequence_number = new_cert
+            if new_cert.value.transfer.sequence_number >= new_nonce {
+                new_nonce = new_cert
                     .value
                     .transfer
                     .sequence_number
                     .increment()
-                    .unwrap_or_else(|_| SequenceNumber::max());
+                    .unwrap_or_else(|_| Nonce::max());
             }
         }
         for old_cert in &self.sent_certificates {
@@ -542,11 +534,11 @@ where
         // Atomic update
         self.sent_certificates = sent_certificates;
         self.balance = new_balance;
-        self.next_sequence_number = new_next_sequence_number;
+        self.nonce = new_nonce;
         // Sanity check
         assert_eq!(
             self.sent_certificates.len(),
-            self.next_sequence_number.into()
+            self.nonce.into()
         );
         Ok(())
     }
@@ -562,7 +554,7 @@ where
             "Client state has a different pending transfer",
         );
         ensure!(
-            order.transfer.sequence_number == self.next_sequence_number,
+            order.transfer.sequence_number == self.nonce,
             "Unexpected sequence number"
         );
         self.pending_transfer = Some(order.clone());
@@ -575,7 +567,7 @@ where
             .await?;
         assert_eq!(new_sent_certificates.last().unwrap().value, order);
         // Clear `pending_transfer` and update `sent_certificates`,
-        // `balance`, and `next_sequence_number`. (Note that if we were using persistent
+        // `balance`, and `nonce`. (Note that if we were using persistent
         // storage, we should ensure update atomicity in the eventuality of a crash.)
         self.pending_transfer = None;
         self.update_sent_certificates(new_sent_certificates)?;
@@ -584,7 +576,7 @@ where
             self.communicate_transfers(
                 self.address,
                 self.sent_certificates.clone(),
-                CommunicateAction::SynchronizeNextSequenceNumber(self.next_sequence_number),
+                CommunicateAction::SynchronizeNextNonce(self.nonce),
             )
             .await?;
         }
@@ -599,19 +591,10 @@ where
     fn transfer_to_tos(
         &mut self,
         amount: Amount,
-        recipient: TosAddress,
+        recipient: Address,
         user_data: UserData,
     ) -> AsyncResult<CertifiedTransferOrder, failure::Error> {
-        Box::pin(self.transfer(amount, Address::Tos(recipient), user_data))
-    }
-
-    fn transfer_to_primary(
-        &mut self,
-        amount: Amount,
-        recipient: PrimaryAddress,
-        user_data: UserData,
-    ) -> AsyncResult<CertifiedTransferOrder, failure::Error> {
-        Box::pin(self.transfer(amount, Address::Primary(recipient), user_data))
+        Box::pin(self.transfer(amount, recipient, user_data))
     }
 
     fn get_spendable_amount(&mut self) -> AsyncResult<Amount, failure::Error> {
@@ -621,7 +604,7 @@ where
                 self.execute_transfer(order, /* with_confirmation */ false)
                     .await?;
             }
-            if self.sent_certificates.len() < self.next_sequence_number.into() {
+            if self.sent_certificates.len() < self.nonce.into() {
                 // Recover missing sent certificates.
                 let new_sent_certificates = self.download_sent_certificates().await?;
                 self.update_sent_certificates(new_sent_certificates)?;
@@ -643,13 +626,13 @@ where
             certificate.check(&self.committee)?;
             let transfer = &certificate.value.transfer;
             ensure!(
-                transfer.recipient == Address::Tos(self.address),
+                transfer.recipient == self.address,
                 "Transfer should be received by us."
             );
             self.communicate_transfers(
                 transfer.sender,
                 vec![certificate.clone()],
-                CommunicateAction::SynchronizeNextSequenceNumber(
+                CommunicateAction::SynchronizeNextNonce(
                     certificate.value.transfer.sequence_number.increment()?,
                 ),
             )
@@ -669,15 +652,15 @@ where
     fn transfer_to_tos_unsafe_unconfirmed(
         &mut self,
         amount: Amount,
-        recipient: TosAddress,
+        recipient: Address,
         user_data: UserData,
     ) -> AsyncResult<CertifiedTransferOrder, failure::Error> {
         Box::pin(async move {
             let transfer = Transfer {
                 sender: self.address,
-                recipient: Address::Tos(recipient),
+                recipient: recipient,
                 amount,
-                sequence_number: self.next_sequence_number,
+                sequence_number: self.nonce,
                 user_data,
             };
             let order = TransferOrder::new(transfer, &self.secret);

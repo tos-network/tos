@@ -18,9 +18,9 @@ fn test_signed_values() {
 
     let transfer = Transfer {
         sender: a1,
-        recipient: Address::Tos(a2),
+        recipient: a2,
         amount: Amount::from(1),
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
     let order = TransferOrder::new(transfer.clone(), &sec1);
@@ -52,9 +52,9 @@ fn test_certificates() {
 
     let transfer = Transfer {
         sender: a1,
-        recipient: Address::Tos(a2),
+        recipient: a2,
         amount: Amount::from(1),
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
     let order = TransferOrder::new(transfer.clone(), &sec1);

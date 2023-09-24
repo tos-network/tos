@@ -114,7 +114,7 @@ fn make_client(
         secret,
         committee,
         authority_clients,
-        SequenceNumber::new(),
+        Nonce::new(),
         Vec::new(),
         Vec::new(),
         Balance::from(0),
@@ -124,7 +124,7 @@ fn make_client(
 #[cfg(test)]
 fn fund_account<I: IntoIterator<Item = i128>>(
     clients: &mut HashMap<AuthorityName, LocalAuthorityClient>,
-    address: TosAddress,
+    address: Address,
     balances: I,
 ) {
     let mut balances = balances.into_iter().map(Balance::from);
@@ -186,14 +186,14 @@ fn test_initiating_valid_transfer() {
             UserData(Some(*b"hello...........hello...........")),
         ))
         .unwrap();
-    assert_eq!(sender.next_sequence_number, SequenceNumber::from(1));
+    assert_eq!(sender.nonce, Nonce::from(1));
     assert_eq!(sender.pending_transfer, None);
     assert_eq!(
         rt.block_on(sender.get_strong_majority_balance()),
         Balance::from(1)
     );
     assert_eq!(
-        rt.block_on(sender.request_certificate(sender.address, SequenceNumber::from(0)))
+        rt.block_on(sender.request_certificate(sender.address, Nonce::from(0)))
             .unwrap(),
         certificate
     );
@@ -213,14 +213,14 @@ fn test_initiating_valid_transfer_despite_bad_authority() {
             UserData(Some(*b"hello...........hello...........")),
         ))
         .unwrap();
-    assert_eq!(sender.next_sequence_number, SequenceNumber::from(1));
+    assert_eq!(sender.nonce, Nonce::from(1));
     assert_eq!(sender.pending_transfer, None);
     assert_eq!(
         rt.block_on(sender.get_strong_majority_balance()),
         Balance::from(1)
     );
     assert_eq!(
-        rt.block_on(sender.request_certificate(sender.address, SequenceNumber::from(0)))
+        rt.block_on(sender.request_certificate(sender.address, Nonce::from(0)))
             .unwrap(),
         certificate
     );
@@ -237,7 +237,7 @@ fn test_initiating_transfer_low_funds() {
         .block_on(sender.transfer_to_tos(Amount::from(3), recipient, UserData::default()))
         .is_err());
     // Trying to overspend does not block an account.
-    assert_eq!(sender.next_sequence_number, SequenceNumber::from(0));
+    assert_eq!(sender.nonce, Nonce::from(0));
     assert_eq!(sender.pending_transfer, None);
     assert_eq!(
         rt.block_on(sender.get_strong_majority_balance()),
@@ -264,7 +264,7 @@ fn test_bidirectional_transfer() {
         ))
         .unwrap();
 
-    assert_eq!(client1.next_sequence_number, SequenceNumber::from(1));
+    assert_eq!(client1.nonce, Nonce::from(1));
     assert_eq!(client1.pending_transfer, None);
     assert_eq!(
         rt.block_on(client1.get_strong_majority_balance()),
@@ -273,11 +273,11 @@ fn test_bidirectional_transfer() {
     assert_eq!(client1.balance, Balance::from(0));
     assert_eq!(
         rt.block_on(client1.get_strong_majority_sequence_number(client1.address)),
-        SequenceNumber::from(1)
+        Nonce::from(1)
     );
 
     assert_eq!(
-        rt.block_on(client1.request_certificate(client1.address, SequenceNumber::from(0)))
+        rt.block_on(client1.request_certificate(client1.address, Nonce::from(0)))
             .unwrap(),
         certificate
     );
@@ -297,10 +297,10 @@ fn test_bidirectional_transfer() {
     assert_eq!(client2.balance, Balance::from(3));
 
     // Send back some money.
-    assert_eq!(client2.next_sequence_number, SequenceNumber::from(0));
+    assert_eq!(client2.nonce, Nonce::from(0));
     rt.block_on(client2.transfer_to_tos(Amount::from(1), client1.address, UserData::default()))
         .unwrap();
-    assert_eq!(client2.next_sequence_number, SequenceNumber::from(1));
+    assert_eq!(client2.nonce, Nonce::from(1));
     assert_eq!(client2.pending_transfer, None);
     assert_eq!(
         rt.block_on(client2.get_strong_majority_balance()),
@@ -308,7 +308,7 @@ fn test_bidirectional_transfer() {
     );
     assert_eq!(
         rt.block_on(client2.get_strong_majority_sequence_number(client2.address)),
-        SequenceNumber::from(1)
+        Nonce::from(1)
     );
     assert_eq!(
         rt.block_on(client1.get_strong_majority_balance()),
@@ -334,7 +334,7 @@ fn test_receiving_unconfirmed_transfer() {
         .unwrap();
     // Transfer was executed locally, creating negative balance.
     assert_eq!(client1.balance, Balance::from(-2));
-    assert_eq!(client1.next_sequence_number, SequenceNumber::from(1));
+    assert_eq!(client1.nonce, Nonce::from(1));
     assert_eq!(client1.pending_transfer, None);
     // ..but not confirmed remotely, hence an unchanged balance and sequence number.
     assert_eq!(
@@ -343,7 +343,7 @@ fn test_receiving_unconfirmed_transfer() {
     );
     assert_eq!(
         rt.block_on(client1.get_strong_majority_sequence_number(client1.address)),
-        SequenceNumber::from(0)
+        Nonce::from(0)
     );
     // Let the receiver confirm in last resort.
     rt.block_on(client2.receive_from_tos(certificate))
@@ -387,7 +387,7 @@ fn test_receiving_unconfirmed_transfer_with_lagging_sender_balances() {
             .communicate_transfers(
                 client0.address,
                 client0.sent_certificates.clone(),
-                CommunicateAction::SynchronizeNextSequenceNumber(client0.next_sequence_number),
+                CommunicateAction::SynchronizeNextNonce(client0.nonce),
             )
             .await
             .unwrap();
@@ -402,10 +402,10 @@ fn test_receiving_unconfirmed_transfer_with_lagging_sender_balances() {
         .unwrap();
     // Transfers were executed locally, possibly creating negative balances.
     assert_eq!(client0.balance, Balance::from(-2));
-    assert_eq!(client0.next_sequence_number, SequenceNumber::from(2));
+    assert_eq!(client0.nonce, Nonce::from(2));
     assert_eq!(client0.pending_transfer, None);
     assert_eq!(client1.balance, Balance::from(-2));
-    assert_eq!(client1.next_sequence_number, SequenceNumber::from(1));
+    assert_eq!(client1.nonce, Nonce::from(1));
     assert_eq!(client1.pending_transfer, None);
     // Last one was not confirmed remotely, hence an unchanged (remote) balance and sequence number.
     assert_eq!(
@@ -414,7 +414,7 @@ fn test_receiving_unconfirmed_transfer_with_lagging_sender_balances() {
     );
     assert_eq!(
         rt.block_on(client1.get_strong_majority_sequence_number(client1.address)),
-        SequenceNumber::from(0)
+        Nonce::from(0)
     );
     // Let the receiver confirm in last resort.
     rt.block_on(client2.receive_from_tos(certificate))

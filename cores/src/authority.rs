@@ -14,7 +14,7 @@ pub struct AccountOffchainState {
     /// Balance of the Tos account.
     pub balance: Balance,
     /// Sequence number tracking spending actions.
-    pub next_sequence_number: SequenceNumber,
+    pub nonce: Nonce,
     /// Whether we have signed a transfer for this sequence number already.
     pub pending_confirmation: Option<SignedTransferOrder>,
     /// All confirmed certificates for this sender.
@@ -33,7 +33,7 @@ pub struct AuthorityState {
     /// The signature key of the authority.
     pub secret: KeyPair,
     /// Offchain states of Tos accounts.
-    pub accounts: BTreeMap<TosAddress, AccountOffchainState>,
+    pub accounts: BTreeMap<Address, AccountOffchainState>,
     /// The latest transaction index of the blockchain that the authority has seen.
     pub last_transaction_index: VersionNumber,
     /// The sharding ID of this authority shard. 0 if one shard.
@@ -93,8 +93,8 @@ impl Authority for AuthorityState {
         let transfer = &order.transfer;
         let sender = transfer.sender;
         fp_ensure!(
-            transfer.sequence_number <= SequenceNumber::max(),
-            TosError::InvalidSequenceNumber
+            transfer.sequence_number <= Nonce::max(),
+            TosError::InvalidNonce
         );
         fp_ensure!(
             transfer.amount > Amount::zero(),
@@ -114,8 +114,8 @@ impl Authority for AuthorityState {
                     return Ok(account.make_account_info(sender));
                 }
                 fp_ensure!(
-                    account.next_sequence_number == transfer.sequence_number,
-                    TosError::UnexpectedSequenceNumber
+                    account.nonce == transfer.sequence_number,
+                    TosError::UnexpectedNonce
                 );
                 fp_ensure!(
                     account.balance >= transfer.amount.into(),
@@ -149,7 +149,7 @@ impl Authority for AuthorityState {
             .accounts
             .entry(transfer.sender)
             .or_insert_with(AccountOffchainState::new);
-        let mut sender_sequence_number = sender_account.next_sequence_number;
+        let mut sender_sequence_number = sender_account.nonce;
         let mut sender_balance = sender_account.balance;
 
         // Check and update the copied state
@@ -167,18 +167,14 @@ impl Authority for AuthorityState {
 
         // Commit sender state back to the database (Must never fail!)
         sender_account.balance = sender_balance;
-        sender_account.next_sequence_number = sender_sequence_number;
+        sender_account.nonce = sender_sequence_number;
         sender_account.pending_confirmation = None;
         sender_account.confirmed_log.push(certificate.clone());
         let info = sender_account.make_account_info(transfer.sender);
 
         // Update Tos recipient state locally or issue a cross-shard update (Must never fail!)
         let recipient = match transfer.recipient {
-            Address::Tos(recipient) => recipient,
-            Address::Primary(_) => {
-                // Nothing else to do for Primary recipients.
-                return Ok((info, None));
-            }
+            recipient => recipient,
         };
         // If the recipient is in the same shard, read and update the account.
         if self.in_shard(&recipient) {
@@ -211,10 +207,7 @@ impl Authority for AuthorityState {
         let transfer = &certificate.value.transfer;
 
         let recipient = match transfer.recipient {
-            Address::Tos(recipient) => recipient,
-            Address::Primary(_) => {
-                fp_bail!(TosError::InvalidCrossShardUpdate);
-            }
+            recipient => recipient,
         };
         fp_ensure!(self.in_shard(&recipient), TosError::WrongShard);
         let recipient_account = self
@@ -283,7 +276,7 @@ impl Default for AccountOffchainState {
     fn default() -> Self {
         Self {
             balance: Balance::zero(),
-            next_sequence_number: SequenceNumber::new(),
+            nonce: Nonce::new(),
             pending_confirmation: None,
             confirmed_log: Vec::new(),
             synchronization_log: Vec::new(),
@@ -297,11 +290,11 @@ impl AccountOffchainState {
         Self::default()
     }
 
-    fn make_account_info(&self, sender: TosAddress) -> AccountInfoResponse {
+    fn make_account_info(&self, sender: Address) -> AccountInfoResponse {
         AccountInfoResponse {
             sender,
             balance: self.balance,
-            next_sequence_number: self.next_sequence_number,
+            nonce: self.nonce,
             pending_confirmation: self.pending_confirmation.clone(),
             requested_certificate: None,
             requested_received_transfers: Vec::new(),
@@ -312,7 +305,7 @@ impl AccountOffchainState {
     pub fn new_with_balance(balance: Balance, received_log: Vec<CertifiedTransferOrder>) -> Self {
         Self {
             balance,
-            next_sequence_number: SequenceNumber::new(),
+            nonce: Nonce::new(),
             pending_confirmation: None,
             confirmed_log: Vec::new(),
             synchronization_log: Vec::new(),
@@ -352,23 +345,23 @@ impl AuthorityState {
         }
     }
 
-    pub fn in_shard(&self, address: &TosAddress) -> bool {
+    pub fn in_shard(&self, address: &Address) -> bool {
         self.which_shard(address) == self.shard_id
     }
 
-    pub fn get_shard(num_shards: u32, address: &TosAddress) -> u32 {
-        const LAST_INTEGER_INDEX: usize = std::mem::size_of::<TosAddress>() - 4;
+    pub fn get_shard(num_shards: u32, address: &Address) -> u32 {
+        const LAST_INTEGER_INDEX: usize = std::mem::size_of::<Address>() - 4;
         u32::from_le_bytes(address.0[LAST_INTEGER_INDEX..].try_into().expect("4 bytes"))
             % num_shards
     }
 
-    pub fn which_shard(&self, address: &TosAddress) -> u32 {
+    pub fn which_shard(&self, address: &Address) -> u32 {
         Self::get_shard(self.number_of_shards, address)
     }
 
     fn account_state(
         &self,
-        address: &TosAddress,
+        address: &Address,
     ) -> Result<&AccountOffchainState, TosError> {
         self.accounts
             .get(address)
@@ -376,7 +369,7 @@ impl AuthorityState {
     }
 
     #[cfg(test)]
-    pub fn accounts_mut(&mut self) -> &mut BTreeMap<TosAddress, AccountOffchainState> {
+    pub fn accounts_mut(&mut self) -> &mut BTreeMap<Address, AccountOffchainState> {
         &mut self.accounts
     }
 }

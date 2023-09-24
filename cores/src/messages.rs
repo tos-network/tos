@@ -16,30 +16,24 @@ use std::{
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct FundingTransaction {
-    pub recipient: TosAddress,
+    pub recipient: Address,
     pub primary_coins: Amount,
     // TODO: Authenticated by Primary sender.
 }
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct PrimarySynchronizationOrder {
-    pub recipient: TosAddress,
+    pub recipient: Address,
     pub amount: Amount,
     pub transaction_index: VersionNumber,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, Serialize, Deserialize)]
-pub enum Address {
-    Primary(PrimaryAddress),
-    Tos(TosAddress),
-}
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct Transfer {
-    pub sender: TosAddress,
+    pub sender: Address,
     pub recipient: Address,
     pub amount: Amount,
-    pub sequence_number: SequenceNumber,
+    pub sequence_number: Nonce,
     pub user_data: UserData,
 }
 
@@ -74,16 +68,16 @@ pub struct ConfirmationOrder {
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct AccountInfoRequest {
-    pub sender: TosAddress,
-    pub request_sequence_number: Option<SequenceNumber>,
+    pub sender: Address,
+    pub request_sequence_number: Option<Nonce>,
     pub request_received_transfers_excluding_first_nth: Option<usize>,
 }
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct AccountInfoResponse {
-    pub sender: TosAddress,
+    pub sender: Address,
     pub balance: Balance,
-    pub next_sequence_number: SequenceNumber,
+    pub nonce: Nonce,
     pub pending_confirmation: Option<SignedTransferOrder>,
     pub requested_certificate: Option<CertifiedTransferOrder>,
     pub requested_received_transfers: Vec<CertifiedTransferOrder>,
@@ -143,7 +137,7 @@ impl PartialEq for CertifiedTransferOrder {
 }
 
 impl Transfer {
-    pub fn key(&self) -> (TosAddress, SequenceNumber) {
+    pub fn key(&self) -> (Address, Nonce) {
         (self.sender, self.sequence_number)
     }
 }
@@ -241,7 +235,7 @@ impl<'a> SignatureAggregator<'a> {
 }
 
 impl CertifiedTransferOrder {
-    pub fn key(&self) -> (TosAddress, SequenceNumber) {
+    pub fn key(&self) -> (Address, Nonce) {
         let transfer = &self.value.transfer;
         transfer.key()
     }

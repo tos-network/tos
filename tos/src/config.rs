@@ -6,7 +6,7 @@ use crate::transport::NetworkProtocol;
 use cores::{
     base_types::*,
     client::ClientState,
-    messages::{Address, CertifiedTransferOrder},
+    messages::CertifiedTransferOrder,
 };
 
 use serde::{Deserialize, Serialize};
@@ -20,10 +20,10 @@ use std::{
 pub struct AuthorityConfig {
     pub network_protocol: NetworkProtocol,
     #[serde(
-        serialize_with = "address_as_base64",
-        deserialize_with = "address_from_base64"
+        serialize_with = "address_as_base58",
+        deserialize_with = "address_from_base58"
     )]
-    pub address: TosAddress,
+    pub address: Address,
     pub host: String,
     pub base_port: u32,
     pub num_shards: u32,
@@ -94,12 +94,12 @@ impl CommitteeConfig {
 #[derive(Serialize, Deserialize)]
 pub struct UserAccount {
     #[serde(
-        serialize_with = "address_as_base64",
-        deserialize_with = "address_from_base64"
+        serialize_with = "address_as_base58",
+        deserialize_with = "address_from_base58"
     )]
-    pub address: TosAddress,
+    pub address: Address,
     pub key: KeyPair,
-    pub next_sequence_number: SequenceNumber,
+    pub nonce: Nonce,
     pub balance: Balance,
     pub sent_certificates: Vec<CertifiedTransferOrder>,
     pub received_certificates: Vec<CertifiedTransferOrder>,
@@ -111,7 +111,7 @@ impl UserAccount {
         Self {
             address,
             key,
-            next_sequence_number: SequenceNumber::new(),
+            nonce: Nonce::new(),
             balance,
             sent_certificates: Vec::new(),
             received_certificates: Vec::new(),
@@ -120,16 +120,17 @@ impl UserAccount {
 }
 
 pub struct AccountsConfig {
-    accounts: BTreeMap<TosAddress, UserAccount>,
+    accounts: BTreeMap<Address, UserAccount>,
 }
 
 impl AccountsConfig {
-    pub fn get(&self, address: &TosAddress) -> Option<&UserAccount> {
+    pub fn get(&self, address: &Address) -> Option<&UserAccount> {
         self.accounts.get(address)
     }
 
     pub fn insert(&mut self, account: UserAccount) {
         self.accounts.insert(account.address, account);
+        //self.write_account(&account);
     }
 
     pub fn num_accounts(&self) -> usize {
@@ -145,23 +146,24 @@ impl AccountsConfig {
             .accounts
             .get_mut(&state.address())
             .expect("Updated account should already exist");
-        account.next_sequence_number = state.next_sequence_number();
+        account.nonce = state.nonce();
         account.balance = state.balance();
         account.sent_certificates = state.sent_certificates().clone();
         account.received_certificates = state.received_certificates().cloned().collect();
+        //self.write_account(&account);
     }
 
     pub fn update_for_received_transfer(&mut self, certificate: CertifiedTransferOrder) {
         let transfer = &certificate.value.transfer;
-        if let Address::Tos(recipient) = &transfer.recipient {
-            if let Some(config) = self.accounts.get_mut(recipient) {
-                if let Err(position) = config
-                    .received_certificates
-                    .binary_search_by_key(&certificate.key(), CertifiedTransferOrder::key)
-                {
-                    config.balance = config.balance.try_add(transfer.amount.into()).unwrap();
-                    config.received_certificates.insert(position, certificate)
-                }
+        let recipient = &transfer.recipient;
+        if let Some(config) = self.accounts.get_mut(recipient) {
+            if let Err(position) = config
+                .received_certificates
+                .binary_search_by_key(&certificate.key(), CertifiedTransferOrder::key)
+            {
+                config.balance = config.balance.try_add(transfer.amount.into()).unwrap();
+                config.received_certificates.insert(position, certificate);
+                //self.write_account(&config);
             }
         }
     }
@@ -182,10 +184,21 @@ impl AccountsConfig {
         })
     }
 
+    pub fn write_account(&self, account : &UserAccount ) -> Result<(), std::io::Error> {
+        let mut path: String = encode_address(&account.address).to_owned();
+        path.push_str(".json");
+        let file = OpenOptions::new().create(true).write(true).open(path)?;
+        let mut writer = BufWriter::new(file);
+        serde_json::to_writer(&mut writer, account)?;
+        writer.write_all(b"\n")?;
+        Ok(())
+    }
+
     pub fn write(&self, path: &str) -> Result<(), std::io::Error> {
-        let file = OpenOptions::new().write(true).open(path)?;
+        let file = OpenOptions::new().create(true).write(true).open(path)?;
         let mut writer = BufWriter::new(file);
         for account in self.accounts.values() {
+            self.write_account(&account)?;
             serde_json::to_writer(&mut writer, account)?;
             writer.write_all(b"\n")?;
         }
@@ -194,7 +207,7 @@ impl AccountsConfig {
 }
 
 pub struct InitialStateConfig {
-    pub accounts: Vec<(TosAddress, Balance)>,
+    pub accounts: Vec<(Address, Balance)>,
 }
 
 impl InitialStateConfig {

@@ -163,9 +163,9 @@ fn init_redeem_transaction(
     let (sender_address, sender_key) = get_key_pair();
     let primary_transfer = Transfer {
         sender: sender_address,
-        recipient: Address::Primary(dbg_addr(2)),
+        recipient: dbg_addr(2),
         amount: Amount::from(3),
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
     let order = TransferOrder::new(primary_transfer, &sender_key);

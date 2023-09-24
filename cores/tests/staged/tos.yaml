@@ -2,20 +2,20 @@
 AccountInfoRequest:
   STRUCT:
     - sender:
-        TYPENAME: PublicKeyBytes
+        TYPENAME: PublicKey
     - request_sequence_number:
         OPTION:
-          TYPENAME: SequenceNumber
+          TYPENAME: Nonce
     - request_received_transfers_excluding_first_nth:
         OPTION: U64
 AccountInfoResponse:
   STRUCT:
     - sender:
-        TYPENAME: PublicKeyBytes
+        TYPENAME: PublicKey
     - balance:
         TYPENAME: Balance
-    - next_sequence_number:
-        TYPENAME: SequenceNumber
+    - nonce:
+        TYPENAME: Nonce
     - pending_confirmation:
         OPTION:
           TYPENAME: SignedTransferOrder
@@ -30,11 +30,11 @@ Address:
     0:
       Primary:
         NEWTYPE:
-          TYPENAME: PublicKeyBytes
+          TYPENAME: PublicKey
     1:
       Tos:
         NEWTYPE:
-          TYPENAME: PublicKeyBytes
+          TYPENAME: PublicKey
 Amount:
   NEWTYPESTRUCT: U64
 Balance:
@@ -46,14 +46,14 @@ CertifiedTransferOrder:
     - signatures:
         SEQ:
           TUPLE:
-            - TYPENAME: PublicKeyBytes
+            - TYPENAME: PublicKey
             - TYPENAME: Signature
-PublicKeyBytes:
+PublicKey:
   NEWTYPESTRUCT:
     TUPLEARRAY:
       CONTENT: U8
       SIZE: 32
-SequenceNumber:
+Nonce:
   NEWTYPESTRUCT: U64
 SerializedMessage:
   ENUM:
@@ -95,7 +95,7 @@ SignedTransferOrder:
     - value:
         TYPENAME: TransferOrder
     - authority:
-        TYPENAME: PublicKeyBytes
+        TYPENAME: PublicKey
     - signature:
         TYPENAME: Signature
 TosError:
@@ -111,7 +111,7 @@ TosError:
     3:
       IncorrectTransferAmount: UNIT
     4:
-      UnexpectedSequenceNumber: UNIT
+      UnexpectedNonce: UNIT
     5:
       InsufficientFunding:
         STRUCT:
@@ -130,7 +130,7 @@ TosError:
       MissingEalierConfirmations:
         STRUCT:
           - current_sequence_number:
-              TYPENAME: SequenceNumber
+              TYPENAME: Nonce
     10:
       UnexpectedTransactionIndex: UNIT
     11:
@@ -140,7 +140,7 @@ TosError:
     13:
       CertificateAuthorityReuse: UNIT
     14:
-      InvalidSequenceNumber: UNIT
+      InvalidNonce: UNIT
     15:
       SequenceOverflow: UNIT
     16:
@@ -168,13 +168,13 @@ TosError:
 Transfer:
   STRUCT:
     - sender:
-        TYPENAME: PublicKeyBytes
+        TYPENAME: PublicKey
     - recipient:
         TYPENAME: Address
     - amount:
         TYPENAME: Amount
     - sequence_number:
-        TYPENAME: SequenceNumber
+        TYPENAME: Nonce
     - user_data:
         TYPENAME: UserData
 TransferOrder:

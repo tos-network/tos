@@ -29,7 +29,7 @@ fn test_info_request() {
     };
     let req2 = AccountInfoRequest {
         sender: dbg_addr(0x20),
-        request_sequence_number: Some(SequenceNumber::from(129)),
+        request_sequence_number: Some(Nonce::from(129)),
         request_received_transfers_excluding_first_nth: None,
     };
 
@@ -59,9 +59,9 @@ fn test_order() {
 
     let transfer = Transfer {
         sender: sender_name,
-        recipient: Address::Primary(dbg_addr(0x20)),
+        recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
     let transfer_order = TransferOrder::new(transfer, &sender_key);
@@ -78,9 +78,9 @@ fn test_order() {
     let (sender_name, sender_key) = get_key_pair();
     let transfer2 = Transfer {
         sender: sender_name,
-        recipient: Address::Tos(dbg_addr(0x20)),
+        recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
     let transfer_order2 = TransferOrder::new(transfer2, &sender_key);
@@ -100,9 +100,9 @@ fn test_vote() {
     let (sender_name, sender_key) = get_key_pair();
     let transfer = Transfer {
         sender: sender_name,
-        recipient: Address::Primary(dbg_addr(0x20)),
+        recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
     let order = TransferOrder::new(transfer, &sender_key);
@@ -125,9 +125,9 @@ fn test_cert() {
     let (sender_name, sender_key) = get_key_pair();
     let transfer = Transfer {
         sender: sender_name,
-        recipient: Address::Primary(dbg_addr(0x20)),
+        recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
     let order = TransferOrder::new(transfer, &sender_key);
@@ -158,9 +158,9 @@ fn test_info_response() {
     let (sender_name, sender_key) = get_key_pair();
     let transfer = Transfer {
         sender: sender_name,
-        recipient: Address::Primary(dbg_addr(0x20)),
+        recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
     let order = TransferOrder::new(transfer, &sender_key);
@@ -183,7 +183,7 @@ fn test_info_response() {
     let resp1 = AccountInfoResponse {
         sender: dbg_addr(0x20),
         balance: Balance::from(50),
-        next_sequence_number: SequenceNumber::new(),
+        nonce: Nonce::new(),
         pending_confirmation: None,
         requested_certificate: None,
         requested_received_transfers: Vec::new(),
@@ -191,7 +191,7 @@ fn test_info_response() {
     let resp2 = AccountInfoResponse {
         sender: dbg_addr(0x20),
         balance: Balance::from(50),
-        next_sequence_number: SequenceNumber::new(),
+        nonce: Nonce::new(),
         pending_confirmation: Some(vote.clone()),
         requested_certificate: None,
         requested_received_transfers: Vec::new(),
@@ -199,7 +199,7 @@ fn test_info_response() {
     let resp3 = AccountInfoResponse {
         sender: dbg_addr(0x20),
         balance: Balance::from(50),
-        next_sequence_number: SequenceNumber::new(),
+        nonce: Nonce::new(),
         pending_confirmation: None,
         requested_certificate: Some(cert.clone()),
         requested_received_transfers: Vec::new(),
@@ -207,7 +207,7 @@ fn test_info_response() {
     let resp4 = AccountInfoResponse {
         sender: dbg_addr(0x20),
         balance: Balance::from(50),
-        next_sequence_number: SequenceNumber::new(),
+        nonce: Nonce::new(),
         pending_confirmation: Some(vote),
         requested_certificate: Some(cert),
         requested_received_transfers: Vec::new(),
@@ -230,9 +230,9 @@ fn test_time_order() {
     let (sender_name, sender_key) = get_key_pair();
     let transfer = Transfer {
         sender: sender_name,
-        recipient: Address::Primary(dbg_addr(0x20)),
+        recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
 
@@ -263,9 +263,9 @@ fn test_time_vote() {
     let (sender_name, sender_key) = get_key_pair();
     let transfer = Transfer {
         sender: sender_name,
-        recipient: Address::Primary(dbg_addr(0x20)),
+        recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
     let order = TransferOrder::new(transfer, &sender_key);
@@ -302,9 +302,9 @@ fn test_time_cert() {
     let (sender_name, sender_key) = get_key_pair();
     let transfer = Transfer {
         sender: sender_name,
-        recipient: Address::Primary(dbg_addr(0)),
+        recipient: dbg_addr(0),
         amount: Amount::from(5),
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
     let order = TransferOrder::new(transfer, &sender_key);

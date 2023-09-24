@@ -130,7 +130,7 @@ impl ClientServerBenchmark {
             assert!(states[i].in_shard(&keypair.0));
             let client = AccountOffchainState {
                 balance: Balance::from(Amount::from(100)),
-                next_sequence_number: SequenceNumber::from(0),
+                nonce: Nonce::from(0),
                 pending_confirmation: None,
                 confirmed_log: Vec::new(),
                 synchronization_log: Vec::new(),
@@ -147,9 +147,9 @@ impl ClientServerBenchmark {
         for (pubx, secx) in account_keys.iter() {
             let transfer = Transfer {
                 sender: *pubx,
-                recipient: Address::Tos(next_recipient),
+                recipient: next_recipient,
                 amount: Amount::from(50),
-                sequence_number: SequenceNumber::from(0),
+                sequence_number: Nonce::from(0),
                 user_data: UserData::default(),
             };
             next_recipient = *pubx;

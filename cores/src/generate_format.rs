@@ -2,7 +2,7 @@
 // Copyright (c) Tos  Network.
 // SPDX-License-Identifier: Apache-2.0
 
-use cores::{error, messages, serialize};
+use cores::{error, base_types, serialize};
 use serde_reflection::{Registry, Result, Samples, Tracer, TracerConfig};
 use std::{fs::File, io::Write};
 use structopt::{clap::arg_enum, StructOpt};
@@ -14,7 +14,7 @@ fn get_registry() -> Result<Registry> {
     // tracer.trace_value(&mut samples, ...)?;
 
     // 2. Trace the main entry point(s) + every enum separately.
-    tracer.trace_type::<messages::Address>(&samples)?;
+    tracer.trace_type::<base_types::Address>(&samples)?;
     tracer.trace_type::<error::TosError>(&samples)?;
     tracer.trace_type::<serialize::SerializedMessage>(&samples)?;
     tracer.registry()

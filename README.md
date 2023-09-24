@@ -13,9 +13,7 @@ TOS allows a set of distributed authorities, some of which are Byzantine, to mai
 
 ```bash
 cargo build --release
-cd scripts
-./test.sh
-cd ../..
+scripts/test.sh
 
 # Benchmark
 cd target/release

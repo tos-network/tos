@@ -7,7 +7,7 @@ use super::*;
 #[test]
 fn test_handle_transfer_order_bad_signature() {
     let (sender, sender_key) = get_key_pair();
-    let recipient = Address::Tos(dbg_addr(2));
+    let recipient = dbg_addr(2);
     let mut authority_state = init_state_with_account(sender, Balance::from(5));
     let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
     let (_unknown_address, unknown_key) = get_key_pair();
@@ -27,7 +27,7 @@ fn test_handle_transfer_order_bad_signature() {
 #[test]
 fn test_handle_transfer_order_zero_amount() {
     let (sender, sender_key) = get_key_pair();
-    let recipient = Address::Tos(dbg_addr(2));
+    let recipient = dbg_addr(2);
     let mut authority_state = init_state_with_account(sender, Balance::from(5));
     let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
 
@@ -49,7 +49,7 @@ fn test_handle_transfer_order_zero_amount() {
 #[test]
 fn test_handle_transfer_order_unknown_sender() {
     let (sender, sender_key) = get_key_pair();
-    let recipient = Address::Tos(dbg_addr(2));
+    let recipient = dbg_addr(2);
     let mut authority_state = init_state_with_account(sender, Balance::from(5));
     let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
     let (unknown_address, unknown_key) = get_key_pair();
@@ -71,16 +71,16 @@ fn test_handle_transfer_order_unknown_sender() {
 #[test]
 fn test_handle_transfer_order_bad_sequence_number() {
     let (sender, sender_key) = get_key_pair();
-    let recipient = Address::Tos(dbg_addr(2));
+    let recipient = dbg_addr(2);
     let authority_state = init_state_with_account(sender, Balance::from(5));
     let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
 
     let mut sequence_number_state = authority_state;
     let sequence_number_state_sender_account =
         sequence_number_state.accounts.get_mut(&sender).unwrap();
-    sequence_number_state_sender_account.next_sequence_number =
+    sequence_number_state_sender_account.nonce =
         sequence_number_state_sender_account
-            .next_sequence_number
+            .nonce
             .increment()
             .unwrap();
     assert!(sequence_number_state
@@ -97,7 +97,7 @@ fn test_handle_transfer_order_bad_sequence_number() {
 #[test]
 fn test_handle_transfer_order_exceed_balance() {
     let (sender, sender_key) = get_key_pair();
-    let recipient = Address::Tos(dbg_addr(2));
+    let recipient = dbg_addr(2);
     let mut authority_state = init_state_with_account(sender, Balance::from(5));
     let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(1000));
     assert!(authority_state
@@ -114,7 +114,7 @@ fn test_handle_transfer_order_exceed_balance() {
 #[test]
 fn test_handle_transfer_order_ok() {
     let (sender, sender_key) = get_key_pair();
-    let recipient = Address::Tos(dbg_addr(2));
+    let recipient = dbg_addr(2);
     let mut authority_state = init_state_with_account(sender, Balance::from(5));
     let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
 
@@ -137,7 +137,7 @@ fn test_handle_transfer_order_ok() {
 #[test]
 fn test_handle_transfer_order_double_spend() {
     let (sender, sender_key) = get_key_pair();
-    let recipient = Address::Tos(dbg_addr(2));
+    let recipient = dbg_addr(2);
     let mut authority_state = init_state_with_account(sender, Balance::from(5));
     let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
 
@@ -158,7 +158,7 @@ fn test_handle_confirmation_order_unknown_sender() {
     let certified_transfer_order = init_certified_transfer_order(
         sender,
         &sender_key,
-        Address::Tos(recipient),
+        recipient,
         Amount::from(5),
         &authority_state,
     );
@@ -175,7 +175,7 @@ fn test_handle_confirmation_order_bad_sequence_number() {
     let recipient = dbg_addr(2);
     let mut authority_state = init_state_with_account(sender, Balance::from(5));
     let sender_account = authority_state.accounts.get_mut(&sender).unwrap();
-    sender_account.next_sequence_number = sender_account.next_sequence_number.increment().unwrap();
+    sender_account.nonce = sender_account.nonce.increment().unwrap();
     // let old_account = sender_account;
 
     let old_balance;
@@ -183,13 +183,13 @@ fn test_handle_confirmation_order_bad_sequence_number() {
     {
         let old_account = authority_state.accounts.get_mut(&sender).unwrap();
         old_balance = old_account.balance;
-        old_seq_num = old_account.next_sequence_number;
+        old_seq_num = old_account.nonce;
     }
 
     let certified_transfer_order = init_certified_transfer_order(
         sender,
         &sender_key,
-        Address::Tos(recipient),
+        recipient,
         Amount::from(5),
         &authority_state,
     );
@@ -199,7 +199,7 @@ fn test_handle_confirmation_order_bad_sequence_number() {
         .is_ok());
     let new_account = authority_state.accounts.get_mut(&sender).unwrap();
     assert_eq!(old_balance, new_account.balance);
-    assert_eq!(old_seq_num, new_account.next_sequence_number);
+    assert_eq!(old_seq_num, new_account.nonce);
     assert_eq!(new_account.confirmed_log, Vec::new());
     assert!(authority_state.accounts.get(&recipient).is_none());
 }
@@ -213,7 +213,7 @@ fn test_handle_confirmation_order_exceed_balance() {
     let certified_transfer_order = init_certified_transfer_order(
         sender,
         &sender_key,
-        Address::Tos(recipient),
+        recipient,
         Amount::from(1000),
         &authority_state,
     );
@@ -222,7 +222,7 @@ fn test_handle_confirmation_order_exceed_balance() {
         .is_ok());
     let new_account = authority_state.accounts.get(&sender).unwrap();
     assert_eq!(Balance::from(-995), new_account.balance);
-    assert_eq!(SequenceNumber::from(1), new_account.next_sequence_number);
+    assert_eq!(Nonce::from(1), new_account.nonce);
     assert_eq!(new_account.confirmed_log.len(), 1);
     assert!(authority_state.accounts.get(&recipient).is_some());
 }
@@ -239,7 +239,7 @@ fn test_handle_confirmation_order_receiver_balance_overflow() {
     let certified_transfer_order = init_certified_transfer_order(
         sender,
         &sender_key,
-        Address::Tos(recipient),
+        recipient,
         Amount::from(1),
         &authority_state,
     );
@@ -249,8 +249,8 @@ fn test_handle_confirmation_order_receiver_balance_overflow() {
     let new_sender_account = authority_state.accounts.get(&sender).unwrap();
     assert_eq!(Balance::from(0), new_sender_account.balance);
     assert_eq!(
-        SequenceNumber::from(1),
-        new_sender_account.next_sequence_number
+        Nonce::from(1),
+        new_sender_account.nonce
     );
     assert_eq!(new_sender_account.confirmed_log.len(), 1);
     let new_recipient_account = authority_state.accounts.get(&recipient).unwrap();
@@ -265,7 +265,7 @@ fn test_handle_confirmation_order_receiver_equal_sender() {
     let certified_transfer_order = init_certified_transfer_order(
         address,
         &key,
-        Address::Tos(address),
+        address,
         Amount::from(10),
         &authority_state,
     );
@@ -274,7 +274,7 @@ fn test_handle_confirmation_order_receiver_equal_sender() {
         .is_ok());
     let account = authority_state.accounts.get(&address).unwrap();
     assert_eq!(Balance::from(1), account.balance);
-    assert_eq!(SequenceNumber::from(1), account.next_sequence_number);
+    assert_eq!(Nonce::from(1), account.nonce);
     assert_eq!(account.confirmed_log.len(), 1);
 }
 
@@ -287,7 +287,7 @@ fn test_handle_cross_shard_recipient_commit() {
     let certified_transfer_order = init_certified_transfer_order(
         sender,
         &sender_key,
-        Address::Tos(recipient),
+        recipient,
         Amount::from(10),
         &authority_state,
     );
@@ -296,7 +296,7 @@ fn test_handle_cross_shard_recipient_commit() {
         .is_ok());
     let account = authority_state.accounts.get(&recipient).unwrap();
     assert_eq!(Balance::from(11), account.balance);
-    assert_eq!(SequenceNumber::from(0), account.next_sequence_number);
+    assert_eq!(Nonce::from(0), account.nonce);
     assert_eq!(account.confirmed_log.len(), 0);
 }
 
@@ -308,14 +308,14 @@ fn test_handle_confirmation_order_ok() {
     let certified_transfer_order = init_certified_transfer_order(
         sender,
         &sender_key,
-        Address::Tos(recipient),
+        recipient,
         Amount::from(5),
         &authority_state,
     );
 
     let old_account = authority_state.accounts.get_mut(&sender).unwrap();
-    let mut next_sequence_number = old_account.next_sequence_number;
-    next_sequence_number = next_sequence_number.increment().unwrap();
+    let mut nonce = old_account.nonce;
+    nonce = nonce.increment().unwrap();
     let mut remaining_balance = old_account.balance;
     remaining_balance = remaining_balance
         .try_sub(certified_transfer_order.value.transfer.amount.into())
@@ -326,7 +326,7 @@ fn test_handle_confirmation_order_ok() {
         .unwrap();
     assert_eq!(sender, info.sender);
     assert_eq!(remaining_balance, info.balance);
-    assert_eq!(next_sequence_number, info.next_sequence_number);
+    assert_eq!(nonce, info.nonce);
     assert_eq!(None, info.pending_confirmation);
     assert_eq!(
         authority_state.accounts.get(&sender).unwrap().confirmed_log,
@@ -447,7 +447,7 @@ fn init_state() -> AuthorityState {
 }
 
 #[cfg(test)]
-fn init_state_with_accounts<I: IntoIterator<Item = (TosAddress, Balance)>>(
+fn init_state_with_accounts<I: IntoIterator<Item = (Address, Balance)>>(
     balances: I,
 ) -> AuthorityState {
     let mut state = init_state();
@@ -462,13 +462,13 @@ fn init_state_with_accounts<I: IntoIterator<Item = (TosAddress, Balance)>>(
 }
 
 #[cfg(test)]
-fn init_state_with_account(address: TosAddress, balance: Balance) -> AuthorityState {
+fn init_state_with_account(address: Address, balance: Balance) -> AuthorityState {
     init_state_with_accounts(std::iter::once((address, balance)))
 }
 
 #[cfg(test)]
 fn init_transfer_order(
-    sender: TosAddress,
+    sender: Address,
     secret: &KeyPair,
     recipient: Address,
     amount: Amount,
@@ -477,7 +477,7 @@ fn init_transfer_order(
         sender,
         recipient,
         amount,
-        sequence_number: SequenceNumber::new(),
+        sequence_number: Nonce::new(),
         user_data: UserData::default(),
     };
     TransferOrder::new(transfer, secret)
@@ -485,7 +485,7 @@ fn init_transfer_order(
 
 #[cfg(test)]
 fn init_certified_transfer_order(
-    sender: TosAddress,
+    sender: Address,
     secret: &KeyPair,
     recipient: Address,
     amount: Amount,
@@ -506,7 +506,7 @@ fn init_certified_transfer_order(
 }
 
 #[cfg(test)]
-fn init_primary_synchronization_order(recipient: TosAddress) -> PrimarySynchronizationOrder {
+fn init_primary_synchronization_order(recipient: Address) -> PrimarySynchronizationOrder {
     let mut transaction_index = VersionNumber::new();
     transaction_index = transaction_index.increment().unwrap();
     PrimarySynchronizationOrder {
