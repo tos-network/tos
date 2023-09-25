@@ -107,8 +107,8 @@ fn test_vote() {
     };
     let order = TransferOrder::new(transfer, &sender_key);
 
-    let (authority_name, authority_key) = get_key_pair();
-    let vote = SignedTransferOrder::new(order, authority_name, &authority_key);
+    let (validator_name, validator_key) = get_key_pair();
+    let vote = SignedTransferOrder::new(order, validator_name, &validator_key);
 
     let buf = serialize_vote(&vote);
     let result = deserialize_message(buf.as_slice());
@@ -137,10 +137,10 @@ fn test_cert() {
     };
 
     for _ in 0..3 {
-        let (authority_name, authority_key) = get_key_pair();
-        let sig = Signature::new(&cert.value.transfer, &authority_key);
+        let (validator_name, validator_key) = get_key_pair();
+        let sig = Signature::new(&cert.value.transfer, &validator_key);
 
-        cert.signatures.push((authority_name, sig));
+        cert.signatures.push((validator_name, sig));
     }
 
     let buf = serialize_cert(&cert);
@@ -174,10 +174,10 @@ fn test_info_response() {
     };
 
     for _ in 0..3 {
-        let (authority_name, authority_key) = get_key_pair();
-        let sig = Signature::new(&cert.value.transfer, &authority_key);
+        let (validator_name, validator_key) = get_key_pair();
+        let sig = Signature::new(&cert.value.transfer, &validator_key);
 
-        cert.signatures.push((authority_name, sig));
+        cert.signatures.push((validator_name, sig));
     }
 
     let resp1 = AccountInfoResponse {
@@ -270,12 +270,12 @@ fn test_time_vote() {
     };
     let order = TransferOrder::new(transfer, &sender_key);
 
-    let (authority_name, authority_key) = get_key_pair();
+    let (validator_name, validator_key) = get_key_pair();
 
     let mut buf = Vec::new();
     let now = Instant::now();
     for _ in 0..100 {
-        let vote = SignedTransferOrder::new(order.clone(), authority_name, &authority_key);
+        let vote = SignedTransferOrder::new(order.clone(), validator_name, &validator_key);
         serialize_vote_into(&mut buf, &vote).unwrap();
     }
     println!("Write Vote: {} microsec", now.elapsed().as_micros() / 100);
@@ -285,7 +285,7 @@ fn test_time_vote() {
     for _ in 0..100 {
         if let SerializedMessage::Vote(vote) = deserialize_message(&mut buf2).unwrap() {
             vote.signature
-                .check(&vote.value.transfer, vote.authority)
+                .check(&vote.value.transfer, vote.validator)
                 .unwrap();
         }
     }
@@ -314,9 +314,9 @@ fn test_time_cert() {
     };
 
     for _ in 0..7 {
-        let (authority_name, authority_key) = get_key_pair();
-        let sig = Signature::new(&cert.value.transfer, &authority_key);
-        cert.signatures.push((authority_name, sig));
+        let (validator_name, validator_key) = get_key_pair();
+        let sig = Signature::new(&cert.value.transfer, &validator_key);
+        cert.signatures.push((validator_name, sig));
     }
 
     let mut buf = Vec::new();

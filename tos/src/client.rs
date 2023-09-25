@@ -6,7 +6,7 @@
 
 use tos::{config::*, network, transport};
 use cores::{
-    authority::*, base_types::*, client::*, committee::Committee, messages::*, serialize::*,
+    validator::*, base_types::*, client::*, validators::Validators, messages::*, serialize::*,
 };
 
 use bytes::Bytes;
@@ -19,14 +19,14 @@ use std::{
 use structopt::StructOpt;
 use tokio::runtime::Runtime;
 
-fn make_authority_clients(
-    committee_config: &CommitteeConfig,
+fn make_validator_clients(
+    validators_config: &ValidatorsConfig,
     buffer_size: usize,
     send_timeout: std::time::Duration,
     recv_timeout: std::time::Duration,
-) -> HashMap<AuthorityName, network::Client> {
-    let mut authority_clients = HashMap::new();
-    for config in &committee_config.authorities {
+) -> HashMap<ValidatorName, network::Client> {
+    let mut validator_clients = HashMap::new();
+    for config in &validators_config.authorities {
         let config = config.clone();
         let client = network::Client::new(
             config.network_protocol,
@@ -37,20 +37,20 @@ fn make_authority_clients(
             send_timeout,
             recv_timeout,
         );
-        authority_clients.insert(config.address, client);
+        validator_clients.insert(config.address, client);
     }
-    authority_clients
+    validator_clients
 }
 
-fn make_authority_mass_clients(
-    committee_config: &CommitteeConfig,
+fn make_validator_mass_clients(
+    validators_config: &ValidatorsConfig,
     buffer_size: usize,
     send_timeout: std::time::Duration,
     recv_timeout: std::time::Duration,
     max_in_flight: u64,
 ) -> Vec<(u32, network::MassClient)> {
-    let mut authority_clients = Vec::new();
-    for config in &committee_config.authorities {
+    let mut validator_clients = Vec::new();
+    for config in &validators_config.authorities {
         let client = network::MassClient::new(
             config.network_protocol,
             config.host.clone(),
@@ -60,28 +60,28 @@ fn make_authority_mass_clients(
             recv_timeout,
             max_in_flight / config.num_shards as u64, // Distribute window to diff shards
         );
-        authority_clients.push((config.num_shards, client));
+        validator_clients.push((config.num_shards, client));
     }
-    authority_clients
+    validator_clients
 }
 
 fn make_client_state(
     accounts: &AccountsConfig,
-    committee_config: &CommitteeConfig,
+    validators_config: &ValidatorsConfig,
     address: Address,
     buffer_size: usize,
     send_timeout: std::time::Duration,
     recv_timeout: std::time::Duration,
 ) -> ClientState<network::Client> {
     let account = accounts.get(&address).expect("Unknown account");
-    let committee = Committee::new(committee_config.voting_rights());
-    let authority_clients =
-        make_authority_clients(committee_config, buffer_size, send_timeout, recv_timeout);
+    let validators = Validators::new(validators_config.voting_rights());
+    let validator_clients =
+        make_validator_clients(validators_config, buffer_size, send_timeout, recv_timeout);
     ClientState::new(
         address,
         account.key.copy(),
-        committee,
-        authority_clients,
+        validators,
+        validator_clients,
         account.nonce,
         account.sent_certificates.clone(),
         account.received_certificates.clone(),
@@ -127,15 +127,15 @@ fn make_benchmark_certificates_from_orders_and_server_configs(
 ) -> Vec<(Address, Bytes)> {
     let mut keys = Vec::new();
     for file in server_config {
-        let server_config = AuthorityServerConfig::read(file).expect("Fail to read server config");
-        keys.push((server_config.authority.address, server_config.key));
+        let server_config = ValidatorServerConfig::read(file).expect("Fail to read server config");
+        keys.push((server_config.validator.address, server_config.key));
     }
-    let committee = Committee {
+    let validators = Validators {
         voting_rights: keys.iter().map(|(k, _)| (*k, 1)).collect(),
         total_votes: keys.len(),
     };
     assert!(
-        keys.len() >= committee.quorum_threshold(),
+        keys.len() >= validators.quorum_threshold(),
         "Not enough server configs were provided with --server-configs"
     );
     let mut serialized_certificates = Vec::new();
@@ -144,7 +144,7 @@ fn make_benchmark_certificates_from_orders_and_server_configs(
             value: order.clone(),
             signatures: Vec::new(),
         };
-        for i in 0..committee.quorum_threshold() {
+        for i in 0..validators.quorum_threshold() {
             let (pubx, secx) = keys.get(i).unwrap();
             let sig = Signature::new(&certificate.value.transfer, secx);
             certificate.signatures.push((*pubx, sig));
@@ -157,10 +157,10 @@ fn make_benchmark_certificates_from_orders_and_server_configs(
 
 /// Try to aggregate votes into certificates.
 fn make_benchmark_certificates_from_votes(
-    committee_config: &CommitteeConfig,
+    validators_config: &ValidatorsConfig,
     votes: Vec<SignedTransferOrder>,
 ) -> Vec<(Address, Bytes)> {
-    let committee = Committee::new(committee_config.voting_rights());
+    let validators = Validators::new(validators_config.voting_rights());
     let mut aggregators = HashMap::new();
     let mut certificates = Vec::new();
     let mut done_senders = HashSet::new();
@@ -173,13 +173,13 @@ fn make_benchmark_certificates_from_votes(
         debug!(
             "Processing vote on {}'s transfer by {}",
             encode_address(&address),
-            encode_address(&vote.authority)
+            encode_address(&vote.validator)
         );
         let value = vote.value;
         let aggregator = aggregators
             .entry(address)
-            .or_insert_with(|| SignatureAggregator::try_new(value, &committee).unwrap());
-        match aggregator.append(vote.authority, vote.signature) {
+            .or_insert_with(|| SignatureAggregator::try_new(value, &validators).unwrap());
+        match aggregator.append(vote.validator, vote.signature) {
             Ok(Some(certificate)) => {
                 debug!("Found certificate: {:?}", certificate);
                 let buf = serialize_cert(&certificate);
@@ -197,10 +197,10 @@ fn make_benchmark_certificates_from_votes(
     certificates
 }
 
-/// Broadcast a bulk of requests to each authority.
+/// Broadcast a bulk of requests to each validator.
 async fn mass_broadcast_orders(
     phase: &'static str,
-    committee_config: &CommitteeConfig,
+    validators_config: &ValidatorsConfig,
     buffer_size: usize,
     send_timeout: std::time::Duration,
     recv_timeout: std::time::Duration,
@@ -209,19 +209,19 @@ async fn mass_broadcast_orders(
 ) -> Vec<Bytes> {
     let time_start = Instant::now();
     info!("Broadcasting {} {} orders", orders.len(), phase);
-    let authority_clients = make_authority_mass_clients(
-        committee_config,
+    let validator_clients = make_validator_mass_clients(
+        validators_config,
         buffer_size,
         send_timeout,
         recv_timeout,
         max_in_flight,
     );
     let mut streams = Vec::new();
-    for (num_shards, client) in authority_clients {
-        // Re-index orders by shard for this particular authority client.
+    for (num_shards, client) in validator_clients {
+        // Re-index orders by shard for this particular validator client.
         let mut sharded_requests = HashMap::new();
         for (address, buf) in &orders {
-            let shard = AuthorityState::get_shard(num_shards, address);
+            let shard = ValidatorState::get_shard(num_shards, address);
             sharded_requests
                 .entry(shard)
                 .or_insert_with(Vec::new)
@@ -288,7 +288,7 @@ struct ClientOpt {
 
     /// Sets the file describing the public configurations of all authorities
     #[structopt(long)]
-    committee: String,
+    validators: String,
 
     /// Timeout for sending queries (us)
     #[structopt(long, default_value = "4000000")]
@@ -366,13 +366,13 @@ fn main() {
     let send_timeout = Duration::from_micros(options.send_timeout);
     let recv_timeout = Duration::from_micros(options.recv_timeout);
     let accounts_config_path = &options.accounts;
-    let committee_config_path = &options.committee;
+    let validators_config_path = &options.validators;
     let buffer_size = options.buffer_size;
 
     let mut accounts_config =
         AccountsConfig::read_or_create(accounts_config_path).expect("Unable to read user accounts");
-    let committee_config =
-        CommitteeConfig::read(committee_config_path).expect("Unable to read committee config file");
+    let validators_config =
+        ValidatorsConfig::read(validators_config_path).expect("Unable to read validators config file");
 
     match options.cmd {
         ClientCommands::Transfer { from, to, amount } => {
@@ -384,7 +384,7 @@ fn main() {
             rt.block_on(async move {
                 let mut client_state = make_client_state(
                     &accounts_config,
-                    &committee_config,
+                    &validators_config,
                     sender,
                     buffer_size,
                     send_timeout,
@@ -403,7 +403,7 @@ fn main() {
                 info!("Updating recipient's local balance");
                 let mut recipient_client_state = make_client_state(
                     &accounts_config,
-                    &committee_config,
+                    &validators_config,
                     recipient,
                     buffer_size,
                     send_timeout,
@@ -428,7 +428,7 @@ fn main() {
             rt.block_on(async move {
                 let mut client_state = make_client_state(
                     &accounts_config,
-                    &committee_config,
+                    &validators_config,
                     user_address,
                     buffer_size,
                     send_timeout,
@@ -462,7 +462,7 @@ fn main() {
                     make_benchmark_transfer_orders(&mut accounts_config, max_orders);
                 let responses = mass_broadcast_orders(
                     "transfer",
-                    &committee_config,
+                    &validators_config,
                     buffer_size,
                     send_timeout,
                     recv_timeout,
@@ -484,12 +484,12 @@ fn main() {
                     let files = files.iter().map(AsRef::as_ref).collect();
                     make_benchmark_certificates_from_orders_and_server_configs(orders, files)
                 } else {
-                    warn!("Using committee config");
-                    make_benchmark_certificates_from_votes(&committee_config, votes)
+                    warn!("Using validators config");
+                    make_benchmark_certificates_from_votes(&validators_config, votes)
                 };
                 let responses = mass_broadcast_orders(
                     "confirmation",
-                    &committee_config,
+                    &validators_config,
                     buffer_size,
                     send_timeout,
                     recv_timeout,

@@ -5,7 +5,7 @@
 #![deny(warnings)]
 
 use tos::{config::*, network, transport};
-use cores::{authority::*, base_types::*, committee::Committee};
+use cores::{validator::*, base_types::*, validators::Validators};
 
 use futures::future::join_all;
 use log::*;
@@ -16,25 +16,25 @@ use tokio::runtime::Runtime;
 fn make_shard_server(
     local_ip_addr: &str,
     server_config_path: &str,
-    committee_config_path: &str,
+    validators_config_path: &str,
     initial_accounts_config_path: &str,
     buffer_size: usize,
     cross_shard_queue_size: usize,
     shard: u32,
 ) -> network::Server {
     let server_config =
-        AuthorityServerConfig::read(server_config_path).expect("Fail to read server config");
-    let committee_config =
-        CommitteeConfig::read(committee_config_path).expect("Fail to read committee config");
+        ValidatorServerConfig::read(server_config_path).expect("Fail to read server config");
+    let validators_config =
+        ValidatorsConfig::read(validators_config_path).expect("Fail to read validators config");
     let initial_accounts_config = InitialStateConfig::read(initial_accounts_config_path)
         .expect("Fail to read initial account config");
 
-    let committee = Committee::new(committee_config.voting_rights());
-    let num_shards = server_config.authority.num_shards;
+    let validators = Validators::new(validators_config.voting_rights());
+    let num_shards = server_config.validator.num_shards;
 
-    let mut state = AuthorityState::new_shard(
-        committee,
-        server_config.authority.address,
+    let mut state = ValidatorState::new_shard(
+        validators,
+        server_config.validator.address,
         server_config.key.copy(),
         shard,
         num_shards,
@@ -42,7 +42,7 @@ fn make_shard_server(
 
     // Load initial states
     for (address, balance) in &initial_accounts_config.accounts {
-        if AuthorityState::get_shard(num_shards, address) != shard {
+        if ValidatorState::get_shard(num_shards, address) != shard {
             continue;
         }
         let client = AccountOffchainState {
@@ -57,9 +57,9 @@ fn make_shard_server(
     }
 
     network::Server::new(
-        server_config.authority.network_protocol,
+        server_config.validator.network_protocol,
         local_ip_addr.to_string(),
-        server_config.authority.base_port,
+        server_config.validator.base_port,
         state,
         buffer_size,
         cross_shard_queue_size,
@@ -69,21 +69,21 @@ fn make_shard_server(
 fn make_servers(
     local_ip_addr: &str,
     server_config_path: &str,
-    committee_config_path: &str,
+    validators_config_path: &str,
     initial_accounts_config_path: &str,
     buffer_size: usize,
     cross_shard_queue_size: usize,
 ) -> Vec<network::Server> {
     let server_config =
-        AuthorityServerConfig::read(server_config_path).expect("Fail to read server config");
-    let num_shards = server_config.authority.num_shards;
+        ValidatorServerConfig::read(server_config_path).expect("Fail to read server config");
+    let num_shards = server_config.validator.num_shards;
 
     let mut servers = Vec::new();
     for shard in 0..num_shards {
         servers.push(make_shard_server(
             local_ip_addr,
             server_config_path,
-            committee_config_path,
+            validators_config_path,
             initial_accounts_config_path,
             buffer_size,
             cross_shard_queue_size,
@@ -99,7 +99,7 @@ fn make_servers(
     about = "A byzantine fault tolerant payments sidechain with low-latency finality and high throughput"
 )]
 struct ServerOpt {
-    /// Path to the file containing the server configuration of this Tos authority (including its secret key)
+    /// Path to the file containing the server configuration of this Tos validator (including its secret key)
     #[structopt(long)]
     server: String,
 
@@ -110,7 +110,7 @@ struct ServerOpt {
 
 #[derive(StructOpt)]
 enum ServerCommands {
-    /// Runs a service for each shard of the Tos authority")
+    /// Runs a service for each shard of the Tos validator")
     #[structopt(name = "run")]
     Run {
         /// Maximum size of datagrams received and sent (bytes)
@@ -121,9 +121,9 @@ enum ServerCommands {
         #[structopt(long, default_value = "1000")]
         cross_shard_queue_size: usize,
 
-        /// Path to the file containing the public description of all authorities in this Tos committee
+        /// Path to the file containing the public description of all authorities in this Tos validators
         #[structopt(long)]
-        committee: String,
+        validators: String,
 
         /// Path to the file describing the initial user accounts
         #[structopt(long)]
@@ -149,7 +149,7 @@ enum ServerCommands {
         #[structopt(long)]
         port: u32,
 
-        /// Number of shards for this authority
+        /// Number of shards for this validator
         #[structopt(long)]
         shards: u32,
     },
@@ -165,7 +165,7 @@ fn main() {
         ServerCommands::Run {
             buffer_size,
             cross_shard_queue_size,
-            committee,
+            validators,
             initial_accounts,
             shard,
         } => {
@@ -176,7 +176,7 @@ fn main() {
                     let server = make_shard_server(
                         "0.0.0.0", // Allow local IP address to be different from the public one.
                         server_config_path,
-                        &committee,
+                        &validators,
                         &initial_accounts,
                         buffer_size,
                         cross_shard_queue_size,
@@ -189,7 +189,7 @@ fn main() {
                     make_servers(
                         "0.0.0.0", // Allow local IP address to be different from the public one.
                         server_config_path,
-                        &committee,
+                        &validators,
                         &initial_accounts,
                         buffer_size,
                         cross_shard_queue_size,
@@ -223,19 +223,19 @@ fn main() {
             shards,
         } => {
             let (address, key) = get_key_pair();
-            let authority = AuthorityConfig {
+            let validator = ValidatorConfig {
                 network_protocol: protocol,
                 address,
                 host,
                 base_port: port,
                 num_shards: shards,
             };
-            let server = AuthorityServerConfig { authority, key };
+            let server = ValidatorServerConfig { validator, key };
             server
                 .write(server_config_path)
                 .expect("Unable to write server config file");
             info!("Wrote server config file");
-            server.authority.print();
+            server.validator.print();
         }
     }
 }

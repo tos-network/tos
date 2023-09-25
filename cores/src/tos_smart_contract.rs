@@ -2,7 +2,7 @@
 // Copyright (c) Tos  Network.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{base_types::*, committee::Committee, messages::*};
+use super::{base_types::*, validators::Validators, messages::*};
 use failure::ensure;
 use std::collections::BTreeMap;
 
@@ -20,8 +20,8 @@ pub struct AccountOnchainState {
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct TosSmartContractState {
-    /// Committee of this Tos instance.
-    committee: Committee,
+    /// Validators of this Tos instance.
+    validators: Validators,
     /// Onchain states of Tos smart contract.
     pub accounts: BTreeMap<Address, AccountOnchainState>,
     /// Primary coins in the smart contract.
@@ -70,7 +70,7 @@ impl TosSmartContract for TosSmartContractState {
         &mut self,
         transaction: RedeemTransaction,
     ) -> Result<(), failure::Error> {
-        transaction.transfer_certificate.check(&self.committee)?;
+        transaction.transfer_certificate.check(&self.validators)?;
         let order = transaction.transfer_certificate.value;
         let transfer = &order.transfer;
         ensure!(
@@ -102,9 +102,9 @@ impl AccountOnchainState {
 }
 
 impl TosSmartContractState {
-    pub fn new(committee: Committee) -> Self {
+    pub fn new(validators: Validators) -> Self {
         TosSmartContractState {
-            committee,
+            validators,
             total_balance: Amount::zero(),
             last_transaction_index: VersionNumber::new(),
             blockchain: Vec::new(),

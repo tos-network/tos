@@ -42,7 +42,7 @@ pub struct KeyPair(dalek::Keypair);
 pub struct PublicKey(pub [u8; dalek::PUBLIC_KEY_LENGTH]);
 
 pub type Address = PublicKey;
-pub type AuthorityName = PublicKey;
+pub type ValidatorName = PublicKey;
 
 pub fn get_key_pair() -> (Address, KeyPair) {
     let mut csprng = OsRng;

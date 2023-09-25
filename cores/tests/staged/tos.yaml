@@ -94,7 +94,7 @@ SignedTransferOrder:
   STRUCT:
     - value:
         TYPENAME: TransferOrder
-    - authority:
+    - validator:
         TYPENAME: PublicKey
     - signature:
         TYPENAME: Signature
@@ -138,7 +138,7 @@ TosError:
     12:
       UnknownSenderAccount: UNIT
     13:
-      CertificateAuthorityReuse: UNIT
+      CertificateValidatorReuse: UNIT
     14:
       InvalidNonce: UNIT
     15:

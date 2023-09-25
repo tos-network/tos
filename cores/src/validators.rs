@@ -6,21 +6,21 @@ use super::base_types::*;
 use std::collections::BTreeMap;
 
 #[derive(Eq, PartialEq, Clone, Hash, Debug)]
-pub struct Committee {
-    pub voting_rights: BTreeMap<AuthorityName, usize>,
+pub struct Validators {
+    pub voting_rights: BTreeMap<ValidatorName, usize>,
     pub total_votes: usize,
 }
 
-impl Committee {
-    pub fn new(voting_rights: BTreeMap<AuthorityName, usize>) -> Self {
+impl Validators {
+    pub fn new(voting_rights: BTreeMap<ValidatorName, usize>) -> Self {
         let total_votes = voting_rights.iter().fold(0, |sum, (_, votes)| sum + *votes);
-        Committee {
+        Validators {
             voting_rights,
             total_votes,
         }
     }
 
-    pub fn weight(&self, author: &AuthorityName) -> usize {
+    pub fn weight(&self, author: &ValidatorName) -> usize {
         *self.voting_rights.get(author).unwrap_or(&0)
     }
 
@@ -37,7 +37,7 @@ impl Committee {
     }
 
     /// Find the highest value than is supported by a quorum of authorities.
-    pub fn get_strong_majority_lower_bound<V>(&self, mut values: Vec<(AuthorityName, V)>) -> V
+    pub fn get_strong_majority_lower_bound<V>(&self, mut values: Vec<(ValidatorName, V)>) -> V
     where
         V: Default + std::cmp::Ord,
     {

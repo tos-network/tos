@@ -28,7 +28,7 @@ pub enum TosError {
     // Signature verification
     #[fail(display = "Signature is not valid: {}", error)]
     InvalidSignature { error: String },
-    #[fail(display = "Value was not signed by a known authority")]
+    #[fail(display = "Value was not signed by a known validator")]
     UnknownSigner,
     // Certificate verification
     #[fail(display = "Signatures in a certificate must form a quorum")]
@@ -50,10 +50,10 @@ pub enum TosError {
         pending_confirmation
     )]
     PreviousTransferMustBeConfirmedFirst { pending_confirmation: TransferOrder },
-    #[fail(display = "Transfer order was processed but no signature was produced by authority")]
+    #[fail(display = "Transfer order was processed but no signature was produced by validator")]
     ErrorWhileProcessingTransferOrder,
     #[fail(
-        display = "An invalid answer was returned by the authority while requesting a certificate"
+        display = "An invalid answer was returned by the validator while requesting a certificate"
     )]
     ErrorWhileRequestingCertificate,
     #[fail(
@@ -72,7 +72,7 @@ pub enum TosError {
     #[fail(display = "Unknown sender's account")]
     UnknownSenderAccount,
     #[fail(display = "Signatures in a certificate must be from different authorities.")]
-    CertificateAuthorityReuse,
+    CertificateValidatorReuse,
     #[fail(display = "Sequence numbers above the maximal value are not usable for transfers.")]
     InvalidNonce,
     #[fail(display = "Sequence number overflow.")]

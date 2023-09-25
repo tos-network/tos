@@ -2,7 +2,7 @@
 // Copyright (c) Tos  Network.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{base_types::*, committee::Committee, downloader::*, error::TosError, messages::*};
+use crate::{base_types::*, validators::Validators, downloader::*, error::TosError, messages::*};
 use failure::{bail, ensure};
 use futures::{future, StreamExt};
 use rand::seq::SliceRandom;
@@ -17,7 +17,7 @@ mod client_tests;
 
 pub type AsyncResult<'a, T, E> = future::BoxFuture<'a, Result<T, E>>;
 
-pub trait AuthorityClient {
+pub trait ValidatorClient {
     /// Initiate a new transfer to a Tos or Primary account.
     fn handle_transfer_order(
         &mut self,
@@ -37,15 +37,15 @@ pub trait AuthorityClient {
     ) -> AsyncResult<AccountInfoResponse, TosError>;
 }
 
-pub struct ClientState<AuthorityClient> {
+pub struct ClientState<ValidatorClient> {
     /// Our Tos address.
     address: Address,
     /// Our signature key.
     secret: KeyPair,
-    /// Our Tos committee.
-    committee: Committee,
-    /// How to talk to this committee.
-    authority_clients: HashMap<AuthorityName, AuthorityClient>,
+    /// Our Tos validators.
+    validators: Validators,
+    /// How to talk to this validators.
+    validator_clients: HashMap<ValidatorName, ValidatorClient>,
     /// Expected sequence number for the next certified transfer.
     /// This is also the number of transfer certificates that we have created.
     nonce: Nonce,
@@ -101,8 +101,8 @@ impl<A> ClientState<A> {
     pub fn new(
         address: Address,
         secret: KeyPair,
-        committee: Committee,
-        authority_clients: HashMap<AuthorityName, A>,
+        validators: Validators,
+        validator_clients: HashMap<ValidatorName, A>,
         nonce: Nonce,
         sent_certificates: Vec<CertifiedTransferOrder>,
         received_certificates: Vec<CertifiedTransferOrder>,
@@ -111,8 +111,8 @@ impl<A> ClientState<A> {
         Self {
             address,
             secret,
-            committee,
-            authority_clients,
+            validators,
+            validator_clients,
             nonce,
             pending_transfer: None,
             sent_certificates,
@@ -151,16 +151,16 @@ impl<A> ClientState<A> {
 
 #[derive(Clone)]
 struct CertificateRequester<A> {
-    committee: Committee,
-    authority_clients: Vec<A>,
+    validators: Validators,
+    validator_clients: Vec<A>,
     sender: Address,
 }
 
 impl<A> CertificateRequester<A> {
-    fn new(committee: Committee, authority_clients: Vec<A>, sender: Address) -> Self {
+    fn new(validators: Validators, validator_clients: Vec<A>, sender: Address) -> Self {
         Self {
-            committee,
-            authority_clients,
+            validators,
+            validator_clients,
             sender,
         }
     }
@@ -168,7 +168,7 @@ impl<A> CertificateRequester<A> {
 
 impl<A> Requester for CertificateRequester<A>
 where
-    A: AuthorityClient + Send + Sync + 'static + Clone,
+    A: ValidatorClient + Send + Sync + 'static + Clone,
 {
     type Key = Nonce;
     type Value = Result<CertifiedTransferOrder, TosError>;
@@ -184,16 +184,16 @@ where
                 request_sequence_number: Some(sequence_number),
                 request_received_transfers_excluding_first_nth: None,
             };
-            // Sequentially try each authority in random order.
-            self.authority_clients.shuffle(&mut rand::thread_rng());
-            for client in self.authority_clients.iter_mut() {
+            // Sequentially try each validator in random order.
+            self.validator_clients.shuffle(&mut rand::thread_rng());
+            for client in self.validator_clients.iter_mut() {
                 let result = client.handle_account_info_request(request.clone()).await;
                 if let Ok(AccountInfoResponse {
                     requested_certificate: Some(certificate),
                     ..
                 }) = &result
                 {
-                    if certificate.check(&self.committee).is_ok() {
+                    if certificate.check(&self.validators).is_ok() {
                         let transfer = &certificate.value.transfer;
                         if transfer.sender == self.sender
                             && transfer.sequence_number == sequence_number
@@ -217,7 +217,7 @@ enum CommunicateAction {
 
 impl<A> ClientState<A>
 where
-    A: AuthorityClient + Send + Sync + 'static + Clone,
+    A: ValidatorClient + Send + Sync + 'static + Clone,
 {
     #[cfg(test)]
     async fn request_certificate(
@@ -226,8 +226,8 @@ where
         sequence_number: Nonce,
     ) -> Result<CertifiedTransferOrder, TosError> {
         CertificateRequester::new(
-            self.committee.clone(),
-            self.authority_clients.values().cloned().collect(),
+            self.validators.clone(),
+            self.validator_clients.values().cloned().collect(),
             sender,
         )
         .query(sequence_number)
@@ -247,7 +247,7 @@ where
             request_received_transfers_excluding_first_nth: None,
         };
         let numbers: futures::stream::FuturesUnordered<_> = self
-            .authority_clients
+            .validator_clients
             .iter_mut()
             .map(|(name, client)| {
                 let fut = client.handle_account_info_request(request.clone());
@@ -259,7 +259,7 @@ where
                 }
             })
             .collect();
-        self.committee.get_strong_majority_lower_bound(
+        self.validators.get_strong_majority_lower_bound(
             numbers.filter_map(|x| async move { x }).collect().await,
         )
     }
@@ -274,7 +274,7 @@ where
             request_received_transfers_excluding_first_nth: None,
         };
         let numbers: futures::stream::FuturesUnordered<_> = self
-            .authority_clients
+            .validator_clients
             .iter_mut()
             .map(|(name, client)| {
                 let fut = client.handle_account_info_request(request.clone());
@@ -286,7 +286,7 @@ where
                 }
             })
             .collect();
-        self.committee.get_strong_majority_lower_bound(
+        self.validators.get_strong_majority_lower_bound(
             numbers.filter_map(|x| async move { x }).collect().await,
         )
     }
@@ -297,11 +297,11 @@ where
         execute: F,
     ) -> Result<Vec<V>, failure::Error>
     where
-        F: Fn(AuthorityName, &'a mut A) -> AsyncResult<'a, V, TosError> + Clone,
+        F: Fn(ValidatorName, &'a mut A) -> AsyncResult<'a, V, TosError> + Clone,
     {
-        let committee = &self.committee;
-        let authority_clients = &mut self.authority_clients;
-        let mut responses: futures::stream::FuturesUnordered<_> = authority_clients
+        let validators = &self.validators;
+        let validator_clients = &mut self.validator_clients;
+        let mut responses: futures::stream::FuturesUnordered<_> = validator_clients
             .iter_mut()
             .map(|(name, client)| {
                 let execute = execute.clone();
@@ -316,16 +316,16 @@ where
             match result {
                 Ok(value) => {
                     values.push(value);
-                    value_score += committee.weight(&name);
-                    if value_score >= committee.quorum_threshold() {
+                    value_score += validators.weight(&name);
+                    if value_score >= validators.quorum_threshold() {
                         // Success!
                         return Ok(values);
                     }
                 }
                 Err(err) => {
                     let entry = error_scores.entry(err.clone()).or_insert(0);
-                    *entry += committee.weight(&name);
-                    if *entry >= committee.validity_threshold() {
+                    *entry += validators.weight(&name);
+                    if *entry >= validators.validity_threshold() {
                         // At least one honest node returned this error.
                         // No quorum can be reached, so return early.
                         bail!(
@@ -353,8 +353,8 @@ where
             CommunicateAction::SynchronizeNextNonce(seq) => *seq,
         };
         let requester = CertificateRequester::new(
-            self.committee.clone(),
-            self.authority_clients.values().cloned().collect(),
+            self.validators.clone(),
+            self.validator_clients.values().cloned().collect(),
             sender,
         );
         let (task, mut handle) = Downloader::start(
@@ -367,14 +367,14 @@ where
                 }
             }),
         );
-        let committee = self.committee.clone();
+        let validators = self.validators.clone();
         let votes = self
             .communicate_with_quorum(|name, client| {
                 let mut handle = handle.clone();
                 let action = action.clone();
-                let committee = &committee;
+                let validators = &validators;
                 Box::pin(async move {
-                    // Figure out which certificates this authority is missing.
+                    // Figure out which certificates this validator is missing.
                     let request = AccountInfoRequest {
                         sender,
                         request_sequence_number: None,
@@ -412,10 +412,10 @@ where
                                 ..
                             }) => {
                                 fp_ensure!(
-                                    signed_order.authority == name,
+                                    signed_order.validator == name,
                                     TosError::ErrorWhileProcessingTransferOrder
                                 );
-                                signed_order.check(committee)?;
+                                signed_order.check(validators)?;
                                 return Ok(Some(signed_order));
                             }
                             Err(err) => return Err(err),
@@ -436,7 +436,7 @@ where
                     .into_iter()
                     .filter_map(|vote| match vote {
                         Some(signed_order) => {
-                            Some((signed_order.authority, signed_order.signature))
+                            Some((signed_order.validator, signed_order.signature))
                         }
                         None => None,
                     })
@@ -444,7 +444,7 @@ where
             };
             // Certificate is valid because
             // * `communicate_with_quorum` ensured a sufficient "weight" of (non-error) answers were returned by authorities.
-            // * each answer is a vote signed by the expected authority.
+            // * each answer is a vote signed by the expected validator.
             certificates.push(certificate);
         }
         Ok(certificates)
@@ -456,8 +456,8 @@ where
         &self,
     ) -> Result<Vec<CertifiedTransferOrder>, TosError> {
         let mut requester = CertificateRequester::new(
-            self.committee.clone(),
-            self.authority_clients.values().cloned().collect(),
+            self.validators.clone(),
+            self.validator_clients.values().cloned().collect(),
             self.address,
         );
         let known_sequence_numbers: BTreeSet<_> = self
@@ -586,7 +586,7 @@ where
 
 impl<A> Client for ClientState<A>
 where
-    A: AuthorityClient + Send + Sync + Clone + 'static,
+    A: ValidatorClient + Send + Sync + Clone + 'static,
 {
     fn transfer_to_tos(
         &mut self,
@@ -623,7 +623,7 @@ where
         certificate: CertifiedTransferOrder,
     ) -> AsyncResult<(), failure::Error> {
         Box::pin(async move {
-            certificate.check(&self.committee)?;
+            certificate.check(&self.validators)?;
             let transfer = &certificate.value.transfer;
             ensure!(
                 transfer.recipient == self.address,

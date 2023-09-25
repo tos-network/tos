@@ -2,12 +2,12 @@
 // Copyright (c) Tos  Network.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{base_types::*, committee::Committee, error::TosError, messages::*};
+use crate::{base_types::*, validators::Validators, error::TosError, messages::*};
 use std::{collections::BTreeMap, convert::TryInto};
 
 #[cfg(test)]
-#[path = "unit_tests/authority_tests.rs"]
-mod authority_tests;
+#[path = "unit_tests/validator_tests.rs"]
+mod validator_tests;
 
 #[derive(Eq, PartialEq, Debug)]
 pub struct AccountOffchainState {
@@ -25,27 +25,27 @@ pub struct AccountOffchainState {
     pub received_log: Vec<CertifiedTransferOrder>,
 }
 
-pub struct AuthorityState {
+pub struct ValidatorState {
     /// The name of this autority.
-    pub name: AuthorityName,
-    /// Committee of this Tos instance.
-    pub committee: Committee,
-    /// The signature key of the authority.
+    pub name: ValidatorName,
+    /// Validators of this Tos instance.
+    pub validators: Validators,
+    /// The signature key of the validator.
     pub secret: KeyPair,
     /// Offchain states of Tos accounts.
     pub accounts: BTreeMap<Address, AccountOffchainState>,
-    /// The latest transaction index of the blockchain that the authority has seen.
+    /// The latest transaction index of the blockchain that the validator has seen.
     pub last_transaction_index: VersionNumber,
-    /// The sharding ID of this authority shard. 0 if one shard.
+    /// The sharding ID of this validator shard. 0 if one shard.
     pub shard_id: ShardId,
     /// The number of shards. 1 if single shard.
     pub number_of_shards: u32,
 }
 
-/// Interface provided by each (shard of an) authority.
+/// Interface provided by each (shard of an) validator.
 /// All commands return either the current account info or an error.
 /// Repeating commands produces no changes and returns no error.
-pub trait Authority {
+pub trait Validator {
     /// Initiate a new transfer to a Tos or Primary account.
     fn handle_transfer_order(
         &mut self,
@@ -70,7 +70,7 @@ pub trait Authority {
         request: AccountInfoRequest,
     ) -> Result<AccountInfoResponse, TosError>;
 
-    /// Handle cross updates from another shard of the same authority.
+    /// Handle cross updates from another shard of the same validator.
     /// This relies on deliver-once semantics of a trusted channel between shards.
     fn handle_cross_shard_recipient_commit(
         &mut self,
@@ -78,7 +78,7 @@ pub trait Authority {
     ) -> Result<(), TosError>;
 }
 
-impl Authority for AuthorityState {
+impl Validator for ValidatorState {
     /// Initiate a new transfer.
     fn handle_transfer_order(
         &mut self,
@@ -141,7 +141,7 @@ impl Authority for AuthorityState {
             self.in_shard(&certificate.value.transfer.sender),
             TosError::WrongShard
         );
-        certificate.check(&self.committee)?;
+        certificate.check(&self.validators)?;
         let transfer = certificate.value.transfer.clone();
 
         // First we copy all relevant data from sender.
@@ -314,10 +314,10 @@ impl AccountOffchainState {
     }
 }
 
-impl AuthorityState {
-    pub fn new(committee: Committee, name: AuthorityName, secret: KeyPair) -> Self {
-        AuthorityState {
-            committee,
+impl ValidatorState {
+    pub fn new(validators: Validators, name: ValidatorName, secret: KeyPair) -> Self {
+        ValidatorState {
+            validators,
             name,
             secret,
             accounts: BTreeMap::new(),
@@ -328,14 +328,14 @@ impl AuthorityState {
     }
 
     pub fn new_shard(
-        committee: Committee,
-        name: AuthorityName,
+        validators: Validators,
+        name: ValidatorName,
         secret: KeyPair,
         shard_id: u32,
         number_of_shards: u32,
     ) -> Self {
-        AuthorityState {
-            committee,
+        ValidatorState {
+            validators,
             name,
             secret,
             accounts: BTreeMap::new(),

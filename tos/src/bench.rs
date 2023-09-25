@@ -5,7 +5,7 @@
 #![deny(warnings)]
 
 use tos::{network, transport};
-use cores::{authority::*, base_types::*, committee::*, messages::*, serialize::*};
+use cores::{validator::*, base_types::*, validators::*, messages::*, serialize::*};
 
 use bytes::Bytes;
 use futures::stream::StreamExt;
@@ -34,10 +34,10 @@ struct ClientServerBenchmark {
     /// Base port number
     #[structopt(long, default_value = "9555")]
     port: u32,
-    /// Size of the Tos committee
+    /// Size of the Tos validators
     #[structopt(long, default_value = "10")]
-    committee_size: usize,
-    /// Number of shards per Tos authority
+    validators_size: usize,
+    /// Number of shards per Tos validator
     #[structopt(long, default_value = "15")]
     num_shards: u32,
     /// Maximum number of requests in flight (0 for blocking client)
@@ -97,23 +97,23 @@ fn main() {
 }
 
 impl ClientServerBenchmark {
-    fn make_structures(&self) -> (Vec<AuthorityState>, Vec<(u32, Bytes)>) {
+    fn make_structures(&self) -> (Vec<ValidatorState>, Vec<(u32, Bytes)>) {
         info!("Preparing accounts.");
         let mut keys = Vec::new();
-        for _ in 0..self.committee_size {
+        for _ in 0..self.validators_size {
             keys.push(get_key_pair());
         }
-        let committee = Committee {
+        let validators = Validators {
             voting_rights: keys.iter().map(|(k, _)| (*k, 1)).collect(),
-            total_votes: self.committee_size,
+            total_votes: self.validators_size,
         };
 
-        // Pick an authority and create one state per shard.
+        // Pick an validator and create one state per shard.
         let (public_auth0, secret_auth0) = keys.pop().unwrap();
         let mut states = Vec::new();
         for i in 0..self.num_shards {
-            let state = AuthorityState::new_shard(
-                committee.clone(),
+            let state = ValidatorState::new_shard(
+                validators.clone(),
                 public_auth0,
                 secret_auth0.copy(),
                 i as u32,
@@ -126,7 +126,7 @@ impl ClientServerBenchmark {
         let mut account_keys = Vec::new();
         for _ in 0..self.num_accounts {
             let keypair = get_key_pair();
-            let i = AuthorityState::get_shard(self.num_shards, &keypair.0) as usize;
+            let i = ValidatorState::get_shard(self.num_shards, &keypair.0) as usize;
             assert!(states[i].in_shard(&keypair.0));
             let client = AccountOffchainState {
                 balance: Balance::from(Amount::from(100)),
@@ -154,7 +154,7 @@ impl ClientServerBenchmark {
             };
             next_recipient = *pubx;
             let order = TransferOrder::new(transfer.clone(), secx);
-            let shard = AuthorityState::get_shard(self.num_shards, pubx);
+            let shard = ValidatorState::get_shard(self.num_shards, pubx);
 
             // Serialize order
             let bufx = serialize_transfer_order(&order);
@@ -165,7 +165,7 @@ impl ClientServerBenchmark {
                 value: order,
                 signatures: Vec::new(),
             };
-            for i in 0..committee.quorum_threshold() {
+            for i in 0..validators.quorum_threshold() {
                 let (pubx, secx) = keys.get(i).unwrap();
                 let sig = Signature::new(&certificate.value.transfer, secx);
                 certificate.signatures.push((*pubx, sig));
@@ -181,7 +181,7 @@ impl ClientServerBenchmark {
         (states, orders)
     }
 
-    async fn spawn_server(&self, state: AuthorityState) -> transport::SpawnedServer {
+    async fn spawn_server(&self, state: ValidatorState) -> transport::SpawnedServer {
         let server = network::Server::new(
             self.protocol,
             self.host.clone(),

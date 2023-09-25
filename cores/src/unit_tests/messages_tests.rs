@@ -14,7 +14,7 @@ fn test_signed_values() {
 
     authorities.insert(/* address */ a1, /* voting right */ 1);
     authorities.insert(/* address */ a2, /* voting right */ 0);
-    let committee = Committee::new(authorities);
+    let validators = Validators::new(authorities);
 
     let transfer = Transfer {
         sender: a1,
@@ -27,16 +27,16 @@ fn test_signed_values() {
     let bad_order = TransferOrder::new(transfer, &sec2);
 
     let v = SignedTransferOrder::new(order.clone(), a1, &sec1);
-    assert!(v.check(&committee).is_ok());
+    assert!(v.check(&validators).is_ok());
 
     let v = SignedTransferOrder::new(order.clone(), a2, &sec2);
-    assert!(v.check(&committee).is_err());
+    assert!(v.check(&validators).is_err());
 
     let v = SignedTransferOrder::new(order, a3, &sec3);
-    assert!(v.check(&committee).is_err());
+    assert!(v.check(&validators).is_err());
 
     let v = SignedTransferOrder::new(bad_order, a1, &sec1);
-    assert!(v.check(&committee).is_err());
+    assert!(v.check(&validators).is_err());
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_certificates() {
     let mut authorities = BTreeMap::new();
     authorities.insert(/* address */ a1, /* voting right */ 1);
     authorities.insert(/* address */ a2, /* voting right */ 1);
-    let committee = Committee::new(authorities);
+    let validators = Validators::new(authorities);
 
     let transfer = Transfer {
         sender: a1,
@@ -64,22 +64,22 @@ fn test_certificates() {
     let v2 = SignedTransferOrder::new(order.clone(), a2, &sec2);
     let v3 = SignedTransferOrder::new(order.clone(), a3, &sec3);
 
-    let mut builder = SignatureAggregator::try_new(order.clone(), &committee).unwrap();
+    let mut builder = SignatureAggregator::try_new(order.clone(), &validators).unwrap();
     assert!(builder
-        .append(v1.authority, v1.signature)
+        .append(v1.validator, v1.signature)
         .unwrap()
         .is_none());
-    let mut c = builder.append(v2.authority, v2.signature).unwrap().unwrap();
-    assert!(c.check(&committee).is_ok());
+    let mut c = builder.append(v2.validator, v2.signature).unwrap().unwrap();
+    assert!(c.check(&validators).is_ok());
     c.signatures.pop();
-    assert!(c.check(&committee).is_err());
+    assert!(c.check(&validators).is_err());
 
-    let mut builder = SignatureAggregator::try_new(order, &committee).unwrap();
+    let mut builder = SignatureAggregator::try_new(order, &validators).unwrap();
     assert!(builder
-        .append(v1.authority, v1.signature)
+        .append(v1.validator, v1.signature)
         .unwrap()
         .is_none());
-    assert!(builder.append(v3.authority, v3.signature).is_err());
+    assert!(builder.append(v3.validator, v3.signature).is_err());
 
-    assert!(SignatureAggregator::try_new(bad_order, &committee).is_err());
+    assert!(SignatureAggregator::try_new(bad_order, &validators).is_err());
 }

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::transport::*;
-use cores::{authority::*, base_types::*, client::*, error::*, messages::*, serialize::*};
+use cores::{validator::*, base_types::*, client::*, error::*, messages::*, serialize::*};
 
 use bytes::Bytes;
 use futures::{channel::mpsc, future::FutureExt, sink::SinkExt, stream::StreamExt};
@@ -15,7 +15,7 @@ pub struct Server {
     network_protocol: NetworkProtocol,
     base_address: String,
     base_port: u32,
-    state: AuthorityState,
+    state: ValidatorState,
     buffer_size: usize,
     cross_shard_queue_size: usize,
     // Stats
@@ -28,7 +28,7 @@ impl Server {
         network_protocol: NetworkProtocol,
         base_address: String,
         base_port: u32,
-        state: AuthorityState,
+        state: ValidatorState,
         buffer_size: usize,
         cross_shard_queue_size: usize,
     ) -> Self {
@@ -287,14 +287,14 @@ impl Client {
     }
 }
 
-impl AuthorityClient for Client {
+impl ValidatorClient for Client {
     /// Initiate a new transfer to a Tos or Primary account.
     fn handle_transfer_order(
         &mut self,
         order: TransferOrder,
     ) -> AsyncResult<AccountInfoResponse, TosError> {
         Box::pin(async move {
-            let shard = AuthorityState::get_shard(self.num_shards, &order.transfer.sender);
+            let shard = ValidatorState::get_shard(self.num_shards, &order.transfer.sender);
             self.send_recv_bytes(shard, serialize_transfer_order(&order))
                 .await
         })
@@ -306,7 +306,7 @@ impl AuthorityClient for Client {
         order: ConfirmationOrder,
     ) -> AsyncResult<AccountInfoResponse, TosError> {
         Box::pin(async move {
-            let shard = AuthorityState::get_shard(
+            let shard = ValidatorState::get_shard(
                 self.num_shards,
                 &order.transfer_certificate.value.transfer.sender,
             );
@@ -321,7 +321,7 @@ impl AuthorityClient for Client {
         request: AccountInfoRequest,
     ) -> AsyncResult<AccountInfoResponse, TosError> {
         Box::pin(async move {
-            let shard = AuthorityState::get_shard(self.num_shards, &request.sender);
+            let shard = ValidatorState::get_shard(self.num_shards, &request.sender);
             self.send_recv_bytes(shard, serialize_info_request(&request))
                 .await
         })
@@ -414,7 +414,7 @@ impl MassClient {
         }
     }
 
-    /// Spin off one task for each shard based on this authority client.
+    /// Spin off one task for each shard based on this validator client.
     pub fn run<I>(&self, sharded_requests: I) -> impl futures::stream::Stream<Item = Vec<Bytes>>
     where
         I: IntoIterator<Item = (ShardId, Vec<Bytes>)>,

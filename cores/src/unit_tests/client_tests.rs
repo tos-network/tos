@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::{
-    authority::{AccountOffchainState, Authority, AuthorityState},
+    validator::{AccountOffchainState, Validator, ValidatorState},
     base_types::Amount,
 };
 use futures::lock::Mutex;
@@ -16,9 +16,9 @@ use std::{
 use tokio::runtime::Runtime;
 
 #[derive(Clone)]
-struct LocalAuthorityClient(Arc<Mutex<AuthorityState>>);
+struct LocalValidatorClient(Arc<Mutex<ValidatorState>>);
 
-impl AuthorityClient for LocalAuthorityClient {
+impl ValidatorClient for LocalValidatorClient {
     fn handle_transfer_order(
         &mut self,
         order: TransferOrder,
@@ -50,8 +50,8 @@ impl AuthorityClient for LocalAuthorityClient {
     }
 }
 
-impl LocalAuthorityClient {
-    fn new(state: AuthorityState) -> Self {
+impl LocalValidatorClient {
+    fn new(state: ValidatorState) -> Self {
         Self(Arc::new(Mutex::new(state)))
     }
 }
@@ -59,7 +59,7 @@ impl LocalAuthorityClient {
 #[cfg(test)]
 fn init_local_authorities(
     count: usize,
-) -> (HashMap<AuthorityName, LocalAuthorityClient>, Committee) {
+) -> (HashMap<ValidatorName, LocalValidatorClient>, Validators) {
     let mut key_pairs = Vec::new();
     let mut voting_rights = BTreeMap::new();
     for _ in 0..count {
@@ -67,53 +67,53 @@ fn init_local_authorities(
         voting_rights.insert(key_pair.0, 1);
         key_pairs.push(key_pair);
     }
-    let committee = Committee::new(voting_rights);
+    let validators = Validators::new(voting_rights);
 
     let mut clients = HashMap::new();
     for (address, secret) in key_pairs {
-        let state = AuthorityState::new(committee.clone(), address, secret);
-        clients.insert(address, LocalAuthorityClient::new(state));
+        let state = ValidatorState::new(validators.clone(), address, secret);
+        clients.insert(address, LocalValidatorClient::new(state));
     }
-    (clients, committee)
+    (clients, validators)
 }
 
 #[cfg(test)]
 fn init_local_authorities_bad_1(
     count: usize,
-) -> (HashMap<AuthorityName, LocalAuthorityClient>, Committee) {
+) -> (HashMap<ValidatorName, LocalValidatorClient>, Validators) {
     let mut key_pairs = Vec::new();
     let mut voting_rights = BTreeMap::new();
     for i in 0..count {
         let key_pair = get_key_pair();
         voting_rights.insert(key_pair.0, 1);
         if i + 1 < (count + 2) / 3 {
-            // init 1 authority with a bad keypair
+            // init 1 validator with a bad keypair
             key_pairs.push(get_key_pair());
         } else {
             key_pairs.push(key_pair);
         }
     }
-    let committee = Committee::new(voting_rights);
+    let validators = Validators::new(voting_rights);
 
     let mut clients = HashMap::new();
     for (address, secret) in key_pairs {
-        let state = AuthorityState::new(committee.clone(), address, secret);
-        clients.insert(address, LocalAuthorityClient::new(state));
+        let state = ValidatorState::new(validators.clone(), address, secret);
+        clients.insert(address, LocalValidatorClient::new(state));
     }
-    (clients, committee)
+    (clients, validators)
 }
 
 #[cfg(test)]
 fn make_client(
-    authority_clients: HashMap<AuthorityName, LocalAuthorityClient>,
-    committee: Committee,
-) -> ClientState<LocalAuthorityClient> {
+    validator_clients: HashMap<ValidatorName, LocalValidatorClient>,
+    validators: Validators,
+) -> ClientState<LocalValidatorClient> {
     let (address, secret) = get_key_pair();
     ClientState::new(
         address,
         secret,
-        committee,
-        authority_clients,
+        validators,
+        validator_clients,
         Nonce::new(),
         Vec::new(),
         Vec::new(),
@@ -123,7 +123,7 @@ fn make_client(
 
 #[cfg(test)]
 fn fund_account<I: IntoIterator<Item = i128>>(
-    clients: &mut HashMap<AuthorityName, LocalAuthorityClient>,
+    clients: &mut HashMap<ValidatorName, LocalValidatorClient>,
     address: Address,
     balances: I,
 ) {
@@ -140,20 +140,20 @@ fn fund_account<I: IntoIterator<Item = i128>>(
 }
 
 #[cfg(test)]
-fn init_local_client_state(balances: Vec<i128>) -> ClientState<LocalAuthorityClient> {
-    let (mut authority_clients, committee) = init_local_authorities(balances.len());
-    let client = make_client(authority_clients.clone(), committee);
-    fund_account(&mut authority_clients, client.address, balances);
+fn init_local_client_state(balances: Vec<i128>) -> ClientState<LocalValidatorClient> {
+    let (mut validator_clients, validators) = init_local_authorities(balances.len());
+    let client = make_client(validator_clients.clone(), validators);
+    fund_account(&mut validator_clients, client.address, balances);
     client
 }
 
 #[cfg(test)]
-fn init_local_client_state_with_bad_authority(
+fn init_local_client_state_with_bad_validator(
     balances: Vec<i128>,
-) -> ClientState<LocalAuthorityClient> {
-    let (mut authority_clients, committee) = init_local_authorities_bad_1(balances.len());
-    let client = make_client(authority_clients.clone(), committee);
-    fund_account(&mut authority_clients, client.address, balances);
+) -> ClientState<LocalValidatorClient> {
+    let (mut validator_clients, validators) = init_local_authorities_bad_1(balances.len());
+    let client = make_client(validator_clients.clone(), validators);
+    fund_account(&mut validator_clients, client.address, balances);
     client
 }
 
@@ -200,11 +200,11 @@ fn test_initiating_valid_transfer() {
 }
 
 #[test]
-fn test_initiating_valid_transfer_despite_bad_authority() {
+fn test_initiating_valid_transfer_despite_bad_validator() {
     let mut rt = Runtime::new().unwrap();
     let (recipient, _) = get_key_pair();
 
-    let mut sender = init_local_client_state_with_bad_authority(vec![4, 4, 4, 4]);
+    let mut sender = init_local_client_state_with_bad_validator(vec![4, 4, 4, 4]);
     sender.balance = Balance::from(4);
     let certificate = rt
         .block_on(sender.transfer_to_tos(
@@ -248,10 +248,10 @@ fn test_initiating_transfer_low_funds() {
 #[test]
 fn test_bidirectional_transfer() {
     let mut rt = Runtime::new().unwrap();
-    let (mut authority_clients, committee) = init_local_authorities(4);
-    let mut client1 = make_client(authority_clients.clone(), committee.clone());
-    let mut client2 = make_client(authority_clients.clone(), committee);
-    fund_account(&mut authority_clients, client1.address, vec![2, 3, 4, 4]);
+    let (mut validator_clients, validators) = init_local_authorities(4);
+    let mut client1 = make_client(validator_clients.clone(), validators.clone());
+    let mut client2 = make_client(validator_clients.clone(), validators);
+    fund_account(&mut validator_clients, client1.address, vec![2, 3, 4, 4]);
     // Update client1's local balance accordingly.
     client1.balance = rt.block_on(client1.get_strong_majority_balance());
     assert_eq!(client1.balance, Balance::from(3));
@@ -319,10 +319,10 @@ fn test_bidirectional_transfer() {
 #[test]
 fn test_receiving_unconfirmed_transfer() {
     let mut rt = Runtime::new().unwrap();
-    let (mut authority_clients, committee) = init_local_authorities(4);
-    let mut client1 = make_client(authority_clients.clone(), committee.clone());
-    let mut client2 = make_client(authority_clients.clone(), committee);
-    fund_account(&mut authority_clients, client1.address, vec![2, 3, 4, 4]);
+    let (mut validator_clients, validators) = init_local_authorities(4);
+    let mut client1 = make_client(validator_clients.clone(), validators.clone());
+    let mut client2 = make_client(validator_clients.clone(), validators);
+    fund_account(&mut validator_clients, client1.address, vec![2, 3, 4, 4]);
     // not updating client1.balance
 
     let certificate = rt
@@ -357,11 +357,11 @@ fn test_receiving_unconfirmed_transfer() {
 #[test]
 fn test_receiving_unconfirmed_transfer_with_lagging_sender_balances() {
     let mut rt = Runtime::new().unwrap();
-    let (mut authority_clients, committee) = init_local_authorities(4);
-    let mut client0 = make_client(authority_clients.clone(), committee.clone());
-    let mut client1 = make_client(authority_clients.clone(), committee.clone());
-    let mut client2 = make_client(authority_clients.clone(), committee);
-    fund_account(&mut authority_clients, client0.address, vec![2, 3, 4, 4]);
+    let (mut validator_clients, validators) = init_local_authorities(4);
+    let mut client0 = make_client(validator_clients.clone(), validators.clone());
+    let mut client1 = make_client(validator_clients.clone(), validators.clone());
+    let mut client2 = make_client(validator_clients.clone(), validators);
+    fund_account(&mut validator_clients, client0.address, vec![2, 3, 4, 4]);
     // not updating client balances
 
     // transferring funds from client0 to client1.

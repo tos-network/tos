@@ -17,7 +17,7 @@ use std::{
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AuthorityConfig {
+pub struct ValidatorConfig {
     pub network_protocol: NetworkProtocol,
     #[serde(
         serialize_with = "address_as_base58",
@@ -29,7 +29,7 @@ pub struct AuthorityConfig {
     pub num_shards: u32,
 }
 
-impl AuthorityConfig {
+impl ValidatorConfig {
     pub fn print(&self) {
         let data = serde_json::to_string(self).unwrap();
         println!("{}", data);
@@ -37,12 +37,12 @@ impl AuthorityConfig {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct AuthorityServerConfig {
-    pub authority: AuthorityConfig,
+pub struct ValidatorServerConfig {
+    pub validator: ValidatorConfig,
     pub key: KeyPair,
 }
 
-impl AuthorityServerConfig {
+impl ValidatorServerConfig {
     pub fn read(path: &str) -> Result<Self, std::io::Error> {
         let data = fs::read(path)?;
         Ok(serde_json::from_slice(data.as_slice())?)
@@ -58,11 +58,11 @@ impl AuthorityServerConfig {
     }
 }
 
-pub struct CommitteeConfig {
-    pub authorities: Vec<AuthorityConfig>,
+pub struct ValidatorsConfig {
+    pub authorities: Vec<ValidatorConfig>,
 }
 
-impl CommitteeConfig {
+impl ValidatorsConfig {
     pub fn read(path: &str) -> Result<Self, std::io::Error> {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
@@ -82,10 +82,10 @@ impl CommitteeConfig {
         Ok(())
     }
 
-    pub fn voting_rights(&self) -> BTreeMap<AuthorityName, usize> {
+    pub fn voting_rights(&self) -> BTreeMap<ValidatorName, usize> {
         let mut map = BTreeMap::new();
-        for authority in &self.authorities {
-            map.insert(authority.address, 1);
+        for validator in &self.authorities {
+            map.insert(validator.address, 1);
         }
         map
     }
@@ -184,21 +184,10 @@ impl AccountsConfig {
         })
     }
 
-    pub fn write_account(&self, account : &UserAccount ) -> Result<(), std::io::Error> {
-        let mut path: String = encode_address(&account.address).to_owned();
-        path.push_str(".json");
-        let file = OpenOptions::new().create(true).write(true).open(path)?;
-        let mut writer = BufWriter::new(file);
-        serde_json::to_writer(&mut writer, account)?;
-        writer.write_all(b"\n")?;
-        Ok(())
-    }
-
     pub fn write(&self, path: &str) -> Result<(), std::io::Error> {
         let file = OpenOptions::new().create(true).write(true).open(path)?;
         let mut writer = BufWriter::new(file);
         for account in self.accounts.values() {
-            self.write_account(&account)?;
             serde_json::to_writer(&mut writer, account)?;
             writer.write_all(b"\n")?;
         }

@@ -49,7 +49,7 @@ fn test_handle_funding_transaction_ok() {
 fn test_handle_redeem_transaction_ok() {
     let (mut contract_state, name, secret) = init_contract();
     let redeem_transaction =
-        init_redeem_transaction(contract_state.committee.clone(), name, secret);
+        init_redeem_transaction(contract_state.validators.clone(), name, secret);
     let funding_transaction = init_funding_transaction();
     assert!(contract_state
         .handle_funding_transaction(funding_transaction)
@@ -84,7 +84,7 @@ fn test_handle_redeem_transaction_ok() {
 fn test_handle_redeem_transaction_negative_balance() {
     let (mut contract_state, name, secret) = init_contract();
     let mut redeem_transaction =
-        init_redeem_transaction(contract_state.committee.clone(), name, secret);
+        init_redeem_transaction(contract_state.validators.clone(), name, secret);
     let funding_transaction = init_funding_transaction();
     let too_much_money = Amount::from(1000);
     assert!(contract_state
@@ -114,7 +114,7 @@ fn test_handle_redeem_transaction_negative_balance() {
 fn test_handle_redeem_transaction_double_spend() {
     let (mut contract_state, name, secret) = init_contract();
     let redeem_transaction =
-        init_redeem_transaction(contract_state.committee.clone(), name, secret);
+        init_redeem_transaction(contract_state.validators.clone(), name, secret);
     let funding_transaction = init_funding_transaction();
     assert!(contract_state
         .handle_funding_transaction(funding_transaction)
@@ -132,18 +132,18 @@ fn test_handle_redeem_transaction_double_spend() {
 
 // helpers
 #[cfg(test)]
-fn init_contract() -> (TosSmartContractState, AuthorityName, KeyPair) {
-    let (authority_address, authority_key) = get_key_pair();
+fn init_contract() -> (TosSmartContractState, ValidatorName, KeyPair) {
+    let (validator_address, validator_key) = get_key_pair();
     let mut authorities = BTreeMap::new();
     authorities.insert(
-        /* address */ authority_address,
+        /* address */ validator_address,
         /* voting right */ 1,
     );
-    let committee = Committee::new(authorities);
+    let validators = Validators::new(authorities);
     (
-        TosSmartContractState::new(committee),
-        authority_address,
-        authority_key,
+        TosSmartContractState::new(validators),
+        validator_address,
+        validator_key,
     )
 }
 
@@ -156,8 +156,8 @@ fn init_funding_transaction() -> FundingTransaction {
 
 #[cfg(test)]
 fn init_redeem_transaction(
-    committee: Committee,
-    name: AuthorityName,
+    validators: Validators,
+    name: ValidatorName,
     secret: KeyPair,
 ) -> RedeemTransaction {
     let (sender_address, sender_key) = get_key_pair();
@@ -170,9 +170,9 @@ fn init_redeem_transaction(
     };
     let order = TransferOrder::new(primary_transfer, &sender_key);
     let vote = SignedTransferOrder::new(order.clone(), name, &secret);
-    let mut builder = SignatureAggregator::try_new(order, &committee).unwrap();
+    let mut builder = SignatureAggregator::try_new(order, &validators).unwrap();
     let certificate = builder
-        .append(vote.authority, vote.signature)
+        .append(vote.validator, vote.signature)
         .unwrap()
         .unwrap();
     RedeemTransaction {

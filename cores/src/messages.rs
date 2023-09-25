@@ -2,7 +2,7 @@
 // Copyright (c) Tos  Network.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{base_types::*, committee::Committee, error::*};
+use super::{base_types::*, validators::Validators, error::*};
 
 #[cfg(test)]
 #[path = "unit_tests/messages_tests.rs"]
@@ -46,14 +46,14 @@ pub struct TransferOrder {
 #[derive(Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct SignedTransferOrder {
     pub value: TransferOrder,
-    pub authority: AuthorityName,
+    pub validator: ValidatorName,
     pub signature: Signature,
 }
 
 #[derive(Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct CertifiedTransferOrder {
     pub value: TransferOrder,
-    pub signatures: Vec<(AuthorityName, Signature)>,
+    pub signatures: Vec<(ValidatorName, Signature)>,
 }
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
@@ -104,13 +104,13 @@ impl PartialEq for TransferOrder {
 impl Hash for SignedTransferOrder {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.value.hash(state);
-        self.authority.hash(state);
+        self.validator.hash(state);
     }
 }
 
 impl PartialEq for SignedTransferOrder {
     fn eq(&self, other: &Self) -> bool {
-        self.value == other.value && self.authority == other.authority
+        self.value == other.value && self.validator == other.validator
     }
 }
 
@@ -158,43 +158,43 @@ impl TransferOrder {
 
 impl SignedTransferOrder {
     /// Use signing key to create a signed object.
-    pub fn new(value: TransferOrder, authority: AuthorityName, secret: &KeyPair) -> Self {
+    pub fn new(value: TransferOrder, validator: ValidatorName, secret: &KeyPair) -> Self {
         let signature = Signature::new(&value.transfer, secret);
         Self {
             value,
-            authority,
+            validator,
             signature,
         }
     }
 
-    /// Verify the signature and return the non-zero voting right of the authority.
-    pub fn check(&self, committee: &Committee) -> Result<usize, TosError> {
+    /// Verify the signature and return the non-zero voting right of the validator.
+    pub fn check(&self, validators: &Validators) -> Result<usize, TosError> {
         self.value.check_signature()?;
-        let weight = committee.weight(&self.authority);
+        let weight = validators.weight(&self.validator);
         fp_ensure!(weight > 0, TosError::UnknownSigner);
-        self.signature.check(&self.value.transfer, self.authority)?;
+        self.signature.check(&self.value.transfer, self.validator)?;
         Ok(weight)
     }
 }
 
 pub struct SignatureAggregator<'a> {
-    committee: &'a Committee,
+    validators: &'a Validators,
     weight: usize,
-    used_authorities: HashSet<AuthorityName>,
+    used_authorities: HashSet<ValidatorName>,
     partial: CertifiedTransferOrder,
 }
 
 impl<'a> SignatureAggregator<'a> {
     /// Start aggregating signatures for the given value into a certificate.
-    pub fn try_new(value: TransferOrder, committee: &'a Committee) -> Result<Self, TosError> {
+    pub fn try_new(value: TransferOrder, validators: &'a Validators) -> Result<Self, TosError> {
         value.check_signature()?;
-        Ok(Self::new_unsafe(value, committee))
+        Ok(Self::new_unsafe(value, validators))
     }
 
     /// Same as try_new but we don't check the order.
-    pub fn new_unsafe(value: TransferOrder, committee: &'a Committee) -> Self {
+    pub fn new_unsafe(value: TransferOrder, validators: &'a Validators) -> Self {
         Self {
-            committee,
+            validators,
             weight: 0,
             used_authorities: HashSet::new(),
             partial: CertifiedTransferOrder {
@@ -209,24 +209,24 @@ impl<'a> SignatureAggregator<'a> {
     /// Returns an error if the signed value cannot be aggregated.
     pub fn append(
         &mut self,
-        authority: AuthorityName,
+        validator: ValidatorName,
         signature: Signature,
     ) -> Result<Option<CertifiedTransferOrder>, TosError> {
-        signature.check(&self.partial.value.transfer, authority)?;
-        // Check that each authority only appears once.
+        signature.check(&self.partial.value.transfer, validator)?;
+        // Check that each validator only appears once.
         fp_ensure!(
-            !self.used_authorities.contains(&authority),
-            TosError::CertificateAuthorityReuse
+            !self.used_authorities.contains(&validator),
+            TosError::CertificateValidatorReuse
         );
-        self.used_authorities.insert(authority);
+        self.used_authorities.insert(validator);
         // Update weight.
-        let voting_rights = self.committee.weight(&authority);
+        let voting_rights = self.validators.weight(&validator);
         fp_ensure!(voting_rights > 0, TosError::UnknownSigner);
         self.weight += voting_rights;
         // Update certificate.
-        self.partial.signatures.push((authority, signature));
+        self.partial.signatures.push((validator, signature));
 
-        if self.weight >= self.committee.quorum_threshold() {
+        if self.weight >= self.validators.quorum_threshold() {
             Ok(Some(self.partial.clone()))
         } else {
             Ok(None)
@@ -241,24 +241,24 @@ impl CertifiedTransferOrder {
     }
 
     /// Verify the certificate.
-    pub fn check(&self, committee: &Committee) -> Result<(), TosError> {
+    pub fn check(&self, validators: &Validators) -> Result<(), TosError> {
         // Check the quorum.
         let mut weight = 0;
         let mut used_authorities = HashSet::new();
-        for (authority, _) in self.signatures.iter() {
-            // Check that each authority only appears once.
+        for (validator, _) in self.signatures.iter() {
+            // Check that each validator only appears once.
             fp_ensure!(
-                !used_authorities.contains(authority),
-                TosError::CertificateAuthorityReuse
+                !used_authorities.contains(validator),
+                TosError::CertificateValidatorReuse
             );
-            used_authorities.insert(*authority);
+            used_authorities.insert(*validator);
             // Update weight.
-            let voting_rights = committee.weight(authority);
+            let voting_rights = validators.weight(validator);
             fp_ensure!(voting_rights > 0, TosError::UnknownSigner);
             weight += voting_rights;
         }
         fp_ensure!(
-            weight >= committee.quorum_threshold(),
+            weight >= validators.quorum_threshold(),
             TosError::CertificateRequiresQuorum
         );
         // All what is left is checking signatures!
