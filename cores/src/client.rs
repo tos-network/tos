@@ -19,15 +19,15 @@ pub type AsyncResult<'a, T, E> = future::BoxFuture<'a, Result<T, E>>;
 
 pub trait ValidatorClient {
     /// Initiate a new transfer to a Tos or Primary account.
-    fn handle_transfer_order(
+    fn handle_transfer_tx(
         &mut self,
-        order: TransferOrder,
+        tx: Transaction,
     ) -> AsyncResult<AccountInfoResponse, TosError>;
 
     /// Confirm a transfer to a Tos or Primary account.
-    fn handle_confirmation_order(
+    fn handle_confirmation_tx(
         &mut self,
-        order: ConfirmationOrder,
+        tx: ConfirmationTx,
     ) -> AsyncResult<AccountInfoResponse, TosError>;
 
     /// Handle information requests for this account.
@@ -50,21 +50,21 @@ pub struct ClientState<ValidatorClient> {
     /// This is also the number of transfer certificates that we have created.
     nonce: Nonce,
     /// Pending transfer.
-    pending_transfer: Option<TransferOrder>,
+    pending_transfer: Option<Transaction>,
 
     // The remaining fields are used to minimize networking, and may not always be persisted locally.
     /// Transfer certificates that we have created ("sent").
-    /// Normally, `sent_certificates` should contain one certificate for each index in `0..nonce`.
-    sent_certificates: Vec<CertifiedTransferOrder>,
+    /// Normally, `sent` should contain one certificate for each index in `0..nonce`.
+    sent: Vec<CertifiedTransaction>,
     /// Known received certificates, indexed by sender and sequence number.
-    /// TODO: API to search and download yet unknown `received_certificates`.
-    received_certificates: BTreeMap<(Address, Nonce), CertifiedTransferOrder>,
+    /// TODO: API to search and download yet unknown `received`.
+    received: BTreeMap<(Address, Nonce), CertifiedTransaction>,
     /// The known spendable balance (including a possible initial funding, excluding unknown sent
     /// or received certificates).
     balance: Balance,
 }
 
-// Operations are considered successful when they successfully reach a quorum of authorities.
+// Operations are considered successful when they successfully reach a quorum of validators.
 pub trait Client {
     /// Send money to a Tos account.
     fn transfer_to_tos(
@@ -72,12 +72,12 @@ pub trait Client {
         amount: Amount,
         recipient: Address,
         user_data: UserData,
-    ) -> AsyncResult<CertifiedTransferOrder, failure::Error>;
+    ) -> AsyncResult<CertifiedTransaction, failure::Error>;
 
     /// Receive money from Tos.
     fn receive_from_tos(
         &mut self,
-        certificate: CertifiedTransferOrder,
+        certificate: CertifiedTransaction,
     ) -> AsyncResult<(), failure::Error>;
 
     /// Send money to a Tos account.
@@ -88,7 +88,7 @@ pub trait Client {
         amount: Amount,
         recipient: Address,
         user_data: UserData,
-    ) -> AsyncResult<CertifiedTransferOrder, failure::Error>;
+    ) -> AsyncResult<CertifiedTransaction, failure::Error>;
 
     /// Find how much money we can spend.
     /// TODO: Currently, this value only reflects received transfers that were
@@ -104,8 +104,8 @@ impl<A> ClientState<A> {
         validators: Validators,
         validator_clients: HashMap<ValidatorName, A>,
         nonce: Nonce,
-        sent_certificates: Vec<CertifiedTransferOrder>,
-        received_certificates: Vec<CertifiedTransferOrder>,
+        sent: Vec<CertifiedTransaction>,
+        received: Vec<CertifiedTransaction>,
         balance: Balance,
     ) -> Self {
         Self {
@@ -115,8 +115,8 @@ impl<A> ClientState<A> {
             validator_clients,
             nonce,
             pending_transfer: None,
-            sent_certificates,
-            received_certificates: received_certificates
+            sent,
+            received: received
                 .into_iter()
                 .map(|cert| (cert.key(), cert))
                 .collect(),
@@ -136,16 +136,16 @@ impl<A> ClientState<A> {
         self.balance
     }
 
-    pub fn pending_transfer(&self) -> &Option<TransferOrder> {
+    pub fn pending_transfer(&self) -> &Option<Transaction> {
         &self.pending_transfer
     }
 
-    pub fn sent_certificates(&self) -> &Vec<CertifiedTransferOrder> {
-        &self.sent_certificates
+    pub fn sent(&self) -> &Vec<CertifiedTransaction> {
+        &self.sent
     }
 
-    pub fn received_certificates(&self) -> impl Iterator<Item = &CertifiedTransferOrder> {
-        self.received_certificates.values()
+    pub fn received(&self) -> impl Iterator<Item = &CertifiedTransaction> {
+        self.received.values()
     }
 }
 
@@ -171,20 +171,20 @@ where
     A: ValidatorClient + Send + Sync + 'static + Clone,
 {
     type Key = Nonce;
-    type Value = Result<CertifiedTransferOrder, TosError>;
+    type Value = Result<CertifiedTransaction, TosError>;
 
     /// Try to find a certificate for the given sender and sequence number.
     fn query(
         &mut self,
-        sequence_number: Nonce,
-    ) -> AsyncResult<CertifiedTransferOrder, TosError> {
+        nonce: Nonce,
+    ) -> AsyncResult<CertifiedTransaction, TosError> {
         Box::pin(async move {
             let request = AccountInfoRequest {
                 sender: self.sender,
-                request_sequence_number: Some(sequence_number),
+                request_nonce: Some(nonce),
                 request_received_transfers_excluding_first_nth: None,
             };
-            // Sequentially try each validator in random order.
+            // Sequentially try each validator in random tx.
             self.validator_clients.shuffle(&mut rand::thread_rng());
             for client in self.validator_clients.iter_mut() {
                 let result = client.handle_account_info_request(request.clone()).await;
@@ -196,7 +196,7 @@ where
                     if certificate.check(&self.validators).is_ok() {
                         let transfer = &certificate.value.transfer;
                         if transfer.sender == self.sender
-                            && transfer.sequence_number == sequence_number
+                            && transfer.nonce == nonce
                         {
                             return Ok(certificate.clone());
                         }
@@ -211,7 +211,7 @@ where
 /// Used for communicate_transfers
 #[derive(Clone)]
 enum CommunicateAction {
-    SendOrder(TransferOrder),
+    SendTx(Transaction),
     SynchronizeNextNonce(Nonce),
 }
 
@@ -223,27 +223,27 @@ where
     async fn request_certificate(
         &mut self,
         sender: Address,
-        sequence_number: Nonce,
-    ) -> Result<CertifiedTransferOrder, TosError> {
+        nonce: Nonce,
+    ) -> Result<CertifiedTransaction, TosError> {
         CertificateRequester::new(
             self.validators.clone(),
             self.validator_clients.values().cloned().collect(),
             sender,
         )
-        .query(sequence_number)
+        .query(nonce)
         .await
     }
 
-    /// Find the highest sequence number that is known to a quorum of authorities.
+    /// Find the highest sequence number that is known to a quorum of validators.
     /// NOTE: This is only reliable in the synchronous model, with a sufficient timeout value.
     #[cfg(test)]
-    async fn get_strong_majority_sequence_number(
+    async fn get_strong_majority_nonce(
         &mut self,
         sender: Address,
     ) -> Nonce {
         let request = AccountInfoRequest {
             sender,
-            request_sequence_number: None,
+            request_nonce: None,
             request_received_transfers_excluding_first_nth: None,
         };
         let numbers: futures::stream::FuturesUnordered<_> = self
@@ -264,13 +264,13 @@ where
         )
     }
 
-    /// Find the highest balance that is backed by a quorum of authorities.
+    /// Find the highest balance that is backed by a quorum of validators.
     /// NOTE: This is only reliable in the synchronous model, with a sufficient timeout value.
     #[cfg(test)]
     async fn get_strong_majority_balance(&mut self) -> Balance {
         let request = AccountInfoRequest {
             sender: self.address,
-            request_sequence_number: None,
+            request_nonce: None,
             request_received_transfers_excluding_first_nth: None,
         };
         let numbers: futures::stream::FuturesUnordered<_> = self
@@ -291,7 +291,7 @@ where
         )
     }
 
-    /// Execute a sequence of actions in parallel for a quorum of authorities.
+    /// Execute a sequence of actions in parallel for a quorum of validators.
     async fn communicate_with_quorum<'a, V, F>(
         &'a mut self,
         execute: F,
@@ -329,7 +329,7 @@ where
                         // At least one honest node returned this error.
                         // No quorum can be reached, so return early.
                         bail!(
-                            "Failed to communicate with a quorum of authorities: {}",
+                            "Failed to communicate with a quorum of validators: {}",
                             err
                         );
                     }
@@ -337,19 +337,19 @@ where
             }
         }
 
-        bail!("Failed to communicate with a quorum of authorities (multiple errors)");
+        bail!("Failed to communicate with a quorum of validators (multiple errors)");
     }
 
-    /// Broadcast confirmation orders and optionally one more transfer order.
+    /// Broadcast confirmation txs and optionally one more transfer tx.
     /// The corresponding sequence numbers should be consecutive and increasing.
     async fn communicate_transfers(
         &mut self,
         sender: Address,
-        known_certificates: Vec<CertifiedTransferOrder>,
+        known_certificates: Vec<CertifiedTransaction>,
         action: CommunicateAction,
-    ) -> Result<Vec<CertifiedTransferOrder>, failure::Error> {
-        let target_sequence_number = match &action {
-            CommunicateAction::SendOrder(order) => order.transfer.sequence_number,
+    ) -> Result<Vec<CertifiedTransaction>, failure::Error> {
+        let target_nonce = match &action {
+            CommunicateAction::SendTx(tx) => tx.transfer.nonce,
             CommunicateAction::SynchronizeNextNonce(seq) => *seq,
         };
         let requester = CertificateRequester::new(
@@ -361,7 +361,7 @@ where
             requester,
             known_certificates.into_iter().filter_map(|cert| {
                 if cert.value.transfer.sender == sender {
-                    Some((cert.value.transfer.sequence_number, Ok(cert)))
+                    Some((cert.value.transfer.nonce, Ok(cert)))
                 } else {
                     None
                 }
@@ -377,16 +377,16 @@ where
                     // Figure out which certificates this validator is missing.
                     let request = AccountInfoRequest {
                         sender,
-                        request_sequence_number: None,
+                        request_nonce: None,
                         request_received_transfers_excluding_first_nth: None,
                     };
                     let response = client.handle_account_info_request(request).await?;
-                    let current_sequence_number = response.nonce;
-                    // Download each missing certificate in reverse order using the downloader.
+                    let current_nonce = response.nonce;
+                    // Download each missing certificate in reverse tx using the downloader.
                     let mut missing_certificates = Vec::new();
-                    let mut number = target_sequence_number.decrement();
+                    let mut number = target_nonce.decrement();
                     while let Ok(value) = number {
-                        if value < current_sequence_number {
+                        if value < current_nonce {
                             break;
                         }
                         let certificate = handle
@@ -396,30 +396,30 @@ where
                         missing_certificates.push(certificate);
                         number = value.decrement();
                     }
-                    // Send all missing confirmation orders.
+                    // Send all missing confirmation txs.
                     missing_certificates.reverse();
                     for certificate in missing_certificates {
                         client
-                            .handle_confirmation_order(ConfirmationOrder::new(certificate))
+                            .handle_confirmation_tx(ConfirmationTx::new(certificate))
                             .await?;
                     }
-                    // Send the transfer order (if any) and return a vote.
-                    if let CommunicateAction::SendOrder(order) = action {
-                        let result = client.handle_transfer_order(order).await;
+                    // Send the transfer tx (if any) and return a vote.
+                    if let CommunicateAction::SendTx(tx) = action {
+                        let result = client.handle_transfer_tx(tx).await;
                         match result {
                             Ok(AccountInfoResponse {
-                                pending_confirmation: Some(signed_order),
+                                pending_confirmation: Some(signed_tx),
                                 ..
                             }) => {
                                 fp_ensure!(
-                                    signed_order.validator == name,
-                                    TosError::ErrorWhileProcessingTransferOrder
+                                    signed_tx.validator == name,
+                                    TosError::ErrorWhileProcessingTransaction
                                 );
-                                signed_order.check(validators)?;
-                                return Ok(Some(signed_order));
+                                signed_tx.check(validators)?;
+                                return Ok(Some(signed_tx));
                             }
                             Err(err) => return Err(err),
-                            _ => return Err(TosError::ErrorWhileProcessingTransferOrder),
+                            _ => return Err(TosError::ErrorWhileProcessingTransaction),
                         }
                     }
                     Ok(None)
@@ -429,21 +429,21 @@ where
         // Terminate downloader task and retrieve the content of the cache.
         handle.stop().await?;
         let mut certificates: Vec<_> = task.await.unwrap().filter_map(Result::ok).collect();
-        if let CommunicateAction::SendOrder(order) = action {
-            let certificate = CertifiedTransferOrder {
-                value: order,
+        if let CommunicateAction::SendTx(tx) = action {
+            let certificate = CertifiedTransaction {
+                value: tx,
                 signatures: votes
                     .into_iter()
                     .filter_map(|vote| match vote {
-                        Some(signed_order) => {
-                            Some((signed_order.validator, signed_order.signature))
+                        Some(signed_tx) => {
+                            Some((signed_tx.validator, signed_tx.signature))
                         }
                         None => None,
                     })
                     .collect(),
             };
             // Certificate is valid because
-            // * `communicate_with_quorum` ensured a sufficient "weight" of (non-error) answers were returned by authorities.
+            // * `communicate_with_quorum` ensured a sufficient "weight" of (non-error) answers were returned by validators.
             // * each answer is a vote signed by the expected validator.
             certificates.push(certificate);
         }
@@ -452,30 +452,30 @@ where
 
     /// Make sure we have all our certificates with sequence number
     /// in the range 0..self.nonce
-    async fn download_sent_certificates(
+    async fn download_sent(
         &self,
-    ) -> Result<Vec<CertifiedTransferOrder>, TosError> {
+    ) -> Result<Vec<CertifiedTransaction>, TosError> {
         let mut requester = CertificateRequester::new(
             self.validators.clone(),
             self.validator_clients.values().cloned().collect(),
             self.address,
         );
-        let known_sequence_numbers: BTreeSet<_> = self
-            .sent_certificates
+        let known_nonces: BTreeSet<_> = self
+            .sent
             .iter()
-            .map(|cert| cert.value.transfer.sequence_number)
+            .map(|cert| cert.value.transfer.nonce)
             .collect();
-        let mut sent_certificates = self.sent_certificates.clone();
+        let mut sent = self.sent.clone();
         let mut number = Nonce::from(0);
         while number < self.nonce {
-            if !known_sequence_numbers.contains(&number) {
+            if !known_nonces.contains(&number) {
                 let certificate = requester.query(number).await?;
-                sent_certificates.push(certificate);
+                sent.push(certificate);
             }
             number = number.increment().unwrap_or_else(|_| Nonce::max());
         }
-        sent_certificates.sort_by_key(|cert| cert.value.transfer.sequence_number);
-        Ok(sent_certificates)
+        sent.sort_by_key(|cert| cert.value.transfer.nonce);
+        Ok(sent)
     }
 
     /// Send money to a Tos or Primary recipient.
@@ -484,7 +484,7 @@ where
         amount: Amount,
         recipient: Address,
         user_data: UserData,
-    ) -> Result<CertifiedTransferOrder, failure::Error> {
+    ) -> Result<CertifiedTransaction, failure::Error> {
         // Trying to overspend may block the account. To prevent this, we compare with
         // the balance as we know it.
         let safe_amount = self.get_spendable_amount().await?;
@@ -498,12 +498,12 @@ where
             sender: self.address,
             recipient,
             amount,
-            sequence_number: self.nonce,
+            nonce: self.nonce,
             user_data,
         };
-        let order = TransferOrder::new(transfer, &self.secret);
+        let tx = Transaction::new(transfer, &self.secret);
         let certificate = self
-            .execute_transfer(order, /* with_confirmation */ true)
+            .execute_transfer(tx, /* with_confirmation */ true)
             .await?;
         Ok(certificate)
     }
@@ -511,76 +511,76 @@ where
     /// Update our view of sent certificates. Adjust the local balance and the next sequence number accordingly.
     /// NOTE: This is only useful in the eventuality of missing local data.
     /// We assume certificates to be valid and sent by us, and their sequence numbers to be unique.
-    fn update_sent_certificates(
+    fn update_sent(
         &mut self,
-        sent_certificates: Vec<CertifiedTransferOrder>,
+        sent: Vec<CertifiedTransaction>,
     ) -> Result<(), TosError> {
         let mut new_balance = self.balance;
         let mut new_nonce = self.nonce;
-        for new_cert in &sent_certificates {
+        for new_cert in &sent {
             new_balance = new_balance.try_sub(new_cert.value.transfer.amount.into())?;
-            if new_cert.value.transfer.sequence_number >= new_nonce {
+            if new_cert.value.transfer.nonce >= new_nonce {
                 new_nonce = new_cert
                     .value
                     .transfer
-                    .sequence_number
+                    .nonce
                     .increment()
                     .unwrap_or_else(|_| Nonce::max());
             }
         }
-        for old_cert in &self.sent_certificates {
+        for old_cert in &self.sent {
             new_balance = new_balance.try_add(old_cert.value.transfer.amount.into())?;
         }
         // Atomic update
-        self.sent_certificates = sent_certificates;
+        self.sent = sent;
         self.balance = new_balance;
         self.nonce = new_nonce;
         // Sanity check
         assert_eq!(
-            self.sent_certificates.len(),
+            self.sent.len(),
             self.nonce.into()
         );
         Ok(())
     }
 
-    /// Execute (or retry) a transfer order. Update local balance.
+    /// Execute (or retry) a transfer tx. Update local balance.
     async fn execute_transfer(
         &mut self,
-        order: TransferOrder,
+        tx: Transaction,
         with_confirmation: bool,
-    ) -> Result<CertifiedTransferOrder, failure::Error> {
+    ) -> Result<CertifiedTransaction, failure::Error> {
         ensure!(
-            self.pending_transfer == None || self.pending_transfer.as_ref() == Some(&order),
+            self.pending_transfer == None || self.pending_transfer.as_ref() == Some(&tx),
             "Client state has a different pending transfer",
         );
         ensure!(
-            order.transfer.sequence_number == self.nonce,
+            tx.transfer.nonce == self.nonce,
             "Unexpected sequence number"
         );
-        self.pending_transfer = Some(order.clone());
-        let new_sent_certificates = self
+        self.pending_transfer = Some(tx.clone());
+        let new_sent = self
             .communicate_transfers(
                 self.address,
-                self.sent_certificates.clone(),
-                CommunicateAction::SendOrder(order.clone()),
+                self.sent.clone(),
+                CommunicateAction::SendTx(tx.clone()),
             )
             .await?;
-        assert_eq!(new_sent_certificates.last().unwrap().value, order);
-        // Clear `pending_transfer` and update `sent_certificates`,
+        assert_eq!(new_sent.last().unwrap().value, tx);
+        // Clear `pending_transfer` and update `sent`,
         // `balance`, and `nonce`. (Note that if we were using persistent
         // storage, we should ensure update atomicity in the eventuality of a crash.)
         self.pending_transfer = None;
-        self.update_sent_certificates(new_sent_certificates)?;
+        self.update_sent(new_sent)?;
         // Confirm last transfer certificate if needed.
         if with_confirmation {
             self.communicate_transfers(
                 self.address,
-                self.sent_certificates.clone(),
+                self.sent.clone(),
                 CommunicateAction::SynchronizeNextNonce(self.nonce),
             )
             .await?;
         }
-        Ok(self.sent_certificates.last().unwrap().clone())
+        Ok(self.sent.last().unwrap().clone())
     }
 }
 
@@ -593,21 +593,21 @@ where
         amount: Amount,
         recipient: Address,
         user_data: UserData,
-    ) -> AsyncResult<CertifiedTransferOrder, failure::Error> {
+    ) -> AsyncResult<CertifiedTransaction, failure::Error> {
         Box::pin(self.transfer(amount, recipient, user_data))
     }
 
     fn get_spendable_amount(&mut self) -> AsyncResult<Amount, failure::Error> {
         Box::pin(async move {
-            if let Some(order) = self.pending_transfer.clone() {
+            if let Some(tx) = self.pending_transfer.clone() {
                 // Finish executing the previous transfer.
-                self.execute_transfer(order, /* with_confirmation */ false)
+                self.execute_transfer(tx, /* with_confirmation */ false)
                     .await?;
             }
-            if self.sent_certificates.len() < self.nonce.into() {
+            if self.sent.len() < self.nonce.into() {
                 // Recover missing sent certificates.
-                let new_sent_certificates = self.download_sent_certificates().await?;
-                self.update_sent_certificates(new_sent_certificates)?;
+                let new_sent = self.download_sent().await?;
+                self.update_sent(new_sent)?;
             }
             let amount = if self.balance < Balance::zero() {
                 Amount::zero()
@@ -620,7 +620,7 @@ where
 
     fn receive_from_tos(
         &mut self,
-        certificate: CertifiedTransferOrder,
+        certificate: CertifiedTransaction,
     ) -> AsyncResult<(), failure::Error> {
         Box::pin(async move {
             certificate.check(&self.validators)?;
@@ -633,14 +633,14 @@ where
                 transfer.sender,
                 vec![certificate.clone()],
                 CommunicateAction::SynchronizeNextNonce(
-                    certificate.value.transfer.sequence_number.increment()?,
+                    certificate.value.transfer.nonce.increment()?,
                 ),
             )
             .await?;
             // Everything worked: update the local balance.
             let transfer = &certificate.value.transfer;
             if let btree_map::Entry::Vacant(entry) =
-                self.received_certificates.entry(transfer.key())
+                self.received.entry(transfer.key())
             {
                 self.balance = self.balance.try_add(transfer.amount.into())?;
                 entry.insert(certificate);
@@ -654,18 +654,18 @@ where
         amount: Amount,
         recipient: Address,
         user_data: UserData,
-    ) -> AsyncResult<CertifiedTransferOrder, failure::Error> {
+    ) -> AsyncResult<CertifiedTransaction, failure::Error> {
         Box::pin(async move {
             let transfer = Transfer {
                 sender: self.address,
                 recipient: recipient,
                 amount,
-                sequence_number: self.nonce,
+                nonce: self.nonce,
                 user_data,
             };
-            let order = TransferOrder::new(transfer, &self.secret);
+            let tx = Transaction::new(transfer, &self.secret);
             let new_certificate = self
-                .execute_transfer(order, /* with_confirmation */ false)
+                .execute_transfer(tx, /* with_confirmation */ false)
                 .await?;
             Ok(new_certificate)
         })

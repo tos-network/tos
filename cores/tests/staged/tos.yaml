@@ -3,7 +3,7 @@ AccountInfoRequest:
   STRUCT:
     - sender:
         TYPENAME: PublicKey
-    - request_sequence_number:
+    - request_nonce:
         OPTION:
           TYPENAME: Nonce
     - request_received_transfers_excluding_first_nth:
@@ -18,21 +18,21 @@ AccountInfoResponse:
         TYPENAME: Nonce
     - pending_confirmation:
         OPTION:
-          TYPENAME: SignedTransferOrder
+          TYPENAME: SignedTransaction
     - requested_certificate:
         OPTION:
-          TYPENAME: CertifiedTransferOrder
+          TYPENAME: CertifiedTransaction
     - requested_received_transfers:
         SEQ:
-          TYPENAME: CertifiedTransferOrder
+          TYPENAME: CertifiedTransaction
 Amount:
   NEWTYPESTRUCT: U64
 Balance:
   NEWTYPESTRUCT: I128
-CertifiedTransferOrder:
+CertifiedTransaction:
   STRUCT:
     - value:
-        TYPENAME: TransferOrder
+        TYPENAME: Transaction
     - signatures:
         SEQ:
           TUPLE:
@@ -48,21 +48,21 @@ PublicKey:
 SerializedMessage:
   ENUM:
     0:
-      Order:
+      Tx:
         NEWTYPE:
-          TYPENAME: TransferOrder
+          TYPENAME: Transaction
     1:
       Vote:
         NEWTYPE:
-          TYPENAME: SignedTransferOrder
+          TYPENAME: SignedTransaction
     2:
       Cert:
         NEWTYPE:
-          TYPENAME: CertifiedTransferOrder
+          TYPENAME: CertifiedTransaction
     3:
       CrossShard:
         NEWTYPE:
-          TYPENAME: CertifiedTransferOrder
+          TYPENAME: CertifiedTransaction
     4:
       Error:
         NEWTYPE:
@@ -80,10 +80,10 @@ Signature:
     TUPLEARRAY:
       CONTENT: U8
       SIZE: 64
-SignedTransferOrder:
+SignedTransaction:
   STRUCT:
     - value:
-        TYPENAME: TransferOrder
+        TYPENAME: Transaction
     - validator:
         TYPENAME: PublicKey
     - signature:
@@ -111,15 +111,15 @@ TosError:
       PreviousTransferMustBeConfirmedFirst:
         STRUCT:
           - pending_confirmation:
-              TYPENAME: TransferOrder
+              TYPENAME: Transaction
     7:
-      ErrorWhileProcessingTransferOrder: UNIT
+      ErrorWhileProcessingTransaction: UNIT
     8:
       ErrorWhileRequestingCertificate: UNIT
     9:
       MissingEalierConfirmations:
         STRUCT:
-          - current_sequence_number:
+          - current_nonce:
               TYPENAME: Nonce
     10:
       UnexpectedTransactionIndex: UNIT
@@ -155,6 +155,12 @@ TosError:
       ClientIoError:
         STRUCT:
           - error: STR
+Transaction:
+  STRUCT:
+    - transfer:
+        TYPENAME: Transfer
+    - signature:
+        TYPENAME: Signature
 Transfer:
   STRUCT:
     - sender:
@@ -163,16 +169,10 @@ Transfer:
         TYPENAME: PublicKey
     - amount:
         TYPENAME: Amount
-    - sequence_number:
+    - nonce:
         TYPENAME: Nonce
     - user_data:
         TYPENAME: UserData
-TransferOrder:
-  STRUCT:
-    - transfer:
-        TYPENAME: Transfer
-    - signature:
-        TYPENAME: Signature
 UserData:
   NEWTYPESTRUCT:
     OPTION:

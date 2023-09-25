@@ -19,24 +19,24 @@ use tokio::runtime::Runtime;
 struct LocalValidatorClient(Arc<Mutex<ValidatorState>>);
 
 impl ValidatorClient for LocalValidatorClient {
-    fn handle_transfer_order(
+    fn handle_transfer_tx(
         &mut self,
-        order: TransferOrder,
+        tx: Transaction,
     ) -> AsyncResult<AccountInfoResponse, TosError> {
         let state = self.0.clone();
-        Box::pin(async move { state.lock().await.handle_transfer_order(order) })
+        Box::pin(async move { state.lock().await.handle_transfer_tx(tx) })
     }
 
-    fn handle_confirmation_order(
+    fn handle_confirmation_tx(
         &mut self,
-        order: ConfirmationOrder,
+        tx: ConfirmationTx,
     ) -> AsyncResult<AccountInfoResponse, TosError> {
         let state = self.0.clone();
         Box::pin(async move {
             state
                 .lock()
                 .await
-                .handle_confirmation_order(order)
+                .handle_confirmation_tx(tx)
                 .map(|(info, _)| info)
         })
     }
@@ -57,7 +57,7 @@ impl LocalValidatorClient {
 }
 
 #[cfg(test)]
-fn init_local_authorities(
+fn init_local_validators(
     count: usize,
 ) -> (HashMap<ValidatorName, LocalValidatorClient>, Validators) {
     let mut key_pairs = Vec::new();
@@ -78,7 +78,7 @@ fn init_local_authorities(
 }
 
 #[cfg(test)]
-fn init_local_authorities_bad_1(
+fn init_local_validators_bad_1(
     count: usize,
 ) -> (HashMap<ValidatorName, LocalValidatorClient>, Validators) {
     let mut key_pairs = Vec::new();
@@ -141,7 +141,7 @@ fn fund_account<I: IntoIterator<Item = i128>>(
 
 #[cfg(test)]
 fn init_local_client_state(balances: Vec<i128>) -> ClientState<LocalValidatorClient> {
-    let (mut validator_clients, validators) = init_local_authorities(balances.len());
+    let (mut validator_clients, validators) = init_local_validators(balances.len());
     let client = make_client(validator_clients.clone(), validators);
     fund_account(&mut validator_clients, client.address, balances);
     client
@@ -151,7 +151,7 @@ fn init_local_client_state(balances: Vec<i128>) -> ClientState<LocalValidatorCli
 fn init_local_client_state_with_bad_validator(
     balances: Vec<i128>,
 ) -> ClientState<LocalValidatorClient> {
-    let (mut validator_clients, validators) = init_local_authorities_bad_1(balances.len());
+    let (mut validator_clients, validators) = init_local_validators_bad_1(balances.len());
     let client = make_client(validator_clients.clone(), validators);
     fund_account(&mut validator_clients, client.address, balances);
     client
@@ -248,7 +248,7 @@ fn test_initiating_transfer_low_funds() {
 #[test]
 fn test_bidirectional_transfer() {
     let mut rt = Runtime::new().unwrap();
-    let (mut validator_clients, validators) = init_local_authorities(4);
+    let (mut validator_clients, validators) = init_local_validators(4);
     let mut client1 = make_client(validator_clients.clone(), validators.clone());
     let mut client2 = make_client(validator_clients.clone(), validators);
     fund_account(&mut validator_clients, client1.address, vec![2, 3, 4, 4]);
@@ -272,7 +272,7 @@ fn test_bidirectional_transfer() {
     );
     assert_eq!(client1.balance, Balance::from(0));
     assert_eq!(
-        rt.block_on(client1.get_strong_majority_sequence_number(client1.address)),
+        rt.block_on(client1.get_strong_majority_nonce(client1.address)),
         Nonce::from(1)
     );
 
@@ -307,7 +307,7 @@ fn test_bidirectional_transfer() {
         Balance::from(2)
     );
     assert_eq!(
-        rt.block_on(client2.get_strong_majority_sequence_number(client2.address)),
+        rt.block_on(client2.get_strong_majority_nonce(client2.address)),
         Nonce::from(1)
     );
     assert_eq!(
@@ -319,7 +319,7 @@ fn test_bidirectional_transfer() {
 #[test]
 fn test_receiving_unconfirmed_transfer() {
     let mut rt = Runtime::new().unwrap();
-    let (mut validator_clients, validators) = init_local_authorities(4);
+    let (mut validator_clients, validators) = init_local_validators(4);
     let mut client1 = make_client(validator_clients.clone(), validators.clone());
     let mut client2 = make_client(validator_clients.clone(), validators);
     fund_account(&mut validator_clients, client1.address, vec![2, 3, 4, 4]);
@@ -342,7 +342,7 @@ fn test_receiving_unconfirmed_transfer() {
         Balance::from(3)
     );
     assert_eq!(
-        rt.block_on(client1.get_strong_majority_sequence_number(client1.address)),
+        rt.block_on(client1.get_strong_majority_nonce(client1.address)),
         Nonce::from(0)
     );
     // Let the receiver confirm in last resort.
@@ -357,7 +357,7 @@ fn test_receiving_unconfirmed_transfer() {
 #[test]
 fn test_receiving_unconfirmed_transfer_with_lagging_sender_balances() {
     let mut rt = Runtime::new().unwrap();
-    let (mut validator_clients, validators) = init_local_authorities(4);
+    let (mut validator_clients, validators) = init_local_validators(4);
     let mut client0 = make_client(validator_clients.clone(), validators.clone());
     let mut client1 = make_client(validator_clients.clone(), validators.clone());
     let mut client2 = make_client(validator_clients.clone(), validators);
@@ -386,7 +386,7 @@ fn test_receiving_unconfirmed_transfer_with_lagging_sender_balances() {
         client0
             .communicate_transfers(
                 client0.address,
-                client0.sent_certificates.clone(),
+                client0.sent.clone(),
                 CommunicateAction::SynchronizeNextNonce(client0.nonce),
             )
             .await
@@ -413,7 +413,7 @@ fn test_receiving_unconfirmed_transfer_with_lagging_sender_balances() {
         Balance::from(2)
     );
     assert_eq!(
-        rt.block_on(client1.get_strong_majority_sequence_number(client1.address)),
+        rt.block_on(client1.get_strong_majority_nonce(client1.address)),
         Nonce::from(0)
     );
     // Let the receiver confirm in last resort.

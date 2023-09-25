@@ -5,16 +5,16 @@
 use super::*;
 
 #[test]
-fn test_handle_transfer_order_bad_signature() {
+fn test_handle_transfer_tx_bad_signature() {
     let (sender, sender_key) = get_key_pair();
     let recipient = dbg_addr(2);
     let mut validator_state = init_state_with_account(sender, Balance::from(5));
-    let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
+    let transfer_tx = init_transfer_tx(sender, &sender_key, recipient, Amount::from(5));
     let (_unknown_address, unknown_key) = get_key_pair();
-    let mut bad_signature_transfer_order = transfer_order.clone();
-    bad_signature_transfer_order.signature = Signature::new(&transfer_order.transfer, &unknown_key);
+    let mut bad_signature_transfer_tx = transfer_tx.clone();
+    bad_signature_transfer_tx.signature = Signature::new(&transfer_tx.transfer, &unknown_key);
     assert!(validator_state
-        .handle_transfer_order(bad_signature_transfer_order)
+        .handle_transfer_tx(bad_signature_transfer_tx)
         .is_err());
     assert!(validator_state
         .accounts
@@ -25,18 +25,18 @@ fn test_handle_transfer_order_bad_signature() {
 }
 
 #[test]
-fn test_handle_transfer_order_zero_amount() {
+fn test_handle_transfer_tx_zero_amount() {
     let (sender, sender_key) = get_key_pair();
     let recipient = dbg_addr(2);
     let mut validator_state = init_state_with_account(sender, Balance::from(5));
-    let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
+    let transfer_tx = init_transfer_tx(sender, &sender_key, recipient, Amount::from(5));
 
     // test transfer non-positive amount
-    let mut zero_amount_transfer = transfer_order.transfer;
+    let mut zero_amount_transfer = transfer_tx.transfer;
     zero_amount_transfer.amount = Amount::zero();
-    let zero_amount_transfer_order = TransferOrder::new(zero_amount_transfer, &sender_key);
+    let zero_amount_transfer_tx = Transaction::new(zero_amount_transfer, &sender_key);
     assert!(validator_state
-        .handle_transfer_order(zero_amount_transfer_order)
+        .handle_transfer_tx(zero_amount_transfer_tx)
         .is_err());
     assert!(validator_state
         .accounts
@@ -47,18 +47,18 @@ fn test_handle_transfer_order_zero_amount() {
 }
 
 #[test]
-fn test_handle_transfer_order_unknown_sender() {
+fn test_handle_transfer_tx_unknown_sender() {
     let (sender, sender_key) = get_key_pair();
     let recipient = dbg_addr(2);
     let mut validator_state = init_state_with_account(sender, Balance::from(5));
-    let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
+    let transfer_tx = init_transfer_tx(sender, &sender_key, recipient, Amount::from(5));
     let (unknown_address, unknown_key) = get_key_pair();
 
-    let mut unknown_sender_transfer = transfer_order.transfer;
+    let mut unknown_sender_transfer = transfer_tx.transfer;
     unknown_sender_transfer.sender = unknown_address;
-    let unknown_sender_transfer_order = TransferOrder::new(unknown_sender_transfer, &unknown_key);
+    let unknown_sender_transfer_tx = Transaction::new(unknown_sender_transfer, &unknown_key);
     assert!(validator_state
-        .handle_transfer_order(unknown_sender_transfer_order)
+        .handle_transfer_tx(unknown_sender_transfer_tx)
         .is_err());
     assert!(validator_state
         .accounts
@@ -69,24 +69,24 @@ fn test_handle_transfer_order_unknown_sender() {
 }
 
 #[test]
-fn test_handle_transfer_order_bad_sequence_number() {
+fn test_handle_transfer_tx_bad_nonce() {
     let (sender, sender_key) = get_key_pair();
     let recipient = dbg_addr(2);
     let validator_state = init_state_with_account(sender, Balance::from(5));
-    let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
+    let transfer_tx = init_transfer_tx(sender, &sender_key, recipient, Amount::from(5));
 
-    let mut sequence_number_state = validator_state;
-    let sequence_number_state_sender_account =
-        sequence_number_state.accounts.get_mut(&sender).unwrap();
-    sequence_number_state_sender_account.nonce =
-        sequence_number_state_sender_account
+    let mut nonce_state = validator_state;
+    let nonce_state_sender_account =
+        nonce_state.accounts.get_mut(&sender).unwrap();
+    nonce_state_sender_account.nonce =
+        nonce_state_sender_account
             .nonce
             .increment()
             .unwrap();
-    assert!(sequence_number_state
-        .handle_transfer_order(transfer_order)
+    assert!(nonce_state
+        .handle_transfer_tx(transfer_tx)
         .is_err());
-    assert!(sequence_number_state
+    assert!(nonce_state
         .accounts
         .get(&sender)
         .unwrap()
@@ -95,13 +95,13 @@ fn test_handle_transfer_order_bad_sequence_number() {
 }
 
 #[test]
-fn test_handle_transfer_order_exceed_balance() {
+fn test_handle_transfer_tx_exceed_balance() {
     let (sender, sender_key) = get_key_pair();
     let recipient = dbg_addr(2);
     let mut validator_state = init_state_with_account(sender, Balance::from(5));
-    let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(1000));
+    let transfer_tx = init_transfer_tx(sender, &sender_key, recipient, Amount::from(1000));
     assert!(validator_state
-        .handle_transfer_order(transfer_order)
+        .handle_transfer_tx(transfer_tx)
         .is_err());
     assert!(validator_state
         .accounts
@@ -112,14 +112,14 @@ fn test_handle_transfer_order_exceed_balance() {
 }
 
 #[test]
-fn test_handle_transfer_order_ok() {
+fn test_handle_transfer_tx_ok() {
     let (sender, sender_key) = get_key_pair();
     let recipient = dbg_addr(2);
     let mut validator_state = init_state_with_account(sender, Balance::from(5));
-    let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
+    let transfer_tx = init_transfer_tx(sender, &sender_key, recipient, Amount::from(5));
 
     let account_info = validator_state
-        .handle_transfer_order(transfer_order)
+        .handle_transfer_tx(transfer_tx)
         .unwrap();
     let pending_confirmation = validator_state
         .accounts
@@ -135,27 +135,27 @@ fn test_handle_transfer_order_ok() {
 }
 
 #[test]
-fn test_handle_transfer_order_double_spend() {
+fn test_handle_transfer_tx_double_spend() {
     let (sender, sender_key) = get_key_pair();
     let recipient = dbg_addr(2);
     let mut validator_state = init_state_with_account(sender, Balance::from(5));
-    let transfer_order = init_transfer_order(sender, &sender_key, recipient, Amount::from(5));
+    let transfer_tx = init_transfer_tx(sender, &sender_key, recipient, Amount::from(5));
 
-    let signed_order = validator_state
-        .handle_transfer_order(transfer_order.clone())
+    let signed_tx = validator_state
+        .handle_transfer_tx(transfer_tx.clone())
         .unwrap();
-    let double_spend_signed_order = validator_state
-        .handle_transfer_order(transfer_order)
+    let double_spend_signed_tx = validator_state
+        .handle_transfer_tx(transfer_tx)
         .unwrap();
-    assert_eq!(signed_order, double_spend_signed_order);
+    assert_eq!(signed_tx, double_spend_signed_tx);
 }
 
 #[test]
-fn test_handle_confirmation_order_unknown_sender() {
+fn test_handle_confirmation_tx_unknown_sender() {
     let recipient = dbg_addr(2);
     let (sender, sender_key) = get_key_pair();
     let mut validator_state = init_state();
-    let certified_transfer_order = init_certified_transfer_order(
+    let certified_transfer_tx = init_certified_transfer_tx(
         sender,
         &sender_key,
         recipient,
@@ -164,13 +164,13 @@ fn test_handle_confirmation_order_unknown_sender() {
     );
 
     assert!(validator_state
-        .handle_confirmation_order(ConfirmationOrder::new(certified_transfer_order))
+        .handle_confirmation_tx(ConfirmationTx::new(certified_transfer_tx))
         .is_ok());
     assert!(validator_state.accounts.get(&recipient).is_some());
 }
 
 #[test]
-fn test_handle_confirmation_order_bad_sequence_number() {
+fn test_handle_confirmation_tx_bad_nonce() {
     let (sender, sender_key) = get_key_pair();
     let recipient = dbg_addr(2);
     let mut validator_state = init_state_with_account(sender, Balance::from(5));
@@ -186,7 +186,7 @@ fn test_handle_confirmation_order_bad_sequence_number() {
         old_seq_num = old_account.nonce;
     }
 
-    let certified_transfer_order = init_certified_transfer_order(
+    let certified_transfer_tx = init_certified_transfer_tx(
         sender,
         &sender_key,
         recipient,
@@ -195,7 +195,7 @@ fn test_handle_confirmation_order_bad_sequence_number() {
     );
     // Replays are ignored.
     assert!(validator_state
-        .handle_confirmation_order(ConfirmationOrder::new(certified_transfer_order))
+        .handle_confirmation_tx(ConfirmationTx::new(certified_transfer_tx))
         .is_ok());
     let new_account = validator_state.accounts.get_mut(&sender).unwrap();
     assert_eq!(old_balance, new_account.balance);
@@ -205,12 +205,12 @@ fn test_handle_confirmation_order_bad_sequence_number() {
 }
 
 #[test]
-fn test_handle_confirmation_order_exceed_balance() {
+fn test_handle_confirmation_tx_exceed_balance() {
     let (sender, sender_key) = get_key_pair();
     let recipient = dbg_addr(2);
     let mut validator_state = init_state_with_account(sender, Balance::from(5));
 
-    let certified_transfer_order = init_certified_transfer_order(
+    let certified_transfer_tx = init_certified_transfer_tx(
         sender,
         &sender_key,
         recipient,
@@ -218,7 +218,7 @@ fn test_handle_confirmation_order_exceed_balance() {
         &validator_state,
     );
     assert!(validator_state
-        .handle_confirmation_order(ConfirmationOrder::new(certified_transfer_order))
+        .handle_confirmation_tx(ConfirmationTx::new(certified_transfer_tx))
         .is_ok());
     let new_account = validator_state.accounts.get(&sender).unwrap();
     assert_eq!(Balance::from(-995), new_account.balance);
@@ -228,7 +228,7 @@ fn test_handle_confirmation_order_exceed_balance() {
 }
 
 #[test]
-fn test_handle_confirmation_order_receiver_balance_overflow() {
+fn test_handle_confirmation_tx_receiver_balance_overflow() {
     let (sender, sender_key) = get_key_pair();
     let (recipient, _) = get_key_pair();
     let mut validator_state = init_state_with_accounts(vec![
@@ -236,7 +236,7 @@ fn test_handle_confirmation_order_receiver_balance_overflow() {
         (recipient, Balance::max()),
     ]);
 
-    let certified_transfer_order = init_certified_transfer_order(
+    let certified_transfer_tx = init_certified_transfer_tx(
         sender,
         &sender_key,
         recipient,
@@ -244,7 +244,7 @@ fn test_handle_confirmation_order_receiver_balance_overflow() {
         &validator_state,
     );
     assert!(validator_state
-        .handle_confirmation_order(ConfirmationOrder::new(certified_transfer_order))
+        .handle_confirmation_tx(ConfirmationTx::new(certified_transfer_tx))
         .is_ok());
     let new_sender_account = validator_state.accounts.get(&sender).unwrap();
     assert_eq!(Balance::from(0), new_sender_account.balance);
@@ -258,11 +258,11 @@ fn test_handle_confirmation_order_receiver_balance_overflow() {
 }
 
 #[test]
-fn test_handle_confirmation_order_receiver_equal_sender() {
+fn test_handle_confirmation_tx_receiver_equal_sender() {
     let (address, key) = get_key_pair();
     let mut validator_state = init_state_with_account(address, Balance::from(1));
 
-    let certified_transfer_order = init_certified_transfer_order(
+    let certified_transfer_tx = init_certified_transfer_tx(
         address,
         &key,
         address,
@@ -270,7 +270,7 @@ fn test_handle_confirmation_order_receiver_equal_sender() {
         &validator_state,
     );
     assert!(validator_state
-        .handle_confirmation_order(ConfirmationOrder::new(certified_transfer_order))
+        .handle_confirmation_tx(ConfirmationTx::new(certified_transfer_tx))
         .is_ok());
     let account = validator_state.accounts.get(&address).unwrap();
     assert_eq!(Balance::from(1), account.balance);
@@ -284,7 +284,7 @@ fn test_handle_cross_shard_recipient_commit() {
     let (recipient, _) = get_key_pair();
     // Sender has no account on this shard.
     let mut validator_state = init_state_with_account(recipient, Balance::from(1));
-    let certified_transfer_order = init_certified_transfer_order(
+    let certified_transfer_tx = init_certified_transfer_tx(
         sender,
         &sender_key,
         recipient,
@@ -292,7 +292,7 @@ fn test_handle_cross_shard_recipient_commit() {
         &validator_state,
     );
     assert!(validator_state
-        .handle_cross_shard_recipient_commit(certified_transfer_order)
+        .handle_cross_shard_recipient_commit(certified_transfer_tx)
         .is_ok());
     let account = validator_state.accounts.get(&recipient).unwrap();
     assert_eq!(Balance::from(11), account.balance);
@@ -301,11 +301,11 @@ fn test_handle_cross_shard_recipient_commit() {
 }
 
 #[test]
-fn test_handle_confirmation_order_ok() {
+fn test_handle_confirmation_tx_ok() {
     let (sender, sender_key) = get_key_pair();
     let recipient = dbg_addr(2);
     let mut validator_state = init_state_with_account(sender, Balance::from(5));
-    let certified_transfer_order = init_certified_transfer_order(
+    let certified_transfer_tx = init_certified_transfer_tx(
         sender,
         &sender_key,
         recipient,
@@ -318,11 +318,11 @@ fn test_handle_confirmation_order_ok() {
     nonce = nonce.increment().unwrap();
     let mut remaining_balance = old_account.balance;
     remaining_balance = remaining_balance
-        .try_sub(certified_transfer_order.value.transfer.amount.into())
+        .try_sub(certified_transfer_tx.value.transfer.amount.into())
         .unwrap();
 
     let (info, _) = validator_state
-        .handle_confirmation_order(ConfirmationOrder::new(certified_transfer_order.clone()))
+        .handle_confirmation_tx(ConfirmationTx::new(certified_transfer_tx.clone()))
         .unwrap();
     assert_eq!(sender, info.sender);
     assert_eq!(remaining_balance, info.balance);
@@ -330,18 +330,18 @@ fn test_handle_confirmation_order_ok() {
     assert_eq!(None, info.pending_confirmation);
     assert_eq!(
         validator_state.accounts.get(&sender).unwrap().confirmed_log,
-        vec![certified_transfer_order.clone()]
+        vec![certified_transfer_tx.clone()]
     );
 
     let recipient_account = validator_state.accounts.get(&recipient).unwrap();
     assert_eq!(
         recipient_account.balance,
-        certified_transfer_order.value.transfer.amount.into()
+        certified_transfer_tx.value.transfer.amount.into()
     );
 
     let info_request = AccountInfoRequest {
         sender: recipient,
-        request_sequence_number: None,
+        request_nonce: None,
         request_received_transfers_excluding_first_nth: Some(0),
     };
     let response = validator_state
@@ -358,40 +358,40 @@ fn test_handle_confirmation_order_ok() {
 }
 
 #[test]
-fn test_handle_primary_synchronization_order_update() {
+fn test_handle_primary_synchronization_tx_update() {
     let mut state = init_state();
     let mut updated_transaction_index = state.last_transaction_index;
     let address = dbg_addr(1);
-    let order = init_primary_synchronization_order(address);
+    let tx = init_primary_synchronization_tx(address);
 
     assert!(state
-        .handle_primary_synchronization_order(order.clone())
+        .handle_primary_synchronization_tx(tx.clone())
         .is_ok());
     updated_transaction_index = updated_transaction_index.increment().unwrap();
     assert_eq!(state.last_transaction_index, updated_transaction_index);
     let account = state.accounts.get(&address).unwrap();
-    assert_eq!(account.balance, order.amount.into());
+    assert_eq!(account.balance, tx.amount.into());
     assert_eq!(state.accounts.len(), 1);
 }
 
 #[test]
-fn test_handle_primary_synchronization_order_double_spend() {
+fn test_handle_primary_synchronization_tx_double_spend() {
     let mut state = init_state();
     let mut updated_transaction_index = state.last_transaction_index;
     let address = dbg_addr(1);
-    let order = init_primary_synchronization_order(address);
+    let tx = init_primary_synchronization_tx(address);
 
     assert!(state
-        .handle_primary_synchronization_order(order.clone())
+        .handle_primary_synchronization_tx(tx.clone())
         .is_ok());
     updated_transaction_index = updated_transaction_index.increment().unwrap();
     // Replays are ignored.
     assert!(state
-        .handle_primary_synchronization_order(order.clone())
+        .handle_primary_synchronization_tx(tx.clone())
         .is_ok());
     assert_eq!(state.last_transaction_index, updated_transaction_index);
     let account = state.accounts.get(&address).unwrap();
-    assert_eq!(account.balance, order.amount.into());
+    assert_eq!(account.balance, tx.amount.into());
     assert_eq!(state.accounts.len(), 1);
 }
 
@@ -415,12 +415,12 @@ fn test_account_state_unknown_account() {
 
 #[test]
 fn test_get_shards() {
-    let num_shards = 16u32;
-    let mut found = vec![false; num_shards as usize];
-    let mut left = num_shards;
+    let shards = 16u32;
+    let mut found = vec![false; shards as usize];
+    let mut left = shards;
     loop {
         let (address, _) = get_key_pair();
-        let shard = ValidatorState::get_shard(num_shards, &address) as usize;
+        let shard = ValidatorState::get_shard(shards, &address) as usize;
         println!("found {}", shard);
         if !found[shard] {
             found[shard] = true;
@@ -437,12 +437,12 @@ fn test_get_shards() {
 #[cfg(test)]
 fn init_state() -> ValidatorState {
     let (validator_address, validator_key) = get_key_pair();
-    let mut authorities = BTreeMap::new();
-    authorities.insert(
+    let mut validators = BTreeMap::new();
+    validators.insert(
         /* address */ validator_address,
         /* voting right */ 1,
     );
-    let validators = Validators::new(authorities);
+    let validators = Validators::new(validators);
     ValidatorState::new(validators, validator_address, validator_key)
 }
 
@@ -467,38 +467,38 @@ fn init_state_with_account(address: Address, balance: Balance) -> ValidatorState
 }
 
 #[cfg(test)]
-fn init_transfer_order(
+fn init_transfer_tx(
     sender: Address,
     secret: &KeyPair,
     recipient: Address,
     amount: Amount,
-) -> TransferOrder {
+) -> Transaction {
     let transfer = Transfer {
         sender,
         recipient,
         amount,
-        sequence_number: Nonce::new(),
+        nonce: Nonce::new(),
         user_data: UserData::default(),
     };
-    TransferOrder::new(transfer, secret)
+    Transaction::new(transfer, secret)
 }
 
 #[cfg(test)]
-fn init_certified_transfer_order(
+fn init_certified_transfer_tx(
     sender: Address,
     secret: &KeyPair,
     recipient: Address,
     amount: Amount,
     validator_state: &ValidatorState,
-) -> CertifiedTransferOrder {
-    let transfer_order = init_transfer_order(sender, secret, recipient, amount);
-    let vote = SignedTransferOrder::new(
-        transfer_order.clone(),
+) -> CertifiedTransaction {
+    let transfer_tx = init_transfer_tx(sender, secret, recipient, amount);
+    let vote = SignedTransaction::new(
+        transfer_tx.clone(),
         validator_state.name,
         &validator_state.secret,
     );
     let mut builder =
-        SignatureAggregator::try_new(transfer_order, &validator_state.validators).unwrap();
+        SignatureAggregator::try_new(transfer_tx, &validator_state.validators).unwrap();
     builder
         .append(vote.validator, vote.signature)
         .unwrap()
@@ -506,10 +506,10 @@ fn init_certified_transfer_order(
 }
 
 #[cfg(test)]
-fn init_primary_synchronization_order(recipient: Address) -> PrimarySynchronizationOrder {
+fn init_primary_synchronization_tx(recipient: Address) -> PrimarySynchronizationTx {
     let mut transaction_index = VersionNumber::new();
     transaction_index = transaction_index.increment().unwrap();
-    PrimarySynchronizationOrder {
+    PrimarySynchronizationTx {
         recipient,
         amount: Amount::from(5),
         transaction_index,

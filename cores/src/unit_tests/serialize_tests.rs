@@ -24,12 +24,12 @@ fn test_error() {
 fn test_info_request() {
     let req1 = AccountInfoRequest {
         sender: dbg_addr(0x20),
-        request_sequence_number: None,
+        request_nonce: None,
         request_received_transfers_excluding_first_nth: None,
     };
     let req2 = AccountInfoRequest {
         sender: dbg_addr(0x20),
-        request_sequence_number: Some(Nonce::from(129)),
+        request_nonce: Some(Nonce::from(129)),
         request_received_transfers_excluding_first_nth: None,
     };
 
@@ -54,23 +54,23 @@ fn test_info_request() {
 }
 
 #[test]
-fn test_order() {
+fn test_tx() {
     let (sender_name, sender_key) = get_key_pair();
 
     let transfer = Transfer {
         sender: sender_name,
         recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: Nonce::new(),
+        nonce: Nonce::new(),
         user_data: UserData::default(),
     };
-    let transfer_order = TransferOrder::new(transfer, &sender_key);
+    let transfer_tx = Transaction::new(transfer, &sender_key);
 
-    let buf = serialize_transfer_order(&transfer_order);
+    let buf = serialize_transfer_tx(&transfer_tx);
     let result = deserialize_message(buf.as_slice());
     assert!(result.is_ok());
-    if let SerializedMessage::Order(o) = result.unwrap() {
-        assert!(*o == transfer_order);
+    if let SerializedMessage::Tx(o) = result.unwrap() {
+        assert!(*o == transfer_tx);
     } else {
         panic!()
     }
@@ -80,16 +80,16 @@ fn test_order() {
         sender: sender_name,
         recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: Nonce::new(),
+        nonce: Nonce::new(),
         user_data: UserData::default(),
     };
-    let transfer_order2 = TransferOrder::new(transfer2, &sender_key);
+    let transfer_tx2 = Transaction::new(transfer2, &sender_key);
 
-    let buf = serialize_transfer_order(&transfer_order2);
+    let buf = serialize_transfer_tx(&transfer_tx2);
     let result = deserialize_message(buf.as_slice());
     assert!(result.is_ok());
-    if let SerializedMessage::Order(o) = result.unwrap() {
-        assert!(*o == transfer_order2);
+    if let SerializedMessage::Tx(o) = result.unwrap() {
+        assert!(*o == transfer_tx2);
     } else {
         panic!()
     }
@@ -102,13 +102,13 @@ fn test_vote() {
         sender: sender_name,
         recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: Nonce::new(),
+        nonce: Nonce::new(),
         user_data: UserData::default(),
     };
-    let order = TransferOrder::new(transfer, &sender_key);
+    let tx = Transaction::new(transfer, &sender_key);
 
     let (validator_name, validator_key) = get_key_pair();
-    let vote = SignedTransferOrder::new(order, validator_name, &validator_key);
+    let vote = SignedTransaction::new(tx, validator_name, &validator_key);
 
     let buf = serialize_vote(&vote);
     let result = deserialize_message(buf.as_slice());
@@ -127,12 +127,12 @@ fn test_cert() {
         sender: sender_name,
         recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: Nonce::new(),
+        nonce: Nonce::new(),
         user_data: UserData::default(),
     };
-    let order = TransferOrder::new(transfer, &sender_key);
-    let mut cert = CertifiedTransferOrder {
-        value: order,
+    let tx = Transaction::new(transfer, &sender_key);
+    let mut cert = CertifiedTransaction {
+        value: tx,
         signatures: Vec::new(),
     };
 
@@ -160,16 +160,16 @@ fn test_info_response() {
         sender: sender_name,
         recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: Nonce::new(),
+        nonce: Nonce::new(),
         user_data: UserData::default(),
     };
-    let order = TransferOrder::new(transfer, &sender_key);
+    let tx = Transaction::new(transfer, &sender_key);
 
     let (auth_name, auth_key) = get_key_pair();
-    let vote = SignedTransferOrder::new(order.clone(), auth_name, &auth_key);
+    let vote = SignedTransaction::new(tx.clone(), auth_name, &auth_key);
 
-    let mut cert = CertifiedTransferOrder {
-        value: order,
+    let mut cert = CertifiedTransaction {
+        value: tx,
         signatures: Vec::new(),
     };
 
@@ -226,34 +226,34 @@ fn test_info_response() {
 }
 
 #[test]
-fn test_time_order() {
+fn test_time_tx() {
     let (sender_name, sender_key) = get_key_pair();
     let transfer = Transfer {
         sender: sender_name,
         recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: Nonce::new(),
+        nonce: Nonce::new(),
         user_data: UserData::default(),
     };
 
     let mut buf = Vec::new();
     let now = Instant::now();
     for _ in 0..100 {
-        let transfer_order = TransferOrder::new(transfer.clone(), &sender_key);
-        serialize_transfer_order_into(&mut buf, &transfer_order).unwrap();
+        let transfer_tx = Transaction::new(transfer.clone(), &sender_key);
+        serialize_transfer_tx_into(&mut buf, &transfer_tx).unwrap();
     }
-    println!("Write Order: {} microsec", now.elapsed().as_micros() / 100);
+    println!("Write Tx: {} microsec", now.elapsed().as_micros() / 100);
 
     let mut buf2 = buf.as_slice();
     let now = Instant::now();
     for _ in 0..100 {
-        if let SerializedMessage::Order(order) = deserialize_message(&mut buf2).unwrap() {
-            order.check_signature().unwrap();
+        if let SerializedMessage::Tx(tx) = deserialize_message(&mut buf2).unwrap() {
+            tx.check_signature().unwrap();
         }
     }
     assert!(deserialize_message(&mut buf2).is_err());
     println!(
-        "Read & Check Order: {} microsec",
+        "Read & Check Tx: {} microsec",
         now.elapsed().as_micros() / 100
     );
 }
@@ -265,17 +265,17 @@ fn test_time_vote() {
         sender: sender_name,
         recipient: dbg_addr(0x20),
         amount: Amount::from(5),
-        sequence_number: Nonce::new(),
+        nonce: Nonce::new(),
         user_data: UserData::default(),
     };
-    let order = TransferOrder::new(transfer, &sender_key);
+    let tx = Transaction::new(transfer, &sender_key);
 
     let (validator_name, validator_key) = get_key_pair();
 
     let mut buf = Vec::new();
     let now = Instant::now();
     for _ in 0..100 {
-        let vote = SignedTransferOrder::new(order.clone(), validator_name, &validator_key);
+        let vote = SignedTransaction::new(tx.clone(), validator_name, &validator_key);
         serialize_vote_into(&mut buf, &vote).unwrap();
     }
     println!("Write Vote: {} microsec", now.elapsed().as_micros() / 100);
@@ -304,12 +304,12 @@ fn test_time_cert() {
         sender: sender_name,
         recipient: dbg_addr(0),
         amount: Amount::from(5),
-        sequence_number: Nonce::new(),
+        nonce: Nonce::new(),
         user_data: UserData::default(),
     };
-    let order = TransferOrder::new(transfer, &sender_key);
-    let mut cert = CertifiedTransferOrder {
-        value: order,
+    let tx = Transaction::new(transfer, &sender_key);
+    let mut cert = CertifiedTransaction {
+        value: tx,
         signatures: Vec::new(),
     };
 

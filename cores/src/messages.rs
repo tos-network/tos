@@ -22,7 +22,7 @@ pub struct FundingTransaction {
 }
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub struct PrimarySynchronizationOrder {
+pub struct PrimarySynchronizationTx {
     pub recipient: Address,
     pub amount: Amount,
     pub transaction_index: VersionNumber,
@@ -33,43 +33,43 @@ pub struct Transfer {
     pub sender: Address,
     pub recipient: Address,
     pub amount: Amount,
-    pub sequence_number: Nonce,
+    pub nonce: Nonce,
     pub user_data: UserData,
 }
 
 #[derive(Eq, Clone, Debug, Serialize, Deserialize)]
-pub struct TransferOrder {
+pub struct Transaction {
     pub transfer: Transfer,
     pub signature: Signature,
 }
 
 #[derive(Eq, Clone, Debug, Serialize, Deserialize)]
-pub struct SignedTransferOrder {
-    pub value: TransferOrder,
+pub struct SignedTransaction {
+    pub value: Transaction,
     pub validator: ValidatorName,
     pub signature: Signature,
 }
 
 #[derive(Eq, Clone, Debug, Serialize, Deserialize)]
-pub struct CertifiedTransferOrder {
-    pub value: TransferOrder,
+pub struct CertifiedTransaction {
+    pub value: Transaction,
     pub signatures: Vec<(ValidatorName, Signature)>,
 }
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct RedeemTransaction {
-    pub transfer_certificate: CertifiedTransferOrder,
+    pub ctx: CertifiedTransaction,
 }
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub struct ConfirmationOrder {
-    pub transfer_certificate: CertifiedTransferOrder,
+pub struct ConfirmationTx {
+    pub ctx: CertifiedTransaction,
 }
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct AccountInfoRequest {
     pub sender: Address,
-    pub request_sequence_number: Option<Nonce>,
+    pub request_nonce: Option<Nonce>,
     pub request_received_transfers_excluding_first_nth: Option<usize>,
 }
 
@@ -78,43 +78,43 @@ pub struct AccountInfoResponse {
     pub sender: Address,
     pub balance: Balance,
     pub nonce: Nonce,
-    pub pending_confirmation: Option<SignedTransferOrder>,
-    pub requested_certificate: Option<CertifiedTransferOrder>,
-    pub requested_received_transfers: Vec<CertifiedTransferOrder>,
+    pub pending_confirmation: Option<SignedTransaction>,
+    pub requested_certificate: Option<CertifiedTransaction>,
+    pub requested_received_transfers: Vec<CertifiedTransaction>,
 }
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct CrossShardUpdate {
     pub shard_id: ShardId,
-    pub transfer_certificate: CertifiedTransferOrder,
+    pub ctx: CertifiedTransaction,
 }
 
-impl Hash for TransferOrder {
+impl Hash for Transaction {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.transfer.hash(state);
     }
 }
 
-impl PartialEq for TransferOrder {
+impl PartialEq for Transaction {
     fn eq(&self, other: &Self) -> bool {
         self.transfer == other.transfer
     }
 }
 
-impl Hash for SignedTransferOrder {
+impl Hash for SignedTransaction {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.value.hash(state);
         self.validator.hash(state);
     }
 }
 
-impl PartialEq for SignedTransferOrder {
+impl PartialEq for SignedTransaction {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value && self.validator == other.validator
     }
 }
 
-impl Hash for CertifiedTransferOrder {
+impl Hash for CertifiedTransaction {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.value.hash(state);
         self.signatures.len().hash(state);
@@ -124,7 +124,7 @@ impl Hash for CertifiedTransferOrder {
     }
 }
 
-impl PartialEq for CertifiedTransferOrder {
+impl PartialEq for CertifiedTransaction {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
             && self.signatures.len() == other.signatures.len()
@@ -138,11 +138,11 @@ impl PartialEq for CertifiedTransferOrder {
 
 impl Transfer {
     pub fn key(&self) -> (Address, Nonce) {
-        (self.sender, self.sequence_number)
+        (self.sender, self.nonce)
     }
 }
 
-impl TransferOrder {
+impl Transaction {
     pub fn new(transfer: Transfer, secret: &KeyPair) -> Self {
         let signature = Signature::new(&transfer, secret);
         Self {
@@ -156,9 +156,9 @@ impl TransferOrder {
     }
 }
 
-impl SignedTransferOrder {
+impl SignedTransaction {
     /// Use signing key to create a signed object.
-    pub fn new(value: TransferOrder, validator: ValidatorName, secret: &KeyPair) -> Self {
+    pub fn new(value: Transaction, validator: ValidatorName, secret: &KeyPair) -> Self {
         let signature = Signature::new(&value.transfer, secret);
         Self {
             value,
@@ -180,24 +180,24 @@ impl SignedTransferOrder {
 pub struct SignatureAggregator<'a> {
     validators: &'a Validators,
     weight: usize,
-    used_authorities: HashSet<ValidatorName>,
-    partial: CertifiedTransferOrder,
+    used_validators: HashSet<ValidatorName>,
+    partial: CertifiedTransaction,
 }
 
 impl<'a> SignatureAggregator<'a> {
     /// Start aggregating signatures for the given value into a certificate.
-    pub fn try_new(value: TransferOrder, validators: &'a Validators) -> Result<Self, TosError> {
+    pub fn try_new(value: Transaction, validators: &'a Validators) -> Result<Self, TosError> {
         value.check_signature()?;
         Ok(Self::new_unsafe(value, validators))
     }
 
-    /// Same as try_new but we don't check the order.
-    pub fn new_unsafe(value: TransferOrder, validators: &'a Validators) -> Self {
+    /// Same as try_new but we don't check the tx.
+    pub fn new_unsafe(value: Transaction, validators: &'a Validators) -> Self {
         Self {
             validators,
             weight: 0,
-            used_authorities: HashSet::new(),
-            partial: CertifiedTransferOrder {
+            used_validators: HashSet::new(),
+            partial: CertifiedTransaction {
                 value,
                 signatures: Vec::new(),
             },
@@ -211,14 +211,14 @@ impl<'a> SignatureAggregator<'a> {
         &mut self,
         validator: ValidatorName,
         signature: Signature,
-    ) -> Result<Option<CertifiedTransferOrder>, TosError> {
+    ) -> Result<Option<CertifiedTransaction>, TosError> {
         signature.check(&self.partial.value.transfer, validator)?;
         // Check that each validator only appears once.
         fp_ensure!(
-            !self.used_authorities.contains(&validator),
+            !self.used_validators.contains(&validator),
             TosError::CertificateValidatorReuse
         );
-        self.used_authorities.insert(validator);
+        self.used_validators.insert(validator);
         // Update weight.
         let voting_rights = self.validators.weight(&validator);
         fp_ensure!(voting_rights > 0, TosError::UnknownSigner);
@@ -234,7 +234,7 @@ impl<'a> SignatureAggregator<'a> {
     }
 }
 
-impl CertifiedTransferOrder {
+impl CertifiedTransaction {
     pub fn key(&self) -> (Address, Nonce) {
         let transfer = &self.value.transfer;
         transfer.key()
@@ -244,14 +244,14 @@ impl CertifiedTransferOrder {
     pub fn check(&self, validators: &Validators) -> Result<(), TosError> {
         // Check the quorum.
         let mut weight = 0;
-        let mut used_authorities = HashSet::new();
+        let mut used_validators = HashSet::new();
         for (validator, _) in self.signatures.iter() {
             // Check that each validator only appears once.
             fp_ensure!(
-                !used_authorities.contains(validator),
+                !used_validators.contains(validator),
                 TosError::CertificateValidatorReuse
             );
-            used_authorities.insert(*validator);
+            used_validators.insert(*validator);
             // Update weight.
             let voting_rights = validators.weight(validator);
             fp_ensure!(voting_rights > 0, TosError::UnknownSigner);
@@ -271,17 +271,17 @@ impl CertifiedTransferOrder {
 }
 
 impl RedeemTransaction {
-    pub fn new(transfer_certificate: CertifiedTransferOrder) -> Self {
+    pub fn new(ctx: CertifiedTransaction) -> Self {
         Self {
-            transfer_certificate,
+            ctx,
         }
     }
 }
 
-impl ConfirmationOrder {
-    pub fn new(transfer_certificate: CertifiedTransferOrder) -> Self {
+impl ConfirmationTx {
+    pub fn new(ctx: CertifiedTransaction) -> Self {
         Self {
-            transfer_certificate,
+            ctx,
         }
     }
 }

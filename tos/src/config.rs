@@ -6,7 +6,7 @@ use crate::transport::NetworkProtocol;
 use cores::{
     base_types::*,
     client::ClientState,
-    messages::CertifiedTransferOrder,
+    messages::CertifiedTransaction,
 };
 
 use serde::{Deserialize, Serialize};
@@ -25,8 +25,8 @@ pub struct ValidatorConfig {
     )]
     pub address: Address,
     pub host: String,
-    pub base_port: u32,
-    pub num_shards: u32,
+    pub port: u32,
+    pub shards: u32,
 }
 
 impl ValidatorConfig {
@@ -59,7 +59,7 @@ impl ValidatorServerConfig {
 }
 
 pub struct ValidatorsConfig {
-    pub authorities: Vec<ValidatorConfig>,
+    pub validators: Vec<ValidatorConfig>,
 }
 
 impl ValidatorsConfig {
@@ -68,14 +68,14 @@ impl ValidatorsConfig {
         let reader = BufReader::new(file);
         let stream = serde_json::Deserializer::from_reader(reader).into_iter();
         Ok(Self {
-            authorities: stream.filter_map(Result::ok).collect(),
+            validators: stream.filter_map(Result::ok).collect(),
         })
     }
 
     pub fn write(&self, path: &str) -> Result<(), std::io::Error> {
         let file = OpenOptions::new().create(true).write(true).open(path)?;
         let mut writer = BufWriter::new(file);
-        for config in &self.authorities {
+        for config in &self.validators {
             serde_json::to_writer(&mut writer, config)?;
             writer.write_all(b"\n")?;
         }
@@ -84,7 +84,7 @@ impl ValidatorsConfig {
 
     pub fn voting_rights(&self) -> BTreeMap<ValidatorName, usize> {
         let mut map = BTreeMap::new();
-        for validator in &self.authorities {
+        for validator in &self.validators {
             map.insert(validator.address, 1);
         }
         map
@@ -101,8 +101,8 @@ pub struct UserAccount {
     pub key: KeyPair,
     pub nonce: Nonce,
     pub balance: Balance,
-    pub sent_certificates: Vec<CertifiedTransferOrder>,
-    pub received_certificates: Vec<CertifiedTransferOrder>,
+    pub sent: Vec<CertifiedTransaction>,
+    pub received: Vec<CertifiedTransaction>,
 }
 
 impl UserAccount {
@@ -113,8 +113,8 @@ impl UserAccount {
             key,
             nonce: Nonce::new(),
             balance,
-            sent_certificates: Vec::new(),
-            received_certificates: Vec::new(),
+            sent: Vec::new(),
+            received: Vec::new(),
         }
     }
 }
@@ -148,21 +148,21 @@ impl AccountsConfig {
             .expect("Updated account should already exist");
         account.nonce = state.nonce();
         account.balance = state.balance();
-        account.sent_certificates = state.sent_certificates().clone();
-        account.received_certificates = state.received_certificates().cloned().collect();
+        account.sent = state.sent().clone();
+        account.received = state.received().cloned().collect();
         //self.write_account(&account);
     }
 
-    pub fn update_for_received_transfer(&mut self, certificate: CertifiedTransferOrder) {
+    pub fn update_for_received_transfer(&mut self, certificate: CertifiedTransaction) {
         let transfer = &certificate.value.transfer;
         let recipient = &transfer.recipient;
         if let Some(config) = self.accounts.get_mut(recipient) {
             if let Err(position) = config
-                .received_certificates
-                .binary_search_by_key(&certificate.key(), CertifiedTransferOrder::key)
+                .received
+                .binary_search_by_key(&certificate.key(), CertifiedTransaction::key)
             {
                 config.balance = config.balance.try_add(transfer.amount.into()).unwrap();
-                config.received_certificates.insert(position, certificate);
+                config.received.insert(position, certificate);
                 //self.write_account(&config);
             }
         }

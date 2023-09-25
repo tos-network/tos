@@ -46,22 +46,22 @@ pub enum TosError {
     )]
     InsufficientFunding { current_balance: Balance },
     #[fail(
-        display = "Cannot initiate transfer while a transfer order is still pending confirmation: {:?}",
+        display = "Cannot initiate transfer while a transfer tx is still pending confirmation: {:?}",
         pending_confirmation
     )]
-    PreviousTransferMustBeConfirmedFirst { pending_confirmation: TransferOrder },
-    #[fail(display = "Transfer order was processed but no signature was produced by validator")]
-    ErrorWhileProcessingTransferOrder,
+    PreviousTransferMustBeConfirmedFirst { pending_confirmation: Transaction },
+    #[fail(display = "Transfer tx was processed but no signature was produced by validator")]
+    ErrorWhileProcessingTransaction,
     #[fail(
         display = "An invalid answer was returned by the validator while requesting a certificate"
     )]
     ErrorWhileRequestingCertificate,
     #[fail(
-        display = "Cannot confirm a transfer while previous transfer orders are still pending confirmation: {:?}",
-        current_sequence_number
+        display = "Cannot confirm a transfer while previous transfer txs are still pending confirmation: {:?}",
+        current_nonce
     )]
     MissingEalierConfirmations {
-        current_sequence_number: VersionNumber,
+        current_nonce: VersionNumber,
     },
     // Synchronization validation
     #[fail(display = "Transaction index must increase by one")]
@@ -71,7 +71,7 @@ pub enum TosError {
     CertificateNotfound,
     #[fail(display = "Unknown sender's account")]
     UnknownSenderAccount,
-    #[fail(display = "Signatures in a certificate must be from different authorities.")]
+    #[fail(display = "Signatures in a certificate must be from different validators.")]
     CertificateValidatorReuse,
     #[fail(display = "Sequence numbers above the maximal value are not usable for transfers.")]
     InvalidNonce,

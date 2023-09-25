@@ -36,13 +36,13 @@ impl Validators {
         (self.total_votes + 2) / 3
     }
 
-    /// Find the highest value than is supported by a quorum of authorities.
+    /// Find the highest value than is supported by a quorum of validators.
     pub fn get_strong_majority_lower_bound<V>(&self, mut values: Vec<(ValidatorName, V)>) -> V
     where
         V: Default + std::cmp::Ord,
     {
         values.sort_by(|(_, x), (_, y)| V::cmp(y, x));
-        // Browse values by decreasing order, while tracking how many votes they have.
+        // Browse values by decreasing tx, while tracking how many votes they have.
         let mut score = 0;
         for (name, value) in values {
             score += self.weight(&name);

@@ -41,7 +41,7 @@ fn test_local_downloader() {
         assert_eq!(handle.query("b").await.unwrap(), 0);
         handle.stop().await.unwrap();
         let values: Vec<_> = task.await.unwrap().collect();
-        // Cached values are returned ordered by keys.
+        // Cached values are returned txed by keys.
         assert_eq!(values, vec![10, 0, 1, 11]);
     });
 }

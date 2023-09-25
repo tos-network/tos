@@ -26,13 +26,13 @@ fn make_validator_clients(
     recv_timeout: std::time::Duration,
 ) -> HashMap<ValidatorName, network::Client> {
     let mut validator_clients = HashMap::new();
-    for config in &validators_config.authorities {
+    for config in &validators_config.validators {
         let config = config.clone();
         let client = network::Client::new(
             config.network_protocol,
             config.host,
-            config.base_port,
-            config.num_shards,
+            config.port,
+            config.shards,
             buffer_size,
             send_timeout,
             recv_timeout,
@@ -50,17 +50,17 @@ fn make_validator_mass_clients(
     max_in_flight: u64,
 ) -> Vec<(u32, network::MassClient)> {
     let mut validator_clients = Vec::new();
-    for config in &validators_config.authorities {
+    for config in &validators_config.validators {
         let client = network::MassClient::new(
             config.network_protocol,
             config.host.clone(),
-            config.base_port,
+            config.port,
             buffer_size,
             send_timeout,
             recv_timeout,
-            max_in_flight / config.num_shards as u64, // Distribute window to diff shards
+            max_in_flight / config.shards as u64, // Distribute window to diff shards
         );
-        validator_clients.push((config.num_shards, client));
+        validator_clients.push((config.shards, client));
     }
     validator_clients
 }
@@ -83,46 +83,46 @@ fn make_client_state(
         validators,
         validator_clients,
         account.nonce,
-        account.sent_certificates.clone(),
-        account.received_certificates.clone(),
+        account.sent.clone(),
+        account.received.clone(),
         account.balance,
     )
 }
 
-/// Make one transfer order per account, up to `max_orders` transfers.
-fn make_benchmark_transfer_orders(
+/// Make one transfer tx per account, up to `max_txs` transfers.
+fn make_benchmark_transfer_txs(
     accounts_config: &mut AccountsConfig,
-    max_orders: usize,
-) -> (Vec<TransferOrder>, Vec<(Address, Bytes)>) {
-    let mut orders = Vec::new();
-    let mut serialized_orders = Vec::new();
-    // TODO: deterministic sequence of orders to recover from interrupted benchmarks.
+    max_txs: usize,
+) -> (Vec<Transaction>, Vec<(Address, Bytes)>) {
+    let mut txs = Vec::new();
+    let mut serialized_txs = Vec::new();
+    // TODO: deterministic sequence of txs to recover from interrupted benchmarks.
     let mut next_recipient = get_key_pair().0;
     for account in accounts_config.accounts_mut() {
         let transfer = Transfer {
             sender: account.address,
             recipient: next_recipient,
             amount: Amount::from(1),
-            sequence_number: account.nonce,
+            nonce: account.nonce,
             user_data: UserData::default(),
         };
-        debug!("Preparing transfer order: {:?}", transfer);
+        debug!("Preparing transfer tx: {:?}", transfer);
         account.nonce = account.nonce.increment().unwrap();
         next_recipient = account.address;
-        let order = TransferOrder::new(transfer.clone(), &account.key);
-        orders.push(order.clone());
-        let serialized_order = serialize_transfer_order(&order);
-        serialized_orders.push((account.address, serialized_order.into()));
-        if serialized_orders.len() >= max_orders {
+        let tx = Transaction::new(transfer.clone(), &account.key);
+        txs.push(tx.clone());
+        let serialized_tx = serialize_transfer_tx(&tx);
+        serialized_txs.push((account.address, serialized_tx.into()));
+        if serialized_txs.len() >= max_txs {
             break;
         }
     }
-    (orders, serialized_orders)
+    (txs, serialized_txs)
 }
 
-/// Try to make certificates from orders and server configs
-fn make_benchmark_certificates_from_orders_and_server_configs(
-    orders: Vec<TransferOrder>,
+/// Try to make certificates from txs and server configs
+fn make_benchmark_certificates_from_txs_and_server_configs(
+    txs: Vec<Transaction>,
     server_config: Vec<&str>,
 ) -> Vec<(Address, Bytes)> {
     let mut keys = Vec::new();
@@ -139,9 +139,9 @@ fn make_benchmark_certificates_from_orders_and_server_configs(
         "Not enough server configs were provided with --server-configs"
     );
     let mut serialized_certificates = Vec::new();
-    for order in orders {
-        let mut certificate = CertifiedTransferOrder {
-            value: order.clone(),
+    for tx in txs {
+        let mut certificate = CertifiedTransaction {
+            value: tx.clone(),
             signatures: Vec::new(),
         };
         for i in 0..validators.quorum_threshold() {
@@ -150,7 +150,7 @@ fn make_benchmark_certificates_from_orders_and_server_configs(
             certificate.signatures.push((*pubx, sig));
         }
         let serialized_certificate = serialize_cert(&certificate);
-        serialized_certificates.push((order.transfer.sender, serialized_certificate.into()));
+        serialized_certificates.push((tx.transfer.sender, serialized_certificate.into()));
     }
     serialized_certificates
 }
@@ -158,7 +158,7 @@ fn make_benchmark_certificates_from_orders_and_server_configs(
 /// Try to aggregate votes into certificates.
 fn make_benchmark_certificates_from_votes(
     validators_config: &ValidatorsConfig,
-    votes: Vec<SignedTransferOrder>,
+    votes: Vec<SignedTransaction>,
 ) -> Vec<(Address, Bytes)> {
     let validators = Validators::new(validators_config.voting_rights());
     let mut aggregators = HashMap::new();
@@ -198,17 +198,17 @@ fn make_benchmark_certificates_from_votes(
 }
 
 /// Broadcast a bulk of requests to each validator.
-async fn mass_broadcast_orders(
+async fn mass_broadcast_txs(
     phase: &'static str,
     validators_config: &ValidatorsConfig,
     buffer_size: usize,
     send_timeout: std::time::Duration,
     recv_timeout: std::time::Duration,
     max_in_flight: u64,
-    orders: Vec<(Address, Bytes)>,
+    txs: Vec<(Address, Bytes)>,
 ) -> Vec<Bytes> {
     let time_start = Instant::now();
-    info!("Broadcasting {} {} orders", orders.len(), phase);
+    info!("Broadcasting {} {} txs", txs.len(), phase);
     let validator_clients = make_validator_mass_clients(
         validators_config,
         buffer_size,
@@ -217,11 +217,11 @@ async fn mass_broadcast_orders(
         max_in_flight,
     );
     let mut streams = Vec::new();
-    for (num_shards, client) in validator_clients {
-        // Re-index orders by shard for this particular validator client.
+    for (shards, client) in validator_clients {
+        // Re-index txs by shard for this particular validator client.
         let mut sharded_requests = HashMap::new();
-        for (address, buf) in &orders {
-            let shard = ValidatorState::get_shard(num_shards, address);
+        for (address, buf) in &txs {
+            let shard = ValidatorState::get_shard(shards, address);
             sharded_requests
                 .entry(shard)
                 .or_insert_with(Vec::new)
@@ -237,8 +237,8 @@ async fn mass_broadcast_orders(
         time_elapsed.as_millis()
     );
     warn!(
-        "Estimated server throughput: {} {} orders per sec",
-        (orders.len() as u128) * 1_000_000 / time_elapsed.as_micros(),
+        "Estimated server throughput: {} {} txs per sec",
+        (txs.len() as u128) * 1_000_000 / time_elapsed.as_micros(),
         phase
     );
     responses
@@ -286,7 +286,7 @@ struct ClientOpt {
     #[structopt(long)]
     accounts: String,
 
-    /// Sets the file describing the public configurations of all authorities
+    /// Sets the file describing the public configurations of all validators
     #[structopt(long)]
     validators: String,
 
@@ -340,7 +340,7 @@ enum ClientCommands {
 
         /// Use a subset of the accounts to generate N transfers
         #[structopt(long)]
-        max_orders: Option<usize>,
+        max_txs: Option<usize>,
 
         /// Use server configuration files to generate certificates (instead of aggregating received votes).
         #[structopt(long)]
@@ -450,24 +450,24 @@ fn main() {
 
         ClientCommands::Benchmark {
             max_in_flight,
-            max_orders,
+            max_txs,
             server_configs,
         } => {
-            let max_orders = max_orders.unwrap_or_else(|| accounts_config.num_accounts());
+            let max_txs = max_txs.unwrap_or_else(|| accounts_config.num_accounts());
 
             let mut rt = Runtime::new().unwrap();
             rt.block_on(async move {
-                warn!("Starting benchmark phase 1 (transfer orders)");
-                let (orders, serialize_orders) =
-                    make_benchmark_transfer_orders(&mut accounts_config, max_orders);
-                let responses = mass_broadcast_orders(
+                warn!("Starting benchmark phase 1 (transfer txs)");
+                let (txs, serialize_txs) =
+                    make_benchmark_transfer_txs(&mut accounts_config, max_txs);
+                let responses = mass_broadcast_txs(
                     "transfer",
                     &validators_config,
                     buffer_size,
                     send_timeout,
                     recv_timeout,
                     max_in_flight,
-                    serialize_orders,
+                    serialize_txs,
                 )
                 .await;
                 let votes: Vec<_> = responses
@@ -478,16 +478,16 @@ fn main() {
                     .collect();
                 warn!("Received {} valid votes.", votes.len());
 
-                warn!("Starting benchmark phase 2 (confirmation orders)");
+                warn!("Starting benchmark phase 2 (confirmation txs)");
                 let certificates = if let Some(files) = server_configs {
                     warn!("Using server configs provided by --server-configs");
                     let files = files.iter().map(AsRef::as_ref).collect();
-                    make_benchmark_certificates_from_orders_and_server_configs(orders, files)
+                    make_benchmark_certificates_from_txs_and_server_configs(txs, files)
                 } else {
                     warn!("Using validators config");
                     make_benchmark_certificates_from_votes(&validators_config, votes)
                 };
-                let responses = mass_broadcast_orders(
+                let responses = mass_broadcast_txs(
                     "confirmation",
                     &validators_config,
                     buffer_size,

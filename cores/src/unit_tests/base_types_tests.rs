@@ -33,7 +33,7 @@ fn test_signatures() {
 }
 
 #[test]
-fn test_max_sequence_number() {
+fn test_max_nonce() {
     let max = Nonce::max();
     assert_eq!(max.0 * 2 + 1, std::u64::MAX);
 }

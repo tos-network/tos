@@ -39,7 +39,7 @@ struct ClientServerBenchmark {
     validators_size: usize,
     /// Number of shards per Tos validator
     #[structopt(long, default_value = "15")]
-    num_shards: u32,
+    shards: u32,
     /// Maximum number of requests in flight (0 for blocking client)
     #[structopt(long, default_value = "400")]
     max_in_flight: usize,
@@ -64,7 +64,7 @@ fn main() {
     env_logger::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let benchmark = ClientServerBenchmark::from_args();
 
-    let (states, orders) = benchmark.make_structures();
+    let (states, txs) = benchmark.make_structures();
 
     // Start the servers on the thread pool
     for state in states {
@@ -93,7 +93,7 @@ fn main() {
         .thread_stack_size(15 * 1024 * 1024)
         .build()
         .unwrap();
-    runtime.block_on(benchmark.launch_client(orders));
+    runtime.block_on(benchmark.launch_client(txs));
 }
 
 impl ClientServerBenchmark {
@@ -111,13 +111,13 @@ impl ClientServerBenchmark {
         // Pick an validator and create one state per shard.
         let (public_auth0, secret_auth0) = keys.pop().unwrap();
         let mut states = Vec::new();
-        for i in 0..self.num_shards {
+        for i in 0..self.shards {
             let state = ValidatorState::new_shard(
                 validators.clone(),
                 public_auth0,
                 secret_auth0.copy(),
                 i as u32,
-                self.num_shards,
+                self.shards,
             );
             states.push(state);
         }
@@ -126,7 +126,7 @@ impl ClientServerBenchmark {
         let mut account_keys = Vec::new();
         for _ in 0..self.num_accounts {
             let keypair = get_key_pair();
-            let i = ValidatorState::get_shard(self.num_shards, &keypair.0) as usize;
+            let i = ValidatorState::get_shard(self.shards, &keypair.0) as usize;
             assert!(states[i].in_shard(&keypair.0));
             let client = AccountOffchainState {
                 balance: Balance::from(Amount::from(100)),
@@ -141,28 +141,28 @@ impl ClientServerBenchmark {
         }
 
         info!("Preparing transactions.");
-        // Make one transaction per account (transfer order + confirmation).
-        let mut orders: Vec<(u32, Bytes)> = Vec::new();
+        // Make one transaction per account (transfer tx + confirmation).
+        let mut txs: Vec<(u32, Bytes)> = Vec::new();
         let mut next_recipient = get_key_pair().0;
         for (pubx, secx) in account_keys.iter() {
             let transfer = Transfer {
                 sender: *pubx,
                 recipient: next_recipient,
                 amount: Amount::from(50),
-                sequence_number: Nonce::from(0),
+                nonce: Nonce::from(0),
                 user_data: UserData::default(),
             };
             next_recipient = *pubx;
-            let order = TransferOrder::new(transfer.clone(), secx);
-            let shard = ValidatorState::get_shard(self.num_shards, pubx);
+            let tx = Transaction::new(transfer.clone(), secx);
+            let shard = ValidatorState::get_shard(self.shards, pubx);
 
-            // Serialize order
-            let bufx = serialize_transfer_order(&order);
+            // Serialize tx
+            let bufx = serialize_transfer_tx(&tx);
             assert!(!bufx.is_empty());
 
             // Make certificate
-            let mut certificate = CertifiedTransferOrder {
-                value: order,
+            let mut certificate = CertifiedTransaction {
+                value: tx,
                 signatures: Vec::new(),
             };
             for i in 0..validators.quorum_threshold() {
@@ -174,11 +174,11 @@ impl ClientServerBenchmark {
             let bufx2 = serialize_cert(&certificate);
             assert!(!bufx2.is_empty());
 
-            orders.push((shard, bufx2.into()));
-            orders.push((shard, bufx.into()));
+            txs.push((shard, bufx2.into()));
+            txs.push((shard, bufx.into()));
         }
 
-        (states, orders)
+        (states, txs)
     }
 
     async fn spawn_server(&self, state: ValidatorState) -> transport::SpawnedServer {
@@ -193,13 +193,13 @@ impl ClientServerBenchmark {
         server.spawn().await.unwrap()
     }
 
-    async fn launch_client(&self, mut orders: Vec<(u32, Bytes)>) {
+    async fn launch_client(&self, mut txs: Vec<(u32, Bytes)>) {
         time::delay_for(Duration::from_millis(1000)).await;
 
-        let items_number = orders.len() / 2;
+        let items_number = txs.len() / 2;
         let time_start = Instant::now();
 
-        let max_in_flight = (self.max_in_flight / self.num_shards as usize) as usize;
+        let max_in_flight = (self.max_in_flight / self.shards as usize) as usize;
         info!("Set max_in_flight per shard to {}", max_in_flight);
 
         info!("Sending requests.");
@@ -214,7 +214,7 @@ impl ClientServerBenchmark {
                 max_in_flight as u64,
             );
             let mut sharded_requests = HashMap::new();
-            for (shard, buf) in orders.iter().rev() {
+            for (shard, buf) in txs.iter().rev() {
                 sharded_requests
                     .entry(*shard)
                     .or_insert_with(Vec::new)
@@ -228,24 +228,24 @@ impl ClientServerBenchmark {
                 self.protocol,
                 self.host.clone(),
                 self.port,
-                self.num_shards,
+                self.shards,
                 self.buffer_size,
                 Duration::from_micros(self.send_timeout_us),
                 Duration::from_micros(self.recv_timeout_us),
             );
 
-            while !orders.is_empty() {
-                if orders.len() % 1000 == 0 {
-                    info!("Process message {}...", orders.len());
+            while !txs.is_empty() {
+                if txs.len() % 1000 == 0 {
+                    info!("Process message {}...", txs.len());
                 }
-                let (shard, order) = orders.pop().unwrap();
-                let status = client.send_recv_bytes(shard, order.to_vec()).await;
+                let (shard, tx) = txs.pop().unwrap();
+                let status = client.send_recv_bytes(shard, tx.to_vec()).await;
                 match status {
                     Ok(info) => {
                         debug!("Query response: {:?}", info);
                     }
                     Err(error) => {
-                        error!("Failed to execute order: {}", error);
+                        error!("Failed to execute tx: {}", error);
                     }
                 }
             }

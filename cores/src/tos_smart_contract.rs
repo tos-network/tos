@@ -70,9 +70,9 @@ impl TosSmartContract for TosSmartContractState {
         &mut self,
         transaction: RedeemTransaction,
     ) -> Result<(), failure::Error> {
-        transaction.transfer_certificate.check(&self.validators)?;
-        let order = transaction.transfer_certificate.value;
-        let transfer = &order.transfer;
+        transaction.ctx.check(&self.validators)?;
+        let tx = transaction.ctx.value;
+        let transfer = &tx.transfer;
         ensure!(
             self.total_balance >= transfer.amount,
             "The balance on the blockchain cannot be negative",
@@ -82,12 +82,12 @@ impl TosSmartContract for TosSmartContractState {
             .entry(transfer.sender)
             .or_insert_with(AccountOnchainState::new);
         ensure!(
-            account.last_redeemed < Some(transfer.sequence_number),
+            account.last_redeemed < Some(transfer.nonce),
             "Transfer certificates to Primary must have increasing sequence numbers.",
         );
-        account.last_redeemed = Some(transfer.sequence_number);
+        account.last_redeemed = Some(transfer.nonce);
         self.total_balance = self.total_balance.try_sub(transfer.amount)?;
-        // Transfer Primary coins to order.recipient
+        // Transfer Primary coins to tx.recipient
 
         Ok(())
     }

@@ -30,19 +30,19 @@ fn make_shard_server(
         .expect("Fail to read initial account config");
 
     let validators = Validators::new(validators_config.voting_rights());
-    let num_shards = server_config.validator.num_shards;
+    let shards = server_config.validator.shards;
 
     let mut state = ValidatorState::new_shard(
         validators,
         server_config.validator.address,
         server_config.key.copy(),
         shard,
-        num_shards,
+        shards,
     );
 
     // Load initial states
     for (address, balance) in &initial_accounts_config.accounts {
-        if ValidatorState::get_shard(num_shards, address) != shard {
+        if ValidatorState::get_shard(shards, address) != shard {
             continue;
         }
         let client = AccountOffchainState {
@@ -59,7 +59,7 @@ fn make_shard_server(
     network::Server::new(
         server_config.validator.network_protocol,
         local_ip_addr.to_string(),
-        server_config.validator.base_port,
+        server_config.validator.port,
         state,
         buffer_size,
         cross_shard_queue_size,
@@ -76,10 +76,10 @@ fn make_servers(
 ) -> Vec<network::Server> {
     let server_config =
         ValidatorServerConfig::read(server_config_path).expect("Fail to read server config");
-    let num_shards = server_config.validator.num_shards;
+    let shards = server_config.validator.shards;
 
     let mut servers = Vec::new();
-    for shard in 0..num_shards {
+    for shard in 0..shards {
         servers.push(make_shard_server(
             local_ip_addr,
             server_config_path,
@@ -121,7 +121,7 @@ enum ServerCommands {
         #[structopt(long, default_value = "1000")]
         cross_shard_queue_size: usize,
 
-        /// Path to the file containing the public description of all authorities in this Tos validators
+        /// Path to the file containing the public description of all validators in this Tos validators
         #[structopt(long)]
         validators: String,
 
@@ -227,8 +227,8 @@ fn main() {
                 network_protocol: protocol,
                 address,
                 host,
-                base_port: port,
-                num_shards: shards,
+                port: port,
+                shards: shards,
             };
             let server = ValidatorServerConfig { validator, key };
             server

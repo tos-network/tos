@@ -14,7 +14,7 @@ use tokio::time;
 pub struct Server {
     network_protocol: NetworkProtocol,
     base_address: String,
-    base_port: u32,
+    port: u32,
     state: ValidatorState,
     buffer_size: usize,
     cross_shard_queue_size: usize,
@@ -27,7 +27,7 @@ impl Server {
     pub fn new(
         network_protocol: NetworkProtocol,
         base_address: String,
-        base_port: u32,
+        port: u32,
         state: ValidatorState,
         buffer_size: usize,
         cross_shard_queue_size: usize,
@@ -35,7 +35,7 @@ impl Server {
         Self {
             network_protocol,
             base_address,
-            base_port,
+            port,
             state,
             buffer_size,
             cross_shard_queue_size,
@@ -55,7 +55,7 @@ impl Server {
     async fn forward_cross_shard_queries(
         network_protocol: NetworkProtocol,
         base_address: String,
-        base_port: u32,
+        port: u32,
         this_shard: ShardId,
         mut receiver: mpsc::Receiver<(Vec<u8>, ShardId)>,
     ) {
@@ -67,7 +67,7 @@ impl Server {
         let mut queries_sent = 0u64;
         while let Some((buf, shard)) = receiver.next().await {
             // Send cross-shard query.
-            let remote_address = format!("{}:{}", base_address, base_port + shard);
+            let remote_address = format!("{}:{}", base_address, port + shard);
             let status = pool.send_data_to(&buf, &remote_address).await;
             if let Err(error) = status {
                 error!("Failed to send cross-shard query: {}", error);
@@ -78,7 +78,7 @@ impl Server {
                     info!(
                         "{}:{} (shard {}) has sent {} cross-shard queries",
                         base_address,
-                        base_port + this_shard,
+                        port + this_shard,
                         this_shard,
                         queries_sent
                     );
@@ -92,19 +92,19 @@ impl Server {
             "Listening to {} traffic on {}:{}",
             self.network_protocol,
             self.base_address,
-            self.base_port + self.state.shard_id
+            self.port + self.state.shard_id
         );
         let address = format!(
             "{}:{}",
             self.base_address,
-            self.base_port + self.state.shard_id
+            self.port + self.state.shard_id
         );
 
         let (cross_shard_sender, cross_shard_receiver) = mpsc::channel(self.cross_shard_queue_size);
         tokio::spawn(Self::forward_cross_shard_queries(
             self.network_protocol,
             self.base_address.clone(),
-            self.base_port,
+            self.port,
             self.state.shard_id,
             cross_shard_receiver,
         ));
@@ -136,19 +136,19 @@ impl MessageHandler for RunningServerState {
                 Err(_) => Err(TosError::InvalidDecoding),
                 Ok(result) => {
                     match result {
-                        SerializedMessage::Order(message) => self
+                        SerializedMessage::Tx(message) => self
                             .server
                             .state
-                            .handle_transfer_order(*message)
+                            .handle_transfer_tx(*message)
                             .map(|info| Some(serialize_info_response(&info))),
                         SerializedMessage::Cert(message) => {
-                            let confirmation_order = ConfirmationOrder {
-                                transfer_certificate: message.as_ref().clone(),
+                            let confirmation_tx = ConfirmationTx {
+                                ctx: message.as_ref().clone(),
                             };
                             match self
                                 .server
                                 .state
-                                .handle_confirmation_order(confirmation_order)
+                                .handle_confirmation_tx(confirmation_tx)
                             {
                                 Ok((info, send_shard)) => {
                                     // Send a message to other shard
@@ -199,7 +199,7 @@ impl MessageHandler for RunningServerState {
                 info!(
                     "{}:{} (shard {}) has processed {} packets",
                     self.server.base_address,
-                    self.server.base_port + self.server.state.shard_id,
+                    self.server.port + self.server.state.shard_id,
                     self.server.state.shard_id,
                     self.server.packets_processed
                 );
@@ -221,8 +221,8 @@ impl MessageHandler for RunningServerState {
 pub struct Client {
     network_protocol: NetworkProtocol,
     base_address: String,
-    base_port: u32,
-    num_shards: u32,
+    port: u32,
+    shards: u32,
     buffer_size: usize,
     send_timeout: std::time::Duration,
     recv_timeout: std::time::Duration,
@@ -232,8 +232,8 @@ impl Client {
     pub fn new(
         network_protocol: NetworkProtocol,
         base_address: String,
-        base_port: u32,
-        num_shards: u32,
+        port: u32,
+        shards: u32,
         buffer_size: usize,
         send_timeout: std::time::Duration,
         recv_timeout: std::time::Duration,
@@ -241,8 +241,8 @@ impl Client {
         Self {
             network_protocol,
             base_address,
-            base_port,
-            num_shards,
+            port,
+            shards,
             buffer_size,
             send_timeout,
             recv_timeout,
@@ -254,7 +254,7 @@ impl Client {
         shard: ShardId,
         buf: Vec<u8>,
     ) -> Result<Vec<u8>, io::Error> {
-        let address = format!("{}:{}", self.base_address, self.base_port + shard);
+        let address = format!("{}:{}", self.base_address, self.port + shard);
         let mut stream = self
             .network_protocol
             .connect(address, self.buffer_size)
@@ -289,28 +289,28 @@ impl Client {
 
 impl ValidatorClient for Client {
     /// Initiate a new transfer to a Tos or Primary account.
-    fn handle_transfer_order(
+    fn handle_transfer_tx(
         &mut self,
-        order: TransferOrder,
+        tx: Transaction,
     ) -> AsyncResult<AccountInfoResponse, TosError> {
         Box::pin(async move {
-            let shard = ValidatorState::get_shard(self.num_shards, &order.transfer.sender);
-            self.send_recv_bytes(shard, serialize_transfer_order(&order))
+            let shard = ValidatorState::get_shard(self.shards, &tx.transfer.sender);
+            self.send_recv_bytes(shard, serialize_transfer_tx(&tx))
                 .await
         })
     }
 
     /// Confirm a transfer to a Tos or Primary account.
-    fn handle_confirmation_order(
+    fn handle_confirmation_tx(
         &mut self,
-        order: ConfirmationOrder,
+        tx: ConfirmationTx,
     ) -> AsyncResult<AccountInfoResponse, TosError> {
         Box::pin(async move {
             let shard = ValidatorState::get_shard(
-                self.num_shards,
-                &order.transfer_certificate.value.transfer.sender,
+                self.shards,
+                &tx.ctx.value.transfer.sender,
             );
-            self.send_recv_bytes(shard, serialize_cert(&order.transfer_certificate))
+            self.send_recv_bytes(shard, serialize_cert(&tx.ctx))
                 .await
         })
     }
@@ -321,7 +321,7 @@ impl ValidatorClient for Client {
         request: AccountInfoRequest,
     ) -> AsyncResult<AccountInfoResponse, TosError> {
         Box::pin(async move {
-            let shard = ValidatorState::get_shard(self.num_shards, &request.sender);
+            let shard = ValidatorState::get_shard(self.shards, &request.sender);
             self.send_recv_bytes(shard, serialize_info_request(&request))
                 .await
         })
@@ -332,7 +332,7 @@ impl ValidatorClient for Client {
 pub struct MassClient {
     network_protocol: NetworkProtocol,
     base_address: String,
-    base_port: u32,
+    port: u32,
     buffer_size: usize,
     send_timeout: std::time::Duration,
     recv_timeout: std::time::Duration,
@@ -343,7 +343,7 @@ impl MassClient {
     pub fn new(
         network_protocol: NetworkProtocol,
         base_address: String,
-        base_port: u32,
+        port: u32,
         buffer_size: usize,
         send_timeout: std::time::Duration,
         recv_timeout: std::time::Duration,
@@ -352,7 +352,7 @@ impl MassClient {
         Self {
             network_protocol,
             base_address,
-            base_port,
+            port,
             buffer_size,
             send_timeout,
             recv_timeout,
@@ -361,7 +361,7 @@ impl MassClient {
     }
 
     async fn run_shard(&self, shard: u32, requests: Vec<Bytes>) -> Result<Vec<Bytes>, io::Error> {
-        let address = format!("{}:{}", self.base_address, self.base_port + shard);
+        let address = format!("{}:{}", self.base_address, self.port + shard);
         let mut stream = self
             .network_protocol
             .connect(address, self.buffer_size)
@@ -428,7 +428,7 @@ impl MassClient {
                         "Sending {} requests to {}:{} (shard {})",
                         client.network_protocol,
                         client.base_address,
-                        client.base_port + shard,
+                        client.port + shard,
                         shard
                     );
                     let responses = client
@@ -439,7 +439,7 @@ impl MassClient {
                         "Done sending {} requests to {}:{} (shard {})",
                         client.network_protocol,
                         client.base_address,
-                        client.base_port + shard,
+                        client.port + shard,
                         shard
                     );
                     responses

@@ -60,22 +60,22 @@ fn test_handle_redeem_transaction_ok() {
         .handle_redeem_transaction(redeem_transaction.clone())
         .is_ok());
     let sender = redeem_transaction
-        .transfer_certificate
+        .ctx
         .value
         .transfer
         .sender;
     let amount = redeem_transaction
-        .transfer_certificate
+        .ctx
         .value
         .transfer
         .amount;
     let account = contract_state.accounts.get(&sender).unwrap();
-    let sequence_number = redeem_transaction
-        .transfer_certificate
+    let nonce = redeem_transaction
+        .ctx
         .value
         .transfer
-        .sequence_number;
-    assert_eq!(account.last_redeemed, Some(sequence_number));
+        .nonce;
+    assert_eq!(account.last_redeemed, Some(nonce));
     old_total_balance = old_total_balance.try_sub(amount).unwrap();
     assert_eq!(contract_state.total_balance, old_total_balance);
 }
@@ -93,11 +93,11 @@ fn test_handle_redeem_transaction_negative_balance() {
     let old_balance = contract_state.total_balance;
 
     redeem_transaction
-        .transfer_certificate
+        .ctx
         .value
         .transfer
         .amount = redeem_transaction
-        .transfer_certificate
+        .ctx
         .value
         .transfer
         .amount
@@ -134,12 +134,12 @@ fn test_handle_redeem_transaction_double_spend() {
 #[cfg(test)]
 fn init_contract() -> (TosSmartContractState, ValidatorName, KeyPair) {
     let (validator_address, validator_key) = get_key_pair();
-    let mut authorities = BTreeMap::new();
-    authorities.insert(
+    let mut validators = BTreeMap::new();
+    validators.insert(
         /* address */ validator_address,
         /* voting right */ 1,
     );
-    let validators = Validators::new(authorities);
+    let validators = Validators::new(validators);
     (
         TosSmartContractState::new(validators),
         validator_address,
@@ -165,17 +165,17 @@ fn init_redeem_transaction(
         sender: sender_address,
         recipient: dbg_addr(2),
         amount: Amount::from(3),
-        sequence_number: Nonce::new(),
+        nonce: Nonce::new(),
         user_data: UserData::default(),
     };
-    let order = TransferOrder::new(primary_transfer, &sender_key);
-    let vote = SignedTransferOrder::new(order.clone(), name, &secret);
-    let mut builder = SignatureAggregator::try_new(order, &validators).unwrap();
+    let tx = Transaction::new(primary_transfer, &sender_key);
+    let vote = SignedTransaction::new(tx.clone(), name, &secret);
+    let mut builder = SignatureAggregator::try_new(tx, &validators).unwrap();
     let certificate = builder
         .append(vote.validator, vote.signature)
         .unwrap()
         .unwrap();
     RedeemTransaction {
-        transfer_certificate: certificate,
+        ctx: certificate,
     }
 }

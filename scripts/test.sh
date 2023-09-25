@@ -26,7 +26,7 @@ for file in "${account_files[@]}"; do
   fi
 done
 
-# Create configuration files for 4 authorities with 4 shards each.
+# Create configuration files for 4 validators with 4 shards each.
 # * Private server states are stored in `server*.json`.
 # * `validators.json` is the public description of the TOS validators.
 for I in 1 2 3 4
