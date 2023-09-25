@@ -1,8 +1,6 @@
 /target
-/scrpts/aggregated_parsed_logs
 
 .DS_Store
-/scrpts/aggregated_tps_log.txt
 
 # Thumbnails
 ._*

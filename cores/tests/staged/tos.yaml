@@ -25,16 +25,6 @@ AccountInfoResponse:
     - requested_received_transfers:
         SEQ:
           TYPENAME: CertifiedTransferOrder
-Address:
-  ENUM:
-    0:
-      Primary:
-        NEWTYPE:
-          TYPENAME: PublicKey
-    1:
-      Tos:
-        NEWTYPE:
-          TYPENAME: PublicKey
 Amount:
   NEWTYPESTRUCT: U64
 Balance:
@@ -48,13 +38,13 @@ CertifiedTransferOrder:
           TUPLE:
             - TYPENAME: PublicKey
             - TYPENAME: Signature
+Nonce:
+  NEWTYPESTRUCT: U64
 PublicKey:
   NEWTYPESTRUCT:
     TUPLEARRAY:
       CONTENT: U8
       SIZE: 32
-Nonce:
-  NEWTYPESTRUCT: U64
 SerializedMessage:
   ENUM:
     0:
@@ -170,7 +160,7 @@ Transfer:
     - sender:
         TYPENAME: PublicKey
     - recipient:
-        TYPENAME: Address
+        TYPENAME: PublicKey
     - amount:
         TYPENAME: Amount
     - sequence_number:
