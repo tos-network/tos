@@ -27,7 +27,7 @@ use std::thread;
 struct ClientServerBenchmark {
     /// Choose a network protocol between Udp and Tcp
     #[structopt(long, default_value = "udp")]
-    protocol: transport::NetworkProtocol,
+    protocol: transport::Protocol,
     /// Hostname
     #[structopt(long, default_value = "127.0.0.1")]
     host: String,

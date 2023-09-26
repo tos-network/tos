@@ -29,7 +29,7 @@ fn make_validator_clients(
     for config in &validators_config.validators {
         let config = config.clone();
         let client = network::Client::new(
-            config.network_protocol,
+            config.protocol,
             config.host,
             config.port,
             config.shards,
@@ -52,7 +52,7 @@ fn make_validator_mass_clients(
     let mut validator_clients = Vec::new();
     for config in &validators_config.validators {
         let client = network::MassClient::new(
-            config.network_protocol,
+            config.protocol,
             config.host.clone(),
             config.port,
             buffer_size,

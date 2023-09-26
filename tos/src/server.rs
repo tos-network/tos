@@ -57,7 +57,7 @@ fn make_shard_server(
     }
 
     network::Server::new(
-        server_config.validator.network_protocol,
+        server_config.validator.protocol,
         local_ip_addr.to_string(),
         server_config.validator.port,
         state,
@@ -137,9 +137,9 @@ enum ServerCommands {
     /// Generate a new server configuration and output its public description
     #[structopt(name = "generate")]
     Generate {
-        /// Chooses a network protocol between Udp and Tcp
+        /// Chooses a network protocol between udp and tcp
         #[structopt(long, default_value = "Udp")]
-        protocol: transport::NetworkProtocol,
+        protocol: transport::Protocol,
 
         /// Sets the public name of the host
         #[structopt(long)]
@@ -224,7 +224,7 @@ fn main() {
         } => {
             let (address, key) = get_key_pair();
             let validator = ValidatorConfig {
-                network_protocol: protocol,
+                protocol: protocol,
                 address,
                 host,
                 port: port,

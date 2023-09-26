@@ -2,7 +2,7 @@
 // Copyright (c) Tos  Network.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::transport::NetworkProtocol;
+use crate::transport::Protocol;
 use cores::{
     base_types::*,
     client::ClientState,
@@ -18,7 +18,7 @@ use std::{
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidatorConfig {
-    pub network_protocol: NetworkProtocol,
+    pub protocol: Protocol,
     #[serde(
         serialize_with = "address_as_base58",
         deserialize_with = "address_from_base58"

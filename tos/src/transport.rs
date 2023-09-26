@@ -22,7 +22,7 @@ pub const DEFAULT_MAX_DATAGRAM_SIZE: &str = "65507";
 // Supported transport protocols.
 arg_enum! {
     #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-    pub enum NetworkProtocol {
+    pub enum Protocol {
         Udp,
         Tcp,
     }
@@ -72,7 +72,7 @@ impl SpawnedServer {
     }
 }
 
-impl NetworkProtocol {
+impl Protocol {
     /// Create a DataStream for this protocol.
     pub async fn connect(
         self,
@@ -80,8 +80,8 @@ impl NetworkProtocol {
         max_data_size: usize,
     ) -> Result<Box<dyn DataStream>, std::io::Error> {
         let stream: Box<dyn DataStream> = match self {
-            NetworkProtocol::Udp => Box::new(UdpDataStream::connect(address, max_data_size).await?),
-            NetworkProtocol::Tcp => Box::new(TcpDataStream::connect(address, max_data_size).await?),
+            Protocol::Udp => Box::new(UdpDataStream::connect(address, max_data_size).await?),
+            Protocol::Tcp => Box::new(TcpDataStream::connect(address, max_data_size).await?),
         };
         Ok(stream)
     }
@@ -186,7 +186,7 @@ impl DataStreamPool for UdpDataStreamPool {
 }
 
 // Server implementation for UDP.
-impl NetworkProtocol {
+impl Protocol {
     async fn run_udp_server<S>(
         mut socket: UdpSocket,
         mut state: S,
@@ -322,7 +322,7 @@ impl DataStreamPool for TcpDataStreamPool {
 }
 
 // Server implementation for TCP.
-impl NetworkProtocol {
+impl Protocol {
     async fn run_tcp_server<S>(
         mut listener: TcpListener,
         state: S,

@@ -7,6 +7,13 @@ RELEASE_DIR="$BASE_DIR/target/release"
 echo "Base directory: $BASE_DIR"
 echo "Release directory: $RELEASE_DIR"
 
+# Check if directory does not exist
+if [ ! -d $RELEASE_DIR ] 
+then
+    echo "Directory $RELEASE_DIR DOES NOT exists." 
+    exit 1
+fi
+
 cd $RELEASE_DIR
 
 # Re-Run
@@ -76,5 +83,7 @@ grep "$ACCOUNT1" accounts.json
 
 # Kill servers
 kill %1 %2 %3 %4 %5 %6 %7 %8 %9 %10 %11 %12 %13 %14 %15 %16
+
+sleep 2
 
 cd $BASE_DIR
