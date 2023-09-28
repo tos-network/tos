@@ -13,7 +13,7 @@ use tokio::time;
 
 pub struct Server {
     protocol: Protocol,
-    base_address: String,
+    address: String,
     port: u32,
     state: ValidatorState,
     buffer_size: usize,
@@ -26,7 +26,7 @@ pub struct Server {
 impl Server {
     pub fn new(
         protocol: Protocol,
-        base_address: String,
+        address: String,
         port: u32,
         state: ValidatorState,
         buffer_size: usize,
@@ -34,7 +34,7 @@ impl Server {
     ) -> Self {
         Self {
             protocol,
-            base_address,
+            address,
             port,
             state,
             buffer_size,
@@ -54,7 +54,7 @@ impl Server {
 
     async fn forward_cross_shard_queries(
         protocol: Protocol,
-        base_address: String,
+        address: String,
         port: u32,
         this_shard: ShardId,
         mut receiver: mpsc::Receiver<(Vec<u8>, ShardId)>,
@@ -67,7 +67,7 @@ impl Server {
         let mut queries_sent = 0u64;
         while let Some((buf, shard)) = receiver.next().await {
             // Send cross-shard query.
-            let remote_address = format!("{}:{}", base_address, port + shard);
+            let remote_address = format!("{}:{}", address, port + shard);
             let status = pool.send_data_to(&buf, &remote_address).await;
             if let Err(error) = status {
                 error!("Failed to send cross-shard query: {}", error);
@@ -77,7 +77,7 @@ impl Server {
                 if queries_sent % 2000 == 0 {
                     info!(
                         "{}:{} (shard {}) has sent {} cross-shard queries",
-                        base_address,
+                        address,
                         port + this_shard,
                         this_shard,
                         queries_sent
@@ -91,19 +91,19 @@ impl Server {
         info!(
             "Listening to {} traffic on {}:{}",
             self.protocol,
-            self.base_address,
+            self.address,
             self.port + self.state.shard_id
         );
         let address = format!(
             "{}:{}",
-            self.base_address,
+            self.address,
             self.port + self.state.shard_id
         );
 
         let (cross_shard_sender, cross_shard_receiver) = mpsc::channel(self.cross_shard_queue_size);
         tokio::spawn(Self::forward_cross_shard_queries(
             self.protocol,
-            self.base_address.clone(),
+            self.address.clone(),
             self.port,
             self.state.shard_id,
             cross_shard_receiver,
@@ -198,7 +198,7 @@ impl MessageHandler for RunningServerState {
             if self.server.packets_processed % 5000 == 0 {
                 info!(
                     "{}:{} (shard {}) has processed {} packets",
-                    self.server.base_address,
+                    self.server.address,
                     self.server.port + self.server.state.shard_id,
                     self.server.state.shard_id,
                     self.server.packets_processed
@@ -220,7 +220,7 @@ impl MessageHandler for RunningServerState {
 #[derive(Clone)]
 pub struct Client {
     protocol: Protocol,
-    base_address: String,
+    address: String,
     port: u32,
     shards: u32,
     buffer_size: usize,
@@ -231,7 +231,7 @@ pub struct Client {
 impl Client {
     pub fn new(
         protocol: Protocol,
-        base_address: String,
+        address: String,
         port: u32,
         shards: u32,
         buffer_size: usize,
@@ -240,7 +240,7 @@ impl Client {
     ) -> Self {
         Self {
             protocol,
-            base_address,
+            address,
             port,
             shards,
             buffer_size,
@@ -254,7 +254,7 @@ impl Client {
         shard: ShardId,
         buf: Vec<u8>,
     ) -> Result<Vec<u8>, io::Error> {
-        let address = format!("{}:{}", self.base_address, self.port + shard);
+        let address = format!("{}:{}", self.address, self.port + shard);
         let mut stream = self
             .protocol
             .connect(address, self.buffer_size)
@@ -331,7 +331,7 @@ impl ValidatorClient for Client {
 #[derive(Clone)]
 pub struct MassClient {
     protocol: Protocol,
-    base_address: String,
+    address: String,
     port: u32,
     buffer_size: usize,
     send_timeout: std::time::Duration,
@@ -342,7 +342,7 @@ pub struct MassClient {
 impl MassClient {
     pub fn new(
         protocol: Protocol,
-        base_address: String,
+        address: String,
         port: u32,
         buffer_size: usize,
         send_timeout: std::time::Duration,
@@ -351,7 +351,7 @@ impl MassClient {
     ) -> Self {
         Self {
             protocol,
-            base_address,
+            address,
             port,
             buffer_size,
             send_timeout,
@@ -361,7 +361,7 @@ impl MassClient {
     }
 
     async fn run_shard(&self, shard: u32, requests: Vec<Bytes>) -> Result<Vec<Bytes>, io::Error> {
-        let address = format!("{}:{}", self.base_address, self.port + shard);
+        let address = format!("{}:{}", self.address, self.port + shard);
         let mut stream = self
             .protocol
             .connect(address, self.buffer_size)
@@ -427,7 +427,7 @@ impl MassClient {
                     info!(
                         "Sending {} requests to {}:{} (shard {})",
                         client.protocol,
-                        client.base_address,
+                        client.address,
                         client.port + shard,
                         shard
                     );
@@ -438,7 +438,7 @@ impl MassClient {
                     info!(
                         "Done sending {} requests to {}:{} (shard {})",
                         client.protocol,
-                        client.base_address,
+                        client.address,
                         client.port + shard,
                         shard
                     );

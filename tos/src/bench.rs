@@ -35,13 +35,13 @@ struct ClientServerBenchmark {
     #[structopt(long, default_value = "9555")]
     port: u32,
     /// Size of the Tos validators
-    #[structopt(long, default_value = "10")]
+    #[structopt(long, default_value = "4")]
     validators_size: usize,
     /// Number of shards per Tos validator
     #[structopt(long, default_value = "15")]
     shards: u32,
     /// Maximum number of requests in flight (0 for blocking client)
-    #[structopt(long, default_value = "400")]
+    #[structopt(long, default_value = "1000")]
     max_in_flight: usize,
     /// Number of accounts and transactions used in the benchmark
     #[structopt(long, default_value = "40000")]

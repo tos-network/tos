@@ -466,19 +466,19 @@ where
             .map(|cert| cert.value.transfer.nonce)
             .collect();
         let mut sent = self.sent.clone();
-        let mut number = Nonce::from(0);
-        while number < self.nonce {
-            if !known_nonces.contains(&number) {
-                let certificate = requester.query(number).await?;
+        let mut nonce = Nonce::from(0);
+        while nonce < self.nonce {
+            if !known_nonces.contains(&nonce) {
+                let certificate = requester.query(nonce).await?;
                 sent.push(certificate);
             }
-            number = number.increment().unwrap_or_else(|_| Nonce::max());
+            nonce = nonce.increment().unwrap_or_else(|_| Nonce::max());
         }
         sent.sort_by_key(|cert| cert.value.transfer.nonce);
         Ok(sent)
     }
 
-    /// Send money to a Tos or Primary recipient.
+    /// Send money to a recipient.
     async fn transfer(
         &mut self,
         amount: Amount,
