@@ -3,7 +3,7 @@
 [![Build Status](https://github.com/tos-network/tos/actions/workflows/rust.yml/badge.svg)](https://github.com/tos-network/tos/actions/workflows/rust.yml)
 [![License](https://img.shields.io/badge/license-Apache-green.svg)](LICENSE.md)
 
-This repository is dedicated to sharing material related to the TOS Network.
+TOS Network is a genuine Web3.0 network with decentralized storage, instant payments and various decentralized services.
 
 ## Summary
 
