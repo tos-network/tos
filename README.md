@@ -1,4 +1,4 @@
-# TOS
+# TOS Network
 
 [![Build Status](https://github.com/tos-network/tos/actions/workflows/rust.yml/badge.svg)](https://github.com/tos-network/tos/actions/workflows/rust.yml)
 [![License](https://img.shields.io/badge/license-Apache-green.svg)](LICENSE.md)
@@ -7,7 +7,9 @@ This repository is dedicated to sharing material related to the TOS Network.
 
 ## Summary
 
-TOS allows a set of distributed validators, some of which are Byzantine, to maintain a high-integrity and availability settlement system for pre-funded payments. It can be used to settle payments in a native unit of value (crypto-currency), or as a financial side-infrastructure to support retail payments in fiat currencies. TOS is based on Byzantine Consistent Broadcast as its core primitive, foregoing the expenses of full atomic commit channels (consensus). The resulting system has low-latency for both confirmation and payment finality. Remarkably, each validator can be sharded across many machines to allow unbounded horizontal scalability. Our experiments demonstrate intra-continental confirmation latency of less than 100ms, making TOS applicable to point of sale payments. In laboratory environments, we achieve over 80,000 transactions per second with 20 validators---surpassing the requirements of current retail card payment networks, while significantly increasing their robustness.
+TOS allows a set of distributed validators, some of which are Byzantine, to maintain a high-integrity and availability settlement system for fast payments. TOS has low-latency for both confirmation and payment finality. Remarkably, each validator can be sharded across many machines to allow unbounded horizontal scalability.
+
+We achieve over 80,000 transactions per second with 20 validators---surpassing the requirements of current VISA card payment networks. TOS Network is very suitable to be used in AI, IoT services.
 
 ## Quickstart with TOS Network
 
