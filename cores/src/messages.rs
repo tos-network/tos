@@ -21,13 +21,6 @@ pub struct FundingTransaction {
     // TODO: Authenticated by Primary sender.
 }
 
-#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub struct PrimarySynchronizationTx {
-    pub recipient: Address,
-    pub amount: Amount,
-    pub transaction_index: VersionNumber,
-}
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct Transfer {
     pub sender: Address,

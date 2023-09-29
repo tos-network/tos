@@ -101,7 +101,7 @@ impl Serialize for KeyPair {
     where
         S: serde::ser::Serializer,
     {
-        serializer.serialize_str(&base64::encode(&self.0.to_bytes()))
+        serializer.serialize_str(&self.0.to_bytes().to_base58())
     }
 }
 
@@ -111,7 +111,7 @@ impl<'de> Deserialize<'de> for KeyPair {
         D: serde::de::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let value = base64::decode(&s).map_err(|err| serde::de::Error::custom(err.to_string()))?;
+        let value = s.from_base58().unwrap();
         let key = dalek::Keypair::from_bytes(&value)
             .map_err(|err| serde::de::Error::custom(err.to_string()))?;
         Ok(KeyPair(key))
@@ -120,7 +120,7 @@ impl<'de> Deserialize<'de> for KeyPair {
 
 impl std::fmt::Debug for Signature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        let s = base64::encode(&self.0);
+        let s = self.0.to_bytes().to_base58();
         write!(f, "{}", s)?;
         Ok(())
     }

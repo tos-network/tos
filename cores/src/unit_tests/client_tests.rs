@@ -187,7 +187,7 @@ fn test_initiating_valid_transfer() {
         ))
         .unwrap();
     assert_eq!(sender.nonce, Nonce::from(1));
-    assert_eq!(sender.pending_transfer, None);
+    assert_eq!(sender.pending_tx, None);
     assert_eq!(
         rt.block_on(sender.get_strong_majority_balance()),
         Balance::from(1)
@@ -214,7 +214,7 @@ fn test_initiating_valid_transfer_despite_bad_validator() {
         ))
         .unwrap();
     assert_eq!(sender.nonce, Nonce::from(1));
-    assert_eq!(sender.pending_transfer, None);
+    assert_eq!(sender.pending_tx, None);
     assert_eq!(
         rt.block_on(sender.get_strong_majority_balance()),
         Balance::from(1)
@@ -238,7 +238,7 @@ fn test_initiating_transfer_low_funds() {
         .is_err());
     // Trying to overspend does not block an account.
     assert_eq!(sender.nonce, Nonce::from(0));
-    assert_eq!(sender.pending_transfer, None);
+    assert_eq!(sender.pending_tx, None);
     assert_eq!(
         rt.block_on(sender.get_strong_majority_balance()),
         Balance::from(2)
@@ -265,7 +265,7 @@ fn test_bidirectional_transfer() {
         .unwrap();
 
     assert_eq!(client1.nonce, Nonce::from(1));
-    assert_eq!(client1.pending_transfer, None);
+    assert_eq!(client1.pending_tx, None);
     assert_eq!(
         rt.block_on(client1.get_strong_majority_balance()),
         Balance::from(0)
@@ -301,7 +301,7 @@ fn test_bidirectional_transfer() {
     rt.block_on(client2.transfer_to_tos(Amount::from(1), client1.address, UserData::default()))
         .unwrap();
     assert_eq!(client2.nonce, Nonce::from(1));
-    assert_eq!(client2.pending_transfer, None);
+    assert_eq!(client2.pending_tx, None);
     assert_eq!(
         rt.block_on(client2.get_strong_majority_balance()),
         Balance::from(2)
@@ -335,7 +335,7 @@ fn test_receiving_unconfirmed_transfer() {
     // Transfer was executed locally, creating negative balance.
     assert_eq!(client1.balance, Balance::from(-2));
     assert_eq!(client1.nonce, Nonce::from(1));
-    assert_eq!(client1.pending_transfer, None);
+    assert_eq!(client1.pending_tx, None);
     // ..but not confirmed remotely, hence an unchanged balance and sequence number.
     assert_eq!(
         rt.block_on(client1.get_strong_majority_balance()),
@@ -403,10 +403,10 @@ fn test_receiving_unconfirmed_transfer_with_lagging_sender_balances() {
     // Transfers were executed locally, possibly creating negative balances.
     assert_eq!(client0.balance, Balance::from(-2));
     assert_eq!(client0.nonce, Nonce::from(2));
-    assert_eq!(client0.pending_transfer, None);
+    assert_eq!(client0.pending_tx, None);
     assert_eq!(client1.balance, Balance::from(-2));
     assert_eq!(client1.nonce, Nonce::from(1));
-    assert_eq!(client1.pending_transfer, None);
+    assert_eq!(client1.pending_tx, None);
     // Last one was not confirmed remotely, hence an unchanged (remote) balance and sequence number.
     assert_eq!(
         rt.block_on(client1.get_strong_majority_balance()),

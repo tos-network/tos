@@ -49,8 +49,8 @@ pub struct ClientState<ValidatorClient> {
     /// Expected sequence number for the next certified transfer.
     /// This is also the number of transfer certificates that we have created.
     nonce: Nonce,
-    /// Pending transfer.
-    pending_transfer: Option<Transaction>,
+    /// Pending transaction.
+    pending_tx: Option<Transaction>,
 
     // The remaining fields are used to minimize networking, and may not always be persisted locally.
     /// Transfer certificates that we have created ("sent").
@@ -114,7 +114,7 @@ impl<A> ClientState<A> {
             validators,
             validator_clients,
             nonce,
-            pending_transfer: None,
+            pending_tx: None,
             sent,
             received: received
                 .into_iter()
@@ -136,8 +136,8 @@ impl<A> ClientState<A> {
         self.balance
     }
 
-    pub fn pending_transfer(&self) -> &Option<Transaction> {
-        &self.pending_transfer
+    pub fn pending_tx(&self) -> &Option<Transaction> {
+        &self.pending_tx
     }
 
     pub fn sent(&self) -> &Vec<CertifiedTransaction> {
@@ -550,14 +550,14 @@ where
         with_confirmation: bool,
     ) -> Result<CertifiedTransaction, failure::Error> {
         ensure!(
-            self.pending_transfer == None || self.pending_transfer.as_ref() == Some(&tx),
+            self.pending_tx == None || self.pending_tx.as_ref() == Some(&tx),
             "Client state has a different pending transfer",
         );
         ensure!(
             tx.transfer.nonce == self.nonce,
             "Unexpected sequence number"
         );
-        self.pending_transfer = Some(tx.clone());
+        self.pending_tx = Some(tx.clone());
         let new_sent = self
             .communicate_transfers(
                 self.address,
@@ -566,10 +566,10 @@ where
             )
             .await?;
         assert_eq!(new_sent.last().unwrap().value, tx);
-        // Clear `pending_transfer` and update `sent`,
+        // Clear `pending_tx` and update `sent`,
         // `balance`, and `nonce`. (Note that if we were using persistent
         // storage, we should ensure update atomicity in the eventuality of a crash.)
-        self.pending_transfer = None;
+        self.pending_tx = None;
         self.update_sent(new_sent)?;
         // Confirm last transfer certificate if needed.
         if with_confirmation {
@@ -599,7 +599,7 @@ where
 
     fn get_spendable_amount(&mut self) -> AsyncResult<Amount, failure::Error> {
         Box::pin(async move {
-            if let Some(tx) = self.pending_transfer.clone() {
+            if let Some(tx) = self.pending_tx.clone() {
                 // Finish executing the previous transfer.
                 self.execute_transfer(tx, /* with_confirmation */ false)
                     .await?;

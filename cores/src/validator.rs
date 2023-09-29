@@ -19,8 +19,6 @@ pub struct AccountOffchainState {
     pub pending_confirmation: Option<SignedTransaction>,
     /// All confirmed certificates for this sender.
     pub confirmed_log: Vec<CertifiedTransaction>,
-    /// All executed Primary synchronization txs for this recipient.
-    pub synchronization_log: Vec<PrimarySynchronizationTx>,
     /// All confirmed certificates as a receiver.
     pub received_log: Vec<CertifiedTransaction>,
 }
@@ -57,12 +55,6 @@ pub trait Validator {
         &mut self,
         tx: ConfirmationTx,
     ) -> Result<(AccountInfoResponse, Option<CrossShardUpdate>), TosError>;
-
-    /// Force synchronization to finalize transfers from Primary to Tos.
-    fn handle_primary_synchronization_tx(
-        &mut self,
-        tx: PrimarySynchronizationTx,
-    ) -> Result<AccountInfoResponse, TosError>;
 
     /// Handle information requests for this account.
     fn handle_account_info_request(
@@ -222,35 +214,6 @@ impl Validator for ValidatorState {
         Ok(())
     }
 
-    /// Finalize a transfer from Primary.
-    fn handle_primary_synchronization_tx(
-        &mut self,
-        tx: PrimarySynchronizationTx,
-    ) -> Result<AccountInfoResponse, TosError> {
-        // Update recipient state; note that the blockchain client is trusted.
-        let recipient = tx.recipient;
-        fp_ensure!(self.in_shard(&recipient), TosError::WrongShard);
-
-        let recipient_account = self
-            .accounts
-            .entry(recipient)
-            .or_insert_with(AccountOffchainState::new);
-        if tx.transaction_index <= self.last_transaction_index {
-            // Ignore old transaction index.
-            return Ok(recipient_account.make_account_info(recipient));
-        }
-        fp_ensure!(
-            tx.transaction_index == self.last_transaction_index.increment()?,
-            TosError::UnexpectedTransactionIndex
-        );
-        let recipient_balance = recipient_account.balance.try_add(tx.amount.into())?;
-        let last_transaction_index = self.last_transaction_index.increment()?;
-        recipient_account.balance = recipient_balance;
-        recipient_account.synchronization_log.push(tx);
-        self.last_transaction_index = last_transaction_index;
-        Ok(recipient_account.make_account_info(recipient))
-    }
-
     fn handle_account_info_request(
         &self,
         request: AccountInfoRequest,
@@ -279,7 +242,6 @@ impl Default for AccountOffchainState {
             nonce: Nonce::new(),
             pending_confirmation: None,
             confirmed_log: Vec::new(),
-            synchronization_log: Vec::new(),
             received_log: Vec::new(),
         }
     }
@@ -308,7 +270,6 @@ impl AccountOffchainState {
             nonce: Nonce::new(),
             pending_confirmation: None,
             confirmed_log: Vec::new(),
-            synchronization_log: Vec::new(),
             received_log,
         }
     }

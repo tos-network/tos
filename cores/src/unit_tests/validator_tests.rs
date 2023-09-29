@@ -358,44 +358,6 @@ fn test_handle_confirmation_tx_ok() {
 }
 
 #[test]
-fn test_handle_primary_synchronization_tx_update() {
-    let mut state = init_state();
-    let mut updated_transaction_index = state.last_transaction_index;
-    let address = dbg_addr(1);
-    let tx = init_primary_synchronization_tx(address);
-
-    assert!(state
-        .handle_primary_synchronization_tx(tx.clone())
-        .is_ok());
-    updated_transaction_index = updated_transaction_index.increment().unwrap();
-    assert_eq!(state.last_transaction_index, updated_transaction_index);
-    let account = state.accounts.get(&address).unwrap();
-    assert_eq!(account.balance, tx.amount.into());
-    assert_eq!(state.accounts.len(), 1);
-}
-
-#[test]
-fn test_handle_primary_synchronization_tx_double_spend() {
-    let mut state = init_state();
-    let mut updated_transaction_index = state.last_transaction_index;
-    let address = dbg_addr(1);
-    let tx = init_primary_synchronization_tx(address);
-
-    assert!(state
-        .handle_primary_synchronization_tx(tx.clone())
-        .is_ok());
-    updated_transaction_index = updated_transaction_index.increment().unwrap();
-    // Replays are ignored.
-    assert!(state
-        .handle_primary_synchronization_tx(tx.clone())
-        .is_ok());
-    assert_eq!(state.last_transaction_index, updated_transaction_index);
-    let account = state.accounts.get(&address).unwrap();
-    assert_eq!(account.balance, tx.amount.into());
-    assert_eq!(state.accounts.len(), 1);
-}
-
-#[test]
 fn test_account_state_ok() {
     let sender = dbg_addr(1);
     let validator_state = init_state_with_account(sender, Balance::from(5));
@@ -503,15 +465,4 @@ fn init_certified_transfer_tx(
         .append(vote.validator, vote.signature)
         .unwrap()
         .unwrap()
-}
-
-#[cfg(test)]
-fn init_primary_synchronization_tx(recipient: Address) -> PrimarySynchronizationTx {
-    let mut transaction_index = VersionNumber::new();
-    transaction_index = transaction_index.increment().unwrap();
-    PrimarySynchronizationTx {
-        recipient,
-        amount: Amount::from(5),
-        transaction_index,
-    }
 }
