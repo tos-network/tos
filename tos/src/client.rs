@@ -66,7 +66,7 @@ fn make_validator_mass_clients(
 }
 
 fn make_client_state(
-    accounts: &AccountsConfig,
+    accounts: &mut AccountsConfig,
     validators_config: &ValidatorsConfig,
     address: Address,
     buffer_size: usize,
@@ -282,10 +282,6 @@ fn deserialize_response(response: &[u8]) -> Option<AccountInfoResponse> {
     about = "A Byzantine fault tolerant payments sidechain with low-latency finality and high throughput"
 )]
 struct ClientOpt {
-    /// Sets the file storing the state of our user accounts (an empty one will be created if missing)
-    #[structopt(long)]
-    accounts: String,
-
     /// Sets the file describing the public configurations of all validators
     #[structopt(long)]
     validators: String,
@@ -365,12 +361,11 @@ fn main() {
 
     let send_timeout = Duration::from_micros(options.send_timeout);
     let recv_timeout = Duration::from_micros(options.recv_timeout);
-    let accounts_config_path = &options.accounts;
     let validators_config_path = &options.validators;
     let buffer_size = options.buffer_size;
 
-    let mut accounts_config =
-        AccountsConfig::read_or_create(accounts_config_path).expect("Unable to read user accounts");
+    let mut accounts_config = 
+        AccountsConfig::read_or_create().expect("Unable to read user accounts");
     let validators_config =
         ValidatorsConfig::read(validators_config_path).expect("Unable to read validators config file");
 
@@ -383,7 +378,7 @@ fn main() {
             let mut rt = Runtime::new().unwrap();
             rt.block_on(async move {
                 let mut client_state = make_client_state(
-                    &accounts_config,
+                    &mut accounts_config,
                     &validators_config,
                     sender,
                     buffer_size,
@@ -402,7 +397,7 @@ fn main() {
                 accounts_config.update_from_state(&client_state);
                 info!("Updating recipient's local balance");
                 let mut recipient_client_state = make_client_state(
-                    &accounts_config,
+                    &mut accounts_config,
                     &validators_config,
                     recipient,
                     buffer_size,
@@ -414,9 +409,6 @@ fn main() {
                     .await
                     .unwrap();
                 accounts_config.update_from_state(&recipient_client_state);
-                accounts_config
-                    .write(accounts_config_path)
-                    .expect("Unable to write user accounts");
                 info!("Saved user account states");
             });
         }
@@ -427,7 +419,7 @@ fn main() {
             let mut rt = Runtime::new().unwrap();
             rt.block_on(async move {
                 let mut client_state = make_client_state(
-                    &accounts_config,
+                    &mut accounts_config,
                     &validators_config,
                     user_address,
                     buffer_size,
@@ -441,9 +433,6 @@ fn main() {
                 info!("Balance confirmed after {} us", time_total);
                 println!("{:?}", amount);
                 accounts_config.update_from_state(&client_state);
-                accounts_config
-                    .write(accounts_config_path)
-                    .expect("Unable to write user accounts");
                 info!("Saved client account state");
             });
         }
@@ -518,9 +507,6 @@ fn main() {
                 // Make sure that the local balances are accurate so that future
                 // balance checks of the non-mass client pass.
                 mass_update_recipients(&mut accounts_config, certificates);
-                accounts_config
-                    .write(accounts_config_path)
-                    .expect("Unable to write user accounts");
                 info!("Saved client account state");
             });
         }
@@ -535,9 +521,6 @@ fn main() {
                 println!("{}:{}", encode_address(&account.address), initial_funding);
                 accounts_config.insert(account);
             }
-            accounts_config
-                .write(accounts_config_path)
-                .expect("Unable to write user accounts");
         }
     }
 }

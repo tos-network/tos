@@ -46,7 +46,7 @@ sleep 1
 # Create configuration files for 1000 user accounts.
 # * Private account states are stored in one local wallet `accounts.json`.
 # * `initial_accounts.txt` is used to mint the corresponding initial balances at startup on the server side.
-./client --validators validators.json --accounts accounts.json create_accounts 1000 --initial-funding 100 >> initial_accounts.txt
+./client --validators validators.json create_accounts 1000 --initial-funding 100 >> initial_accounts.txt
 
 # cat initial_accounts.txt
 # cat accounts.json
@@ -65,21 +65,21 @@ sleep 1
 # Query (locally cached) balance for first and last user account
 ACCOUNT1="`head -n 1 initial_accounts.txt | awk -F: '{ print $1 }'`"
 ACCOUNT2="`tail -n -1 initial_accounts.txt | awk -F: '{ print $1 }'`"
-./client --validators validators.json --accounts accounts.json query_balance "$ACCOUNT1"
-./client --validators validators.json --accounts accounts.json query_balance "$ACCOUNT2"
+./client --validators validators.json query_balance "$ACCOUNT1"
+./client --validators validators.json query_balance "$ACCOUNT2"
 
 # Transfer 10 units
-./client --validators validators.json --accounts accounts.json transfer 10 --from "$ACCOUNT1" --to "$ACCOUNT2"
+./client --validators validators.json transfer 10 --from "$ACCOUNT1" --to "$ACCOUNT2"
 
 # Query balances again
-./client --validators validators.json --accounts accounts.json query_balance "$ACCOUNT1"
-./client --validators validators.json --accounts accounts.json query_balance "$ACCOUNT2"
+./client --validators validators.json query_balance "$ACCOUNT1"
+./client --validators validators.json query_balance "$ACCOUNT2"
 
 # Launch local benchmark using all user accounts
-./client --validators validators.json --accounts accounts.json benchmark
+./client --validators validators.json benchmark
 
 # Inspect state of first account
-grep "$ACCOUNT1" accounts.json
+grep "$ACCOUNT1" "$ACCOUNT1.json"
 
 # Kill servers
 kill %1 %2 %3 %4 %5 %6 %7 %8 %9 %10 %11 %12 %13 %14 %15 %16

@@ -12,7 +12,6 @@ use cores::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    path::Path,
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, BufWriter, Write},
 };
@@ -125,16 +124,13 @@ pub struct AccountsConfig {
 }
 
 impl AccountsConfig {
-    pub fn get(&mut self, address: &Address) -> Option<&UserAccount> {
-        if ! self.accounts.contains_key(address) {
-            self.read_account(address);
-        }
+    pub fn get(&self, address: &Address) -> Option<&UserAccount> {
         self.accounts.get(address)
     }
 
     pub fn insert(&mut self, account: UserAccount) {
-        AccountsConfig::write_account(&account).unwrap();
         self.accounts.insert(account.address, account);
+        //self.write_account(&account);
     }
 
     pub fn num_accounts(&self) -> usize {
@@ -154,7 +150,7 @@ impl AccountsConfig {
         account.balance = state.balance();
         account.sent = state.sent().clone();
         account.received = state.received().cloned().collect();
-        AccountsConfig::write_account(&account).unwrap();
+        //self.write_account(&account);
     }
 
     pub fn update_for_received_transfer(&mut self, certificate: CertifiedTransaction) {
@@ -167,40 +163,35 @@ impl AccountsConfig {
             {
                 config.balance = config.balance.try_add(transfer.amount.into()).unwrap();
                 config.received.insert(position, certificate);
-                AccountsConfig::write_account(&config).unwrap();
+                //self.write_account(&config);
             }
         }
     }
 
-    pub fn read_account(&mut self, address: &Address) {
-        let mut path: String = encode_address(&address).to_owned();
-        path.push_str(".json");
-        let is_file = Path::new(&path).exists();
-        if is_file {
-          let file = OpenOptions::new()
-            .create(false)
-            .write(false)
+    pub fn read_or_create(path: &str) -> Result<Self, std::io::Error> {
+        let file = OpenOptions::new()
+            .create(true)
+            .write(true)
             .read(true)
-            .open(path).unwrap();
-          let reader = BufReader::new(file);
-          let account:UserAccount = serde_json::from_reader(reader).unwrap();
-          self.accounts.insert(account.address, account);
-        }
+            .open(path)?;
+        let reader = BufReader::new(file);
+        let stream = serde_json::Deserializer::from_reader(reader).into_iter();
+        Ok(Self {
+            accounts: stream
+                .filter_map(Result::ok)
+                .map(|account: UserAccount| (account.address, account))
+                .collect(),
+        })
     }
 
-    fn write_account(account : &UserAccount ) -> Result<(), std::io::Error> {
-        let mut path: String = encode_address(&account.address).to_owned();
-        path.push_str(".json");
+    pub fn write(&self, path: &str) -> Result<(), std::io::Error> {
         let file = OpenOptions::new().create(true).write(true).open(path)?;
         let mut writer = BufWriter::new(file);
-        serde_json::to_writer(&mut writer, account)?;
-        writer.write_all(b"\n")?;
+        for account in self.accounts.values() {
+            serde_json::to_writer(&mut writer, account)?;
+            writer.write_all(b"\n")?;
+        }
         Ok(())
-    }
-    pub fn read_or_create() -> Result<Self, std::io::Error> {
-        Ok(Self {
-            accounts : BTreeMap::new()
-        })
     }
 }
 
