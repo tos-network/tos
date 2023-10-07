@@ -3,10 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use base58::{ToBase58, FromBase58};
+use rand::rngs::OsRng;
 use ed25519_dalek as dalek;
 use ed25519_dalek::{Signer, Verifier};
-
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::convert::{TryFrom, TryInto};
 
@@ -36,7 +35,8 @@ pub type VersionNumber = Nonce;
 pub struct UserData(pub Option<[u8; 32]>);
 
 /// A signature key-pair.
-pub struct KeyPair(dalek::Keypair);
+#[derive(Clone)]
+pub struct KeyPair(dalek::SigningKey);
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Hash, Serialize, Deserialize)]
 pub struct PublicKey(pub [u8; dalek::PUBLIC_KEY_LENGTH]);
@@ -46,8 +46,8 @@ pub type ValidatorName = PublicKey;
 
 pub fn get_key_pair() -> (Address, KeyPair) {
     let mut csprng = OsRng;
-    let keypair = dalek::Keypair::generate(&mut csprng);
-    (PublicKey(keypair.public.to_bytes()), KeyPair(keypair))
+    let keypair = dalek::SigningKey::generate(&mut csprng);
+    (PublicKey(keypair.verifying_key().to_bytes()), KeyPair(keypair))
 }
 
 pub fn address_as_base58<S>(key: &PublicKey, serializer: S) -> Result<S::Ok, S::Error>
@@ -67,11 +67,11 @@ where
 }
 
 pub fn encode_address(key: &PublicKey) -> String {
-    ToBase58::to_base58(&key.0[..])
+    key.0[..].to_base58()
 }
 
 pub fn decode_address(s: &str) -> Result<PublicKey, failure::Error> {
-    let value = FromBase58::from_base58(s).unwrap();
+    let value = s.from_base58().unwrap();
     let mut address = [0u8; dalek::PUBLIC_KEY_LENGTH];
     address.copy_from_slice(&value[..dalek::PUBLIC_KEY_LENGTH]);
     Ok(PublicKey(address))
@@ -87,13 +87,9 @@ pub fn dbg_addr(name: u8) -> Address {
 pub struct Signature(dalek::Signature);
 
 impl KeyPair {
-    /// Avoid implementing `clone` on secret keys to prevent mistakes.
     pub fn copy(&self) -> KeyPair {
-        KeyPair(dalek::Keypair {
-            secret: dalek::SecretKey::from_bytes(self.0.secret.as_bytes()).unwrap(),
-            public: dalek::PublicKey::from_bytes(self.0.public.as_bytes()).unwrap(),
-        })
-    }
+        KeyPair(self.0.clone())
+     }
 }
 
 impl Serialize for KeyPair {
@@ -112,9 +108,10 @@ impl<'de> Deserialize<'de> for KeyPair {
     {
         let s = String::deserialize(deserializer)?;
         let value = s.from_base58().unwrap();
-        let key = dalek::Keypair::from_bytes(&value)
-            .map_err(|err| serde::de::Error::custom(err.to_string()))?;
-        Ok(KeyPair(key))
+        let mut secret = [0u8; dalek::SECRET_KEY_LENGTH];
+        secret.copy_from_slice(&value[..dalek::SECRET_KEY_LENGTH]);
+        let keypair: dalek::SigningKey = dalek::SigningKey::from_bytes(&secret);
+        Ok(KeyPair(keypair))
     }
 }
 
@@ -296,13 +293,14 @@ where
 }
 
 impl Signature {
-    pub fn new<T>(value: &T, secret: &KeyPair) -> Self
+    pub fn new<T>(value: &T, keypair: &KeyPair) -> Self
     where
         T: Signable<Vec<u8>>,
     {
         let mut message = Vec::new();
         value.write(&mut message);
-        let signature = secret.0.sign(&message);
+        let signing_key = keypair.0.clone();
+        let signature = signing_key.sign(&message);
         Signature(signature)
     }
 
@@ -316,8 +314,8 @@ impl Signature {
     {
         let mut message = Vec::new();
         value.write(&mut message);
-        let public_key = dalek::PublicKey::from_bytes(&author.0)?;
-        public_key.verify(&message, &self.0)
+        let verifying_key = dalek::VerifyingKey::from_bytes(&author.0)?;
+        verifying_key.verify(&message, &self.0)
     }
 
     pub fn check<T>(&self, value: &T, author: Address) -> Result<(), TosError>
@@ -339,11 +337,11 @@ impl Signature {
         value.write(&mut msg);
         let mut messages: Vec<&[u8]> = Vec::new();
         let mut signatures: Vec<dalek::Signature> = Vec::new();
-        let mut public_keys: Vec<dalek::PublicKey> = Vec::new();
+        let mut public_keys: Vec<dalek::VerifyingKey> = Vec::new();
         for (addr, sig) in votes.into_iter() {
             messages.push(&msg);
             signatures.push(sig.0);
-            public_keys.push(dalek::PublicKey::from_bytes(&addr.0)?);
+            public_keys.push(dalek::VerifyingKey::from_bytes(&addr.0)?);
         }
         dalek::verify_batch(&messages[..], &signatures[..], &public_keys[..])
     }
