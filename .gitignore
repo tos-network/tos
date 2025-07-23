@@ -1,0 +1,25 @@
+target/
+*.log
+mainnet/
+testnet/
+dev/
+peerlist-*/
+.vscode/
+wallets/
+peerlist-*.json
+build/
+
+# ignore all profiling files
+flamegraph.svg
+perf.data
+perf.data.old
+
+# ignore generated files by Terminos
+difficulty_dataset.csv
+precomputed_tables_*.bin
+mainnet*
+testnet*
+stagenet*
+devnet*
+wallet.dat
+miner_wallet.dat

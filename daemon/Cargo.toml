@@ -1,0 +1,52 @@
+[package]
+name = "terminos_daemon"
+version = "1.18.0"
+edition = "2021"
+authors = ["Slixe <slixeprivate@gmail.com>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+terminos_common = { path = "../common", features = ["prompt", "clap", "rpc-server", "tokio"] }
+terminos-environment = { git = "https://github.com/tos-network/terminos-vm", branch = "dev" }
+terminos-vm = { git = "https://github.com/tos-network/terminos-vm", branch = "dev" }
+
+# Database backends
+sled = "0.34.7"
+rocksdb = "0.23.0"
+
+# Used for Diffie-Hellman key exchange in p2p
+x25519-dalek = { version = "2.0.1", features = ["serde", "zeroize", "static_secrets"] }
+
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+metrics-exporter-prometheus = "0.17.0"
+semver = "1.0.23"
+itertools = "0.14.0"
+linked-hash-map = "0.5.6"
+bytes = "1"
+humantime = "2.1.0"
+human_bytes = "0.4.2"
+tokio-socks = "0.5.2"
+
+# Common dependencies
+actix-web = { workspace = true }
+strum = { workspace = true }
+clap = { workspace = true }
+lru = { workspace = true }
+async-trait = { workspace = true }
+lazy_static = { workspace = true }
+chacha20poly1305 = { workspace = true, features = ["bytes"]}
+metrics = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "io-util", "io-std", "time", "macros", "sync", "net"] }
+hex = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+tempdir = "*"
