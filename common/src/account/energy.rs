@@ -3,7 +3,6 @@ use crate::{
     crypto::PublicKey,
     serializer::{Serializer, Writer, Reader, ReaderError},
     block::TopoHeight,
-    config::COIN_VALUE,
 };
 
 /// Flexible freeze duration for TOS staking

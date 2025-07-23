@@ -733,7 +733,7 @@ impl TransactionBuilder {
                     )?;
                 }
             },
-            TransactionTypeBuilder::Energy(ref payload) => {
+            TransactionTypeBuilder::Energy(ref _payload) => {
                 // Energy transactions don't need special commitment handling
                 // They will be processed in the second match statement
             },

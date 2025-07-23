@@ -5,7 +5,6 @@ use crate::{
     api::DataElement,
     crypto::{Address, Hash},
     account::FreezeDuration,
-    config::COIN_VALUE,
 };
 
 fn default_bool_true() -> bool {
@@ -135,6 +134,7 @@ impl EnergyBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::COIN_VALUE;
 
     #[test]
     fn test_energy_builder_freeze() {

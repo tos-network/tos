@@ -64,8 +64,7 @@ use terminos_common::{
     transaction::{
         verify::BlockchainVerificationState,
         Transaction,
-        TransactionType,
-        FeeType
+        TransactionType
     },
     utils::{calculate_tx_fee, format_terminos},
     tokio::{

@@ -7,24 +7,15 @@ use crate::{
 pub const VERSION: &str = env!("BUILD_VERSION");
 pub const TERMINOS_ASSET: Hash = Hash::zero();
 
-// ===== NEW TRON-STYLE ENERGY-BASED FEE MODEL =====
-
-// Account activation fee (similar to TRON's 0.1 TRX)
-// 0.1 TOS per account activation
-pub const ACCOUNT_ACTIVATION_FEE: u64 = 10000000; // 0.1 TOS
+// ===== NEW ENERGY-BASED FEE MODEL =====
 
 // Energy-based fee model constants
 // Only transfer operations consume energy
 // Adjusted to match TRON's ratio: 1 TOS freeze = 7 free transfers/3 days
 pub const ENERGY_PER_TRANSFER: u64 = 1;           // Basic transfer (1 energy per transfer)
-pub const ENERGY_PER_KB: u64 = 10;                // Per KB of transaction data
 
-// Energy to TOS conversion rate (when energy is insufficient)
-// 1 energy = 0.0001 TOS (market rate)
-pub const ENERGY_TO_TOS_RATE: u64 = 10000; // 0.0001 TOS per energy
 
-// Legacy fee constants (kept for reference only)
-// These are no longer used in the new energy-based model
+// TOS-based fee model constants
 pub const FEE_PER_KB: u64 = 10000;
 pub const FEE_PER_ACCOUNT_CREATION: u64 = 100000;
 pub const FEE_PER_TRANSFER: u64 = 5000;

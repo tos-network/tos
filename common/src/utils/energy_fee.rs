@@ -2,9 +2,7 @@ use crate::{
     account::{EnergyResource, FreezeDuration, FreezeRecord},
     block::TopoHeight,
     config::{
-        ACCOUNT_ACTIVATION_FEE,
-        ENERGY_PER_TRANSFER,
-        ENERGY_TO_TOS_RATE,
+        ENERGY_PER_TRANSFER
     },
 };
 
@@ -25,52 +23,16 @@ impl EnergyFeeCalculator {
         // Energy cost for transfers (1 energy per transfer, regardless of size)
         energy_cost += output_count as u64 * ENERGY_PER_TRANSFER;
 
-        // Energy cost for new account activations (1 energy per new address)
-        energy_cost += new_addresses as u64 * ENERGY_PER_TRANSFER;
+        // Energy cost for new account activations (0 energy per new address)
+        energy_cost += new_addresses as u64 * 0;
 
         energy_cost
     }
 
-    /// Calculate TOS cost when energy is insufficient
-    pub fn energy_to_tos_cost(energy_needed: u64) -> u64 {
-        energy_needed * ENERGY_TO_TOS_RATE
-    }
 
-    /// Calculate total cost including account activation
-    pub fn calculate_total_cost(
-        energy_cost: u64,
-        new_addresses: usize,
-        energy_resource: &EnergyResource,
-    ) -> (u64, u64) {
-        let mut total_tos_cost = 0;
-        let mut energy_to_consume = energy_cost;
-
-        // Account activation fees (only for new addresses)
-        let activation_cost = new_addresses as u64 * ACCOUNT_ACTIVATION_FEE;
-        total_tos_cost += activation_cost;
-
-        // Check if we have enough energy
-        if energy_resource.has_enough_energy(energy_cost) {
-            // Use energy, no additional TOS cost
-            (energy_to_consume, total_tos_cost)
-        } else {
-            // Calculate how much energy we need to buy with TOS
-            let available_energy = energy_resource.available_energy();
-            let energy_shortage = energy_cost.saturating_sub(available_energy);
-            let tos_for_energy = Self::energy_to_tos_cost(energy_shortage);
-            
-            energy_to_consume = available_energy;
-            total_tos_cost += tos_for_energy;
-            
-            (energy_to_consume, total_tos_cost)
-        }
-    }
-
-    /// Estimate energy cost for a simple transfer
-    pub fn estimate_transfer_energy_cost(tx_size: usize) -> u64 {
-        Self::calculate_energy_cost(tx_size, 1, 0)
-    }
 }
+
+
 
 /// Energy resource manager for accounts
 pub struct EnergyResourceManager;
@@ -182,9 +144,9 @@ mod tests {
         let multiple_transfer_cost = EnergyFeeCalculator::calculate_energy_cost(100, 5, 0);
         assert_eq!(multiple_transfer_cost, 5 * ENERGY_PER_TRANSFER); // Should be 5 energy
         
-        // Test with new addresses (each new address also costs 1 energy)
+        // Test with new addresses (new addresses don't consume energy in current implementation)
         let transfer_with_new_address = EnergyFeeCalculator::calculate_energy_cost(100, 1, 2);
-        assert_eq!(transfer_with_new_address, ENERGY_PER_TRANSFER + 2 * ENERGY_PER_TRANSFER); // 1 + 2 = 3 energy
+        assert_eq!(transfer_with_new_address, ENERGY_PER_TRANSFER); // Only 1 energy for the transfer
         
         // Verify the constant is set to 1
         assert_eq!(ENERGY_PER_TRANSFER, 1);

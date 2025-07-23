@@ -961,7 +961,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
         
         // Create test keypair
         let alice = KeyPair::new();
-        let alice_pubkey = alice.get_public_key().compress();
+        let _alice_pubkey = alice.get_public_key().compress();
         
         // Create mock state with sufficient balance
         let mut state = MockAccountState::new();
@@ -1099,7 +1099,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         
         // Create test keypair
         let alice = KeyPair::new();
-        let alice_pubkey = alice.get_public_key().compress();
+        let _alice_pubkey = alice.get_public_key().compress();
         
         // Create mock state with sufficient balance
         let mut state = MockAccountState::new();
@@ -1559,7 +1559,7 @@ fn test_energy_system_demo() {
     println!("Outputs: {} transfers", output_count);
     println!("New addresses: {} activations", new_addresses);
     println!("Energy cost: {} transfers", energy_cost);
-    println!("TOS equivalent: {:.6} TOS", energy_cost as f64 / terminos_common::config::ENERGY_TO_TOS_RATE as f64);
+    println!("TOS equivalent: N/A (energy conversion not implemented)");
     println!();
 
     // Simulate transaction execution
@@ -1652,19 +1652,27 @@ fn test_energy_system_demo() {
     let large_energy_cost = 500000000; // 5 energy (more than available)
     let new_addresses = 2;
     
-    let (energy_consumed, tos_cost) = terminos_common::utils::energy_fee::EnergyFeeCalculator::calculate_total_cost(
+    // Calculate energy cost and TOS conversion manually
+    let energy_consumed = terminos_common::utils::energy_fee::EnergyFeeCalculator::calculate_energy_cost(
         large_energy_cost,
         new_addresses,
-        &alice_energy
+        new_addresses
     );
+    let available_energy = alice_energy.available_energy();
+    let tos_cost = if energy_consumed <= available_energy {
+        0 // Sufficient energy available
+    } else {
+        // Insufficient energy - in current implementation, this would fail
+        // rather than convert to TOS
+        0
+    };
     
     println!("Required energy: {}", large_energy_cost);
     println!("Available energy: {}", alice_energy.available_energy());
     println!("Energy consumed: {}", energy_consumed);
     println!("TOS cost: {}", tos_cost);
     println!("TOS cost breakdown:");
-    println!("  - Account activation: {} TOS", new_addresses as u64 * terminos_common::config::ACCOUNT_ACTIVATION_FEE);
-    println!("  - Energy conversion: {} TOS", tos_cost - new_addresses as u64 * terminos_common::config::ACCOUNT_ACTIVATION_FEE);
+    println!("  - Energy conversion: {} TOS", tos_cost);
     println!();
 
     // Show freeze records by duration

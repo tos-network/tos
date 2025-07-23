@@ -39,7 +39,6 @@ use crate::{
         verify::{ZKPCache, NoZKPCache, VerificationError, BlockchainVerificationState},
         MAX_TRANSFER_COUNT,
         Transaction,
-        EXTRA_DATA_LIMIT_SIZE,
         BurnPayload,
         Reference,
         Role,

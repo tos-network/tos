@@ -25,7 +25,6 @@ use crate::{
 };
 use super::{InternalRpcError, ApiError};
 use terminos_common::{
-    account::FreezeDuration,
     api::{
         daemon::*,
         RPCContractOutput,

@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use crate::{
     serializer::{Serializer, Writer, Reader, ReaderError},
     account::FreezeDuration,
-    config::COIN_VALUE,
 };
 
 /// Energy-related transaction payloads for Transfer operations only
@@ -125,6 +124,7 @@ impl Serializer for EnergyPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::COIN_VALUE;
 
     #[test]
     fn test_freeze_tos_payload_creation() {
