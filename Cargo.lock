@@ -3716,7 +3716,7 @@ dependencies = [
 
 [[package]]
 name = "terminos_common"
-version = "1.18.0"
+version = "0.1.0"
 dependencies = [
  "actix-rt",
  "actix-web",
@@ -3772,7 +3772,7 @@ dependencies = [
 
 [[package]]
 name = "terminos_daemon"
-version = "1.18.0"
+version = "0.1.0"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -3821,7 +3821,7 @@ dependencies = [
 
 [[package]]
 name = "terminos_miner"
-version = "1.18.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3838,7 +3838,7 @@ dependencies = [
 
 [[package]]
 name = "terminos_wallet"
-version = "1.18.0"
+version = "0.1.0"
 dependencies = [
  "actix-web",
  "actix-web-httpauth",

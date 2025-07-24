@@ -8,6 +8,8 @@ peerlist-*/
 wallets/
 peerlist-*.json
 build/
+data/
+logs/
 
 # ignore all profiling files
 flamegraph.svg

@@ -295,14 +295,14 @@ mod tests {
     #[test]
     fn test_query_element() {
         let mut fields = HashMap::new();
-        fields.insert(DataValue::String("owner".to_string()), DataElement::Value(DataValue::String("Slixe".to_string())));
+        fields.insert(DataValue::String("owner".to_string()), DataElement::Value(DataValue::String("Terminos".to_string())));
         fields.insert(DataValue::String("balance".to_string()), DataElement::Value(DataValue::U8(25)));
 
         let element = DataElement::Fields(fields.clone());
 
         let query = QueryElement::HasKey {
             key: DataValue::String("owner".to_string()),
-            query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Slixe".to_string())))))
+            query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Terminos".to_string())))))
         };
         assert!(query.verify(&element));
 
@@ -315,14 +315,14 @@ mod tests {
         let query = QueryElement::Len(QueryNumber::GreaterOrEqual(2));
         assert!(query.verify(&DataElement::Fields(fields.clone())));
 
-        let query = QueryElement::ContainsElement(DataElement::Value(DataValue::String("Slixe".to_string())));
-        assert!(query.verify(&DataElement::Array(vec![DataElement::Value(DataValue::String("Slixe".to_string()))])));
+        let query = QueryElement::ContainsElement(DataElement::Value(DataValue::String("Terminos".to_string())));
+        assert!(query.verify(&DataElement::Array(vec![DataElement::Value(DataValue::String("Terminos".to_string()))])));
 
         let query = QueryElement::AtPosition {
             position: 0,
-            query: Box::new(Query::Value(QueryValue::Equal(DataValue::String("Slixe".to_string()))))
+            query: Box::new(Query::Value(QueryValue::Equal(DataValue::String("Terminos".to_string()))))
         };
-        assert!(query.verify(&DataElement::Array(vec![DataElement::Value(DataValue::String("Slixe".to_string()))])));
+        assert!(query.verify(&DataElement::Array(vec![DataElement::Value(DataValue::String("Terminos".to_string()))])));
 
         let query = QueryElement::Type(ElementType::Fields);
         assert!(query.verify(&DataElement::Fields(fields)));
@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn test_query_and() {
         let mut fields = HashMap::new();
-        fields.insert(DataValue::String("owner".to_string()), DataElement::Value(DataValue::String("Slixe".to_string())));
+        fields.insert(DataValue::String("owner".to_string()), DataElement::Value(DataValue::String("Terminos".to_string())));
         fields.insert(DataValue::String("balance".to_string()), DataElement::Value(DataValue::U8(25)));
 
         let element = DataElement::Fields(fields.clone());
@@ -357,7 +357,7 @@ mod tests {
         let query = Query::And(vec![
             Query::Element(QueryElement::HasKey {
                 key: DataValue::String("owner".to_string()),
-                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Slixe".to_string())))))
+                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Terminos".to_string())))))
             }),
             Query::Element(QueryElement::AtKey {
                 key: DataValue::String("balance".to_string()),
@@ -369,7 +369,7 @@ mod tests {
         let query = Query::And(vec![
             Query::Element(QueryElement::HasKey {
                 key: DataValue::String("owner".to_string()),
-                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Slixe".to_string())))))
+                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Terminos".to_string())))))
             }),
             Query::Element(QueryElement::AtKey {
                 key: DataValue::String("balance".to_string()),
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn test_query_or() {
         let mut fields = HashMap::new();
-        fields.insert(DataValue::String("owner".to_string()), DataElement::Value(DataValue::String("Slixe".to_string())));
+        fields.insert(DataValue::String("owner".to_string()), DataElement::Value(DataValue::String("Terminos".to_string())));
         fields.insert(DataValue::String("balance".to_string()), DataElement::Value(DataValue::U8(25)));
 
         let element = DataElement::Fields(fields);
@@ -394,7 +394,7 @@ mod tests {
             }),
             Query::Element(QueryElement::HasKey {
                 key: DataValue::String("owner".to_string()),
-                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Slixe".to_string())))))
+                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Terminos".to_string())))))
             })
         ]);
         assert!(query.verify_element(&element));
@@ -406,7 +406,7 @@ mod tests {
             }),
             Query::Not(Box::new(Query::Element(QueryElement::HasKey {
                 key: DataValue::String("owner".to_string()),
-                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Slixe".to_string())))))
+                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Terminos".to_string())))))
             })))
         ]);
         assert!(!query.verify_element(&element));
