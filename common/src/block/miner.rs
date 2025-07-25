@@ -14,8 +14,8 @@ use crate::{
     serializer::{Reader, ReaderError, Serializer, Writer},
     time::TimestampMillis,
 };
-use xelis_hash::{
-    Error as XelisHashError,
+use terminos_hash::{
+    Error as TerminosHashError,
     v1,
     v2,
 };
@@ -107,7 +107,7 @@ pub enum WorkerError {
     #[error("missing miner work")]
     MissingWork,
     #[error(transparent)]
-    HashError(#[from] XelisHashError)
+    HashError(#[from] TerminosHashError)
 }
 
 impl<'a> Worker<'a> {
@@ -188,10 +188,10 @@ impl<'a> Worker<'a> {
                 let mut input = v1::AlignedInput::default();
                 let slice = input.as_mut_slice()?;
                 slice[0..BLOCK_WORK_SIZE].copy_from_slice(work.as_ref());
-                v1::xelis_hash(slice, scratch_pad).map(|bytes| Hash::new(bytes))?
+                v1::terminos_hash(slice, scratch_pad).map(|bytes| Hash::new(bytes))?
             },
             WorkVariant::V2(scratch_pad) => {
-                v2::xelis_hash(work, scratch_pad).map(|bytes| Hash::new(bytes))?
+                v2::terminos_hash(work, scratch_pad).map(|bytes| Hash::new(bytes))?
             }
         };
 
@@ -362,7 +362,7 @@ mod tests {
         let mut input = v1::AlignedInput::default();
         let slice = input.as_mut_slice().unwrap();
         slice[0..BLOCK_WORK_SIZE].copy_from_slice(&work.to_bytes());
-        let expected_hash = v1::xelis_hash(slice, &mut v1::ScratchPad::default()).map(|bytes| Hash::new(bytes)).unwrap();
+        let expected_hash = v1::terminos_hash(slice, &mut v1::ScratchPad::default()).map(|bytes| Hash::new(bytes)).unwrap();
         let block_hash = work.hash();
 
         let mut worker = Worker::new();

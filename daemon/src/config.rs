@@ -205,7 +205,7 @@ const HARD_FORKS: [HardFork; 3] = [
     HardFork {
         height: 0,
         version: BlockVersion::V1,
-        changelog: "xelis-hash v2",
+        changelog: "terminos-hash v2",
         version_requirement: None
     },
     HardFork {
@@ -227,7 +227,7 @@ const OTHERS_NETWORK_HARD_FORKS: [HardFork; 4] = [
     HardFork {
         height: 5,
         version: BlockVersion::V1,
-        changelog: "xelis-hash v2",
+        changelog: "terminos-hash v2",
         version_requirement: Some(">=1.13.0")
     },
     HardFork {

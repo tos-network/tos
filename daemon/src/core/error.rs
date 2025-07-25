@@ -9,7 +9,7 @@ use terminos_common::{
         proofs::ProofVerificationError,
         Address,
         Hash,
-        XelisHashError
+        TerminosHashError
     },
     tokio::sync::AcquireError,
     account::Nonce,
@@ -353,7 +353,7 @@ pub enum BlockchainError {
     #[error("Invalid transaction proof: {}", _0)]
     TransactionProof(ProofVerificationError),
     #[error("Error while generating pow hash")]
-    POWHashError(#[from] XelisHashError),
+    POWHashError(#[from] TerminosHashError),
     #[error("Transfer count is invalid")]
     TransferCount,
     #[error("Invalid commitments assets")]

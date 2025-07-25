@@ -702,10 +702,10 @@ dependencies = [
 [[package]]
 name = "bulletproofs"
 version = "5.0.2"
-source = "git+https://github.com/xelis-project/bulletproofs?tag=v5.0.0#eca1052e33d38d06d8745ef07cc1c2c8ec5a0b78"
+source = "git+https://github.com/tos-network/bulletproofs?tag=v5.0.2#70e335fe1a35b812a8cd5346b4545e2a9e9b42b2"
 dependencies = [
  "byteorder",
- "curve25519-dalek 4.1.3 (git+https://github.com/xelis-project/curve25519-dalek?tag=v4.2.0)",
+ "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?tag=v4.2.0)",
  "digest",
  "group",
  "merlin",
@@ -1262,12 +1262,12 @@ dependencies = [
 [[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
-source = "git+https://github.com/xelis-project/curve25519-dalek?tag=v4.2.0#a7bd1e9c2f2d391ca151ae9c9a4f1a79d9b9060f"
+source = "git+https://github.com/tos-network/curve25519-dalek?tag=v4.2.0#0ca0e1a1cab7c08733e35cfedc33fc68db2058be"
 dependencies = [
  "bytemuck",
  "cfg-if",
  "cpufeatures",
- "curve25519-dalek-derive 0.1.1 (git+https://github.com/xelis-project/curve25519-dalek?tag=v4.2.0)",
+ "curve25519-dalek-derive 0.1.1 (git+https://github.com/tos-network/curve25519-dalek?tag=v4.2.0)",
  "digest",
  "fiat-crypto",
  "group",
@@ -1292,7 +1292,7 @@ dependencies = [
 [[package]]
 name = "curve25519-dalek-derive"
 version = "0.1.1"
-source = "git+https://github.com/xelis-project/curve25519-dalek?tag=v4.2.0#a7bd1e9c2f2d391ca151ae9c9a4f1a79d9b9060f"
+source = "git+https://github.com/tos-network/curve25519-dalek?tag=v4.2.0#0ca0e1a1cab7c08733e35cfedc33fc68db2058be"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3688,6 +3688,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "terminos-hash"
+version = "0.1.0"
+source = "git+https://github.com/tos-network/terminos-hash?branch=master#9cb37fe6168f38b4435db0013f61d8c60ab0ba6b"
+dependencies = [
+ "aes 0.8.4",
+ "blake3",
+ "bytemuck",
+ "chacha20 0.9.1",
+ "thiserror 1.0.69",
+ "tiny-keccak",
+]
+
+[[package]]
 name = "terminos-types"
 version = "0.1.0"
 source = "git+https://github.com/tos-network/terminos-vm?branch=dev#cd29c0e1f0835ef4c6033460111921d5e31f4be6"
@@ -3735,7 +3748,7 @@ dependencies = [
  "console-subscriber",
  "criterion",
  "crossterm",
- "curve25519-dalek 4.1.3 (git+https://github.com/xelis-project/curve25519-dalek?tag=v4.2.0)",
+ "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?tag=v4.2.0)",
  "fern",
  "futures",
  "futures-util",
@@ -3758,6 +3771,7 @@ dependencies = [
  "serde_regex",
  "sha3",
  "terminos-builder",
+ "terminos-hash",
  "terminos-types",
  "terminos-vm",
  "thiserror 2.0.12",
@@ -3765,7 +3779,6 @@ dependencies = [
  "tokio-tungstenite-wasm",
  "tokio_with_wasm",
  "win32console",
- "xelis-hash",
  "zeroize",
  "zip",
 ]
@@ -4936,19 +4949,6 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "zeroize",
-]
-
-[[package]]
-name = "xelis-hash"
-version = "0.1.0"
-source = "git+https://github.com/xelis-project/xelis-hash?branch=master#17a9dcd21a78a6e91ebf94e4ce407db7e7bd7f44"
-dependencies = [
- "aes 0.8.4",
- "blake3",
- "bytemuck",
- "chacha20 0.9.1",
- "thiserror 1.0.69",
- "tiny-keccak",
 ]
 
 [[package]]
