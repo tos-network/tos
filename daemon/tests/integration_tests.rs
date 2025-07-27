@@ -868,7 +868,7 @@ fn test_freeze_tos_integration() {
     // Create a real freeze_tos transaction
     let freeze_amount = 200 * COIN_VALUE; // 200 TOS
     let duration = terminos_common::account::FreezeDuration::new(7).unwrap();
-    let energy_gain = (freeze_amount / COIN_VALUE) * duration.reward_multiplier(); // 200 * 14 = 2800次转账
+    let energy_gain = (freeze_amount / COIN_VALUE) * duration.reward_multiplier(); // 200 * 14 = 2800 transfers
     
     // Create energy transaction builder
     let energy_builder = terminos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, duration.clone());
@@ -1508,7 +1508,7 @@ fn test_energy_system_demo() {
     println!("=== Freezing TOS for Energy ===");
     let topoheight = 1000;
     
-    // Freeze 1 TOS for 7 days (14次转账)
+    // Freeze 1 TOS for 7 days (14 transfers)
     let duration7 = terminos_common::account::FreezeDuration::new(7).unwrap();
     let energy_gained_7d = terminos_common::utils::energy_fee::EnergyResourceManager::freeze_tos_for_energy(
         &mut alice_energy,
@@ -1521,7 +1521,7 @@ fn test_energy_system_demo() {
     println!("Available energy: {} transfers", alice_energy.available_energy());
     println!();
 
-    // Freeze 2 TOS for 14 days (56次转账)
+    // Freeze 2 TOS for 14 days (56 transfers)
     let duration14 = terminos_common::account::FreezeDuration::new(14).unwrap();
     let energy_gained_14d = terminos_common::utils::energy_fee::EnergyResourceManager::freeze_tos_for_energy(
         &mut alice_energy,
