@@ -391,9 +391,13 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
     command_manager.remove_command("create")?;
 
     // Add wallet commands
-    command_manager.add_command(Command::new(
+    command_manager.add_command(Command::with_optional_arguments(
         "change_password",
         "Set a new password to open your wallet",
+        vec![
+            Arg::new("old_password", ArgType::String),
+            Arg::new("new_password", ArgType::String)
+        ],
         CommandHandler::Async(async_handler!(change_password))
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
@@ -463,9 +467,10 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "Show current nonce",
         CommandHandler::Async(async_handler!(nonce))
     ))?;
-    command_manager.add_command(Command::new(
+    command_manager.add_command(Command::with_optional_arguments(
         "set_nonce",
         "Set new nonce",
+        vec![Arg::new("nonce", ArgType::Number)],
         CommandHandler::Async(async_handler!(set_nonce))
     ))?;
     command_manager.add_command(Command::new(
@@ -632,9 +637,10 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "See the current transaction version",
         CommandHandler::Async(async_handler!(tx_version))
     ))?;
-    command_manager.add_command(Command::new(
+    command_manager.add_command(Command::with_optional_arguments(
         "set_tx_version",
         "Set the transaction version",
+        vec![Arg::new("version", ArgType::Number)],
         CommandHandler::Async(async_handler!(set_tx_version))
     ))?;
     command_manager.add_command(Command::new(
@@ -1063,19 +1069,27 @@ async fn untrack_asset(manager: &CommandManager, mut args: ArgumentManager) -> R
 }
 
 // Change wallet password
-async fn change_password(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
+async fn change_password(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
     let prompt = manager.get_prompt();
 
-    let old_password = prompt.read_input(prompt.colorize_string(Color::BrightRed, "Current Password: "), true)
-        .await
-        .context("Error while asking old password")?;
+    let old_password = if args.has_argument("old_password") {
+        args.get_value("old_password")?.to_string_value()?
+    } else {
+        prompt.read_input(prompt.colorize_string(Color::BrightRed, "Current Password: "), true)
+            .await
+            .context("Error while asking old password")?
+    };
 
-    let new_password = prompt.read_input(prompt.colorize_string(Color::BrightRed, "New Password: "), true)
-        .await
-        .context("Error while asking new password")?;
+    let new_password = if args.has_argument("new_password") {
+        args.get_value("new_password")?.to_string_value()?
+    } else {
+        prompt.read_input(prompt.colorize_string(Color::BrightRed, "New Password: "), true)
+            .await
+            .context("Error while asking new password")?
+    };
 
     manager.message("Changing password...");
     wallet.set_password(&old_password, &new_password).await?;
@@ -1756,9 +1770,13 @@ async fn nonce(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comma
     Ok(())
 }
 
-async fn set_nonce(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let value = manager.get_prompt().read("New Nonce: ".to_string()).await
-        .context("Error while reading new nonce to set")?;
+async fn set_nonce(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+    let value = if args.has_argument("nonce") {
+        args.get_value("nonce")?.to_number()?
+    } else {
+        manager.get_prompt().read("New Nonce: ".to_string()).await
+            .context("Error while reading new nonce to set")?
+    };
 
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
@@ -1779,9 +1797,14 @@ async fn tx_version(manager: &CommandManager, _: ArgumentManager) -> Result<(), 
     Ok(())
 }
 
-async fn set_tx_version(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let value: u8 = manager.get_prompt().read("New Transaction Version: ".to_string()).await
-        .context("Error while reading new transaction version to set")?;
+async fn set_tx_version(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+    let value: u8 = if args.has_argument("version") {
+        args.get_value("version")?.to_number()?.try_into()
+            .map_err(|_| CommandError::InvalidArgument("Invalid transaction version".to_string()))?
+    } else {
+        manager.get_prompt().read("New Transaction Version: ".to_string()).await
+            .context("Error while reading new transaction version to set")?
+    };
 
     let tx_version = TxVersion::try_from(value)
         .map_err(|_| CommandError::InvalidArgument("Invalid transaction version".to_string()))?;

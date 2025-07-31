@@ -16,8 +16,8 @@ pub struct FreezeDuration {
 impl FreezeDuration {
     /// Create a new freeze duration with validation
     pub fn new(days: u32) -> Result<Self, &'static str> {
-        if days < 3 || days > 90 {
-            return Err("Freeze duration must be between 3 and 90 days");
+        if days < crate::config::MIN_FREEZE_DURATION_DAYS || days > crate::config::MAX_FREEZE_DURATION_DAYS {
+            return Err("Freeze duration must be between 3 and 180 days");
         }
         Ok(Self { days })
     }
@@ -50,9 +50,9 @@ impl FreezeDuration {
         self.days
     }
 
-    /// Check if duration is valid (3-90 days)
+    /// Check if duration is valid (3-180 days)
     pub fn is_valid(&self) -> bool {
-        self.days >= 3 && self.days <= 90
+        self.days >= crate::config::MIN_FREEZE_DURATION_DAYS && self.days <= crate::config::MAX_FREEZE_DURATION_DAYS
     }
 }
 

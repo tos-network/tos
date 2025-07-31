@@ -582,6 +582,23 @@ impl Transaction {
             return Err(VerificationError::InvalidFormat);
         }
 
+        // Validate that Energy fee type can only be used with Transfer transactions
+        if self.get_fee_type().is_energy() {
+            if !matches!(self.data, TransactionType::Transfers(_)) {
+                return Err(VerificationError::InvalidFormat);
+            }
+            
+            // Validate that Energy fee type cannot be used for transfers to new addresses
+            if let TransactionType::Transfers(transfers) = &self.data {
+                for transfer in transfers {
+                    // Try to get the account nonce to check if account exists
+                    // If account doesn't exist, this will fail with AccountNotFound error
+                    let _nonce = state.get_account_nonce(transfer.get_destination()).await
+                        .map_err(|_| VerificationError::InvalidFormat)?;
+                }
+            }
+        }
+
         trace!("Pre-verifying transaction on state");
         state.pre_verify_tx(&self).await
             .map_err(VerificationError::State)?;

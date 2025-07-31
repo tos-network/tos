@@ -60,8 +60,20 @@ pub const MAX_GAS_USAGE_PER_TX: u64 = COIN_VALUE * 10;
 pub const COIN_DECIMALS: u8 = 8;
 // 100 000 000 to represent 1 TOS
 pub const COIN_VALUE: u64 = 10u64.pow(COIN_DECIMALS as u32);
-// 18.4M full coin
-pub const MAXIMUM_SUPPLY: u64 = 18_400_000 * COIN_VALUE;
+// 184M full coin
+pub const MAXIMUM_SUPPLY: u64 = 184_000_000 * COIN_VALUE;
+
+// ===== FREEZE DURATION LIMITS =====
+// Minimum freeze duration in days
+pub const MIN_FREEZE_DURATION_DAYS: u32 = 3;
+// Maximum freeze duration in days
+pub const MAX_FREEZE_DURATION_DAYS: u32 = 180;
+
+// ===== TOS AMOUNT LIMITS =====
+// Minimum TOS amount for freeze operations (1 TOS)
+pub const MIN_FREEZE_TOS_AMOUNT: u64 = COIN_VALUE;
+// Minimum TOS amount for unfreeze operations (1 TOS)
+pub const MIN_UNFREEZE_TOS_AMOUNT: u64 = COIN_VALUE;
 
 // Addresses format
 // mainnet prefix address

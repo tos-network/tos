@@ -30,4 +30,8 @@ pub trait AccountState: FeeHelper {
 
     /// Update account nonce
     fn update_nonce(&mut self, new_nonce: Nonce) -> Result<(), Self::Error>;
+
+    /// Check if an account is registered (exists) on the blockchain
+    /// This is used to validate Energy fee restrictions for new addresses
+    fn is_account_registered(&self, key: &crate::crypto::PublicKey) -> Result<bool, Self::Error>;
 }

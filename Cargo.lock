@@ -1416,6 +1416,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastrand"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+
+[[package]]
 name = "fern"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3642,6 +3648,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tempfile"
+version = "3.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8a64e3985349f2441a1a9ef0b853f869006c3855f2cda6862a94d26ebb9d6a1"
+dependencies = [
+ "fastrand",
+ "getrandom 0.3.3",
+ "once_cell",
+ "rustix 1.0.8",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "terminos-ast"
 version = "0.1.0"
 source = "git+https://github.com/tos-network/terminos-vm?branch=dev#cd29c0e1f0835ef4c6033460111921d5e31f4be6"
@@ -3877,6 +3896,7 @@ dependencies = [
  "serde_json",
  "sled",
  "strum",
+ "tempfile",
  "terminos_common",
  "thiserror 2.0.12",
  "tokio-tungstenite-wasm",

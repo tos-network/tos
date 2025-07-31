@@ -992,4 +992,9 @@ impl AccountState for AccountStateImpl {
         self.nonce = new_nonce;
         Ok(())
     }
+
+    fn is_account_registered(&self, _: &PublicKey) -> Result<bool, TestError> {
+        // For testing purposes, assume all accounts are registered
+        Ok(true)
+    }
 }

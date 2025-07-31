@@ -202,6 +202,11 @@ impl AccountState for TransactionBuilderState {
         self.nonce = new_nonce;
         Ok(())
     }
+
+    fn is_account_registered(&self, key: &PublicKey) -> Result<bool, Self::Error> {
+        // Use the same logic as account_exists for consistency
+        Ok(self.inner.registered_keys.contains(key))
+    }
 }
 
 impl AsMut<EstimateFeesState> for TransactionBuilderState {
