@@ -26,3 +26,6 @@ devnet*
 wallet.dat
 miner_wallet.dat
 test_wallet*/
+test_export.csv
+transactions_2024.csv
+wallet_history.csv
