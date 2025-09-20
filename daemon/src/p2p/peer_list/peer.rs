@@ -10,7 +10,7 @@ use crate::{
 };
 use anyhow::Context;
 use metrics::counter;
-use terminos_common::{
+use tos_common::{
     tokio::{
         select,
         sync::{broadcast, mpsc, oneshot, Mutex, Semaphore},
@@ -432,7 +432,7 @@ impl Peer {
         trace!("waiting for permit {}", request);
         let _permit = self.objects_semaphore.acquire().await?;
         debug!("requesting {}", request);
-        counter!("terminos_p2p_objects_requests", "peer" => self.get_id().to_string()).increment(1u64);
+        counter!("tos_p2p_objects_requests", "peer" => self.get_id().to_string()).increment(1u64);
 
         let mut receiver = {
             let mut objects = self.objects_requested.lock().await;
@@ -487,7 +487,7 @@ impl Peer {
 
         let _permit = self.objects_semaphore.acquire().await?;
         debug!("Requesting bootstrap chain step: {:?}", step_kind);
-        counter!("terminos_p2p_bootstrap_requests", "peer" => self.get_id().to_string()).increment(1u64);
+        counter!("tos_p2p_bootstrap_requests", "peer" => self.get_id().to_string()).increment(1u64);
 
         let (sender, receiver) = tokio::sync::oneshot::channel();
         {

@@ -9,9 +9,9 @@ use humantime::{format_duration, Duration as HumanDuration};
 use log::{debug, error, info, trace, warn};
 use rpc::rpc::get_block_response_for_hash;
 use serde::{Deserialize, Serialize};
-use terminos_common::{
+use tos_common::{
     async_handler,
-    config::{init, VERSION, TERMINOS_ASSET},
+    config::{init, VERSION, TOS_ASSET},
     context::Context,
     crypto::{
         Address,
@@ -45,7 +45,7 @@ use terminos_common::{
     utils::{
         format_difficulty,
         format_hashrate,
-        format_terminos
+        format_tos
     }
 };
 use crate::config::MILLIS_PER_SECOND;
@@ -85,7 +85,7 @@ use anyhow::{
 
 // Functions helpers for serde default values
 fn default_filename_log() -> String {
-    "terminos-daemon.log".to_owned()
+    "tos-daemon.log".to_owned()
 }
 
 fn default_logs_path() -> String {
@@ -107,7 +107,7 @@ pub struct LogConfig {
     #[serde(default)]
     disable_file_logging: bool,
     /// Disable the log filename date based
-    /// If disabled, the log file will be named terminos-daemon.log instead of YYYY-MM-DD.terminos-daemon.log
+    /// If disabled, the log file will be named tos-daemon.log instead of YYYY-MM-DD.tos-daemon.log
     #[clap(long)]
     #[serde(default)]
     disable_file_log_date_based: bool,
@@ -128,9 +128,9 @@ pub struct LogConfig {
     auto_compress_logs: bool,
     /// Log filename
     /// 
-    /// By default filename is terminos-daemon.log.
+    /// By default filename is tos-daemon.log.
     /// File will be stored in logs directory, this is only the filename, not the full path.
-    /// Log file is rotated every day and has the format YYYY-MM-DD.terminos-daemon.log.
+    /// Log file is rotated every day and has the format YYYY-MM-DD.tos-daemon.log.
     #[clap(long, default_value_t = default_filename_log())]
     #[serde(default = "default_filename_log")]
     filename_log: String,
@@ -156,8 +156,8 @@ pub struct LogConfig {
 }
 
 #[derive(Parser, Serialize, Deserialize)]
-#[clap(version = VERSION, about = "TERMINOS.")]
-#[command(styles = terminos_common::get_cli_styles())]
+#[clap(version = VERSION, about = "TOS.")]
+#[command(styles = tos_common::get_cli_styles())]
 pub struct CliConfig {
     /// Blockchain core configuration
     #[structopt(flatten)]
@@ -249,7 +249,7 @@ async fn main() -> Result<()> {
         log_config.datetime_format.clone(),
     )?;
 
-    info!("Terminos Blockchain running version: {}", VERSION);
+    info!("Tos Blockchain running version: {}", VERSION);
     info!("----------------------------------------------");
 
     let dir_path = blockchain_config.dir_path.as_deref()
@@ -464,7 +464,7 @@ fn build_prompt_message(
 
     format!(
         "{} | {} | {} | {} | {}{}{}{}{}{} ",
-        prompt.colorize_string(Color::Blue, "Terminos"),
+        prompt.colorize_string(Color::Blue, "Tos"),
         topoheight_str,
         network_hashrate_str,
         mempool_str,
@@ -509,7 +509,7 @@ async fn verify_chain<S: Storage>(manager: &CommandManager, mut args: ArgumentMa
             let expected_block_reward = storage.get_block_reward_at_topo_height(topo).context("Error while retrieving block reward")?;
             // Verify the saved block reward
             if block_reward != expected_block_reward {
-                manager.error(format!("Block reward saved is incorrect for {} at topoheight {}, got {} while expecting {}", hash_at_topo, topo, format_terminos(block_reward), format_terminos(expected_block_reward)));
+                manager.error(format!("Block reward saved is incorrect for {} at topoheight {}, got {} while expecting {}", hash_at_topo, topo, format_tos(block_reward), format_tos(expected_block_reward)));
                 return Ok(())
             }
             block_reward
@@ -526,13 +526,13 @@ async fn verify_chain<S: Storage>(manager: &CommandManager, mut args: ArgumentMa
 
         // Verify the supply at block
         if supply != expected_supply {
-            manager.error(format!("Error for block {} at topoheight {}, expected supply {} found {}", hash_at_topo, topo, format_terminos(expected_supply), format_terminos(supply)));
+            manager.error(format!("Error for block {} at topoheight {}, expected supply {} found {}", hash_at_topo, topo, format_tos(expected_supply), format_tos(supply)));
             return Ok(())
         }
 
         // Verify that we have a balance for each account updated
         let header = storage.get_block_header_by_hash(&hash_at_topo).await.context("Error while retrieving block header")?;
-        if !storage.has_balance_at_exact_topoheight(header.get_miner(), &TERMINOS_ASSET, topo).await.context("Error while checking the miner balance version")? {
+        if !storage.has_balance_at_exact_topoheight(header.get_miner(), &TOS_ASSET, topo).await.context("Error while checking the miner balance version")? {
             manager.error(format!("No balance version found for miner {} at topoheight {} for block {}", header.get_miner().as_address(blockchain.get_network().is_mainnet()), topo, hash_at_topo));
             return Ok(())
         }
@@ -558,7 +558,7 @@ async fn verify_chain<S: Storage>(manager: &CommandManager, mut args: ArgumentMa
                 }
 
                 // TODO: with upcoming smart contracts, this may be biased due to the gas fee
-                if let Some(burned) = transaction.get_burned_amount(&TERMINOS_ASSET) {
+                if let Some(burned) = transaction.get_burned_amount(&TOS_ASSET) {
                     burned_sum += burned;
                 }
 
@@ -584,7 +584,7 @@ async fn verify_chain<S: Storage>(manager: &CommandManager, mut args: ArgumentMa
         expected_burned_supply += burned_sum;
 
         if burned_supply != expected_burned_supply {
-            manager.error(format!("Error for block {} at topoheight {}, expected burned supply {} found {}", hash_at_topo, topo, format_terminos(expected_burned_supply), format_terminos(burned_supply)));
+            manager.error(format!("Error for block {} at topoheight {}, expected burned supply {} found {}", hash_at_topo, topo, format_tos(expected_burned_supply), format_tos(burned_supply)));
             return Ok(())
         }
     }
@@ -644,7 +644,7 @@ async fn print_balance<S: Storage>(manager: &CommandManager, _: ArgumentManager)
         .context("Error while reading topoheight")?;
 
     let asset = prompt.read_hash("Asset (default TOS): ").await.ok();
-    let asset = asset.unwrap_or(TERMINOS_ASSET);
+    let asset = asset.unwrap_or(TOS_ASSET);
 
     let balance = storage.get_balance_at_exact_topoheight(&address.to_public_key(), &asset, topoheight).await
         .context("Error while retrieving balance")?;
@@ -987,7 +987,7 @@ async fn show_balance<S: Storage>(manager: &CommandManager, mut arguments: Argum
         prompt.colorize_string(Color::Green, "Asset (default TOS): ")
     ).await.ok();
 
-    let asset = asset.unwrap_or(TERMINOS_ASSET);
+    let asset = asset.unwrap_or(TOS_ASSET);
 
     let mut history = if arguments.has_argument("history") {
         let value = arguments.get_value("history")?.to_number()?;
@@ -1192,10 +1192,10 @@ async fn status<S: Storage>(manager: &CommandManager, _: ArgumentManager) -> Res
     manager.message(format!("Top block hash: {}", top_block_hash));
     manager.message(format!("Average Block Time: {:.2}s", avg_block_time as f64 / MILLIS_PER_SECOND as f64));
     manager.message(format!("Target Block Time: {:.2}s", block_time_target as f64 / MILLIS_PER_SECOND as f64));
-    manager.message(format!("Emitted Supply: {} TOS", format_terminos(emitted_supply)));
-    manager.message(format!("Burned Supply: {} TOS", format_terminos(burned_supply)));
-    manager.message(format!("Circulating Supply: {} TOS", format_terminos(emitted_supply - burned_supply)));
-    manager.message(format!("Current Block Reward: {} TOS", format_terminos(get_block_reward(emitted_supply, block_time_target))));
+    manager.message(format!("Emitted Supply: {} TOS", format_tos(emitted_supply)));
+    manager.message(format!("Burned Supply: {} TOS", format_tos(burned_supply)));
+    manager.message(format!("Circulating Supply: {} TOS", format_tos(emitted_supply - burned_supply)));
+    manager.message(format!("Current Block Reward: {} TOS", format_tos(get_block_reward(emitted_supply, block_time_target))));
     manager.message(format!("Accounts/Transactions/Blocks/Assets/Contracts: {}/{}/{}/{}/{}", accounts_count, transactions_count, blocks_count, assets, contracts));
     manager.message(format!("Block Version: {}", version));
     manager.message(format!("POW Algorithm: {}", get_pow_algorithm_for_version(version)));

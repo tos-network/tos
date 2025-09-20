@@ -1,17 +1,17 @@
 [package]
-name = "terminos_common"
+name = "tos_common"
 version = "0.1.0"
 edition = "2021"
-authors = ["Terminos <info@tos.network>"]
+authors = ["Tos <info@tos.network>"]
 build = "build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-terminos-hash = { git = "https://github.com/tos-network/terminos-hash", branch = "master" }
-terminos-vm = { git = "https://github.com/tos-network/terminos-vm", branch = "dev", features = ["logging"] }
-terminos-types = { git = "https://github.com/tos-network/terminos-vm", branch = "dev" }
-terminos-builder = { git = "https://github.com/tos-network/terminos-vm", branch = "dev" }
+tos-hash = { git = "https://github.com/tos-network/tos-hash", branch = "master" }
+tos-vm = { git = "https://github.com/tos-network/tos-vm", branch = "dev", features = ["logging"] }
+tos-types = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
+tos-builder = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
 bulletproofs = { git = "https://github.com/tos-network/bulletproofs", tag = "v5.0.2" }
 curve25519-dalek = { features = ["digest", "group", "rand_core", "serde", "ecdlp"], git = "https://github.com/tos-network/curve25519-dalek", tag = "v4.2.0" }
 blake3 = "1.5.1"

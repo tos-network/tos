@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use futures::{stream, Stream, StreamExt};
 use log::trace;
 use rocksdb::Direction;
-use terminos_vm::ValueCell;
-use terminos_common::{
+use tos_vm::ValueCell;
+use tos_common::{
     block::TopoHeight,
     crypto::Hash,
     serializer::Serializer,

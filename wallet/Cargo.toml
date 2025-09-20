@@ -1,13 +1,13 @@
 [package]
-name = "terminos_wallet"
+name = "tos_wallet"
 version = "0.1.0"
 edition = "2021"
-authors = ["Terminos <info@tos.network>"]
+authors = ["Tos <info@tos.network>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-terminos_common = { path = "../common", features = ["tokio"] }
+tos_common = { path = "../common", features = ["tokio"] }
 sled = "0.34.7"
 argon2 = "0.4.1"
 crc32fast = "1.3.2"
@@ -49,11 +49,11 @@ wasm-bindgen-futures = "0.4.43"
 [features]
 # Set as default dependencies until https://github.com/rust-lang/cargo/issues/4663 is resolved for binary targets
 default = ["cli", "api_server", "tokio-multi-thread"]
-xswd = ["terminos_common/rpc", "dep:tokio-tungstenite-wasm", "dep:aes-gcm"]
-cli = ["tokio-multi-thread", "dep:clap", "terminos_common/prompt"]
-network_handler = ["terminos_common/rpc-client"]
-api_server = ["xswd", "network_handler", "terminos_common/rpc-server", "dep:actix-web", "dep:actix-web-httpauth"]
-tokio-multi-thread = ["terminos_common/tokio-multi-thread"]
+xswd = ["tos_common/rpc", "dep:tokio-tungstenite-wasm", "dep:aes-gcm"]
+cli = ["tokio-multi-thread", "dep:clap", "tos_common/prompt"]
+network_handler = ["tos_common/rpc-client"]
+api_server = ["xswd", "network_handler", "tos_common/rpc-server", "dep:actix-web", "dep:actix-web-httpauth"]
+tokio-multi-thread = ["tos_common/tokio-multi-thread"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

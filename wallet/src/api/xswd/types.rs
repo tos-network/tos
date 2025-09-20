@@ -8,7 +8,7 @@ use std::{
         Arc
     }
 };
-use terminos_common::{rpc::RpcRequest, serializer::*, tokio::sync::Mutex};
+use tos_common::{rpc::RpcRequest, serializer::*, tokio::sync::Mutex};
 
 // Used for context only
 #[derive(Clone, Hash, PartialEq, Eq)]

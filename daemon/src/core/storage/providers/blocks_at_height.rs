@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use async_trait::async_trait;
 use indexmap::IndexSet;
 use log::error;
-use terminos_common::{
+use tos_common::{
     crypto::{Hash, HASH_SIZE},
     serializer::{Reader, ReaderError, Serializer, Writer}
 };

@@ -1,7 +1,7 @@
 use std::{fmt, sync::Arc};
 
 use indexmap::IndexSet;
-use terminos_common::{
+use tos_common::{
     crypto::{Hash, PublicKey},
     time::{get_current_time_in_millis, TimestampMillis}
 };

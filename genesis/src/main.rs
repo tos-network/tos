@@ -1,4 +1,4 @@
-use terminos_common::{
+use tos_common::{
     block::{Block, BlockHeader, BlockVersion},
     crypto::{Address, Hashable},
     immutable::Immutable,

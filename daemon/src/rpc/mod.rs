@@ -25,7 +25,7 @@ use actix_web::{
 use anyhow::Context;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde_json::{Value, json};
-use terminos_common::{
+use tos_common::{
     tokio::sync::Mutex,
     api::daemon::NotifyEvent,
     config,

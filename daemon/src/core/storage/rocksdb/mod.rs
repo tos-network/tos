@@ -27,7 +27,7 @@ use rocksdb::{
 };
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
-use terminos_common::{
+use tos_common::{
     account::EnergyResource,
     block::{BlockHeader, TopoHeight},
     crypto::{Hash, PublicKey},

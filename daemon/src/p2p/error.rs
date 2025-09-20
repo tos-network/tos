@@ -9,7 +9,7 @@ use std::{
 };
 use thiserror::Error;
 use anyhow::Error;
-use terminos_common::{
+use tos_common::{
     tokio::{
         sync::{
             AcquireError,

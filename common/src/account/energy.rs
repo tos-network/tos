@@ -154,7 +154,7 @@ impl Serializer for FreezeRecord {
     }
 }
 
-/// Energy resource management for Terminos
+/// Energy resource management for Tos
 /// Enhanced with TRON-style freeze duration and reward multiplier system
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnergyResource {

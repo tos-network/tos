@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use futures::{stream, Stream, StreamExt};
 use log::trace;
-use terminos_common::{
+use tos_common::{
     block::TopoHeight,
     crypto::{hash, Hash},
     serializer::Serializer,
 };
-use terminos_vm::ValueCell;
+use tos_vm::ValueCell;
 use crate::core::{
     error::{BlockchainError, DiskContext},
     storage::{ContractDataProvider, SledStorage, VersionedContractData}

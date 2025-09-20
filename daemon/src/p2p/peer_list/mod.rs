@@ -18,7 +18,7 @@ use serde::{Serialize, Deserialize};
 use x25519_dalek::PublicKey;
 use bytes::Bytes;
 use log::{info, debug, trace, error};
-use terminos_common::{
+use tos_common::{
     tokio::sync::{mpsc::Sender, RwLock},
     block::TopoHeight,
     serializer::{Reader, ReaderError, Serializer, Writer},
@@ -147,7 +147,7 @@ impl PeerList {
         };
 
         trace!("Signaling exit of {}", peer);
-        gauge!("terminos_p2p_peers_current").set(peers.len() as f64);
+        gauge!("tos_p2p_peers_current").set(peers.len() as f64);
 
         let res = peer.signal_exit().await;
  
@@ -215,7 +215,7 @@ impl PeerList {
             peers.len()
         };
         info!("New peer connected: {}", peer);
-        gauge!("terminos_p2p_peers_current").set(count as f64);
+        gauge!("tos_p2p_peers_current").set(count as f64);
 
         if peer.is_out() {
             self.increment_outgoing_peers_count();

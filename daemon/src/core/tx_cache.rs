@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use terminos_common::{
+use tos_common::{
     transaction::verify::ZKPCache,
     crypto::Hash
 };

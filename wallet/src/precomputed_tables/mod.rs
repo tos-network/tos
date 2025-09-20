@@ -1,5 +1,5 @@
 use std::sync::{Arc, RwLock};
-use terminos_common::crypto::ecdlp;
+use tos_common::crypto::ecdlp;
 
 #[cfg(all(
     target_arch = "wasm32",

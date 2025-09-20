@@ -12,8 +12,8 @@ use anyhow::Context as AnyhowContext;
 use better_any::Tid;
 use indexmap::IndexMap;
 use log::{debug, info};
-use terminos_builder::EnvironmentBuilder;
-use terminos_vm::{
+use tos_builder::EnvironmentBuilder;
+use tos_vm::{
     Context,
     FnInstance,
     FnParams,

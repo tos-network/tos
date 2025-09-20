@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::warn;
 use thiserror::Error;
-use terminos_common::serializer::{
+use tos_common::serializer::{
     Reader,
     ReaderError,
     Serializer,
@@ -26,7 +26,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
     target_vendor = "unknown",
     target_os = "unknown"
 ))]
-const PREFIX_DB_KEY: &'static str = "___terminos_db___";
+const PREFIX_DB_KEY: &'static str = "___tos_db___";
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct IVec(Arc<Vec<u8>>);
@@ -558,7 +558,7 @@ mod tests {
         assert!(tree.is_empty());
         assert_eq!(tree.len(), 0);
 
-        tree.insert("terminos", "sonimret").unwrap();
+        tree.insert("tos", "sonimret").unwrap();
         assert_eq!(tree.len(), 1);
 
         tree.clear().unwrap();
@@ -589,7 +589,7 @@ mod tests {
 
         let tree = db.open_tree("test").unwrap();
         tree.insert("test", "test").unwrap();
-        tree.insert("terminos", "sonimret").unwrap();
+        tree.insert("tos", "sonimret").unwrap();
 
         let mut buffer = Vec::new();
         let mut writer = Writer::new(&mut buffer);
@@ -605,8 +605,8 @@ mod tests {
         assert_eq!(tree.name(), b"test".into());
         assert_eq!(tree.len(), 2);
         assert_eq!(tree.get("test").unwrap().unwrap(), b"test".into());
-        assert_eq!(tree.contains_key("terminos").unwrap(), true);
-        assert_eq!(tree.get("terminos").unwrap().unwrap(), b"sonimret".into());
+        assert_eq!(tree.contains_key("tos").unwrap(), true);
+        assert_eq!(tree.get("tos").unwrap().unwrap(), b"sonimret".into());
 
         assert_eq!(db.get("hello").unwrap().unwrap(), b"world".into());
         db.flush().unwrap();

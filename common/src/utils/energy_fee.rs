@@ -6,7 +6,7 @@ use crate::{
     },
 };
 
-/// Energy-based fee calculator for Terminos
+/// Energy-based fee calculator for Tos
 /// Implements TRON-style energy model without bandwidth
 pub struct EnergyFeeCalculator;
 

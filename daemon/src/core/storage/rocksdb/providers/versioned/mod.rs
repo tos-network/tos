@@ -1,6 +1,6 @@
 use rocksdb::Direction;
 use log::trace;
-use terminos_common::{
+use tos_common::{
     block::TopoHeight,
     serializer::RawBytes,
     versioned_type::Versioned

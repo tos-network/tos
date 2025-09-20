@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use terminos_common::serializer::{Serializer, Reader, ReaderError, Writer};
+use tos_common::serializer::{Serializer, Reader, ReaderError, Writer};
 
 // this packet is sent when a peer disconnects from one of our peer
 // it is used to continue to track common peers between us and our peers

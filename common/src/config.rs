@@ -5,7 +5,7 @@ use crate::{
 };
 
 pub const VERSION: &str = env!("BUILD_VERSION");
-pub const TERMINOS_ASSET: Hash = Hash::zero();
+pub const TOS_ASSET: Hash = Hash::zero();
 
 // ===== NEW ENERGY-BASED FEE MODEL =====
 

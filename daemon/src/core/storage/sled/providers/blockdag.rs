@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use log::trace;
-use terminos_common::{
+use tos_common::{
     block::{BlockHeader, TopoHeight},
     crypto::Hash,
     immutable::Immutable

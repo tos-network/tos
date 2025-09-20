@@ -1,7 +1,7 @@
 use std::{sync::Arc, borrow::Cow};
 use anyhow::Context as AnyContext;
 use cfg_if::cfg_if;
-use terminos_common::{
+use tos_common::{
     api::{
         wallet::*,
         DataElement,
@@ -10,7 +10,7 @@ use terminos_common::{
         SplitAddressResult
     },
     async_handler,
-    config::{VERSION, TERMINOS_ASSET},
+    config::{VERSION, TOS_ASSET},
     context::Context,
     crypto::{Hashable, KeyPair},
     rpc::{
@@ -241,7 +241,7 @@ async fn rescan(context: &Context, body: Value) -> Result<Value, InternalRpcErro
 // By default, it will returns 0 if no balance is found on disk
 async fn get_balance(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetBalanceParams = parse_params(body)?;
-    let asset = params.asset.unwrap_or(TERMINOS_ASSET);
+    let asset = params.asset.unwrap_or(TOS_ASSET);
     let wallet: &Arc<Wallet> = context.get()?;
     let storage = wallet.get_storage().read().await;
 
@@ -254,7 +254,7 @@ async fn get_balance(context: &Context, body: Value) -> Result<Value, InternalRp
 // Check if the wallet has a balance for a specific asset
 async fn has_balance(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetBalanceParams = parse_params(body)?;
-    let asset = params.asset.unwrap_or(TERMINOS_ASSET);
+    let asset = params.asset.unwrap_or(TOS_ASSET);
     let wallet: &Arc<Wallet> = context.get()?;
     let storage = wallet.get_storage().read().await;
 

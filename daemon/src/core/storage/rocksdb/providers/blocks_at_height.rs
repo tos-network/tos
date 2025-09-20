@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use async_trait::async_trait;
 use indexmap::IndexSet;
 use log::trace;
-use terminos_common::crypto::Hash;
+use tos_common::crypto::Hash;
 use crate::core::{
     error::BlockchainError,
     storage::{

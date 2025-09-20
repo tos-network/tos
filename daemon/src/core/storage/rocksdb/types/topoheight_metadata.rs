@@ -1,4 +1,4 @@
-use terminos_common::serializer::*;
+use tos_common::serializer::*;
 
 pub struct TopoHeightMetadata {
     pub rewards: u64,

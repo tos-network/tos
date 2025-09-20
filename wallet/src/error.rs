@@ -3,13 +3,13 @@ use thiserror::Error;
 use chacha20poly1305::Error as CryptoError;
 #[cfg(feature = "network_handler")]
 use super::network_handler::NetworkError;
-use terminos_common::{
+use tos_common::{
     crypto::Hash,
     transaction::extra_data::CipherFormatError,
-    utils::{format_coin, format_terminos}
+    utils::{format_coin, format_tos}
 };
 #[cfg(feature = "xswd")]
-use terminos_common::rpc::InternalRpcError;
+use tos_common::rpc::InternalRpcError;
 
 use anyhow::Error;
 
@@ -55,7 +55,7 @@ pub enum WalletError {
     NoSaltFound,
     #[error("Your wallet contains only {} instead of {} for asset {}", format_coin(*_0, *_2), format_coin(*_1, *_2), _3)]
     NotEnoughFunds(u64, u64, u8, Hash),
-    #[error("Your wallet don't have enough funds to pay fees: expected {} but have only {}", format_terminos(*_0), format_terminos(*_1))]
+    #[error("Your wallet don't have enough funds to pay fees: expected {} but have only {}", format_tos(*_0), format_tos(*_1))]
     NotEnoughFundsForFee(u64, u64),
     #[error("Invalid address params")]
     InvalidAddressParams,
@@ -77,7 +77,7 @@ pub enum WalletError {
     RPCServerNotRunning,
     #[error("RPC Server is already running")]
     RPCServerAlreadyRunning,
-    #[error("Invalid fees provided, minimum fees calculated: {}, provided: {}", format_terminos(*_0), format_terminos(*_1))]
+    #[error("Invalid fees provided, minimum fees calculated: {}, provided: {}", format_tos(*_0), format_tos(*_1))]
     InvalidFeeProvided(u64, u64),
     #[error("Wallet name cannot be empty")]
     EmptyName,

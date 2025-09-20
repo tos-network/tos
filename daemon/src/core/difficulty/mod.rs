@@ -1,5 +1,5 @@
 use log::trace;
-use terminos_common::{
+use tos_common::{
     block::BlockVersion,
     difficulty::Difficulty,
     network::Network,
@@ -111,7 +111,7 @@ pub const fn get_difficulty_at_hard_fork(network: &Network, version: BlockVersio
 
 #[cfg(test)]
 mod tests {
-    use terminos_common::utils::format_hashrate;
+    use tos_common::utils::format_hashrate;
     use crate::config::{HASH, MEGA_HASH};
 
     use super::*;

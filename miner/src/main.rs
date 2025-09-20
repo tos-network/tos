@@ -41,7 +41,7 @@ use tokio_tungstenite::{
         Error as TungsteniteError
     }
 };
-use terminos_common::{
+use tos_common::{
     api::daemon::{
         GetMinerWorkResult,
         SubmitMinerWorkParams,
@@ -106,7 +106,7 @@ fn default_iterations() -> usize {
 }
 
 fn default_log_filename() -> String {
-    "terminos-miner.log".to_owned()
+    "tos-miner.log".to_owned()
 }
 
 fn default_logs_path() -> String {
@@ -132,7 +132,7 @@ pub struct LogConfig {
     #[serde(default)]
     disable_file_logging: bool,
     /// Disable the log filename date based
-    /// If disabled, the log file will be named terminos-miner.log instead of YYYY-MM-DD.terminos-miner.log
+    /// If disabled, the log file will be named tos-miner.log instead of YYYY-MM-DD.tos-miner.log
     #[clap(long)]
     #[serde(default)]
     disable_file_log_date_based: bool,
@@ -153,10 +153,10 @@ pub struct LogConfig {
     disable_interactive_mode: bool,
     /// Log filename
     /// 
-    /// By default filename is terminos-miner.log.
+    /// By default filename is tos-miner.log.
     /// File will be stored in logs directory, this is only the filename, not the full path.
-    /// Log file is rotated every day and has the format YYYY-MM-DD.terminos-miner.log.
-    #[clap(default_value_t = String::from("terminos-miner.log"))]
+    /// Log file is rotated every day and has the format YYYY-MM-DD.tos-miner.log.
+    #[clap(default_value_t = String::from("tos-miner.log"))]
     #[serde(default = "default_log_filename")]
     filename_log: String,
     /// Logs directory
@@ -192,8 +192,8 @@ pub struct BenchmarkConfig {
 }
 
 #[derive(Parser, Serialize, Deserialize)]
-#[clap(version = VERSION, about = "Terminos.")]
-#[command(styles = terminos_common::get_cli_styles())]
+#[clap(version = VERSION, about = "Tos.")]
+#[command(styles = tos_common::get_cli_styles())]
 pub struct Config {
     /// Log configuration
     #[clap(flatten)]
@@ -705,7 +705,7 @@ async fn run_prompt(prompt: ShareablePrompt) -> Result<()> {
         Ok(
             format!(
                 "{} | {} | {} | {} | {} | {} {} ",
-                prompt.colorize_string(Color::Blue, "Terminos Miner"),
+                prompt.colorize_string(Color::Blue, "Tos Miner"),
                 topoheight_str,
                 blocks_found,
                 blocks_rejected,

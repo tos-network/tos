@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use terminos_common::{
+use tos_common::{
     account::CiphertextCache,
     block::TopoHeight,
     crypto::Hash,

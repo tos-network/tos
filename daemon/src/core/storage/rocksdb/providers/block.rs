@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use async_trait::async_trait;
 use log::trace;
-use terminos_common::{
+use tos_common::{
     block::{Block, BlockHeader},
     crypto::Hash,
     difficulty::{CumulativeDifficulty, Difficulty},

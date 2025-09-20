@@ -1,4 +1,4 @@
-use terminos_vm::tid;
+use tos_vm::tid;
 
 use crate::{
     account::CiphertextCache,

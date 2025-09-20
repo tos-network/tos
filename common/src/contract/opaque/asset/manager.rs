@@ -1,5 +1,5 @@
 use blake3::hash;
-use terminos_vm::{
+use tos_vm::{
     Context,
     EnvironmentError,
     FnInstance,

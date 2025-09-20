@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use terminos_common::{
+use tos_common::{
     block::TopoHeight,
     crypto::{Hash, HASH_SIZE},
     serializer::Serializer

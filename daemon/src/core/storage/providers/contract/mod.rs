@@ -6,12 +6,12 @@ mod supply;
 use std::borrow::Cow;
 
 use async_trait::async_trait;
-use terminos_common::{
+use tos_common::{
     block::TopoHeight,
     crypto::Hash,
     versioned_type::Versioned
 };
-use terminos_vm::Module;
+use tos_vm::Module;
 use crate::core::error::BlockchainError;
 
 pub use data::*;

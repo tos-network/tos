@@ -9,7 +9,7 @@ mod dag_order;
 
 use log::{debug, trace};
 use sled::Tree;
-use terminos_common::{
+use tos_common::{
     block::TopoHeight,
     serializer::{NoTransform, Serializer},
     versioned_type::Versioned

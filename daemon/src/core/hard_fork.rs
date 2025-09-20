@@ -1,5 +1,5 @@
 use anyhow::Result;
-use terminos_common::{
+use tos_common::{
     api::daemon::HardFork,
     block::{Algorithm, BlockVersion},
     network::Network,
@@ -106,7 +106,7 @@ pub const fn is_tx_version_allowed_in_block_version(tx_version: TxVersion, block
 
 #[cfg(test)]
 mod tests {
-    use terminos_common::{
+    use tos_common::{
         block::BlockVersion,
         transaction::TxVersion
     };

@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use indexmap::{IndexMap, IndexSet};
 use log::debug;
-use terminos_common::{
+use tos_common::{
     account::{AccountSummary, Balance, Nonce},
     asset::AssetData,
     block::TopoHeight,
@@ -20,7 +20,7 @@ use terminos_common::{
     transaction::MultiSigPayload,
     versioned_type::State
 };
-use terminos_vm::{Module, ValueCell};
+use tos_vm::{Module, ValueCell};
 use crate::{
     config::{CHAIN_SYNC_REQUEST_MAX_BLOCKS, PEER_MAX_PACKET_SIZE, PRUNE_SAFETY_LIMIT},
     p2p::packet::{

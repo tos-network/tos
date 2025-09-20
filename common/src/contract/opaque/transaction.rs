@@ -1,6 +1,6 @@
 use anyhow::Context as AnyhowContext;
 use std::sync::Arc;
-use terminos_vm::{
+use tos_vm::{
     traits::{JSONHelper, Serializable},
     Context,
     FnInstance,

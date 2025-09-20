@@ -9,11 +9,11 @@ mod memory_storage;
 
 use bulletproofs::RangeProof;
 use log::debug;
-use terminos_types::{
+use tos_types::{
     register_opaque_json,
     impl_opaque
 };
-use terminos_vm::{tid, traits::JSON_REGISTRY, OpaqueWrapper};
+use tos_vm::{tid, traits::JSON_REGISTRY, OpaqueWrapper};
 use crate::{
     account::CiphertextCache,
     block::Block,
@@ -122,7 +122,7 @@ mod tests {
 
     use super::*;
     use serde_json::json;
-    use terminos_vm::OpaqueWrapper;
+    use tos_vm::OpaqueWrapper;
 
     #[test]
     fn test_address_serde() {

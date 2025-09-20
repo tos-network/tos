@@ -8,7 +8,7 @@ use std::{
 };
 use indexmap::IndexMap;
 use lru::LruCache;
-use terminos_common::{
+use tos_common::{
     api::{
         query::{
             Query,
@@ -19,7 +19,7 @@ use terminos_common::{
     },
     asset::AssetData,
     block::TopoHeight,
-    config::TERMINOS_ASSET,
+    config::TOS_ASSET,
     crypto::{
         elgamal::CompressedCiphertext,
         Hash,
@@ -133,7 +133,7 @@ pub struct EncryptedStorage {
     // Multisig state
     multisig_state: Option<MultiSig>,
     // Energy resource state
-    energy_resource: Option<terminos_common::account::EnergyResource>
+    energy_resource: Option<tos_common::account::EnergyResource>
 }
 
 impl EncryptedStorage {
@@ -189,9 +189,9 @@ impl EncryptedStorage {
             storage.energy_resource = Some(storage.load_from_disk(&storage.extra, ENERGY_RESOURCE)?);
         }
 
-        // Force tracking of native terminos asset
-        if !storage.is_asset_tracked(&TERMINOS_ASSET)? {
-            storage.track_asset(&TERMINOS_ASSET)?;
+        // Force tracking of native tos asset
+        if !storage.is_asset_tracked(&TOS_ASSET)? {
+            storage.track_asset(&TOS_ASSET)?;
         }
 
         Ok(storage)
@@ -570,13 +570,13 @@ impl EncryptedStorage {
     }
 
     // Get the energy resource
-    pub async fn get_energy_resource(&self) -> Result<Option<&terminos_common::account::EnergyResource>> {
+    pub async fn get_energy_resource(&self) -> Result<Option<&tos_common::account::EnergyResource>> {
         trace!("get energy resource");
         Ok(self.energy_resource.as_ref())
     }
 
     // Set the energy resource
-    pub async fn set_energy_resource(&mut self, energy_resource: terminos_common::account::EnergyResource) -> Result<()> {
+    pub async fn set_energy_resource(&mut self, energy_resource: tos_common::account::EnergyResource) -> Result<()> {
         trace!("set energy resource");
         self.save_to_disk(&self.extra, ENERGY_RESOURCE, &energy_resource.to_bytes())?;
         self.energy_resource = Some(energy_resource);
@@ -584,7 +584,7 @@ impl EncryptedStorage {
     }
 
     // Update the energy resource (if it exists)
-    pub async fn update_energy_resource(&mut self, updater: impl FnOnce(&mut terminos_common::account::EnergyResource)) -> Result<()> {
+    pub async fn update_energy_resource(&mut self, updater: impl FnOnce(&mut tos_common::account::EnergyResource)) -> Result<()> {
         trace!("update energy resource");
         if let Some(mut resource) = self.energy_resource.take() {
             updater(&mut resource);
@@ -1183,7 +1183,7 @@ impl EncryptedStorage {
 
             let mut transfers: Option<Vec<Transfer>> = None;
             match entry.get_mut_entry() {
-                EntryData::Coinbase { .. } if accept_coinbase && (asset.map(|a| *a == TERMINOS_ASSET).unwrap_or(true)) => {},
+                EntryData::Coinbase { .. } if accept_coinbase && (asset.map(|a| *a == TOS_ASSET).unwrap_or(true)) => {},
                 EntryData::Burn { asset: burn_asset, .. } if accept_burn => {
                     if let Some(asset) = asset {
                         if *asset != *burn_asset {

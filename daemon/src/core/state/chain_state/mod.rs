@@ -7,7 +7,7 @@ use std::{
 };
 use async_trait::async_trait;
 use log::{debug, trace};
-use terminos_common::{
+use tos_common::{
     account::{
         CiphertextCache,
         Nonce,
@@ -15,7 +15,7 @@ use terminos_common::{
         VersionedNonce
     },
     block::{BlockVersion, TopoHeight},
-    config::TERMINOS_ASSET,
+    config::TOS_ASSET,
     crypto::{
         elgamal::Ciphertext,
         Hash,
@@ -27,11 +27,11 @@ use terminos_common::{
         Reference,
         Transaction
     },
-    utils::format_terminos,
+    utils::format_tos,
     versioned_type::VersionedState,
 };
-use terminos_environment::Environment;
-use terminos_vm::Module;
+use tos_environment::Environment;
+use tos_vm::Module;
 use crate::core::{
     error::BlockchainError,
     storage::Storage
@@ -317,8 +317,8 @@ impl<'a, S: Storage> ChainState<'a, S> {
 
     // Reward a miner for the block mined
     pub async fn reward_miner(&mut self, miner: &'a PublicKey, reward: u64) -> Result<(), BlockchainError> {
-        debug!("Rewarding miner {} with {} TOS at topoheight {}", miner.as_address(self.storage.is_mainnet()), format_terminos(reward), self.topoheight);
-        let miner_balance = self.internal_get_receiver_balance(Cow::Borrowed(miner), Cow::Borrowed(&TERMINOS_ASSET)).await?;
+        debug!("Rewarding miner {} with {} TOS at topoheight {}", miner.as_address(self.storage.is_mainnet()), format_tos(reward), self.topoheight);
+        let miner_balance = self.internal_get_receiver_balance(Cow::Borrowed(miner), Cow::Borrowed(&TOS_ASSET)).await?;
         *miner_balance += reward;
 
         Ok(())

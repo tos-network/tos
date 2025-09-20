@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use terminos_common::{
+use tos_common::{
     api::daemon::{DevFeeThreshold, HardFork},
     block::BlockVersion,
     config::BYTES_PER_KB,
@@ -205,7 +205,7 @@ const HARD_FORKS: [HardFork; 3] = [
     HardFork {
         height: 0,
         version: BlockVersion::V1,
-        changelog: "terminos-hash v2",
+        changelog: "tos-hash v2",
         version_requirement: None
     },
     HardFork {
@@ -227,7 +227,7 @@ const OTHERS_NETWORK_HARD_FORKS: [HardFork; 4] = [
     HardFork {
         height: 5,
         version: BlockVersion::V1,
-        changelog: "terminos-hash v2",
+        changelog: "tos-hash v2",
         version_requirement: Some(">=1.13.0")
     },
     HardFork {

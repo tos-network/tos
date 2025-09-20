@@ -1,13 +1,13 @@
 [package]
-name = "terminos_miner"
+name = "tos_miner"
 version = "0.1.0"
 edition = "2021"
-authors = ["Terminos <info@tos.network>"]
+authors = ["Tos <info@tos.network>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-terminos_common = { path = "../common", features = ["prompt", "clap"] }
+tos_common = { path = "../common", features = ["prompt", "clap"] }
 tokio-tungstenite = { version = "0.27", features = ["rustls-tls-native-roots"] }
 
 # Common dependencies

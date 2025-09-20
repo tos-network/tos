@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use indexmap::IndexSet;
 use log::debug;
-use terminos_common::{
+use tos_common::{
     crypto::{Hash, HASH_SIZE},
     serializer::{
         Serializer,

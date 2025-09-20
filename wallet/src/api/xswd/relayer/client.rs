@@ -5,7 +5,7 @@ use tokio_tungstenite_wasm::{
     Message,
     connect,
 };
-use terminos_common::tokio::{
+use tos_common::tokio::{
     select,
     spawn_task,
     sync::mpsc

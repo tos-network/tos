@@ -8,7 +8,7 @@ use serde_json::{
     Value,
     json
 };
-use terminos_common::{
+use tos_common::{
     api::wallet::NotifyEvent,
     context::Context,
     crypto::elgamal::PublicKey as DecompressedPublicKey,
@@ -26,8 +26,8 @@ pub use error::XSWDError;
 pub use types::*;
 pub use relayer::{XSWDRelayer, XSWDRelayerShared};
 
-// XSWD Protocol (XTERMINOS Secure WebSocket DApp)
-// is a way to communicate with the TERMINOS Wallet
+// XSWD Protocol (XTOS Secure WebSocket DApp)
+// is a way to communicate with the TOS Wallet
 // from a web browser through a websocket.
 // XSWD is exactly as the JSON RPC api
 // but an application must authenticate itself first

@@ -21,11 +21,11 @@ use curve25519_dalek::{
 use indexmap::IndexMap;
 use log::{debug, trace};
 use merlin::Transcript;
-use terminos_vm::ModuleValidator;
+use tos_vm::ModuleValidator;
 use crate::{
     tokio::spawn_blocking_safe,
     account::{Nonce, EnergyResource},
-    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TERMINOS_ASSET},
+    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     contract::ContractProvider,
     crypto::{
         elgamal::{
@@ -133,7 +133,7 @@ impl Transaction {
     ) -> Result<Ciphertext, DecompressionError> {
         let mut output = Ciphertext::zero();
 
-        if *asset == TERMINOS_ASSET {
+        if *asset == TOS_ASSET {
             // Fees are applied to the native blockchain asset only.
             output += Scalar::from(self.fee);
         }
@@ -153,7 +153,7 @@ impl Transaction {
             },
             TransactionType::MultiSig(_) => {},
             TransactionType::InvokeContract(payload) => {
-                if *asset == TERMINOS_ASSET {
+                if *asset == TOS_ASSET {
                     output += Scalar::from(payload.max_gas);
                 }
 
@@ -173,7 +173,7 @@ impl Transaction {
             },
             TransactionType::DeployContract(payload) => {
                 if let Some(invoke) = payload.invoke.as_ref() {
-                    if *asset == TERMINOS_ASSET {
+                    if *asset == TOS_ASSET {
                         output += Scalar::from(invoke.max_gas);
                     }
 
@@ -193,7 +193,7 @@ impl Transaction {
                 }
 
                 // Burn a full coin for each contract deployed
-                if *asset == TERMINOS_ASSET {
+                if *asset == TOS_ASSET {
                     output += Scalar::from(BURN_PER_CONTRACT);
                 }
             },
@@ -203,7 +203,7 @@ impl Transaction {
                 match payload {
                     EnergyPayload::FreezeTos { amount, duration } => {
                         // For freeze operations, deduct the freeze amount from TOS balance
-                        if *asset == TERMINOS_ASSET {
+                        if *asset == TOS_ASSET {
                             output += Scalar::from(*amount);
                             let _energy_gained = (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier();
                             debug!("FreezeTos operation: deducting {} TOS from balance for asset {}", amount, asset);
@@ -292,8 +292,8 @@ impl Transaction {
                 .any(|c| c.get_asset() == asset)
         };
 
-        // TERMINOS_ASSET is always required for fees
-        if !has_commitment_for_asset(&TERMINOS_ASSET) {
+        // TOS_ASSET is always required for fees
+        if !has_commitment_for_asset(&TOS_ASSET) {
             return false;
         }
 
@@ -1184,7 +1184,7 @@ impl Transaction {
                 }
             },
             TransactionType::Burn(payload) => {
-                if payload.asset == TERMINOS_ASSET {
+                if payload.asset == TOS_ASSET {
                     state.add_burned_coins(payload.amount).await
                         .map_err(VerificationError::State)?;
                 }

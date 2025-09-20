@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use log::{trace, debug, error};
-use terminos_common::{
+use tos_common::{
     crypto::PublicKey,
     serializer::Serializer,
     block::TopoHeight,

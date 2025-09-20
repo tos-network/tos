@@ -6,7 +6,7 @@ use log::info;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "cli")]
 use clap::Parser;
-use terminos_common::{
+use tos_common::{
     config::VERSION,
     crypto::ecdlp,
     network::Network,
@@ -14,7 +14,7 @@ use terminos_common::{
 };
 
 #[cfg(feature = "cli")]
-use terminos_common::prompt::{
+use tos_common::prompt::{
     default_logs_datetime_format,
     LogLevel,
     ModuleConfig
@@ -71,7 +71,7 @@ fn default_precomputed_tables_l1() -> usize {
 }
 
 fn default_log_filename() -> String {
-    String::from("terminos-wallet.log")
+    String::from("tos-wallet.log")
 }
 
 fn default_logs_path() -> String {
@@ -125,7 +125,7 @@ pub struct LogConfig {
     #[serde(default)]
     pub disable_file_logging: bool,
     /// Disable the log filename date based
-    /// If disabled, the log file will be named terminos-wallet.log instead of YYYY-MM-DD.terminos-wallet.log
+    /// If disabled, the log file will be named tos-wallet.log instead of YYYY-MM-DD.tos-wallet.log
     #[clap(long)]
     #[serde(default)]
     pub disable_file_log_date_based: bool,
@@ -146,9 +146,9 @@ pub struct LogConfig {
     pub disable_interactive_mode: bool,
     /// Log filename
     /// 
-    /// By default filename is terminos-wallet.log.
+    /// By default filename is tos-wallet.log.
     /// File will be stored in logs directory, this is only the filename, not the full path.
-    /// Log file is rotated every day and has the format YYYY-MM-DD.terminos-wallet.log.
+    /// Log file is rotated every day and has the format YYYY-MM-DD.tos-wallet.log.
     #[clap(long, default_value_t = default_log_filename())]
     #[serde(default = "default_log_filename")]
     pub filename_log: String,
@@ -175,8 +175,8 @@ pub struct LogConfig {
 
 #[cfg(feature = "cli")]
 #[derive(Parser, Serialize, Deserialize, Clone)]
-#[clap(version = VERSION, about = "Terminos.")]
-#[command(styles = terminos_common::get_cli_styles())]
+#[clap(version = VERSION, about = "Tos.")]
+#[command(styles = tos_common::get_cli_styles())]
 pub struct Config {
     /// RPC Server configuration
     #[cfg(feature = "api_server")]

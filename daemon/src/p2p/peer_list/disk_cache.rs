@@ -2,7 +2,7 @@ use std::net::IpAddr;
 
 use log::info;
 use sled::{Config, Db, Mode, Tree};
-use terminos_common::serializer::{ReaderError, Serializer};
+use tos_common::serializer::{ReaderError, Serializer};
 use thiserror::Error;
 
 use super::PeerListEntry;

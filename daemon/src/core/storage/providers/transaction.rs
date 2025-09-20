@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use terminos_common::{
+use tos_common::{
     crypto::Hash, immutable::Immutable, transaction::Transaction
 };
 use crate::core::error::BlockchainError;

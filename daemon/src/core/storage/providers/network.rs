@@ -1,4 +1,4 @@
-use terminos_common::network::Network;
+use tos_common::network::Network;
 use crate::core::error::BlockchainError;
 
 pub trait NetworkProvider {

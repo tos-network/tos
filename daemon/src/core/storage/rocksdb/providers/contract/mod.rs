@@ -6,7 +6,7 @@ mod r#impl;
 
 use async_trait::async_trait;
 use log::trace;
-use terminos_common::{
+use tos_common::{
     account::CiphertextCache,
     asset::AssetData,
     block::TopoHeight,
@@ -14,7 +14,7 @@ use terminos_common::{
     crypto::{Hash, PublicKey},
     tokio::try_block_on
 };
-use terminos_vm::ValueCell;
+use tos_vm::ValueCell;
 use crate::core::storage::*;
 
 #[async_trait]

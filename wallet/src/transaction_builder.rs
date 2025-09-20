@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use log::{debug, trace};
-use terminos_common::{
+use tos_common::{
     account::CiphertextCache,
     crypto::{elgamal::Ciphertext, Hash, Hashable, PublicKey},
     transaction::{builder::{AccountState, FeeHelper}, Reference, Transaction}

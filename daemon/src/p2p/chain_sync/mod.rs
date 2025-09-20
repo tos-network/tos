@@ -13,7 +13,7 @@ use futures::{
 };
 use indexmap::IndexSet;
 use log::{debug, error, info, trace, warn};
-use terminos_common::{
+use tos_common::{
     block::{Block, BlockVersion},
     crypto::Hash,
     immutable::Immutable,

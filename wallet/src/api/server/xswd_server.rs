@@ -17,7 +17,7 @@ use actix_web::{
 use async_trait::async_trait;
 use log::{debug, error, info};
 use serde_json::{json, Value};
-use terminos_common::{
+use tos_common::{
     api::{wallet::NotifyEvent, EventResult},
     rpc::{
         server::websocket::{WebSocketHandler, WebSocketServer, WebSocketSessionShared},

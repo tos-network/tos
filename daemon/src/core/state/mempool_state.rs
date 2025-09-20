@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::{hash_map::Entry, HashMap}};
 use async_trait::async_trait;
-use terminos_common::{
+use tos_common::{
     account::Nonce,
     block::{BlockVersion, TopoHeight},
     crypto::{
@@ -15,8 +15,8 @@ use terminos_common::{
         Transaction
     }
 };
-use terminos_environment::Environment;
-use terminos_vm::Module;
+use tos_environment::Environment;
+use tos_vm::Module;
 use crate::core::{
     error::BlockchainError,
     mempool::Mempool,

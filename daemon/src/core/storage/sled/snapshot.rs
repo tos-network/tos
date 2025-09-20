@@ -1,7 +1,7 @@
 use std::collections::{btree_map::{Entry, IntoIter}, BTreeMap};
 use itertools::{Either, Itertools};
 use sled::{IVec, Tree};
-use terminos_common::serializer::Serializer;
+use tos_common::serializer::Serializer;
 
 use crate::core::{error::BlockchainError, storage::cache::StorageCache};
 

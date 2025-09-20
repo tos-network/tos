@@ -3,7 +3,7 @@ use anyhow::Context;
 use bytes::Bytes;
 use itertools::Either;
 use rocksdb::Direction;
-use terminos_common::serializer::Serializer;
+use tos_common::serializer::Serializer;
 
 use crate::core::error::BlockchainError;
 

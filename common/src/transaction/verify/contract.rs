@@ -8,10 +8,10 @@ use anyhow::Context;
 use curve25519_dalek::Scalar;
 use log::{debug, trace, warn};
 use indexmap::IndexMap;
-use terminos_vm::{ValueCell, VM};
+use tos_vm::{ValueCell, VM};
 
 use crate::{
-    config::{TX_GAS_BURN_PERCENT, TERMINOS_ASSET},
+    config::{TX_GAS_BURN_PERCENT, TOS_ASSET},
     contract::{ContractOutput, ContractProvider, ContractProviderWrapper},
     crypto::{elgamal::Ciphertext, Hash},
     tokio::block_in_place_safe,
@@ -193,7 +193,7 @@ impl Transaction {
         if refund_gas > 0 {
             // If we have some funds to refund, we add it to the sender balance
             // But to prevent any front running, we add to the sender balance by considering him as a receiver.
-            let balance = state.get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Owned(TERMINOS_ASSET)).await
+            let balance = state.get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Owned(TOS_ASSET)).await
                 .map_err(VerificationError::State)?;
 
             *balance += Scalar::from(refund_gas);

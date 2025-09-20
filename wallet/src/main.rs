@@ -10,11 +10,11 @@ use anyhow::{Result, Context};
 use indexmap::IndexSet;
 use log::{error, info};
 use clap::Parser;
-use terminos_common::{
+use tos_common::{
     async_handler,
     config::{
         init,
-        TERMINOS_ASSET
+        TOS_ASSET
     },
     crypto::{
         Address,
@@ -53,12 +53,11 @@ use terminos_common::{
     },
     utils::{
         format_coin,
-        format_terminos,
-        from_coin,
-        format_tos
+        format_tos,
+        from_coin
     }
 };
-use terminos_wallet::{
+use tos_wallet::{
     config::{Config, LogProgressTableGenerationReportFunction, DIR_PATH},
     precomputed_tables,
     wallet::{
@@ -68,11 +67,11 @@ use terminos_wallet::{
 };
 
 #[cfg(feature = "network_handler")]
-use terminos_wallet::config::DEFAULT_DAEMON_ADDRESS;
+use tos_wallet::config::DEFAULT_DAEMON_ADDRESS;
 
 #[cfg(feature = "xswd")]
 use {
-    terminos_wallet::{
+    tos_wallet::{
         api::{
             AuthConfig,
             PermissionResult,
@@ -80,7 +79,7 @@ use {
         },
         wallet::XSWDEvent,
     },
-    terminos_common::{
+    tos_common::{
         rpc::RpcRequest,
         prompt::ShareablePrompt,
         tokio::{
@@ -676,7 +675,7 @@ async fn prompt_message_builder(prompt: &Prompt, command_manager: Option<&Comman
             let balance = format!(
                 "{}: {}",
                 prompt.colorize_string(Color::Yellow, "Balance"),
-                prompt.colorize_string(Color::Green, &format_terminos(storage.get_plaintext_balance_for(&TERMINOS_ASSET).await.unwrap_or(0))),
+                prompt.colorize_string(Color::Green, &format_tos(storage.get_plaintext_balance_for(&TOS_ASSET).await.unwrap_or(0))),
             );
             let status = if wallet.is_online().await {
                 prompt.colorize_string(Color::Green, "Online")
@@ -693,7 +692,7 @@ async fn prompt_message_builder(prompt: &Prompt, command_manager: Option<&Comman
             return Ok(
                 format!(
                     "{} | {} | {} | {} | {} {}{} ",
-                    prompt.colorize_string(Color::Blue, "Terminos Wallet"),
+                    prompt.colorize_string(Color::Blue, "Tos Wallet"),
                     addr_str,
                     topoheight_str,
                     balance,
@@ -708,7 +707,7 @@ async fn prompt_message_builder(prompt: &Prompt, command_manager: Option<&Comman
     Ok(
         format!(
             "{} {} ",
-            prompt.colorize_string(Color::Blue, "Terminos Wallet"),
+            prompt.colorize_string(Color::Blue, "Tos Wallet"),
             prompt.colorize_string(Color::BrightBlack, ">>")
         )
     )
@@ -1057,7 +1056,7 @@ async fn untrack_asset(manager: &CommandManager, mut args: ArgumentManager) -> R
         prompt.read_hash(prompt.colorize_string(Color::BrightGreen, "Asset ID: ")).await?
     };
 
-    if asset == TERMINOS_ASSET {
+    if asset == TOS_ASSET {
         manager.message("TOS asset cannot be untracked");
     } else if wallet.untrack_asset(asset).await.context("Error while untracking asset")? {
         manager.message("Asset ID is not marked as tracked!");
@@ -1188,7 +1187,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
             false
         ).await?;
         if asset_name.is_empty() {
-            TERMINOS_ASSET
+            TOS_ASSET
         } else if asset_name.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_name).context("Error while reading hash from hex")?
         } else {
@@ -1221,8 +1220,8 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     let fee_type = if args.has_argument("fee_type") {
         let fee_type_str = args.get_value("fee_type")?.to_string_value()?;
         match fee_type_str.to_lowercase().as_str() {
-            "tos" => Some(terminos_common::transaction::FeeType::TOS),
-            "energy" => Some(terminos_common::transaction::FeeType::Energy),
+            "tos" => Some(tos_common::transaction::FeeType::TOS),
+            "energy" => Some(tos_common::transaction::FeeType::Energy),
             _ => {
                 manager.error("Invalid fee_type. Use 'tos' or 'energy'");
                 return Ok(());
@@ -1233,8 +1232,8 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     };
 
     // Validate fee_type for energy
-    if fee_type.as_ref() == Some(&terminos_common::transaction::FeeType::Energy) {
-        if asset != TERMINOS_ASSET {
+    if fee_type.as_ref() == Some(&tos_common::transaction::FeeType::Energy) {
+        if asset != TOS_ASSET {
             manager.error("Energy fees can only be used for TOS transfers");
             return Ok(());
         }
@@ -1296,7 +1295,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         
         // Create a custom fee builder if energy fees are requested
         let fee_builder = if let Some(ref ft) = fee_type {
-            if *ft == terminos_common::transaction::FeeType::Energy {
+            if *ft == tos_common::transaction::FeeType::Energy {
                 FeeBuilder::Value(0) // Energy fees are 0 TOS
             } else {
                 FeeBuilder::default()
@@ -1306,7 +1305,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         };
         
         // Create transaction builder with fee type
-        let mut builder = terminos_common::transaction::builder::TransactionBuilder::new(
+        let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
             tx_version,
             wallet.get_public_key().clone(),
             threshold,
@@ -1321,9 +1320,9 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         
         match builder.build(&mut state, wallet.get_keypair()) {
             Ok(tx) => {
-                manager.message(&format!("Transaction created with {} fees", match fee_type.as_ref().unwrap_or(&terminos_common::transaction::FeeType::TOS) {
-                    terminos_common::transaction::FeeType::TOS => "TOS",
-                    terminos_common::transaction::FeeType::Energy => "Energy",
+                manager.message(&format!("Transaction created with {} fees", match fee_type.as_ref().unwrap_or(&tos_common::transaction::FeeType::TOS) {
+                    tos_common::transaction::FeeType::TOS => "TOS",
+                    tos_common::transaction::FeeType::Energy => "Energy",
                 }));
                 tx
             },
@@ -1363,14 +1362,14 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
        ).await.ok();
     }
 
-    let asset = asset.unwrap_or(TERMINOS_ASSET);
+    let asset = asset.unwrap_or(TOS_ASSET);
     
     // Read fee_type parameter
     let fee_type = if args.has_argument("fee_type") {
         let fee_type_str = args.get_value("fee_type")?.to_string_value()?;
         match fee_type_str.to_lowercase().as_str() {
-            "tos" => Some(terminos_common::transaction::FeeType::TOS),
-            "energy" => Some(terminos_common::transaction::FeeType::Energy),
+            "tos" => Some(tos_common::transaction::FeeType::TOS),
+            "energy" => Some(tos_common::transaction::FeeType::Energy),
             _ => {
                 manager.error("Invalid fee_type. Use 'tos' or 'energy'");
                 return Ok(());
@@ -1381,8 +1380,8 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
     };
 
     // Validate fee_type for energy
-    if fee_type.as_ref() == Some(&terminos_common::transaction::FeeType::Energy) {
-        if asset != TERMINOS_ASSET {
+    if fee_type.as_ref() == Some(&tos_common::transaction::FeeType::Energy) {
+        if asset != TOS_ASSET {
             manager.error("Energy fees can only be used for TOS transfers");
             return Ok(());
         }
@@ -1408,7 +1407,7 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
     
     // Estimate fees based on fee type
     let estimated_fees = if let Some(ref ft) = fee_type {
-        if *ft == terminos_common::transaction::FeeType::Energy {
+        if *ft == tos_common::transaction::FeeType::Energy {
             // For energy fees, we don't deduct from TOS balance
             0
         } else {
@@ -1418,17 +1417,17 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
         wallet.estimate_fees(tx_type.clone(), FeeBuilder::default()).await.context("Error while estimating fees")?
     };
 
-    if asset == TERMINOS_ASSET && fee_type.as_ref() != Some(&terminos_common::transaction::FeeType::Energy) {
+    if asset == TOS_ASSET && fee_type.as_ref() != Some(&tos_common::transaction::FeeType::Energy) {
         amount = amount.checked_sub(estimated_fees).context("Insufficient balance to pay fees")?;
     }
 
     let fee_display = if let Some(ref ft) = fee_type {
         match ft {
-            terminos_common::transaction::FeeType::TOS => format!("TOS fees: {}", format_terminos(estimated_fees)),
-            terminos_common::transaction::FeeType::Energy => "Energy fees: 0 TOS".to_string(),
+            tos_common::transaction::FeeType::TOS => format!("TOS fees: {}", format_tos(estimated_fees)),
+            tos_common::transaction::FeeType::Energy => "Energy fees: 0 TOS".to_string(),
         }
     } else {
-        format!("TOS fees: {}", format_terminos(estimated_fees))
+        format!("TOS fees: {}", format_tos(estimated_fees))
     };
     
     manager.message(format!("Sending {} of {} ({}) to {} ({})", format_coin(amount, asset_data.get_decimals()), asset_data.get_name(), asset, address, fee_display));
@@ -1461,7 +1460,7 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
         
         // Create a custom fee builder if energy fees are requested
         let fee_builder = if let Some(ref ft) = fee_type {
-            if *ft == terminos_common::transaction::FeeType::Energy {
+            if *ft == tos_common::transaction::FeeType::Energy {
                 FeeBuilder::Value(0) // Energy fees are 0 TOS
             } else {
                 FeeBuilder::default()
@@ -1471,7 +1470,7 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
         };
         
         // Create transaction builder with fee type
-        let mut builder = terminos_common::transaction::builder::TransactionBuilder::new(
+        let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
             tx_version,
             wallet.get_public_key().clone(),
             threshold,
@@ -1486,9 +1485,9 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
         
         match builder.build(&mut state, wallet.get_keypair()) {
             Ok(tx) => {
-                manager.message(&format!("Transaction created with {} fees", match fee_type.as_ref().unwrap_or(&terminos_common::transaction::FeeType::TOS) {
-                    terminos_common::transaction::FeeType::TOS => "TOS",
-                    terminos_common::transaction::FeeType::Energy => "Energy",
+                manager.message(&format!("Transaction created with {} fees", match fee_type.as_ref().unwrap_or(&tos_common::transaction::FeeType::TOS) {
+                    tos_common::transaction::FeeType::TOS => "TOS",
+                    tos_common::transaction::FeeType::Energy => "Energy",
                 }));
                 tx
             },
@@ -1513,7 +1512,7 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
     } else {
         prompt.read_hash(
             prompt.colorize_string(Color::Green, "Asset (default TOS): ")
-        ).await.unwrap_or(TERMINOS_ASSET)
+        ).await.unwrap_or(TOS_ASSET)
     };
 
     let (max_balance, asset_data, multisig) = {
@@ -1584,7 +1583,7 @@ async fn balance(manager: &CommandManager, mut arguments: ArgumentManager) -> Re
     } else {
         prompt.read_hash(
             prompt.colorize_string(Color::Green, "Asset (default TOS): ")
-        ).await.unwrap_or(TERMINOS_ASSET)
+        ).await.unwrap_or(TOS_ASSET)
     };
     let balance = storage.get_plaintext_balance_for(&asset).await?;
     let data = storage.get_asset(&asset).await?;
@@ -1839,9 +1838,9 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
             manager.message(format!("Pruned topoheight: {:?}", info.pruned_topoheight));
             manager.message(format!("Top block hash: {}", info.top_block_hash));
             manager.message(format!("Network: {}", info.network));
-            manager.message(format!("Emitted supply: {}", format_terminos(info.emitted_supply)));
-            manager.message(format!("Burned supply: {}", format_terminos(info.burned_supply)));
-            manager.message(format!("Circulating supply: {}", format_terminos(info.circulating_supply)));
+            manager.message(format!("Emitted supply: {}", format_tos(info.emitted_supply)));
+            manager.message(format!("Burned supply: {}", format_tos(info.burned_supply)));
+            manager.message(format!("Circulating supply: {}", format_tos(info.circulating_supply)));
             manager.message("---------------------");
         }
     }
@@ -2202,7 +2201,7 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
 
     // Parse duration (3-90 days)
     let duration = if duration_num >= 3 && duration_num <= 90 {
-        terminos_common::account::FreezeDuration::new(duration_num as u32)
+        tos_common::account::FreezeDuration::new(duration_num as u32)
             .map_err(|e| CommandError::InvalidArgument(e.to_string()))?
     } else {
         return Err(CommandError::InvalidArgument("Duration must be between 3 and 90 days".to_string()));
@@ -2233,7 +2232,7 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
 
     // Create freeze transaction
     let duration_clone = duration.clone();
-    let _payload = terminos_common::transaction::EnergyPayload::FreezeTos {
+    let _payload = tos_common::transaction::EnergyPayload::FreezeTos {
         amount,
         duration,
     };
@@ -2285,7 +2284,7 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
     let mut energy_resource = if let Some(resource) = storage.get_energy_resource().await? {
         resource.clone()
     } else {
-        terminos_common::account::EnergyResource::new()
+        tos_common::account::EnergyResource::new()
     };
 
     // Add energy from this freeze operation
@@ -2349,7 +2348,7 @@ async fn unfreeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Re
     }
 
     // Create unfreeze transaction
-    let _payload = terminos_common::transaction::EnergyPayload::UnfreezeTos {
+    let _payload = tos_common::transaction::EnergyPayload::UnfreezeTos {
         amount,
     };
 
@@ -2430,11 +2429,11 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
         let api = handler.get_api();
         let address = wallet.get_address();
         
-        match api.call(&"get_energy".to_string(), &terminos_common::api::daemon::GetEnergyParams {
+        match api.call(&"get_energy".to_string(), &tos_common::api::daemon::GetEnergyParams {
             address: Cow::Borrowed(&address)
         }).await {
             Ok(result) => {
-                let energy_result: terminos_common::api::daemon::GetEnergyResult = serde_json::from_value(result)
+                let energy_result: tos_common::api::daemon::GetEnergyResult = serde_json::from_value(result)
                     .context("Failed to parse energy result")?;
                 
                 manager.message(format!("Energy Information for {}:", address));

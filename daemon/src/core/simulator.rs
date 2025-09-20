@@ -7,7 +7,7 @@ use std::{
 use serde::{Serialize, Deserialize};
 use log::{info, error};
 use rand::{rngs::OsRng, Rng};
-use terminos_common::{
+use tos_common::{
     tokio::time::interval,
     crypto::KeyPair,
     config::TIPS_LIMIT,
@@ -172,7 +172,7 @@ impl Simulator {
 
     //                 transfers.push(Transfer {
     //                     to: keys[n].get_public_key().clone(),
-    //                     asset: TERMINOS_ASSET,
+    //                     asset: TOS_ASSET,
     //                     amount,
     //                     extra_data: None
     //                 });
@@ -188,7 +188,7 @@ impl Simulator {
     //                     *balance -= total_amount;
     //                 },
     //                 Entry::Vacant(e) => {
-    //                     let balance = storage.get_last_balance(keypair.get_public_key(), &TERMINOS_ASSET).await.map(|(_, v)| v.get_balance()).unwrap();
+    //                     let balance = storage.get_last_balance(keypair.get_public_key(), &TOS_ASSET).await.map(|(_, v)| v.get_balance()).unwrap();
     //                     let balance = e.insert(balance);
     //                     if *balance < total_amount {
     //                         continue;

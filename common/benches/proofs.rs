@@ -1,7 +1,7 @@
 use bulletproofs::RangeProof;
 use criterion::{criterion_group, criterion_main, Criterion};
 use merlin::Transcript;
-use terminos_common::crypto::{
+use tos_common::crypto::{
     elgamal::{PedersenCommitment, PedersenOpening},
     proofs::{
         BatchCollector,

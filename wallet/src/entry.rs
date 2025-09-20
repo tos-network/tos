@@ -1,5 +1,5 @@
 use indexmap::{IndexMap, IndexSet};
-use terminos_common::{
+use tos_common::{
     api::wallet::{
         EntryType as RPCEntryType,
         TransactionEntry as RPCTransactionEntry,
@@ -7,7 +7,7 @@ use terminos_common::{
         TransferOut as RPCTransferOut,
         DeployInvoke as RPCDeployInvoke,
     },
-    config::TERMINOS_ASSET,
+    config::TOS_ASSET,
     crypto::{
         Hash,
         PublicKey
@@ -22,7 +22,7 @@ use terminos_common::{
     transaction::extra_data::PlaintextExtraData,
     utils::{
         format_coin,
-        format_terminos
+        format_tos
     }
 };
 use anyhow::Result;
@@ -196,7 +196,7 @@ impl Serializer for DeployInvoke {
 
 #[derive(Debug, Clone)]
 pub enum EntryData {
-    // Coinbase is only TERMINOS_ASSET
+    // Coinbase is only TOS_ASSET
     Coinbase {
         reward: u64
     },
@@ -519,16 +519,16 @@ impl TransactionEntry {
 
     pub async fn summary(&self, mainnet: bool, storage: &EncryptedStorage) -> Result<String> {
         let entry_str = match self.get_entry() {
-            EntryData::Coinbase { reward } => format!("Coinbase {} TOS", format_terminos(*reward)),
+            EntryData::Coinbase { reward } => format!("Coinbase {} TOS", format_tos(*reward)),
             EntryData::Burn { asset, amount, fee, nonce } => {
                 let data = storage.get_asset(asset).await?;
-                format!("Fee: {}, Nonce: {} Burn {} {} ({})", format_terminos(*fee), nonce, format_coin(*amount, data.get_decimals()), data.get_name(), asset)
+                format!("Fee: {}, Nonce: {} Burn {} {} ({})", format_tos(*fee), nonce, format_coin(*amount, data.get_decimals()), data.get_name(), asset)
             },
             EntryData::Incoming { from, transfers } => {
                 let mut str = String::new();
                 for transfer in transfers {
-                    if *transfer.get_asset() == TERMINOS_ASSET {
-                        str.push_str(&format!("Received {} TOS from {}", format_terminos(transfer.get_amount()), from.as_address(mainnet)));
+                    if *transfer.get_asset() == TOS_ASSET {
+                        str.push_str(&format!("Received {} TOS from {}", format_tos(transfer.get_amount()), from.as_address(mainnet)));
                     } else {
                         let data = storage.get_asset(transfer.get_asset()).await?;
                         str.push_str(&format!("Received {} {} ({}) from {}", format_coin(transfer.get_amount(), data.get_decimals()), data.get_name(), transfer.get_asset(), from.as_address(mainnet)));
@@ -537,10 +537,10 @@ impl TransactionEntry {
                 str
             },
             EntryData::Outgoing { transfers, fee, nonce } => {
-                let mut str = format!("Fee: {}, Nonce: {} ", format_terminos(*fee), nonce);
+                let mut str = format!("Fee: {}, Nonce: {} ", format_tos(*fee), nonce);
                 for transfer in transfers {
-                    if *transfer.get_asset() == TERMINOS_ASSET {
-                        str.push_str(&format!("Sent {} TOS to {}", format_terminos(transfer.get_amount()), transfer.get_destination().as_address(mainnet)));
+                    if *transfer.get_asset() == TOS_ASSET {
+                        str.push_str(&format!("Sent {} TOS to {}", format_tos(transfer.get_amount()), transfer.get_destination().as_address(mainnet)));
                     } else {
                         let data = storage.get_asset(transfer.get_asset()).await?;
                         str.push_str(&format!("Sent {} {} ({}) to {}", format_coin(transfer.get_amount(), data.get_decimals()), data.get_name(), transfer.get_asset(), transfer.get_destination().as_address(mainnet)));
@@ -549,7 +549,7 @@ impl TransactionEntry {
                 str
             },
             EntryData::MultiSig { participants, threshold, fee, nonce } => {
-                let mut str = format!("Fee: {}, Nonce: {} ", format_terminos(*fee), nonce);
+                let mut str = format!("Fee: {}, Nonce: {} ", format_tos(*fee), nonce);
                 str.push_str(&format!("MultiSig setup with threshold {} and {} participants", threshold, participants.len()));
                 for participant in participants {
                     str.push_str(&format!("{}", participant.as_address(mainnet)));
@@ -557,8 +557,8 @@ impl TransactionEntry {
                 str
             },
             EntryData::InvokeContract { contract, deposits, chunk_id, fee, max_gas, nonce } => {
-                let mut str = format!("Fee: {}, Nonce: {} ", format_terminos(*fee), nonce);
-                str.push_str(&format!("Invoke contract {} with chunk id {} (max gas: {})", contract, chunk_id, format_terminos(*max_gas)));
+                let mut str = format!("Fee: {}, Nonce: {} ", format_tos(*fee), nonce);
+                str.push_str(&format!("Invoke contract {} with chunk id {} (max gas: {})", contract, chunk_id, format_tos(*max_gas)));
                 for (asset, amount) in deposits {
                     let data = storage.get_asset(&asset).await?;
                     str.push_str(&format!("Deposit {} {} ({}) to contract", format_coin(*amount, data.get_decimals()), data.get_name(), asset));
@@ -566,7 +566,7 @@ impl TransactionEntry {
                 str
             },
             EntryData::DeployContract { fee, nonce, invoke } => {
-                format!("Fee: {}, Nonce: {} Deploy contract (constructor called: {})", format_terminos(*fee), nonce, invoke.is_some())
+                format!("Fee: {}, Nonce: {} Deploy contract (constructor called: {})", format_tos(*fee), nonce, invoke.is_some())
             }
         };
 

@@ -55,7 +55,7 @@ pub enum Role {
     Receiver,
 }
 
-// this enum represent all types of transaction available on Terminos Network
+// this enum represent all types of transaction available on Tos Network
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum TransactionType {
@@ -113,7 +113,7 @@ pub struct Transaction {
     source: CompressedPublicKey,
     /// Type of the transaction
     data: TransactionType,
-    /// Fees in Terminos (TOS or Energy depending on fee_type)
+    /// Fees in Tos (TOS or Energy depending on fee_type)
     fee: u64,
     /// Fee type: TOS or Energy
     fee_type: FeeType,
@@ -227,7 +227,7 @@ impl Transaction {
     // Get the burned amount
     // This will returns the burned amount by a Burn payload
     // Or the % of execution fees to burn due to a Smart Contracts call
-    // only if the asset is Terminos
+    // only if the asset is Tos
     pub fn get_burned_amount(&self, asset: &Hash) -> Option<u64> {
         match &self.data {
             TransactionType::Burn(payload) if payload.asset == *asset => Some(payload.amount),

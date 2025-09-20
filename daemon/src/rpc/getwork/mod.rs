@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use log::{debug, error, trace, warn};
 use lru::LruCache;
 use serde::Serialize;
-use terminos_common::{
+use tos_common::{
     tokio::{sync::Mutex, time::sleep},
     api::daemon::{
         GetBlockTemplateResult,

@@ -26,7 +26,7 @@ use chacha20poly1305::aead::Buffer;
 use human_bytes::human_bytes;
 use humantime::format_duration;
 use metrics::counter;
-use terminos_common::{
+use tos_common::{
     tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{
@@ -269,7 +269,7 @@ impl Connection {
 
         // Increment the key rotation counter
         self.rotate_key_out.fetch_add(1, Ordering::Relaxed);
-        counter!("terminos_p2p_rotate_key_total").increment(1);
+        counter!("tos_p2p_rotate_key_total").increment(1);
 
         // Reset the counter
         self.bytes_encrypted.store(0, Ordering::Relaxed);
@@ -295,7 +295,7 @@ impl Connection {
     // Otherwise, we can't know how much bytes to read for each ciphertext/packet
     async fn send_packet_bytes_internal(&self, stream: &mut OwnedWriteHalf, packet: &[u8]) -> P2pResult<()> {
         let packet_len = packet.len() as u32;
-        counter!("terminos_p2p_bytes_out_total").increment(packet_len as u64);
+        counter!("tos_p2p_bytes_out_total").increment(packet_len as u64);
         stream.write_all(&packet_len.to_be_bytes()).await?;
         stream.write_all(packet).await?;
 
@@ -432,7 +432,7 @@ impl Connection {
             bytes.extend(&buf[0..read]);
         }
 
-        counter!("terminos_p2p_bytes_in_total").increment(bytes.len() as u64);
+        counter!("tos_p2p_bytes_in_total").increment(bytes.len() as u64);
 
         // If encryption is supported, use it
         if self.encryption.is_read_ready().await {

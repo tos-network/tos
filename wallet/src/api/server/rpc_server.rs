@@ -6,7 +6,7 @@ use actix_web_httpauth::{
 };
 use anyhow::Result;
 use log::{info, warn};
-use terminos_common::{
+use tos_common::{
     tokio::{
         spawn_task,
         sync::Mutex

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use log::trace;
 use rocksdb::Direction;
-use terminos_common::{
+use tos_common::{
     asset::{AssetData, VersionedAssetData},
     block::TopoHeight,
     crypto::{Hash, PublicKey},

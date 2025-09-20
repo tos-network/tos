@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use terminos_common::{crypto::{hash, Hash, HASH_SIZE}, serializer::Serializer};
+use tos_common::{crypto::{hash, Hash, HASH_SIZE}, serializer::Serializer};
 
 // This builder is used to build a merkle tree from a list of hashes
 // It uses a bottom-up approach to build the tree

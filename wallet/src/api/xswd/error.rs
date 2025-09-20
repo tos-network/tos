@@ -1,5 +1,5 @@
 use thiserror::Error;
-use terminos_common::rpc::InternalRpcError;
+use tos_common::rpc::InternalRpcError;
 
 #[derive(Error, Debug, Clone, Copy)]
 pub enum XSWDError {

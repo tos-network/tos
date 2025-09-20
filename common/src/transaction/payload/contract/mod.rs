@@ -4,7 +4,7 @@ mod invoke;
 use anyhow::Context;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
-use terminos_vm::{
+use tos_vm::{
     Chunk,
     Module,
     OpaqueWrapper,

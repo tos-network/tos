@@ -12,7 +12,7 @@ use log::{
 use anyhow::{Error, Context};
 use chrono::TimeZone;
 use serde::Serialize;
-use terminos_common::{
+use tos_common::{
     api::{
         wallet::{
             BalanceChanged,
@@ -61,7 +61,7 @@ use terminos_common::{
         Role,
         Transaction,
         TxVersion
-    }, utils::{format_coin, format_terminos}
+    }, utils::{format_coin, format_tos}
 };
 
 use crate::{
@@ -95,7 +95,7 @@ use {
         daemon_api::DaemonAPI,
         storage::Balance,
     },
-    terminos_common::config::TERMINOS_ASSET,
+    tos_common::config::TOS_ASSET,
 };
 
 #[cfg(feature = "xswd")]
@@ -112,7 +112,7 @@ use {
         PermissionRequest,
         XSWDHandler
     },
-    terminos_common::{
+    tos_common::{
         rpc::{
             RPCHandler,
             RpcRequest,
@@ -829,7 +829,7 @@ impl Wallet {
             let force_stable_balance = self.should_force_stable_balance();
             // Reference must be none in order to use the last stable balance
             // Otherwise that mean we're still waiting on a TX to be confirmed
-            if generated && (used_assets.contains(&TERMINOS_ASSET) || force_stable_balance) {
+            if generated && (used_assets.contains(&TOS_ASSET) || force_stable_balance) {
                 if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
                     let mut daemon_stable_topoheight = None;
                     // Last mining reward is above stable topoheight, this may increase orphans rate
@@ -1064,10 +1064,10 @@ impl Wallet {
             match tx.get_entry() {
                 EntryData::Burn { asset, amount, fee, nonce } => {
                     let data = storage.get_asset(&asset).await?;
-                    writeln!(w, "{},{},{},{},{},-,{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "Burn", data.get_name(), format_coin(*amount, data.get_decimals()), format_terminos(*fee), nonce).context("Error while writing csv line")?;
+                    writeln!(w, "{},{},{},{},{},-,{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "Burn", data.get_name(), format_coin(*amount, data.get_decimals()), format_tos(*fee), nonce).context("Error while writing csv line")?;
                 },
                 EntryData::Coinbase { reward } => {
-                    writeln!(w, "{},{},{},{},{},-,{},-,-", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "Coinbase", "TOS", format_terminos(*reward)).context("Error while writing csv line")?;
+                    writeln!(w, "{},{},{},{},{},-,{},-,-", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "Coinbase", "TOS", format_tos(*reward)).context("Error while writing csv line")?;
                 },
                 EntryData::Incoming { from, transfers } => {
                     for transfer in transfers {
@@ -1078,34 +1078,34 @@ impl Wallet {
                 EntryData::Outgoing { transfers, fee, nonce } => {
                     for transfer in transfers {
                         let data = storage.get_asset(&transfer.get_asset()).await?;
-                        writeln!(w, "{},{},{},{},{},{},{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "Outgoing", transfer.get_destination().as_address(self.get_network().is_mainnet()), data.get_name(), format_coin(transfer.get_amount(), data.get_decimals()), format_terminos(*fee), nonce).context("Error while writing csv line")?;
+                        writeln!(w, "{},{},{},{},{},{},{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "Outgoing", transfer.get_destination().as_address(self.get_network().is_mainnet()), data.get_name(), format_coin(transfer.get_amount(), data.get_decimals()), format_tos(*fee), nonce).context("Error while writing csv line")?;
                     }
                 },
                 EntryData::MultiSig { participants, threshold, fee, nonce } => {
                     let str_participants: Vec<String> = participants.iter().map(|p| p.as_address(self.get_network().is_mainnet()).to_string()).collect();
-                    writeln!(w, "{},{},{},{},{},{},-,{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "MultiSig", str_participants.join("|"), threshold, format_terminos(*fee), nonce).context("Error while writing csv line")?;
+                    writeln!(w, "{},{},{},{},{},{},-,{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "MultiSig", str_participants.join("|"), threshold, format_tos(*fee), nonce).context("Error while writing csv line")?;
                 },
                 EntryData::InvokeContract { contract, deposits, chunk_id, fee, max_gas, nonce } => {
                     let mut str_deposits = Vec::new();
-                    str_deposits.push(format!("Gas:{}", format_terminos(*max_gas)));
+                    str_deposits.push(format!("Gas:{}", format_tos(*max_gas)));
                     for (asset, amount) in deposits {
                         let data = storage.get_asset(&asset).await?;
                         str_deposits.push(format!("{}:{}", data.get_name(), format_coin(*amount, data.get_decimals())));
                     }
 
-                    writeln!(w, "{},{},{},{},{},{},{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "InvokeContract", contract, str_deposits.join("|"), chunk_id, format_terminos(*fee), nonce).context("Error while writing csv line")?;
+                    writeln!(w, "{},{},{},{},{},{},{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "InvokeContract", contract, str_deposits.join("|"), chunk_id, format_tos(*fee), nonce).context("Error while writing csv line")?;
                 },
                 EntryData::DeployContract { fee, nonce, invoke } => {
                     let mut str_deposits = Vec::new();
                     if let Some(invoke) = invoke {
-                        str_deposits.push(format!("Gas:{}", format_terminos(invoke.max_gas)));
+                        str_deposits.push(format!("Gas:{}", format_tos(invoke.max_gas)));
                         for (asset, amount) in invoke.deposits.iter() {
                             let data = storage.get_asset(&asset).await?;
                             str_deposits.push(format!("{}:{}", data.get_name(), format_coin(*amount, data.get_decimals())));
                         }
                     }
 
-                    writeln!(w, "{},{},{},{},-,-,{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "DeployContract", str_deposits.join("|"), format_terminos(*fee), nonce).context("Error while writing csv line")?;
+                    writeln!(w, "{},{},{},{},-,-,{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "DeployContract", str_deposits.join("|"), format_tos(*fee), nonce).context("Error while writing csv line")?;
                 },
             }
         }

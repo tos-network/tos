@@ -1,7 +1,7 @@
 mod step;
 mod block_metadata;
 
-use terminos_common::serializer::*;
+use tos_common::serializer::*;
 
 pub use step::*;
 pub use block_metadata::BlockMetadata;

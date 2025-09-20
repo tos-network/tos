@@ -2,14 +2,14 @@ use crate::p2p::error::P2pError;
 use std::sync::PoisonError;
 use strum::{EnumDiscriminants, IntoDiscriminant};
 use thiserror::Error;
-use terminos_common::{
+use tos_common::{
     crypto::{
         bech32::Bech32Error,
         elgamal::DecompressionError,
         proofs::ProofVerificationError,
         Address,
         Hash,
-        TerminosHashError
+        TosHashError
     },
     tokio::sync::AcquireError,
     account::Nonce,
@@ -20,7 +20,7 @@ use terminos_common::{
     serializer::ReaderError,
     time::TimestampMillis,
     transaction::verify::VerificationError,
-    utils::format_terminos
+    utils::format_tos
 };
 use human_bytes::human_bytes;
 
@@ -222,9 +222,9 @@ pub enum BlockchainError {
     NoStableReferenceFound,
     #[error("Tx {} is already in block", _0)]
     TxAlreadyInBlock(Hash),
-    #[error("Invalid Tx fee, expected at least {}, got {}", format_terminos(*_0), format_terminos(*_1))]
+    #[error("Invalid Tx fee, expected at least {}, got {}", format_tos(*_0), format_tos(*_1))]
     InvalidTxFee(u64, u64),
-    #[error("Fees are lower for this TX than the overrided TX, expected at least {}, got {}", format_terminos(*_0), format_terminos(*_1))]
+    #[error("Fees are lower for this TX than the overrided TX, expected at least {}, got {}", format_tos(*_0), format_tos(*_1))]
     FeesToLowToOverride(u64, u64),
     #[error("No account found for {}", _0)]
     AccountNotFound(Address),
@@ -353,7 +353,7 @@ pub enum BlockchainError {
     #[error("Invalid transaction proof: {}", _0)]
     TransactionProof(ProofVerificationError),
     #[error("Error while generating pow hash")]
-    POWHashError(#[from] TerminosHashError),
+    POWHashError(#[from] TosHashError),
     #[error("Transfer count is invalid")]
     TransferCount,
     #[error("Invalid commitments assets")]

@@ -5,7 +5,7 @@ mod providers;
 use async_trait::async_trait;
 use itertools::Either;
 use crate::core::error::{BlockchainError, DiskContext};
-use terminos_common::{
+use tos_common::{
     account::EnergyResource,
     block::{BlockHeader, TopoHeight},
     crypto::{Hash, PublicKey},

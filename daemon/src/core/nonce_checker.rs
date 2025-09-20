@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use log::trace;
-use terminos_common::{
+use tos_common::{
     account::Nonce,
     block::TopoHeight,
     crypto::PublicKey

@@ -15,14 +15,13 @@ use merlin::Transcript;
 use bulletproofs::RangeProof;
 use curve25519_dalek::Scalar;
 use serde::{Deserialize, Serialize};
-use terminos_vm::Module;
+use tos_vm::Module;
 use std::{
     collections::{HashMap, HashSet},
     iter,
 };
 use crate::{
-    account::{Nonce, CiphertextCache},
-    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TERMINOS_ASSET},
+    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     crypto::{
         elgamal::{
             Ciphertext,
@@ -394,7 +393,7 @@ impl TransactionBuilder {
         transfers: &[TransferWithCommitment],
         deposits: &HashMap<Hash, DepositWithCommitment>,
     ) -> Ciphertext {
-        if asset == &TERMINOS_ASSET {
+        if asset == &TOS_ASSET {
             // Fees are applied to the native blockchain asset only.
             ct -= Scalar::from(fee);
         }
@@ -424,7 +423,7 @@ impl TransactionBuilder {
                     }
                 }
 
-                if *asset == TERMINOS_ASSET {
+                if *asset == TOS_ASSET {
                     ct -= Scalar::from(payload.max_gas);
                 }
             },
@@ -440,17 +439,17 @@ impl TransactionBuilder {
                         }
                     }
 
-                    if *asset == TERMINOS_ASSET {
+                    if *asset == TOS_ASSET {
                         ct -= Scalar::from(invoke.max_gas);
                     }
                 }
 
-                if *asset == TERMINOS_ASSET {
+                if *asset == TOS_ASSET {
                     ct -= Scalar::from(BURN_PER_CONTRACT);
                 }
             },
             TransactionTypeBuilder::Energy(payload) => {
-                if *asset == TERMINOS_ASSET {
+                if *asset == TOS_ASSET {
                     ct -= Scalar::from(payload.amount);
                 }
             }
@@ -473,7 +472,7 @@ impl TransactionBuilder {
             true
         };
 
-        if *asset == TERMINOS_ASSET && should_apply_fees {
+        if *asset == TOS_ASSET && should_apply_fees {
             // Fees are applied to the native blockchain asset only.
             cost += fee;
         }
@@ -497,12 +496,12 @@ impl TransactionBuilder {
                     cost += deposit.amount;
                 }
 
-                if *asset == TERMINOS_ASSET {
+                if *asset == TOS_ASSET {
                     cost += payload.max_gas;
                 }
             },
             TransactionTypeBuilder::DeployContract(payload) => {
-                if *asset == TERMINOS_ASSET {
+                if *asset == TOS_ASSET {
                     cost += BURN_PER_CONTRACT;
                 }
 
@@ -511,13 +510,13 @@ impl TransactionBuilder {
                         cost += deposit.amount;
                     }
 
-                    if *asset == TERMINOS_ASSET {
+                    if *asset == TOS_ASSET {
                         cost += invoke.max_gas;
                     }
                 }
             },
             TransactionTypeBuilder::Energy(payload) => {
-                if *asset == TERMINOS_ASSET {
+                if *asset == TOS_ASSET {
                     cost += payload.amount;
                 }
             }
@@ -1181,7 +1180,7 @@ impl TransactionTypeBuilder {
         let mut consumed = HashSet::new();
 
         // Native asset is always used. (fees)
-        consumed.insert(&TERMINOS_ASSET);
+        consumed.insert(&TOS_ASSET);
 
         match &self {
             TransactionTypeBuilder::Transfers(transfers) => {

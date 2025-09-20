@@ -134,7 +134,7 @@ impl From<RPCTransactionType<'_>> for TransactionType {
     }
 }
 
-// This is exactly the same as the one in terminos_common/src/transaction/mod.rs
+// This is exactly the same as the one in tos_common/src/transaction/mod.rs
 // We use this one for serde (de)serialization
 // So we have addresses displayed as strings and not Public Key as bytes
 // This is much more easier for developers relying on the API

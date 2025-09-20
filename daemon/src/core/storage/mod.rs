@@ -13,7 +13,7 @@ pub use self::{
 use std::collections::HashSet;
 use async_trait::async_trait;
 use log::{debug, trace, warn};
-use terminos_common::{
+use tos_common::{
     block::{
         BlockHeader,
         TopoHeight,

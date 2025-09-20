@@ -8,7 +8,7 @@ use std::{
 use anyhow::Result;
 use serde::Serialize;
 use serde_json::Value;
-use terminos_common::{
+use tos_common::{
     tokio::sync::broadcast,
     rpc::client::{
         WebSocketJsonRPCClient,

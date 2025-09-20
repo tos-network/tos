@@ -45,13 +45,13 @@ pub fn format_coin(value: u64, decimals: u8) -> String {
     format!("{:.1$}", value as f64 / 10usize.pow(decimals as u32) as f64, decimals as usize)
 }
 
-// Format value using terminos decimals
-pub fn format_terminos(value: u64) -> String {
+// Format value using tos decimals
+pub fn format_value(value: u64) -> String {
     format_coin(value, COIN_DECIMALS)
 }
 
-// Convert a terminos amount from string to a u64
-pub fn from_terminos(value: impl Into<String>) -> Option<u64> {
+// Convert a tos amount from string to a u64
+pub fn from_amount(value: impl Into<String>) -> Option<u64> {
     from_coin(value, COIN_DECIMALS)
 }
 
@@ -243,12 +243,12 @@ mod tests {
     }
 
     #[test]
-    fn test_terminos_format() {
-        assert_eq!(format_terminos(FEE_PER_ACCOUNT_CREATION), "0.00100000");
-        assert_eq!(format_terminos(FEE_PER_KB), "0.00010000");
-        assert_eq!(format_terminos(FEE_PER_TRANSFER), "0.00005000");
-        assert_eq!(format_terminos(COIN_VALUE), "1.00000000");
-        assert_eq!(format_terminos(1), "0.00000001");
+    fn test_tos_format() {
+        assert_eq!(format_tos(FEE_PER_ACCOUNT_CREATION), "0.00100000");
+        assert_eq!(format_tos(FEE_PER_KB), "0.00010000");
+        assert_eq!(format_tos(FEE_PER_TRANSFER), "0.00005000");
+        assert_eq!(format_tos(COIN_VALUE), "1.00000000");
+        assert_eq!(format_tos(1), "0.00000001");
     }
 
     #[test]
@@ -279,8 +279,8 @@ mod tests {
     }
 
     #[test]
-    fn test_from_terminos() {
-        let value = from_terminos("100.123");
+    fn test_from_tos() {
+        let value = from_tos("100.123");
         assert_eq!(value, Some(100_123_00000));
     }
 }

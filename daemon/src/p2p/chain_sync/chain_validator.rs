@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use indexmap::{IndexMap, IndexSet};
-use terminos_common::{
+use tos_common::{
     block::{BlockHeader, BlockVersion, TopoHeight},
     config::TIPS_LIMIT,
     crypto::Hash,

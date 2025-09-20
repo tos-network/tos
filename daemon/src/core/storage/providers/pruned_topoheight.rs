@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use terminos_common::block::TopoHeight;
+use tos_common::block::TopoHeight;
 use crate::core::error::BlockchainError;
 
 // This trait is used for pruning

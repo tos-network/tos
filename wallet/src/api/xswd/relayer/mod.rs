@@ -8,7 +8,7 @@ use futures::{stream, StreamExt};
 use log::error;
 use serde::Serialize;
 use serde_json::{json, Value};
-use terminos_common::{
+use tos_common::{
     api::{wallet::NotifyEvent, EventResult},
     rpc::{
         Id,

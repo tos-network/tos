@@ -6,7 +6,7 @@ use std::{
 use async_trait::async_trait;
 use log::{debug, trace};
 use indexmap::IndexMap;
-use terminos_common::{
+use tos_common::{
     account::{BalanceType, Nonce, VersionedNonce, EnergyResource},
     asset::VersionedAssetData,
     block::{Block, BlockVersion, TopoHeight},
@@ -26,7 +26,7 @@ use terminos_common::{
     },
     versioned_type::VersionedState
 };
-use terminos_vm::Environment;
+use tos_vm::Environment;
 use crate::core::{
     error::BlockchainError,
     storage::{
@@ -64,7 +64,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Applic
     /// Pre-verify the TX
     async fn pre_verify_tx<'b>(
         &'b mut self,
-        tx: &terminos_common::transaction::Transaction,
+        tx: &tos_common::transaction::Transaction,
     ) -> Result<(), BlockchainError> {
         self.inner.pre_verify_tx(tx).await
     }
@@ -141,7 +141,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Applic
     async fn set_contract_module(
         &mut self,
         hash: &'a Hash,
-        module: &'a terminos_vm::Module
+        module: &'a tos_vm::Module
     ) -> Result<(), BlockchainError> {
         self.inner.set_contract_module(hash, module).await
     }
@@ -156,7 +156,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Applic
     async fn get_contract_module_with_environment(
         &self,
         hash: &'a Hash
-    ) -> Result<(&terminos_vm::Module, &Environment), BlockchainError> {
+    ) -> Result<(&tos_vm::Module, &Environment), BlockchainError> {
         self.inner.get_contract_module_with_environment(hash).await
     }
 }

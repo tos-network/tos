@@ -13,7 +13,7 @@ use linked_hash_map::LinkedHashMap;
 use serde::{Serialize, Deserialize};
 use indexmap::IndexSet;
 use log::{debug, info, trace, warn};
-use terminos_common::{
+use tos_common::{
     account::Nonce,
     api::daemon::FeeRatesEstimated,
     block::{BlockVersion, TopoHeight},
@@ -30,7 +30,7 @@ use terminos_common::{
         Transaction
     }
 };
-use terminos_vm::Environment;
+use tos_vm::Environment;
 
 // Wrap a TX with its hash and size in bytes for faster access
 // size of tx can be heavy to compute, so we store it here

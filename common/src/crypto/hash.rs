@@ -10,8 +10,8 @@ use serde::de::Error as SerdeError;
 use serde::{Deserialize, Serialize};
 use blake3::hash as blake3_hash;
 
-pub use terminos_hash::Error as TerminosHashError;
-use terminos_hash::{v1, v2};
+pub use tos_hash::Error as TosHashError;
+use tos_hash::{v1, v2};
 
 pub const HASH_SIZE: usize = 32; // 32 bytes / 256 bits
 
@@ -62,7 +62,7 @@ pub fn hash(value: &[u8]) -> Hash {
 }
 
 // Perform a PoW hash using the given algorithm
-pub fn pow_hash(work: &[u8], algorithm: Algorithm) -> Result<Hash, TerminosHashError> {
+pub fn pow_hash(work: &[u8], algorithm: Algorithm) -> Result<Hash, TosHashError> {
     match algorithm {
         Algorithm::V1 => {
             let mut scratchpad = v1::ScratchPad::default();
@@ -72,11 +72,11 @@ pub fn pow_hash(work: &[u8], algorithm: Algorithm) -> Result<Hash, TerminosHashE
             let slice = input.as_mut_slice()?;
             slice[..work.len()].copy_from_slice(work);
         
-            v1::terminos_hash(slice, &mut scratchpad)
+            v1::tos_hash(slice, &mut scratchpad)
         },
         Algorithm::V2 => {
             let mut scratchpad = v2::ScratchPad::default();
-            v2::terminos_hash(work, &mut scratchpad)
+            v2::tos_hash(work, &mut scratchpad)
         },
     }.map(Hash::new)
 }

@@ -1,6 +1,6 @@
 use anyhow::Context as AnyhowContext;
 use sha3::{Digest, Sha3_256};
-use terminos_vm::{
+use tos_vm::{
     traits::Serializable,
     Context,
     EnvironmentError,

@@ -1,6 +1,6 @@
 use indexmap::IndexSet;
 use log::trace;
-use terminos_common::{
+use tos_common::{
     difficulty::CumulativeDifficulty,
     time::TimestampMillis,
     crypto::Hash,

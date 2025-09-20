@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashMap};
 
 use async_trait::async_trait;
 use indexmap::IndexMap;
-use terminos_vm::{Environment, Module};
+use tos_vm::{Environment, Module};
 use crate::{
     account::Nonce,
     block::{Block, BlockVersion},
@@ -134,10 +134,10 @@ pub struct ContractEnvironment<'a, P: ContractProvider> {
 
 #[async_trait]
 pub trait BlockchainApplyState<'a, P: ContractProvider, E>: BlockchainVerificationState<'a, E> {
-    /// Add burned Terminos
+    /// Add burned Tos
     async fn add_burned_coins(&mut self, amount: u64) -> Result<(), E>;
 
-    /// Add fee Terminos
+    /// Add fee Tos
     async fn add_gas_fee(&mut self, amount: u64) -> Result<(), E>;
 
     /// Get the hash of the block

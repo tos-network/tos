@@ -1,6 +1,6 @@
 use anyhow::Context as AnyhowContext;
 use log::debug;
-use terminos_vm::{
+use tos_vm::{
     traits::{JSONHelper, Serializable},
     Context,
     FnInstance,

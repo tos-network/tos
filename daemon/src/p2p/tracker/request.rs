@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Instant};
 
 use log::error;
-use terminos_common::{
+use tos_common::{
     tokio::sync::broadcast,
     crypto::Hash
 };

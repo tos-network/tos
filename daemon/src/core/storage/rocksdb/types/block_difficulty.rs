@@ -1,4 +1,4 @@
-use terminos_common::{difficulty::{CumulativeDifficulty, Difficulty}, serializer::*, varuint::VarUint};
+use tos_common::{difficulty::{CumulativeDifficulty, Difficulty}, serializer::*, varuint::VarUint};
 
 // All needed difficulty for a block
 pub struct BlockDifficulty {

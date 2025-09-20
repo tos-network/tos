@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use log::trace;
 use rocksdb::Direction;
-use terminos_common::{account::BalanceType, block::TopoHeight, serializer::RawBytes};
+use tos_common::{account::BalanceType, block::TopoHeight, serializer::RawBytes};
 use crate::core::{
     error::BlockchainError,
     storage::{

@@ -5,7 +5,7 @@ use chacha20poly1305::{
     AeadCore,
     KeyInit
 };
-use terminos_common::crypto::{
+use tos_common::crypto::{
     HASH_SIZE,
     hash
 };

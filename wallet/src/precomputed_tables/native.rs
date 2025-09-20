@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{bail, Result};
 use log::info;
-use terminos_common::{
+use tos_common::{
     crypto::ecdlp,
     utils::detect_available_parallelism
 };

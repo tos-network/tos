@@ -1,5 +1,5 @@
-# Terminos
+# Tos
 
-Official Rust implementation of the Terminos Network protocol.
+Official Rust implementation of the Tos Network protocol.
 
 

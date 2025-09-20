@@ -13,7 +13,7 @@ use serde::{
     Deserializer,
     de::Error
 };
-use terminos_vm::ValueCell;
+use tos_vm::ValueCell;
 use crate::{
     account::{Nonce, CiphertextCache, VersionedBalance, VersionedNonce},
     block::{TopoHeight, Algorithm, BlockVersion, EXTRA_NONCE_SIZE},
@@ -421,14 +421,14 @@ pub struct TransactionResponse<'a> {
     pub data: RPCTransaction<'a>
 }
 
-fn default_terminos_asset() -> Hash {
-    crate::config::TERMINOS_ASSET
+fn default_tos_asset() -> Hash {
+    crate::config::TOS_ASSET
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct GetAccountHistoryParams {
     pub address: Address,
-    #[serde(default = "default_terminos_asset")]
+    #[serde(default = "default_tos_asset")]
     pub asset: Hash,
     pub minimum_topoheight: Option<TopoHeight>,
     pub maximum_topoheight: Option<TopoHeight>,

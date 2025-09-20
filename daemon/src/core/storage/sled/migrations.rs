@@ -1,5 +1,5 @@
 use log::debug;
-use terminos_common::config::VERSION;
+use tos_common::config::VERSION;
 use crate::core::error::BlockchainError;
 use super::{SledStorage, DB_VERSION};
 

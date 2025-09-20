@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use terminos_common::crypto::Hash;
+use tos_common::crypto::Hash;
 use crate::core::error::BlockchainError;
 
 // This provider tracks the order in which blocks are added in the chain.

@@ -8,7 +8,7 @@ use std::{
     sync::Arc,
     cmp::Ordering
 };
-use terminos_common::{
+use tos_common::{
     transaction::Transaction,
     crypto::{
         Hash,

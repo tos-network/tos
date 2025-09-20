@@ -1,7 +1,7 @@
 use std::time::Duration;
 use humantime::Duration as HumanDuration;
 use serde::{Deserialize, Serialize};
-use terminos_common::{
+use tos_common::{
     crypto::Hash,
     prompt::LogLevel,
     utils::detect_available_parallelism

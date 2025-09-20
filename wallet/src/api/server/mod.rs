@@ -9,7 +9,7 @@ pub use rpc_server::{
 
 use serde::Serialize;
 use serde_json::json;
-use terminos_common::{
+use tos_common::{
     api::wallet::NotifyEvent,
     rpc::server::WebSocketServerHandler
 };

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use futures::Stream;
-use terminos_vm::ValueCell;
-use terminos_common::{
+use tos_vm::ValueCell;
+use tos_common::{
     block::TopoHeight,
     crypto::Hash,
     versioned_type::Versioned,

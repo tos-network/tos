@@ -1,5 +1,5 @@
 use anyhow::Context as AnyhowContext;
-use terminos_vm::{
+use tos_vm::{
     traits::{JSONHelper, Serializable},
     Context,
     FnInstance,

@@ -9,7 +9,7 @@ mod dag_order;
 
 use async_trait::async_trait;
 use log::debug;
-use terminos_common::block::TopoHeight;
+use tos_common::block::TopoHeight;
 use crate::core::error::BlockchainError;
 
 pub use balance::*;

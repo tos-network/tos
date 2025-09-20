@@ -4,7 +4,7 @@
 use std::process::Command;
 
 fn main() {
-    let commit_hash = if let Some(hash) = option_env!("TERMINOS_COMMIT_HASH") {
+    let commit_hash = if let Some(hash) = option_env!("TOS_COMMIT_HASH") {
         (&hash[0..7]).to_string()
     } else {
         // Run git command to get the commit hash

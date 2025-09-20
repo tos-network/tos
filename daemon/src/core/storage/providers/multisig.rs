@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use async_trait::async_trait;
-use terminos_common::{
+use tos_common::{
     block::TopoHeight,
     crypto::PublicKey,
     transaction::MultiSigPayload,

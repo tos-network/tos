@@ -1,5 +1,5 @@
 use indexmap::IndexSet;
-use terminos_common::{
+use tos_common::{
     api::daemon::{NotifyEvent, PeerPeerListUpdatedEvent, TimedDirection},
     crypto::Hash,
     difficulty::CumulativeDifficulty,

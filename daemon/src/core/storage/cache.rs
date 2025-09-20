@@ -1,7 +1,7 @@
 use std::{ops::{Deref, DerefMut}, sync::Arc};
 
 use lru::LruCache;
-use terminos_common::{
+use tos_common::{
     tokio::sync::Mutex,
     block::{BlockHeader, TopoHeight},
     crypto::Hash,

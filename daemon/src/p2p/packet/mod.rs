@@ -8,7 +8,7 @@ mod peer_disconnected;
 
 use std::borrow::Cow;
 use log::{debug, trace};
-use terminos_common::{
+use tos_common::{
     serializer::{Serializer, Reader, ReaderError, Writer},
     block::BlockHeader,
     crypto::Hash

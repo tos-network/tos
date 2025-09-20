@@ -2,7 +2,7 @@ pub mod languages;
 
 use thiserror::Error;
 use log::debug;
-use terminos_common::{
+use tos_common::{
     crypto::PrivateKey,
     serializer::Serializer
 };
@@ -195,7 +195,7 @@ pub fn key_to_words_with_language<'a>(key: &PrivateKey, language: &'a Language) 
 
 #[cfg(test)]
 mod tests {
-    use terminos_common::crypto::KeyPair;
+    use tos_common::crypto::KeyPair;
 
     #[test]
     fn test_languages() {

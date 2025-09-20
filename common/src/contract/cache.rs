@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use terminos_vm::ValueCell;
+use tos_vm::ValueCell;
 use crate::{
     asset::AssetData,
     context::NoOpBuildHasher,
@@ -78,7 +78,7 @@ impl ContractCache {
 
 // #[cfg(test)]
 // mod tests {
-//     use terminos_vm::Value;
+//     use tos_vm::Value;
 //     use crate::crypto::KeyPair;
 //     use super::*;
 

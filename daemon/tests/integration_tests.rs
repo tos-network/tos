@@ -1,5 +1,5 @@
-use terminos_common::{
-    config::{COIN_VALUE, TERMINOS_ASSET},
+use tos_common::{
+    config::{COIN_VALUE, TOS_ASSET},
     crypto::KeyPair,
     transaction::{
         BurnPayload,
@@ -18,7 +18,7 @@ use std::collections::HashMap;
 // Helper function to create a simple transfer transaction
 fn create_transfer_transaction(
     sender: &KeyPair,
-    receiver: &terminos_common::crypto::elgamal::CompressedPublicKey,
+    receiver: &tos_common::crypto::elgamal::CompressedPublicKey,
     amount: u64,
     fee: u64,
     fee_type: FeeType,
@@ -27,7 +27,7 @@ fn create_transfer_transaction(
     let transfer = TransferBuilder {
         destination: receiver.clone().to_address(false),
         amount,
-        asset: TERMINOS_ASSET,
+        asset: TOS_ASSET,
         extra_data: None,
         encrypt_extra_data: true,
     };
@@ -40,7 +40,7 @@ fn create_transfer_transaction(
     
     // Create a simple mock state for testing
     let mut state = MockAccountState::new();
-    state.set_balance(TERMINOS_ASSET, 1000 * COIN_VALUE);
+    state.set_balance(TOS_ASSET, 1000 * COIN_VALUE);
     state.nonce = nonce;
     
     let tx = builder.build(&mut state, sender)?;
@@ -204,7 +204,7 @@ impl MockChainState {
             },
             TransactionType::Energy(energy_data) => {
                 match energy_data {
-                    terminos_common::transaction::EnergyPayload::FreezeTos { amount, duration } => {
+                    tos_common::transaction::EnergyPayload::FreezeTos { amount, duration } => {
                         // Deduct TOS for freeze amount
                         let sender_balance = self.get_balance(sender);
                         if sender_balance < *amount {
@@ -223,7 +223,7 @@ impl MockChainState {
                         let energy_gain = (*amount / COIN_VALUE) * duration.reward_multiplier();
                         self.set_energy(sender.clone(), used, total + energy_gain);
                     }
-                    terminos_common::transaction::EnergyPayload::UnfreezeTos { amount } => {
+                    tos_common::transaction::EnergyPayload::UnfreezeTos { amount } => {
                         // Check if we have enough balance for fee first
                         let fee = tx.get_fee();
                         let sender_balance = self.get_balance(sender);
@@ -265,7 +265,7 @@ impl MockChainState {
 
 // Simple mock account state for testing
 struct MockAccountState {
-    balances: std::collections::HashMap<terminos_common::crypto::Hash, u64>,
+    balances: std::collections::HashMap<tos_common::crypto::Hash, u64>,
     nonce: u64,
 }
 
@@ -277,35 +277,35 @@ impl MockAccountState {
         }
     }
     
-    fn set_balance(&mut self, asset: terminos_common::crypto::Hash, amount: u64) {
+    fn set_balance(&mut self, asset: tos_common::crypto::Hash, amount: u64) {
         self.balances.insert(asset, amount);
     }
 }
 
-impl terminos_common::transaction::builder::AccountState for MockAccountState {
+impl tos_common::transaction::builder::AccountState for MockAccountState {
     fn is_mainnet(&self) -> bool {
         false
     }
     
-    fn get_account_balance(&self, asset: &terminos_common::crypto::Hash) -> Result<u64, Self::Error> {
+    fn get_account_balance(&self, asset: &tos_common::crypto::Hash) -> Result<u64, Self::Error> {
         Ok(self.balances.get(asset).copied().unwrap_or(1000 * COIN_VALUE))
     }
     
-    fn get_reference(&self) -> terminos_common::transaction::Reference {
-        terminos_common::transaction::Reference {
+    fn get_reference(&self) -> tos_common::transaction::Reference {
+        tos_common::transaction::Reference {
             topoheight: 0,
-            hash: terminos_common::crypto::Hash::zero(),
+            hash: tos_common::crypto::Hash::zero(),
         }
     }
     
-    fn get_account_ciphertext(&self, _asset: &terminos_common::crypto::Hash) -> Result<terminos_common::account::CiphertextCache, Self::Error> {
+    fn get_account_ciphertext(&self, _asset: &tos_common::crypto::Hash) -> Result<tos_common::account::CiphertextCache, Self::Error> {
         // Return a dummy ciphertext for testing
         let keypair = KeyPair::new();
         let ciphertext = keypair.get_public_key().encrypt(1000 * COIN_VALUE);
-        Ok(terminos_common::account::CiphertextCache::Decompressed(ciphertext))
+        Ok(tos_common::account::CiphertextCache::Decompressed(ciphertext))
     }
     
-    fn update_account_balance(&mut self, asset: &terminos_common::crypto::Hash, new_balance: u64, _ciphertext: terminos_common::crypto::elgamal::Ciphertext) -> Result<(), Self::Error> {
+    fn update_account_balance(&mut self, asset: &tos_common::crypto::Hash, new_balance: u64, _ciphertext: tos_common::crypto::elgamal::Ciphertext) -> Result<(), Self::Error> {
         self.balances.insert(asset.clone(), new_balance);
         Ok(())
     }
@@ -319,16 +319,16 @@ impl terminos_common::transaction::builder::AccountState for MockAccountState {
         Ok(())
     }
 
-    fn is_account_registered(&self, _key: &terminos_common::crypto::PublicKey) -> Result<bool, Self::Error> {
+    fn is_account_registered(&self, _key: &tos_common::crypto::PublicKey) -> Result<bool, Self::Error> {
         // For testing purposes, assume all accounts are registered
         Ok(true)
     }
 }
 
-impl terminos_common::transaction::builder::FeeHelper for MockAccountState {
+impl tos_common::transaction::builder::FeeHelper for MockAccountState {
     type Error = Box<dyn std::error::Error>;
     
-    fn account_exists(&self, _key: &terminos_common::crypto::elgamal::CompressedPublicKey) -> Result<bool, Self::Error> {
+    fn account_exists(&self, _key: &tos_common::crypto::elgamal::CompressedPublicKey) -> Result<bool, Self::Error> {
         Ok(true) // Assume account exists for testing
     }
 }
@@ -349,7 +349,7 @@ async fn test_energy_fee_validation_integration() {
     // Test that energy fees are only valid for Transfer transactions
     let transfer_type = TransactionType::Transfers(vec![]);
     let burn_type = TransactionType::Burn(BurnPayload {
-        asset: TERMINOS_ASSET,
+        asset: TOS_ASSET,
         amount: 100,
     });
     
@@ -375,11 +375,11 @@ async fn test_energy_fee_validation_integration() {
     let transfer_with_tos_fee = (TransactionType::Transfers(vec![]), FeeType::TOS);
     let transfer_with_energy_fee = (TransactionType::Transfers(vec![]), FeeType::Energy);
     let burn_with_tos_fee = (TransactionType::Burn(BurnPayload {
-        asset: TERMINOS_ASSET,
+        asset: TOS_ASSET,
         amount: 100,
     }), FeeType::TOS);
     let burn_with_energy_fee = (TransactionType::Burn(BurnPayload {
-        asset: TERMINOS_ASSET,
+        asset: TOS_ASSET,
         amount: 100,
     }), FeeType::Energy);
     
@@ -477,7 +477,7 @@ async fn test_invalid_energy_fee_on_burn_transaction() {
     
     // Create burn transaction with energy fee (should fail validation)
     let burn_payload = BurnPayload {
-        asset: TERMINOS_ASSET,
+        asset: TOS_ASSET,
         amount: 100,
     };
     
@@ -489,7 +489,7 @@ async fn test_invalid_energy_fee_on_burn_transaction() {
     
     // Create a simple mock state for testing
     let mut state = MockAccountState::new();
-    state.set_balance(TERMINOS_ASSET, 1000 * COIN_VALUE);
+    state.set_balance(TOS_ASSET, 1000 * COIN_VALUE);
     
     // This should fail because burn transactions can't use energy fees
     let result = builder.build(&mut state, &alice);
@@ -510,7 +510,7 @@ async fn test_invalid_energy_fee_for_new_address() {
     let transfer = TransferBuilder {
         destination: bob.get_public_key().compress().to_address(false),
         amount: 100 * COIN_VALUE,
-        asset: TERMINOS_ASSET,
+        asset: TOS_ASSET,
         extra_data: None,
         encrypt_extra_data: true,
     };
@@ -524,7 +524,7 @@ async fn test_invalid_energy_fee_for_new_address() {
     // Create a mock state that simulates new address (not registered)
     // We'll use a simple approach: create a custom mock state that returns false for Bob's address
     let mut state = MockAccountState::new();
-    state.set_balance(TERMINOS_ASSET, 1000 * COIN_VALUE);
+    state.set_balance(TOS_ASSET, 1000 * COIN_VALUE);
     
     // Override the is_account_registered method for this test
     // Since we can't easily override the method, we'll test the validation logic directly
@@ -921,16 +921,16 @@ fn test_freeze_tos_integration() {
     
     // Create a real freeze_tos transaction
     let freeze_amount = 200 * COIN_VALUE; // 200 TOS
-    let duration = terminos_common::account::FreezeDuration::new(7).unwrap();
+    let duration = tos_common::account::FreezeDuration::new(7).unwrap();
     let energy_gain = (freeze_amount / COIN_VALUE) * duration.reward_multiplier(); // 200 * 14 = 2800 transfers
     
     // Create energy transaction builder
-    let energy_builder = terminos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, duration.clone());
-    let tx_type = terminos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-    let fee_builder = terminos_common::transaction::builder::FeeBuilder::default();
+    let energy_builder = tos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, duration.clone());
+    let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
+    let fee_builder = tos_common::transaction::builder::FeeBuilder::default();
     
-    let builder = terminos_common::transaction::builder::TransactionBuilder::new(
-        terminos_common::transaction::TxVersion::T0,
+    let builder = tos_common::transaction::builder::TransactionBuilder::new(
+        tos_common::transaction::TxVersion::T0,
         alice.get_public_key().compress(),
         None,
         tx_type,
@@ -939,7 +939,7 @@ fn test_freeze_tos_integration() {
     
     // Create a simple mock state for transaction building
     let mut state = MockAccountState::new();
-    state.set_balance(terminos_common::config::TERMINOS_ASSET, 1000 * COIN_VALUE);
+    state.set_balance(tos_common::config::TOS_ASSET, 1000 * COIN_VALUE);
     state.nonce = 0;
     
     // Build the transaction
@@ -1004,9 +1004,9 @@ fn test_freeze_tos_sigma_proofs_verification() {
     
     // Test different freeze amounts and durations
     let test_cases = vec![
-        (100 * COIN_VALUE, terminos_common::account::FreezeDuration::new(3).unwrap()),
-        (500 * COIN_VALUE, terminos_common::account::FreezeDuration::new(7).unwrap()),
-        (1000 * COIN_VALUE, terminos_common::account::FreezeDuration::new(14).unwrap()),
+        (100 * COIN_VALUE, tos_common::account::FreezeDuration::new(3).unwrap()),
+        (500 * COIN_VALUE, tos_common::account::FreezeDuration::new(7).unwrap()),
+        (1000 * COIN_VALUE, tos_common::account::FreezeDuration::new(14).unwrap()),
     ];
     
     for (freeze_amount, duration) in test_cases {
@@ -1019,16 +1019,16 @@ fn test_freeze_tos_sigma_proofs_verification() {
         
         // Create mock state with sufficient balance
         let mut state = MockAccountState::new();
-        state.set_balance(terminos_common::config::TERMINOS_ASSET, 2000 * COIN_VALUE);
+        state.set_balance(tos_common::config::TOS_ASSET, 2000 * COIN_VALUE);
         state.nonce = 0;
         
         // Create energy transaction builder
-        let energy_builder = terminos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, duration.clone());
-        let tx_type = terminos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = terminos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
+        let energy_builder = tos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, duration.clone());
+        let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
         
-        let builder = terminos_common::transaction::builder::TransactionBuilder::new(
-            terminos_common::transaction::TxVersion::T0,
+        let builder = tos_common::transaction::builder::TransactionBuilder::new(
+            tos_common::transaction::TxVersion::T0,
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -1056,7 +1056,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
         // Verify that we have the expected source commitment for TOS
         let tos_commitment = freeze_tx.get_source_commitments()
             .iter()
-            .find(|c| c.get_asset() == &terminos_common::config::TERMINOS_ASSET);
+            .find(|c| c.get_asset() == &tos_common::config::TOS_ASSET);
         
         assert!(tos_commitment.is_some(), "Should have TOS source commitment");
         println!("✓ TOS source commitment found");
@@ -1070,12 +1070,12 @@ fn test_freeze_tos_sigma_proofs_verification() {
         
         // Test 2: Verify source commitment structure
         let commitment = tos_commitment.unwrap();
-        assert_eq!(commitment.get_asset(), &terminos_common::config::TERMINOS_ASSET, "Wrong asset");
+        assert_eq!(commitment.get_asset(), &tos_common::config::TOS_ASSET, "Wrong asset");
         println!("✓ Source commitment structure validation passed");
         
         // Test 3: Verify that the transaction can be serialized and deserialized
         let tx_bytes = freeze_tx.to_bytes();
-        let deserialized_tx = match terminos_common::transaction::Transaction::from_bytes(&tx_bytes) {
+        let deserialized_tx = match tos_common::transaction::Transaction::from_bytes(&tx_bytes) {
             Ok(tx) => {
                 println!("✓ Transaction serialization/deserialization successful");
                 tx
@@ -1100,9 +1100,9 @@ fn test_freeze_tos_sigma_proofs_verification() {
         
         // Test 5: Verify that the transaction data matches expected values
         match freeze_tx.get_data() {
-            terminos_common::transaction::TransactionType::Energy(energy_payload) => {
+            tos_common::transaction::TransactionType::Energy(energy_payload) => {
                 match energy_payload {
-                    terminos_common::transaction::EnergyPayload::FreezeTos { amount, duration: tx_duration } => {
+                    tos_common::transaction::EnergyPayload::FreezeTos { amount, duration: tx_duration } => {
                         assert_eq!(*amount, freeze_amount, "Freeze amount mismatch");
                         assert_eq!(*tx_duration, duration, "Freeze duration mismatch");
                         println!("✓ Energy payload validation passed");
@@ -1114,7 +1114,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
         }
         
         // Test 6: Verify fee type
-        assert_eq!(freeze_tx.get_fee_type(), &terminos_common::transaction::FeeType::TOS, "Expected TOS fee type");
+        assert_eq!(freeze_tx.get_fee_type(), &tos_common::transaction::FeeType::TOS, "Expected TOS fee type");
         println!("✓ Fee type validation passed");
         
         // Test 7: Verify that the transaction has the expected size
@@ -1123,7 +1123,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
         println!("✓ Transaction size: {} bytes", tx_size);
         
         // Test 8: Verify that the transaction can be converted to RPC format
-        let rpc_tx = terminos_common::api::RPCTransaction::from_tx(&freeze_tx, &tx_hash, false);
+        let rpc_tx = tos_common::api::RPCTransaction::from_tx(&freeze_tx, &tx_hash, false);
         assert_eq!(rpc_tx.hash.as_ref(), &tx_hash, "RPC transaction hash mismatch");
         assert_eq!(rpc_tx.fee, freeze_tx.get_fee(), "RPC transaction fee mismatch");
         assert_eq!(rpc_tx.nonce, freeze_tx.get_nonce(), "RPC transaction nonce mismatch");
@@ -1157,16 +1157,16 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         
         // Create mock state with sufficient balance
         let mut state = MockAccountState::new();
-        state.set_balance(terminos_common::config::TERMINOS_ASSET, 2000 * COIN_VALUE);
+        state.set_balance(tos_common::config::TOS_ASSET, 2000 * COIN_VALUE);
         state.nonce = 0;
         
         // Create energy transaction builder for unfreeze
-        let energy_builder = terminos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
-        let tx_type = terminos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = terminos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
+        let energy_builder = tos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
+        let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
         
-        let builder = terminos_common::transaction::builder::TransactionBuilder::new(
-            terminos_common::transaction::TxVersion::T0,
+        let builder = tos_common::transaction::builder::TransactionBuilder::new(
+            tos_common::transaction::TxVersion::T0,
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -1193,7 +1193,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         // Verify that we have the expected source commitment for TOS
         let tos_commitment = unfreeze_tx.get_source_commitments()
             .iter()
-            .find(|c| c.get_asset() == &terminos_common::config::TERMINOS_ASSET);
+            .find(|c| c.get_asset() == &tos_common::config::TOS_ASSET);
         
         assert!(tos_commitment.is_some(), "Should have TOS source commitment");
         println!("✓ TOS source commitment found");
@@ -1207,12 +1207,12 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         
         // Test 2: Verify source commitment structure
         let commitment = tos_commitment.unwrap();
-        assert_eq!(commitment.get_asset(), &terminos_common::config::TERMINOS_ASSET, "Wrong asset");
+        assert_eq!(commitment.get_asset(), &tos_common::config::TOS_ASSET, "Wrong asset");
         println!("✓ Source commitment structure validation passed");
         
         // Test 3: Verify that the transaction can be serialized and deserialized
         let tx_bytes = unfreeze_tx.to_bytes();
-        let deserialized_tx = match terminos_common::transaction::Transaction::from_bytes(&tx_bytes) {
+        let deserialized_tx = match tos_common::transaction::Transaction::from_bytes(&tx_bytes) {
             Ok(tx) => {
                 println!("✓ Transaction serialization/deserialization successful");
                 tx
@@ -1237,9 +1237,9 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         
         // Test 5: Verify that the transaction data matches expected values
         match unfreeze_tx.get_data() {
-            terminos_common::transaction::TransactionType::Energy(energy_payload) => {
+            tos_common::transaction::TransactionType::Energy(energy_payload) => {
                 match energy_payload {
-                    terminos_common::transaction::EnergyPayload::UnfreezeTos { amount } => {
+                    tos_common::transaction::EnergyPayload::UnfreezeTos { amount } => {
                         assert_eq!(*amount, unfreeze_amount, "Unfreeze amount mismatch");
                         println!("✓ Energy payload validation passed");
                     },
@@ -1250,7 +1250,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         }
         
         // Test 6: Verify fee type
-        assert_eq!(unfreeze_tx.get_fee_type(), &terminos_common::transaction::FeeType::TOS, "Expected TOS fee type");
+        assert_eq!(unfreeze_tx.get_fee_type(), &tos_common::transaction::FeeType::TOS, "Expected TOS fee type");
         println!("✓ Fee type validation passed");
         
         // Test 7: Verify that the transaction has the expected size
@@ -1259,7 +1259,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         println!("✓ Transaction size: {} bytes", tx_size);
         
         // Test 8: Verify that the transaction can be converted to RPC format
-        let rpc_tx = terminos_common::api::RPCTransaction::from_tx(&unfreeze_tx, &tx_hash, false);
+        let rpc_tx = tos_common::api::RPCTransaction::from_tx(&unfreeze_tx, &tx_hash, false);
         assert_eq!(rpc_tx.hash.as_ref(), &tx_hash, "RPC transaction hash mismatch");
         assert_eq!(rpc_tx.fee, unfreeze_tx.get_fee(), "RPC transaction fee mismatch");
         assert_eq!(rpc_tx.nonce, unfreeze_tx.get_nonce(), "RPC transaction nonce mismatch");
@@ -1298,16 +1298,16 @@ fn test_unfreeze_tos_integration() {
     
     // Step 1: Freeze some TOS first to have something to unfreeze
     let freeze_amount = 200 * COIN_VALUE; // 200 TOS
-    let freeze_duration = terminos_common::account::FreezeDuration::new(3).unwrap();
+    let freeze_duration = tos_common::account::FreezeDuration::new(3).unwrap();
     let energy_gain = (freeze_amount / COIN_VALUE) * freeze_duration.reward_multiplier();
     
     // Create freeze transaction
-    let energy_builder = terminos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, freeze_duration.clone());
-    let tx_type = terminos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-    let fee_builder = terminos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
+    let energy_builder = tos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, freeze_duration.clone());
+    let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
+    let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
     
-    let builder = terminos_common::transaction::builder::TransactionBuilder::new(
-        terminos_common::transaction::TxVersion::T0,
+    let builder = tos_common::transaction::builder::TransactionBuilder::new(
+        tos_common::transaction::TxVersion::T0,
         alice.get_public_key().compress(),
         None,
         tx_type,
@@ -1316,7 +1316,7 @@ fn test_unfreeze_tos_integration() {
     
     // Create a simple mock state for transaction building
     let mut state = MockAccountState::new();
-    state.set_balance(terminos_common::config::TERMINOS_ASSET, 1000 * COIN_VALUE);
+    state.set_balance(tos_common::config::TOS_ASSET, 1000 * COIN_VALUE);
     state.nonce = 0;
     
     // Build the freeze transaction
@@ -1351,12 +1351,12 @@ fn test_unfreeze_tos_integration() {
     let unfreeze_amount = 100 * COIN_VALUE; // 100 TOS (half of what was frozen)
     
     // Create unfreeze transaction
-    let energy_builder = terminos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
-    let tx_type = terminos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-    let fee_builder = terminos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
+    let energy_builder = tos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
+    let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
+    let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
     
-    let builder = terminos_common::transaction::builder::TransactionBuilder::new(
-        terminos_common::transaction::TxVersion::T0,
+    let builder = tos_common::transaction::builder::TransactionBuilder::new(
+        tos_common::transaction::TxVersion::T0,
         alice.get_public_key().compress(),
         None,
         tx_type,
@@ -1365,7 +1365,7 @@ fn test_unfreeze_tos_integration() {
     
     // Create a simple mock state for transaction building
     let mut state = MockAccountState::new();
-    state.set_balance(terminos_common::config::TERMINOS_ASSET, 780 * COIN_VALUE); // Updated balance after freeze
+    state.set_balance(tos_common::config::TOS_ASSET, 780 * COIN_VALUE); // Updated balance after freeze
     state.nonce = 1; // Updated nonce after freeze
     
     // Build the unfreeze transaction
@@ -1421,14 +1421,14 @@ fn test_unfreeze_tos_edge_cases() {
         
         // Freeze 100 TOS
         let freeze_amount = 100 * COIN_VALUE;
-        let freeze_duration = terminos_common::account::FreezeDuration::new(3).unwrap();
+        let freeze_duration = tos_common::account::FreezeDuration::new(3).unwrap();
         
-        let energy_builder = terminos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, freeze_duration);
-        let tx_type = terminos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = terminos_common::transaction::builder::FeeBuilder::Value(20000);
+        let energy_builder = tos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, freeze_duration);
+        let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000);
         
-        let builder = terminos_common::transaction::builder::TransactionBuilder::new(
-            terminos_common::transaction::TxVersion::T0,
+        let builder = tos_common::transaction::builder::TransactionBuilder::new(
+            tos_common::transaction::TxVersion::T0,
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -1436,7 +1436,7 @@ fn test_unfreeze_tos_edge_cases() {
         );
         
         let mut state = MockAccountState::new();
-        state.set_balance(terminos_common::config::TERMINOS_ASSET, 1000 * COIN_VALUE);
+        state.set_balance(tos_common::config::TOS_ASSET, 1000 * COIN_VALUE);
         state.nonce = 0;
         
         let freeze_tx = builder.build(&mut state, &alice).unwrap();
@@ -1449,12 +1449,12 @@ fn test_unfreeze_tos_edge_cases() {
         // Try to unfreeze 150 TOS (more than frozen)
         let unfreeze_amount = 150 * COIN_VALUE;
         
-        let energy_builder = terminos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
-        let tx_type = terminos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = terminos_common::transaction::builder::FeeBuilder::Value(20000);
+        let energy_builder = tos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
+        let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000);
         
-        let builder = terminos_common::transaction::builder::TransactionBuilder::new(
-            terminos_common::transaction::TxVersion::T0,
+        let builder = tos_common::transaction::builder::TransactionBuilder::new(
+            tos_common::transaction::TxVersion::T0,
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -1462,7 +1462,7 @@ fn test_unfreeze_tos_edge_cases() {
         );
         
         let mut state = MockAccountState::new();
-        state.set_balance(terminos_common::config::TERMINOS_ASSET, 880 * COIN_VALUE); // After freeze
+        state.set_balance(tos_common::config::TOS_ASSET, 880 * COIN_VALUE); // After freeze
         state.nonce = 1;
         
         let unfreeze_tx = builder.build(&mut state, &alice).unwrap();
@@ -1487,14 +1487,14 @@ fn test_unfreeze_tos_edge_cases() {
         
         // Freeze 100 TOS
         let freeze_amount = 100 * COIN_VALUE;
-        let freeze_duration = terminos_common::account::FreezeDuration::new(3).unwrap();
+        let freeze_duration = tos_common::account::FreezeDuration::new(3).unwrap();
         
-        let energy_builder = terminos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, freeze_duration);
-        let tx_type = terminos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = terminos_common::transaction::builder::FeeBuilder::Value(20000);
+        let energy_builder = tos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, freeze_duration);
+        let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000);
         
-        let builder = terminos_common::transaction::builder::TransactionBuilder::new(
-            terminos_common::transaction::TxVersion::T0,
+        let builder = tos_common::transaction::builder::TransactionBuilder::new(
+            tos_common::transaction::TxVersion::T0,
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -1502,7 +1502,7 @@ fn test_unfreeze_tos_edge_cases() {
         );
         
         let mut state = MockAccountState::new();
-        state.set_balance(terminos_common::config::TERMINOS_ASSET, 1000 * COIN_VALUE);
+        state.set_balance(tos_common::config::TOS_ASSET, 1000 * COIN_VALUE);
         state.nonce = 0;
         
         let freeze_tx = builder.build(&mut state, &alice).unwrap();
@@ -1518,12 +1518,12 @@ fn test_unfreeze_tos_edge_cases() {
         // Try to unfreeze 50 TOS
         let unfreeze_amount = 50 * COIN_VALUE;
         
-        let energy_builder = terminos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
-        let tx_type = terminos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = terminos_common::transaction::builder::FeeBuilder::Value(20000);
+        let energy_builder = tos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
+        let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000);
         
-        let builder = terminos_common::transaction::builder::TransactionBuilder::new(
-            terminos_common::transaction::TxVersion::T0,
+        let builder = tos_common::transaction::builder::TransactionBuilder::new(
+            tos_common::transaction::TxVersion::T0,
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -1531,7 +1531,7 @@ fn test_unfreeze_tos_edge_cases() {
         );
         
         let mut state = MockAccountState::new();
-        state.set_balance(terminos_common::config::TERMINOS_ASSET, 880 * COIN_VALUE); // Keep original balance for building
+        state.set_balance(tos_common::config::TOS_ASSET, 880 * COIN_VALUE); // Keep original balance for building
         state.nonce = 1;
         
         let unfreeze_tx = builder.build(&mut state, &alice).unwrap();
@@ -1550,10 +1550,10 @@ fn test_unfreeze_tos_edge_cases() {
 
 #[test]
 fn test_energy_system_demo() {
-    println!("=== Terminos Energy System Demo Test ===\n");
+    println!("=== Tos Energy System Demo Test ===\n");
 
     // Create a new energy resource for an account
-    let mut alice_energy = terminos_common::utils::energy_fee::EnergyResourceManager::create_energy_resource();
+    let mut alice_energy = tos_common::utils::energy_fee::EnergyResourceManager::create_energy_resource();
     println!("Alice's energy resource created");
     println!("Initial energy: {}", alice_energy.available_energy());
     println!();
@@ -1563,8 +1563,8 @@ fn test_energy_system_demo() {
     let topoheight = 1000;
     
     // Freeze 1 TOS for 7 days (14 transfers)
-    let duration7 = terminos_common::account::FreezeDuration::new(7).unwrap();
-    let energy_gained_7d = terminos_common::utils::energy_fee::EnergyResourceManager::freeze_tos_for_energy(
+    let duration7 = tos_common::account::FreezeDuration::new(7).unwrap();
+    let energy_gained_7d = tos_common::utils::energy_fee::EnergyResourceManager::freeze_tos_for_energy(
         &mut alice_energy,
         100000000, // 1 TOS
         duration7,
@@ -1576,8 +1576,8 @@ fn test_energy_system_demo() {
     println!();
 
     // Freeze 2 TOS for 14 days (56 transfers)
-    let duration14 = terminos_common::account::FreezeDuration::new(14).unwrap();
-    let energy_gained_14d = terminos_common::utils::energy_fee::EnergyResourceManager::freeze_tos_for_energy(
+    let duration14 = tos_common::account::FreezeDuration::new(14).unwrap();
+    let energy_gained_14d = tos_common::utils::energy_fee::EnergyResourceManager::freeze_tos_for_energy(
         &mut alice_energy,
         200000000, // 2 TOS
         duration14,
@@ -1590,7 +1590,7 @@ fn test_energy_system_demo() {
 
     // Show energy status
     println!("=== Energy Status ===");
-    let status = terminos_common::utils::energy_fee::EnergyResourceManager::get_energy_status(&alice_energy);
+    let status = tos_common::utils::energy_fee::EnergyResourceManager::get_energy_status(&alice_energy);
     println!("Total energy: {} transfers", status.total_energy);
     println!("Used energy: {} transfers", status.used_energy);
     println!("Available energy: {} transfers", status.available_energy);
@@ -1604,7 +1604,7 @@ fn test_energy_system_demo() {
     let output_count = 2;
     let new_addresses = 1;
     
-    let energy_cost = terminos_common::utils::energy_fee::EnergyFeeCalculator::calculate_energy_cost(
+    let energy_cost = tos_common::utils::energy_fee::EnergyFeeCalculator::calculate_energy_cost(
         tx_size,
         output_count,
         new_addresses
@@ -1620,7 +1620,7 @@ fn test_energy_system_demo() {
     println!("=== Transaction Execution ===");
     println!("Executing transaction with energy cost: {} transfers", energy_cost);
     
-    let result = terminos_common::utils::energy_fee::EnergyResourceManager::consume_energy_for_transaction(
+    let result = tos_common::utils::energy_fee::EnergyResourceManager::consume_energy_for_transaction(
         &mut alice_energy,
         energy_cost
     );
@@ -1638,7 +1638,7 @@ fn test_energy_system_demo() {
 
     // Show updated status
     println!("=== Updated Energy Status ===");
-    let updated_status = terminos_common::utils::energy_fee::EnergyResourceManager::get_energy_status(&alice_energy);
+    let updated_status = tos_common::utils::energy_fee::EnergyResourceManager::get_energy_status(&alice_energy);
     println!("Total energy: {} transfers", updated_status.total_energy);
     println!("Used energy: {} transfers", updated_status.used_energy);
     println!("Available energy: {} transfers", updated_status.available_energy);
@@ -1656,7 +1656,7 @@ fn test_energy_system_demo() {
 
     // Try to unfreeze before unlock time (should fail)
     println!("Trying to unfreeze 0.5 TOS before unlock time...");
-    let result = terminos_common::utils::energy_fee::EnergyResourceManager::unfreeze_tos(
+    let result = tos_common::utils::energy_fee::EnergyResourceManager::unfreeze_tos(
         &mut alice_energy,
         50000000, // 0.5 TOS
         unlock_topoheight_7d - 1
@@ -1674,7 +1674,7 @@ fn test_energy_system_demo() {
 
     // Unfreeze after 7-day lock period
     println!("Unfreezing 1 TOS after 7-day lock period...");
-    let result = terminos_common::utils::energy_fee::EnergyResourceManager::unfreeze_tos(
+    let result = tos_common::utils::energy_fee::EnergyResourceManager::unfreeze_tos(
         &mut alice_energy,
         100000000, // 1 TOS (integer)
         unlock_topoheight_7d
@@ -1707,7 +1707,7 @@ fn test_energy_system_demo() {
     let new_addresses = 2;
     
     // Calculate energy cost and TOS conversion manually
-    let energy_consumed = terminos_common::utils::energy_fee::EnergyFeeCalculator::calculate_energy_cost(
+    let energy_consumed = tos_common::utils::energy_fee::EnergyFeeCalculator::calculate_energy_cost(
         large_energy_cost,
         new_addresses,
         new_addresses
@@ -1731,7 +1731,7 @@ fn test_energy_system_demo() {
 
     // Show freeze records by duration
     println!("=== Freeze Records by Duration ===");
-    let records_by_duration = terminos_common::utils::energy_fee::EnergyResourceManager::get_freeze_records_by_duration(&alice_energy);
+    let records_by_duration = tos_common::utils::energy_fee::EnergyResourceManager::get_freeze_records_by_duration(&alice_energy);
     
     for (duration, records) in records_by_duration {
         println!("{}: {} records", duration.name(), records.len());
@@ -1764,7 +1764,7 @@ fn test_energy_system_demo() {
     
     println!("✓ All energy system demo assertions passed!");
     println!("=== Demo Complete ===");
-    println!("The Energy system provides efficient resource management for Terminos!");
+    println!("The Energy system provides efficient resource management for Tos!");
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use terminos_vm::Module;
+use tos_vm::Module;
 
 use crate::{crypto::Hash, serializer::*};
 use super::ContractDeposit;

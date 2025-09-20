@@ -1,5 +1,5 @@
 use log::trace;
-use terminos_common::{
+use tos_common::{
     asset::AssetData,
     block::TopoHeight,
     contract::{ContractProvider, ContractStorage},
@@ -7,7 +7,7 @@ use terminos_common::{
     crypto::{Hash, PublicKey},
     tokio::try_block_on
 };
-use terminos_vm::ValueCell;
+use tos_vm::ValueCell;
 use crate::core::storage::{
     AccountProvider,
     AssetProvider,

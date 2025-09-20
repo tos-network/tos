@@ -24,7 +24,7 @@ use crate::{
     p2p::peer_list::Peer,
 };
 use super::{InternalRpcError, ApiError};
-use terminos_common::{
+use tos_common::{
     api::{
         daemon::*,
         RPCContractOutput,
@@ -44,7 +44,7 @@ use terminos_common::{
         MAXIMUM_SUPPLY,
         MAX_TRANSACTION_SIZE,
         VERSION,
-        TERMINOS_ASSET
+        TOS_ASSET
     },
     context::Context,
     crypto::{Address, AddressType, Hash},
@@ -1214,7 +1214,7 @@ async fn get_account_history<S: Storage>(context: &Context, body: Value) -> Resu
         let (hash, block_header) = storage.get_block_header_at_topoheight(topo).await.context(format!("Error while retrieving block header at topo height {topo}"))?;
 
         // Block reward is only paid in TOS
-        if params.asset == TERMINOS_ASSET {
+        if params.asset == TOS_ASSET {
             let is_miner = *block_header.get_miner() == *key;
             if (is_miner || is_dev_address) && params.incoming_flow {
                 let mut reward = storage.get_block_reward_at_topo_height(topo).context(format!("Error while retrieving reward at topo height {topo}"))?;
@@ -1335,7 +1335,7 @@ async fn get_account_history<S: Storage>(context: &Context, body: Value) -> Resu
                 TransactionType::Energy(payload) => {
                     if is_sender {
                         match payload {
-                            terminos_common::transaction::EnergyPayload::FreezeTos { amount, duration } => {
+                            tos_common::transaction::EnergyPayload::FreezeTos { amount, duration } => {
                                 history.push(AccountHistoryEntry {
                                     topoheight: topo,
                                     hash: tx_hash.clone(),
@@ -1346,7 +1346,7 @@ async fn get_account_history<S: Storage>(context: &Context, body: Value) -> Resu
                                     block_timestamp: block_header.get_timestamp()
                                 });
                             },
-                            terminos_common::transaction::EnergyPayload::UnfreezeTos { amount } => {
+                            tos_common::transaction::EnergyPayload::UnfreezeTos { amount } => {
                                 history.push(AccountHistoryEntry {
                                     topoheight: topo,
                                     hash: tx_hash.clone(),

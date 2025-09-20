@@ -1,4 +1,4 @@
-use terminos_common::{block::TopoHeight, serializer::*};
+use tos_common::{block::TopoHeight, serializer::*};
 
 pub type ContractId = u64;
 

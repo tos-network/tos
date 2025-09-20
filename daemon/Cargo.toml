@@ -1,15 +1,15 @@
 [package]
-name = "terminos_daemon"
+name = "tos_daemon"
 version = "0.1.0"
 edition = "2021"
-authors = ["Terminos <info@tos.network>"]
+authors = ["Tos <info@tos.network>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-terminos_common = { path = "../common", features = ["prompt", "clap", "rpc-server", "tokio"] }
-terminos-environment = { git = "https://github.com/tos-network/terminos-vm", branch = "dev" }
-terminos-vm = { git = "https://github.com/tos-network/terminos-vm", branch = "dev" }
+tos_common = { path = "../common", features = ["prompt", "clap", "rpc-server", "tokio"] }
+tos-environment = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
+tos-vm = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
 
 # Database backends
 sled = "0.34.7"

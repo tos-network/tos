@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 use thiserror::Error;
 use anyhow::{Context, Error};
 use log::{debug, error, info, trace, warn};
-use terminos_common::{
+use tos_common::{
     account::CiphertextCache,
     api::{
         daemon::{
@@ -21,7 +21,7 @@ use terminos_common::{
         wallet::BalanceChanged,
         RPCTransactionType
     },
-    config::TERMINOS_ASSET,
+    config::TOS_ASSET,
     crypto::{
         elgamal::Ciphertext,
         Address,
@@ -234,7 +234,7 @@ impl NetworkHandler {
         if miner == *address.get_public_key() {
             debug!("Block {} at topoheight {} is mined by us", block_hash, topoheight);
             if let Some(reward) = block.miner_reward {
-                assets_changed.insert(TERMINOS_ASSET);
+                assets_changed.insert(TOS_ASSET);
                 
                 if should_scan_history {
                     let coinbase = EntryData::Coinbase { reward };
@@ -284,7 +284,7 @@ impl NetworkHandler {
                 let is_owner = *tx.source.get_public_key() == *address.get_public_key();
                 if is_owner {
                     debug!("Transaction {} is from us", tx.hash);
-                    assets_changed.insert(TERMINOS_ASSET);
+                    assets_changed.insert(TOS_ASSET);
                 }
 
                 let entry: Option<EntryData> = match tx.data {

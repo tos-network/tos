@@ -1,7 +1,7 @@
 use std::hash::{Hasher, Hash as StdHash};
 
 use indexmap::IndexSet;
-use terminos_common::{
+use tos_common::{
     crypto::Hash,
     difficulty::{CumulativeDifficulty, Difficulty},
     varuint::VarUint,

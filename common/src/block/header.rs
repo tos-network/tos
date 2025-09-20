@@ -17,7 +17,7 @@ use crate::{
     time::TimestampMillis,
     immutable::Immutable
 };
-use terminos_hash::Error as TerminosHashError;
+use tos_hash::Error as TosHashError;
 use super::{Algorithm, MinerWork, EXTRA_NONCE_SIZE};
 
 // Serialize the extra nonce in a hexadecimal string
@@ -192,7 +192,7 @@ impl BlockHeader {
     }
 
     // compute the block POW hash
-    pub fn get_pow_hash(&self, algorithm: Algorithm) -> Result<Hash, TerminosHashError> {
+    pub fn get_pow_hash(&self, algorithm: Algorithm) -> Result<Hash, TosHashError> {
         pow_hash(&self.get_serialized_header(), algorithm)
     }
 

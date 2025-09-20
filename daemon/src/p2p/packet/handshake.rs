@@ -1,5 +1,5 @@
 use log::debug;
-use terminos_common::{
+use tos_common::{
     crypto::Hash,
     difficulty::CumulativeDifficulty,
     network::Network,

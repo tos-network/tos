@@ -1,7 +1,7 @@
 use std::time::Duration;
 use humantime::format_duration;
 use log::trace;
-use terminos_common::{
+use tos_common::{
     difficulty::Difficulty,
     time::TimestampMillis,
     utils::format_difficulty,

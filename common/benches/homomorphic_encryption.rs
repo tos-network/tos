@@ -1,9 +1,9 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
 use curve25519_dalek::Scalar;
-use terminos_common::crypto::KeyPair;
+use tos_common::crypto::KeyPair;
 
-// Current Homomorphic Encryption operations used by terminos network
+// Current Homomorphic Encryption operations used by tos network
 // Those are based on the Twisted elGamal encryption scheme. 
 fn bench_he_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("he_operations");

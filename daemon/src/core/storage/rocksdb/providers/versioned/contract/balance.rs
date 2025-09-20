@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use log::trace;
-use terminos_common::block::TopoHeight;
+use tos_common::block::TopoHeight;
 use crate::core::{
     error::BlockchainError,
     storage::{

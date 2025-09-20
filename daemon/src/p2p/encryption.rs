@@ -8,7 +8,7 @@ use chacha20poly1305::{
     KeyInit
 };
 use thiserror::Error;
-use terminos_common::tokio::sync::Mutex;
+use tos_common::tokio::sync::Mutex;
 use log::trace;
 
 // This symetric key is used to encrypt/decrypt the data

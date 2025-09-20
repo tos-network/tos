@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use log::trace;
 use rocksdb::Direction;
-use terminos_common::{
+use tos_common::{
     block::TopoHeight,
     serializer::{RawBytes, Serializer},
     versioned_type::Versioned

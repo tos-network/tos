@@ -12,7 +12,7 @@ use log::{
     debug,
     warn,
 };
-use terminos_common::{
+use tos_common::{
     tokio::{
         sync::{
             mpsc::{Sender, Receiver, self},

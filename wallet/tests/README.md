@@ -1,6 +1,6 @@
-# Terminos Wallet Batch Mode Tests
+# Tos Wallet Batch Mode Tests
 
-This directory contains Python test scripts for testing the Terminos wallet's batch mode functionality. The tests are split into multiple files based on command categories to make debugging easier.
+This directory contains Python test scripts for testing the Tos wallet's batch mode functionality. The tests are split into multiple files based on command categories to make debugging easier.
 
 ## Test Files
 
@@ -144,29 +144,29 @@ The wallet's batch mode works as follows:
 
 ```bash
 # Display address (no parameters)
-../target/debug/terminos_wallet --batch-mode --cmd "display_address" --wallet-path test_wallet --password test123
+../target/debug/tos_wallet --batch-mode --cmd "display_address" --wallet-path test_wallet --password test123
 
 # List balances with page parameter
-../target/debug/terminos_wallet --batch-mode --cmd "list_balances 1" --wallet-path test_wallet --password test123
+../target/debug/tos_wallet --batch-mode --cmd "list_balances 1" --wallet-path test_wallet --password test123
 
 # Freeze TOS with parameters
-../target/debug/terminos_wallet --batch-mode --cmd "freeze_tos 100000000 7 yes" --wallet-path test_wallet --password test123
+../target/debug/tos_wallet --batch-mode --cmd "freeze_tos 100000000 7 yes" --wallet-path test_wallet --password test123
 
 # Transfer with parameters
-../target/debug/terminos_wallet --batch-mode --cmd "transfer tos:address 100000000 tos yes" --wallet-path test_wallet --password test123
+../target/debug/tos_wallet --batch-mode --cmd "transfer tos:address 100000000 tos yes" --wallet-path test_wallet --password test123
 ```
 
 ## Requirements
 
 - Python 3.6+
 - Cargo and Rust toolchain
-- terminos-wallet binary must be built (`cargo build --bin terminos_wallet`)
+- tos-wallet binary must be built (`cargo build --bin tos_wallet`)
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Wallet Binary Not Found**: Ensure `cargo build --bin terminos_wallet` has been run
+1. **Wallet Binary Not Found**: Ensure `cargo build --bin tos_wallet` has been run
 2. **Test Wallet Not Found**: Tests create a test wallet automatically
 3. **Command Parameters**: Ensure parameters are space-separated, not `key=value` format
 4. **Hash Parameters**: Use 64-character hex strings for hash parameters

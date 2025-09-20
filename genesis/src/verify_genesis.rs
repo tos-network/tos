@@ -1,4 +1,4 @@
-use terminos_common::{
+use tos_common::{
     block::Block,
     serializer::Serializer,
     crypto::Hashable,
@@ -41,7 +41,7 @@ fn main() {
             println!("Block transactions count: {}", block.get_txs_count());
             println!("Block transactions hash: {}", block.get_header().get_txs_hash());
             println!("Block work hash: {}", block.get_header().get_work_hash());
-            println!("Block POW hash (V2): {:?}", block.get_pow_hash(terminos_common::block::Algorithm::V2));
+            println!("Block POW hash (V2): {:?}", block.get_pow_hash(tos_common::block::Algorithm::V2));
             println!("Block hash: {}", block.hash());
         },
         Err(e) => {

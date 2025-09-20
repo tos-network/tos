@@ -1,4 +1,4 @@
-use terminos_common::{network::Network, serializer::Serializer};
+use tos_common::{network::Network, serializer::Serializer};
 use log::trace;
 use crate::core::{error::BlockchainError, storage::{sled::NETWORK, NetworkProvider, SledStorage}};
 

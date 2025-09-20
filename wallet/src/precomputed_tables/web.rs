@@ -12,7 +12,7 @@ use web_sys::{
     FileSystemGetFileOptions,
     FileSystemWritableFileStream
 };
-use terminos_common::crypto::ecdlp::{self, ECDLPTables};
+use tos_common::crypto::ecdlp::{self, ECDLPTables};
 use wasm_bindgen_futures::JsFuture;
 use log::{info, warn};
 

@@ -4,7 +4,7 @@ use futures::{stream, StreamExt, TryStreamExt};
 use indexmap::{IndexMap, IndexSet};
 use log::{debug, error, info, trace, warn};
 use tokio::try_join;
-use terminos_common::{
+use tos_common::{
     account::{VersionedBalance, VersionedNonce},
     crypto::{Hash, PublicKey},
     immutable::Immutable,

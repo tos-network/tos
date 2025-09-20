@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use indexmap::IndexSet;
 use log::trace;
-use terminos_common::{
+use tos_common::{
     block::{BlockHeader, BlockVersion},
     crypto::Hash,
     difficulty::{CumulativeDifficulty, Difficulty},
