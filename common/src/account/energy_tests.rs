@@ -1,22 +1,22 @@
 use crate::{
     account::{EnergyResource, FreezeDuration, FreezeRecord, EnergyLease},
     utils::energy_fee::{EnergyFeeCalculator, EnergyResourceManager, EnergyStatus},
-    config::{ENERGY_PER_KB, ENERGY_PER_TRANSFER},
+    config::ENERGY_PER_TRANSFER,
 };
 
 #[test]
 fn test_energy_fee_calculation() {
-    // Test basic energy cost calculation
+    // Test basic energy cost calculation - only transfer count matters, not transaction size
     let cost = EnergyFeeCalculator::calculate_energy_cost(1024, 1, 0);
-    assert_eq!(cost, ENERGY_PER_KB + ENERGY_PER_TRANSFER);
+    assert_eq!(cost, ENERGY_PER_TRANSFER);
 
-    // Test with multiple outputs
+    // Test with multiple outputs - each transfer consumes 1 energy
     let cost = EnergyFeeCalculator::calculate_energy_cost(1024, 3, 0);
-    assert_eq!(cost, ENERGY_PER_KB + 3 * ENERGY_PER_TRANSFER);
+    assert_eq!(cost, 3 * ENERGY_PER_TRANSFER);
 
-    // Test with new addresses
+    // Test with new addresses - new addresses don't consume energy in current implementation
     let cost = EnergyFeeCalculator::calculate_energy_cost(1024, 1, 2);
-    assert_eq!(cost, ENERGY_PER_KB + ENERGY_PER_TRANSFER + 2 * ENERGY_PER_TRANSFER);
+    assert_eq!(cost, ENERGY_PER_TRANSFER);
 }
 
 #[test]
@@ -244,8 +244,8 @@ fn test_energy_fee_calculator_total_cost() {
     
     // Test with sufficient energy
     let energy_consumed = EnergyFeeCalculator::calculate_energy_cost(
-        energy_cost,
-        new_addresses,
+        1024, // tx_size (ignored in current implementation)
+        1,    // output_count (1 transfer)
         new_addresses
     );
     let available_energy = resource.available_energy();
@@ -257,14 +257,13 @@ fn test_energy_fee_calculator_total_cost() {
         0
     };
     
-    assert_eq!(energy_consumed, energy_cost);
+    assert_eq!(energy_consumed, 1); // Only 1 transfer = 1 energy
     assert_eq!(tos_cost, 0); // No TOS cost when energy is sufficient
-    
-    // Test with insufficient energy
-    let large_energy_cost = 200000000; // 2 energy (more than available)
+
+    // Test with insufficient energy (multiple transfers)
     let energy_consumed = EnergyFeeCalculator::calculate_energy_cost(
-        large_energy_cost,
-        new_addresses,
+        1024, // tx_size (ignored)
+        20,   // output_count (20 transfers, more than available energy)
         new_addresses
     );
     let available_energy = resource.available_energy();
@@ -276,7 +275,7 @@ fn test_energy_fee_calculator_total_cost() {
         0
     };
     
-    assert_eq!(energy_consumed, large_energy_cost);
+    assert_eq!(energy_consumed, 20); // 20 transfers = 20 energy
     // In current implementation, insufficient energy causes transaction failure
     // rather than TOS conversion
     assert_eq!(tos_cost, 0);

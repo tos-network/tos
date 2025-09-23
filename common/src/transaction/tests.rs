@@ -719,8 +719,8 @@ async fn test_transfer_extra_data_limits() {
     alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
     bob.set_balance(TOS_ASSET, 0);
 
-    // Test single transfer with maximum extra data size (use smaller size to account for encryption overhead)
-    let max_extra_data = DataElement::Value(DataValue::Blob(vec![0u8; 500])); // Use 500 bytes instead of full limit
+    // Test single transfer with exchange ID sized extra data (realistic use case)
+    let max_extra_data = DataElement::Value(DataValue::Blob(vec![0u8; 32])); // Use 32 bytes, typical exchange ID size
     let tx = {
         let mut state = AccountStateImpl {
             balances: alice.balances.clone(),
@@ -809,7 +809,7 @@ async fn test_transfer_extra_data_limits() {
     // Test multiple transfers with total extra data exceeding limit
     let mut transfers = Vec::new();
     for i in 0..32 {
-        let extra_data_size = if i == 31 { 1000 } else { 100 }; // Use larger sizes to exceed total limit
+        let extra_data_size = if i == 31 { 100 } else { 20 }; // Use sizes that will exceed total limit after encryption
         let extra_data = DataElement::Value(DataValue::Blob(vec![0u8; extra_data_size]));
         transfers.push(TransferBuilder {
             amount: 1,

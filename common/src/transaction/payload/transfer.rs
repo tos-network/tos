@@ -17,7 +17,7 @@ use crate::{
 pub struct TransferPayload {
     asset: Hash,
     destination: CompressedPublicKey,
-    // we can put whatever we want up to EXTRA_DATA_LIMIT_SIZE bytes
+    // we can put whatever we want up to EXTRA_DATA_LIMIT_SIZE bytes (128 bytes for memo/exchange IDs)
     extra_data: Option<UnknownExtraDataFormat>,
     /// Represents the ciphertext along with `sender_handle` and `receiver_handle`.
     /// The opening is reused for both of the sender and receiver commitments.

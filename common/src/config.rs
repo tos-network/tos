@@ -11,7 +11,13 @@ pub const TOS_ASSET: Hash = Hash::zero();
 
 // Energy-based fee model constants
 // Only transfer operations consume energy
-// Adjusted to match TRON's ratio: 1 TOS freeze = 7 free transfers/3 days
+// Simplified model compared to TRON: 1 transfer = 1 energy (size-independent)
+//
+// Energy Model Overview:
+// - Each transfer consumes exactly 1 energy regardless of transaction size
+// - Energy is gained by freezing TOS with duration-based multipliers
+// - Energy formula: 1 TOS × (2 × freeze_days) = energy units
+// - Example: 1 TOS frozen for 7 days = 14 energy = 14 free transfers
 pub const ENERGY_PER_TRANSFER: u64 = 1;           // Basic transfer (1 energy per transfer)
 
 

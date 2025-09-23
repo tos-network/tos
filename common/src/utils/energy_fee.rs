@@ -6,13 +6,35 @@ use crate::{
     },
 };
 
-/// Energy-based fee calculator for Tos
+/// Energy-based fee calculator for TOS
 /// Implements TRON-style energy model without bandwidth
+///
+/// # Energy Cost Model
+/// - Transfer operations: 1 energy per transfer (regardless of transaction size)
+/// - Account creation: 0 energy (no energy cost for new addresses)
+/// - Transaction size: Ignored in energy calculation (unlike TRON's bandwidth)
+///
+/// # Edge Cases
+/// - Large transactions consume the same energy as small ones (size-independent)
+/// - Multiple outputs scale linearly (N outputs = N energy)
+/// - New account creation doesn't consume additional energy
+/// - Zero outputs result in zero energy cost
 pub struct EnergyFeeCalculator;
 
 impl EnergyFeeCalculator {
-    /// Calculate energy cost for a transaction (only transfer supported)
+    /// Calculate energy cost for a transaction (only transfer operations consume energy)
     /// Each transfer consumes exactly 1 energy, regardless of transaction size
+    ///
+    /// # Parameters
+    /// - `_tx_size`: Transaction size in bytes (ignored in current implementation)
+    /// - `output_count`: Number of transfer outputs (each costs 1 energy)
+    /// - `new_addresses`: Number of new addresses created (currently costs 0 energy)
+    ///
+    /// # Edge Cases
+    /// - Transaction size is completely ignored (unlike TRON's bandwidth model)
+    /// - New address creation is free in terms of energy
+    /// - Zero outputs = zero energy cost
+    /// - Large transactions with 1 output = same cost as small transactions with 1 output
     pub fn calculate_energy_cost(
         _tx_size: usize,
         output_count: usize,
@@ -35,6 +57,19 @@ impl EnergyFeeCalculator {
 
 
 /// Energy resource manager for accounts
+///
+/// # Purpose
+/// Provides high-level operations for managing energy resources, including:
+/// - Freezing TOS to gain energy
+/// - Unfreezing TOS (with time constraints)
+/// - Consuming energy for transactions
+/// - Resetting energy usage periodically
+///
+/// # Edge Cases and Error Handling
+/// - All TOS amounts must be whole numbers (fractional parts discarded)
+/// - Energy consumption fails if insufficient energy available
+/// - Unfreezing only works on unlocked freeze records
+/// - Energy reset timing must be managed externally
 pub struct EnergyResourceManager;
 
 impl EnergyResourceManager {

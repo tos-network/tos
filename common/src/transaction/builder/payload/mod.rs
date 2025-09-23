@@ -16,7 +16,7 @@ pub struct TransferBuilder {
     pub asset: Hash,
     pub amount: u64,
     pub destination: Address,
-    // we can put whatever we want up to EXTRA_DATA_LIMIT_SIZE bytes
+    // we can put whatever we want up to EXTRA_DATA_LIMIT_SIZE bytes (128 bytes for memo/exchange IDs)
     pub extra_data: Option<DataElement>,
     // Encrypt the extra data by default
     // Set to false if you want to keep it public

@@ -6,10 +6,22 @@ use crate::{
 };
 
 /// Flexible freeze duration for TOS staking
-/// Users can set custom days from 3 to 90 days
+/// Users can set custom days from 3 to 180 days
+///
+/// # Edge Cases
+/// - Duration below 3 days will be rejected
+/// - Duration above 180 days will be rejected
+/// - Default duration is 3 days (minimum)
+///
+/// # Energy Calculation
+/// Energy gained = 1 TOS × (2 × freeze_days)
+/// Examples:
+/// - 3 days: 1 TOS → 6 energy (6 free transfers)
+/// - 7 days: 1 TOS → 14 energy (14 free transfers)
+/// - 30 days: 1 TOS → 60 energy (60 free transfers)
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct FreezeDuration {
-    /// Number of days to freeze (3-90 days)
+    /// Number of days to freeze (3-180 days)
     pub days: u32,
 }
 
@@ -78,6 +90,17 @@ impl Serializer for FreezeDuration {
 }
 
 /// Freeze record for tracking individual freeze operations
+///
+/// # Edge Cases
+/// - Only whole TOS amounts can be frozen (fractional parts are discarded)
+/// - Unfreezing is only allowed after the unlock_topoheight is reached
+/// - Partial unfreezing is supported - you can unfreeze less than the full amount
+/// - Energy is calculated using integer arithmetic to avoid precision issues
+///
+/// # Important Notes
+/// - Each freeze record tracks its own unlock time based on the freeze duration
+/// - Energy gained is immutable once frozen (doesn't change with time)
+/// - Unfreezing removes energy proportionally to the amount unfrozen
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FreezeRecord {
     /// Amount of TOS frozen
@@ -154,8 +177,26 @@ impl Serializer for FreezeRecord {
     }
 }
 
-/// Energy resource management for Tos
+/// Energy resource management for TOS
 /// Enhanced with TRON-style freeze duration and reward multiplier system
+///
+/// # Energy Model Overview
+/// - Energy is consumed for transfer operations (1 energy per transfer)
+/// - Energy is gained by freezing TOS for a specified duration
+/// - Energy regenerates when used_energy is reset (periodic reset mechanism)
+/// - Multiple freeze records with different durations can coexist
+///
+/// # Edge Cases and Limitations
+/// - **Minimum freeze amount**: Only whole TOS amounts (multiples of COIN_VALUE)
+/// - **Energy consumption**: Fails if insufficient energy available (no automatic TOS conversion)
+/// - **Unfreezing constraints**: Only unlocked records can be unfrozen
+/// - **Integer arithmetic**: All calculations use integers to avoid floating-point precision issues
+/// - **Energy reset**: used_energy is reset periodically (timing depends on external calls)
+///
+/// # Behavioral Notes
+/// - Freezing 0.5 TOS will actually freeze 0 TOS (rounded down)
+/// - Unfreezing from multiple records follows FIFO order for unlocked records
+/// - Energy total decreases when unfreezing (proportional to amount unfrozen)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnergyResource {
     /// Total energy available
@@ -320,7 +361,17 @@ impl EnergyResource {
         grouped
     }
 
-    /// Reset used energy (called periodically)
+    /// Reset used energy (called periodically by the network)
+    ///
+    /// # When to call
+    /// This should be called periodically by the network (e.g., daily) to restore
+    /// energy usage. In TRON-like systems, this typically happens every 24 hours.
+    ///
+    /// # Edge Cases
+    /// - Resets used_energy to 0, making all total_energy available again
+    /// - Does not affect frozen TOS or total energy amounts
+    /// - Updates last_update timestamp to current topoheight
+    /// - No validation on timing - caller must implement reset schedule
     pub fn reset_used_energy(&mut self, topoheight: TopoHeight) {
         self.used_energy = 0;
         self.last_update = topoheight;

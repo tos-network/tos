@@ -6,6 +6,20 @@ use crate::{
 
 /// Energy-related transaction payloads for Transfer operations only
 /// Enhanced with TRON-style freeze duration and reward multiplier system
+///
+/// # Supported Operations
+/// - `FreezeTos`: Lock TOS to gain energy for free transfers
+/// - `UnfreezeTos`: Unlock previously frozen TOS (after lock period expires)
+///
+/// # Fee Model
+/// - Energy operations themselves don't consume energy
+/// - Small TOS fees are required to prevent spam/abuse
+/// - Only regular transfer transactions consume energy
+///
+/// # Edge Cases
+/// - Freeze amounts must be whole TOS (fractional parts ignored)
+/// - Unfreeze only works after the lock period expires
+/// - Multiple freeze operations with different durations are supported
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EnergyPayload {
     /// Freeze TOS to get energy for free transfers with duration-based rewards
