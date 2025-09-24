@@ -10,7 +10,7 @@ const EXTRA_NONCE_SIZE: usize = 32;
 
 fn main() {
     // Use the developer address from configuration
-    let dev_address = "tos:qsl6sj2u0gp37tr6drrq964rd4d8gnaxnezgytmt0cfltnp2wsgqqak28je";
+    let dev_address = "tos1qsl6sj2u0gp37tr6drrq964rd4d8gnaxnezgytmt0cfltnp2wsgqqak28je";
     let address = Address::from_string(dev_address).unwrap();
     let public_key = address.to_public_key();
     

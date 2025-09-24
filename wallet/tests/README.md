@@ -153,7 +153,7 @@ The wallet's batch mode works as follows:
 ../target/debug/tos_wallet --batch-mode --cmd "freeze_tos 100000000 7 yes" --wallet-path test_wallet --password test123
 
 # Transfer with parameters
-../target/debug/tos_wallet --batch-mode --cmd "transfer tos:address 100000000 tos yes" --wallet-path test_wallet --password test123
+../target/debug/tos_wallet --batch-mode --cmd "transfer tos1address 100000000 tos yes" --wallet-path test_wallet --password test123
 ```
 
 ## Requirements

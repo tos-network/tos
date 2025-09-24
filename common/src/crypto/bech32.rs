@@ -8,7 +8,7 @@ pub const CHARSET: &str = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 /// generator polynomial used in Bech32 encoding.
 pub const GENERATOR: [u32; 5] = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
 /// separator character used in Bech32 encoding.
-pub const SEPARATOR: char = ':';
+pub const SEPARATOR: char = '1';
 
 #[derive(Error, Debug)]
 pub enum Bech32Error {

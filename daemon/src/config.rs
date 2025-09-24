@@ -105,7 +105,7 @@ pub const EMISSION_SPEED_FACTOR: u64 = 20;
 
 // Developer address for paying dev fees until Smart Contracts integration
 // (testnet/mainnet format is converted lazily later)
-pub const DEV_ADDRESS: &str = "tos:qsl6sj2u0gp37tr6drrq964rd4d8gnaxnezgytmt0cfltnp2wsgqqak28je";
+pub const DEV_ADDRESS: &str = "tos1qsl6sj2u0gp37tr6drrq964rd4d8gnaxnezgytmt0cfltnp2wsgqqak28je";
 
 // Chain sync config
 // minimum X seconds between each chain sync request per peer

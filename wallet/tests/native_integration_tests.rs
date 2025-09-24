@@ -48,7 +48,7 @@ mod tests {
 
         // Output should contain a wallet address
         let stdout_str = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout_str.contains("tos:"), "Output should contain wallet address");
+        assert!(stdout_str.contains("tos1"), "Output should contain wallet address");
 
         Ok(())
     }
