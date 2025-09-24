@@ -1,0 +1,8 @@
+{
+  "command": "balance",
+  "wallet_path": "test_wallet",
+  "password": "test123",
+  "params": {
+    "asset": "TOS"
+  }
+}

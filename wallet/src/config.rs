@@ -4,6 +4,7 @@ use argon2::{Params, Argon2, Algorithm, Version};
 use lazy_static::lazy_static;
 use log::info;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 #[cfg(feature = "cli")]
 use clap::Parser;
 use tos_common::{
@@ -240,16 +241,46 @@ pub struct Config {
     #[serde(skip)]
     #[serde(default)]
     pub generate_config_template: bool,
-    /// Enable batch mode - execute a single command and exit
+    /// Execute a command and exit (similar to geth --exec)
     #[clap(long)]
     #[serde(skip)]
     #[serde(default)]
-    pub batch_mode: bool,
-    /// Command to execute in batch mode
+    pub exec: Option<String>,
+    /// JSON string containing batch command and parameters
     #[clap(long)]
     #[serde(skip)]
     #[serde(default)]
-    pub cmd: Option<String>
+    pub json: Option<String>,
+    /// JSON file path containing batch command and parameters
+    #[clap(long)]
+    #[serde(skip)]
+    #[serde(default)]
+    pub json_file: Option<String>
+}
+
+impl Config {
+    /// Check if we're in exec mode (--exec, --json, or --json-file)
+    pub fn is_exec_mode(&self) -> bool {
+        self.exec.is_some() || self.json.is_some() || self.json_file.is_some()
+    }
+
+    /// Get the command to execute (from --exec)
+    pub fn get_exec_command(&self) -> Option<&String> {
+        self.exec.as_ref()
+    }
+}
+
+/// JSON batch configuration structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JsonBatchConfig {
+    /// Command to execute
+    pub command: String,
+    /// Wallet path (optional, can use CLI parameter)
+    pub wallet_path: Option<String>,
+    /// Password (optional, can use CLI parameter)
+    pub password: Option<String>,
+    /// Command parameters
+    pub params: HashMap<String, serde_json::Value>,
 }
 
 /// This struct is used to log the progress of the table generation

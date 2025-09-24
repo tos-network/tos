@@ -148,4 +148,57 @@ impl ArgumentManager {
     pub fn size(&self) -> usize {
         self.arguments.len()
     }
+
+    /// Create ArgumentManager from JSON parameters
+    pub fn from_json_params(params: &std::collections::HashMap<String, serde_json::Value>) -> Result<Self, ArgError> {
+        let mut arguments = HashMap::new();
+
+        for (key, value) in params {
+            let arg_value = match value {
+                serde_json::Value::Bool(b) => ArgValue::Bool(*b),
+                serde_json::Value::Number(n) => {
+                    if let Some(i) = n.as_u64() {
+                        ArgValue::Number(i)
+                    } else {
+                        return Err(ArgError::InvalidType);
+                    }
+                },
+                serde_json::Value::String(s) => {
+                    // Try to parse as Hash first, then as String
+                    if s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()) {
+                        if let Ok(hash) = Hash::from_hex(s) {
+                            ArgValue::Hash(hash)
+                        } else {
+                            ArgValue::String(s.clone())
+                        }
+                    } else {
+                        ArgValue::String(s.clone())
+                    }
+                },
+                serde_json::Value::Array(arr) => {
+                    let mut vec_args = Vec::new();
+                    for item in arr {
+                        match item {
+                            serde_json::Value::String(s) => vec_args.push(ArgValue::String(s.clone())),
+                            serde_json::Value::Number(n) => {
+                                if let Some(i) = n.as_u64() {
+                                    vec_args.push(ArgValue::Number(i));
+                                } else {
+                                    return Err(ArgError::InvalidType);
+                                }
+                            },
+                            serde_json::Value::Bool(b) => vec_args.push(ArgValue::Bool(*b)),
+                            _ => return Err(ArgError::InvalidType),
+                        }
+                    }
+                    ArgValue::Array(vec_args)
+                },
+                _ => return Err(ArgError::InvalidType),
+            };
+
+            arguments.insert(key.clone(), arg_value);
+        }
+
+        Ok(ArgumentManager::new(arguments))
+    }
 }

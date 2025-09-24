@@ -1,0 +1,10 @@
+{
+  "command": "transfer",
+  "params": {
+    "address": "tos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq8cczjp",
+    "amount": "10.5",
+    "asset": "TOS",
+    "fee_type": "low",
+    "confirm": "yes"
+  }
+}

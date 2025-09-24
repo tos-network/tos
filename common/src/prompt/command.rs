@@ -30,7 +30,11 @@ pub enum CommandError {
     #[error(transparent)]
     Any(#[from] Error),
     #[error("Poison Error: {}", _0)]
-    PoisonError(String)
+    PoisonError(String),
+    #[error("Missing required argument '{}' in batch mode. Use --{} <value>", _0, _0)]
+    MissingArgument(String),
+    #[error("Batch mode error: {}", _0)]
+    BatchModeError(String)
 }
 
 impl<T> From<PoisonError<T>> for CommandError {
@@ -143,7 +147,8 @@ pub struct CommandManager {
     commands: Mutex<Vec<Rc<Command>>>,
     context: Mutex<Context>,
     prompt: ShareablePrompt,
-    running_since: Instant
+    running_since: Instant,
+    batch_mode: bool,
 }
 
 impl CommandManager {
@@ -152,12 +157,31 @@ impl CommandManager {
             commands: Mutex::new(Vec::new()),
             context: Mutex::new(context),
             prompt,
-            running_since: Instant::now()
+            running_since: Instant::now(),
+            batch_mode: false,
         }
     }
 
     pub fn new(prompt: ShareablePrompt) -> Self {
         Self::with_context(Context::new(), prompt)
+    }
+
+    pub fn with_batch_mode(context: Context, prompt: ShareablePrompt, exec_mode: bool) -> Self {
+        Self {
+            commands: Mutex::new(Vec::new()),
+            context: Mutex::new(context),
+            prompt,
+            running_since: Instant::now(),
+            batch_mode: exec_mode,
+        }
+    }
+
+    pub fn new_with_batch_mode(prompt: ShareablePrompt, exec_mode: bool) -> Self {
+        Self::with_batch_mode(Context::new(), prompt, exec_mode)
+    }
+
+    pub fn is_batch_mode(&self) -> bool {
+        self.batch_mode
     }
 
     // Register default commands:
@@ -220,6 +244,23 @@ impl CommandManager {
         &self.commands
     }
 
+    /// Handle command from JSON parameters
+    pub async fn handle_json_command(&self, command_name: &str, json_params: &std::collections::HashMap<String, serde_json::Value>) -> Result<(), CommandError> {
+        let command = {
+            let commands = self.commands.lock()?;
+            commands.iter().find(|command| *command.get_name() == *command_name).cloned().ok_or(CommandError::CommandNotFound)?
+        };
+
+        // Create ArgumentManager from JSON params
+        let arguments = ArgumentManager::from_json_params(json_params)
+            .map_err(|e| CommandError::InvalidArgument(e.to_string()))?;
+
+        // Validate batch parameters
+        self.validate_batch_params(command_name, &arguments)?;
+
+        command.execute(self, arguments).await
+    }
+
     pub async fn handle_command(&self, value: String) -> Result<(), CommandError> {
         let mut command_split = value.split_whitespace();
         let command_name = command_split.next().ok_or(CommandError::ExpectedCommandName)?;
@@ -272,6 +313,100 @@ impl CommandManager {
 
     pub fn running_since(&self) -> Duration {
         self.running_since.elapsed()
+    }
+
+    /// Require a parameter in batch mode, throw error if missing
+    pub fn require_param(&self, args: &ArgumentManager, param_name: &str) -> Result<(), CommandError> {
+        if self.batch_mode && !args.has_argument(param_name) {
+            return Err(CommandError::MissingArgument(param_name.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Validate required parameters for batch mode
+    pub fn validate_batch_params(&self, command_name: &str, args: &ArgumentManager) -> Result<(), CommandError> {
+        if !self.batch_mode {
+            return Ok(());
+        }
+
+        match command_name {
+            "open" => {
+                self.require_param(args, "name")?;
+                self.require_param(args, "password")?;
+            },
+            "create" => {
+                self.require_param(args, "name")?;
+                self.require_param(args, "password")?;
+            },
+            "recover_seed" => {
+                self.require_param(args, "name")?;
+                self.require_param(args, "password")?;
+                self.require_param(args, "seed")?;
+            },
+            "recover_private_key" => {
+                self.require_param(args, "name")?;
+                self.require_param(args, "password")?;
+                self.require_param(args, "private_key")?;
+            },
+            "transfer" => {
+                self.require_param(args, "address")?;
+                self.require_param(args, "amount")?;
+                self.require_param(args, "asset")?;
+            },
+            "transfer_all" => {
+                self.require_param(args, "address")?;
+                self.require_param(args, "asset")?;
+            },
+            "burn" => {
+                self.require_param(args, "asset")?;
+                self.require_param(args, "amount")?;
+            },
+            "change_password" => {
+                self.require_param(args, "old_password")?;
+                self.require_param(args, "new_password")?;
+            },
+            "export_transactions" => {
+                self.require_param(args, "filename")?;
+            },
+            "freeze_tos" => {
+                self.require_param(args, "amount")?;
+                self.require_param(args, "duration")?;
+                self.require_param(args, "confirm")?;
+            },
+            "unfreeze_tos" => {
+                self.require_param(args, "amount")?;
+                self.require_param(args, "confirm")?;
+            },
+            "set_asset_name" => {
+                self.require_param(args, "asset")?;
+                self.require_param(args, "name")?;
+            },
+            "start_rpc_server" => {
+                self.require_param(args, "bind_address")?;
+                self.require_param(args, "username")?;
+                self.require_param(args, "password")?;
+            },
+            "multisig_sign" => {
+                self.require_param(args, "tx_hash")?;
+            },
+            "seed" => {
+                self.require_param(args, "password")?;
+            },
+            "set_nonce" => {
+                self.require_param(args, "nonce")?;
+            },
+            "track_asset" => {
+                self.require_param(args, "asset")?;
+            },
+            "untrack_asset" => {
+                self.require_param(args, "asset")?;
+            },
+            "set_tx_version" => {
+                self.require_param(args, "version")?;
+            },
+            _ => {}
+        }
+        Ok(())
     }
 }
 

@@ -1,0 +1,6 @@
+{
+  "command": "balance",
+  "params": {
+    "asset": "TOS"
+  }
+}

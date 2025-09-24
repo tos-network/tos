@@ -1,0 +1,8 @@
+{
+  "command": "set_nonce",
+  "wallet_path": "test_wallet",
+  "password": "test123",
+  "params": {
+    "nonce": 42
+  }
+}

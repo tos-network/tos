@@ -1,0 +1,11 @@
+{
+  "command": "transfer",
+  "wallet_path": "test_wallet",
+  "password": "test123",
+  "params": {
+    "address": "tos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq8cczjp",
+    "amount": "100",
+    "asset": "TOS",
+    "confirm": "yes"
+  }
+}

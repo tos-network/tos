@@ -10,6 +10,7 @@ peerlist-*.json
 build/
 data/
 logs/
+test_*/
 
 # ignore all profiling files
 flamegraph.svg
