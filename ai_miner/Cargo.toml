@@ -2,6 +2,11 @@
 name = "tos_ai_miner"
 version = "0.1.0"
 edition = "2021"
+authors = ["TOS Network Team <info@tos.network>"]
+license = "BSD-3-Clause"
+description = "TOS Network AI mining program"
+repository = "https://github.com/tos-network/tos"
+homepage = "https://tos.network"
 
 [dependencies]
 tokio = { version = "1.46", features = ["full"] }

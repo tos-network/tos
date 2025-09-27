@@ -1,5 +1,87 @@
-.gitignore
+# TOS Network - Docker ignore file
+
+# Build artifacts
 target/
-API.md
-README.md
+build/
+*.tar.gz
+*.zip
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Wallet and key files
+*.wallet
+*.key
+*.pem
+*_wallet.db/
+wallet.db/
+miner_wallet.db/
+publisher_wallet.db/
+test_wallet*/
+wallets/
+
+# Configuration files with secrets
+config.toml
+.env
+.env.local
+.env.*.local
+
+# Git
+.git/
+.gitignore
+
+# Documentation build
+docs/_build/
+
+# Test coverage
+coverage/
+*.profraw
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Development directories
+dev/
+peerlist-dev/
+
+# Precomputed tables (large files)
+precomputed_tables_*.bin
+
+# Docker files (except what we need)
+Dockerfile.*
+!Dockerfile
+docker-compose.override.yml
+
+# Build scripts (not needed in container)
 build_all.sh
+build_local.sh

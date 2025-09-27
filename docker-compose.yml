@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  # TOS Network Daemon
+  tos-daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        app: tos_daemon
+        commit_hash: ${TOS_COMMIT_HASH:-latest}
+    container_name: tos-daemon
+    restart: unless-stopped
+    ports:
+      - "2125:2125"  # P2P port
+      - "2126:2126"  # RPC port
+      - "8080:8080"  # HTTP API port
+    volumes:
+      - tos-data:/var/run/tos/data
+      - tos-config:/var/run/tos/config
+    environment:
+      - RUST_LOG=${RUST_LOG:-info}
+      - TOS_NETWORK=${TOS_NETWORK:-mainnet}
+      - TOS_DATA_DIR=/var/run/tos/data
+      - TOS_CONFIG_DIR=/var/run/tos/config
+    networks:
+      - tos-network
+
+  # TOS Network Miner
+  tos-miner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        app: tos_miner
+        commit_hash: ${TOS_COMMIT_HASH:-latest}
+    container_name: tos-miner
+    restart: unless-stopped
+    depends_on:
+      - tos-daemon
+    environment:
+      - RUST_LOG=${RUST_LOG:-info}
+      - TOS_DAEMON_URL=http://tos-daemon:8080
+      - TOS_MINER_ADDRESS=${TOS_MINER_ADDRESS}
+      - TOS_MINER_THREADS=${TOS_MINER_THREADS:-4}
+    networks:
+      - tos-network
+    profiles:
+      - miner
+
+  # TOS Network AI Miner
+  tos-ai-miner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        app: tos_ai_miner
+        commit_hash: ${TOS_COMMIT_HASH:-latest}
+    container_name: tos-ai-miner
+    restart: unless-stopped
+    depends_on:
+      - tos-daemon
+    environment:
+      - RUST_LOG=${RUST_LOG:-info}
+      - TOS_DAEMON_URL=http://tos-daemon:8080
+      - TOS_AI_MINER_ADDRESS=${TOS_AI_MINER_ADDRESS}
+      - TOS_AI_MODEL_PATH=${TOS_AI_MODEL_PATH:-/models}
+    volumes:
+      - tos-ai-models:/models
+    networks:
+      - tos-network
+    profiles:
+      - ai-miner
+
+  # TOS Network Wallet (for testing/management)
+  tos-wallet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        app: tos_wallet
+        commit_hash: ${TOS_COMMIT_HASH:-latest}
+    container_name: tos-wallet
+    volumes:
+      - tos-wallet-data:/var/run/tos/data
+    environment:
+      - RUST_LOG=${RUST_LOG:-info}
+      - TOS_DAEMON_URL=http://tos-daemon:8080
+    networks:
+      - tos-network
+    profiles:
+      - wallet
+
+volumes:
+  tos-data:
+    driver: local
+  tos-config:
+    driver: local
+  tos-wallet-data:
+    driver: local
+  tos-ai-models:
+    driver: local
+
+networks:
+  tos-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

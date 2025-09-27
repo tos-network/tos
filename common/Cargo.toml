@@ -2,7 +2,11 @@
 name = "tos_common"
 version = "0.1.0"
 edition = "2021"
-authors = ["Tos <info@tos.network>"]
+authors = ["TOS Network Team <info@tos.network>"]
+license = "BSD-3-Clause"
+description = "TOS Network common library"
+repository = "https://github.com/tos-network/tos"
+homepage = "https://tos.network"
 build = "build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
