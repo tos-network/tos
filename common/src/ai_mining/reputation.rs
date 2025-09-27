@@ -79,7 +79,7 @@ impl AccountReputation {
     /// Check if eligible to participate in tasks of specified difficulty
     pub fn can_participate_in_difficulty(&self, difficulty: &DifficultyLevel) -> bool {
         match difficulty {
-            DifficultyLevel::Basic => self.reputation_score >= MIN_REPUTATION_FOR_BASIC,
+            DifficultyLevel::Beginner => self.reputation_score >= MIN_REPUTATION_FOR_BASIC,
             DifficultyLevel::Intermediate => self.reputation_score >= MIN_REPUTATION_FOR_INTERMEDIATE,
             DifficultyLevel::Advanced => self.reputation_score >= MIN_REPUTATION_FOR_ADVANCED,
             DifficultyLevel::Expert => self.reputation_score >= MIN_REPUTATION_FOR_EXPERT,
@@ -277,7 +277,7 @@ pub fn calculate_secure_gas_cost(
 
     // 3. Difficulty multiplier
     let difficulty_multiplier = match difficulty {
-        DifficultyLevel::Basic => 1.0,
+        DifficultyLevel::Beginner => 1.0,
         DifficultyLevel::Intermediate => 1.2,
         DifficultyLevel::Advanced => 1.5,
         DifficultyLevel::Expert => 2.0,
@@ -314,7 +314,7 @@ pub fn calculate_secure_gas_cost(
 /// Calculate base reward based on difficulty
 pub fn calculate_base_reward(difficulty: &DifficultyLevel) -> u64 {
     match difficulty {
-        DifficultyLevel::Basic => BASIC_TASK_BASE_REWARD,
+        DifficultyLevel::Beginner => BASIC_TASK_BASE_REWARD,
         DifficultyLevel::Intermediate => INTERMEDIATE_TASK_BASE_REWARD,
         DifficultyLevel::Advanced => ADVANCED_TASK_BASE_REWARD,
         DifficultyLevel::Expert => EXPERT_TASK_BASE_REWARD,
