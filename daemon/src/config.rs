@@ -245,27 +245,27 @@ const OTHERS_NETWORK_HARD_FORKS: [HardFork; 4] = [
 ];
 
 // Mainnet seed nodes
-const MAINNET_SEED_NODES: [&str; 0] = [
+const MAINNET_SEED_NODES: [&str; 7] = [
     // France
-    //"51.210.117.23:2125",
+    "51.210.117.23:2125",
     // US
-    //"198.71.55.87:2125",
+    "198.71.55.87:2125",
     // Germany
-    //"162.19.249.100:2125",
+    "162.19.249.100:2125",
     // Singapore
-    //"139.99.89.27:2125",
+    "139.99.89.27:2125",
     // Poland
-    //"51.68.142.141:2125",
+    "51.68.142.141:2125",
     // Great Britain
-    //"51.195.220.137:2125",
-    // "Canada"
-    //"66.70.179.137:2125"
+    "51.195.220.137:2125",
+    // Canada
+    "66.70.179.137:2125"
 ];
 
 // Testnet seed nodes
-const TESTNET_SEED_NODES: [&str; 0] = [
+const TESTNET_SEED_NODES: [&str; 1] = [
     // US
-    //"74.208.251.149:2125",
+    "74.208.251.149:2125",
 ];
 
 // Genesis block to have the same starting point for every nodes

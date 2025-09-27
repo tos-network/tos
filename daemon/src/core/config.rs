@@ -205,6 +205,12 @@ pub struct P2pConfig {
     #[clap(long)]
     #[serde(default)]
     pub exclusive_nodes: Vec<String>,
+    /// Additional bootstrap nodes to connect to on startup.
+    /// These nodes will be contacted during initial node discovery in addition to the built-in seed nodes.
+    /// Format: IP:PORT
+    #[clap(long)]
+    #[serde(default)]
+    pub bootstrap_nodes: Vec<String>,
     /// Disable the P2P Server.
     /// No connections will be accepted.
     /// Node will not be able to communicate the network.

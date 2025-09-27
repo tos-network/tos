@@ -442,6 +442,36 @@ impl<S: Storage> Blockchain<S> {
                             }
                         }
                     }
+
+                    // connect to bootstrap nodes
+                    for addr in config.bootstrap_nodes {
+                        for origin in addr.split(",") {
+                            let addr: SocketAddr = match origin.parse() {
+                                Ok(addr) => addr,
+                                Err(e) => {
+                                    match lookup_host(&origin).await {
+                                        Ok(it) => {
+                                            info!("Valid host found for bootstrap node {}", origin);
+                                            for addr in it {
+                                                info!("Trying to connect to bootstrap node with IP from DNS resolution: {}", addr);
+                                                if let Err(e) = p2p.try_to_connect_to_peer(addr, false).await {
+                                                    error!("Error while trying to connect to bootstrap node {}: {}", origin, e);
+                                                }
+                                            }
+                                        },
+                                        Err(e2) => {
+                                            error!("Error while parsing {} as bootstrap node address: {}, {}", origin, e, e2);
+                                        }
+                                    };
+                                    continue;
+                                }
+                            };
+                            info!("Trying to connect to bootstrap node: {}", addr);
+                            if let Err(e) = p2p.try_to_connect_to_peer(addr, false).await {
+                                error!("Error while trying to connect to bootstrap node {}: {}", addr, e);
+                            }
+                        }
+                    }
                 },
                 Err(e) => error!("Error while starting P2p server: {}", e)
             };
