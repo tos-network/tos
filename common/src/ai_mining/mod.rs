@@ -355,7 +355,9 @@ mod tests {
             answer_hash: Hash::new([2u8; 32]),
             stake_amount: 1_000_000_000,
         };
-        assert_eq!(payload_10.calculate_content_gas_cost(), 10 * ANSWER_CONTENT_GAS_COST_PER_BYTE);
+        // 10 chars is short content, so it uses SHORT_CONTENT_GAS_RATE
+        let expected_10 = (10 * SHORT_CONTENT_GAS_RATE).max(MIN_TRANSACTION_COST);
+        assert_eq!(payload_10.calculate_content_gas_cost(), expected_10);
 
         let answer_100_chars = "a".repeat(100); // 100 characters
         let payload_100 = AIMiningPayload::SubmitAnswer {
@@ -364,7 +366,9 @@ mod tests {
             answer_hash: Hash::new([2u8; 32]),
             stake_amount: 1_000_000_000,
         };
-        assert_eq!(payload_100.calculate_content_gas_cost(), 100 * ANSWER_CONTENT_GAS_COST_PER_BYTE);
+        // 100 chars is short content, so it uses SHORT_CONTENT_GAS_RATE
+        let expected_100 = (100 * SHORT_CONTENT_GAS_RATE).max(MIN_TRANSACTION_COST);
+        assert_eq!(payload_100.calculate_content_gas_cost(), expected_100);
 
         // Test other payload types return 0
         let task_payload = AIMiningPayload::PublishTask {
@@ -374,7 +378,9 @@ mod tests {
             deadline: 1000,
             description: "Test description for gas cost calculation.".to_string(),
         };
-        assert_eq!(task_payload.calculate_content_gas_cost(), 42 * DESCRIPTION_GAS_COST_PER_BYTE);
+        // 42 chars is short content, so it uses SHORT_CONTENT_GAS_RATE
+        let expected_description = (42 * SHORT_CONTENT_GAS_RATE).max(MIN_TRANSACTION_COST);
+        assert_eq!(task_payload.calculate_content_gas_cost(), expected_description);
     }
 
     #[test]
@@ -414,11 +420,33 @@ mod tests {
 
         // 4. Verify gas costs are calculated correctly
         let answer_gas_cost = submit_payload.calculate_content_gas_cost();
-        let expected_gas_cost = answer_content.len() as u64 * ANSWER_CONTENT_GAS_COST_PER_BYTE;
+        // Calculate expected cost using tiered pricing
+        let answer_len = answer_content.len();
+        let expected_gas_cost = if answer_len <= SHORT_CONTENT_THRESHOLD {
+            (answer_len as u64 * SHORT_CONTENT_GAS_RATE).max(MIN_TRANSACTION_COST)
+        } else if answer_len <= MEDIUM_CONTENT_THRESHOLD {
+            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
+            ((answer_len - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
+        } else {
+            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
+            ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE) +
+            ((answer_len - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE)
+        };
         assert_eq!(answer_gas_cost, expected_gas_cost);
 
         let description_gas_cost = task_payload.calculate_content_gas_cost();
-        let expected_description_cost = task_description.len() as u64 * DESCRIPTION_GAS_COST_PER_BYTE;
+        // Calculate expected cost using tiered pricing for task description
+        let desc_len = task_description.len();
+        let expected_description_cost = if desc_len <= SHORT_CONTENT_THRESHOLD {
+            (desc_len as u64 * SHORT_CONTENT_GAS_RATE).max(MIN_TRANSACTION_COST)
+        } else if desc_len <= MEDIUM_CONTENT_THRESHOLD {
+            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
+            ((desc_len - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
+        } else {
+            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
+            ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE) +
+            ((desc_len - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE)
+        };
         assert_eq!(description_gas_cost, expected_description_cost);
     }
 
