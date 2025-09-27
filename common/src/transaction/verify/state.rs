@@ -195,4 +195,13 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>: BlockchainVerificati
         account: &'a CompressedPublicKey,
         energy_resource: crate::account::EnergyResource
     ) -> Result<(), E>;
+
+    /// Get the AI mining state
+    async fn get_ai_mining_state(&mut self) -> Result<Option<crate::ai_mining::AIMiningState>, E>;
+
+    /// Set the AI mining state
+    async fn set_ai_mining_state(
+        &mut self,
+        state: &crate::ai_mining::AIMiningState
+    ) -> Result<(), E>;
 }

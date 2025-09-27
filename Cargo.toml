@@ -6,7 +6,8 @@ members = [
     "wallet",
     "miner",
     "daemon",
-    "genesis"
+    "genesis",
+    "ai_miner"
     ]
 
 [workspace.dependencies]
@@ -30,6 +31,7 @@ clap = { version = "4.5.2", features = ["derive"] }
 indexmap = { version = "2.10.0", features = ["serde"] }
 serde = { version = "1", features = ["derive", "rc"] }
 strum = { version = "0.27.1", features = ["derive"] }
+sha3 = "0.10"
 cfg-if = "1"
 tokio-tungstenite-wasm = { version = "0.6.0", features = ["rustls-tls-webpki-roots"] }
 

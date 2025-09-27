@@ -1,5 +1,6 @@
 use indexmap::{IndexMap, IndexSet};
 use tos_common::{
+    ai_mining::AIMiningPayload,
     api::wallet::{
         EntryType as RPCEntryType,
         TransactionEntry as RPCTransactionEntry,
@@ -252,6 +253,14 @@ pub enum EntryData {
         nonce: u64,
         // Invoke if any
         invoke: Option<DeployInvoke>
+    },
+    AIMining {
+        // Transaction hash for reference
+        hash: Hash,
+        // AI mining transaction payload
+        payload: AIMiningPayload,
+        // Whether this is an outgoing transaction
+        outgoing: bool
     }
 }
 
@@ -321,6 +330,12 @@ impl Serializer for EntryData {
                 let nonce = reader.read_u64()?;
                 let invoke = Option::read(reader)?;
                 Self::DeployContract { fee, nonce, invoke }
+            },
+            7 => {
+                let hash = reader.read_hash()?;
+                let payload = AIMiningPayload::read(reader)?;
+                let outgoing = reader.read_bool()?;
+                Self::AIMining { hash, payload, outgoing }
             }
             _ => return Err(ReaderError::InvalidValue)
         }) 
@@ -387,6 +402,12 @@ impl Serializer for EntryData {
                 writer.write_u64(fee);
                 writer.write_u64(nonce);
                 invoke.write(writer);
+            },
+            Self::AIMining { hash, payload, outgoing } => {
+                writer.write_u8(7);
+                writer.write_hash(hash);
+                payload.write(writer);
+                writer.write_bool(*outgoing);
             }
         }
     }
@@ -409,6 +430,9 @@ impl Serializer for EntryData {
             },
             Self::DeployContract { fee, nonce, invoke } => {
                 fee.size() + nonce.size() + invoke.size()
+            },
+            Self::AIMining { hash, payload, outgoing } => {
+                hash.size() + payload.size() + outgoing.size()
             }
         }
     }
@@ -512,6 +536,9 @@ impl TransactionEntry {
                         deposits: v.deposits.clone()
                     });
                     RPCEntryType::DeployContract { fee, nonce, invoke }
+                },
+                EntryData::AIMining { hash, payload, outgoing } => {
+                    RPCEntryType::AIMining { hash, payload, outgoing }
                 }
             }
         }
@@ -567,6 +594,23 @@ impl TransactionEntry {
             },
             EntryData::DeployContract { fee, nonce, invoke } => {
                 format!("Fee: {}, Nonce: {} Deploy contract (constructor called: {})", format_tos(*fee), nonce, invoke.is_some())
+            },
+            EntryData::AIMining { hash: _, payload, outgoing } => {
+                let direction = if *outgoing { "Outgoing" } else { "Incoming" };
+                match payload {
+                    AIMiningPayload::PublishTask { task_id, reward_amount, difficulty, deadline: _, description: _ } => {
+                        format!("{} AI Mining: Publish Task {} with reward {} TOS (difficulty: {:?})", direction, task_id, format_tos(*reward_amount), difficulty)
+                    },
+                    AIMiningPayload::SubmitAnswer { task_id, answer_hash, stake_amount, answer_content: _ } => {
+                        format!("{} AI Mining: Submit Answer {} for task {} (stake: {} TOS)", direction, answer_hash, task_id, format_tos(*stake_amount))
+                    },
+                    AIMiningPayload::ValidateAnswer { task_id, answer_id, validation_score } => {
+                        format!("{} AI Mining: Validate Answer {} for task {} (score: {})", direction, answer_id, task_id, validation_score)
+                    },
+                    AIMiningPayload::RegisterMiner { miner_address, registration_fee } => {
+                        format!("{} AI Mining: Register Miner {} (fee: {} TOS)", direction, miner_address.as_address(mainnet), format_tos(*registration_fee))
+                    },
+                }
             }
         };
 

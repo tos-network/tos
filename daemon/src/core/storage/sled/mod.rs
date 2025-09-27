@@ -7,6 +7,7 @@ use itertools::Either;
 use crate::core::error::{BlockchainError, DiskContext};
 use tos_common::{
     account::EnergyResource,
+    ai_mining::AIMiningState,
     block::{BlockHeader, TopoHeight},
     crypto::{Hash, PublicKey},
     difficulty::{CumulativeDifficulty, Difficulty},
@@ -48,6 +49,8 @@ pub(super) const TXS_COUNT: &[u8; 4] = b"CTXS";
 pub(super) const ASSETS_COUNT: &[u8; 4] = b"CAST";
 pub(super) const BLOCKS_COUNT: &[u8; 4] = b"CBLK";
 pub(super) const BLOCKS_EXECUTION_ORDER_COUNT: &[u8; 4] = b"EBLK";
+// AI Mining state keys
+pub(super) const AI_MINING_STATE_TOPOHEIGHT: &[u8; 4] = b"AIMT";
 pub(super) const CONTRACTS_COUNT: &[u8; 4] = b"CCON";
 pub(super) const DB_VERSION: &[u8; 4] = b"VRSN";
 
@@ -149,6 +152,12 @@ pub struct SledStorage {
     // Versioned energy resources for each account
     // Key is account_bytes_topoheight, value is the energy resource at that topoheight
     pub(super) versioned_energy_resources: Tree,
+    // AI mining state pointers
+    // Key is AI_MINING_STATE_TOPOHEIGHT, value is the current topoheight with AI mining state
+    pub(super) ai_mining_state: Tree,
+    // Versioned AI mining states
+    // Key is topoheight, value is the AI mining state at that topoheight
+    pub(super) versioned_ai_mining_states: Tree,
     // opened DB used for assets to create dynamic assets
     pub(super) db: sled::Db,
 
@@ -257,6 +266,8 @@ impl SledStorage {
             versioned_assets_supply: sled.open_tree("versioned_assets_supply")?,
             energy_resources: sled.open_tree("energy_resources")?,
             versioned_energy_resources: sled.open_tree("versioned_energy_resources")?,
+            ai_mining_state: sled.open_tree("ai_mining_state")?,
+            versioned_ai_mining_states: sled.open_tree("versioned_ai_mining_states")?,
             db: sled,
             cache: StorageCache::new(cache_size),
 
@@ -754,7 +765,57 @@ impl crate::core::storage::EnergyProvider for SledStorage {
         
         // Update the latest topoheight pointer
         Self::insert_into_disk(self.snapshot.as_mut(), &self.energy_resources, &account.to_bytes(), &topoheight.to_be_bytes())?;
-        
+
         Ok(())
+    }
+}
+
+#[async_trait]
+impl crate::core::storage::AIMiningProvider for SledStorage {
+    async fn get_ai_mining_state(&self) -> Result<Option<AIMiningState>, BlockchainError> {
+        trace!("get ai mining state");
+
+        // Get the latest topoheight that has AI mining state
+        let topoheight = self.load_optional_from_disk::<u64>(&self.ai_mining_state, AI_MINING_STATE_TOPOHEIGHT)?;
+
+        match topoheight {
+            Some(topoheight) => {
+                // Get the AI mining state at that topoheight
+                let state = self.load_optional_from_disk::<AIMiningState>(&self.versioned_ai_mining_states, &topoheight.to_be_bytes())?;
+                trace!("Found AI mining state at topoheight {}: {:?}", topoheight, state.is_some());
+                Ok(state)
+            },
+            None => {
+                trace!("No AI mining state found");
+                Ok(None)
+            }
+        }
+    }
+
+    async fn set_ai_mining_state(&mut self, topoheight: TopoHeight, state: &AIMiningState) -> Result<(), BlockchainError> {
+        trace!("set ai mining state at topoheight {}", topoheight);
+
+        // Serialize the AI mining state
+        let bytes = state.to_bytes();
+
+        // Store the versioned state
+        Self::insert_into_disk(self.snapshot.as_mut(), &self.versioned_ai_mining_states, &topoheight.to_be_bytes(), &bytes[..])?;
+
+        // Update the latest topoheight pointer
+        Self::insert_into_disk(self.snapshot.as_mut(), &self.ai_mining_state, AI_MINING_STATE_TOPOHEIGHT, &topoheight.to_be_bytes())?;
+
+        Ok(())
+    }
+
+    async fn has_ai_mining_state_at_topoheight(&self, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
+        trace!("check if AI mining state exists at topoheight {}", topoheight);
+        let exists = self.versioned_ai_mining_states.contains_key(topoheight.to_be_bytes())?;
+        Ok(exists)
+    }
+
+    async fn get_ai_mining_state_at_topoheight(&self, topoheight: TopoHeight) -> Result<Option<AIMiningState>, BlockchainError> {
+        trace!("get AI mining state at topoheight {}", topoheight);
+        let state = self.load_optional_from_disk::<AIMiningState>(&self.versioned_ai_mining_states, &topoheight.to_be_bytes())?;
+        Ok(state)
     }
 }

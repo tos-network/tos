@@ -11,6 +11,9 @@ build/
 data/
 logs/
 test_*/
+miner_wallet.db/
+publisher_wallet.db/
+
 
 # ignore all profiling files
 flamegraph.svg

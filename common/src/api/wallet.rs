@@ -433,6 +433,14 @@ pub enum EntryType {
         nonce: u64,
         // constructor invoke
         invoke: Option<DeployInvoke>
+    },
+    AIMining {
+        // Transaction hash for reference
+        hash: Hash,
+        // AI mining transaction payload
+        payload: crate::ai_mining::AIMiningPayload,
+        // Whether this is an outgoing transaction
+        outgoing: bool,
     }
 }
 

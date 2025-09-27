@@ -1,69 +1,69 @@
 # TOS Wallet Exec Mode Guide
 
-TOS Wallet 现在完全采用与 Geth 一致的 `--exec` 模式，提供简洁、强大的批处理操作。
+TOS Wallet now fully adopts the `--exec` mode consistent with Geth, providing concise and powerful batch operations.
 
-## 🚀 **执行模式对比**
+## 🚀 **Execution Mode Comparison**
 
-### Geth 风格
+### Geth Style
 ```bash
-# Geth 执行 JavaScript 代码
+# Geth executes JavaScript code
 geth --exec "eth.getBalance(eth.accounts[0])" console
 geth --exec "personal.sendTransaction({...}, 'password')" console
 ```
 
-### TOS Wallet 风格 (完全对齐)
+### TOS Wallet Style (Fully Aligned)
 ```bash
-# TOS Wallet 执行简单命令
+# TOS Wallet executes simple commands
 tos_wallet --exec="balance TOS" --wallet-path="wallet" --password="pass"
 tos_wallet --exec="transfer TOS tos1abc... 100" --wallet-path="wallet" --password="pass"
 ```
 
-## 📋 **支持的执行方式**
+## 📋 **Supported Execution Methods**
 
-### 1. **--exec** (主要方式，与 Geth 对齐)
+### 1. **--exec** (Primary Method, Aligned with Geth)
 
-#### 基础查询命令
+#### Basic Query Commands
 ```bash
-# 查询余额
+# Query balance
 tos_wallet --exec="balance TOS" --wallet-path="my_wallet" --password="secret"
 
-# 获取地址
+# Get address
 tos_wallet --exec="address" --wallet-path="my_wallet" --password="secret"
 
-# 查看 nonce
+# Check nonce
 tos_wallet --exec="nonce" --wallet-path="my_wallet" --password="secret"
 ```
 
-#### 钱包管理命令
+#### Wallet Management Commands
 ```bash
-# 设置 nonce
+# Set nonce
 tos_wallet --exec="set_nonce 42" --wallet-path="my_wallet" --password="secret"
 
-# 跟踪资产
+# Track asset
 tos_wallet --exec="track_asset abc123..." --wallet-path="my_wallet" --password="secret"
 
-# 取消跟踪资产
+# Untrack asset
 tos_wallet --exec="untrack_asset abc123..." --wallet-path="my_wallet" --password="secret"
 ```
 
-#### 交易命令
+#### Transaction Commands
 ```bash
-# 转账交易
+# Transfer transaction
 tos_wallet --exec="transfer TOS tos1abc... 100" --wallet-path="my_wallet" --password="secret"
 
-# 转账所有余额
+# Transfer all balance
 tos_wallet --exec="transfer_all TOS tos1abc..." --wallet-path="my_wallet" --password="secret"
 
-# 销毁代币
+# Burn tokens
 tos_wallet --exec="burn TOS 50" --wallet-path="my_wallet" --password="secret"
 ```
 
-### 2. **--json** (高级配置)
+### 2. **--json** (Advanced Configuration)
 
-适用于需要复杂参数的场景：
+Suitable for scenarios requiring complex parameters:
 
 ```bash
-# 结构化转账配置
+# Structured transfer configuration
 tos_wallet --json='{
   "command": "transfer",
   "params": {
@@ -75,7 +75,7 @@ tos_wallet --json='{
   }
 }' --wallet-path="my_wallet" --password="secret"
 
-# 冻结 TOS 配置
+# Freeze TOS configuration
 tos_wallet --json='{
   "command": "freeze_tos",
   "params": {
@@ -86,16 +86,16 @@ tos_wallet --json='{
 }' --wallet-path="my_wallet" --password="secret"
 ```
 
-### 3. **--json-file** (批量配置)
+### 3. **--json-file** (Batch Configuration)
 
-适用于复杂的批量操作：
+Suitable for complex batch operations:
 
 ```bash
-# 从文件执行配置
+# Execute configuration from file
 tos_wallet --json-file="transfer_config.json" --wallet-path="my_wallet" --password="secret"
 ```
 
-配置文件示例 (`transfer_config.json`):
+Configuration file example (`transfer_config.json`):
 ```json
 {
   "command": "transfer",
@@ -108,34 +108,34 @@ tos_wallet --json-file="transfer_config.json" --wallet-path="my_wallet" --passwo
 }
 ```
 
-## 🎯 **使用场景推荐**
+## 🎯 **Usage Scenario Recommendations**
 
-| 场景 | 推荐方式 | 示例 |
-|------|----------|------|
-| **简单查询** | `--exec` | `--exec="balance TOS"` |
-| **基础操作** | `--exec` | `--exec="set_nonce 42"` |
-| **复杂交易** | `--json` | JSON 字符串配置 |
-| **批量脚本** | `--json-file` | 配置文件 |
-| **CI/CD 集成** | `--exec` + `--json-file` | 混合使用 |
+| Scenario | Recommended Method | Example |
+|----------|-------------------|---------|
+| **Simple Queries** | `--exec` | `--exec="balance TOS"` |
+| **Basic Operations** | `--exec` | `--exec="set_nonce 42"` |
+| **Complex Transactions** | `--json` | JSON string configuration |
+| **Batch Scripts** | `--json-file` | Configuration files |
+| **CI/CD Integration** | `--exec` + `--json-file` | Hybrid usage |
 
-## 🔧 **脚本集成示例**
+## 🔧 **Script Integration Examples**
 
-### Bash 脚本
+### Bash Script
 ```bash
 #!/bin/bash
 WALLET="my_wallet"
 PASSWORD="secret123"
 
-# 检查余额
+# Check balance
 echo "Current balance:"
 tos_wallet --exec="balance TOS" --wallet-path="$WALLET" --password="$PASSWORD"
 
-# 执行转账
+# Execute transfer
 echo "Sending transaction:"
 tos_wallet --exec="transfer TOS tos1recipient... 10" --wallet-path="$WALLET" --password="$PASSWORD"
 ```
 
-### Python 集成
+### Python Integration
 ```python
 import subprocess
 
@@ -150,31 +150,31 @@ def run_wallet_command(exec_cmd, wallet_path, password):
     result = subprocess.run(cmd, capture_output=True, text=True)
     return result.stdout, result.stderr
 
-# 使用示例
+# Usage example
 balance_output, _ = run_wallet_command("balance TOS", "my_wallet", "secret")
 print(f"Balance: {balance_output}")
 ```
 
-## ⚡ **性能和便利性**
+## ⚡ **Performance and Convenience**
 
-### 优势
-1. **简洁语法**: 一行命令完成操作
-2. **与 Geth 一致**: 熟悉的接口，降低学习成本
-3. **类型安全**: JSON 参数提供编译时检查
-4. **灵活性**: 支持简单命令和复杂配置
+### Advantages
+1. **Concise Syntax**: Complete operations with one command
+2. **Consistent with Geth**: Familiar interface, reducing learning curve
+3. **Type Safety**: JSON parameters provide compile-time checking
+4. **Flexibility**: Supports both simple commands and complex configurations
 
-### 最佳实践
-1. **日常使用**: 优先使用 `--exec`
-2. **复杂场景**: 使用 `--json` 或 `--json-file`
-3. **脚本自动化**: 根据复杂度选择合适的方式
-4. **错误处理**: 检查命令返回状态码
+### Best Practices
+1. **Daily Usage**: Prioritize using `--exec`
+2. **Complex Scenarios**: Use `--json` or `--json-file`
+3. **Script Automation**: Choose appropriate method based on complexity
+4. **Error Handling**: Check command return status codes
 
-## 🆚 **与其他工具对比**
+## 🆚 **Comparison with Other Tools**
 
-| 工具 | 执行方式 | TOS Wallet 等效 |
-|------|----------|----------------|
+| Tool | Execution Method | TOS Wallet Equivalent |
+|------|------------------|----------------------|
 | `geth --exec "cmd"` | JavaScript | `--exec="cmd"` |
-| `bitcoin-cli cmd` | 单命令 | `--exec="cmd"` |
-| `solana cmd` | 子命令 | `--exec="cmd"` |
+| `bitcoin-cli cmd` | Single command | `--exec="cmd"` |
+| `solana cmd` | Subcommand | `--exec="cmd"` |
 
-TOS Wallet 的 `--exec` 模式结合了各种工具的优点，提供了一致、强大且易用的接口！
+TOS Wallet's `--exec` mode combines the advantages of various tools, providing a consistent, powerful, and user-friendly interface!

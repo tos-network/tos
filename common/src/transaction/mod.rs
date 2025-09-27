@@ -10,7 +10,8 @@ use crate::{
         Hashable,
         Signature,
     },
-    serializer::*
+    serializer::*,
+    ai_mining::AIMiningPayload,
 };
 
 use bulletproofs::RangeProof;
@@ -67,6 +68,7 @@ pub enum TransactionType {
     InvokeContract(InvokeContractPayload),
     DeployContract(DeployContractPayload),
     Energy(EnergyPayload),
+    AIMining(AIMiningPayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -392,6 +394,10 @@ impl Serializer for TransactionType {
             TransactionType::Energy(payload) => {
                 writer.write_u8(5);
                 payload.write(writer);
+            },
+            TransactionType::AIMining(payload) => {
+                writer.write_u8(6);
+                payload.write(writer);
             }
         };
     }
@@ -418,6 +424,7 @@ impl Serializer for TransactionType {
             3 => TransactionType::InvokeContract(InvokeContractPayload::read(reader)?),
             4 => TransactionType::DeployContract(DeployContractPayload::read(reader)?),
             5 => TransactionType::Energy(EnergyPayload::read(reader)?),
+            6 => TransactionType::AIMining(AIMiningPayload::read(reader)?),
             _ => {
                 return Err(ReaderError::InvalidValue)
             }
@@ -442,6 +449,7 @@ impl Serializer for TransactionType {
             TransactionType::InvokeContract(payload) => payload.size(),
             TransactionType::DeployContract(module) => module.size(),
             TransactionType::Energy(payload) => payload.size(),
+            TransactionType::AIMining(payload) => payload.size(),
         }
     }
 }

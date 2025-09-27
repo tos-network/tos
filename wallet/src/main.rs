@@ -1,6 +1,7 @@
 use std::{
     fs::File,
     io::Write,
+    ops::AddAssign,
     path::Path,
     sync::Arc,
     time::Duration,
@@ -10,7 +11,9 @@ use anyhow::{Result, Context};
 use indexmap::IndexSet;
 use log::{error, info};
 use clap::Parser;
+use sha3::{Digest, Keccak256};
 use tos_common::{
+    ai_mining::{AIMiningPayload, DifficultyLevel},
     async_handler,
     config::{
         init,
@@ -59,6 +62,7 @@ use tos_common::{
 };
 use tos_wallet::{
     config::{Config, JsonBatchConfig, LogProgressTableGenerationReportFunction, DIR_PATH},
+    entry::EntryData,
     precomputed_tables,
     wallet::{
         RecoverOption,
@@ -701,6 +705,78 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "status",
         "See the status of the wallet",
         CommandHandler::Async(async_handler!(status))
+    ))?;
+
+    // AI Mining commands
+    command_manager.add_command(Command::with_optional_arguments(
+        "ai_mining_history",
+        "Show AI mining transaction history",
+        vec![
+            Arg::new("page", ArgType::Number),
+            Arg::new("limit", ArgType::Number),
+            Arg::new("type", ArgType::String)
+        ],
+        CommandHandler::Async(async_handler!(ai_mining_history))
+    ))?;
+    command_manager.add_command(Command::new(
+        "ai_mining_stats",
+        "Show your AI mining statistics",
+        CommandHandler::Async(async_handler!(ai_mining_stats))
+    ))?;
+    command_manager.add_command(Command::with_optional_arguments(
+        "ai_mining_tasks",
+        "Show AI mining tasks you've published or participated in",
+        vec![
+            Arg::new("page", ArgType::Number),
+            Arg::new("status", ArgType::String)
+        ],
+        CommandHandler::Async(async_handler!(ai_mining_tasks))
+    ))?;
+    command_manager.add_command(Command::with_optional_arguments(
+        "ai_mining_rewards",
+        "Show AI mining rewards earned",
+        vec![Arg::new("page", ArgType::Number)],
+        CommandHandler::Async(async_handler!(ai_mining_rewards))
+    ))?;
+
+    // AI Mining business commands
+    command_manager.add_command(Command::with_required_arguments(
+        "publish_task",
+        "Publish a new AI mining task",
+        vec![
+            Arg::new("description", ArgType::String),
+            Arg::new("reward", ArgType::Number),
+            Arg::new("difficulty", ArgType::String),
+            Arg::new("deadline", ArgType::Number)
+        ],
+        CommandHandler::Async(async_handler!(publish_task))
+    ))?;
+    command_manager.add_command(Command::with_required_arguments(
+        "submit_answer",
+        "Submit answer to an AI mining task",
+        vec![
+            Arg::new("task_id", ArgType::String),
+            Arg::new("answer_content", ArgType::String),
+            Arg::new("answer_hash", ArgType::String),
+            Arg::new("stake", ArgType::Number)
+        ],
+        CommandHandler::Async(async_handler!(submit_answer))
+    ))?;
+    command_manager.add_command(Command::with_required_arguments(
+        "validate_answer",
+        "Validate a submitted answer",
+        vec![
+            Arg::new("task_id", ArgType::String),
+            Arg::new("answer_id", ArgType::String),
+            Arg::new("score", ArgType::Number)
+        ],
+        CommandHandler::Async(async_handler!(validate_answer))
+    ))?;
+    command_manager.add_command(Command::with_required_arguments(
+        "register_miner",
+        "Register as an AI miner",
+        vec![Arg::new("fee", ArgType::Number)],
+        CommandHandler::Async(async_handler!(register_miner))
     ))?;
 
     let mut context = command_manager.get_context().lock()?;
@@ -2065,6 +2141,561 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
     manager.message(format!("Wallet address: {}", wallet.get_address()));
 
     Ok(())
+}
+
+// Show AI mining transaction history
+async fn ai_mining_history(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let page = if arguments.has_argument("page") {
+        arguments.get_value("page")?.to_number()? as usize
+    } else {
+        0
+    };
+
+    let limit = if arguments.has_argument("limit") {
+        arguments.get_value("limit")?.to_number()? as usize
+    } else {
+        20
+    };
+
+    let filter_type = if arguments.has_argument("type") {
+        Some(arguments.get_value("type")?.to_string_value()?)
+    } else {
+        None
+    };
+
+    let storage = wallet.get_storage().read().await;
+    let all_transactions = storage.get_transactions()?;
+
+    // Filter for AI mining transactions
+    let ai_transactions: Vec<_> = all_transactions.iter()
+        .filter(|tx| {
+            if let EntryData::AIMining { payload, .. } = tx.get_entry() {
+                if let Some(ref filter) = filter_type {
+                    match filter.to_lowercase().as_str() {
+                        "publish" | "publishtask" => matches!(payload, AIMiningPayload::PublishTask { .. }),
+                        "submit" | "submitanswer" => matches!(payload, AIMiningPayload::SubmitAnswer { .. }),
+                        "validate" | "validateanswer" => matches!(payload, AIMiningPayload::ValidateAnswer { .. }),
+                        "register" | "registerminer" => matches!(payload, AIMiningPayload::RegisterMiner { .. }),
+                        _ => true
+                    }
+                } else {
+                    true
+                }
+            } else {
+                false
+            }
+        })
+        .collect();
+
+    if ai_transactions.is_empty() {
+        manager.message("No AI mining transactions found");
+        return Ok(());
+    }
+
+    let total_count = ai_transactions.len();
+    let start_idx = page * limit;
+    let end_idx = std::cmp::min(start_idx + limit, total_count);
+
+    if start_idx >= total_count {
+        manager.message("No AI mining transactions found on this page");
+        return Ok(());
+    }
+
+    let type_filter_str = filter_type.map(|t| format!(" (filtered by {})", t)).unwrap_or_default();
+    manager.message(format!("AI Mining Transaction History{} (page {}, showing {}-{} of {})",
+        type_filter_str, page, start_idx + 1, end_idx, total_count));
+    manager.message("=".repeat(80));
+
+    let network = wallet.get_network();
+    for tx in &ai_transactions[start_idx..end_idx] {
+        let summary = tx.summary(network.is_mainnet(), &storage).await?;
+        manager.message(summary);
+    }
+
+    if end_idx < total_count {
+        manager.message(format!("Use 'ai_mining_history --page {}' to see more transactions", page + 1));
+    }
+
+    Ok(())
+}
+
+// Show AI mining statistics for this wallet
+async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let storage = wallet.get_storage().read().await;
+    let all_transactions = storage.get_transactions()?;
+    let network = wallet.get_network();
+    let wallet_address = wallet.get_address();
+
+    let mut stats = AIMiningSummary::default();
+
+    // Analyze all AI mining transactions
+    for tx in &all_transactions {
+        if let EntryData::AIMining { payload, outgoing, .. } = tx.get_entry() {
+            match payload {
+                AIMiningPayload::PublishTask { reward_amount, difficulty, .. } => {
+                    if *outgoing {
+                        stats.tasks_published += 1;
+                        stats.total_rewards_offered += reward_amount;
+                        stats.difficulty_breakdown.entry(format!("{:?}", difficulty)).or_insert(0).add_assign(1);
+                    }
+                },
+                AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                    if *outgoing {
+                        stats.answers_submitted += 1;
+                        stats.total_staked += stake_amount;
+                    }
+                },
+                AIMiningPayload::ValidateAnswer { validation_score, .. } => {
+                    if *outgoing {
+                        stats.validations_performed += 1;
+                        stats.total_validation_score += *validation_score as u64;
+                    }
+                },
+                AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                    if *outgoing {
+                        stats.registrations += 1;
+                        stats.total_registration_fees += registration_fee;
+                    }
+                },
+            }
+        }
+    }
+
+    manager.message("=== AI Mining Statistics ===");
+    manager.message(format!("Wallet Address: {}", wallet_address));
+    manager.message(format!("Network: {}", network));
+    manager.message("");
+
+    manager.message("--- Activity Summary ---");
+    manager.message(format!("Tasks Published: {}", stats.tasks_published));
+    manager.message(format!("Answers Submitted: {}", stats.answers_submitted));
+    manager.message(format!("Validations Performed: {}", stats.validations_performed));
+    manager.message(format!("Miner Registrations: {}", stats.registrations));
+    manager.message("");
+
+    manager.message("--- Financial Summary ---");
+    manager.message(format!("Total Rewards Offered: {} TOS", format_tos(stats.total_rewards_offered)));
+    manager.message(format!("Total Amount Staked: {} TOS", format_tos(stats.total_staked)));
+    manager.message(format!("Total Registration Fees: {} TOS", format_tos(stats.total_registration_fees)));
+    if stats.validations_performed > 0 {
+        let avg_score = stats.total_validation_score as f64 / stats.validations_performed as f64;
+        manager.message(format!("Average Validation Score: {:.1}", avg_score));
+    }
+    manager.message("");
+
+    if !stats.difficulty_breakdown.is_empty() {
+        manager.message("--- Task Difficulty Breakdown ---");
+        for (difficulty, count) in stats.difficulty_breakdown {
+            manager.message(format!("{}: {} tasks", difficulty, count));
+        }
+    }
+
+    Ok(())
+}
+
+// Show AI mining tasks this wallet has interacted with
+async fn ai_mining_tasks(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let page = if arguments.has_argument("page") {
+        arguments.get_value("page")?.to_number()? as usize
+    } else {
+        0
+    };
+
+    let status_filter = if arguments.has_argument("status") {
+        Some(arguments.get_value("status")?.to_string_value()?)
+    } else {
+        None
+    };
+
+    // Show AI mining transactions from local history
+    let storage = wallet.get_storage().read().await;
+    let all_transactions = storage.get_transactions()?;
+
+    // Filter for AI mining transactions
+    let mut ai_transactions: Vec<_> = all_transactions.iter()
+        .filter(|tx| matches!(tx.get_entry(), EntryData::AIMining { .. }))
+        .collect();
+
+    ai_transactions.sort_by_key(|tx| std::cmp::Reverse(tx.get_topoheight()));
+
+    let total_count = ai_transactions.len();
+    let start_idx = page * 10;
+    let end_idx = std::cmp::min(start_idx + 10, total_count);
+
+    if total_count == 0 {
+        manager.message("No AI mining transactions found in wallet history");
+        return Ok(());
+    }
+
+    if start_idx >= total_count {
+        manager.message("No transactions found on this page");
+        return Ok(());
+    }
+
+    let status_filter_str = status_filter.map(|s| format!(" (filter: {})", s)).unwrap_or_default();
+    manager.message(format!("AI Mining Transaction History{} (page {}, showing {}-{} of {})",
+        status_filter_str, page, start_idx + 1, end_idx, total_count));
+    manager.message("=".repeat(80));
+
+    for tx in &ai_transactions[start_idx..end_idx] {
+        if let EntryData::AIMining { payload, outgoing, .. } = tx.get_entry() {
+            let direction = if *outgoing { "OUTGOING" } else { "INCOMING" };
+
+            manager.message(format!("[{}] {}", direction, tx.get_hash()));
+            manager.message(format!("  TopoHeight: {}", tx.get_topoheight()));
+
+            match payload {
+                AIMiningPayload::PublishTask { task_id, reward_amount, difficulty, .. } => {
+                    manager.message(format!("  Type: Publish Task"));
+                    manager.message(format!("  Task ID: {}", task_id));
+                    manager.message(format!("  Reward: {} TOS", format_tos(*reward_amount)));
+                    manager.message(format!("  Difficulty: {:?}", difficulty));
+                },
+                AIMiningPayload::SubmitAnswer { task_id, answer_hash, stake_amount, answer_content: _ } => {
+                    manager.message(format!("  Type: Submit Answer"));
+                    manager.message(format!("  Task ID: {}", task_id));
+                    manager.message(format!("  Answer Hash: {}", answer_hash));
+                    manager.message(format!("  Stake: {} TOS", format_tos(*stake_amount)));
+                },
+                AIMiningPayload::ValidateAnswer { task_id, answer_id, validation_score } => {
+                    manager.message(format!("  Type: Validate Answer"));
+                    manager.message(format!("  Task ID: {}", task_id));
+                    manager.message(format!("  Answer ID: {}", answer_id));
+                    manager.message(format!("  Validation Score: {}", validation_score));
+                },
+                AIMiningPayload::RegisterMiner { miner_address, registration_fee } => {
+                    manager.message(format!("  Type: Register Miner"));
+                    manager.message(format!("  Miner Address: {}", miner_address.as_address(wallet.get_network().is_mainnet())));
+                    manager.message(format!("  Registration Fee: {} TOS", format_tos(*registration_fee)));
+                },
+            }
+            manager.message("");
+        }
+    }
+
+    if end_idx < total_count {
+        manager.message(format!("Use 'ai_mining_tasks --page {}' to see more transactions", page + 1));
+    }
+
+    Ok(())
+}
+
+// Show AI mining rewards earned
+async fn ai_mining_rewards(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let page = if arguments.has_argument("page") {
+        arguments.get_value("page")?.to_number()? as usize
+    } else {
+        0
+    };
+
+    let storage = wallet.get_storage().read().await;
+    let all_transactions = storage.get_transactions()?;
+
+    // Find incoming transactions that could be rewards
+    let potential_rewards: Vec<_> = all_transactions.iter()
+        .filter(|tx| {
+            match tx.get_entry() {
+                EntryData::Incoming { transfers, .. } => {
+                    // Look for TOS transfers that could be AI mining rewards
+                    transfers.iter().any(|transfer| transfer.get_asset() == &TOS_ASSET)
+                },
+                EntryData::AIMining { outgoing, .. } => !outgoing, // Incoming AI mining transactions
+                _ => false
+            }
+        })
+        .collect();
+
+    if potential_rewards.is_empty() {
+        manager.message("No potential AI mining rewards found");
+        return Ok(());
+    }
+
+    let total_count = potential_rewards.len();
+    let start_idx = page * 20;
+    let end_idx = std::cmp::min(start_idx + 20, total_count);
+
+    if start_idx >= total_count {
+        manager.message("No rewards found on this page");
+        return Ok(());
+    }
+
+    manager.message(format!("Potential AI Mining Rewards (page {}, showing {}-{} of {})",
+        page, start_idx + 1, end_idx, total_count));
+    manager.message("Note: This includes all incoming TOS transfers and AI mining transactions");
+    manager.message("=".repeat(80));
+
+    let network = wallet.get_network();
+    let mut total_rewards = 0u64;
+
+    for tx in &potential_rewards[start_idx..end_idx] {
+        let summary = tx.summary(network.is_mainnet(), &storage).await?;
+        manager.message(summary);
+
+        // Try to extract reward amounts
+        match tx.get_entry() {
+            EntryData::Incoming { transfers, .. } => {
+                for transfer in transfers {
+                    if transfer.get_asset() == &TOS_ASSET {
+                        total_rewards += transfer.get_amount();
+                    }
+                }
+            },
+            _ => {}
+        }
+    }
+
+    if total_rewards > 0 {
+        manager.message("");
+        manager.message(format!("Total TOS received in this page: {} TOS", format_tos(total_rewards)));
+    }
+
+    if end_idx < total_count {
+        manager.message(format!("Use 'ai_mining_rewards --page {}' to see more rewards", page + 1));
+    }
+
+    Ok(())
+}
+
+// AI Mining business commands implementation
+async fn publish_task(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
+
+    let description = arguments.get_value("description")?.to_string_value()?;
+    let reward = arguments.get_value("reward")?.to_number()? as u64;
+    let difficulty_str = arguments.get_value("difficulty")?.to_string_value()?;
+    let deadline = arguments.get_value("deadline")?.to_number()? as u64;
+
+    // Parse difficulty level
+    let difficulty = match difficulty_str.to_lowercase().as_str() {
+        "beginner" => DifficultyLevel::Beginner,
+        "intermediate" => DifficultyLevel::Intermediate,
+        "advanced" => DifficultyLevel::Advanced,
+        "expert" => DifficultyLevel::Expert,
+        _ => return Err(CommandError::InvalidArgument("difficulty must be: beginner, intermediate, advanced, or expert".to_string())),
+    };
+
+    // Convert reward from TOS to nanoTOS
+    let reward_nanos = reward * 1_000_000_000;
+
+    // Validate reward is within difficulty range
+    let (min_reward, max_reward) = difficulty.reward_range();
+    if reward_nanos < min_reward || reward_nanos > max_reward {
+        return Err(CommandError::InvalidArgument(format!(
+            "Reward {} TOS is outside valid range [{}, {}] TOS for difficulty {:?}",
+            reward, min_reward / 1_000_000_000, max_reward / 1_000_000_000, difficulty
+        )));
+    }
+
+    // Generate task ID from description and current time
+    let task_data = format!("{}-{}-{}", description, reward_nanos, deadline);
+    let task_id_bytes = Keccak256::digest(task_data.as_bytes());
+    let task_id = Hash::from_hex(&hex::encode(task_id_bytes)).unwrap_or_else(|_| Hash::zero());
+
+    // Create AI mining payload
+    let ai_mining_payload = AIMiningPayload::PublishTask {
+        task_id: task_id.clone(),
+        reward_amount: reward_nanos,
+        difficulty: difficulty.clone(),
+        deadline,
+        description: description.clone(),
+    };
+
+    // Validate payload before creating transaction
+    ai_mining_payload.validate().map_err(|e| CommandError::InvalidArgument(e.to_string()))?;
+
+    // Create transaction type
+    let tx_type = TransactionTypeBuilder::AIMining(ai_mining_payload);
+
+    manager.message(format!("Publishing AI mining task:"));
+    manager.message(format!("  Task ID: {}", task_id));
+    manager.message(format!("  Description: {}", description));
+    manager.message(format!("  Reward: {} TOS", reward));
+    manager.message(format!("  Difficulty: {:?}", difficulty));
+    manager.message(format!("  Deadline: {}", deadline));
+
+    // Build and submit transaction
+    match wallet.create_transaction(tx_type, FeeBuilder::default()).await {
+        Ok(tx) => {
+            manager.message(format!("Transaction created successfully: {}", tx.hash()));
+            manager.message("AI mining task published!");
+        }
+        Err(e) => {
+            return Err(CommandError::InvalidArgument(format!("Failed to create transaction: {}", e)));
+        }
+    }
+
+    Ok(())
+}
+
+async fn submit_answer(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
+
+    let task_id_str = arguments.get_value("task_id")?.to_string_value()?;
+    let answer_content = arguments.get_value("answer_content")?.to_string_value()?;
+    let answer_hash_str = arguments.get_value("answer_hash")?.to_string_value()?;
+    let stake = arguments.get_value("stake")?.to_number()? as u64;
+
+    // Parse hashes
+    let task_id = Hash::from_hex(&task_id_str).map_err(|_|
+        CommandError::InvalidArgument("Invalid task_id format".to_string()))?;
+    let answer_hash = Hash::from_hex(&answer_hash_str).map_err(|_|
+        CommandError::InvalidArgument("Invalid answer_hash format".to_string()))?;
+
+    // Convert stake from TOS to nanoTOS
+    let stake_nanos = stake * 1_000_000_000;
+
+    // Create AI mining payload
+    let ai_mining_payload = AIMiningPayload::SubmitAnswer {
+        task_id: task_id.clone(),
+        answer_content: answer_content.clone(),
+        answer_hash: answer_hash.clone(),
+        stake_amount: stake_nanos,
+    };
+
+    // Validate payload before creating transaction
+    ai_mining_payload.validate().map_err(|e| CommandError::InvalidArgument(e.to_string()))?;
+
+    // Create transaction type
+    let tx_type = TransactionTypeBuilder::AIMining(ai_mining_payload);
+
+    manager.message(format!("Submitting answer to AI mining task:"));
+    manager.message(format!("  Task ID: {}", task_id));
+    manager.message(format!("  Answer Hash: {}", answer_hash));
+    manager.message(format!("  Stake: {} TOS", stake));
+
+    // Build and submit transaction
+    match wallet.create_transaction(tx_type, FeeBuilder::default()).await {
+        Ok(tx) => {
+            manager.message(format!("Transaction created successfully: {}", tx.hash()));
+            manager.message("Answer submitted to AI mining task!");
+        }
+        Err(e) => {
+            return Err(CommandError::InvalidArgument(format!("Failed to create transaction: {}", e)));
+        }
+    }
+
+    Ok(())
+}
+
+async fn validate_answer(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
+
+    let task_id_str = arguments.get_value("task_id")?.to_string_value()?;
+    let answer_id_str = arguments.get_value("answer_id")?.to_string_value()?;
+    let score = arguments.get_value("score")?.to_number()? as u8;
+
+    // Validate score range
+    if score > 100 {
+        return Err(CommandError::InvalidArgument("Score must be between 0 and 100".to_string()));
+    }
+
+    // Parse hashes
+    let task_id = Hash::from_hex(&task_id_str).map_err(|_|
+        CommandError::InvalidArgument("Invalid task_id format".to_string()))?;
+    let answer_id = Hash::from_hex(&answer_id_str).map_err(|_|
+        CommandError::InvalidArgument("Invalid answer_id format".to_string()))?;
+
+    // Create AI mining payload
+    let ai_mining_payload = AIMiningPayload::ValidateAnswer {
+        task_id: task_id.clone(),
+        answer_id: answer_id.clone(),
+        validation_score: score,
+    };
+
+    // Create transaction type
+    let tx_type = TransactionTypeBuilder::AIMining(ai_mining_payload);
+
+    manager.message(format!("Validating answer for AI mining task:"));
+    manager.message(format!("  Task ID: {}", task_id));
+    manager.message(format!("  Answer ID: {}", answer_id));
+    manager.message(format!("  Score: {}/100", score));
+
+    // Build and submit transaction
+    match wallet.create_transaction(tx_type, FeeBuilder::default()).await {
+        Ok(tx) => {
+            manager.message(format!("Transaction created successfully: {}", tx.hash()));
+            manager.message("Answer validation submitted!");
+        }
+        Err(e) => {
+            return Err(CommandError::InvalidArgument(format!("Failed to create transaction: {}", e)));
+        }
+    }
+
+    Ok(())
+}
+
+async fn register_miner(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+    let (wallet, wallet_address) = {
+        let context = manager.get_context().lock()?;
+        let wallet = context.get::<Arc<Wallet>>()?.clone();
+        let wallet_address = wallet.get_address().clone();
+        (wallet, wallet_address)
+    };
+
+    let fee = arguments.get_value("fee")?.to_number()? as u64;
+
+    // Convert fee from TOS to nanoTOS
+    let fee_nanos = fee * 1_000_000_000;
+
+    // Create AI mining payload
+    let ai_mining_payload = AIMiningPayload::RegisterMiner {
+        miner_address: wallet_address.get_public_key().clone(),
+        registration_fee: fee_nanos,
+    };
+
+    // Create transaction type
+    let tx_type = TransactionTypeBuilder::AIMining(ai_mining_payload);
+
+    manager.message(format!("Registering as AI miner:"));
+    manager.message(format!("  Miner Address: {}", wallet_address));
+    manager.message(format!("  Registration Fee: {} TOS", fee));
+
+    // Build and submit transaction
+    match wallet.create_transaction(tx_type, FeeBuilder::default()).await {
+        Ok(tx) => {
+            manager.message(format!("Transaction created successfully: {}", tx.hash()));
+            manager.message("AI miner registration submitted!");
+        }
+        Err(e) => {
+            return Err(CommandError::InvalidArgument(format!("Failed to create transaction: {}", e)));
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Default)]
+struct AIMiningSummary {
+    tasks_published: u32,
+    answers_submitted: u32,
+    validations_performed: u32,
+    registrations: u32,
+    total_rewards_offered: u64,
+    total_staked: u64,
+    total_registration_fees: u64,
+    total_validation_score: u64,
+    difficulty_breakdown: std::collections::HashMap<String, u32>,
 }
 
 async fn logout(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {

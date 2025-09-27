@@ -21,6 +21,7 @@ mod versioned;
 mod cache;
 mod state;
 mod energy;
+mod ai_mining;
 
 pub use asset::*;
 pub use blocks_at_height::*;
@@ -45,3 +46,4 @@ pub use versioned::*;
 pub use cache::*;
 pub use state::*;
 pub use energy::*;
+pub use ai_mining::*;

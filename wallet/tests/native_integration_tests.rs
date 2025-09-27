@@ -19,8 +19,7 @@ mod tests {
         let output = Command::new("../target/debug/tos_wallet")
             .args(&[
                 "--precomputed-tables-l1", "13",
-                "--batch-mode",
-                "--cmd", cmd,
+                "--exec", cmd,
                 "--wallet-path", wallet_name,
                 "--password", "test123",
             ])

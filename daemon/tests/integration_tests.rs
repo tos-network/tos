@@ -995,6 +995,8 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
         (TransactionType::DeployContract(_), FeeType::Energy) => false,
         (TransactionType::Energy(_), FeeType::TOS) => true,
         (TransactionType::Energy(_), FeeType::Energy) => false,
+        (TransactionType::AIMining(_), FeeType::TOS) => true,
+        (TransactionType::AIMining(_), FeeType::Energy) => false,
     }
 }
 

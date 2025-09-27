@@ -505,6 +505,25 @@ impl NetworkHandler {
                     RPCTransactionType::Energy(_) => {
                         // Energy transactions are not yet supported in wallet history
                         None
+                    },
+                    RPCTransactionType::AIMining(payload) => {
+                        let payload = payload.into_owned();
+                        if is_owner {
+                            if !should_scan_history || self.has_tx_stored(&tx.hash).await? {
+                                debug!("Transaction AI mining {} was already stored, skipping it", tx.hash);
+                                return Ok((None, assets_changed));
+                            }
+
+                            let outgoing = false; // TODO: implement proper outgoing detection for AI mining
+
+                            Some(EntryData::AIMining {
+                                hash: tx.hash.clone().into_owned(),
+                                payload,
+                                outgoing
+                            })
+                        } else {
+                            None
+                        }
                     }
                 };
 

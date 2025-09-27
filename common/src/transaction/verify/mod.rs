@@ -117,7 +117,8 @@ impl Transaction {
                     | TransactionType::MultiSig(_)
                     | TransactionType::InvokeContract(_)
                     | TransactionType::DeployContract(_)
-                    | TransactionType::Energy(_) => true,
+                    | TransactionType::Energy(_)
+                    | TransactionType::AIMining(_) => true,
                 }
             }
         }
@@ -216,6 +217,32 @@ impl Transaction {
                         // The amount is already handled in the energy system
                         debug!("UnfreezeTos operation: no TOS deduction for asset {} (amount: {})", asset, amount);
                         debug!("  Energy will be removed from energy resource during apply phase");
+                    }
+                }
+            },
+            TransactionType::AIMining(payload) => {
+                // AI Mining operations may involve TOS rewards or stakes
+                match payload {
+                    crate::ai_mining::AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        // For task publishing, deduct the reward amount from TOS balance
+                        if *asset == TOS_ASSET {
+                            output += Scalar::from(*reward_amount);
+                        }
+                    },
+                    crate::ai_mining::AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        // For answer submission, deduct the stake amount from TOS balance
+                        if *asset == TOS_ASSET {
+                            output += Scalar::from(*stake_amount);
+                        }
+                    },
+                    crate::ai_mining::AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        // For miner registration, deduct the registration fee from TOS balance
+                        if *asset == TOS_ASSET {
+                            output += Scalar::from(*registration_fee);
+                        }
+                    },
+                    crate::ai_mining::AIMiningPayload::ValidateAnswer { .. } => {
+                        // Validation doesn't involve direct TOS transfers
                     }
                 }
             }
@@ -325,6 +352,7 @@ impl Transaction {
                 .all(|asset| has_commitment_for_asset(asset)),
             TransactionType::DeployContract(_) => true,
             TransactionType::Energy(_) => true,
+            TransactionType::AIMining(_) => true,
         }
     }
 
@@ -504,6 +532,9 @@ impl Transaction {
             },
             TransactionType::Energy(_) => {
                 // Energy transactions don't require special verification beyond basic checks
+            },
+            TransactionType::AIMining(_) => {
+                // AI Mining transactions don't require special verification beyond basic checks for now
             }
         };
 
@@ -742,6 +773,9 @@ impl Transaction {
             },
             TransactionType::Energy(_) => {
                 // Energy transactions don't require special verification beyond basic checks
+            },
+            TransactionType::AIMining(_) => {
+                // AI Mining transactions don't require special verification beyond basic checks for now
             }
         };
 
@@ -966,8 +1000,15 @@ impl Transaction {
                 // This ensures consistency between generation and verification
                 // Note: Transfer transactions with energy fees are TransactionType::Transfers, not TransactionType::Energy
                 Transaction::append_energy_transcript(&mut transcript, payload);
-                
-                debug!("Energy transaction verification - payload: {:?}, fee: {}, nonce: {}", 
+
+                debug!("Energy transaction verification - payload: {:?}, fee: {}, nonce: {}",
+                       payload, self.fee, self.nonce);
+            },
+            TransactionType::AIMining(payload) => {
+                // AI Mining transactions - add to transcript for consistency
+                transcript.append_message(b"ai_mining_payload", &format!("{:?}", payload).as_bytes());
+
+                debug!("AI Mining transaction verification - payload: {:?}, fee: {}, nonce: {}",
                        payload, self.fee, self.nonce);
             }
         }
@@ -1279,6 +1320,46 @@ impl Transaction {
                         }
                     }
                 }
+            },
+            TransactionType::AIMining(payload) => {
+                // Handle AI Mining operations with full validation
+                use crate::ai_mining::AIMiningValidator;
+
+                // Get or create AI mining state
+                let mut ai_mining_state = state.get_ai_mining_state().await
+                    .map_err(VerificationError::State)?
+                    .unwrap_or_default();
+
+                // Create validator with current context
+                let block_height = state.get_block().get_height() as u64;
+                let timestamp = state.get_block().get_timestamp();
+                let source = self.source.clone();
+
+                let result = {
+                    let mut validator = AIMiningValidator::new(
+                        &mut ai_mining_state,
+                        block_height,
+                        timestamp,
+                        source,
+                    );
+
+                    // Validate and apply the AI mining operation
+                    validator.validate_and_apply(payload)
+                        .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("AI Mining validation failed: {}", e)))?;
+
+                    // Update tasks and process completions
+                    validator.update_tasks()
+                        .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("AI Mining task update failed: {}", e)))?;
+
+                    validator.get_validation_summary()
+                };
+
+                // Save updated state back to blockchain
+                state.set_ai_mining_state(&ai_mining_state).await
+                    .map_err(VerificationError::State)?;
+
+                debug!("AI Mining operation processed - payload: {:?}, miners: {}, active_tasks: {}, completed_tasks: {}",
+                       payload, result.total_miners, result.active_tasks, result.completed_tasks);
             }
         }
 

@@ -77,6 +77,7 @@ use super::{
     MAX_MULTISIG_PARTICIPANTS,
     MAX_TRANSFER_COUNT
 };
+use crate::ai_mining::AIMiningPayload;
 
 
 pub use payload::*;
@@ -135,6 +136,7 @@ pub enum TransactionTypeBuilder {
     InvokeContract(InvokeContractBuilder),
     DeployContract(DeployContractBuilder),
     Energy(EnergyBuilder),
+    AIMining(AIMiningPayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -295,6 +297,10 @@ impl TransactionBuilder {
                 // Payload size
                 size += energy_payload.size();
             }
+            TransactionTypeBuilder::AIMining(payload) => {
+                // AI Mining payload size
+                size += payload.size();
+            }
         };
 
         // Range Proof
@@ -453,6 +459,27 @@ impl TransactionBuilder {
                     ct -= Scalar::from(payload.amount);
                 }
             }
+            TransactionTypeBuilder::AIMining(payload) => {
+                // AI Mining operations may consume TOS for registration fees, stakes, etc.
+                if *asset == TOS_ASSET {
+                    match payload {
+                        crate::ai_mining::AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                            ct -= Scalar::from(*registration_fee);
+                        }
+                        crate::ai_mining::AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                            ct -= Scalar::from(*stake_amount);
+                            // Add answer content gas cost
+                            ct -= Scalar::from(payload.calculate_content_gas_cost());
+                        }
+                        crate::ai_mining::AIMiningPayload::PublishTask { reward_amount, .. } => {
+                            ct -= Scalar::from(*reward_amount);
+                            // Add description gas cost
+                            ct -= Scalar::from(payload.calculate_description_gas_cost());
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
 
         ct
@@ -518,6 +545,27 @@ impl TransactionBuilder {
             TransactionTypeBuilder::Energy(payload) => {
                 if *asset == TOS_ASSET {
                     cost += payload.amount;
+                }
+            }
+            TransactionTypeBuilder::AIMining(payload) => {
+                // AI Mining operations may cost TOS for registration fees, stakes, rewards, etc.
+                if *asset == TOS_ASSET {
+                    match payload {
+                        crate::ai_mining::AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                            cost += *registration_fee;
+                        }
+                        crate::ai_mining::AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                            cost += *stake_amount;
+                            // Add answer content gas cost
+                            cost += payload.calculate_content_gas_cost();
+                        }
+                        crate::ai_mining::AIMiningPayload::PublishTask { reward_amount, .. } => {
+                            cost += *reward_amount;
+                            // Add description gas cost
+                            cost += payload.calculate_description_gas_cost();
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -760,6 +808,10 @@ impl TransactionBuilder {
                 // Energy transactions don't need special commitment handling
                 // They will be processed in the second match statement
             },
+            TransactionTypeBuilder::AIMining(_) => {
+                // AI Mining transactions don't need special commitment handling
+                // They are handled in the final transaction creation
+            },
             TransactionTypeBuilder::Burn(_) => {},
             TransactionTypeBuilder::MultiSig(_) => {},
         };
@@ -963,6 +1015,9 @@ impl TransactionBuilder {
                     );
                 }
             }
+            TransactionTypeBuilder::AIMining(_) => {
+                // AI Mining transactions don't need deposits processing
+            }
             _ => {}
         };
 
@@ -1088,6 +1143,10 @@ impl TransactionBuilder {
 
                 TransactionType::Energy(energy_payload)
             }
+            TransactionTypeBuilder::AIMining(ref payload) => {
+                // AI Mining transactions use the payload directly
+                TransactionType::AIMining(payload.clone())
+            }
         };
 
         // 3. Create the RangeProof
@@ -1194,6 +1253,17 @@ impl TransactionTypeBuilder {
             TransactionTypeBuilder::InvokeContract(payload) => {
                 consumed.extend(payload.deposits.keys());
             },
+            TransactionTypeBuilder::AIMining(payload) => {
+                // AI Mining operations consume TOS asset
+                match payload {
+                    crate::ai_mining::AIMiningPayload::RegisterMiner { .. } |
+                    crate::ai_mining::AIMiningPayload::SubmitAnswer { .. } |
+                    crate::ai_mining::AIMiningPayload::PublishTask { .. } => {
+                        consumed.insert(&TOS_ASSET);
+                    }
+                    _ => {}
+                }
+            },
             _ => {},
         }
 
@@ -1208,6 +1278,19 @@ impl TransactionTypeBuilder {
             TransactionTypeBuilder::Transfers(transfers) => {
                 for transfer in transfers {
                     used_keys.insert(transfer.destination.get_public_key());
+                }
+            }
+            TransactionTypeBuilder::AIMining(payload) => {
+                // AI Mining operations may specify miner addresses
+                match payload {
+                    crate::ai_mining::AIMiningPayload::RegisterMiner { miner_address, .. } => {
+                        // Add the miner address to used keys
+                        used_keys.insert(miner_address);
+                    }
+                    _ => {
+                        // Other AI Mining operations don't have explicit destination addresses
+                        // They operate on the sender's address implicitly
+                    }
                 }
             }
             _ => {},

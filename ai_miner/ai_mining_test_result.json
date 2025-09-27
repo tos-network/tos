@@ -1,0 +1,56 @@
+{
+  "task_info": {
+    "task_id": "b417ab6fa63ce24ba635423810e1354f0a3e50f3e20a27691c64ece4805c40e7",
+    "reward_amount": 2000000,
+    "difficulty": "intermediate",
+    "deadline": 1758865873,
+    "tx_data": {
+      "type": "ai_mining",
+      "payload_type": "PublishTask",
+      "timestamp": 1758862273,
+      "network": "devnet",
+      "task_id": "b417ab6fa63ce24ba635423810e1354f0a3e50f3e20a27691c64ece4805c40e7",
+      "reward_amount": 2000000,
+      "difficulty": "intermediate",
+      "deadline": 1758865873
+    }
+  },
+  "answer_info": {
+    "task_id": "b417ab6fa63ce24ba635423810e1354f0a3e50f3e20a27691c64ece4805c40e7",
+    "answer_hash": "8d3b59aa88b02fc340e0ca8bbdb649553dbbae08d0d0d52064f3336e0138d958",
+    "stake_amount": 100000,
+    "tx_data": {
+      "type": "ai_mining",
+      "payload_type": "SubmitAnswer",
+      "timestamp": 1758862275,
+      "network": "devnet",
+      "task_id": "b417ab6fa63ce24ba635423810e1354f0a3e50f3e20a27691c64ece4805c40e7",
+      "answer_hash": "8d3b59aa88b02fc340e0ca8bbdb649553dbbae08d0d0d52064f3336e0138d958",
+      "stake_amount": 100000
+    }
+  },
+  "validation_info": {
+    "task_id": "b417ab6fa63ce24ba635423810e1354f0a3e50f3e20a27691c64ece4805c40e7",
+    "answer_id": "8d3b59aa88b02fc340e0ca8bbdb649553dbbae08d0d0d52064f3336e0138d958",
+    "validation_score": 75,
+    "tx_data": {
+      "type": "ai_mining",
+      "payload_type": "ValidateAnswer",
+      "timestamp": 1758862276,
+      "network": "devnet",
+      "task_id": "b417ab6fa63ce24ba635423810e1354f0a3e50f3e20a27691c64ece4805c40e7",
+      "answer_id": "8d3b59aa88b02fc340e0ca8bbdb649553dbbae08d0d0d52064f3336e0138d958",
+      "validation_score": 75
+    }
+  },
+  "rewards": {
+    "total_reward": 2000000,
+    "actual_reward": 1500000,
+    "miner_reward": 1050000,
+    "validator_reward": 300000,
+    "network_fee": 150000,
+    "efficiency": 75
+  },
+  "status": "completed",
+  "timestamp": 1758862276
+}

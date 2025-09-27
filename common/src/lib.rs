@@ -6,6 +6,9 @@ pub mod account;
 pub mod api;
 pub mod contract;
 
+// AI Mining module
+pub mod ai_mining;
+
 pub mod utils;
 pub mod config;
 pub mod immutable;

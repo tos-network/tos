@@ -105,7 +105,14 @@ pub enum Column {
     EnergyResources,
     // Versioned energy resources for each account
     // {topoheight}_{account_address} => {energy_resource}
-    VersionedEnergyResources
+    VersionedEnergyResources,
+
+    // AI mining state pointer
+    // AI_MINING_STATE_TOPOHEIGHT => {topoheight}
+    AIMiningState,
+    // Versioned AI mining states
+    // {topoheight} => {ai_mining_state}
+    VersionedAIMiningStates
 }
 
 impl Column {
@@ -122,7 +129,8 @@ impl Column {
             | VersionedContractsBalances
             | VersionedContractsData
             | PrefixedRegistrations
-            | VersionedEnergyResources => Some(PREFIX_TOPOHEIGHT_LEN),
+            | VersionedEnergyResources
+            | VersionedAIMiningStates => Some(PREFIX_TOPOHEIGHT_LEN),
 
             ContractsBalances => Some(PREFIX_ID_LEN),
             Balances => Some(PREFIX_ID_LEN),

@@ -1,0 +1,60 @@
+{
+  "workflow_id": "demo_1758927752",
+  "timestamp": "2025-09-27T08:02:32.928750",
+  "version": "v1.1.0",
+  "task": {
+    "task_id": "5efa4836e7dfe396750034127edb8fe23adf5bf8c8235b06446bf0136b603aea",
+    "publisher_id": "publisher_001",
+    "reward_amount": 2000000,
+    "difficulty": "Intermediate",
+    "deadline": 1758931347,
+    "description": "Analyze the given Rust code snippet, identify performance bottlenecks and provide optimization suggestions:\n\n```rust\nfn bubble_sort(arr: &mut [i32]) {\n    let n = arr.len();\n    for i in 0..n {\n        for j in 0..n-1-i {\n            if arr[j] > arr[j+1] {\n                arr.swap(j, j+1);\n            }\n        }\n    }\n}\n```\n\nRequirements:\n1. Identify algorithm complexity issues\n2. Provide at least 3 optimization solutions\n3. Estimate performance improvement percentages\n4. Provide optimized code examples",
+    "created_at": 1758927747
+  },
+  "answer": {
+    "task_id": "5efa4836e7dfe396750034127edb8fe23adf5bf8c8235b06446bf0136b603aea",
+    "miner_id": "miner_001",
+    "answer_content": "## Performance Analysis Report\n\n### 1. Algorithm Complexity Issues\nThe current bubble sort has time complexity O(n²) and space complexity O(1). Main performance bottlenecks:\n- Nested loops causing quadratic time complexity\n- Full comparison in each round, even when array is already sorted\n- Frequent element swap operations\n\n### 2. Optimization Solutions\n\n**Solution 1: Early termination optimization**\n```rust\nfn optimized_bubble_sort(arr: &mut [i32]) {\n    let n = arr.len();\n    for i in 0..n {\n        let mut swapped = false;\n        for j in 0..n-1-i {\n            if arr[j] > arr[j+1] {\n                arr.swap(j, j+1);\n                swapped = true;\n            }\n        }\n        if !swapped { break; }\n    }\n}\n```\nExpected improvement: Best case from O(n²) to O(n)\n\n**Solution 2: Use quicksort**\n```rust\nfn quick_sort(arr: &mut [i32]) {\n    if arr.len() <= 1 { return; }\n    let pivot = partition(arr);\n    quick_sort(&mut arr[0..pivot]);\n    quick_sort(&mut arr[pivot+1..]);\n}\n```\nExpected improvement: Average complexity reduced to O(n log n), 75-90% improvement\n\n**Solution 3: Use Rust standard library**\n```rust\nfn std_sort(arr: &mut [i32]) {\n    arr.sort_unstable();\n}\n```\nExpected improvement: Highly optimized TimSort algorithm, 90%+ performance improvement\n\n### 3. Performance Benchmarking Recommendations\nRecommend testing performance differences of each solution on arrays with 1000, 10000, 100000 elements.",
+    "answer_hash": "8620c9f715114b56e40380f62aaeb4731ef8157bf54b5281d9def5ee646fd997",
+    "stake_amount": 100000,
+    "submitted_at": 1758927749
+  },
+  "validation": {
+    "task_id": "5efa4836e7dfe396750034127edb8fe23adf5bf8c8235b06446bf0136b603aea",
+    "answer_id": "8620c9f715114b56e40380f62aaeb4731ef8157bf54b5281d9def5ee646fd997",
+    "validator_id": "validator_001",
+    "validation_score": 100,
+    "validated_at": 1758927752,
+    "validation_details": {
+      "content_length": 899,
+      "technical_depth": "High",
+      "code_examples": true,
+      "structure_quality": "Good"
+    }
+  },
+  "rewards": {
+    "task_id": "5efa4836e7dfe396750034127edb8fe23adf5bf8c8235b06446bf0136b603aea",
+    "base_reward": 2000000,
+    "validation_score": 100,
+    "efficiency_ratio": 1.0,
+    "actual_reward": 2000000,
+    "distribution": {
+      "miner": {
+        "id": "miner_001",
+        "amount": 1400000
+      },
+      "validator": {
+        "id": "validator_001",
+        "amount": 400000
+      },
+      "network": {
+        "amount": 200000
+      }
+    },
+    "economics": {
+      "total_gas_cost": 1205006562,
+      "reward_cost_ratio": 0.001659741998981745
+    },
+    "distributed_at": 1758927752
+  }
+}
