@@ -54,26 +54,197 @@ Create configuration file `/etc/tos/daemon.toml`:
 
 ```toml
 [p2p]
-# Bind to all interfaces for public access
+# P2P listening address - bind to all interfaces for public access
 bind_address = "0.0.0.0:2125"
 
-# Allow more peers for bootstrap functionality
+# Maximum number of peer connections allowed
 max_peers = 100
+
+# Maximum number of outgoing peer connections
 max_outgoing_peers = 50
 
-# Enable P2P server
+# Enable P2P server (false disables all P2P communication)
 disable = false
 
-# Optional: Connect to existing seed nodes for redundancy
+# Priority nodes to connect when P2P starts (connected only once)
+priority_nodes = []
+
+# Exclusive nodes with maintained connections (replaces seed nodes)
+exclusive_nodes = []
+
+# Additional bootstrap nodes for initial network discovery
 bootstrap_nodes = [
     "51.210.117.23:2125",        # France seed
     "198.71.55.87:2125",         # US seed
     "162.19.249.100:2125"        # Germany seed
 ]
 
+# Allow fast sync mode (sync bootstrapped chain without verifying history)
+# Use with extreme caution and trusted nodes only
+allow_fast_sync = false
+
+# Allow parallel block requests instead of sequential sync
+allow_boost_sync = false
+
+# Forward blocks from priority nodes before self-verification
+allow_priority_blocks = false
+
+# Configure maximum chain response size for sync operations
+max_chain_response_size = 4096
+
+# Prevent IP address sharing with other peers and through API
+disable_ip_sharing = false
+
+# Limit concurrent tasks for accepting incoming connections
+concurrency_task_count_limit = 4
+
+# Duration to temporarily ban peers after reaching fail limit
+temp_ban_duration = "15m"
+
+# Number of failures before temporarily banning a peer
+fail_count_limit = 50
+
+# Disable re-execution of orphaned blocks during chain sync
+disable_reexecute_blocks_on_sync = false
+
+# Log level for block propagation (trace, debug, info, warn, error)
+block_propagation_log_level = "debug"
+
+# Disable requesting propagated transactions from peers
+disable_fetching_txs_propagated = false
+
+# Handle peer packets in dedicated task for better performance
+handle_peer_packets_in_dedicated_task = false
+
+# P2P stream processing concurrency
+stream_concurrency = 8
+
+# Optional proxy configuration
+# proxy_address = "socks5://127.0.0.1:9050"
+# proxy_username = "user"
+# proxy_password = "pass"
+
+# Optional node identifier tag
+# tag = "bootstrap-node-1"
+
 [rpc]
-# Optional: Enable RPC for monitoring
+# Disable RPC server (also disables GetWork server)
+disable = false
+
+# RPC server listening address
 bind_address = "127.0.0.1:8080"
+
+# Number of worker threads for HTTP server
+threads = 8
+
+# Concurrency for RPC event notifications
+notify_events_concurrency = 8
+
+[rpc.getwork]
+# Disable GetWork server for miners
+disable = false
+
+# Rate limit for GetWork jobs in milliseconds (0 = no limit)
+rate_limit_ms = 500
+
+# Concurrency for job notifications to miners
+notify_job_concurrency = 8
+
+[rpc.prometheus]
+# Enable Prometheus metrics endpoint
+enable = false
+
+# URL path for metrics export
+route = "/metrics"
+
+# Storage configuration
+[storage]
+# Database backend to use (rocksdb or sled)
+use_db_backend = "rocksdb"
+
+# Directory path for blockchain data storage
+# dir_path = "/var/lib/tos/"
+
+# Enable automatic pruning keeping N blocks before top
+# auto_prune_keep_n_blocks = 1000
+
+# Enable database integrity check on startup
+check_db_integrity = false
+
+# Enable recovery mode (skips integrity checks and pre-computations)
+recovery_mode = false
+
+# Flush storage to disk every N blocks
+# flush_db_every_n_blocks = 100
+
+# Disable ZKP (Zero-Knowledge Proof) cache
+disable_zkp_cache = false
+
+[storage.rocksdb]
+# Number of background threads for RocksDB operations
+parallelism = 8
+
+# Maximum concurrent background jobs (compactions and flushes)
+max_background_jobs = 8
+
+# Maximum subcompaction jobs running simultaneously
+max_subcompaction_jobs = 8
+
+# Low priority background thread pool size
+low_priority_background_threads = 8
+
+# Maximum number of open files (-1 = unlimited)
+max_open_files = 1024
+
+# Maximum number of log files to keep
+keep_max_log_files = 4
+
+# Compression mode (none, snappy, lz4, zstd)
+compression_mode = "lz4"
+
+# Block cache mode (none, lru, clock)
+cache_mode = "lru"
+
+# Cache size in bytes
+cache_size = 67108864  # 64 MB
+
+# Write buffer size for memtables
+write_buffer_size = 67108864  # 64 MB
+
+# Share write buffer across column families
+write_buffer_shared = false
+
+[storage.sled]
+# LRU cache size (0 = disabled)
+cache_size = 1024
+
+# Internal database cache size in bytes
+internal_cache_size = 67108864  # 64 MB
+
+# Internal database mode (fast, small, low_space)
+internal_db_mode = "low_space"
+
+# Performance and security settings
+[daemon]
+# Skip PoW verification (WARNING: dangerous for production)
+skip_pow_verification = false
+
+# Skip transaction verification in block templates
+skip_block_template_txs_verification = false
+
+# Number of threads for transaction verification
+txs_verification_threads_count = 8
+
+# Custom genesis block in hexadecimal format for dev mode
+# genesis_block_hex = "..."
+
+# Block hash checkpoints (no rewind below these points)
+checkpoints = []
+
+# Simulator mode configuration (skip PoW, generate blocks automatically)
+# [simulator]
+# enable = true
+# block_time_ms = 12000
 ```
 
 #### 4. Firewall Configuration
