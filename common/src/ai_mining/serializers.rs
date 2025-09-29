@@ -1,14 +1,14 @@
 //! Serialization implementations for AI Mining types
 
-use std::collections::HashMap;
 use crate::{
-    crypto::{Hash, elgamal::CompressedPublicKey},
-    serializer::{Serializer, Reader, ReaderError, Writer},
     ai_mining::{
-        AIMiningState, AIMiningStatistics, AIMiningTask, AIMiner,
-        TaskStatus, SubmittedAnswer, ValidationScore
-    }
+        AIMiner, AIMiningState, AIMiningStatistics, AIMiningTask, AccountReputation,
+        SubmittedAnswer, TaskStatus, ValidationScore,
+    },
+    crypto::{elgamal::CompressedPublicKey, Hash},
+    serializer::{Reader, ReaderError, Serializer, Writer},
 };
+use std::collections::HashMap;
 
 impl Serializer for AIMiningState {
     fn write(&self, writer: &mut Writer) {
@@ -26,6 +26,13 @@ impl Serializer for AIMiningState {
         for (address, miner) in &self.miners {
             address.write(writer);
             miner.write(writer);
+        }
+
+        // Write account reputations
+        (self.account_reputations.len() as u64).write(writer);
+        for (address, reputation) in &self.account_reputations {
+            address.write(writer);
+            reputation.write(writer);
         }
 
         // Write statistics
@@ -51,12 +58,22 @@ impl Serializer for AIMiningState {
             miners.insert(address, miner);
         }
 
+        // Read reputations
+        let reputation_count = u64::read(reader)?;
+        let mut account_reputations = HashMap::new();
+        for _ in 0..reputation_count {
+            let address = CompressedPublicKey::read(reader)?;
+            let reputation = AccountReputation::read(reader)?;
+            account_reputations.insert(address, reputation);
+        }
+
         // Read statistics
         let statistics = AIMiningStatistics::read(reader)?;
 
         Ok(AIMiningState {
             tasks,
             miners,
+            account_reputations,
             statistics,
         })
     }
@@ -66,6 +83,12 @@ impl Serializer for AIMiningState {
         self.tasks.iter().map(|(k, v)| k.size() + v.size()).sum::<usize>() +
         8 + // miner count
         self.miners.iter().map(|(k, v)| k.size() + v.size()).sum::<usize>() +
+        8 + // reputation count
+        self
+            .account_reputations
+            .iter()
+            .map(|(k, v)| k.size() + v.size())
+            .sum::<usize>() +
         self.statistics.size()
     }
 }
@@ -113,6 +136,8 @@ impl Serializer for AIMiningTask {
         for answer in &self.submitted_answers {
             answer.write(writer);
         }
+
+        self.rewards_processed.write(writer);
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
@@ -133,6 +158,12 @@ impl Serializer for AIMiningTask {
             submitted_answers.push(answer);
         }
 
+        let rewards_processed = if reader.size() > 0 {
+            bool::read(reader)?
+        } else {
+            false
+        };
+
         Ok(AIMiningTask {
             task_id,
             publisher,
@@ -143,6 +174,7 @@ impl Serializer for AIMiningTask {
             status,
             published_at,
             submitted_answers,
+            rewards_processed,
         })
     }
 
@@ -156,7 +188,50 @@ impl Serializer for AIMiningTask {
         self.status.size() +
         8 + // published_at
         8 + // answer count
-        self.submitted_answers.iter().map(|v| v.size()).sum::<usize>()
+        self.submitted_answers.iter().map(|v| v.size()).sum::<usize>() +
+        1 // rewards_processed
+    }
+}
+
+impl Serializer for AccountReputation {
+    fn write(&self, writer: &mut Writer) {
+        self.account.write(writer);
+        self.created_at.write(writer);
+        self.transaction_count.write(writer);
+        self.stake_amount.write(writer);
+        self.last_submission_time.write(writer);
+        writer.write_u64(&self.reputation_score.to_bits());
+        self.total_rewards_earned.write(writer);
+        self.successful_validations.write(writer);
+        self.total_validations.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let account = CompressedPublicKey::read(reader)?;
+        let created_at = u64::read(reader)?;
+        let transaction_count = u64::read(reader)?;
+        let stake_amount = u64::read(reader)?;
+        let last_submission_time = u64::read(reader)?;
+        let reputation_bits = u64::read(reader)?;
+        let total_rewards_earned = u64::read(reader)?;
+        let successful_validations = u64::read(reader)?;
+        let total_validations = u64::read(reader)?;
+
+        Ok(AccountReputation {
+            account,
+            created_at,
+            transaction_count,
+            stake_amount,
+            last_submission_time,
+            reputation_score: f64::from_bits(reputation_bits),
+            total_rewards_earned,
+            successful_validations,
+            total_validations,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.account.size() + (8 * 8)
     }
 }
 
@@ -190,7 +265,7 @@ impl Serializer for AIMiner {
         4 + // tasks_published (u32)
         4 + // answers_submitted (u32)
         4 + // validations_performed (u32)
-        2   // reputation (u16)
+        2 // reputation (u16)
     }
 }
 
@@ -210,7 +285,7 @@ impl Serializer for TaskStatus {
             1 => Ok(TaskStatus::Expired),
             2 => Ok(TaskStatus::Completed),
             3 => Ok(TaskStatus::Cancelled),
-            _ => Err(ReaderError::InvalidValue)
+            _ => Err(ReaderError::InvalidValue),
         }
     }
 
@@ -298,7 +373,6 @@ impl Serializer for ValidationScore {
     fn size(&self) -> usize {
         self.validator.size() +
         1 + // score (u8)
-        8   // validated_at (u64)
+        8 // validated_at (u64)
     }
 }
-

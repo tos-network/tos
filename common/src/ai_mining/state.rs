@@ -1,11 +1,13 @@
 //! AI Mining blockchain state management
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::{
-    crypto::{Hash, elgamal::CompressedPublicKey},
-    ai_mining::{AIMiningTask, AIMiner, AIMiningError, AIMiningResult, TaskStatus}
+    ai_mining::{
+        AIMiner, AIMiningError, AIMiningResult, AIMiningTask, AccountReputation, TaskStatus,
+    },
+    crypto::{elgamal::CompressedPublicKey, Hash},
 };
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// AI Mining state stored in blockchain
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -14,6 +16,9 @@ pub struct AIMiningState {
     pub tasks: HashMap<Hash, AIMiningTask>,
     /// Map of miner_address -> AIMiner
     pub miners: HashMap<CompressedPublicKey, AIMiner>,
+    /// Account reputation records
+    #[serde(default)]
+    pub account_reputations: HashMap<CompressedPublicKey, AccountReputation>,
     /// Statistics for the AI mining system
     pub statistics: AIMiningStatistics,
 }
@@ -40,6 +45,7 @@ impl Default for AIMiningState {
         Self {
             tasks: HashMap::new(),
             miners: HashMap::new(),
+            account_reputations: HashMap::new(),
             statistics: AIMiningStatistics::default(),
         }
     }
@@ -73,15 +79,47 @@ impl AIMiningState {
     ) -> AIMiningResult<()> {
         if self.miners.contains_key(&address) {
             return Err(AIMiningError::ValidationFailed(
-                "Miner already registered".to_string()
+                "Miner already registered".to_string(),
             ));
         }
 
         let miner = AIMiner::new(address.clone(), registration_fee, registered_at);
+        {
+            let reputation = self.ensure_account_reputation(&address, registered_at);
+            reputation.update_stake(registration_fee);
+            reputation.calculate_reputation_score(registered_at);
+        }
         self.miners.insert(address, miner);
         self.statistics.total_miners += 1;
 
         Ok(())
+    }
+
+    /// Ensure an account reputation exists and return a mutable reference
+    pub fn ensure_account_reputation(
+        &mut self,
+        address: &CompressedPublicKey,
+        created_at: u64,
+    ) -> &mut AccountReputation {
+        self.account_reputations
+            .entry(address.clone())
+            .or_insert_with(|| AccountReputation::new(address.clone(), created_at))
+    }
+
+    /// Try to get an account reputation
+    pub fn get_account_reputation(
+        &self,
+        address: &CompressedPublicKey,
+    ) -> Option<&AccountReputation> {
+        self.account_reputations.get(address)
+    }
+
+    /// Try to get a mutable account reputation reference
+    pub fn get_account_reputation_mut(
+        &mut self,
+        address: &CompressedPublicKey,
+    ) -> Option<&mut AccountReputation> {
+        self.account_reputations.get_mut(address)
     }
 
     /// Get a miner by address
@@ -103,7 +141,7 @@ impl AIMiningState {
     pub fn publish_task(&mut self, task: AIMiningTask) -> AIMiningResult<()> {
         if self.tasks.contains_key(&task.task_id) {
             return Err(AIMiningError::ValidationFailed(
-                "Task ID already exists".to_string()
+                "Task ID already exists".to_string(),
             ));
         }
 
@@ -166,7 +204,10 @@ impl AIMiningState {
     }
 
     /// Get tasks by difficulty level
-    pub fn get_tasks_by_difficulty(&self, difficulty: &crate::ai_mining::DifficultyLevel) -> Vec<&AIMiningTask> {
+    pub fn get_tasks_by_difficulty(
+        &self,
+        difficulty: &crate::ai_mining::DifficultyLevel,
+    ) -> Vec<&AIMiningTask> {
         self.tasks
             .values()
             .filter(|task| &task.difficulty == difficulty)
@@ -253,12 +294,16 @@ mod tests {
         let mut state = AIMiningState::new();
         let address = create_test_pubkey([1u8; 32]);
 
-        assert!(state.register_miner(address.clone(), 1_000_000_000, 100).is_ok());
+        assert!(state
+            .register_miner(address.clone(), 1_000_000_000, 100)
+            .is_ok());
         assert!(state.is_miner_registered(&address));
         assert_eq!(state.statistics.total_miners, 1);
 
         // Test duplicate registration
-        assert!(state.register_miner(address.clone(), 1_000_000_000, 100).is_err());
+        assert!(state
+            .register_miner(address.clone(), 1_000_000_000, 100)
+            .is_err());
     }
 
     #[test]
@@ -267,7 +312,9 @@ mod tests {
         let publisher = create_test_pubkey([1u8; 32]);
 
         // Register miner first
-        state.register_miner(publisher.clone(), 1_000_000_000, 100).unwrap();
+        state
+            .register_miner(publisher.clone(), 1_000_000_000, 100)
+            .unwrap();
 
         let task = create_test_task(publisher);
         let task_id = task.task_id.clone();
@@ -293,7 +340,9 @@ mod tests {
         let mut state = AIMiningState::new();
         let publisher = create_test_pubkey([1u8; 32]);
 
-        state.register_miner(publisher.clone(), 1_000_000_000, 100).unwrap();
+        state
+            .register_miner(publisher.clone(), 1_000_000_000, 100)
+            .unwrap();
 
         let task = create_test_task(publisher);
         let task_id = task.task_id.clone();
@@ -314,7 +363,9 @@ mod tests {
         let mut state = AIMiningState::new();
         let publisher = create_test_pubkey([1u8; 32]);
 
-        state.register_miner(publisher.clone(), 1_000_000_000, 100).unwrap();
+        state
+            .register_miner(publisher.clone(), 1_000_000_000, 100)
+            .unwrap();
 
         let mut task = create_test_task(publisher);
         let answer = SubmittedAnswer::new(
@@ -350,6 +401,7 @@ mod tests {
             DifficultyLevel::Beginner,
             1000, // deadline
             100,  // published_at
-        ).unwrap()
+        )
+        .unwrap()
     }
 }

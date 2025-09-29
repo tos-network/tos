@@ -1,10 +1,10 @@
 //! AI Mining task state management
 
-use serde::{Deserialize, Serialize};
 use crate::{
-    crypto::{Hash, elgamal::CompressedPublicKey},
-    ai_mining::{DifficultyLevel, AIMiningError, AIMiningResult}
+    ai_mining::{AIMiningError, AIMiningResult, DifficultyLevel},
+    crypto::{elgamal::CompressedPublicKey, Hash},
 };
+use serde::{Deserialize, Serialize};
 
 /// Status of an AI mining task
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +40,9 @@ pub struct AIMiningTask {
     pub published_at: u64,
     /// List of submitted answers
     pub submitted_answers: Vec<SubmittedAnswer>,
+    /// Whether rewards/reputation have been processed for this task
+    #[serde(default)]
+    pub rewards_processed: bool,
 }
 
 /// Represents a submitted answer to an AI mining task
@@ -107,10 +110,10 @@ impl AIMiningTask {
         // Validate reward amount is within difficulty range
         let (min_reward, max_reward) = difficulty.reward_range();
         if reward_amount < min_reward || reward_amount > max_reward {
-            return Err(AIMiningError::InvalidTaskConfig(
-                format!("Reward amount {} is outside valid range [{}, {}] for difficulty {:?}",
-                    reward_amount, min_reward, max_reward, difficulty)
-            ));
+            return Err(AIMiningError::InvalidTaskConfig(format!(
+                "Reward amount {} is outside valid range [{}, {}] for difficulty {:?}",
+                reward_amount, min_reward, max_reward, difficulty
+            )));
         }
 
         Ok(Self {
@@ -123,6 +126,7 @@ impl AIMiningTask {
             status: TaskStatus::Active,
             published_at,
             submitted_answers: Vec::new(),
+            rewards_processed: false,
         })
     }
 
@@ -134,13 +138,19 @@ impl AIMiningTask {
     /// Add a submitted answer to this task
     pub fn add_answer(&mut self, answer: SubmittedAnswer) -> AIMiningResult<()> {
         if self.status != TaskStatus::Active {
-            return Err(AIMiningError::ValidationFailed("Task is not active".to_string()));
+            return Err(AIMiningError::ValidationFailed(
+                "Task is not active".to_string(),
+            ));
         }
 
         // Check for duplicate answer from same submitter
-        if self.submitted_answers.iter().any(|a| a.submitter == answer.submitter) {
+        if self
+            .submitted_answers
+            .iter()
+            .any(|a| a.submitter == answer.submitter)
+        {
             return Err(AIMiningError::ValidationFailed(
-                "Submitter has already submitted an answer for this task".to_string()
+                "Submitter has already submitted an answer for this task".to_string(),
             ));
         }
 
@@ -199,9 +209,13 @@ impl SubmittedAnswer {
     /// Add a validation score and recalculate average
     pub fn add_validation(&mut self, validation: ValidationScore) -> AIMiningResult<()> {
         // Check for duplicate validation from same validator
-        if self.validation_scores.iter().any(|v| v.validator == validation.validator) {
+        if self
+            .validation_scores
+            .iter()
+            .any(|v| v.validator == validation.validator)
+        {
             return Err(AIMiningError::ValidationFailed(
-                "Validator has already scored this answer".to_string()
+                "Validator has already scored this answer".to_string(),
             ));
         }
 
@@ -223,11 +237,7 @@ impl SubmittedAnswer {
 
 impl AIMiner {
     /// Create a new AI miner
-    pub fn new(
-        address: CompressedPublicKey,
-        registration_fee: u64,
-        registered_at: u64,
-    ) -> Self {
+    pub fn new(address: CompressedPublicKey, registration_fee: u64, registered_at: u64) -> Self {
         Self {
             address,
             registration_fee,
@@ -283,7 +293,8 @@ mod tests {
             DifficultyLevel::Beginner,
             1000,
             100,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(task.task_id, task_id);
         assert_eq!(task.status, TaskStatus::Active);
@@ -357,11 +368,7 @@ mod tests {
 
     #[test]
     fn test_miner_reputation() {
-        let mut miner = AIMiner::new(
-            create_test_pubkey([1u8; 32]),
-            1_000_000_000,
-            100,
-        );
+        let mut miner = AIMiner::new(create_test_pubkey([1u8; 32]), 1_000_000_000, 100);
 
         assert_eq!(miner.reputation, 500); // Initial neutral reputation
 
@@ -383,7 +390,8 @@ mod tests {
         let good_answer = create_test_answer_for_task(good_answer_content);
 
         // Submit a poor answer
-        let poor_answer_content = "It's definitely a dog because I said so without any real analysis of the features.";
+        let poor_answer_content =
+            "It's definitely a dog because I said so without any real analysis of the features.";
         let mut poor_answer = create_test_answer_for_task(poor_answer_content);
         poor_answer.submitter = create_test_pubkey([6u8; 32]); // Different submitter
 
@@ -397,9 +405,21 @@ mod tests {
         let validator3 = create_test_pubkey([12u8; 32]);
 
         let good_validations = vec![
-            ValidationScore { validator: validator1.clone(), score: 95, validated_at: 200 },
-            ValidationScore { validator: validator2.clone(), score: 88, validated_at: 210 },
-            ValidationScore { validator: validator3.clone(), score: 92, validated_at: 220 },
+            ValidationScore {
+                validator: validator1.clone(),
+                score: 95,
+                validated_at: 200,
+            },
+            ValidationScore {
+                validator: validator2.clone(),
+                score: 88,
+                validated_at: 210,
+            },
+            ValidationScore {
+                validator: validator3.clone(),
+                score: 92,
+                validated_at: 220,
+            },
         ];
 
         // Apply validations to good answer
@@ -409,9 +429,21 @@ mod tests {
 
         // Multiple validators score the poor answer lowly
         let poor_validations = vec![
-            ValidationScore { validator: validator1, score: 25, validated_at: 230 },
-            ValidationScore { validator: validator2, score: 30, validated_at: 240 },
-            ValidationScore { validator: validator3, score: 20, validated_at: 250 },
+            ValidationScore {
+                validator: validator1,
+                score: 25,
+                validated_at: 230,
+            },
+            ValidationScore {
+                validator: validator2,
+                score: 30,
+                validated_at: 240,
+            },
+            ValidationScore {
+                validator: validator3,
+                score: 20,
+                validated_at: 250,
+            },
         ];
 
         // Apply validations to poor answer
@@ -439,8 +471,16 @@ mod tests {
         let validator = create_test_pubkey([10u8; 32]);
 
         // Test duplicate validation rejection
-        let validation1 = ValidationScore { validator: validator.clone(), score: 80, validated_at: 200 };
-        let validation2 = ValidationScore { validator: validator, score: 90, validated_at: 210 };
+        let validation1 = ValidationScore {
+            validator: validator.clone(),
+            score: 80,
+            validated_at: 200,
+        };
+        let validation2 = ValidationScore {
+            validator: validator,
+            score: 90,
+            validated_at: 210,
+        };
 
         assert!(answer.add_validation(validation1).is_ok());
         assert!(answer.add_validation(validation2).is_err()); // Should fail - duplicate validator
@@ -477,9 +517,21 @@ mod tests {
 
         // Test edge case with scores that don't divide evenly
         let validations = vec![
-            ValidationScore { validator: create_test_pubkey([10u8; 32]), score: 84, validated_at: 200 },
-            ValidationScore { validator: create_test_pubkey([11u8; 32]), score: 87, validated_at: 210 },
-            ValidationScore { validator: create_test_pubkey([12u8; 32]), score: 89, validated_at: 220 },
+            ValidationScore {
+                validator: create_test_pubkey([10u8; 32]),
+                score: 84,
+                validated_at: 200,
+            },
+            ValidationScore {
+                validator: create_test_pubkey([11u8; 32]),
+                score: 87,
+                validated_at: 210,
+            },
+            ValidationScore {
+                validator: create_test_pubkey([12u8; 32]),
+                score: 89,
+                validated_at: 220,
+            },
         ];
 
         for validation in validations {
@@ -539,7 +591,8 @@ mod tests {
             DifficultyLevel::Beginner,
             1000, // deadline
             100,  // published_at
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     fn create_test_answer() -> SubmittedAnswer {
@@ -563,7 +616,8 @@ mod tests {
             DifficultyLevel::Beginner,
             1000, // deadline
             100,  // published_at
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     fn create_test_answer_for_task(answer_content: &str) -> SubmittedAnswer {

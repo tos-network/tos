@@ -3,9 +3,9 @@
 //! This module implements a reputation scoring system based on account age,
 //! transaction history, and stake amount to prevent Sybil attacks and maintain network security.
 
-use serde::{Deserialize, Serialize};
-use crate::crypto::elgamal::CompressedPublicKey;
 use super::*;
+use crate::crypto::elgamal::CompressedPublicKey;
+use serde::{Deserialize, Serialize};
 
 /// Account reputation information
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -80,7 +80,9 @@ impl AccountReputation {
     pub fn can_participate_in_difficulty(&self, difficulty: &DifficultyLevel) -> bool {
         match difficulty {
             DifficultyLevel::Beginner => self.reputation_score >= MIN_REPUTATION_FOR_BASIC,
-            DifficultyLevel::Intermediate => self.reputation_score >= MIN_REPUTATION_FOR_INTERMEDIATE,
+            DifficultyLevel::Intermediate => {
+                self.reputation_score >= MIN_REPUTATION_FOR_INTERMEDIATE
+            }
             DifficultyLevel::Advanced => self.reputation_score >= MIN_REPUTATION_FOR_ADVANCED,
             DifficultyLevel::Expert => self.reputation_score >= MIN_REPUTATION_FOR_EXPERT,
         }
@@ -101,12 +103,20 @@ impl AccountReputation {
 
     /// Check if can submit now (frequency limit)
     pub fn can_submit_now(&self, current_time: u64) -> bool {
+        if self.transaction_count == 0 {
+            return true;
+        }
+
         let cooldown = self.get_cooldown_period();
         current_time.saturating_sub(self.last_submission_time) >= cooldown
     }
 
     /// Get remaining cooldown time
     pub fn get_remaining_cooldown(&self, current_time: u64) -> u64 {
+        if self.transaction_count == 0 {
+            return 0;
+        }
+
         let cooldown = self.get_cooldown_period();
         let elapsed = current_time.saturating_sub(self.last_submission_time);
         cooldown.saturating_sub(elapsed)
@@ -192,7 +202,8 @@ impl AntiSybilDetector {
         if account_age_hours < 24 {
             risk_score += 0.4;
             details.push("Account created less than 24 hours ago".to_string());
-        } else if account_age_hours < 168 { // 1 week
+        } else if account_age_hours < 168 {
+            // 1 week
             risk_score += 0.2;
             details.push("Account created less than 1 week ago".to_string());
         }
@@ -228,7 +239,10 @@ impl AntiSybilDetector {
         if !reputation.can_submit_now(current_time) {
             risk_score += 0.1;
             let remaining = reputation.get_remaining_cooldown(current_time);
-            details.push(format!("Still in cooldown period, {} seconds remaining", remaining));
+            details.push(format!(
+                "Still in cooldown period, {} seconds remaining",
+                remaining
+            ));
         }
 
         // Determine risk level and recommended action
@@ -267,12 +281,13 @@ pub fn calculate_secure_gas_cost(
     let content_cost = if content_length <= SHORT_CONTENT_THRESHOLD {
         content_length as u64 * SHORT_CONTENT_GAS_RATE
     } else if content_length <= MEDIUM_CONTENT_THRESHOLD {
-        (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
-        ((content_length - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
+        (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE)
+            + ((content_length - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
     } else {
-        (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
-        ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE) +
-        ((content_length - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE)
+        (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE)
+            + ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64
+                * MEDIUM_CONTENT_GAS_RATE)
+            + ((content_length - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE)
     };
 
     // 3. Difficulty multiplier
@@ -371,7 +386,11 @@ mod tests {
 
         // Score should be reasonable (between 0.5 and 1.0)
         // Based on: 30 days age + 50 transactions + 0.0005 TOS stake
-        assert!(score > 0.5 && score < 1.0, "Score should be reasonable: {}", score);
+        assert!(
+            score > 0.5 && score < 1.0,
+            "Score should be reasonable: {}",
+            score
+        );
     }
 
     #[test]

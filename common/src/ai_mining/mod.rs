@@ -3,18 +3,18 @@
 //! This module implements the "Proof of Intelligent Work" mechanism where AI agents
 //! can earn TOS rewards by solving real-world computational problems.
 
-pub mod task;
-pub mod state;
-pub mod validation;
-pub mod serializers;
 pub mod reputation;
+pub mod serializers;
+pub mod state;
+pub mod task;
+pub mod validation;
 
-use serde::{Deserialize, Serialize};
-pub use task::*;
-pub use state::*;
-pub use validation::*;
+use crate::crypto::{elgamal::CompressedPublicKey, Hash};
 pub use reputation::*;
-use crate::crypto::{Hash, elgamal::CompressedPublicKey};
+use serde::{Deserialize, Serialize};
+pub use state::*;
+pub use task::*;
+pub use validation::*;
 
 /// Maximum description length to prevent spam attacks (2KB)
 pub const MAX_TASK_DESCRIPTION_LENGTH: usize = 2048;
@@ -188,12 +188,23 @@ pub enum AIMiningError {
 impl std::fmt::Display for AIMiningError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AIMiningError::InvalidTaskConfig(msg) => write!(f, "Invalid task configuration: {}", msg),
-            AIMiningError::InsufficientStake { required, available } => {
-                write!(f, "Insufficient stake: required {} nanoTOS, available {} nanoTOS", required, available)
+            AIMiningError::InvalidTaskConfig(msg) => {
+                write!(f, "Invalid task configuration: {}", msg)
+            }
+            AIMiningError::InsufficientStake {
+                required,
+                available,
+            } => {
+                write!(
+                    f,
+                    "Insufficient stake: required {} nanoTOS, available {} nanoTOS",
+                    required, available
+                )
             }
             AIMiningError::TaskNotFound(hash) => write!(f, "Task not found: {:?}", hash),
-            AIMiningError::MinerNotRegistered(address) => write!(f, "Miner not registered: {:?}", address),
+            AIMiningError::MinerNotRegistered(address) => {
+                write!(f, "Miner not registered: {:?}", address)
+            }
             AIMiningError::ValidationFailed(msg) => write!(f, "Validation failed: {}", msg),
             AIMiningError::SystemError(msg) => write!(f, "System error: {}", msg),
         }
@@ -212,15 +223,17 @@ impl AIMiningPayload {
             AIMiningPayload::PublishTask { description, .. } => {
                 // Validate description length
                 if description.len() < MIN_TASK_DESCRIPTION_LENGTH {
-                    return Err(AIMiningError::InvalidTaskConfig(
-                        format!("Description too short: minimum {} characters required", MIN_TASK_DESCRIPTION_LENGTH)
-                    ));
+                    return Err(AIMiningError::InvalidTaskConfig(format!(
+                        "Description too short: minimum {} characters required",
+                        MIN_TASK_DESCRIPTION_LENGTH
+                    )));
                 }
 
                 if description.len() > MAX_TASK_DESCRIPTION_LENGTH {
-                    return Err(AIMiningError::InvalidTaskConfig(
-                        format!("Description too long: maximum {} characters allowed", MAX_TASK_DESCRIPTION_LENGTH)
-                    ));
+                    return Err(AIMiningError::InvalidTaskConfig(format!(
+                        "Description too long: maximum {} characters allowed",
+                        MAX_TASK_DESCRIPTION_LENGTH
+                    )));
                 }
 
                 // Validate UTF-8 encoding
@@ -234,15 +247,17 @@ impl AIMiningPayload {
             AIMiningPayload::SubmitAnswer { answer_content, .. } => {
                 // Validate answer content length
                 if answer_content.len() < MIN_ANSWER_CONTENT_LENGTH {
-                    return Err(AIMiningError::InvalidTaskConfig(
-                        format!("Answer content too short: minimum {} characters required", MIN_ANSWER_CONTENT_LENGTH)
-                    ));
+                    return Err(AIMiningError::InvalidTaskConfig(format!(
+                        "Answer content too short: minimum {} characters required",
+                        MIN_ANSWER_CONTENT_LENGTH
+                    )));
                 }
 
                 if answer_content.len() > MAX_ANSWER_CONTENT_LENGTH {
-                    return Err(AIMiningError::InvalidTaskConfig(
-                        format!("Answer content too long: maximum {} characters allowed", MAX_ANSWER_CONTENT_LENGTH)
-                    ));
+                    return Err(AIMiningError::InvalidTaskConfig(format!(
+                        "Answer content too long: maximum {} characters allowed",
+                        MAX_ANSWER_CONTENT_LENGTH
+                    )));
                 }
 
                 // Validate UTF-8 encoding
@@ -253,7 +268,7 @@ impl AIMiningPayload {
 
                 Ok(())
             }
-            _ => Ok(()) // Other payload types don't need validation
+            _ => Ok(()), // Other payload types don't need validation
         }
     }
 
@@ -266,7 +281,7 @@ impl AIMiningPayload {
             AIMiningPayload::SubmitAnswer { answer_content, .. } => {
                 Self::calculate_tiered_gas_cost(answer_content.len())
             }
-            _ => 0 // Other payload types don't have dynamic gas costs
+            _ => 0, // Other payload types don't have dynamic gas costs
         }
     }
 
@@ -278,13 +293,14 @@ impl AIMiningPayload {
             content_length as u64 * SHORT_CONTENT_GAS_RATE
         } else if content_length <= MEDIUM_CONTENT_THRESHOLD {
             // Medium content: 200-1000 bytes
-            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
-            ((content_length - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
+            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE)
+                + ((content_length - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
         } else {
             // Long content: 1000+ bytes
-            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
-            ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE) +
-            ((content_length - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE)
+            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE)
+                + ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64
+                    * MEDIUM_CONTENT_GAS_RATE)
+                + ((content_length - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE)
         };
 
         // Ensure minimum cost
@@ -297,7 +313,7 @@ impl AIMiningPayload {
             AIMiningPayload::PublishTask { description, .. } => {
                 Self::calculate_tiered_gas_cost(description.len())
             }
-            _ => 0
+            _ => 0,
         }
     }
 }
@@ -308,38 +324,47 @@ mod tests {
 
     #[test]
     fn test_difficulty_level_ranges() {
-        assert_eq!(DifficultyLevel::Beginner.reward_range(), (5_000_000_000, 15_000_000_000));
-        assert_eq!(DifficultyLevel::Expert.reward_range(), (200_000_000_000, 500_000_000_000));
+        assert_eq!(
+            DifficultyLevel::Beginner.reward_range(),
+            (5_000_000_000, 15_000_000_000)
+        );
+        assert_eq!(
+            DifficultyLevel::Expert.reward_range(),
+            (200_000_000_000, 500_000_000_000)
+        );
     }
 
     #[test]
     fn test_answer_content_validation() {
         // Test minimum length validation
         let short_answer = "Short"; // 5 bytes < 10 minimum
+        let short_hash = crate::crypto::hash(short_answer.as_bytes());
         let submit_short = AIMiningPayload::SubmitAnswer {
             task_id: Hash::new([1u8; 32]),
             answer_content: short_answer.to_string(),
-            answer_hash: Hash::new([2u8; 32]),
+            answer_hash: short_hash,
             stake_amount: 1_000_000_000,
         };
         assert!(submit_short.validate().is_err());
 
         // Test maximum length validation
         let long_answer = "x".repeat(2049); // 2049 bytes > 2048 maximum
+        let long_hash = crate::crypto::hash(long_answer.as_bytes());
         let submit_long = AIMiningPayload::SubmitAnswer {
             task_id: Hash::new([1u8; 32]),
             answer_content: long_answer,
-            answer_hash: Hash::new([2u8; 32]),
+            answer_hash: long_hash,
             stake_amount: 1_000_000_000,
         };
         assert!(submit_long.validate().is_err());
 
         // Test valid answer content
         let valid_answer = "This is a valid answer that meets the minimum length requirement for AI mining submission.";
+        let valid_hash = crate::crypto::hash(valid_answer.as_bytes());
         let submit_valid = AIMiningPayload::SubmitAnswer {
             task_id: Hash::new([1u8; 32]),
             answer_content: valid_answer.to_string(),
-            answer_hash: Hash::new([2u8; 32]),
+            answer_hash: valid_hash,
             stake_amount: 1_000_000_000,
         };
         assert!(submit_valid.validate().is_ok());
@@ -349,10 +374,11 @@ mod tests {
     fn test_answer_content_gas_cost_calculation() {
         // Test gas cost calculation for different answer lengths
         let answer_10_chars = "Ten chars."; // Exactly 10 characters
+        let hash_10 = crate::crypto::hash(answer_10_chars.as_bytes());
         let payload_10 = AIMiningPayload::SubmitAnswer {
             task_id: Hash::new([1u8; 32]),
             answer_content: answer_10_chars.to_string(),
-            answer_hash: Hash::new([2u8; 32]),
+            answer_hash: hash_10,
             stake_amount: 1_000_000_000,
         };
         // 10 chars is short content, so it uses SHORT_CONTENT_GAS_RATE
@@ -360,10 +386,11 @@ mod tests {
         assert_eq!(payload_10.calculate_content_gas_cost(), expected_10);
 
         let answer_100_chars = "a".repeat(100); // 100 characters
+        let hash_100 = crate::crypto::hash(answer_100_chars.as_bytes());
         let payload_100 = AIMiningPayload::SubmitAnswer {
             task_id: Hash::new([1u8; 32]),
             answer_content: answer_100_chars,
-            answer_hash: Hash::new([2u8; 32]),
+            answer_hash: hash_100,
             stake_amount: 1_000_000_000,
         };
         // 100 chars is short content, so it uses SHORT_CONTENT_GAS_RATE
@@ -380,7 +407,10 @@ mod tests {
         };
         // 42 chars is short content, so it uses SHORT_CONTENT_GAS_RATE
         let expected_description = (42 * SHORT_CONTENT_GAS_RATE).max(MIN_TRANSACTION_COST);
-        assert_eq!(task_payload.calculate_content_gas_cost(), expected_description);
+        assert_eq!(
+            task_payload.calculate_content_gas_cost(),
+            expected_description
+        );
     }
 
     #[test]
@@ -425,12 +455,13 @@ mod tests {
         let expected_gas_cost = if answer_len <= SHORT_CONTENT_THRESHOLD {
             (answer_len as u64 * SHORT_CONTENT_GAS_RATE).max(MIN_TRANSACTION_COST)
         } else if answer_len <= MEDIUM_CONTENT_THRESHOLD {
-            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
-            ((answer_len - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
+            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE)
+                + ((answer_len - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
         } else {
-            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
-            ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE) +
-            ((answer_len - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE)
+            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE)
+                + ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64
+                    * MEDIUM_CONTENT_GAS_RATE)
+                + ((answer_len - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE)
         };
         assert_eq!(answer_gas_cost, expected_gas_cost);
 
@@ -440,12 +471,13 @@ mod tests {
         let expected_description_cost = if desc_len <= SHORT_CONTENT_THRESHOLD {
             (desc_len as u64 * SHORT_CONTENT_GAS_RATE).max(MIN_TRANSACTION_COST)
         } else if desc_len <= MEDIUM_CONTENT_THRESHOLD {
-            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
-            ((desc_len - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
+            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE)
+                + ((desc_len - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
         } else {
-            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
-            ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE) +
-            ((desc_len - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE)
+            (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE)
+                + ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64
+                    * MEDIUM_CONTENT_GAS_RATE)
+                + ((desc_len - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE)
         };
         assert_eq!(description_gas_cost, expected_description_cost);
     }

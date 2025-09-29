@@ -1,25 +1,24 @@
 use anyhow::Result;
+use std::{path::PathBuf, time::Duration};
 use tos_ai_miner::{
     daemon_client::{DaemonClient, DaemonClientConfig},
-    transaction_builder::AIMiningTransactionBuilder,
     storage::{StorageManager, TaskState},
+    transaction_builder::AIMiningTransactionBuilder,
 };
 use tos_common::{
-    crypto::{Hash, elgamal::CompressedPublicKey},
     ai_mining::{
-        AIMiningPayload, DifficultyLevel, AccountReputation, AntiSybilDetector,
-        calculate_secure_gas_cost, calculate_base_reward, calculate_final_reward,
-        MIN_TRANSACTION_COST, SHORT_CONTENT_THRESHOLD, MEDIUM_CONTENT_THRESHOLD,
-        SHORT_CONTENT_GAS_RATE, MEDIUM_CONTENT_GAS_RATE, LONG_CONTENT_GAS_RATE,
-        MIN_REPUTATION_FOR_BASIC, MIN_REPUTATION_FOR_INTERMEDIATE,
-        MIN_REPUTATION_FOR_ADVANCED, MIN_REPUTATION_FOR_EXPERT,
-        BASIC_TASK_BASE_REWARD, INTERMEDIATE_TASK_BASE_REWARD,
-        ADVANCED_TASK_BASE_REWARD, EXPERT_TASK_BASE_REWARD,
+        calculate_base_reward, calculate_final_reward, calculate_secure_gas_cost, AIMiningPayload,
+        AccountReputation, AntiSybilDetector, DifficultyLevel, ADVANCED_TASK_BASE_REWARD,
+        BASIC_TASK_BASE_REWARD, EXPERT_TASK_BASE_REWARD, INTERMEDIATE_TASK_BASE_REWARD,
+        LONG_CONTENT_GAS_RATE, MEDIUM_CONTENT_GAS_RATE, MEDIUM_CONTENT_THRESHOLD,
+        MIN_REPUTATION_FOR_ADVANCED, MIN_REPUTATION_FOR_BASIC, MIN_REPUTATION_FOR_EXPERT,
+        MIN_REPUTATION_FOR_INTERMEDIATE, MIN_TRANSACTION_COST, SHORT_CONTENT_GAS_RATE,
+        SHORT_CONTENT_THRESHOLD,
     },
+    crypto::{elgamal::CompressedPublicKey, Hash},
     network::Network,
     serializer::Serializer,
 };
-use std::{time::Duration, path::PathBuf};
 
 /// Test new secure economic model
 /// Including tiered pricing, reputation system, anti-Sybil mechanisms, etc.
@@ -30,10 +29,11 @@ fn test_tiered_gas_pricing() {
 
     // Test 1: Short content pricing (0-200 bytes)
     let short_content = "A".repeat(100); // 100 bytes
+    let short_hash = tos_common::crypto::hash(short_content.as_bytes());
     let short_payload = AIMiningPayload::SubmitAnswer {
         task_id: Hash::from_bytes(&[1u8; 32]).unwrap(),
         answer_content: short_content.clone(),
-        answer_hash: Hash::from_bytes(&[2u8; 32]).unwrap(),
+        answer_hash: short_hash,
         stake_amount: 50000,
     };
 
@@ -44,38 +44,46 @@ fn test_tiered_gas_pricing() {
 
     // Test 2: Medium content pricing (200-1000 bytes)
     let medium_content = "B".repeat(500); // 500 bytes
+    let medium_hash = tos_common::crypto::hash(medium_content.as_bytes());
     let medium_payload = AIMiningPayload::SubmitAnswer {
         task_id: Hash::from_bytes(&[1u8; 32]).unwrap(),
         answer_content: medium_content.clone(),
-        answer_hash: Hash::from_bytes(&[2u8; 32]).unwrap(),
+        answer_hash: medium_hash,
         stake_amount: 50000,
     };
 
     let medium_gas = medium_payload.calculate_content_gas_cost();
-    let expected_medium = (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
-        ((500 - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE);
+    let expected_medium = (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE)
+        + ((500 - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE);
     assert_eq!(medium_gas, expected_medium.max(MIN_TRANSACTION_COST));
     println!("✓ Medium content (500 bytes): {} nanoTOS", medium_gas);
 
     // Test 3: Long content pricing (1000+ bytes)
     let long_content = "C".repeat(1500); // 1500 bytes
+    let long_hash = tos_common::crypto::hash(long_content.as_bytes());
     let long_payload = AIMiningPayload::SubmitAnswer {
         task_id: Hash::from_bytes(&[1u8; 32]).unwrap(),
         answer_content: long_content.clone(),
-        answer_hash: Hash::from_bytes(&[2u8; 32]).unwrap(),
+        answer_hash: long_hash,
         stake_amount: 50000,
     };
 
     let long_gas = long_payload.calculate_content_gas_cost();
-    let expected_long = (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE) +
-        ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE) +
-        ((1500 - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE);
+    let expected_long = (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE)
+        + ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
+        + ((1500 - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE);
     assert_eq!(long_gas, expected_long.max(MIN_TRANSACTION_COST));
     println!("✓ Long content (1500 bytes): {} nanoTOS", long_gas);
 
     // Verify fee increment
-    assert!(medium_gas > short_gas, "Medium content should cost more than short");
-    assert!(long_gas > medium_gas, "Long content should cost more than medium");
+    assert!(
+        medium_gas > short_gas,
+        "Medium content should cost more than short"
+    );
+    assert!(
+        long_gas > medium_gas,
+        "Long content should cost more than medium"
+    );
 
     println!("=== Tiered Gas Pricing Test PASSED ===\n");
 }
@@ -123,7 +131,10 @@ fn test_reputation_system() {
     assert!(new_score < MIN_REPUTATION_FOR_BASIC);
     assert!(!new_reputation.can_participate_in_difficulty(&DifficultyLevel::Beginner));
 
-    println!("✓ New account correctly restricted: score = {:.3}", new_score);
+    println!(
+        "✓ New account correctly restricted: score = {:.3}",
+        new_score
+    );
 
     println!("=== Reputation System Test PASSED ===\n");
 }
@@ -188,13 +199,25 @@ fn test_secure_gas_calculation() {
         0, // No stake
     );
 
-    assert!(low_rep_gas > high_rep_gas, "Low reputation should pay higher fees");
-    assert!(high_rep_gas >= MIN_TRANSACTION_COST, "Should meet minimum cost");
-    assert!(low_rep_gas >= MIN_TRANSACTION_COST, "Should meet minimum cost");
+    assert!(
+        low_rep_gas > high_rep_gas,
+        "Low reputation should pay higher fees"
+    );
+    assert!(
+        high_rep_gas >= MIN_TRANSACTION_COST,
+        "Should meet minimum cost"
+    );
+    assert!(
+        low_rep_gas >= MIN_TRANSACTION_COST,
+        "Should meet minimum cost"
+    );
 
     println!("✓ High reputation gas cost: {} nanoTOS", high_rep_gas);
     println!("✓ Low reputation gas cost: {} nanoTOS", low_rep_gas);
-    println!("✓ Fee difference: {}x", low_rep_gas as f64 / high_rep_gas as f64);
+    println!(
+        "✓ Fee difference: {}x",
+        low_rep_gas as f64 / high_rep_gas as f64
+    );
 
     println!("=== Secure Gas Calculation Test PASSED ===\n");
 }
@@ -218,10 +241,26 @@ fn test_base_reward_calculation() {
     assert!(advanced_reward > intermediate_reward);
     assert!(expert_reward > advanced_reward);
 
-    println!("✓ Basic reward: {} nanoTOS ({} TOS)", basic_reward, basic_reward as f64 / 1_000_000_000.0);
-    println!("✓ Intermediate reward: {} nanoTOS ({} TOS)", intermediate_reward, intermediate_reward as f64 / 1_000_000_000.0);
-    println!("✓ Advanced reward: {} nanoTOS ({} TOS)", advanced_reward, advanced_reward as f64 / 1_000_000_000.0);
-    println!("✓ Expert reward: {} nanoTOS ({} TOS)", expert_reward, expert_reward as f64 / 1_000_000_000.0);
+    println!(
+        "✓ Basic reward: {} nanoTOS ({} TOS)",
+        basic_reward,
+        basic_reward as f64 / 1_000_000_000.0
+    );
+    println!(
+        "✓ Intermediate reward: {} nanoTOS ({} TOS)",
+        intermediate_reward,
+        intermediate_reward as f64 / 1_000_000_000.0
+    );
+    println!(
+        "✓ Advanced reward: {} nanoTOS ({} TOS)",
+        advanced_reward,
+        advanced_reward as f64 / 1_000_000_000.0
+    );
+    println!(
+        "✓ Expert reward: {} nanoTOS ({} TOS)",
+        expert_reward,
+        expert_reward as f64 / 1_000_000_000.0
+    );
 
     println!("=== Base Reward Calculation Test PASSED ===\n");
 }
@@ -293,13 +332,27 @@ fn test_economic_incentive_balance() {
     // Calculate profitability
     let profit_ratio = final_reward as f64 / gas_cost as f64;
 
-    println!("✓ Gas cost: {} nanoTOS ({:.3} TOS)", gas_cost, gas_cost as f64 / 1_000_000_000.0);
-    println!("✓ Final reward: {} nanoTOS ({:.3} TOS)", final_reward, final_reward as f64 / 1_000_000_000.0);
+    println!(
+        "✓ Gas cost: {} nanoTOS ({:.3} TOS)",
+        gas_cost,
+        gas_cost as f64 / 1_000_000_000.0
+    );
+    println!(
+        "✓ Final reward: {} nanoTOS ({:.3} TOS)",
+        final_reward,
+        final_reward as f64 / 1_000_000_000.0
+    );
     println!("✓ Profit ratio: {:.2}x", profit_ratio);
 
     // Verify economic incentives
-    assert!(profit_ratio > 1.0, "High reputation users should be profitable");
-    assert!(profit_ratio > 2.0, "Should provide meaningful economic incentive");
+    assert!(
+        profit_ratio > 1.0,
+        "High reputation users should be profitable"
+    );
+    assert!(
+        profit_ratio > 2.0,
+        "Should provide meaningful economic incentive"
+    );
 
     // Test low reputation user (should be unprofitable or low profit)
     let mut low_rep = AccountReputation::new(account, base_time - 3600);
@@ -319,7 +372,10 @@ fn test_economic_incentive_balance() {
     println!("✓ Low reputation profit ratio: {:.2}x", low_profit_ratio);
 
     // Low reputation users should have lower profits or losses to incentivize reputation improvement
-    assert!(low_profit_ratio < profit_ratio, "Low reputation should be less profitable");
+    assert!(
+        low_profit_ratio < profit_ratio,
+        "Low reputation should be less profitable"
+    );
 
     println!("=== Economic Incentive Balance Test PASSED ===\n");
 }
@@ -346,7 +402,11 @@ async fn test_workflow_with_security_model() -> Result<()> {
     )?;
 
     println!("✓ Task publication with new reward model:");
-    println!("  - Reward: {} nanoTOS ({} TOS)", INTERMEDIATE_TASK_BASE_REWARD, INTERMEDIATE_TASK_BASE_REWARD as f64 / 1_000_000_000.0);
+    println!(
+        "  - Reward: {} nanoTOS ({} TOS)",
+        INTERMEDIATE_TASK_BASE_REWARD,
+        INTERMEDIATE_TASK_BASE_REWARD as f64 / 1_000_000_000.0
+    );
     println!("  - Description length: {} bytes", task_description.len());
     println!("  - Estimated fee: {} nanoTOS", task_metadata.estimated_fee);
 
@@ -364,7 +424,10 @@ async fn test_workflow_with_security_model() -> Result<()> {
 
     println!("✓ Answer submission with detailed content:");
     println!("  - Answer length: {} bytes", answer_content.len());
-    println!("  - Estimated fee: {} nanoTOS", answer_metadata.estimated_fee);
+    println!(
+        "  - Estimated fee: {} nanoTOS",
+        answer_metadata.estimated_fee
+    );
 
     // Validate answer
     let validation_metadata = builder.build_validate_answer_transaction(
@@ -377,10 +440,15 @@ async fn test_workflow_with_security_model() -> Result<()> {
 
     println!("✓ Answer validation:");
     println!("  - Validation score: 88%");
-    println!("  - Estimated fee: {} nanoTOS", validation_metadata.estimated_fee);
+    println!(
+        "  - Estimated fee: {} nanoTOS",
+        validation_metadata.estimated_fee
+    );
 
     // Calculate total cost and reward
-    let total_cost = task_metadata.estimated_fee + answer_metadata.estimated_fee + validation_metadata.estimated_fee;
+    let total_cost = task_metadata.estimated_fee
+        + answer_metadata.estimated_fee
+        + validation_metadata.estimated_fee;
     let base_reward = INTERMEDIATE_TASK_BASE_REWARD;
 
     // Simulate final reward for high reputation user
@@ -397,8 +465,16 @@ async fn test_workflow_with_security_model() -> Result<()> {
     let profit_ratio = miner_share as f64 / total_cost as f64;
 
     println!("✓ Economic summary:");
-    println!("  - Total cost: {} nanoTOS ({:.3} TOS)", total_cost, total_cost as f64 / 1_000_000_000.0);
-    println!("  - Miner reward: {} nanoTOS ({:.3} TOS)", miner_share, miner_share as f64 / 1_000_000_000.0);
+    println!(
+        "  - Total cost: {} nanoTOS ({:.3} TOS)",
+        total_cost,
+        total_cost as f64 / 1_000_000_000.0
+    );
+    println!(
+        "  - Miner reward: {} nanoTOS ({:.3} TOS)",
+        miner_share,
+        miner_share as f64 / 1_000_000_000.0
+    );
     println!("  - Profit ratio: {:.2}x", profit_ratio);
 
     // Verify profitability of new model
@@ -415,43 +491,59 @@ fn test_spam_prevention() {
 
     // Test minimum length requirement
     let too_short = "Hi"; // 2 bytes
+    let too_short_hash = tos_common::crypto::hash(too_short.as_bytes());
     let short_payload = AIMiningPayload::SubmitAnswer {
         task_id: Hash::from_bytes(&[1u8; 32]).unwrap(),
         answer_content: too_short.to_string(),
-        answer_hash: Hash::from_bytes(&[2u8; 32]).unwrap(),
+        answer_hash: too_short_hash,
         stake_amount: 0,
     };
 
-    assert!(short_payload.validate().is_err(), "Too short content should be rejected");
+    assert!(
+        short_payload.validate().is_err(),
+        "Too short content should be rejected"
+    );
     println!("✓ Short content rejected");
 
     // Test all transactions have minimum fee
     let minimal_content = "A".repeat(10); // Minimum length
+    let minimal_hash = tos_common::crypto::hash(minimal_content.as_bytes());
     let minimal_payload = AIMiningPayload::SubmitAnswer {
         task_id: Hash::from_bytes(&[1u8; 32]).unwrap(),
         answer_content: minimal_content,
-        answer_hash: Hash::from_bytes(&[2u8; 32]).unwrap(),
+        answer_hash: minimal_hash,
         stake_amount: 0,
     };
 
     let minimal_gas = minimal_payload.calculate_content_gas_cost();
-    assert!(minimal_gas >= MIN_TRANSACTION_COST, "Should meet minimum transaction cost");
+    assert!(
+        minimal_gas >= MIN_TRANSACTION_COST,
+        "Should meet minimum transaction cost"
+    );
     println!("✓ Minimum fee enforced: {} nanoTOS", minimal_gas);
 
     // Test high cost for spam content
     let spam_content = "spam ".repeat(400); // 2000 bytes spam content
+    let spam_hash = tos_common::crypto::hash(spam_content.as_bytes());
     let spam_payload = AIMiningPayload::SubmitAnswer {
         task_id: Hash::from_bytes(&[1u8; 32]).unwrap(),
         answer_content: spam_content,
-        answer_hash: Hash::from_bytes(&[2u8; 32]).unwrap(),
+        answer_hash: spam_hash,
         stake_amount: 0,
     };
 
     let spam_gas = spam_payload.calculate_content_gas_cost();
-    println!("✓ Spam content cost: {} nanoTOS ({:.3} TOS)", spam_gas, spam_gas as f64 / 1_000_000_000.0);
+    println!(
+        "✓ Spam content cost: {} nanoTOS ({:.3} TOS)",
+        spam_gas,
+        spam_gas as f64 / 1_000_000_000.0
+    );
 
     // Spam content cost should be significantly higher than minimum
-    assert!(spam_gas > MIN_TRANSACTION_COST * 10, "Spam should be expensive (>10x minimum cost)");
+    assert!(
+        spam_gas > MIN_TRANSACTION_COST * 10,
+        "Spam should be expensive (>10x minimum cost)"
+    );
     assert!(spam_gas > 1_000_000, "Spam should cost more than 0.001 TOS");
 
     println!("=== Spam Prevention Test PASSED ===\n");
@@ -459,7 +551,6 @@ fn test_spam_prevention() {
 
 // Helper functions for testing
 fn create_test_compressed_pubkey(bytes: [u8; 32]) -> CompressedPublicKey {
-    CompressedPublicKey::from_bytes(&bytes).unwrap_or_else(|_| {
-        CompressedPublicKey::from_bytes(&[0u8; 32]).unwrap()
-    })
+    CompressedPublicKey::from_bytes(&bytes)
+        .unwrap_or_else(|_| CompressedPublicKey::from_bytes(&[0u8; 32]).unwrap())
 }

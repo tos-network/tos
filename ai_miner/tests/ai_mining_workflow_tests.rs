@@ -1,16 +1,16 @@
 use anyhow::Result;
+use std::{path::PathBuf, time::Duration};
 use tos_ai_miner::{
     daemon_client::{DaemonClient, DaemonClientConfig},
-    transaction_builder::AIMiningTransactionBuilder,
     storage::{StorageManager, TaskState},
+    transaction_builder::AIMiningTransactionBuilder,
 };
 use tos_common::{
-    crypto::{Hash, elgamal::CompressedPublicKey},
     ai_mining::{AIMiningPayload, DifficultyLevel},
+    crypto::{elgamal::CompressedPublicKey, Hash},
     network::Network,
     serializer::Serializer,
 };
-use std::{time::Duration, path::PathBuf};
 
 /// Test AI mining workflow components in isolation
 /// These tests verify the core functionality without requiring a live daemon
@@ -51,10 +51,13 @@ async fn test_task_publication_workflow() -> Result<()> {
     println!("  - Reward: {} nanoTOS", reward_amount);
 
     // Test 2: Storage Management
-    let mut storage_manager = StorageManager::new(PathBuf::from("test_storage"), Network::Testnet).await?;
+    let mut storage_manager =
+        StorageManager::new(PathBuf::from("test_storage"), Network::Testnet).await?;
 
     // Add task to storage
-    storage_manager.add_task(&task_id, reward_amount, difficulty.clone(), deadline).await?;
+    storage_manager
+        .add_task(&task_id, reward_amount, difficulty.clone(), deadline)
+        .await?;
 
     // Verify task is stored
     let task_info = storage_manager.get_task(&task_id);
@@ -80,12 +83,12 @@ async fn test_answer_submission_workflow() -> Result<()> {
     // Test 1: Transaction Builder
     let builder = AIMiningTransactionBuilder::new(Network::Testnet);
     let task_id = Hash::from_bytes(&[1u8; 32])?;
-    let answer_hash = Hash::from_bytes(&[2u8; 32])?;
     let stake_amount = 50000; // 50K nanoTOS
     let nonce = 2;
     let fee = 0;
 
     let answer_content = "This is a test answer content for AI mining workflow testing. It provides a detailed response to demonstrate the answer submission functionality.";
+    let answer_hash = tos_common::crypto::hash(answer_content.as_bytes());
     let metadata = builder.build_submit_answer_transaction(
         task_id.clone(),
         answer_content.to_string(),
@@ -108,13 +111,18 @@ async fn test_answer_submission_workflow() -> Result<()> {
     println!("  - Stake: {} nanoTOS", stake_amount);
 
     // Test 2: Storage Management
-    let mut storage_manager = StorageManager::new(PathBuf::from("test_storage2"), Network::Testnet).await?;
+    let mut storage_manager =
+        StorageManager::new(PathBuf::from("test_storage2"), Network::Testnet).await?;
 
     // First create the task
-    storage_manager.add_task(&task_id, 1000000, DifficultyLevel::Intermediate, 1234567890).await?;
+    storage_manager
+        .add_task(&task_id, 1000000, DifficultyLevel::Intermediate, 1234567890)
+        .await?;
 
     // Update task state to show answer submitted
-    storage_manager.update_task_state(&task_id, TaskState::AnswersReceived).await?;
+    storage_manager
+        .update_task_state(&task_id, TaskState::AnswersReceived)
+        .await?;
 
     // Verify task state updated
     let task_info = storage_manager.get_task(&task_id);
@@ -161,12 +169,19 @@ async fn test_validation_workflow() -> Result<()> {
     println!("  - Validation Score: {}%", validation_score);
 
     // Test 2: Storage Management
-    let mut storage_manager = StorageManager::new(PathBuf::from("test_storage3"), Network::Testnet).await?;
+    let mut storage_manager =
+        StorageManager::new(PathBuf::from("test_storage3"), Network::Testnet).await?;
 
     // Create task and move through workflow states
-    storage_manager.add_task(&task_id, 1000000, DifficultyLevel::Intermediate, 1234567890).await?;
-    storage_manager.update_task_state(&task_id, TaskState::AnswersReceived).await?;
-    storage_manager.update_task_state(&task_id, TaskState::Validated).await?;
+    storage_manager
+        .add_task(&task_id, 1000000, DifficultyLevel::Intermediate, 1234567890)
+        .await?;
+    storage_manager
+        .update_task_state(&task_id, TaskState::AnswersReceived)
+        .await?;
+    storage_manager
+        .update_task_state(&task_id, TaskState::Validated)
+        .await?;
 
     // Verify validation state
     let task_info = storage_manager.get_task(&task_id);
@@ -197,7 +212,10 @@ async fn test_reward_distribution_workflow() -> Result<()> {
 
     // Verify network-specific fee scaling
     assert!(mainnet_fee > testnet_fee, "Mainnet should have higher fees");
-    assert!(testnet_fee > devnet_fee, "Testnet should have higher fees than devnet");
+    assert!(
+        testnet_fee > devnet_fee,
+        "Testnet should have higher fees than devnet"
+    );
 
     println!("✓ Network-specific fee calculation verified");
     println!("  - Mainnet fee: {} nanoTOS", mainnet_fee);
@@ -205,15 +223,24 @@ async fn test_reward_distribution_workflow() -> Result<()> {
     println!("  - Devnet fee: {} nanoTOS", devnet_fee);
 
     // Test 2: Complete Task Lifecycle
-    let mut storage_manager = StorageManager::new(PathBuf::from("test_storage4"), Network::Testnet).await?;
+    let mut storage_manager =
+        StorageManager::new(PathBuf::from("test_storage4"), Network::Testnet).await?;
     let task_id = Hash::from_bytes(&[4u8; 32])?;
     let reward_amount = 2000000; // 2M nanoTOS
 
     // Complete lifecycle
-    storage_manager.add_task(&task_id, reward_amount, DifficultyLevel::Expert, 1234567890).await?;
-    storage_manager.update_task_state(&task_id, TaskState::AnswersReceived).await?;
-    storage_manager.update_task_state(&task_id, TaskState::Validated).await?;
-    storage_manager.update_task_state(&task_id, TaskState::Validated).await?;
+    storage_manager
+        .add_task(&task_id, reward_amount, DifficultyLevel::Expert, 1234567890)
+        .await?;
+    storage_manager
+        .update_task_state(&task_id, TaskState::AnswersReceived)
+        .await?;
+    storage_manager
+        .update_task_state(&task_id, TaskState::Validated)
+        .await?;
+    storage_manager
+        .update_task_state(&task_id, TaskState::Validated)
+        .await?;
 
     // Verify final state
     let task_info = storage_manager.get_task(&task_id);
@@ -282,10 +309,13 @@ fn test_payload_complexity_calculation() {
         description: "Test task description for complexity calculation".to_string(),
     };
 
+    let answer_payload_content =
+        "Test answer content for complexity calculation workflow".to_string();
+    let answer_payload_hash = tos_common::crypto::hash(answer_payload_content.as_bytes());
     let answer_payload = AIMiningPayload::SubmitAnswer {
         task_id: Hash::from_bytes(&[1u8; 32]).unwrap(),
-        answer_content: "Test answer content for complexity calculation workflow".to_string(),
-        answer_hash: Hash::from_bytes(&[2u8; 32]).unwrap(),
+        answer_content: answer_payload_content,
+        answer_hash: answer_payload_hash,
         stake_amount: 50000,
     };
 
@@ -302,9 +332,18 @@ fn test_payload_complexity_calculation() {
     let validation_fee = builder.estimate_fee_with_payload_type(200, Some(&validation_payload));
 
     // Verify fee ordering based on complexity
-    assert!(publish_fee > validation_fee, "Publish tasks should have highest fees");
-    assert!(validation_fee > answer_fee, "Validation should cost more than answers");
-    assert!(answer_fee > register_fee, "Answers should cost more than registration");
+    assert!(
+        publish_fee > validation_fee,
+        "Publish tasks should have highest fees"
+    );
+    assert!(
+        validation_fee > answer_fee,
+        "Validation should cost more than answers"
+    );
+    assert!(
+        answer_fee > register_fee,
+        "Answers should cost more than registration"
+    );
 
     println!("✓ Payload complexity calculations verified");
     println!("  - Register miner fee: {} nanoTOS", register_fee);
@@ -354,7 +393,10 @@ async fn test_daemon_client_config() -> Result<()> {
     println!("  - Request timeout: {:?}", client.config().request_timeout);
     println!("  - Max retries: {}", client.config().max_retries);
     println!("  - Retry delay: {:?}", client.config().retry_delay);
-    println!("  - Connection timeout: {:?}", client.config().connection_timeout);
+    println!(
+        "  - Connection timeout: {:?}",
+        client.config().connection_timeout
+    );
 
     // Note: We won't test actual daemon connectivity here since no daemon is running
     // This test focuses on configuration and setup
