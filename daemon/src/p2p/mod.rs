@@ -609,7 +609,7 @@ impl<S: Storage> P2pServer<S> {
     // this function handle all new connections
     // A new connection have to send an Handshake
     // if the handshake is valid, we accept it & register it on server
-    async fn verify_connection(&self, buf: &mut [u8], connection: &mut Connection) -> Result<Handshake, P2pError> {
+    async fn verify_connection(&self, buf: &mut [u8], connection: &mut Connection) -> Result<Handshake<'_>, P2pError> {
         trace!("New connection: {}", connection);
 
         // Exchange encryption keys
