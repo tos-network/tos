@@ -10,7 +10,7 @@ use std::{
     sync::Arc
 };
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use bulletproofs::RangeProof;
 use curve25519_dalek::{
     ristretto::CompressedRistretto,
@@ -530,8 +530,39 @@ impl Transaction {
                 validator.verify()
                     .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
             },
-            TransactionType::Energy(_) => {
-                // Energy transactions don't require special verification beyond basic checks
+            TransactionType::Energy(payload) => {
+                match payload {
+                    EnergyPayload::FreezeTos { amount, duration } => {
+                        if *amount == 0 {
+                            return Err(VerificationError::AnyError(anyhow!("Freeze amount must be greater than zero")));
+                        }
+
+                        if *amount % crate::config::COIN_VALUE != 0 {
+                            return Err(VerificationError::AnyError(anyhow!("Freeze amount must be a whole number of TOS")));
+                        }
+
+                        if *amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
+                            return Err(VerificationError::AnyError(anyhow!("Freeze amount must be at least 1 TOS")));
+                        }
+
+                        if !duration.is_valid() {
+                            return Err(VerificationError::AnyError(anyhow!("Freeze duration must be between 3 and 180 days")));
+                        }
+                    },
+                    EnergyPayload::UnfreezeTos { amount } => {
+                        if *amount == 0 {
+                            return Err(VerificationError::AnyError(anyhow!("Unfreeze amount must be greater than zero")));
+                        }
+
+                        if *amount % crate::config::COIN_VALUE != 0 {
+                            return Err(VerificationError::AnyError(anyhow!("Unfreeze amount must be a whole number of TOS")));
+                        }
+
+                        if *amount < crate::config::MIN_UNFREEZE_TOS_AMOUNT {
+                            return Err(VerificationError::AnyError(anyhow!("Unfreeze amount must be at least 1 TOS")));
+                        }
+                    }
+                }
             },
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now

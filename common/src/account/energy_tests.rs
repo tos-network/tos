@@ -62,15 +62,15 @@ fn test_energy_resource_management() {
     assert_eq!(resource.total_energy, 20);
     assert_eq!(resource.available_energy(), 20);
 
-    // Test that partial TOS amounts are rounded down to whole numbers
+    // Test that partial TOS amounts are rejected
     let energy_gained_partial = EnergyResourceManager::freeze_tos_for_energy(
         &mut resource,
-        150000000, // 1.5 TOS should become 1 TOS
+        150000000, // 1.5 TOS (invalid)
         duration3,
         topoheight
     );
-    assert_eq!(energy_gained_partial, 6); // 1 TOS * 6 = 6 transfers
-    assert_eq!(resource.frozen_tos, 300000000); // 1 + 1 + 1 = 3 TOS
+    assert_eq!(energy_gained_partial, 0); // Invalid amount yields no energy
+    assert_eq!(resource.frozen_tos, 200000000); // No additional TOS frozen
 
     // Consume energy for transfers
     let result = EnergyResourceManager::consume_energy_for_transaction(
@@ -109,7 +109,7 @@ fn test_energy_unfreeze_mechanism() {
     // Try to unfreeze before unlock time (should fail)
     let result = EnergyResourceManager::unfreeze_tos(
         &mut resource,
-        50000000, // 0.5 TOS
+        100000000, // 1 TOS (minimum unit)
         unlock_topoheight_7d - 1
     );
     assert!(result.is_err());
@@ -117,12 +117,12 @@ fn test_energy_unfreeze_mechanism() {
     // Unfreeze after unlock time
     let energy_removed = EnergyResourceManager::unfreeze_tos(
         &mut resource,
-        50000000, // 0.5 TOS
+        100000000, // 1 TOS
         unlock_topoheight_7d
     ).unwrap();
-    assert_eq!(energy_removed, 70000000); // 50000000 * 14.0 / 1000 * 1000
-    assert_eq!(resource.frozen_tos, 50000000);
-    assert_eq!(resource.total_energy, 70000000);
+    assert_eq!(energy_removed, 14); // 1 TOS * 14 energy units removed
+    assert_eq!(resource.frozen_tos, 0);
+    assert_eq!(resource.total_energy, 0);
 }
 
 #[test]
@@ -141,18 +141,18 @@ fn test_energy_status() {
     // Consume some energy
     EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
-        20000000 // 0.2 energy
+        2 // 2 energy units
     ).unwrap();
     
     let status = EnergyResourceManager::get_energy_status(&resource);
-    assert_eq!(status.total_energy, 1400000000); // 100000000 * 14.0
-    assert_eq!(status.used_energy, 20000000);
-    assert_eq!(status.available_energy, 1380000000);
+    assert_eq!(status.total_energy, 14); // 1 TOS * 14 energy units
+    assert_eq!(status.used_energy, 2);
+    assert_eq!(status.available_energy, 12);
     assert_eq!(status.frozen_tos, 100000000);
     
     // Test usage percentage
     let usage_percentage = status.usage_percentage();
-    assert!((usage_percentage - 1.43).abs() < 0.01); // 20000000 / 1400000000 * 100
+    assert!((usage_percentage - (2.0 / 14.0 * 100.0)).abs() < 0.01);
     
     // Test energy low check
     assert!(!status.is_energy_low()); // 90% available
@@ -160,7 +160,7 @@ fn test_energy_status() {
     // Consume more energy to make it low
     EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
-        80000000 // 0.8 energy
+        10 // Consume more energy
     ).unwrap();
     
     let status = EnergyResourceManager::get_energy_status(&resource);
@@ -171,7 +171,7 @@ fn test_energy_status() {
 fn test_freeze_duration_rewards() {
     let amounts = [100000000, 200000000, 500000000]; // 1, 2, 5 TOS
     let durations = [FreezeDuration::new(3).unwrap(), FreezeDuration::new(7).unwrap(), FreezeDuration::new(14).unwrap()];
-    let multipliers = [6.0, 14.0, 28.0]; // New energy model: 2 * days
+    let multipliers = [6u64, 14u64, 28u64]; // New energy model: 2 * days
     
     for amount in amounts {
         for (duration, multiplier) in durations.iter().zip(multipliers.iter()) {
@@ -184,7 +184,7 @@ fn test_freeze_duration_rewards() {
                 1000
             );
             
-            let expected_energy = (amount as f64 * multiplier) as u64;
+            let expected_energy = (amount / crate::config::COIN_VALUE) * multiplier;
             assert_eq!(energy_gained, expected_energy);
             assert_eq!(resource.total_energy, expected_energy);
             assert_eq!(resource.frozen_tos, amount);
@@ -198,10 +198,10 @@ fn test_energy_lease() {
     
     let lessor = PublicKey::default();
     let lessee = PublicKey::default();
-    let energy_amount = 100000000; // 1 energy
+    let energy_amount = 1; // 1 energy unit
     let duration = 1000; // 1000 blocks
     let start_topoheight = 1000;
-    let price_per_energy = 1000; // 0.00001 TOS per energy
+    let price_per_energy = 1000; // 0.00001 TOS per energy unit
     
     let lease = EnergyLease::new(
         lessor.clone(),
@@ -239,7 +239,6 @@ fn test_energy_fee_calculator_total_cost() {
         1000
     );
     
-    let energy_cost = 50000000; // 0.5 energy
     let new_addresses = 2;
     
     // Test with sufficient energy
@@ -350,17 +349,17 @@ fn test_energy_reset_mechanism() {
     
     EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
-        50000000 // 0.5 energy
+        5 // 5 energy units
     ).unwrap();
-    
-    assert_eq!(resource.used_energy, 50000000);
+
+    assert_eq!(resource.used_energy, 5);
     
     // Reset energy usage
     EnergyResourceManager::reset_energy_usage(&mut resource, 2000);
     
     assert_eq!(resource.used_energy, 0);
     assert_eq!(resource.last_update, 2000);
-    assert_eq!(resource.available_energy(), 1400000000);
+    assert_eq!(resource.available_energy(), 14);
 } 
 
 #[test]
@@ -369,16 +368,15 @@ fn test_whole_number_tos_requirement() {
     let topoheight = 1000;
     let duration = FreezeDuration::new(7).unwrap();
 
-    // Test that partial TOS amounts are rounded down to whole numbers
+    // Test that partial TOS amounts are rejected
     let energy_gained = EnergyResourceManager::freeze_tos_for_energy(
         &mut resource,
         150000000, // 1.5 TOS
         duration,
         topoheight
     );
-    // Should only freeze 1 TOS (150000000 / 100000000 = 1)
-    assert_eq!(energy_gained, 14); // 1 TOS * 14 = 14 transfers
-    assert_eq!(resource.frozen_tos, 100000000); // Only 1 TOS frozen
+    assert_eq!(energy_gained, 0); // Invalid amount yields no energy
+    assert_eq!(resource.frozen_tos, 0); // Nothing frozen
 
     // Test that very small amounts result in 0 TOS frozen
     let energy_gained_small = EnergyResourceManager::freeze_tos_for_energy(
@@ -387,12 +385,19 @@ fn test_whole_number_tos_requirement() {
         duration,
         topoheight
     );
-    assert_eq!(energy_gained_small, 0); // 0 TOS * 14 = 0 transfers
-    assert_eq!(resource.frozen_tos, 100000000); // Still only 1 TOS frozen
+    assert_eq!(energy_gained_small, 0); // Invalid amount yields no energy
+    assert_eq!(resource.frozen_tos, 0); // Still nothing frozen
 
-    // Test that energy directly equals transfer count
-    assert_eq!(resource.total_energy, 14); // 14 transfers available
-    assert_eq!(resource.available_energy(), 14); // 14 transfers available
+    // Freeze a valid whole-number amount to confirm normal behaviour
+    let energy_gained_valid = EnergyResourceManager::freeze_tos_for_energy(
+        &mut resource,
+        100000000, // 1 TOS
+        duration,
+        topoheight
+    );
+    assert_eq!(energy_gained_valid, 14);
+    assert_eq!(resource.total_energy, 14);
+    assert_eq!(resource.available_energy(), 14);
 
     // Consume 1 energy = 1 transfer
     let result = EnergyResourceManager::consume_energy_for_transaction(

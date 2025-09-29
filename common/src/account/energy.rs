@@ -81,7 +81,7 @@ impl Serializer for FreezeDuration {
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let days = reader.read_u32()?;
-        Ok(Self { days })
+        FreezeDuration::new(days).map_err(|_| ReaderError::InvalidValue)
     }
 
     fn size(&self) -> usize {
@@ -245,11 +245,23 @@ impl EnergyResource {
     /// Ensures TOS amount is a whole number (multiple of COIN_VALUE)
     /// Returns the actual amount of TOS frozen (may be less than requested if not whole number)
     pub fn freeze_tos_for_energy(&mut self, tos_amount: u64, duration: FreezeDuration, topoheight: TopoHeight) -> u64 {
+        if tos_amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
+            return 0;
+        }
+
+        if tos_amount % crate::config::COIN_VALUE != 0 {
+            return 0;
+        }
+
         // Create a new freeze record (this will ensure whole number TOS)
         let freeze_record = FreezeRecord::new(tos_amount, duration, topoheight);
         let energy_gained = freeze_record.energy_gained;
         let actual_tos_frozen = freeze_record.amount;
-        
+
+        if actual_tos_frozen == 0 {
+            return 0;
+        }
+
         // Add to freeze records
         self.freeze_records.push(freeze_record);
         
