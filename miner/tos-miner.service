@@ -1,0 +1,28 @@
+[Unit]
+Description=TOS Testnet Miner
+After=network.target tos-testnet-daemon.service
+Requires=tos-testnet-daemon.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/tos
+ExecStart=/root/tos/target/release/tos_miner \
+    --miner-address tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u \
+    --daemon-address 127.0.0.1:8080 \
+    --num-threads 1 \
+    --log-level info \
+    --disable-file-log-color \
+    --disable-ascii-art
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Resource limits
+LimitNOFILE=65536
+MemoryHigh=512M
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target
