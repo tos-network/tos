@@ -1,7 +1,7 @@
 [Unit]
 Description=TOS Testnet Miner
-After=network.target tos-testnet-daemon.service
-Requires=tos-testnet-daemon.service
+After=network.target tos-daemon.service
+Requires=tos-daemon.service
 
 [Service]
 Type=simple
@@ -12,7 +12,7 @@ ExecStart=/root/tos/target/release/tos_miner \
     --daemon-address 127.0.0.1:8080 \
     --num-threads 1 \
     --log-level info \
-    --disable-file-log-color \
+    --disable-log-color \
     --disable-ascii-art
 Restart=always
 RestartSec=10

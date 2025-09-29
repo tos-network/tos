@@ -73,7 +73,7 @@ ExecStart=$(pwd)/target/release/tos_miner \\
     --daemon-address ${DAEMON_ADDRESS} \\
     --num-threads ${NUM_THREADS} \\
     --log-level info \\
-    --disable-file-log-color \\
+    --disable-log-color \\
     --disable-ascii-art
 Restart=always
 RestartSec=10

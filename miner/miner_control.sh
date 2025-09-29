@@ -84,7 +84,7 @@ case "$1" in
                 --daemon-address "${DAEMON_ADDRESS}" \
                 --num-threads ${NUM_THREADS} \
                 --log-level info \
-                --disable-file-log-color
+                --disable-log-color
         fi
         ;;
     *)
