@@ -74,7 +74,8 @@ ExecStart=$(pwd)/target/release/tos_miner \\
     --num-threads ${NUM_THREADS} \\
     --log-level info \\
     --disable-log-color \\
-    --disable-ascii-art
+    --disable-ascii-art \\
+    --disable-interactive-mode
 Restart=always
 RestartSec=10
 StandardOutput=journal

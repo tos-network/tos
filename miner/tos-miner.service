@@ -13,7 +13,8 @@ ExecStart=/root/tos/target/release/tos_miner \
     --num-threads 1 \
     --log-level info \
     --disable-log-color \
-    --disable-ascii-art
+    --disable-ascii-art \
+    --disable-interactive-mode
 Restart=always
 RestartSec=10
 StandardOutput=journal

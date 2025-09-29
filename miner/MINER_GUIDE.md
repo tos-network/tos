@@ -20,7 +20,8 @@ sudo journalctl -u tos-miner -f
 ./target/release/tos_miner \
     --miner-address tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u \
     --daemon-address 127.0.0.1:8080 \
-    --num-threads 1
+    --num-threads 1 \
+    --disable-interactive-mode
 ```
 
 ## Mining Configuration
@@ -31,6 +32,7 @@ sudo journalctl -u tos-miner -f
 | Daemon Address | `127.0.0.1:8080` | Local testnet daemon RPC endpoint |
 | Threads | `1` | Single thread mining |
 | Network | Testnet | Low difficulty mining |
+| Interactive Mode | Disabled | Non-interactive operation (no CLI commands) |
 
 ## Management Commands
 
