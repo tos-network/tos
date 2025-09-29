@@ -36,7 +36,6 @@ use tos_common::{
     },
     config::{
         COIN_DECIMALS,
-        COIN_VALUE,
         MAXIMUM_SUPPLY,
         MAX_TRANSACTION_SIZE,
         MAX_BLOCK_SIZE,
@@ -3076,10 +3075,6 @@ impl<S: Storage> Blockchain<S> {
     // Block shouldn't be orphaned
     pub async fn internal_get_block_reward(&self, past_supply: u64, is_side_block: bool, side_blocks_count: u64, version: BlockVersion) -> Result<u64, BlockchainError> {
         trace!("internal get block reward");
-        if past_supply == 0 {
-            return Ok(GENESIS_INITIAL_REWARD);
-        }
-
         let block_time_target = get_block_time_target_for_version(version);
         let mut block_reward = get_block_reward(past_supply, block_time_target);
         if is_side_block {
@@ -3420,14 +3415,8 @@ pub fn side_block_reward_percentage(side_blocks: u64) -> u64 {
     side_block_percent
 }
 
-const GENESIS_INITIAL_REWARD: u64 = 3_000_000 * COIN_VALUE;
-
 // Calculate the block reward based on the emitted supply
 pub fn get_block_reward(supply: u64, block_time_target: u64) -> u64 {
-    if supply == 0 {
-        return GENESIS_INITIAL_REWARD;
-    }
-
     // Prevent any overflow
     if supply >= MAXIMUM_SUPPLY {
         // Max supply reached, do we want to generate small fixed amount of coins? 
