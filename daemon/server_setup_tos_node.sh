@@ -101,8 +101,8 @@ if [[ $? -eq 0 ]]; then
     # Display file information
     ls -lh target/release/tos_daemon
 
-    # Create systemd service file
-    echo "📋 Creating systemd service..."
+    # Create systemd service file with optimized sync configuration
+    echo "📋 Creating systemd service with sync optimizations..."
     cat > /etc/systemd/system/tos-daemon.service << EOF
 [Unit]
 Description=TOS Daemon
@@ -112,7 +112,11 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=$(pwd)
-ExecStart=$(pwd)/target/release/tos_daemon --rpc-bind-address 0.0.0.0:8080 --p2p-bind-address 0.0.0.0:2125
+ExecStart=$(pwd)/target/release/tos_daemon \\
+    --rpc-bind-address 0.0.0.0:8080 \\
+    --p2p-bind-address 0.0.0.0:2125 \\
+    --allow-boost-sync \\
+    --auto-prune-keep-n-blocks 2000
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -142,7 +146,12 @@ EOF
     echo "P2P port: 2125"
     echo "RPC port: 8080"
     echo ""
-    echo "⚠️  Note: First startup may require blockchain data synchronization"
+    echo "⚡ Optimization features enabled:"
+    echo "- Boost sync: Faster parallel synchronization"
+    echo "- Auto-pruning: Keep 2000 blocks (reduced storage)"
+    echo ""
+    echo "💾 Expected storage usage: ~50-100 MB (vs GB without pruning)"
+    echo "⚠️  Note: First startup sync may take 30-60 minutes with boost sync"
 
 else
     echo "❌ Build failed, please check error messages"

@@ -1,8 +1,5 @@
 use anyhow::Result;
-use std::{path::PathBuf, time::Duration};
 use tos_ai_miner::{
-    daemon_client::{DaemonClient, DaemonClientConfig},
-    storage::{StorageManager, TaskState},
     transaction_builder::AIMiningTransactionBuilder,
 };
 use tos_common::{
@@ -11,8 +8,7 @@ use tos_common::{
         AccountReputation, AntiSybilDetector, DifficultyLevel, ADVANCED_TASK_BASE_REWARD,
         BASIC_TASK_BASE_REWARD, EXPERT_TASK_BASE_REWARD, INTERMEDIATE_TASK_BASE_REWARD,
         LONG_CONTENT_GAS_RATE, MEDIUM_CONTENT_GAS_RATE, MEDIUM_CONTENT_THRESHOLD,
-        MIN_REPUTATION_FOR_ADVANCED, MIN_REPUTATION_FOR_BASIC, MIN_REPUTATION_FOR_EXPERT,
-        MIN_REPUTATION_FOR_INTERMEDIATE, MIN_TRANSACTION_COST, SHORT_CONTENT_GAS_RATE,
+        MIN_REPUTATION_FOR_BASIC, MIN_TRANSACTION_COST, SHORT_CONTENT_GAS_RATE,
         SHORT_CONTENT_THRESHOLD,
     },
     crypto::{elgamal::CompressedPublicKey, Hash},
@@ -550,7 +546,3 @@ fn test_spam_prevention() {
 }
 
 // Helper functions for testing
-fn create_test_compressed_pubkey(bytes: [u8; 32]) -> CompressedPublicKey {
-    CompressedPublicKey::from_bytes(&bytes)
-        .unwrap_or_else(|_| CompressedPublicKey::from_bytes(&[0u8; 32]).unwrap())
-}

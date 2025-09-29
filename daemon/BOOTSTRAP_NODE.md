@@ -73,11 +73,7 @@ priority_nodes = []
 exclusive_nodes = []
 
 # Additional bootstrap nodes for initial network discovery
-bootstrap_nodes = [
-    "51.210.117.23:2125",        # France seed
-    "198.71.55.87:2125",         # US seed
-    "162.19.249.100:2125"        # Germany seed
-]
+bootstrap_nodes = []
 
 # Allow fast sync mode (sync bootstrapped chain without verifying history)
 # Use with extreme caution and trusted nodes only
