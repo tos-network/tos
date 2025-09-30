@@ -19,10 +19,43 @@ WEBSOCKET_MAP=/etc/nginx/conf.d/websocket_upgrade.conf
 SSL_OPTIONS=/etc/letsencrypt/options-ssl-nginx.conf
 SSL_DH=/etc/letsencrypt/ssl-dhparams.pem
 
+# Embedded fallback templates to avoid network dependencies
+FALLBACK_SSL_OPTIONS='map $sent_http_content_type $expires {
+    default                    off;
+    text/html                  epoch;
+    text/html; charset=utf-8   epoch;
+    text/plain                 max;
+    text/plain; charset=utf-8  max;
+    text/css                   max;
+    text/css; charset=utf-8    max;
+    application/json           off;
+    application/javascript     epoch;
+    ~image/                    max;
+}
+
+ssl_session_cache   shared:SSL:10m;
+ssl_session_timeout 10m;
+ssl_session_tickets off;
+
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers off;
+ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384';
+ssl_ecdh_curve secp384r1;
+ssl_stapling on;
+ssl_stapling_verify on;
+resolver 1.1.1.1 1.0.0.1 valid=300s;
+resolver_timeout 5s;
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+add_header X-Content-Type-Options nosniff;
+add_header X-Frame-Options DENY;
+add_header Referrer-Policy no-referrer;
+add_header X-XSS-Protection "1; mode=block";
+'
+
 install_dependencies() {
   echo "==== 1. Installing dependencies (nginx + certbot) ===="
   apt update
-  apt install -y nginx certbot python3-certbot-nginx curl openssl
+  apt install -y nginx certbot python3-certbot-nginx curl openssl python3
 }
 
 prepare_webroot() {
@@ -42,87 +75,26 @@ map $http_upgrade $connection_upgrade {
 MAPEOF
 }
 
-locate_certbot_file() {
-  local module_path output
-  output=$(python3 - <<'PY'
-import importlib
-from pathlib import Path
-try:
-    mod = importlib.import_module('certbot_nginx._internal')
-    base = Path(mod.__file__).parent
-    print(base / 'options-ssl-nginx.conf')
-except Exception:
-    print()
-PY
-)
-  if [ -n "$output" ] && [ -f "$output" ]; then
-    echo "$output"
-    return 0
-  fi
-  return 1
-}
-
-locate_certbot_dhparams() {
-  local module_path output
-  output=$(python3 - <<'PY'
-import importlib
-from pathlib import Path
-try:
-    mod = importlib.import_module('certbot._internal')
-    base = Path(mod.__file__).parent
-    print(base / 'ssl-dhparams.pem')
-except Exception:
-    print()
-PY
-)
-  if [ -n "$output" ] && [ -f "$output" ]; then
-    echo "$output"
-    return 0
-  fi
-  return 1
-}
-
-certbot_version_url() {
-  local version component
-  version=$(certbot --version 2>/dev/null | awk '{print $2}')
-  component=$1
-  if [ -n "$version" ]; then
-    echo "https://raw.githubusercontent.com/certbot/certbot/v${version}/${component}"
-  else
-    echo ""
-  fi
-}
-
 ensure_ssl_templates() {
   echo "==== Ensuring SSL helper templates exist ===="
   mkdir -p /etc/letsencrypt
 
   if [ ! -f "${SSL_OPTIONS}" ]; then
-    if source_path=$(locate_certbot_file); then
-      cp "$source_path" "${SSL_OPTIONS}"
+    if [ -f /usr/lib/python3/dist-packages/certbot_nginx/_internal/options-ssl-nginx.conf ]; then
+      cp /usr/lib/python3/dist-packages/certbot_nginx/_internal/options-ssl-nginx.conf "${SSL_OPTIONS}"
     else
-      url=$(certbot_version_url "certbot/certbot_nginx/_internal/options-ssl-nginx.conf")
-      if [ -n "$url" ] && curl -fsSL "$url" -o "${SSL_OPTIONS}"; then
-        :
-      else
-        echo "Failed to fetch options-ssl-nginx.conf" >&2
-        exit 1
-      fi
+      echo "Using embedded fallback options file"
+      printf '%s' "$FALLBACK_SSL_OPTIONS" > "${SSL_OPTIONS}"
     fi
     chmod 644 "${SSL_OPTIONS}"
   fi
 
   if [ ! -f "${SSL_DH}" ]; then
-    if dh_source=$(locate_certbot_dhparams); then
-      cp "$dh_source" "${SSL_DH}"
+    if [ -f /usr/lib/python3/dist-packages/certbot/_internal/ssl-dhparams.pem ]; then
+      cp /usr/lib/python3/dist-packages/certbot/_internal/ssl-dhparams.pem "${SSL_DH}"
     else
-      url=$(certbot_version_url "certbot/certbot/_internal/ssl-dhparams.pem")
-      if [ -n "$url" ] && curl -fsSL "$url" -o "${SSL_DH}"; then
-        :
-      else
-        echo "Generating ${SSL_DH} (could take a minute)"
-        openssl dhparam -out "${SSL_DH}" 2048
-      fi
+      echo "Generating ${SSL_DH} (could take a minute)"
+      openssl dhparam -out "${SSL_DH}" 2048
     fi
     chmod 600 "${SSL_DH}"
   fi
