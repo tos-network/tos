@@ -42,25 +42,87 @@ map $http_upgrade $connection_upgrade {
 MAPEOF
 }
 
+locate_certbot_file() {
+  local module_path output
+  output=$(python3 - <<'PY'
+import importlib
+from pathlib import Path
+try:
+    mod = importlib.import_module('certbot_nginx._internal')
+    base = Path(mod.__file__).parent
+    print(base / 'options-ssl-nginx.conf')
+except Exception:
+    print()
+PY
+)
+  if [ -n "$output" ] && [ -f "$output" ]; then
+    echo "$output"
+    return 0
+  fi
+  return 1
+}
+
+locate_certbot_dhparams() {
+  local module_path output
+  output=$(python3 - <<'PY'
+import importlib
+from pathlib import Path
+try:
+    mod = importlib.import_module('certbot._internal')
+    base = Path(mod.__file__).parent
+    print(base / 'ssl-dhparams.pem')
+except Exception:
+    print()
+PY
+)
+  if [ -n "$output" ] && [ -f "$output" ]; then
+    echo "$output"
+    return 0
+  fi
+  return 1
+}
+
+certbot_version_url() {
+  local version component
+  version=$(certbot --version 2>/dev/null | awk '{print $2}')
+  component=$1
+  if [ -n "$version" ]; then
+    echo "https://raw.githubusercontent.com/certbot/certbot/v${version}/${component}"
+  else
+    echo ""
+  fi
+}
+
 ensure_ssl_templates() {
   echo "==== Ensuring SSL helper templates exist ===="
   mkdir -p /etc/letsencrypt
 
   if [ ! -f "${SSL_OPTIONS}" ]; then
-    if [ -f /usr/lib/python3/dist-packages/certbot_nginx/_internal/options-ssl-nginx.conf ]; then
-      cp /usr/lib/python3/dist-packages/certbot_nginx/_internal/options-ssl-nginx.conf "${SSL_OPTIONS}"
+    if source_path=$(locate_certbot_file); then
+      cp "$source_path" "${SSL_OPTIONS}"
     else
-      curl -fsSL "https://raw.githubusercontent.com/certbot/certbot/main/certbot/certbot_nginx/_internal/options-ssl-nginx.conf" -o "${SSL_OPTIONS}"
+      url=$(certbot_version_url "certbot/certbot_nginx/_internal/options-ssl-nginx.conf")
+      if [ -n "$url" ] && curl -fsSL "$url" -o "${SSL_OPTIONS}"; then
+        :
+      else
+        echo "Failed to fetch options-ssl-nginx.conf" >&2
+        exit 1
+      fi
     fi
     chmod 644 "${SSL_OPTIONS}"
   fi
 
   if [ ! -f "${SSL_DH}" ]; then
-    if [ -f /usr/lib/python3/dist-packages/certbot/_internal/ssl-dhparams.pem ]; then
-      cp /usr/lib/python3/dist-packages/certbot/_internal/ssl-dhparams.pem "${SSL_DH}"
+    if dh_source=$(locate_certbot_dhparams); then
+      cp "$dh_source" "${SSL_DH}"
     else
-      echo "Generating ${SSL_DH} (could take a minute)"
-      openssl dhparam -out "${SSL_DH}" 2048
+      url=$(certbot_version_url "certbot/certbot/_internal/ssl-dhparams.pem")
+      if [ -n "$url" ] && curl -fsSL "$url" -o "${SSL_DH}"; then
+        :
+      else
+        echo "Generating ${SSL_DH} (could take a minute)"
+        openssl dhparam -out "${SSL_DH}" 2048
+      fi
     fi
     chmod 600 "${SSL_DH}"
   fi
