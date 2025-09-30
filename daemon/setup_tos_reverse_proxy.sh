@@ -19,19 +19,6 @@ WEBSOCKET_MAP=/etc/nginx/conf.d/websocket_upgrade.conf
 SSL_OPTIONS=/etc/letsencrypt/options-ssl-nginx.conf
 SSL_DH=/etc/letsencrypt/ssl-dhparams.pem
 
-ensure_ssl_templates() {
-  echo "==== Ensuring SSL helper templates exist ===="
-  mkdir -p /etc/letsencrypt
-  if [ ! -f "${SSL_OPTIONS}" ]; then
-    echo "Downloading ${SSL_OPTIONS}"
-    curl -fsSL "https://raw.githubusercontent.com/certbot/certbot/master/certbot_nginx/certbot_nginx/_internal/options-ssl-nginx.conf" -o "${SSL_OPTIONS}"
-  fi
-  if [ ! -f "${SSL_DH}" ]; then
-    echo "Generating ${SSL_DH} (could take a minute)"
-    openssl dhparam -out "${SSL_DH}" 2048
-  fi
-}
-
 install_dependencies() {
   echo "==== 1. Installing dependencies (nginx + certbot) ===="
   apt update
@@ -53,6 +40,30 @@ map $http_upgrade $connection_upgrade {
     '' close;
 }
 MAPEOF
+}
+
+ensure_ssl_templates() {
+  echo "==== Ensuring SSL helper templates exist ===="
+  mkdir -p /etc/letsencrypt
+
+  if [ ! -f "${SSL_OPTIONS}" ]; then
+    if [ -f /usr/lib/python3/dist-packages/certbot_nginx/_internal/options-ssl-nginx.conf ]; then
+      cp /usr/lib/python3/dist-packages/certbot_nginx/_internal/options-ssl-nginx.conf "${SSL_OPTIONS}"
+    else
+      curl -fsSL "https://raw.githubusercontent.com/certbot/certbot/main/certbot/certbot_nginx/_internal/options-ssl-nginx.conf" -o "${SSL_OPTIONS}"
+    fi
+    chmod 644 "${SSL_OPTIONS}"
+  fi
+
+  if [ ! -f "${SSL_DH}" ]; then
+    if [ -f /usr/lib/python3/dist-packages/certbot/_internal/ssl-dhparams.pem ]; then
+      cp /usr/lib/python3/dist-packages/certbot/_internal/ssl-dhparams.pem "${SSL_DH}"
+    else
+      echo "Generating ${SSL_DH} (could take a minute)"
+      openssl dhparam -out "${SSL_DH}" 2048
+    fi
+    chmod 600 "${SSL_DH}"
+  fi
 }
 
 write_nginx_site() {
@@ -105,8 +116,11 @@ enable_site() {
 
 test_and_reload_nginx() {
   echo "==== 6. Testing Nginx configuration and reloading ===="
-  nginx -t
-  systemctl reload nginx
+  if nginx -t; then
+    systemctl reload nginx
+  else
+    echo "Nginx test failed (likely due to missing certificates). Continuing..."
+  fi
 }
 
 obtain_certificate() {
@@ -142,7 +156,7 @@ main() {
   ensure_ssl_templates
   write_nginx_site
   enable_site
-  test_and_reload_nginx || true
+  test_and_reload_nginx
   obtain_certificate
   reload_with_cert
   configure_firewall
