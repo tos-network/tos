@@ -30,8 +30,8 @@ print_usage() {
 check_daemon() {
     if ! curl -s -f http://127.0.0.1:8080/json_rpc -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"get_info","id":1}' >/dev/null 2>&1; then
         echo "❌ Error: Cannot connect to daemon at 127.0.0.1:8080"
-        echo "Please ensure testnet daemon is running:"
-        echo "  sudo systemctl start tos-testnet-daemon"
+        echo "Please ensure daemon is running:"
+        echo "  sudo systemctl start tos-daemon"
         return 1
     fi
     return 0

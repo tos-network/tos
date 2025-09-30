@@ -43,7 +43,7 @@ First, ensure you have a TOS daemon running:
 ```bash
 # Start daemon on development network
 cd daemon
-cargo run --bin tos_daemon -- --network devnet --disable-file-logging
+cargo run --bin tos_daemon -- --network devnet
 ```
 
 You should see output like:
@@ -291,7 +291,7 @@ The system tracks:
 tos_ai_miner --log-level debug
 
 # Disable file logging
-tos_ai_miner --disable-file-logging
+tos_ai_miner
 
 # Custom log path
 tos_ai_miner --logs-path ./custom_logs/

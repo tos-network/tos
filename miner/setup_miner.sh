@@ -24,15 +24,15 @@ fi
 
 # Check if testnet daemon is running
 echo "🔍 Checking testnet daemon status..."
-if ! systemctl is-active --quiet tos-testnet-daemon 2>/dev/null; then
+if ! systemctl is-active --quiet tos-daemon 2>/dev/null; then
     echo "⚠️  Warning: Testnet daemon is not running"
-    echo "Please start testnet daemon first:"
-    echo "  sudo systemctl start tos-testnet-daemon"
-    read -p "Do you want to start testnet daemon now? (y/N): " -n 1 -r
+    echo "Please start daemon first:"
+    echo "  sudo systemctl start tos-daemon"
+    read -p "Do you want to start daemon now? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "🚀 Starting testnet daemon..."
-        sudo systemctl start tos-testnet-daemon
+        echo "🚀 Starting daemon..."
+        sudo systemctl start tos-daemon
         echo "⏱️  Waiting for daemon to initialize..."
         sleep 10
     else
@@ -45,7 +45,7 @@ fi
 echo "🔍 Verifying daemon connectivity..."
 if ! curl -s -f http://127.0.0.1:8080/json_rpc -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"get_info","id":1}' >/dev/null; then
     echo "❌ Error: Cannot connect to daemon at 127.0.0.1:8080"
-    echo "Please ensure testnet daemon is running and accessible"
+    echo "Please ensure daemon is running and accessible"
     exit 1
 fi
 echo "✅ Daemon connectivity verified"
@@ -61,8 +61,8 @@ if [[ $? -eq 0 ]]; then
     sudo tee /etc/systemd/system/tos-miner.service > /dev/null << EOF
 [Unit]
 Description=TOS Testnet Miner
-After=network.target tos-testnet-daemon.service
-Requires=tos-testnet-daemon.service
+After=network.target tos-daemon.service
+Requires=tos-daemon.service
 
 [Service]
 Type=simple

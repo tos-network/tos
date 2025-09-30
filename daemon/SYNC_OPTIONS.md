@@ -103,7 +103,7 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 
-**Testnet Service** `/etc/systemd/system/tos-testnet-daemon.service`:
+**Testnet Service** `/etc/systemd/system/tos-daemon.service` (on testnet server):
 ```ini
 [Unit]
 Description=TOS Testnet Daemon
@@ -137,13 +137,13 @@ WantedBy=multi-user.target
 
 **For Testnet:**
 ```bash
-./daemon/update_testnet_systemd_with_sync_options.sh
+./daemon/update_systemd_with_sync_options.sh
 ```
 
 **Setup Scripts:**
 ```bash
-# Complete testnet setup
-./daemon/setup_testnet_daemon.sh
+# Complete daemon setup
+./daemon/setup_daemon.sh
 ```
 
 ## Performance Comparison

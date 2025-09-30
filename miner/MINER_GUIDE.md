@@ -29,7 +29,7 @@ sudo journalctl -u tos-miner -f
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | Miner Address | `tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u` | Testnet wallet address to receive rewards |
-| Daemon Address | `127.0.0.1:8080` | Local testnet daemon RPC endpoint |
+| Daemon Address | `127.0.0.1:8080` | Local daemon RPC endpoint |
 | Threads | `1` | Single thread mining |
 | Network | Testnet | Low difficulty mining |
 | Interactive Mode | Disabled | Non-interactive operation (no CLI commands) |
@@ -82,10 +82,10 @@ sudo systemctl disable tos-miner
 
 ## Prerequisites
 
-1. **Testnet Daemon Running**:
+1. **Daemon Running**:
    ```bash
-   sudo systemctl start tos-testnet-daemon
-   sudo systemctl status tos-testnet-daemon
+   sudo systemctl start tos-daemon
+   sudo systemctl status tos-daemon
    ```
 
 2. **Daemon Connectivity**:
@@ -109,7 +109,7 @@ sudo systemctl disable tos-miner
 curl -s http://127.0.0.1:8080/json_rpc -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"get_info","id":1}'
 
 # Check daemon status
-sudo systemctl status tos-testnet-daemon
+sudo systemctl status tos-daemon
 
 # Check miner service logs
 sudo journalctl -u tos-miner -n 50
