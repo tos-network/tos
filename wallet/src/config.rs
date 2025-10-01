@@ -258,6 +258,7 @@ pub struct Config {
     pub json_file: Option<String>
 }
 
+#[cfg(feature = "cli")]
 impl Config {
     /// Check if we're in exec mode (--exec, --json, or --json-file)
     pub fn is_exec_mode(&self) -> bool {
