@@ -631,10 +631,7 @@ impl<S: Storage> Blockchain<S> {
     
             // register TOS asset
             debug!("Registering TOS asset: {} at topoheight 0", TOS_ASSET);
-            let ticker = match self.network {
-                Network::Mainnet => "TOS".to_owned(),
-                _ => "TST".to_owned(),
-            };
+            let ticker = "TOS".to_owned();
     
             storage.add_asset(
                 &TOS_ASSET,
