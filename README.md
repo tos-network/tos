@@ -1,6 +1,10 @@
-# TOS Network
+<p align="center">
+  <img src="logo.png" alt="TopoSpartan Logo" width="150"/>
+</p>
 
-Official Rust implementation of the TOS Network protocol.
+# <p align="center">TOS Network</p>
+
+<p align="center">Official Rust implementation of the TOS Network protocol.</p>
 
 ## Overview
 
