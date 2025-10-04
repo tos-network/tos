@@ -42,8 +42,8 @@ pub const TERA_HASH: u64 = GIGA_HASH * 1000;
 // BLOCK TIME in millis * N = minimum hashrate
 // This is to prevent spamming the network with low difficulty blocks
 // and is only active on mainnet
-// Currently set to 20 KH/s
-pub const MAINNET_MINIMUM_HASHRATE: u64 = 20 * KILO_HASH;
+// Currently set to 100 H/s (same as testnet for easier solo mining)
+pub const MAINNET_MINIMUM_HASHRATE: u64 = 100 * HASH;
 // Testnet & Devnet minimum hashrate
 // Currently set to 100 H/s (reduced from 2 KH/s for easier development)
 pub const DEFAULT_MINIMUM_HASHRATE: u64 = 100 * HASH;

@@ -8,8 +8,6 @@ use tos_common::{
 };
 
 use crate::config::{
-    KILO_HASH,
-    GIGA_HASH,
     DEFAULT_MINIMUM_HASHRATE,
     MAINNET_MINIMUM_HASHRATE,
     MILLIS_PER_SECOND
@@ -98,8 +96,8 @@ pub const fn get_minimum_difficulty(network: &Network, version: BlockVersion) ->
 pub const fn get_difficulty_at_hard_fork(network: &Network, version: BlockVersion) -> Option<Difficulty> {
     let hashrate = match network {
         Network::Mainnet => match version {
-            BlockVersion::V0 | BlockVersion::V1 => 20 * KILO_HASH,
-            BlockVersion::V2 => 2 * GIGA_HASH,
+            BlockVersion::V0 | BlockVersion::V1 => DEFAULT_MINIMUM_HASHRATE,
+            BlockVersion::V2 => DEFAULT_MINIMUM_HASHRATE,
             BlockVersion::V3 => return None,
         },
         _ => return None,
@@ -112,18 +110,18 @@ pub const fn get_difficulty_at_hard_fork(network: &Network, version: BlockVersio
 #[cfg(test)]
 mod tests {
     use tos_common::utils::format_hashrate;
-    use crate::config::{HASH, MEGA_HASH};
+    use crate::config::{HASH, KILO_HASH, MEGA_HASH, GIGA_HASH};
 
     use super::*;
 
     #[test]
     fn test_difficulty_at_hard_fork() {
-        // 20 KH/s for V0 with 60s target = 20,000 * 60,000 / 1000 = 1,200,000
-        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V0).unwrap(), Difficulty::from_u64(20 * KILO_HASH * 60));
-        // 2 GH/s for V2 with 12s target = 2,000,000,000 * 12,000 / 1000 = 24,000,000,000
-        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V2).unwrap(), Difficulty::from_u64(12 * 2 * GIGA_HASH));
+        // 100 H/s for V0 with 60s target = 100 * 60,000 / 1000 = 6,000
+        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V0).unwrap(), Difficulty::from_u64(DEFAULT_MINIMUM_HASHRATE * 60));
+        // 100 H/s for V2 with 12s target = 100 * 12,000 / 1000 = 1,200
+        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V2).unwrap(), Difficulty::from_u64(12 * DEFAULT_MINIMUM_HASHRATE));
 
-        // 2 KH/s per second for whole testnet
+        // testnet returns None for all versions
         for version in [BlockVersion::V0, BlockVersion::V1, BlockVersion::V2, BlockVersion::V3] {
             assert!(get_difficulty_at_hard_fork(&Network::Testnet, version).is_none());
         }
