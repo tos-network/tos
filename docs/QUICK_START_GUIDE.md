@@ -223,7 +223,7 @@ tos_ai_miner --network devnet --daemon-address http://127.0.0.1:8080
 ### Test Network (Testnet)
 
 ```bash
-tos_ai_miner --network testnet --daemon-address http://testnet.tos.network:8080
+tos_ai_miner --network testnet --daemon-address http://testnode.tos.network:8080
 ```
 
 **Features:**

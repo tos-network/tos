@@ -3,11 +3,11 @@
 # Usage:
 #   sudo bash setup_tos_reverse_proxy.sh <domain> <email> [backend_host] [backend_port]
 # Example:
-#   sudo bash setup_tos_reverse_proxy.sh testnet.tos.network admin@tos.network 127.0.0.1 8080
+#   sudo bash setup_tos_reverse_proxy.sh testnode.tos.network admin@tos.network 127.0.0.1 8080
 
 set -euo pipefail
 
-DOMAIN=${1:-testnet.tos.network}
+DOMAIN=${1:-testnode.tos.network}
 EMAIL=${2:-admin@tos.network}
 BACKEND_HOST=${3:-127.0.0.1}
 BACKEND_PORT=${4:-8080}
