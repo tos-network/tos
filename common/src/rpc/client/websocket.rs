@@ -5,7 +5,8 @@ use std::{
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc
+        Arc,
+        OnceLock
     },
     time::Duration
 };
@@ -35,6 +36,34 @@ use crate::{
 };
 
 use super::{JSON_RPC_VERSION, JsonRPCError, JsonRPCResponse, JsonRPCResult};
+
+// Initialize rustls crypto provider once
+static RUSTLS_CRYPTO_INIT: OnceLock<()> = OnceLock::new();
+
+#[cfg(feature = "rpc-client")]
+fn init_rustls_crypto_provider() {
+    RUSTLS_CRYPTO_INIT.get_or_init(|| {
+        #[cfg(feature = "rustls")]
+        {
+            use log::{debug, warn};
+
+            // Check if a crypto provider is already installed
+            if rustls::crypto::CryptoProvider::get_default().is_some() {
+                debug!("Rustls crypto provider already initialized");
+                return;
+            }
+
+            // Try to install the default crypto provider
+            // rustls 0.23 with default features uses aws-lc-rs
+            let install_result = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+            match install_result {
+                Ok(_) => debug!("Successfully installed rustls aws-lc-rs crypto provider"),
+                Err(e) => warn!("Failed to install rustls crypto provider: {:?}", e),
+            }
+        }
+    });
+}
 
 // EventReceiver allows to get the event value parsed directly
 pub struct EventReceiver<T: DeserializeOwned> {
@@ -127,6 +156,10 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
     // Create a new WebSocketJsonRPCClient with the target address and timeout
     pub async fn with(mut target: String, timeout_after: Duration) -> Result<WebSocketJsonRPCClient<E>, JsonRPCError> {
+        // Initialize rustls crypto provider before any TLS connections
+        #[cfg(feature = "rpc-client")]
+        init_rustls_crypto_provider();
+
         target = sanitize_ws_address(target.as_str());
         let ws = connect(&target).await?;
 
