@@ -3453,11 +3453,12 @@ mod tests {
         assert_eq!(get_block_dev_fee(0), 10);
         assert_eq!(get_block_dev_fee(1), 10);
 
-        // ~ current height
+        // ~ current height - should still be at 10% threshold
         assert_eq!(get_block_dev_fee(55_000), 10);
 
-        // End of the first threshold, we pass to 5%
-        assert_eq!(get_block_dev_fee(3_942_000), 5);
+        // TIP-1: Removed hardcoded 3_942_000 test (was for 12s blocks)
+        // New threshold is at 15_768_000 blocks (for 3s blocks, same ~1.5 year duration)
+        // Test using DEV_FEES constants instead for flexibility
 
         assert_eq!(get_block_dev_fee(DEV_FEES[0].height), 10);
         assert_eq!(get_block_dev_fee(DEV_FEES[1].height), 5);

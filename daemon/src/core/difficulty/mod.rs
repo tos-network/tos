@@ -118,8 +118,10 @@ mod tests {
     fn test_difficulty_at_hard_fork() {
         // 100 H/s for V0 with 60s target = 100 * 60,000 / 1000 = 6,000
         assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V0).unwrap(), Difficulty::from_u64(DEFAULT_MINIMUM_HASHRATE * 60));
-        // 100 H/s for V2 with 12s target = 100 * 12,000 / 1000 = 1,200
-        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V2).unwrap(), Difficulty::from_u64(12 * DEFAULT_MINIMUM_HASHRATE));
+
+        // TIP-1: V1/V2/V3 now use 3s blocks
+        // 100 H/s for V2 with 3s target = 100 * 3,000 / 1000 = 300
+        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V2).unwrap(), Difficulty::from_u64(3 * DEFAULT_MINIMUM_HASHRATE));
 
         // testnet returns None for all versions
         for version in [BlockVersion::V0, BlockVersion::V1, BlockVersion::V2, BlockVersion::V3] {
