@@ -84,7 +84,7 @@ struct CachedTemplate {
 
 impl BlockTemplateCache {
     /// Create a new block template cache
-    pub fn new(ttl_ms: u64) -> Self {
+    pub fn new(_ttl_ms: u64) -> Self {
         Self {
             cache: Arc::new(RwLock::new(None)),
         }
@@ -179,7 +179,7 @@ mod tests {
 
         // Cache should be empty initially
         assert!(cache.is_empty().await);
-        assert_eq!(cache.get(&hash).await, None);
+        assert!(cache.get(&hash).await.is_none());
 
         // Put data into cache
         cache.put(hash.clone(), data.clone()).await;

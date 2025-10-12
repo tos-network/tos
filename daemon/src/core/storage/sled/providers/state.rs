@@ -13,8 +13,7 @@ use crate::core::{
         DagOrderProvider,
         DifficultyProvider,
         SledStorage,
-        StateProvider,
-        TransactionProvider
+        StateProvider
     }
 };
 

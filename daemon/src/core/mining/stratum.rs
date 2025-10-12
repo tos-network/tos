@@ -250,7 +250,7 @@ mod tests {
     use super::*;
     use tos_common::{
         crypto::{PublicKey, Hash},
-        block::{EXTRA_NONCE_SIZE, BlockHeader},
+        block::{EXTRA_NONCE_SIZE, BlockHeader, BlockVersion},
     };
 
     #[test]
@@ -269,9 +269,13 @@ mod tests {
 
     #[test]
     fn test_block_header_to_stratum_job() {
-        let address = PublicKey::from_slice(&[1u8; 33]).unwrap();
+        // Create a test public key - read from bytes using Serializer trait
+        use tos_common::serializer::{Serializer, Reader};
+        let mut reader = Reader::new(&[1u8; 32]);
+        let address = PublicKey::read(&mut reader).expect("Failed to read public key");
+
         let header = BlockHeader::new_simple(
-            1,
+            BlockVersion::V1,
             vec![Hash::new([0u8; 32])],
             1234567890,
             [0u8; EXTRA_NONCE_SIZE],

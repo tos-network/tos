@@ -114,6 +114,7 @@ impl RecentBlockTracker {
         false
     }
 
+    #[allow(dead_code)]
     fn get_status(&self, hash: &Hash) -> Option<BlockStatus> {
         self.blocks.iter()
             .find(|(h, _, _)| h == hash)

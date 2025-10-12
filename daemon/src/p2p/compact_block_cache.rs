@@ -17,6 +17,7 @@ struct CacheEntry {
     /// When this entry was added
     added_at: Instant,
     /// Peer address that sent this compact block (for debugging)
+    #[allow(dead_code)]
     peer_addr: String,
 }
 
@@ -65,6 +66,7 @@ impl CompactBlockCache {
     /// Retrieve a compact block from the cache
     ///
     /// Returns None if not found or if entry has expired
+    #[allow(dead_code)]
     pub async fn get(&self, block_hash: &Hash) -> Option<CompactBlock> {
         let mut cache = self.cache.write().await;
 
@@ -117,12 +119,14 @@ impl CompactBlockCache {
     }
 
     /// Check if the cache is empty
+    #[allow(dead_code)]
     pub async fn is_empty(&self) -> bool {
         let cache = self.cache.read().await;
         cache.is_empty()
     }
 
     /// Clear all entries from the cache
+    #[allow(dead_code)]
     pub async fn clear(&self) {
         let mut cache = self.cache.write().await;
         cache.clear();
@@ -134,9 +138,7 @@ mod tests {
     use super::*;
     use tos_common::block::{BlockHeader, BlockVersion};
     use tos_common::crypto::elgamal::CompressedPublicKey;
-    use tos_common::immutable::Immutable;
     use tos_common::serializer::{Reader, Serializer};
-    use indexmap::IndexSet;
 
     fn create_test_compact_block() -> CompactBlock {
         // Create a minimal block header

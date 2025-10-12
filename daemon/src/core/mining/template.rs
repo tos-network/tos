@@ -38,6 +38,7 @@ pub struct BlockTemplateGenerator {
     stats: Arc<MiningStats>,
 
     /// Template cache TTL in milliseconds
+    #[allow(dead_code)]
     template_ttl_ms: u64,
 
     /// Network (for version calculation)

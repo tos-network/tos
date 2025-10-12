@@ -594,8 +594,6 @@ mod tests {
 // Run with: cargo test --test daa_integration -- --ignored
 #[cfg(test)]
 mod integration_tests {
-    use super::*;
-
     // TODO: Add integration tests once storage is fully implemented
     // These tests will:
     // 1. Create a chain of blocks with varying timestamps
@@ -647,7 +645,6 @@ mod integration_tests {
 #[cfg(test)]
 mod daa_comprehensive_tests {
     use super::*;
-    use tos_common::varuint::VarUint;
 
     // Test 1: DAA window calculation edge cases - empty window
     #[test]
@@ -799,12 +796,7 @@ mod daa_comprehensive_tests {
 
         let result = apply_difficulty_adjustment(&zero_difficulty, ratio);
         assert!(result.is_ok());
-
-        let new_difficulty = result.unwrap();
-        // Difficulty should be valid (U256 is always non-negative)
-        let new_val = new_difficulty.as_ref();
-        // U256 is unsigned, so we just verify it's a valid value
-        assert!(new_val.as_u64() >= 0, "Difficulty should be valid");
+        // Difficulty should be valid (U256 is always non-negative and unsigned)
     }
 
     // Test 9: Very large difficulty values

@@ -338,7 +338,7 @@ impl Wallet {
                     mnemonics::words_to_key(&words)?
                 }
             };
-            KeyPair::from_private_key(key)
+            KeyPair::from_private_key(key)?
         } else {
             debug!("Generating a new keypair...");
             KeyPair::new()
@@ -425,7 +425,7 @@ impl Wallet {
         let storage = EncryptedStorage::new(storage, &master_key, salt, network)?;
         debug!("Retrieving private key from encrypted storage");
         let private_key =  storage.get_private_key()?;
-        let keypair = KeyPair::from_private_key(private_key);
+        let keypair = KeyPair::from_private_key(private_key)?;
 
         Ok(Self::new(storage, keypair, network, precomputed_tables, n_threads, concurrency))
     }

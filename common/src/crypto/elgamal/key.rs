@@ -1,5 +1,4 @@
 use curve25519_dalek::{
-    constants::RISTRETTO_BASEPOINT_POINT,
     ecdlp::{self, ECDLPArguments, ECDLPTablesFileView},
     ristretto::RistrettoPoint,
     Scalar
@@ -96,8 +95,10 @@ impl PublicKey {
             return Err(KeyError::WeakEntropy);
         }
 
-        // Use STANDARD construction: P = s * G (not s^(-1) * H)
-        Ok(Self(s * RISTRETTO_BASEPOINT_POINT))
+        // Use inverse construction with H base point: P = s^(-1) * H
+        // This construction is required by the signature scheme
+        // Note: We use H (blinding base) not G (Ristretto basepoint) for compatibility with signatures
+        Ok(Self(s.invert() * (*H)))
     }
 
     // Encrypt an amount to a Ciphertext
@@ -327,15 +328,16 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // V-08 Security Tests: Test standard construction (P = s * G)
+    // V-08 Security Tests: Test inverse construction with H (P = s^(-1) * H)
     #[test]
-    fn test_v08_standard_construction() {
+    fn test_v08_inverse_construction() {
         let scalar = Scalar::from(1u64 << 33); // Well above threshold
         let private_key = PrivateKey(scalar);
         let public_key = PublicKey::new(&private_key).unwrap();
 
-        // Verify standard construction: P = s * G
-        let expected = scalar * RISTRETTO_BASEPOINT_POINT;
+        // Verify inverse construction with H: P = s^(-1) * H
+        // This construction is required for signature scheme compatibility
+        let expected = scalar.invert() * (*H);
         assert_eq!(public_key.as_point(), &expected);
     }
 

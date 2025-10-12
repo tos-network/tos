@@ -8,7 +8,6 @@ use tos_common::{
     account::{VersionedBalance, VersionedNonce},
     crypto::{Hash, Hashable, PublicKey},
     immutable::Immutable,
-    transaction::Transaction,
     versioned_type::State,
     asset::VersionedAssetData,
 };

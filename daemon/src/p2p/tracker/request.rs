@@ -11,6 +11,7 @@ use crate::p2p::{
 };
 
 pub type RequestCallback = broadcast::Sender<OwnedObjectResponse>;
+#[allow(dead_code)]
 pub type RequestResponse = broadcast::Receiver<OwnedObjectResponse>;
 
 // Element of the queue for this Object pub Tracker
@@ -29,6 +30,7 @@ pub struct Request {
 }
 
 impl Request {
+    #[allow(dead_code)]
     pub fn new(request: ObjectRequest, peer: Arc<Peer>, group_id: Option<u64>) -> (Self, RequestResponse) {
         let (callback, receiver) = broadcast::channel(1);
         (Self {
@@ -48,6 +50,7 @@ impl Request {
         &self.peer
     }
 
+    #[allow(dead_code)]
     pub fn listen(&self) -> RequestResponse {
         self.callback.subscribe()
     }

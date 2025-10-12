@@ -30,10 +30,9 @@ use tokio_socks::tcp::{Socks4Stream, Socks5Stream};
 use bytes::{Bytes, BytesMut};
 use rand::{seq::IteratorRandom, Rng};
 use futures::{
-    stream::{self, FuturesOrdered},
+    stream::self,
     Stream,
-    StreamExt,
-    TryStreamExt
+    StreamExt
 };
 use indexmap::IndexSet;
 use lru::LruCache;

@@ -42,7 +42,7 @@ use tos_common::{
 use crate::core::{
     config::RocksDBConfig,
     error::{BlockchainError, DiskContext},
-    storage::{BlocksAtHeightProvider, ClientProtocolProvider, ContractOutputsProvider, Tips}
+    storage::BlocksAtHeightProvider
 };
 
 pub use column::*;

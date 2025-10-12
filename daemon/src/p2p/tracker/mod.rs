@@ -75,6 +75,7 @@ impl ExpirableCache {
 pub struct ObjectTracker {
     // This is used to send the request to the requester task loop
     // it is a bounded channel, so if the queue is full, it will block the sender
+    #[allow(dead_code)]
     request_sender: Sender<Hash>,
     // queue of requests with preserved order
     queue: Mutex<Queue<Hash, Request>>,
@@ -246,6 +247,7 @@ impl ObjectTracker {
     }
 
     // Request the object from the peer and returns the response blocker
+    #[allow(dead_code)]
     pub async fn request_object_from_peer_with_or_get_notified(&self, peer: Arc<Peer>, request: ObjectRequest, group_id: Option<u64>) -> Result<RequestResponse, P2pError> {
         trace!("Requesting object {} from {}", request.get_hash(), peer);
         let (listener, hash) = {

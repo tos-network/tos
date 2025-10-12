@@ -90,7 +90,7 @@ use crate::{
         blockdag,
         difficulty,
         error::BlockchainError,
-        ghostdag::{BlueWorkType, TosGhostdag},
+        ghostdag::TosGhostdag,
         mempool::Mempool,
         nonce_checker::NonceChecker,
         simulator::Simulator,

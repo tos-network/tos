@@ -9,7 +9,7 @@ use crate::{
     block::BlockVersion,
     config::{BURN_PER_CONTRACT, COIN_VALUE, TOS_ASSET},
     crypto::{
-        elgamal::{Ciphertext, PedersenOpening},
+        elgamal::{Ciphertext, CompressedPublicKey, PedersenOpening},
         proofs::{G, ProofVerificationError},
         Address,
         Hash,
@@ -900,6 +900,24 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         new_nonce: Nonce
     ) -> Result<(), TestError> {
         self.accounts.get_mut(account).map(|account| account.nonce = new_nonce).ok_or(TestError(()))
+    }
+
+    /// Atomic compare-and-swap for nonce (V-11 security fix)
+    async fn compare_and_swap_nonce(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        expected: Nonce,
+        new_value: Nonce
+    ) -> Result<bool, TestError> {
+        // For test state, we don't need true atomicity
+        // Note: In this test module, PublicKey is already CompressedPublicKey
+        let current = self.get_account_nonce(account).await?;
+        if current == expected {
+            self.update_account_nonce(account, new_value).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn get_block_version(&self) -> BlockVersion {

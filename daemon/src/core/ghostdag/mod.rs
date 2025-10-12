@@ -10,7 +10,7 @@ pub use daa::{calculate_daa_score, calculate_target_difficulty, DAA_WINDOW_SIZE,
 
 use anyhow::Result;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tos_common::crypto::Hash;
 use tos_common::difficulty::Difficulty;
@@ -518,6 +518,7 @@ impl TosGhostdag {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     // Note: Full tests require storage implementation
     // For now, we test basic structure
@@ -757,7 +758,7 @@ mod tests {
         assert!(work_high > work_low, "Higher difficulty should produce higher work");
     }
 
-    /// Test 12: Zero difficulty edge case
+    /// Test 12: Zero difficulty edge case (V-06 Security Fix)
     #[test]
     fn test_ghostdag_zero_difficulty() {
         use tos_common::difficulty::Difficulty;
@@ -766,8 +767,9 @@ mod tests {
         let zero_diff = Difficulty::from(0u64);
         let zero_work = calc_work_from_difficulty(&zero_diff);
 
-        // Zero difficulty should produce zero work
-        assert_eq!(zero_work, BlueWorkType::zero());
+        // V-06 Security Fix: Zero difficulty produces max work to prevent division by zero
+        // This prevents attacks using zero difficulty blocks
+        assert_eq!(zero_work, BlueWorkType::max_value());
     }
 
     /// Test 13: Large DAG performance simulation

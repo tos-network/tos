@@ -56,21 +56,12 @@ impl CompressedCommitment {
         &self.0
     }
 
-    // Decompress it to a PedersenCommitment with comprehensive validation
+    // Decompress it to a PedersenCommitment
+    // Note: Identity points ARE allowed for commitments (they represent zero amounts)
     pub fn decompress(&self) -> Result<PedersenCommitment, DecompressionError> {
-        // Check not identity BEFORE decompression
-        if self.0.is_identity() {
-            return Err(DecompressionError::IdentityPoint);
-        }
-
         let point = self.0.decompress().ok_or(DecompressionError::InvalidPoint)?;
 
-        // Verify not identity AFTER decompression
-        if point.is_identity() {
-            return Err(DecompressionError::IdentityPoint);
-        }
-
-        // Ristretto points are cofactor-clean by construction, but we validate anyway
+        // Ristretto points are cofactor-clean by construction
         Ok(PedersenCommitment::from_point(point))
     }
 }
@@ -86,21 +77,12 @@ impl CompressedHandle {
         &self.0.as_bytes()
     }
 
-    // Decompress it to a DecryptHandle with comprehensive validation
+    // Decompress it to a DecryptHandle
+    // Note: Identity points ARE allowed for handles (they are part of zero ciphertexts)
     pub fn decompress(&self) -> Result<DecryptHandle, DecompressionError> {
-        // Check not identity BEFORE decompression
-        if self.0.is_identity() {
-            return Err(DecompressionError::IdentityPoint);
-        }
-
         let point = self.0.decompress().ok_or(DecompressionError::InvalidPoint)?;
 
-        // Verify not identity AFTER decompression
-        if point.is_identity() {
-            return Err(DecompressionError::IdentityPoint);
-        }
-
-        // Ristretto points are cofactor-clean by construction, but we validate anyway
+        // Ristretto points are cofactor-clean by construction
         Ok(DecryptHandle::from_point(point))
     }
 }
@@ -286,28 +268,32 @@ impl Serializer for Scalar {
 mod tests {
     use super::*;
     use serde_json::json;
-    use curve25519_dalek::ristretto::RistrettoPoint;
 
-    // V-09 Security Tests: Test identity point rejection for commitment
+    // V-09 Security Tests: Test identity point ACCEPTANCE for commitment
+    // Identity commitments are valid (they represent zero amounts in ElGamal)
     #[test]
-    fn test_v09_identity_commitment_rejection() {
-        let identity_compressed = CompressedCommitment::new(CompressedRistretto::identity());
+    fn test_v09_identity_commitment_acceptance() {
+        // Identity point in compressed form is all zeros
+        let identity_compressed = CompressedCommitment::new(CompressedRistretto([0u8; 32]));
         let result = identity_compressed.decompress();
-        assert!(matches!(result, Err(DecompressionError::IdentityPoint)));
+        assert!(result.is_ok(), "Identity commitments should be allowed for zero amounts");
     }
 
-    // V-09 Security Tests: Test identity point rejection for handle
+    // V-09 Security Tests: Test identity point ACCEPTANCE for handle
+    // Identity handles are valid (they are part of zero ciphertexts)
     #[test]
-    fn test_v09_identity_handle_rejection() {
-        let identity_compressed = CompressedHandle::new(CompressedRistretto::identity());
+    fn test_v09_identity_handle_acceptance() {
+        // Identity point in compressed form is all zeros
+        let identity_compressed = CompressedHandle::new(CompressedRistretto([0u8; 32]));
         let result = identity_compressed.decompress();
-        assert!(matches!(result, Err(DecompressionError::IdentityPoint)));
+        assert!(result.is_ok(), "Identity handles should be allowed for zero ciphertexts");
     }
 
     // V-09 Security Tests: Test identity point rejection for public key
     #[test]
     fn test_v09_identity_pubkey_rejection() {
-        let identity_compressed = CompressedPublicKey::new(CompressedRistretto::identity());
+        // Identity point in compressed form is all zeros
+        let identity_compressed = CompressedPublicKey::new(CompressedRistretto([0u8; 32]));
         let result = identity_compressed.decompress();
         assert!(matches!(result, Err(DecompressionError::IdentityPoint)));
     }

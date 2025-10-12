@@ -425,7 +425,8 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
             .context("Error while building unsigned transaction")?;
 
         for signer in params.signers {
-            let keypair = KeyPair::from_private_key(signer.private_key);
+            let keypair = KeyPair::from_private_key(signer.private_key)
+                .context("Invalid private key for multisig signer")?;
             unsigned.sign_multisig(&keypair, signer.id);
         }
 
@@ -502,7 +503,8 @@ async fn build_transaction_offline(context: &Context, body: Value) -> Result<Val
             .context("Error while building unsigned transaction")?;
 
         for signer in params.signers {
-            let keypair = KeyPair::from_private_key(signer.private_key);
+            let keypair = KeyPair::from_private_key(signer.private_key)
+                .context("Invalid private key for multisig signer")?;
             unsigned.sign_multisig(&keypair, signer.id);
         }
 

@@ -7,9 +7,8 @@ use std::{
     time::{Duration, Instant}
 };
 use futures::{
-    stream::{self, FuturesOrdered},
-    StreamExt,
-    TryStreamExt
+    stream::self,
+    StreamExt
 };
 use indexmap::IndexSet;
 use log::{debug, error, info, trace, warn};
@@ -214,7 +213,7 @@ impl<S: Storage> P2pServer<S> {
         for hash in blocks {
             let hash = Immutable::Arc(Arc::new(hash));
             trace!("Processing block {} from chain validator", hash);
-            let header = chain_validator.get_block(&hash);
+            let _header = chain_validator.get_block(&hash);
 
             let future = async move {
                 // we don't already have this block, lets retrieve its txs and add in our chain

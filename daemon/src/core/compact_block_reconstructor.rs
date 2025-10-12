@@ -268,7 +268,6 @@ mod tests {
         crypto::elgamal::CompressedPublicKey,
         serializer::{Reader, Serializer},
     };
-    use indexmap::IndexSet;
 
     #[test]
     fn test_reconstruction_threshold() {
