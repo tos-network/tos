@@ -7,6 +7,7 @@ pub mod diffie_hellman;
 mod tracker;
 mod encryption;
 mod chain_sync;
+mod compact_block_cache;
 
 use anyhow::Context;
 pub use encryption::EncryptionKey;
@@ -212,6 +213,8 @@ pub struct P2pServer<S: Storage> {
     // Proxy address to use in case we try to connect
     // to an outgoing peer
     proxy: Option<(ProxyKind, SocketAddr, Option<(String, String)>)>,
+    // Compact block cache for pending reconstructions
+    compact_block_cache: Arc<compact_block_cache::CompactBlockCache>,
 }
 
 impl<S: Storage> P2pServer<S> {
@@ -320,7 +323,11 @@ impl<S: Storage> P2pServer<S> {
             block_propagation_log_level,
             disable_fetching_txs_propagated,
             handle_peer_packets_in_dedicated_task,
-            proxy
+            proxy,
+            compact_block_cache: Arc::new(compact_block_cache::CompactBlockCache::new(
+                100, // capacity: store up to 100 pending compact blocks
+                Duration::from_secs(60) // timeout: 60 seconds
+            )),
         };
 
         let arc = Arc::new(server);
@@ -2295,8 +2302,16 @@ impl<S: Storage> P2pServer<S> {
                             block_hash, request.missing_indices.len());
                         drop(mempool); // Release lock before sending packet
 
-                        // Store compact block for later reconstruction
-                        // TODO: Implement compact block cache to store pending reconstructions
+                        // Store compact block in cache for later reconstruction
+                        let peer_addr = peer.get_outgoing_address().to_string();
+                        if !self.compact_block_cache.insert(
+                            (*block_hash).clone(),
+                            compact_block.clone(),
+                            peer_addr.clone()
+                        ).await {
+                            debug!("Compact block {} already in cache, skipping duplicate", block_hash);
+                            return Ok(());
+                        }
 
                         // Request missing transactions from peer
                         // Create a ping with current blockchain state
@@ -2398,16 +2413,37 @@ impl<S: Storage> P2pServer<S> {
                 debug!("Received {} missing transactions for block {}",
                     response.transactions.len(), response.block_hash);
 
-                // TODO: Implement compact block cache to retrieve the pending compact block
-                // For now, we can't complete reconstruction without the original compact block
-                warn!("Received missing transactions for block {}, but compact block cache not yet implemented",
-                    response.block_hash);
+                // Retrieve pending compact block from cache
+                match self.compact_block_cache.remove(&response.block_hash).await {
+                    Some(compact_block) => {
+                        debug!("Retrieved compact block {} from cache, completing reconstruction", response.block_hash);
 
-                // Future implementation:
-                // 1. Retrieve pending compact block from cache using response.block_hash
-                // 2. Call CompactBlockReconstructor::complete_reconstruction()
-                // 3. Process the reconstructed block
-                // 4. Remove from cache
+                        // Complete reconstruction with the missing transactions
+                        let mempool = self.blockchain.get_mempool().read().await;
+                        match CompactBlockReconstructor::complete_reconstruction(
+                            compact_block,
+                            response,
+                            &mempool
+                        ) {
+                            Ok(block) => {
+                                debug!("Successfully completed reconstruction of block {}", block.hash());
+                                drop(mempool); // Release lock before processing
+
+                                let block_hash = Arc::new(block.hash());
+                                // Process the reconstructed block through normal block processing
+                                if let Err(e) = self.blocks_processor.send((peer.clone(), block.get_header().clone(), block_hash)).await {
+                                    error!("Error while sending reconstructed block to blocks processor task: {}", e);
+                                }
+                            },
+                            Err(e) => {
+                                error!("Failed to complete block reconstruction: {}", e);
+                            }
+                        }
+                    },
+                    None => {
+                        warn!("Received missing transactions for block {} but compact block not found in cache", response.block_hash);
+                    }
+                }
             }
         };
         Ok(())
