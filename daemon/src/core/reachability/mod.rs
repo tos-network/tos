@@ -152,20 +152,97 @@ impl TosReachability {
         }
     }
 
-    // TODO: Uncomment and implement when Storage trait includes ReachabilityDataProvider
-    // /// Add a new block to the reachability tree
-    // ///
-    // /// This is a simplified version that allocates intervals without reindexing.
-    // /// Full Kaspa implementation includes complex reindexing logic when intervals run out.
-    // pub async fn add_block<S: Storage>(
-    //     &self,
-    //     storage: &S,
-    //     new_block: Hash,
-    //     parent: Hash,
-    //     _mergeset: &[Hash],
-    // ) -> Result<ReachabilityData, BlockchainError> {
-    //     // Implementation here
-    // }
+    /// Add a new block to the reachability tree
+    ///
+    /// This is a simplified Phase 2 implementation that allocates intervals without reindexing.
+    /// Based on Kaspa's add_tree_block in tree.rs
+    ///
+    /// # Algorithm
+    /// 1. Get parent's remaining interval capacity
+    /// 2. Allocate half of remaining interval to new block
+    /// 3. Add new block as child of parent
+    /// 4. Set height = parent_height + 1
+    ///
+    /// Note: Full Kaspa includes complex reindexing when intervals run out.
+    /// This simplified version will panic if parent has no remaining capacity.
+    pub async fn add_tree_block<S: Storage>(
+        &mut self,
+        storage: &mut S,
+        new_block: Hash,
+        selected_parent: Hash,
+    ) -> Result<(), BlockchainError> {
+        // Get parent's reachability data
+        let mut parent_data = storage.get_reachability_data(&selected_parent).await?;
+
+        // Calculate remaining interval capacity
+        // If parent has children, start after last child's interval
+        // Otherwise, use parent's full interval
+        let remaining = if let Some(last_child) = parent_data.children.last() {
+            let last_child_data = storage.get_reachability_data(last_child).await?;
+            Interval::new(last_child_data.interval.end + 1, parent_data.interval.end)
+        } else {
+            parent_data.interval
+        };
+
+        // Allocate half of remaining interval to new block
+        let (allocated, _right) = remaining.split_half();
+
+        // Create reachability data for new block
+        let new_block_data = ReachabilityData {
+            parent: selected_parent.clone(),
+            interval: allocated,
+            height: parent_data.height + 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        // Store new block's reachability data
+        storage.set_reachability_data(&new_block, &new_block_data).await?;
+
+        // Add new block as child of parent
+        parent_data.children.push(new_block);
+        storage.set_reachability_data(&selected_parent, &parent_data).await?;
+
+        Ok(())
+    }
+
+    /// Update future covering sets for blocks in the mergeset
+    ///
+    /// Based on Kaspa's add_dag_block in inquirer.rs
+    ///
+    /// For each block in the mergeset (excluding selected parent), add the new block
+    /// to its future covering set. This enables DAG ancestry queries beyond the chain.
+    pub async fn add_dag_block<S: Storage>(
+        &self,
+        storage: &mut S,
+        new_block: &Hash,
+        mergeset: &[Hash],
+    ) -> Result<(), BlockchainError> {
+        // Get new_block's interval once
+        let new_block_data = storage.get_reachability_data(new_block).await?;
+        let new_block_interval_start = new_block_data.interval.start;
+
+        for merged_block in mergeset {
+            let mut merged_data = storage.get_reachability_data(merged_block).await?;
+
+            // Insert new_block into future_covering_set in sorted order by interval.start
+            // Binary search to find insertion position
+            let insert_pos = merged_data.future_covering_set
+                .binary_search_by_key(&new_block_interval_start, |hash| {
+                    futures::executor::block_on(async {
+                        storage.get_reachability_data(hash).await
+                            .map(|data| data.interval.start)
+                            .unwrap_or(0)
+                    })
+                })
+                .unwrap_or_else(|pos| pos);
+
+            merged_data.future_covering_set.insert(insert_pos, new_block.clone());
+            storage.set_reachability_data(merged_block, &merged_data).await?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
