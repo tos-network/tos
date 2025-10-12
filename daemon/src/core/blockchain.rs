@@ -2430,6 +2430,9 @@ impl<S: Storage> Blockchain<S> {
         };
         debug!("Cumulative difficulty for block {}: {}", block_hash, cumulative_difficulty);
 
+        // Clone full block for compact block broadcast (before split)
+        let full_block_for_broadcast = block.clone();
+
         let (block, txs) = block.split();
         let block = block.into_arc();
         let block_hash = block_hash.into_arc();
@@ -2441,14 +2444,15 @@ impl<S: Storage> Blockchain<S> {
                 trace!("P2p locked, broadcasting in new task");
                 let p2p = p2p.clone();
                 let pruned_topoheight = storage.get_pruned_topoheight().await?;
-                let block = block.clone();
                 let block_hash = block_hash.clone();
-                spawn_task("broadcast-block", async move {
-                    p2p.broadcast_block(
-                        &block,
+                let block_height = full_block_for_broadcast.get_header().get_height();
+                spawn_task("broadcast-compact-block", async move {
+                    // Use compact blocks for bandwidth efficiency
+                    p2p.broadcast_compact_block(
+                        &full_block_for_broadcast,
                         cumulative_difficulty,
                         current_topoheight,
-                        current_height.max(block.get_height()),
+                        current_height.max(block_height),
                         pruned_topoheight,
                         block_hash,
                         mining
