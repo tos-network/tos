@@ -102,6 +102,7 @@ use crate::{
             PacketWrapper,
             MissingTransactions,
             GetMissingTransactions,
+            CompactBlockPropagation,
         },
         peer_list::{
             PeerList,
@@ -2726,6 +2727,120 @@ impl<S: Storage> P2pServer<S> {
         // because this function can be call from Blockchain, which would lead to a deadlock
         let ping = Ping::new(Cow::Borrowed(&hash), our_topoheight, our_height, pruned_topoheight, cumulative_difficulty, IndexSet::new());
         self.broadcast_block_with_ping(block, ping, &hash, is_from_mining, true).await;
+    }
+
+    // Broadcast a compact block (bandwidth-efficient block propagation)
+    // This should be called with the full block (header + transactions)
+    pub async fn broadcast_compact_block(&self, full_block: &tos_common::block::Block, cumulative_difficulty: CumulativeDifficulty, our_topoheight: u64, our_height: u64, pruned_topoheight: Option<u64>, hash: Arc<Hash>, is_from_mining: bool) {
+        debug!("Creating compact block for broadcast {}", hash);
+
+        // Generate a random nonce for short transaction IDs
+        use rand::Rng;
+        let nonce = rand::thread_rng().gen::<u64>();
+
+        // Create compact block from full block
+        let compact_block = tos_common::block::CompactBlock::from_block(full_block.clone(), nonce);
+
+        debug!("Broadcasting compact block {} (nonce: {}, {} short IDs, {} prefilled txs)",
+            hash, nonce, compact_block.short_tx_ids.len(), compact_block.prefilled_txs.len());
+
+        // Build ping packet
+        let ping = Ping::new(Cow::Borrowed(&hash), our_topoheight, our_height, pruned_topoheight, cumulative_difficulty, IndexSet::new());
+
+        // Broadcast compact block with ping
+        self.broadcast_compact_block_with_ping(compact_block, ping, &hash, is_from_mining, true).await;
+    }
+
+    // Broadcast a compact block with a pre-built ping packet
+    async fn broadcast_compact_block_with_ping(&self, compact_block: tos_common::block::CompactBlock, ping: Ping<'_>, hash: &Arc<Hash>, is_from_mining: bool, send_ping: bool) {
+        debug!("Broadcasting compact block {} at height {}", hash, compact_block.header.get_height());
+        counter!("tos_p2p_broadcast_compact_block").increment(1u64);
+
+        // Build the compact block propagation packet
+        let compact_block_packet = Packet::CompactBlockPropagation(
+            PacketWrapper::new(
+                Cow::Owned(CompactBlockPropagation::new(Cow::Owned(compact_block.clone()))),
+                Cow::Borrowed(&ping)
+            )
+        );
+        let packet_compact_block_bytes = Bytes::from(compact_block_packet.to_bytes());
+        let packet_ping_bytes = Bytes::from(Packet::Ping(Cow::Owned(ping)).to_bytes());
+
+        // Lock the block from being handled again as we are broadcasting it
+        if is_from_mining {
+            debug!("Locking block propagation {}", hash);
+            let mut blocks_propagation_queue = self.blocks_propagation_queue.write().await;
+            blocks_propagation_queue.put(hash.clone(), Some(get_current_time_in_millis()));
+        }
+
+        trace!("start broadcasting compact block {} to all peers", hash);
+        let packet_compact_block_bytes = &packet_compact_block_bytes;
+        let packet_ping_bytes = &packet_ping_bytes;
+        let block_height = compact_block.header.get_height();
+
+        // Prepare all the futures to execute them in parallel
+        stream::iter(self.peer_list.get_cloned_peers().await)
+            .for_each_concurrent(self.stream_concurrency, |peer| async move {
+                let peer_height = peer.get_height();
+
+                // Check if peer is in range to receive the compact block
+                if (peer_height >= block_height && peer_height - block_height <= STABLE_LIMIT) ||
+                   (peer_height <= block_height && block_height - peer_height <= 1) {
+
+                    let send_block = {
+                        trace!("locking blocks propagation for peer {}", peer);
+                        let mut blocks_propagation = peer.get_blocks_propagation().lock().await;
+                        trace!("end locking blocks propagation for peer {}", peer);
+
+                        let send = is_from_mining || blocks_propagation.peek(hash)
+                            .map_or(true, |(_, is_common)| *is_common);
+
+                        if send {
+                            let direction = if is_from_mining {
+                                TimedDirection::Both {
+                                    sent_at: get_current_time_in_millis(),
+                                    received_at: 0
+                                }
+                            } else {
+                                TimedDirection::Out {
+                                    sent_at: get_current_time_in_millis()
+                                }
+                            };
+                            blocks_propagation.put(hash.clone(), (direction, false));
+                        }
+
+                        send
+                    };
+
+                    if send_block {
+                        log!(self.block_propagation_log_level, "Broadcast compact block {} to {}", hash, peer);
+                        peer.set_height(block_height.max(peer.get_height()));
+
+                        if let Err(e) = peer.send_bytes(packet_compact_block_bytes.clone()).await {
+                            debug!("Error on broadcast compact block {} to {}: {}", hash, peer, e);
+                        }
+                        trace!("Compact block {} has been broadcasted to {}", hash, peer);
+                    } else if send_ping {
+                        log!(self.block_propagation_log_level, "{} contains {}, don't broadcast compact block to him", peer, hash);
+                        if let Err(e) = peer.send_bytes(packet_ping_bytes.clone()).await {
+                            debug!("Error on sending ping for notifying that we accepted the block {} to {}: {}", hash, peer, e);
+                        } else {
+                            trace!("{} has been notified that we have the block {}", peer, hash);
+                            peer.set_last_ping_sent(get_current_time_in_seconds());
+                        }
+                    }
+                } else if send_ping && peer_height >= block_height.saturating_sub(STABLE_LIMIT) {
+                    log!(self.block_propagation_log_level, "send ping (compact block {}) for propagation to {}", hash, peer);
+                    if let Err(e) = peer.send_bytes(packet_ping_bytes.clone()).await {
+                        debug!("Error on sending ping to peer for notifying that we got the block {} to {}: {}", hash, peer, e);
+                    } else {
+                        trace!("{} has been notified that we received the block {}", peer, hash);
+                        peer.set_last_ping_sent(get_current_time_in_seconds());
+                    }
+                }
+            }).await;
+
+        debug!("broadcast compact block {} done", hash);
     }
 
     // Broadcast a block with a pre-built ping packet
