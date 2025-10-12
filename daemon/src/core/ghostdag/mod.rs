@@ -3,8 +3,10 @@
 // Reference: rusty-kaspa/consensus/src/processes/ghostdag/
 
 pub mod types;
+pub mod daa;
 
 pub use types::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData};
+pub use daa::{calculate_daa_score, calculate_target_difficulty, DAA_WINDOW_SIZE, TARGET_TIME_PER_BLOCK};
 
 use anyhow::Result;
 use std::cmp::Ordering;
@@ -265,6 +267,26 @@ impl TosGhostdag {
             added_blue_work = added_blue_work + block_work;
         }
         let blue_work = parent_data.blue_work + added_blue_work;
+
+        // Step 7: Calculate DAA score and identify mergeset_non_daa blocks
+        // This is Phase 3 addition for complete DAA implementation
+        // Extract mergeset_blues without selected_parent for DAA calculation
+        let mergeset_blues_without_selected: Vec<Hash> = new_block_data
+            .mergeset_blues
+            .iter()
+            .filter(|b| *b != &selected_parent)
+            .cloned()
+            .collect();
+
+        let (_daa_score, mergeset_non_daa) = daa::calculate_daa_score(
+            storage,
+            &selected_parent,
+            &mergeset_blues_without_selected,
+        )
+        .await?;
+
+        // Set the mergeset_non_daa blocks
+        new_block_data.set_mergeset_non_daa(mergeset_non_daa);
 
         // Finalize the GHOSTDAG data
         new_block_data.finalize_score_and_work(blue_score, blue_work);
