@@ -2,11 +2,13 @@ mod header;
 mod block;
 mod miner;
 mod version;
+mod compact;
 
 pub use header::BlockHeader;
 pub use block::Block;
 pub use miner::{MinerWork, Worker, Algorithm};
 pub use version::BlockVersion;
+pub use compact::{CompactBlock, ShortTxId, calculate_short_tx_id, MissingTransactionsRequest, MissingTransactionsResponse};
 
 use crate::crypto::{Hash, HASH_SIZE};
 

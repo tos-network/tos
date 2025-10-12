@@ -48,6 +48,7 @@ rand = { workspace = true }
 indexmap = { workspace = true }
 async-trait = { workspace = true }
 cfg-if = { workspace = true }
+siphasher = { workspace = true }
 
 chrono = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
