@@ -249,8 +249,8 @@ pub fn create_share_error(id: u64, error: StratumError) -> StratumShareResponse 
 mod tests {
     use super::*;
     use tos_common::{
-        crypto::PublicKey,
-        block::EXTRA_NONCE_SIZE,
+        crypto::{PublicKey, Hash},
+        block::{EXTRA_NONCE_SIZE, BlockHeader},
     };
 
     #[test]

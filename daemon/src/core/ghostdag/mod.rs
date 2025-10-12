@@ -10,7 +10,7 @@ pub use daa::{calculate_daa_score, calculate_target_difficulty, DAA_WINDOW_SIZE,
 
 use anyhow::Result;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tos_common::crypto::Hash;
 use tos_common::difficulty::Difficulty;
