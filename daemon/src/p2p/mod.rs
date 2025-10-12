@@ -216,6 +216,9 @@ pub struct P2pServer<S: Storage> {
     proxy: Option<(ProxyKind, SocketAddr, Option<(String, String)>)>,
     // Compact block cache for pending reconstructions
     compact_block_cache: Arc<compact_block_cache::CompactBlockCache>,
+    // Enable/disable compact blocks for bandwidth-efficient block propagation
+    // When disabled, falls back to full block propagation
+    compact_blocks_enabled: bool,
 }
 
 impl<S: Storage> P2pServer<S> {
@@ -243,6 +246,7 @@ impl<S: Storage> P2pServer<S> {
         disable_fetching_txs_propagated: bool,
         handle_peer_packets_in_dedicated_task: bool,
         proxy: Option<(ProxyKind, SocketAddr, Option<(String, String)>)>,
+        compact_blocks_enabled: bool,
     ) -> Result<Arc<Self>, P2pError> {
         if tag.as_ref().is_some_and(|tag| tag.len() == 0 || tag.len() > 16) {
             return Err(P2pError::InvalidTag);
@@ -326,9 +330,10 @@ impl<S: Storage> P2pServer<S> {
             handle_peer_packets_in_dedicated_task,
             proxy,
             compact_block_cache: Arc::new(compact_block_cache::CompactBlockCache::new(
-                100, // capacity: store up to 100 pending compact blocks
-                Duration::from_secs(60) // timeout: 60 seconds
+                COMPACT_BLOCK_CACHE_CAPACITY,
+                Duration::from_secs(COMPACT_BLOCK_CACHE_TIMEOUT_SECS)
             )),
+            compact_blocks_enabled,
         };
 
         let arc = Arc::new(server);
@@ -403,6 +408,9 @@ impl<S: Storage> P2pServer<S> {
 
         // start another task for peerlist loop
         spawn_task("p2p-peerlist", Arc::clone(&self).peerlist_loop());
+
+        // start compact block cache cleanup task
+        spawn_task("p2p-compact-block-cache-cleanup", Arc::clone(&self).compact_block_cache_cleanup_loop());
 
         spawn_task("p2p-incoming-connections", Arc::clone(&self).handle_incoming_connections(listener, concurrency));
 
@@ -1306,6 +1314,37 @@ impl<S: Storage> P2pServer<S> {
 
             sleep(duration).await;
         }
+    }
+
+    // Periodic cleanup task for the compact block cache
+    // This removes expired entries to prevent memory leaks
+    async fn compact_block_cache_cleanup_loop(self: Arc<Self>) {
+        debug!("Starting compact block cache cleanup task...");
+        // Cleanup every 30 seconds
+        const CLEANUP_INTERVAL_SECS: u64 = 30;
+
+        loop {
+            if !self.is_running() {
+                debug!("Compact block cache cleanup loop task is stopped!");
+                break;
+            }
+
+            // Only run cleanup if compact blocks are enabled
+            if self.compact_blocks_enabled {
+                trace!("Running compact block cache cleanup");
+                self.compact_block_cache.cleanup_expired().await;
+
+                // Log cache stats periodically
+                let cache_size = self.compact_block_cache.len().await;
+                if cache_size > 0 {
+                    debug!("Compact block cache: {} pending blocks", cache_size);
+                }
+            }
+
+            sleep(Duration::from_secs(CLEANUP_INTERVAL_SECS)).await;
+        }
+
+        debug!("Compact block cache cleanup task has exited");
     }
 
     // This function is used to broadcast PeerDisconnected event to listeners
@@ -2286,6 +2325,9 @@ impl<S: Storage> P2pServer<S> {
                 let block_hash = Arc::new(compact_block.header.hash());
                 debug!("Received compact block {} from {}", block_hash, peer);
 
+                // Track compact block reception
+                counter!("tos_p2p_compact_block_received").increment(1u64);
+
                 // Attempt reconstruction from mempool
                 let mempool = self.blockchain.get_mempool().read().await;
                 match CompactBlockReconstructor::reconstruct(compact_block.clone(), &mempool).await {
@@ -2293,15 +2335,23 @@ impl<S: Storage> P2pServer<S> {
                         debug!("Successfully reconstructed block {} from compact block", block_hash);
                         drop(mempool); // Release lock before processing
 
+                        // Track successful reconstruction
+                        counter!("tos_p2p_compact_block_reconstruction_success").increment(1u64);
+
                         // Process the reconstructed block through normal block processing
                         if let Err(e) = self.blocks_processor.send((peer.clone(), block.get_header().clone(), block_hash.clone())).await {
                             error!("Error while sending reconstructed block to blocks processor task: {}", e);
                         }
                     },
                     Ok(ReconstructionResult::MissingTransactions(request)) => {
+                        let missing_count = request.missing_indices.len();
                         debug!("Block {} missing {} transactions, requesting from peer",
-                            block_hash, request.missing_indices.len());
+                            block_hash, missing_count);
                         drop(mempool); // Release lock before sending packet
+
+                        // Track missing transactions request
+                        counter!("tos_p2p_compact_block_missing_txs_requests").increment(1u64);
+                        counter!("tos_p2p_compact_block_missing_txs_total").increment(missing_count as u64);
 
                         // Store compact block in cache for later reconstruction
                         let peer_addr = peer.get_outgoing_address().to_string();
@@ -2311,8 +2361,12 @@ impl<S: Storage> P2pServer<S> {
                             peer_addr.clone()
                         ).await {
                             debug!("Compact block {} already in cache, skipping duplicate", block_hash);
+                            counter!("tos_p2p_compact_block_cache_duplicates").increment(1u64);
                             return Ok(());
                         }
+
+                        // Track cache insertion
+                        counter!("tos_p2p_compact_block_cache_insertions").increment(1u64);
 
                         // Request missing transactions from peer
                         // Create a ping with current blockchain state
@@ -2358,13 +2412,23 @@ impl<S: Storage> P2pServer<S> {
                             block_hash, missing_count, total_count);
                         drop(mempool); // Release lock before requesting
 
-                        // Fall back to requesting full block
-                        // Use the existing object request mechanism
-                        warn!("Compact block reconstruction failed for {}, would request full block (not yet implemented)", block_hash);
-                        // TODO: Request full block via ObjectRequest::Block
+                        // Track fallback to full block
+                        counter!("tos_p2p_compact_block_too_many_missing").increment(1u64);
+                        counter!("tos_p2p_compact_block_fallback_to_full").increment(1u64);
+
+                        // Fall back to requesting full block via ObjectRequest
+                        let request = ObjectRequest::Block(Immutable::Owned((*block_hash).clone()));
+                        let packet = Packet::ObjectRequest(Cow::Owned(request));
+
+                        if let Err(e) = peer.send_packet(packet).await {
+                            error!("Failed to request full block {} from {}: {}", block_hash, peer, e);
+                        } else {
+                            debug!("Requested full block {} from {} due to too many missing transactions", block_hash, peer);
+                        }
                     },
                     Err(e) => {
                         error!("Error reconstructing compact block {}: {}", block_hash, e);
+                        counter!("tos_p2p_compact_block_reconstruction_errors").increment(1u64);
                     }
                 }
             },
@@ -2414,10 +2478,18 @@ impl<S: Storage> P2pServer<S> {
                 debug!("Received {} missing transactions for block {}",
                     response.transactions.len(), response.block_hash);
 
+                // Track missing transactions response
+                counter!("tos_p2p_compact_block_missing_txs_responses").increment(1u64);
+                counter!("tos_p2p_compact_block_missing_txs_received").increment(response.transactions.len() as u64);
+
                 // Retrieve pending compact block from cache
                 match self.compact_block_cache.remove(&response.block_hash).await {
                     Some(compact_block) => {
                         debug!("Retrieved compact block {} from cache, completing reconstruction", response.block_hash);
+
+                        // Track cache hit
+                        counter!("tos_p2p_compact_block_cache_hits").increment(1u64);
+                        counter!("tos_p2p_compact_block_cache_removals").increment(1u64);
 
                         // Complete reconstruction with the missing transactions
                         let mempool = self.blockchain.get_mempool().read().await;
@@ -2430,6 +2502,9 @@ impl<S: Storage> P2pServer<S> {
                                 debug!("Successfully completed reconstruction of block {}", block.hash());
                                 drop(mempool); // Release lock before processing
 
+                                // Track successful completion
+                                counter!("tos_p2p_compact_block_reconstruction_completed").increment(1u64);
+
                                 let block_hash = Arc::new(block.hash());
                                 // Process the reconstructed block through normal block processing
                                 if let Err(e) = self.blocks_processor.send((peer.clone(), block.get_header().clone(), block_hash)).await {
@@ -2438,11 +2513,14 @@ impl<S: Storage> P2pServer<S> {
                             },
                             Err(e) => {
                                 error!("Failed to complete block reconstruction: {}", e);
+                                counter!("tos_p2p_compact_block_reconstruction_errors").increment(1u64);
                             }
                         }
                     },
                     None => {
                         warn!("Received missing transactions for block {} but compact block not found in cache", response.block_hash);
+                        // Track cache miss
+                        counter!("tos_p2p_compact_block_cache_misses").increment(1u64);
                     }
                 }
             }
@@ -2732,6 +2810,14 @@ impl<S: Storage> P2pServer<S> {
     // Broadcast a compact block (bandwidth-efficient block propagation)
     // This should be called with the full block (header + transactions)
     pub async fn broadcast_compact_block(&self, full_block: &tos_common::block::Block, cumulative_difficulty: CumulativeDifficulty, our_topoheight: u64, our_height: u64, pruned_topoheight: Option<u64>, hash: Arc<Hash>, is_from_mining: bool) {
+        // Check if compact blocks are enabled
+        if !self.compact_blocks_enabled {
+            debug!("Compact blocks disabled, falling back to full block broadcast for {}", hash);
+            // Fall back to full block broadcast (header only)
+            self.broadcast_block(full_block.get_header(), cumulative_difficulty, our_topoheight, our_height, pruned_topoheight, hash, is_from_mining).await;
+            return;
+        }
+
         debug!("Creating compact block for broadcast {}", hash);
 
         // Generate a random nonce for short transaction IDs

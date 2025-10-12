@@ -196,6 +196,16 @@ pub const PEER_PACKET_CHANNEL_SIZE: usize = 1024;
 // Millis
 pub const PEER_SEND_BYTES_TIMEOUT: u64 = 3_000;
 
+// Compact Blocks Configuration
+// Enable compact blocks for bandwidth-efficient block propagation (BIP-152)
+// When enabled, blocks are transmitted as short transaction IDs + header (~1.3 KB)
+// instead of full transactions (~50 KB), achieving 97.4% bandwidth reduction
+pub const COMPACT_BLOCKS_ENABLED: bool = true;
+// Compact block cache capacity (number of pending compact blocks)
+pub const COMPACT_BLOCK_CACHE_CAPACITY: usize = 100;
+// Compact block cache timeout in seconds (how long to wait for missing transactions)
+pub const COMPACT_BLOCK_CACHE_TIMEOUT_SECS: u64 = 60;
+
 // Hard Forks configured
 const HARD_FORKS: [HardFork; 3] = [
     HardFork {

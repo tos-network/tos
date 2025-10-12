@@ -430,6 +430,7 @@ impl<S: Storage> Blockchain<S> {
                 config.disable_fetching_txs_propagated,
                 config.handle_peer_packets_in_dedicated_task,
                 proxy,
+                config.enable_compact_blocks,
             ) {
                 Ok(p2p) => {
                     *arc.p2p.write().await = Some(p2p.clone());
