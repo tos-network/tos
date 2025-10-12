@@ -295,21 +295,26 @@ mod tests {
     fn test_compact_block_serialization() {
         use crate::block::BlockVersion;
         use crate::crypto::elgamal::CompressedPublicKey;
-        use crate::immutable::Immutable;
-        use indexmap::IndexSet;
         use curve25519_dalek::ristretto::CompressedRistretto;
+        use primitive_types::U256;
 
         // Create a simple block header
-        let tips = IndexSet::from([Hash::new([0u8; 32])]);
+        let parents = vec![vec![Hash::new([0u8; 32])]]; // Level 0 parents
         let miner = CompressedPublicKey::new(CompressedRistretto([1u8; 32]));
         let header = BlockHeader::new(
             BlockVersion::V0,
-            100,
-            1234567890,
-            Immutable::Owned(tips),
-            [0u8; 32],
-            miner,
-            IndexSet::new()
+            parents,                      // parents_by_level
+            100,                          // blue_score
+            100,                          // daa_score
+            U256::zero(),                 // blue_work
+            Hash::new([0u8; 32]),         // pruning_point
+            1234567890,                   // timestamp
+            0,                            // bits
+            [0u8; 32],                    // extra_nonce
+            miner,                        // miner
+            Hash::new([0u8; 32]),         // hash_merkle_root
+            Hash::new([0u8; 32]),         // accepted_id_merkle_root
+            Hash::new([0u8; 32])          // utxo_commitment
         );
 
         // Create empty compact block

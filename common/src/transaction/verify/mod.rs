@@ -1320,7 +1320,7 @@ impl Transaction {
                         let mut energy_resource = energy_resource.unwrap_or_else(EnergyResource::new);
                         
                         // Freeze TOS for energy - get topoheight from the blockchain state
-                        let topoheight = state.get_block().get_height() as u64; // Use block height as topoheight for now
+                        let topoheight = state.get_block().get_blue_score() as u64; // Use blue_score for consensus
                         energy_resource.freeze_tos_for_energy(*amount, duration.clone(), topoheight);
                         
                         // Update energy resource in state
@@ -1337,7 +1337,7 @@ impl Transaction {
                         
                         if let Some(mut energy_resource) = energy_resource {
                             // Unfreeze TOS - get topoheight from the blockchain state
-                            let topoheight = state.get_block().get_height() as u64; // Use block height as topoheight for now
+                            let topoheight = state.get_block().get_blue_score() as u64; // Use blue_score for consensus
                             energy_resource.unfreeze_tos(*amount, topoheight)
                                 .map_err(|_| VerificationError::AnyError(anyhow::anyhow!("Invalid energy operation")))?;
                             
@@ -1362,7 +1362,7 @@ impl Transaction {
                     .unwrap_or_default();
 
                 // Create validator with current context
-                let block_height = state.get_block().get_height() as u64;
+                let block_height = state.get_block().get_blue_score() as u64;
                 let timestamp = state.get_block().get_timestamp();
                 let source = self.source.clone();
 

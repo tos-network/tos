@@ -27,7 +27,7 @@ impl DifficultyProvider for RocksStorage {
     async fn get_height_for_block_hash(&self, hash: &Hash) -> Result<u64, BlockchainError> {
         trace!("get height for block hash {}", hash);
         let header = self.get_block_header_by_hash(hash).await?;
-        Ok(header.get_height())
+        Ok(header.get_blue_score())
     }
 
     // Get the block version using its hash
@@ -62,7 +62,8 @@ impl DifficultyProvider for RocksStorage {
     async fn get_past_blocks_for_block_hash(&self, hash: &Hash) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
         trace!("get past blocks for block hash {}", hash);
         let header = self.get_block_header_by_hash(hash).await?;
-        Ok(header.get_immutable_tips().clone())
+        let tips: IndexSet<Hash> = header.get_parents().iter().cloned().collect();
+        Ok(Immutable::Owned(tips))
     }
 
     // Get a block header using its hash

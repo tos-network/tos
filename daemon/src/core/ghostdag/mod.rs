@@ -313,7 +313,7 @@ impl TosGhostdag {
         while let Some(current) = queue.pop_front() {
             // Get current block's header to access its parents
             let current_header = storage.get_block_header_by_hash(&current).await?;
-            let current_parents = current_header.get_tips();
+            let current_parents = current_header.get_parents();
 
             // For each parent of current block
             for parent in current_parents.iter() {

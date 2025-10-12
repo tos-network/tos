@@ -132,20 +132,20 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         };
 
         // Verify the block version
-        let version = get_version_at_height(self.blockchain.get_network(), header.get_height());
+        let version = get_version_at_height(self.blockchain.get_network(), header.get_blue_score());
         if version != header.get_version() {
             debug!("Block {} has version {} while expected version is {}", hash, header.get_version(), version);
             return Err(BlockchainError::InvalidBlockVersion)
         }
 
         // Verify the block height by tips
-        let height_at_tips = blockdag::calculate_height_at_tips(&provider, header.get_tips().iter()).await?;
-        if height_at_tips != header.get_height() {
-            debug!("Block {} has height {} while expected height is {}", hash, header.get_height(), height_at_tips);
-            return Err(BlockchainError::InvalidBlockHeight(height_at_tips, header.get_height()))
+        let height_at_tips = blockdag::calculate_height_at_tips(&provider, header.get_parents().iter()).await?;
+        if height_at_tips != header.get_blue_score() {
+            debug!("Block {} has height {} while expected height is {}", hash, header.get_blue_score(), height_at_tips);
+            return Err(BlockchainError::InvalidBlockHeight(height_at_tips, header.get_blue_score()))
         }
 
-        let tips = header.get_tips();
+        let tips = header.get_parents();
         let tips_count = tips.len();
 
         // verify tips count
@@ -156,7 +156,7 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
 
         // verify that we have already all its tips
         {
-            for tip in &tips {
+            for tip in tips.iter() {
                 trace!("Checking tip {} for block {}", tip, hash);
                 if !self.blocks.contains_key(tip) && !provider.has_block_with_hash(tip).await? {
                     debug!("Block {} contains tip {} which is not present in chain validator", hash, tip);
@@ -167,10 +167,10 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
 
         // Verify the block height by tips
         {
-            let height_by_tips = blockdag::calculate_height_at_tips(&provider, header.get_tips().iter()).await?;
-            if height_by_tips != header.get_height() {
-                debug!("Block {} has height {} while expected height is {}", hash, header.get_height(), height_by_tips);
-                return Err(BlockchainError::InvalidBlockHeight(height_by_tips, header.get_height()))
+            let height_by_tips = blockdag::calculate_height_at_tips(&provider, header.get_parents().iter()).await?;
+            if height_by_tips != header.get_blue_score() {
+                debug!("Block {} has height {} while expected height is {}", hash, header.get_blue_score(), height_by_tips);
+                return Err(BlockchainError::InvalidBlockHeight(height_by_tips, header.get_blue_score()))
             }
         }
 
@@ -180,8 +180,8 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         let (difficulty, p) = self.blockchain.verify_proof_of_work(&provider, &pow_hash, tips.iter()).await?;
 
         // Find the common base between the block and the current blockchain
-        let tips_vec = header.get_tips();
-        let (base, base_height) = self.blockchain.find_common_base(&provider, tips_vec.as_slice()).await?;
+        let tips_vec = header.get_parents();
+        let (base, base_height) = self.blockchain.find_common_base(&provider, tips_vec).await?;
 
         trace!("Common base: {} at height {} and hash {}", base, base_height, hash);
 
@@ -189,7 +189,7 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         let (_, cumulative_difficulty) = self.blockchain.find_tip_work_score(
             &provider,
             &hash,
-            header.get_tips().iter(),
+            header.get_parents().iter(),
             Some(difficulty.clone()),
             &base,
             base_height
@@ -198,7 +198,7 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         let hash = Arc::new(hash);
         // Store the block in both maps
         // One is for blocks at height and the other is for the block data
-        self.blocks_at_height.entry(header.get_height())
+        self.blocks_at_height.entry(header.get_blue_score())
             .or_insert_with(IndexSet::new)
             .insert(hash.clone());
 
@@ -226,7 +226,7 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
     async fn get_height_for_block_hash(&self, hash: &Hash) -> Result<u64, BlockchainError> {
         trace!("get height for block hash {}", hash);
         if let Some(data) = self.parent.blocks.get(hash) {
-            return Ok(data.header.get_height())
+            return Ok(data.header.get_blue_score())
         }
 
         trace!("fallback on storage for get_height_for_block_hash");
@@ -277,7 +277,8 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
     async fn get_past_blocks_for_block_hash(&self, hash: &Hash) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
         trace!("get past blocks for block hash {}", hash);
         if let Some(data) = self.parent.blocks.get(hash) {
-            return Ok(data.header.get_immutable_tips())
+            let tips: IndexSet<Hash> = data.header.get_parents().iter().cloned().collect();
+            return Ok(Immutable::Owned(tips))
         }
 
         trace!("fallback on storage for get_past_blocks_for_block_hash");

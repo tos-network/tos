@@ -10,7 +10,7 @@ use tos_vm::{
     ValueCell
 };
 
-use crate::{block::Block, contract::ChainState};
+use crate::{block::Block, contract::ChainState, crypto::Hashable};
 
 use super::OpaqueTransaction;
 
@@ -58,7 +58,7 @@ pub fn block_version(_: FnInstance, _: FnParams, context: &mut Context) -> FnRet
 pub fn block_tips(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
     let block: &Block = context.get().context("current block not found")?;
 
-    let tips = block.get_tips()
+    let tips = block.get_parents()
         .iter()
         .map(|tip| Primitive::Opaque(OpaqueWrapper::new(tip.clone())).into())
         .collect();
@@ -69,9 +69,9 @@ pub fn block_tips(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturn
 pub fn block_transactions_hashes(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
     let block: &Block = context.get().context("current block not found")?;
 
-    let hashes = block.get_txs_hashes()
+    let hashes = block.get_transactions()
         .iter()
-        .map(|hash| Primitive::Opaque(OpaqueWrapper::new(hash.clone())).into())
+        .map(|tx| Primitive::Opaque(OpaqueWrapper::new(tx.hash())).into())
         .collect();
 
     Ok(Some(ValueCell::Object(hashes)))
@@ -80,13 +80,15 @@ pub fn block_transactions_hashes(_: FnInstance, _: FnParams, context: &mut Conte
 pub fn block_transactions(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
     let block: &Block = context.get().context("current block not found")?;
 
-    let txs = block.get_txs_hashes()
+    let txs = block.get_transactions()
         .iter()
-        .zip(block.get_transactions())
-        .map(|(hash, tx)| Primitive::Opaque(OpaqueWrapper::new(OpaqueTransaction {
-            inner: tx.clone(),
-            hash: hash.clone()
-        })).into())
+        .map(|tx| {
+            let hash = tx.hash();
+            Primitive::Opaque(OpaqueWrapper::new(OpaqueTransaction {
+                inner: tx.clone(),
+                hash: hash.clone()
+            })).into()
+        })
         .collect();
 
     Ok(Some(ValueCell::Object(txs)))
@@ -99,7 +101,7 @@ pub fn block_transactions_count(_: FnInstance, _: FnParams, context: &mut Contex
 
 pub fn block_height(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
     let block: &Block = context.get().context("current block not found")?;
-    Ok(Some(Primitive::U64(block.get_height()).into()))
+    Ok(Some(Primitive::U64(block.get_blue_score()).into()))
 }
 
 pub fn block_extra_nonce(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {

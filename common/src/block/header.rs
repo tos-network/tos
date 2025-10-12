@@ -4,7 +4,6 @@
 // This is a BREAKING CHANGE from the legacy chain-based format.
 
 use std::fmt::{Display, Formatter, Error as FmtError};
-use indexmap::IndexSet;
 use serde::Deserialize;
 use log::debug;
 use crate::{
@@ -23,7 +22,6 @@ use crate::{
     },
     serializer::{Reader, ReaderError, Serializer, Writer},
     time::TimestampMillis,
-    immutable::Immutable
 };
 use tos_hash::Error as TosHashError;
 use super::{Algorithm, MinerWork, EXTRA_NONCE_SIZE};
@@ -281,71 +279,16 @@ impl BlockHeader {
         pow_hash(&self.get_serialized_header(), algorithm)
     }
 
-    // Legacy compatibility methods (deprecated)
-
-    /// Legacy: Get height (maps to blue_score)
-    /// DEPRECATED: Use get_blue_score() instead
-    #[deprecated(note = "Use get_blue_score() instead")]
-    pub fn get_height(&self) -> u64 {
-        self.blue_score
-    }
-
-    /// Legacy: Get tips (maps to direct parents)
-    /// DEPRECATED: Use get_parents() instead
-    #[deprecated(note = "Use get_parents() instead")]
-    pub fn get_tips(&self) -> Vec<Hash> {
-        self.get_parents().to_vec()
-    }
-
-    /// Legacy: Get immutable tips
-    /// DEPRECATED: Use get_parents() instead
-    #[deprecated(note = "Use get_parents() instead")]
-    pub fn get_immutable_tips(&self) -> Immutable<IndexSet<Hash>> {
-        let set: IndexSet<Hash> = self.get_parents().iter().cloned().collect();
-        Immutable::Owned(set)
-    }
-
-    /// Legacy: Get tips hash
-    /// DEPRECATED: Use get_parents_hash() instead
-    #[deprecated(note = "Use get_parents_hash() instead")]
-    pub fn get_tips_hash(&self) -> Hash {
-        self.get_parents_hash()
-    }
-
-    /// Legacy: Get transactions hashes (not stored in new format)
-    /// DEPRECATED: Transactions are now accessed through merkle root
-    #[deprecated(note = "Use get_hash_merkle_root() instead")]
-    pub fn get_txs_hashes(&self) -> &IndexSet<Hash> {
-        panic!("get_txs_hashes() is not supported in new header format. Use get_hash_merkle_root() instead.");
-    }
-
-    /// Legacy: Take transactions hashes
-    /// DEPRECATED
-    #[deprecated(note = "Use get_hash_merkle_root() instead")]
-    pub fn take_txs_hashes(self) -> IndexSet<Hash> {
-        panic!("take_txs_hashes() is not supported in new header format. Use get_hash_merkle_root() instead.");
-    }
-
-    /// Legacy: Get txs hash
-    /// DEPRECATED: Maps to hash_merkle_root
-    #[deprecated(note = "Use get_hash_merkle_root() instead")]
-    pub fn get_txs_hash(&self) -> Hash {
-        self.hash_merkle_root.clone()
-    }
-
-    /// Legacy: Get txs count (not available in new format)
-    /// DEPRECATED
-    #[deprecated(note = "Transaction count not available in header")]
-    pub fn get_txs_count(&self) -> usize {
-        panic!("get_txs_count() is not supported in new header format");
-    }
-
-    /// Legacy: Get transactions
-    /// DEPRECATED
-    #[deprecated(note = "Use get_hash_merkle_root() instead")]
-    pub fn get_transactions(&self) -> &IndexSet<Hash> {
-        panic!("get_transactions() is not supported in new header format");
-    }
+    // REMOVED: All deprecated legacy methods
+    // These methods have been removed to avoid confusion between:
+    // - blue_score (GHOSTDAG consensus position)
+    // - TopoHeight (sequential storage index)
+    //
+    // Migration guide:
+    // - get_height() → Use get_blue_score() for GHOSTDAG, or storage.get_topoheight_for_block() for sequential index
+    // - get_tips() → Use get_parents()
+    // - get_txs_hashes() → No longer available, use get_hash_merkle_root()
+    // - get_transactions() → No longer available, access via Block.get_transactions()
 }
 
 impl Serializer for BlockHeader {
@@ -561,25 +504,33 @@ mod tests {
 
     #[test]
     fn test_parents_by_level() {
+        use primitive_types::U256;
         let miner = KeyPair::new().get_public_key().compress();
         let parents_by_level = vec![
             vec![Hash::zero(), Hash::zero()],  // 2 direct parents
             vec![Hash::zero()],                 // 1 grandparent
         ];
 
-        let header = BlockHeader::new_simple(
+        let header = BlockHeader::new(
             BlockVersion::V0,
-            vec![],
+            parents_by_level.clone(),
+            0,
+            0,
+            U256::zero(),
+            Hash::zero(),
+            0,
             0,
             [0u8; 32],
             miner,
             Hash::zero(),
+            Hash::zero(),
+            Hash::zero(),
         );
 
         // Test get_parents (should return direct parents)
-        assert_eq!(header.get_parents().len(), 0);
+        assert_eq!(header.get_parents().len(), 2);
 
-        // Test get_all_parents
-        assert_eq!(header.get_all_parents().len(), 0);
+        // Test get_all_parents (should return all 3 parents)
+        assert_eq!(header.get_all_parents().len(), 3);
     }
 }

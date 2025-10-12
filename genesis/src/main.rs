@@ -52,7 +52,7 @@ fn main() {
     // Verify block
     println!("\n=== Verification Information ===");
     println!("Block version: {:?}", block.get_version());
-    println!("Block height: {}", block.get_height());
+    println!("Block height: {}", block.get_blue_score());
     println!("Miner: {}", block.get_miner().to_hex());
     println!("Timestamp: {}", block.get_timestamp());
     println!("Transaction count: {}", block.get_transactions().len());

@@ -31,15 +31,15 @@ fn main() {
         Ok(block) => {
             println!("Block parsed successfully!");
             println!("Block version: {:?}", block.get_version());
-            println!("Block height: {}", block.get_height());
+            println!("Block height: {}", block.get_blue_score());
             println!("Block timestamp: {}", block.get_timestamp());
             println!("Block nonce: {}", block.get_nonce());
             println!("Block extra nonce: {}", hex::encode(block.get_extra_nonce()));
             println!("Block miner public key: {}", block.get_miner().to_hex());
-            println!("Block tips count: {}", block.get_tips().len());
-            println!("Block tips hash: {}", block.get_header().get_tips_hash());
+            println!("Block tips count: {}", block.get_parents().len());
+            println!("Block tips hash: {}", block.get_header().get_parents_hash());
             println!("Block transactions count: {}", block.get_txs_count());
-            println!("Block transactions hash: {}", block.get_header().get_txs_hash());
+            println!("Block transactions hash: {}", block.get_header().get_hash_merkle_root());
             println!("Block work hash: {}", block.get_header().get_work_hash());
             println!("Block POW hash (V2): {:?}", block.get_pow_hash(tos_common::block::Algorithm::V2));
             println!("Block hash: {}", block.hash());

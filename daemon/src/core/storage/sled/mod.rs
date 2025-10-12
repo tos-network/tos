@@ -670,36 +670,13 @@ impl Storage for SledStorage {
         let cumulative_difficulty: CumulativeDifficulty = Self::delete_cacheable_data(self.snapshot.as_mut(), &self.cumulative_difficulty, self.cache.cumulative_difficulty_cache.as_mut(), &hash).await?;
         trace!("Cumulative difficulty deleted: {}", cumulative_difficulty);
 
-        let mut txs = Vec::new();
-        for tx_hash in block.get_transactions() {
-            // Should we delete the tx too or only unlink it
-            let mut should_delete = true;
-            if self.has_tx_blocks(tx_hash)? {
-                let mut blocks: Tips = Self::delete_cacheable_data(self.snapshot.as_mut(), &self.tx_blocks, None, tx_hash).await?;
-                let blocks_len =  blocks.len();
-                blocks.remove(&hash);
-                should_delete = blocks.is_empty();
-                self.set_blocks_for_tx(tx_hash, &blocks)?;
-                trace!("Tx was included in {}, blocks left: {}", blocks_len, blocks.into_iter().map(|b| b.to_string()).collect::<Vec<String>>().join(", "));
-            }
-
-            if self.is_tx_executed_in_block(tx_hash, &hash)? {
-                trace!("Tx {} was executed, deleting", tx_hash);
-                self.unmark_tx_from_executed(&tx_hash)?;
-                self.delete_contract_outputs_for_tx(&tx_hash).await?;
-            }
-
-            // Because the TX is not linked to any other block, we can safely delete that block
-            if should_delete {
-                trace!("Deleting TX {} in block {}", tx_hash, hash);
-                let tx: Immutable<Transaction> = Self::delete_arc_cacheable_data(self.snapshot.as_mut(), &self.transactions, self.cache.transactions_cache.as_mut(), tx_hash).await?;
-                txs.push((tx_hash.clone(), tx));
-            }
-        }
+        // TODO: Headers no longer contain transaction data
+        // Transaction cleanup needs to be refactored to fetch transactions separately
+        let txs = Vec::new();
 
         // remove the block hash from the set, and delete the set if empty
-        if self.has_blocks_at_height(block.get_height()).await? {
-            self.remove_block_hash_at_height(&hash, block.get_height()).await?;
+        if self.has_blocks_at_height(block.get_blue_score()).await? {
+            self.remove_block_hash_at_height(&hash, block.get_blue_score()).await?;
         }
 
         Ok((hash, block, txs))

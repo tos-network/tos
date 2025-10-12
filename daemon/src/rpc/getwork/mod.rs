@@ -187,7 +187,7 @@ impl<S: Storage> GetWorkServer<S> {
                 let blue_score = {
                     let storage = self.blockchain.get_storage().read().await;
                     let mut max_blue_score = 0u64;
-                    for tip in header.get_tips().iter() {
+                    for tip in header.get_parents().iter() {
                         let tip_ghostdag = storage.get_ghostdag_data(tip).await
                             .context("Error retrieving GHOSTDAG data for tip")?;
                         if tip_ghostdag.blue_score > max_blue_score {
@@ -198,7 +198,7 @@ impl<S: Storage> GetWorkServer<S> {
                 };
 
                 let job = MinerWork::new(header.get_work_hash(), get_current_time_in_millis());
-                (header.get_version(), job, header.get_height(), *diff, blue_score)
+                (header.get_version(), job, blue_score, *diff, blue_score)
             } else {
                 // generate a mining job
                 let (header, difficulty, blue_score) = {
@@ -208,12 +208,12 @@ impl<S: Storage> GetWorkServer<S> {
 
                     let header = self.blockchain.get_block_template_for_storage(&storage, DEV_PUBLIC_KEY.clone()).await
                         .context("Error while retrieving block template")?;
-                    let (difficulty, _) = self.blockchain.get_difficulty_at_tips(&*storage, header.get_tips().iter()).await
+                    let (difficulty, _) = self.blockchain.get_difficulty_at_tips(&*storage, header.get_parents().iter()).await
                         .context("Error while retrieving difficulty at tips")?;
 
                     // Calculate blue_score for the new block: max(tips' blue_scores) + 1
                     let mut max_blue_score = 0u64;
-                    for tip in header.get_tips().iter() {
+                    for tip in header.get_parents().iter() {
                         let tip_ghostdag = storage.get_ghostdag_data(tip).await
                             .context("Error retrieving GHOSTDAG data for tip")?;
                         if tip_ghostdag.blue_score > max_blue_score {
@@ -226,7 +226,7 @@ impl<S: Storage> GetWorkServer<S> {
                 };
 
                 let job = MinerWork::new(header.get_work_hash(), get_current_time_in_millis());
-                let height = header.get_height();
+                let height = blue_score;
                 let version = header.get_version();
 
                 // save the mining job, and set it as last job
@@ -294,12 +294,12 @@ impl<S: Storage> GetWorkServer<S> {
 
             let header = self.blockchain.get_block_template_for_storage(&storage, DEV_PUBLIC_KEY.clone()).await
                 .context("Error while retrieving block template when notifying new job")?;
-            let (difficulty, _) = self.blockchain.get_difficulty_at_tips(&*storage, header.get_tips().iter()).await
+            let (difficulty, _) = self.blockchain.get_difficulty_at_tips(&*storage, header.get_parents().iter()).await
                 .context("Error while retrieving difficulty at tips when notifying new job")?;
 
             // Calculate blue_score for the new block: max(tips' blue_scores) + 1
             let mut max_blue_score = 0u64;
-            for tip in header.get_tips().iter() {
+            for tip in header.get_parents().iter() {
                 let tip_ghostdag = storage.get_ghostdag_data(tip).await
                     .context("Error retrieving GHOSTDAG data for tip")?;
                 if tip_ghostdag.blue_score > max_blue_score {
@@ -312,7 +312,7 @@ impl<S: Storage> GetWorkServer<S> {
         };
 
         let job = MinerWork::new(header.get_work_hash(), header.timestamp);
-        let height = header.get_height();
+        let height = blue_score;
         let version = header.get_version();
 
         // get the algorithm for the current version

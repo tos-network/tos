@@ -531,18 +531,19 @@ async fn verify_chain<S: Storage>(manager: &CommandManager, mut args: ArgumentMa
         }
 
         // Verify that we have a balance for each account updated
-        let header = storage.get_block_header_by_hash(&hash_at_topo).await.context("Error while retrieving block header")?;
-        if !storage.has_balance_at_exact_topoheight(header.get_miner(), &TOS_ASSET, topo).await.context("Error while checking the miner balance version")? {
-            manager.error(format!("No balance version found for miner {} at topoheight {} for block {}", header.get_miner().as_address(blockchain.get_network().is_mainnet()), topo, hash_at_topo));
+        let block = storage.get_block_by_hash(&hash_at_topo).await.context("Error while retrieving block")?;
+        if !storage.has_balance_at_exact_topoheight(block.get_miner(), &TOS_ASSET, topo).await.context("Error while checking the miner balance version")? {
+            manager.error(format!("No balance version found for miner {} at topoheight {} for block {}", block.get_miner().as_address(blockchain.get_network().is_mainnet()), topo, hash_at_topo));
             return Ok(())
         }
 
         let mut burned_sum = 0;
         let mut txs = Vec::new();
         let mut outputs = 0;
-        for tx_hash in header.get_transactions() {
-            if storage.is_tx_executed_in_block(tx_hash, &hash_at_topo).context("Error while checking if tx is executed in block")? {
-                let transaction = storage.get_transaction(tx_hash).await
+        for tx in block.get_transactions() {
+            let tx_hash = tx.hash();
+            if storage.is_tx_executed_in_block(&tx_hash, &hash_at_topo).context("Error while checking if tx is executed in block")? {
+                let transaction = storage.get_transaction(&tx_hash).await
                     .context("Error while retrieving transaction")?;
 
                 if !storage.has_nonce_at_exact_topoheight(transaction.get_source(), topo).await.context("Error while checking the tx source nonce version")? {
@@ -570,7 +571,7 @@ async fn verify_chain<S: Storage>(manager: &CommandManager, mut args: ArgumentMa
         if !txs.is_empty() {
             info!("Verifying {} txs ({} outputs) at {}", txs.len(), outputs, topo);
             let start = Instant::now();
-            let mut state = ChainState::new(&*storage, blockchain.get_contract_environment(), 0, topo - 1, header.get_version());
+            let mut state = ChainState::new(&*storage, blockchain.get_contract_environment(), 0, topo - 1, block.get_version());
             Transaction::verify_batch(txs.iter(), &mut state, &NoZKPCache::default()).await
                 .context("Error while verifying txs")?;
 
@@ -1396,12 +1397,12 @@ async fn difficulty_dataset<S: Storage>(manager: &CommandManager, mut arguments:
             let solve_time = if topoheight == 0 {
                 0
             } else {
-        
+
                 // Retrieve best tip timestamp
-                let (_, tip_timestamp) = blockdag::find_newest_tip_by_timestamp::<S, _>(&storage, header.get_tips().iter()).await
+                let (_, tip_timestamp) = blockdag::find_newest_tip_by_timestamp::<S, _>(&storage, header.get_parents().iter()).await
                     .context("Error while finding best tip")?;
                 let solve_time = header.get_timestamp() - tip_timestamp;
-        
+
                 solve_time
             };
 

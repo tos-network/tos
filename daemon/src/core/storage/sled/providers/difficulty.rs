@@ -23,7 +23,7 @@ impl DifficultyProvider for SledStorage {
     async fn get_height_for_block_hash(&self, hash: &Hash) -> Result<u64, BlockchainError> {
         trace!("get height for block hash {}", hash);
         let block = self.get_block_header_by_hash(hash).await?;
-        Ok(block.get_height())
+        Ok(block.get_blue_score())
     }
 
     async fn get_version_for_block_hash(&self, hash: &Hash) -> Result<BlockVersion, BlockchainError> {
@@ -51,7 +51,8 @@ impl DifficultyProvider for SledStorage {
     async fn get_past_blocks_for_block_hash(&self, hash: &Hash) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
         trace!("get past blocks of {}", hash);
         let block = self.get_block_header_by_hash(hash).await?;
-        Ok(block.get_immutable_tips().clone())
+        let tips: IndexSet<Hash> = block.get_parents().iter().cloned().collect();
+        Ok(Immutable::Owned(tips))
     }
 
     async fn get_block_header_by_hash(&self, hash: &Hash) -> Result<Immutable<BlockHeader>, BlockchainError> {

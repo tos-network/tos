@@ -110,8 +110,8 @@ pub trait Storage:
             // generate new tips
             trace!("Removing {} from {} tips", hash, tips.len());
             tips.remove(&hash);
- 
-            for hash in block.get_tips().iter() {
+
+            for hash in block.get_parents().iter() {
                 trace!("Adding {} to {} tips", hash, tips.len());
                 tips.insert(hash.clone());
             }
@@ -137,8 +137,8 @@ pub trait Storage:
 
             topoheight -= 1;
             // height of old block become new height
-            if block.get_height() < height {
-                height = block.get_height();
+            if block.get_blue_score() < height {
+                height = block.get_blue_score();
             }
             done += 1;
         }

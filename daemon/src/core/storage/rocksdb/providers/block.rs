@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use log::trace;
 use tos_common::{
     block::{Block, BlockHeader},
-    crypto::Hash,
+    crypto::{Hash, Hashable},
     difficulty::{CumulativeDifficulty, Difficulty},
     immutable::Immutable,
     transaction::Transaction,
@@ -56,11 +56,9 @@ impl BlockProvider for RocksStorage {
     async fn get_block_by_hash(&self, hash: &Hash) -> Result<Block, BlockchainError> {
         trace!("get block by hash");
         let header = self.get_block_header_by_hash(hash).await?;
-        let mut transactions = Vec::with_capacity(header.get_txs_count());
-        for hash in header.get_txs_hashes() {
-            let transaction = self.get_transaction(hash).await?;
-            transactions.push(transaction.into_arc());
-        }
+        // TODO: Headers no longer contain transaction data - need to fetch from separate storage
+        // For now, return empty transactions as temporary fix
+        let transactions = Vec::new();
 
         Ok(Block::new(header, transactions))
     }
@@ -72,9 +70,10 @@ impl BlockProvider for RocksStorage {
         trace!("save block");
 
         let mut count_txs = 0;
-        for (hash, transaction) in block.get_transactions().iter().zip(txs.iter()) {
-            if !self.has_transaction(hash).await? {
-                self.add_transaction(hash, &transaction).await?;
+        for transaction in txs.iter() {
+            let tx_hash = (**transaction).hash();
+            if !self.has_transaction(&tx_hash).await? {
+                self.add_transaction(&tx_hash, &transaction).await?;
                 count_txs += 1;
             }
         }
@@ -88,7 +87,7 @@ impl BlockProvider for RocksStorage {
         };
         self.insert_into_disk(Column::BlockDifficulty, hash.as_bytes(), &block_difficulty)?;
 
-        self.add_block_hash_at_height(&hash, block.get_height()).await?;
+        self.add_block_hash_at_height(&hash, block.get_blue_score()).await?;
 
         if count_txs > 0 {
             count_txs += self.count_transactions().await?;

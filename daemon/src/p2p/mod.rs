@@ -599,7 +599,7 @@ impl<S: Storage> P2pServer<S> {
                 Cow::Owned(storage.get_hash_at_topo_height(0).await?)
             }
         };
-        let handshake = Handshake::new(Cow::Owned(VERSION.to_owned()), *self.blockchain.get_network(), Cow::Borrowed(self.get_tag()), Cow::Borrowed(&NETWORK_ID), self.get_peer_id(), self.bind_address.port(), get_current_time_in_seconds(), topoheight, block.get_height(), pruned_topoheight, Cow::Borrowed(&top_hash), genesis_block, Cow::Borrowed(&cumulative_difficulty), self.sharable);
+        let handshake = Handshake::new(Cow::Owned(VERSION.to_owned()), *self.blockchain.get_network(), Cow::Borrowed(self.get_tag()), Cow::Borrowed(&NETWORK_ID), self.get_peer_id(), self.bind_address.port(), get_current_time_in_seconds(), topoheight, block.get_blue_score(), pruned_topoheight, Cow::Borrowed(&top_hash), genesis_block, Cow::Borrowed(&cumulative_difficulty), self.sharable);
         Ok(Packet::Handshake(Cow::Owned(handshake)).to_bytes())
     }
 
@@ -1380,40 +1380,11 @@ impl<S: Storage> P2pServer<S> {
         debug!("Event loop task is stopped!");
     }
 
-    async fn request_block(&self, peer: &Arc<Peer>, block_hash: &Hash, header: BlockHeader) -> Result<Block, BlockchainError> {
-        // All futures containing the TXs requested
-        let mut txs_futures = FuturesOrdered::new();
-        for hash in header.get_txs_hashes().iter().cloned() {
-            let future = async {
-                if let Ok(tx) = self.blockchain.get_tx(&hash).await {
-                    debug!("tx {} found in chain", hash);
-                    Ok(tx.into_arc())
-                } else {
-                    debug!("Cache missed for TX {} in block propagation {}, will request it from peer", hash, block_hash);
-
-                    // request it from peer
-                    // TODO: rework object tracker
-                    let mut listener = self.object_tracker.request_object_from_peer_with_or_get_notified(
-                        Arc::clone(&peer),
-                        ObjectRequest::Transaction(Immutable::Owned(hash)),
-                        None
-                    ).await?;
-
-                    listener.recv().await
-                        .context("Error while reading transaction for block")?
-                        .into_transaction()
-                        .map(|(tx, _)| Arc::new(tx))
-                }
-            };
-            txs_futures.push_back(future);
-        }
-
-        // Now collect all the futures
-        let txs = txs_futures.try_collect::<Vec<_>>().await
-            .context("Error while collecting all TXs")?;
-
-        // build the final block with TXs
-        let block = Block::new(Immutable::Owned(header), txs);
+    async fn request_block(&self, peer: &Arc<Peer>, block_hash: &Hash, _header: BlockHeader) -> Result<Block, BlockchainError> {
+        // Since BlockHeader no longer contains transaction hashes, we need to request the full block
+        debug!("Requesting full block {} from peer", block_hash);
+        let (block, _) = peer.request_blocking_object(ObjectRequest::Block(Immutable::Owned(block_hash.clone()))).await?
+            .into_block()?;
         Ok(block)
     }
 
@@ -1986,7 +1957,7 @@ impl<S: Storage> P2pServer<S> {
                     blocks_propagation_queue.put(block_hash.clone(), None);
                 }
 
-                debug!("Received block at height {} from {}", header.get_height(), peer);
+                debug!("Received block at height {} from {}", header.get_blue_score(), peer);
                 if self.allow_priority_blocks && peer.is_priority() {
                     debug!("fast propagating block {} from {}", block_hash, peer);
 
@@ -1999,7 +1970,7 @@ impl<S: Storage> P2pServer<S> {
                         match zelf.build_generic_ping_packet().await {
                             Ok(mut ping) => {
                                 // We provide the highest height available
-                                ping.set_height(header.get_height().max(ping.get_height()));
+                                ping.set_height(header.get_blue_score().max(ping.get_height()));
 
                                 debug!("broadcasting priority block {} with ping packet to all peers", block_hash);
                                 zelf.broadcast_block_with_ping(
@@ -2839,7 +2810,7 @@ impl<S: Storage> P2pServer<S> {
 
     // Broadcast a compact block with a pre-built ping packet
     async fn broadcast_compact_block_with_ping(&self, compact_block: tos_common::block::CompactBlock, ping: Ping<'_>, hash: &Arc<Hash>, is_from_mining: bool, send_ping: bool) {
-        debug!("Broadcasting compact block {} at height {}", hash, compact_block.header.get_height());
+        debug!("Broadcasting compact block {} at height {}", hash, compact_block.header.get_blue_score());
         counter!("tos_p2p_broadcast_compact_block").increment(1u64);
 
         // Build the compact block propagation packet
@@ -2862,7 +2833,7 @@ impl<S: Storage> P2pServer<S> {
         trace!("start broadcasting compact block {} to all peers", hash);
         let packet_compact_block_bytes = &packet_compact_block_bytes;
         let packet_ping_bytes = &packet_ping_bytes;
-        let block_height = compact_block.header.get_height();
+        let block_height = compact_block.header.get_blue_score();
 
         // Prepare all the futures to execute them in parallel
         stream::iter(self.peer_list.get_cloned_peers().await)
@@ -2931,7 +2902,7 @@ impl<S: Storage> P2pServer<S> {
 
     // Broadcast a block with a pre-built ping packet
     pub async fn broadcast_block_with_ping(&self, block: &BlockHeader, ping: Ping<'_>, hash: &Arc<Hash>, is_from_mining: bool, send_ping: bool) {
-        debug!("Broadcasting block {} at height {}", hash, block.get_height());
+        debug!("Broadcasting block {} at height {}", hash, block.get_blue_score());
         counter!("tos_p2p_broadcast_block").increment(1u64);
 
         // Build the block propagation packet
@@ -2963,7 +2934,7 @@ impl<S: Storage> P2pServer<S> {
                 // (block height is always + 1 above the highest tip height, so we can just check that peer height is not above block height + 1, it's enough in 90% of time)
                 // chain can accept old blocks (up to STABLE_LIMIT) but new blocks only N+1
                 // Easier way: we could simply check that the block height is above peer stable height
-                if (peer_height >= block.get_height() && peer_height - block.get_height() <= STABLE_LIMIT) || (peer_height <= block.get_height() && block.get_height() - peer_height <= 1) {
+                if (peer_height >= block.get_blue_score() && peer_height - block.get_blue_score() <= STABLE_LIMIT) || (peer_height <= block.get_blue_score() && block.get_blue_score() - peer_height <= 1) {
                     // Don't lock the blocks propagation while sending the packet
                     let send_block = {
                         trace!("locking blocks propagation for peer {}", peer);
@@ -3001,7 +2972,7 @@ impl<S: Storage> P2pServer<S> {
 
                         // We update the peer height to the block height
                         // As we expect that the peer will accept this block
-                        peer.set_height(block.get_height().max(peer.get_height()));
+                        peer.set_height(block.get_blue_score().max(peer.get_height()));
 
                         if let Err(e) = peer.send_bytes(packet_block_bytes.clone()).await {
                             debug!("Error on broadcast block {} to {}: {}", hash, peer, e);
@@ -3017,7 +2988,7 @@ impl<S: Storage> P2pServer<S> {
                             peer.set_last_ping_sent(get_current_time_in_seconds());
                         }
                     }
-                } else if send_ping && peer_height >= block.get_height().saturating_sub(STABLE_LIMIT) {
+                } else if send_ping && peer_height >= block.get_blue_score().saturating_sub(STABLE_LIMIT) {
                     // Peer is above us, send him a ping packet to inform him we got a block propagated
                     log!(self.block_propagation_log_level, "send ping (block {}) for propagation to {}", hash, peer);
                     if let Err(e) = peer.send_bytes(packet_ping_bytes.clone()).await {
@@ -3028,7 +2999,7 @@ impl<S: Storage> P2pServer<S> {
                     }
                 } else {
                     // Peer is too far, don't send the block and neither the ping packet
-                    log::log!(self.block_propagation_log_level, "Cannot broadcast {} at height {} to {}, too far", hash, block.get_height(), peer);
+                    log::log!(self.block_propagation_log_level, "Cannot broadcast {} at height {} to {}, too far", hash, block.get_blue_score(), peer);
                 }
         }).await;
 

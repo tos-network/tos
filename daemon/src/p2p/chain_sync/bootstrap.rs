@@ -6,8 +6,9 @@ use log::{debug, error, info, trace, warn};
 use tokio::try_join;
 use tos_common::{
     account::{VersionedBalance, VersionedNonce},
-    crypto::{Hash, PublicKey},
+    crypto::{Hash, Hashable, PublicKey},
     immutable::Immutable,
+    transaction::Transaction,
     versioned_type::State,
     asset::VersionedAssetData,
 };
@@ -320,10 +321,11 @@ impl<S: Storage> P2pServer<S> {
                         // Also track all executions
                         let mut executed_transactions = IndexSet::new();
                         {
-                            let header = storage.get_block_header_by_hash(&hash).await?;
-                            for tx_hash in header.get_txs_hashes() {
-                                if storage.is_tx_executed_in_block(tx_hash, &hash)? {
-                                    executed_transactions.insert(tx_hash.clone());
+                            let block = storage.get_block_by_hash(&hash).await?;
+                            for tx in block.get_transactions() {
+                                let tx_hash = tx.hash();
+                                if storage.is_tx_executed_in_block(&tx_hash, &hash)? {
+                                    executed_transactions.insert(tx_hash);
                                 }
                             }
                         }
@@ -512,32 +514,20 @@ impl<S: Storage> P2pServer<S> {
                             }
 
                             debug!("Saving block metadata {}", metadata.hash);
-                            let (header, hash) = peer.request_blocking_object(ObjectRequest::BlockHeader(Immutable::Owned(metadata.hash))).await?
-                                .into_block_header()?;
+                            let (block, hash) = peer.request_blocking_object(ObjectRequest::Block(Immutable::Owned(metadata.hash))).await?
+                                .into_block()?;
 
-                            let mut txs = Vec::with_capacity(header.get_txs_hashes().len());
-                            debug!("Retrieving {} txs for block {}", header.get_txs_count(), hash);
-                            for tx_hash in header.get_txs_hashes() {
-                                trace!("Retrieving TX {} for block {}", tx_hash, hash);
-                                let tx = if self.blockchain.has_tx(tx_hash).await? {
-                                    self.blockchain.get_tx(tx_hash).await?
-                                        .into_arc()
-                                } else {
-                                    let (tx, _) = peer.request_blocking_object(ObjectRequest::Transaction(Immutable::Owned(tx_hash.clone()))).await?
-                                        .into_transaction()?;
-                                    Arc::new(tx)
-                                };
+                            let (header, txs) = block.split();
+                            let tx_hashes: IndexSet<Hash> = txs.iter().map(|tx| tx.hash()).collect();
 
-                                trace!("TX {} ok", tx_hash);
-                                txs.push(tx);
-                            }
-    
+                            debug!("Retrieved {} txs for block {}", txs.len(), hash);
+
                             // link its TX to the block
                             let mut storage = self.blockchain.get_storage().write().await;
-                            for tx_hash in header.get_txs_hashes() {
+                            for tx_hash in &tx_hashes {
                                 storage.add_block_linked_to_tx_if_not_present(tx_hash, &hash)?;
                             }
-    
+
                             // save metadata of this block
                             storage.set_topoheight_metadata(
                                 topoheight,
@@ -550,7 +540,7 @@ impl<S: Storage> P2pServer<S> {
 
                             // Mark needed TXs as executed
                             for tx in metadata.executed_transactions {
-                                if !header.get_txs_hashes().contains(&tx) || storage.is_tx_executed_in_a_block(&tx)? {
+                                if !tx_hashes.contains(&tx) || storage.is_tx_executed_in_a_block(&tx)? {
                                     return Err(P2pError::InvalidBlockMetadata.into())
                                 }
 
@@ -558,7 +548,7 @@ impl<S: Storage> P2pServer<S> {
                             }
 
                             // save the block with its transactions, difficulty
-                            storage.save_block(Arc::new(header), &txs, metadata.difficulty, metadata.cumulative_difficulty, metadata.p, Immutable::Owned(hash)).await?;
+                            storage.save_block(header.into_arc(), &txs, metadata.difficulty, metadata.cumulative_difficulty, metadata.p, Immutable::Owned(hash)).await?;
 
                             Ok(())
                         }).await?;
