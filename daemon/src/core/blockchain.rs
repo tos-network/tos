@@ -2488,9 +2488,43 @@ impl<S: Storage> Blockchain<S> {
             );
 
             // Store GHOSTDAG data
-            storage.insert_ghostdag_data(&block_hash, Arc::new(ghostdag_data)).await?;
+            storage.insert_ghostdag_data(&block_hash, Arc::new(ghostdag_data.clone())).await?;
 
             histogram!("tos_ghostdag_ms").record(start.elapsed().as_millis() as f64);
+
+            // Populate reachability data (TIP-2 Phase 2)
+            // Only populate if this is genesis or if selected parent has reachability data
+            let selected_parent = ghostdag_data.selected_parent.clone();
+            let is_genesis = block.get_height() == 0;
+
+            if is_genesis {
+                // Initialize genesis reachability data
+                debug!("Initializing genesis reachability data for block {}", block_hash);
+                let genesis_hash = block_hash.as_ref().clone();
+                let reachability = crate::core::reachability::TosReachability::new(genesis_hash);
+                let genesis_data = reachability.genesis_reachability_data();
+                storage.set_reachability_data(&block_hash, &genesis_data).await?;
+            } else if storage.has_reachability_data(&selected_parent).await.unwrap_or(false) {
+                // Populate reachability data for non-genesis block
+                debug!("Populating reachability data for block {}", block_hash);
+                let start_reach = Instant::now();
+
+                let genesis_hash = crate::config::get_genesis_block_hash(&self.network)
+                    .cloned()
+                    .unwrap_or_else(|| Hash::new([0u8; 32]));
+                let mut reachability = crate::core::reachability::TosReachability::new(genesis_hash);
+
+                // Add block to reachability tree
+                reachability.add_tree_block(&mut *storage, block_hash.as_ref().clone(), selected_parent).await?;
+
+                // Update future covering sets for mergeset blues
+                let mergeset_blues: Vec<Hash> = ghostdag_data.mergeset_blues.iter()
+                    .cloned()
+                    .collect();
+                reachability.add_dag_block(&mut *storage, &block_hash, &mergeset_blues).await?;
+
+                debug!("Reachability data populated in {:?}", start_reach.elapsed());
+            }
         }
 
         // Save transactions & block
