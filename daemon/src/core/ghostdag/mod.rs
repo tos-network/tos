@@ -9,10 +9,12 @@ pub use types::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData};
 use anyhow::Result;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tos_common::crypto::Hash;
 use tos_common::difficulty::Difficulty;
 
 use crate::core::error::BlockchainError;
+use crate::core::reachability::TosReachability;
 use crate::core::storage::Storage;
 
 /// Calculate work from difficulty
@@ -119,6 +121,9 @@ pub struct TosGhostdag {
 
     /// Genesis block hash
     genesis_hash: Hash,
+
+    /// Reachability service for DAG ancestry queries (TIP-2 Phase 2)
+    reachability: Arc<TosReachability>,
 }
 
 impl TosGhostdag {
@@ -127,10 +132,12 @@ impl TosGhostdag {
     /// # Arguments
     /// * `k` - The k-cluster parameter (maximum anticone size for blue blocks)
     /// * `genesis_hash` - Hash of the genesis block
-    pub fn new(k: KType, genesis_hash: Hash) -> Self {
+    /// * `reachability` - Reachability service for DAG ancestry queries
+    pub fn new(k: KType, genesis_hash: Hash, reachability: Arc<TosReachability>) -> Self {
         Self {
             k,
             genesis_hash,
+            reachability,
         }
     }
 
@@ -279,17 +286,11 @@ impl TosGhostdag {
     }
 
     /// Get ordered mergeset without the selected parent
-    /// BFS-based implementation with conservative heuristic
+    /// BFS-based implementation with reachability service
     ///
     /// Based on Kaspa's ordered_mergeset_without_selected_parent in mergeset.rs
-    /// Phase 2 improvement: Uses BFS to explore mergeset candidates
-    ///
-    /// Note: Full Kaspa implementation uses reachability service to determine
-    /// if a block is in the past of selected parent. We use a conservative heuristic:
-    /// - If block.blue_score <= selected_parent.blue_score - 10, it's likely in the past
-    /// - This is safe but may miss some valid mergeset candidates
-    ///
-    /// Full reachability service will be implemented in later Phase 2 milestone.
+    /// Phase 2 complete implementation: Uses BFS with reachability service to accurately
+    /// determine which blocks are in the past of the selected parent.
     async fn ordered_mergeset_without_selected_parent<S: Storage>(
         &self,
         storage: &S,
@@ -297,10 +298,6 @@ impl TosGhostdag {
         parents: &[Hash],
     ) -> Result<Vec<Hash>, BlockchainError> {
         use std::collections::{HashSet, VecDeque};
-
-        // Get selected parent's blue score for heuristic
-        let selected_parent_data = storage.get_ghostdag_data(&selected_parent).await?;
-        let selected_parent_blue_score = selected_parent_data.blue_score;
 
         // Initialize BFS queue with non-selected parents
         let mut queue: VecDeque<Hash> = parents.iter()
@@ -325,14 +322,25 @@ impl TosGhostdag {
                     continue;
                 }
 
-                // Conservative heuristic: Check if parent is likely in selected_parent's past
-                // Get parent's GHOSTDAG data
-                let parent_data = storage.get_ghostdag_data(parent).await?;
-                let parent_blue_score = parent_data.blue_score;
+                // Try to use reachability service to check if parent is in selected_parent's past
+                // If reachability data doesn't exist yet (during migration), fall back to blue_score heuristic
+                let is_in_past = match (
+                    storage.has_reachability_data(parent).await,
+                    storage.has_reachability_data(&selected_parent).await
+                ) {
+                    (Ok(true), Ok(true)) => {
+                        // Both blocks have reachability data - use accurate DAG ancestry check
+                        self.reachability.is_dag_ancestor_of(storage, parent, &selected_parent).await?
+                    }
+                    _ => {
+                        // Fall back to conservative heuristic for blocks without reachability data
+                        let parent_data = storage.get_ghostdag_data(parent).await?;
+                        let selected_parent_data = storage.get_ghostdag_data(&selected_parent).await?;
+                        parent_data.blue_score + 10 < selected_parent_data.blue_score
+                    }
+                };
 
-                // If parent's blue_score is significantly lower, it's likely in the past
-                // Use a conservative threshold of 10 blocks
-                if parent_blue_score + 10 < selected_parent_blue_score {
+                if is_in_past {
                     past.insert(parent.clone());
                     continue;
                 }

@@ -295,10 +295,14 @@ impl<S: Storage> Blockchain<S> {
             .cloned()
             .unwrap_or_else(|| Hash::new([0u8; 32])); // Devnet uses zero hash
 
+        info!("Initializing reachability service for genesis={}", genesis_hash);
+        let reachability = Arc::new(crate::core::reachability::TosReachability::new(genesis_hash.clone()));
+
         info!("Initializing GHOSTDAG manager with k=10, genesis={}", genesis_hash);
         let ghostdag = Arc::new(TosGhostdag::new(
             10, // k parameter (same as Kaspa)
             genesis_hash,
+            reachability,
         ));
 
         info!("Initializing chain...");
