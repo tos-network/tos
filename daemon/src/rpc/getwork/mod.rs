@@ -169,7 +169,7 @@ impl<S: Storage> GetWorkServer<S> {
     // then, send it
     async fn send_new_job(&self, session: &WebSocketSessionShared<Self>, key: &PublicKey) -> Result<(), anyhow::Error> {
         debug!("Sending new job to miner");
-        let (version, mut job, height, difficulty) = {
+        let (version, mut job, height, difficulty, blue_score) = {
             debug!("locking last header hashfor new job");
             let mut hash = self.last_header_hash.lock().await;
 
@@ -183,21 +183,46 @@ impl<S: Storage> GetWorkServer<S> {
                 let (header, diff) = mining_jobs.peek(hash)
                     .ok_or(InternalRpcError::InternalError("No mining job found"))?;
 
+                // Calculate blue_score for the cached header
+                let blue_score = {
+                    let storage = self.blockchain.get_storage().read().await;
+                    let mut max_blue_score = 0u64;
+                    for tip in header.get_tips().iter() {
+                        let tip_ghostdag = storage.get_ghostdag_data(tip).await
+                            .context("Error retrieving GHOSTDAG data for tip")?;
+                        if tip_ghostdag.blue_score > max_blue_score {
+                            max_blue_score = tip_ghostdag.blue_score;
+                        }
+                    }
+                    max_blue_score + 1
+                };
+
                 let job = MinerWork::new(header.get_work_hash(), get_current_time_in_millis());
-                (header.get_version(), job, header.get_height(), *diff)
+                (header.get_version(), job, header.get_height(), *diff, blue_score)
             } else {
                 // generate a mining job
-                let (header, difficulty) = {
+                let (header, difficulty, blue_score) = {
                     debug!("locking storage for mining job generation");
                     let storage = self.blockchain.get_storage().read().await;
                     debug!("storage read acquired for mining job generation");
-    
+
                     let header = self.blockchain.get_block_template_for_storage(&storage, DEV_PUBLIC_KEY.clone()).await
                         .context("Error while retrieving block template")?;
                     let (difficulty, _) = self.blockchain.get_difficulty_at_tips(&*storage, header.get_tips().iter()).await
                         .context("Error while retrieving difficulty at tips")?;
 
-                    (header, difficulty)
+                    // Calculate blue_score for the new block: max(tips' blue_scores) + 1
+                    let mut max_blue_score = 0u64;
+                    for tip in header.get_tips().iter() {
+                        let tip_ghostdag = storage.get_ghostdag_data(tip).await
+                            .context("Error retrieving GHOSTDAG data for tip")?;
+                        if tip_ghostdag.blue_score > max_blue_score {
+                            max_blue_score = tip_ghostdag.blue_score;
+                        }
+                    }
+                    let blue_score = max_blue_score + 1;
+
+                    (header, difficulty, blue_score)
                 };
 
                 let job = MinerWork::new(header.get_work_hash(), get_current_time_in_millis());
@@ -214,7 +239,7 @@ impl<S: Storage> GetWorkServer<S> {
                     mining_jobs.put(header_work_hash.clone(), (header, difficulty));
                 }
 
-                (version, job, height, difficulty)
+                (version, job, height, difficulty, blue_score)
             }
         };
 
@@ -227,7 +252,7 @@ impl<S: Storage> GetWorkServer<S> {
         let topoheight = self.blockchain.get_topo_height();
 
         debug!("Sending job to new miner");
-        session.send_json(Response::NewJob(GetMinerWorkResult { algorithm, miner_work: job.to_hex(), height, topoheight, difficulty })).await
+        session.send_json(Response::NewJob(GetMinerWorkResult { algorithm, miner_work: job.to_hex(), height, topoheight, difficulty, blue_score })).await
             .context("error while sending block template")?;
         debug!("Job sent to miner");
 
@@ -262,7 +287,7 @@ impl<S: Storage> GetWorkServer<S> {
         self.last_notify.store(get_current_time_in_millis(), Ordering::SeqCst);
         self.is_job_dirty.store(false, Ordering::SeqCst);
         debug!("Notify all miners for a new job");
-        let (header, difficulty) = {
+        let (header, difficulty, blue_score) = {
             debug!("locking storage for new job");
             let storage = self.blockchain.get_storage().read().await;
             debug!("storage read acquired for new job");
@@ -271,7 +296,19 @@ impl<S: Storage> GetWorkServer<S> {
                 .context("Error while retrieving block template when notifying new job")?;
             let (difficulty, _) = self.blockchain.get_difficulty_at_tips(&*storage, header.get_tips().iter()).await
                 .context("Error while retrieving difficulty at tips when notifying new job")?;
-            (header, difficulty)
+
+            // Calculate blue_score for the new block: max(tips' blue_scores) + 1
+            let mut max_blue_score = 0u64;
+            for tip in header.get_tips().iter() {
+                let tip_ghostdag = storage.get_ghostdag_data(tip).await
+                    .context("Error retrieving GHOSTDAG data for tip")?;
+                if tip_ghostdag.blue_score > max_blue_score {
+                    max_blue_score = tip_ghostdag.blue_score;
+                }
+            }
+            let blue_score = max_blue_score + 1;
+
+            (header, difficulty, blue_score)
         };
 
         let job = MinerWork::new(header.get_work_hash(), header.timestamp);
@@ -293,7 +330,8 @@ impl<S: Storage> GetWorkServer<S> {
                     algorithm,
                     height,
                     topoheight,
-                    difficulty
+                    difficulty,
+                    blue_score
                 };
 
                 rpc.notify_clients_with(&NotifyEvent::NewBlockTemplate, value).await;
@@ -332,7 +370,7 @@ impl<S: Storage> GetWorkServer<S> {
                         OsRng.fill_bytes(job.get_extra_nonce());
                         let template = job.to_hex();
 
-                        if let Err(e) = addr.send_json(Response::NewJob(GetMinerWorkResult { algorithm, miner_work: template, height, topoheight, difficulty })).await {
+                        if let Err(e) = addr.send_json(Response::NewJob(GetMinerWorkResult { algorithm, miner_work: template, height, topoheight, difficulty, blue_score })).await {
                             warn!("Error while notifying {} about new job: {}", miner, e);
                         }
                     }

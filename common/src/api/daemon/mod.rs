@@ -186,6 +186,8 @@ pub struct GetBlockTemplateResult {
     pub topoheight: TopoHeight,
     // Difficulty target for the POW challenge
     pub difficulty: Difficulty,
+    // Blue score from GHOSTDAG (number of blue blocks in past)
+    pub blue_score: u64,
 }
 
 #[derive(Serialize, Deserialize, PartialEq)]
@@ -201,6 +203,8 @@ pub struct GetMinerWorkResult {
     // topoheight of the daemon
     // this is for visual purposes only
     pub topoheight: TopoHeight,
+    // Blue score from GHOSTDAG (number of blue blocks in past)
+    pub blue_score: u64,
 }
 
 #[derive(Serialize, Deserialize)]

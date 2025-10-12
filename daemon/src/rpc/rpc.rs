@@ -495,7 +495,18 @@ async fn get_block_template<S: Storage>(context: &Context, body: Value) -> Resul
     let height = block.height;
     let algorithm = get_pow_algorithm_for_version(block.version);
     let topoheight = blockchain.get_topo_height();
-    Ok(json!(GetBlockTemplateResult { template: block.to_hex(), algorithm, height, topoheight, difficulty }))
+
+    // Calculate blue_score for the new block: max(tips' blue_scores) + 1
+    let mut max_blue_score = 0u64;
+    for tip in block.get_tips().iter() {
+        let tip_ghostdag = storage.get_ghostdag_data(tip).await.context("Error retrieving GHOSTDAG data for tip")?;
+        if tip_ghostdag.blue_score > max_blue_score {
+            max_blue_score = tip_ghostdag.blue_score;
+        }
+    }
+    let blue_score = max_blue_score + 1;
+
+    Ok(json!(GetBlockTemplateResult { template: block.to_hex(), algorithm, height, topoheight, difficulty, blue_score }))
 }
 
 async fn get_miner_work<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -503,9 +514,21 @@ async fn get_miner_work<S: Storage>(context: &Context, body: Value) -> Result<Va
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
 
     let header = BlockHeader::from_hex(&params.template)?;
-    let (difficulty, _) = {
+    let (difficulty, blue_score) = {
         let storage = blockchain.get_storage().read().await;
-        blockchain.get_difficulty_at_tips(&*storage, header.get_tips().iter()).await.context("Error while retrieving difficulty at tips")?
+        let diff_result = blockchain.get_difficulty_at_tips(&*storage, header.get_tips().iter()).await.context("Error while retrieving difficulty at tips")?;
+
+        // Calculate blue_score for the new block: max(tips' blue_scores) + 1
+        let mut max_blue_score = 0u64;
+        for tip in header.get_tips().iter() {
+            let tip_ghostdag = storage.get_ghostdag_data(tip).await.context("Error retrieving GHOSTDAG data for tip")?;
+            if tip_ghostdag.blue_score > max_blue_score {
+                max_blue_score = tip_ghostdag.blue_score;
+            }
+        }
+        let blue_score = max_blue_score + 1;
+
+        (diff_result.0, blue_score)
     };
     let version = header.get_version();
     let height = header.get_height();
@@ -527,7 +550,7 @@ async fn get_miner_work<S: Storage>(context: &Context, body: Value) -> Result<Va
     let algorithm = get_pow_algorithm_for_version(version);
     let topoheight = blockchain.get_topo_height();
 
-    Ok(json!(GetMinerWorkResult { miner_work: work.to_hex(), algorithm, difficulty, height, topoheight }))
+    Ok(json!(GetMinerWorkResult { miner_work: work.to_hex(), algorithm, difficulty, height, topoheight, blue_score }))
 }
 
 async fn submit_block<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
