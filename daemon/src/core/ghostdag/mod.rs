@@ -155,6 +155,7 @@ impl TosGhostdag {
             Vec::new(),             // mergeset_blues
             Vec::new(),             // mergeset_reds
             std::collections::HashMap::new(), // blues_anticone_sizes
+            Vec::new(),             // mergeset_non_daa (empty for genesis)
         )
     }
 
@@ -471,6 +472,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             std::collections::HashMap::new(),
+            Vec::new(),  // Empty mergeset_non_daa for genesis
         );
 
         assert_eq!(genesis_data.blue_score, 0);

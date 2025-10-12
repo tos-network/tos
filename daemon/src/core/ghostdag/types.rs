@@ -44,6 +44,13 @@ pub struct TosGhostdagData {
     /// intersection with the current blue set
     /// Key: block hash, Value: anticone size (must be ≤ K)
     pub blues_anticone_sizes: Arc<HashMap<Hash, KType>>,
+
+    /// Mergeset non-DAA: blocks in the mergeset that are too far in the past
+    /// to participate in the Difficulty Adjustment Algorithm (DAA) window.
+    /// These blocks are excluded from DAA score calculation to prevent
+    /// timestamp manipulation attacks.
+    /// (Phase 3 addition for complete DAA implementation)
+    pub mergeset_non_daa: Arc<Vec<Hash>>,
 }
 
 /// Compact GHOSTDAG data - only essential fields
@@ -64,6 +71,7 @@ impl TosGhostdagData {
         mergeset_blues: Vec<Hash>,
         mergeset_reds: Vec<Hash>,
         blues_anticone_sizes: HashMap<Hash, KType>,
+        mergeset_non_daa: Vec<Hash>,
     ) -> Self {
         Self {
             blue_score,
@@ -72,6 +80,7 @@ impl TosGhostdagData {
             mergeset_blues: Arc::new(mergeset_blues),
             mergeset_reds: Arc::new(mergeset_reds),
             blues_anticone_sizes: Arc::new(blues_anticone_sizes),
+            mergeset_non_daa: Arc::new(mergeset_non_daa),
         }
     }
 
@@ -92,6 +101,7 @@ impl TosGhostdagData {
             mergeset_blues: Arc::new(mergeset_blues),
             mergeset_reds: Arc::new(Vec::new()),
             blues_anticone_sizes: Arc::new(blues_anticone_sizes),
+            mergeset_non_daa: Arc::new(Vec::new()),  // Empty initially
         }
     }
 
@@ -140,6 +150,20 @@ impl TosGhostdagData {
         self.blue_score = blue_score;
         self.blue_work = blue_work;
     }
+
+    /// Set mergeset_non_daa blocks
+    /// These are blocks in the mergeset that are outside the DAA window
+    /// and should not participate in difficulty adjustment calculations.
+    /// (Phase 3 addition for complete DAA implementation)
+    pub fn set_mergeset_non_daa(&mut self, non_daa_blocks: Vec<Hash>) {
+        self.mergeset_non_daa = Arc::new(non_daa_blocks);
+    }
+
+    /// Get the number of blocks that participate in DAA
+    /// This is the total mergeset blues minus those outside the DAA window
+    pub fn daa_contributing_blues_count(&self) -> usize {
+        self.mergeset_blues.len().saturating_sub(self.mergeset_non_daa.len())
+    }
 }
 
 impl From<&TosGhostdagData> for CompactGhostdagData {
@@ -161,6 +185,7 @@ impl Default for TosGhostdagData {
             mergeset_blues: Arc::new(Vec::new()),
             mergeset_reds: Arc::new(Vec::new()),
             blues_anticone_sizes: Arc::new(HashMap::new()),
+            mergeset_non_daa: Arc::new(Vec::new()),
         }
     }
 }
