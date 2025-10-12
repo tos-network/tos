@@ -49,3 +49,7 @@ pub use state::*;
 pub use energy::*;
 pub use ai_mining::*;
 pub use ghostdag::*;
+
+// TIP-2 Phase 2: Reachability service
+mod reachability;
+pub use reachability::*;

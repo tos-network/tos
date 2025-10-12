@@ -15,5 +15,6 @@ pub mod merkle;
 
 pub mod hard_fork;
 pub mod ghostdag; // TIP-2 Phase 1: GHOSTDAG implementation
+pub mod reachability; // TIP-2 Phase 2: Reachability service
 
 pub use tx_cache::*;
