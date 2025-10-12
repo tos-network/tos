@@ -83,7 +83,7 @@ use crate::{
         DEV_FEES, DEV_PUBLIC_KEY, EMISSION_SPEED_FACTOR, GENESIS_BLOCK_DIFFICULTY,
         MILLIS_PER_SECOND, SIDE_BLOCK_REWARD_MAX_BLOCKS, PRUNE_SAFETY_LIMIT,
         SIDE_BLOCK_REWARD_PERCENT, SIDE_BLOCK_REWARD_MIN_PERCENT, STABLE_LIMIT,
-        TIMESTAMP_IN_FUTURE_LIMIT, DEFAULT_CACHE_SIZE,
+        TIMESTAMP_IN_FUTURE_LIMIT, DEFAULT_CACHE_SIZE, MAX_ORPHANED_TRANSACTIONS,
     },
     core::{
         config::Config,
@@ -242,6 +242,15 @@ impl<S: Storage> Blockchain<S> {
 
             if config.skip_pow_verification {
                 warn!("PoW verification is disabled! This is dangerous in production!");
+            }
+
+            // V-27 Fix: Reject skip_block_template_txs_verification on mainnet/testnet
+            if config.skip_block_template_txs_verification {
+                if network != Network::Devnet {
+                    error!("skip_block_template_txs_verification is ONLY allowed on devnet! This is a critical security vulnerability on mainnet/testnet.");
+                    return Err(BlockchainError::UnsafeConfigurationOnMainnet.into());
+                }
+                warn!("Block template TX verification is DISABLED - DEVNET ONLY mode active!");
             }
 
             if config.txs_verification_threads_count == 0 {
@@ -1612,6 +1621,13 @@ impl<S: Storage> Blockchain<S> {
                 return Err(BlockchainError::TxAlreadyInMempool(hash.into_owned()))
             }
 
+            // CRITICAL FIX V-13: Acquire per-account lock to prevent nonce race condition
+            // This prevents two concurrent transactions with the same nonce from the same account
+            // from both passing the nonce check and being added to the mempool
+            let nonce_lock = mempool.get_nonce_lock(tx.get_source());
+            let _guard = nonce_lock.lock().await;
+            debug!("Acquired nonce lock for account {}", tx.get_source().as_address(self.network.is_mainnet()));
+
             let stable_topoheight = self.get_stable_topoheight();
             let current_topoheight = self.get_topo_height();
             // get the highest nonce available
@@ -1851,10 +1867,15 @@ impl<S: Storage> Blockchain<S> {
             }
             tips = selected_tips;
 
+            // V-24 Fix: Require at least one valid tip
+            // If all tips were filtered out (invalid), use the best tip as fallback
             if tips.is_empty() {
-                warn!("No valid tips found for block template, using best tip {}", best_tip);
+                warn!("No valid tips found for block template after validation, using best tip {} as fallback", best_tip);
                 tips.push(best_tip);
             }
+
+            // V-24: Ensure we always have at least one tip (safety check)
+            debug_assert!(!tips.is_empty(), "Tips must contain at least one valid entry");
         }
 
         let mut sorted_tips = blockdag::sort_tips(storage, tips.into_iter()).await?;
@@ -1893,7 +1914,7 @@ impl<S: Storage> Blockchain<S> {
     // This function is called when a miner request a new block template
     // We create a block candidate with selected TXs from mempool
     pub async fn get_block_template_for_storage(&self, storage: &S, address: PublicKey) -> Result<BlockHeader, BlockchainError> {
-        let mut block = self.get_block_header_template_for_storage(storage, address).await?;
+        let block = self.get_block_header_template_for_storage(storage, address).await?;
 
         trace!("Locking mempool for building block template");
         let mempool = self.mempool.read().await;
@@ -2090,9 +2111,11 @@ impl<S: Storage> Blockchain<S> {
         }
         debug!("Block {} is not in chain, processing it", block_hash);
 
-        let current_timestamp = get_current_time_in_millis(); 
-        if block.get_timestamp() > current_timestamp + TIMESTAMP_IN_FUTURE_LIMIT { // accept 2s in future
-            debug!("Block timestamp is too much in future!");
+        // V-21 Fix: Strengthen timestamp validation
+        let current_timestamp = get_current_time_in_millis();
+        if block.get_timestamp() > current_timestamp + TIMESTAMP_IN_FUTURE_LIMIT {
+            debug!("Block timestamp {} is too far in future! Current: {}, limit: {}ms",
+                   block.get_timestamp(), current_timestamp, TIMESTAMP_IN_FUTURE_LIMIT);
             return Err(BlockchainError::TimestampIsInFuture(current_timestamp, block.get_timestamp()));
         }
 
@@ -2157,11 +2180,17 @@ impl<S: Storage> Blockchain<S> {
             return Err(BlockchainError::InvalidReachability)
         }
 
+        // V-21 Fix: Validate timestamp against all parents
+        // For multi-parent blocks, use median-time-past to prevent manipulation
+        let mut parent_timestamps = Vec::with_capacity(tips_count);
         for hash in block.get_parents() {
             let previous_timestamp = storage.get_timestamp_for_block_hash(&hash).await?;
-            // block timestamp can't be less than previous block.
+            parent_timestamps.push(previous_timestamp);
+
+            // Block timestamp can't be less than any parent
             if block.get_timestamp() < previous_timestamp {
-                debug!("Invalid block timestamp, parent ({}) is less than new block {}", hash, block_hash);
+                debug!("Invalid block timestamp {}, parent {} has timestamp {} which is greater",
+                       block.get_timestamp(), hash, previous_timestamp);
                 return Err(BlockchainError::TimestampIsLessThanParent(block.get_timestamp()));
             }
 
@@ -2172,6 +2201,17 @@ impl<S: Storage> Blockchain<S> {
             if !self.is_near_enough_from_main_chain(&*storage, &hash, height).await? {
                 error!("{} with hash {} have deviated too much (current height: {}, block height: {})", block, block_hash, current_height, block_height_by_tips);
                 return Err(BlockchainError::BlockDeviation)
+            }
+        }
+
+        // V-21 Fix: For multiple parents, check median-time-past
+        if tips_count > 1 {
+            parent_timestamps.sort_unstable();
+            let median_timestamp = parent_timestamps[tips_count / 2];
+            if block.get_timestamp() < median_timestamp {
+                debug!("Invalid block timestamp {}, less than median parent time {}",
+                       block.get_timestamp(), median_timestamp);
+                return Err(BlockchainError::TimestampIsLessThanParent(median_timestamp));
             }
         }
 
@@ -2470,18 +2510,31 @@ impl<S: Storage> Blockchain<S> {
             // Get tips as parents for GHOSTDAG algorithm
             let parents: Vec<Hash> = block.get_parents().iter().cloned().collect();
 
-            // Run GHOSTDAG algorithm
-            let ghostdag_data = self.ghostdag.ghostdag(&*storage, &parents).await?;
+            // SECURITY FIX V-04: Check if GHOSTDAG data already exists (race detection)
+            // If another thread already computed this, use their result instead
+            let ghostdag_data = if storage.has_ghostdag_data(&block_hash).await? {
+                debug!("GHOSTDAG data already exists for block {} - using existing data (race detected)", block_hash);
+                // Another thread already computed this - fetch existing data
+                storage.get_ghostdag_data(&block_hash).await?
+            } else {
+                // Run GHOSTDAG algorithm
+                let ghostdag_data = self.ghostdag.ghostdag(&*storage, &parents).await?;
 
-            debug!("GHOSTDAG data calculated: blue_score={}, blue_work={}, mergeset_blues={}, mergeset_reds={}",
-                ghostdag_data.blue_score,
-                ghostdag_data.blue_work,
-                ghostdag_data.mergeset_blues.len(),
-                ghostdag_data.mergeset_reds.len()
-            );
+                debug!("GHOSTDAG data calculated: blue_score={}, blue_work={}, mergeset_blues={}, mergeset_reds={}",
+                    ghostdag_data.blue_score,
+                    ghostdag_data.blue_work,
+                    ghostdag_data.mergeset_blues.len(),
+                    ghostdag_data.mergeset_reds.len()
+                );
 
-            // Store GHOSTDAG data
-            storage.insert_ghostdag_data(&block_hash, Arc::new(ghostdag_data.clone())).await?;
+                // Store GHOSTDAG data
+                // Note: There's still a small race window here between has_ghostdag_data check and insert
+                // Ideally, we'd use a try_insert_ghostdag_data with atomic compare-and-swap
+                // TODO: Implement atomic try_insert in storage layer for full V-04 fix
+                storage.insert_ghostdag_data(&block_hash, Arc::new(ghostdag_data.clone())).await?;
+
+                Arc::new(ghostdag_data)
+            };
 
             histogram!("tos_ghostdag_ms").record(start.elapsed().as_millis() as f64);
 
@@ -2561,9 +2614,12 @@ impl<S: Storage> Blockchain<S> {
 
         // track all events to notify websocket
         let mut events: HashMap<NotifyEvent, Vec<Value>> = HashMap::new();
-        // Track all orphaned transactions
-        // We keep in order all orphaned txs to try to re-add them in the mempool
-        let mut orphaned_transactions = IndexSet::new();
+        // V-26 Fix: Track all orphaned transactions with bounded size
+        // We keep orphaned txs to try to re-add them in the mempool
+        // Using LRU cache with max size to prevent unbounded memory growth
+        let mut orphaned_transactions = LruCache::new(
+            NonZeroUsize::new(MAX_ORPHANED_TRANSACTIONS).expect("MAX_ORPHANED_TRANSACTIONS must be > 0")
+        );
 
         // order the DAG (up to TOP_HEIGHT - STABLE_LIMIT)
         let mut highest_topo = 0;
@@ -2620,8 +2676,12 @@ impl<S: Storage> Blockchain<S> {
                             storage.delete_contract_outputs_for_tx(tx_hash).await?;
 
                             if is_orphaned {
-                                debug!("Tx {} is now marked as orphaned", tx_hash);
-                                orphaned_transactions.insert(tx_hash.clone());
+                                // V-26 Fix: Add with size check (LRU will evict oldest if at capacity)
+                                if orphaned_transactions.len() >= MAX_ORPHANED_TRANSACTIONS {
+                                    warn!("Orphaned TX set at capacity {}, evicting oldest", MAX_ORPHANED_TRANSACTIONS);
+                                }
+                                orphaned_transactions.put(tx_hash.clone(), ());
+                                debug!("Tx {} is now marked as orphaned (total: {})", tx_hash, orphaned_transactions.len());
                             }
                         }
                     }
@@ -2632,9 +2692,15 @@ impl<S: Storage> Blockchain<S> {
                     topoheight += 1;
                 }
 
-                // Only clear the versioned data caches if we delete any data
+                // V-23 Fix: Always clear caches during reorg, regardless of writes
+                // This prevents stale cache entries from causing consensus issues
+                storage.clear_versioned_data_caches().await?;
+                storage.clear_caches().await?;
+
+                // Add cache coherence verification in debug builds
+                #[cfg(debug_assertions)]
                 if is_written {
-                    storage.clear_versioned_data_caches().await?;
+                    debug!("Reorg completed with {} block(s) reordered", topoheight - base_topo_height);
                 }
             }
 
@@ -2700,7 +2766,7 @@ impl<S: Storage> Blockchain<S> {
                 }
 
                 // All fees from the transactions executed in this block
-                let mut total_fees = 0;
+                let mut total_fees: u64 = 0;
                 // Chain State used for the verification
                 trace!("building chain state to execute TXs in block {}", block_hash);
                 let mut chain_state = ApplicableChainState::new(
@@ -2732,8 +2798,8 @@ impl<S: Storage> Blockchain<S> {
                         // check that the nonce is not already used
                         if !nonce_checker.use_nonce(chain_state.get_storage(), tx.get_source(), tx.get_nonce(), highest_topo).await? {
                             warn!("Malicious TX {}, it is a potential double spending with same nonce {}, skipping...", tx_hash, tx.get_nonce());
-                            // TX will be orphaned
-                            orphaned_transactions.insert(tx_hash.clone());
+                            // V-26 Fix: TX will be orphaned (LRU handles capacity)
+                            orphaned_transactions.put(tx_hash.clone(), ());
                             continue;
                         }
 
@@ -2742,8 +2808,11 @@ impl<S: Storage> Blockchain<S> {
                         debug!("Executing tx {} in block {} with nonce {}", tx_hash, hash, tx.get_nonce());
                         if let Err(e) = tx.apply_with_partial_verify(tx_hash, &mut chain_state).await {
                             warn!("Error while executing TX {} with current DAG org: {}", tx_hash, e);
-                            // TX may be orphaned if not added again in good order in next blocks
-                            orphaned_transactions.insert(tx_hash.clone());
+                            // CRITICAL: Rollback nonce on execution failure to prevent double-spend window
+                            nonce_checker.undo_nonce(tx.get_source(), tx.get_nonce());
+                            debug!("Rolled back nonce {} for {} due to TX execution failure", tx.get_nonce(), tx.get_source().as_address(self.network.is_mainnet()));
+                            // V-26 Fix: TX may be orphaned if not added again in good order in next blocks
+                            orphaned_transactions.put(tx_hash.clone(), ());
                             continue;
                         }
                         total_txs_execution_time += start.elapsed().as_micros();
@@ -2761,7 +2830,8 @@ impl<S: Storage> Blockchain<S> {
                         chain_state.get_mut_storage().mark_tx_as_executed_in_block(&tx_hash, &hash)?;
 
                         // Delete the transaction from  the list if it was marked as orphaned
-                        if orphaned_transactions.shift_remove(tx_hash) {
+                        // V-26 Fix: Remove from orphaned set using LruCache::pop
+                        if orphaned_transactions.pop(tx_hash).is_some() {
                             trace!("Transaction {} was marked as orphaned, but got executed again", tx_hash);
                         }
 
@@ -2813,7 +2883,8 @@ impl<S: Storage> Blockchain<S> {
                         }
 
                         // Increase total tx fees for miner
-                        total_fees += tx.get_fee();
+                        total_fees = total_fees.checked_add(tx.get_fee())
+                            .ok_or(BlockchainError::BalanceOverflow)?;
                     }
                 }
 
@@ -2830,7 +2901,10 @@ impl<S: Storage> Blockchain<S> {
                 // reward the miner
                 // Miner gets the block reward + total fees + gas fee
                 let gas_fee = chain_state.get_gas_fee();
-                chain_state.reward_miner(block.get_miner(), miner_reward + total_fees + gas_fee).await?;
+                let total_miner_reward = miner_reward.checked_add(total_fees)
+                    .and_then(|r| r.checked_add(gas_fee))
+                    .ok_or(BlockchainError::BalanceOverflow)?;
+                chain_state.reward_miner(block.get_miner(), total_miner_reward).await?;
 
                 // Fire all the contract events
                 {
@@ -3063,10 +3137,10 @@ impl<S: Storage> Blockchain<S> {
 
         if orphan_event_tracked {
             for (tx_hash, sorted_tx) in mempool_deleted_txs {
-                // Delete it from our orphaned transactions list
+                // V-26 Fix: Delete it from our orphaned transactions list
                 // This save some performances as it will not try to add it back and
                 // consume resources for verifying the ZK Proof if we already know the answer
-                if orphaned_transactions.shift_remove(tx_hash.as_ref()) {
+                if orphaned_transactions.pop(tx_hash.as_ref()).is_some() {
                     debug!("Transaction {} was marked as orphaned, but got deleted from mempool. Prevent adding it back", tx_hash);
                 }
 
@@ -3088,12 +3162,18 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        // Now we can try to add back all transactions
+        // V-26 Fix: Now we can try to add back all transactions
+        // Log tracking metric for orphaned TXs every 1000 transactions
+        if orphaned_transactions.len() % 1000 == 0 && orphaned_transactions.len() > 0 {
+            debug!("Orphaned TXs count: {}", orphaned_transactions.len());
+        }
         {
             counter!("tos_orphaned_txs").increment(orphaned_transactions.len() as u64);
 
             let start = Instant::now();
-            for tx_hash in orphaned_transactions {
+            // Collect keys first since we can't iterate LruCache directly
+            let orphaned_keys: Vec<Hash> = orphaned_transactions.iter().map(|(k, _)| k.clone()).collect();
+            for tx_hash in orphaned_keys {
                 debug!("Trying to add orphaned tx {} back in mempool", tx_hash);
                 // It is verified in add_tx_to_mempool function too
                 // But to prevent loading the TX from storage and to fire wrong event

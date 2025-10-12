@@ -75,12 +75,13 @@ impl GhostdagDataProvider for RocksStorage {
     async fn insert_ghostdag_data(&mut self, hash: &Hash, data: Arc<TosGhostdagData>) -> Result<(), BlockchainError> {
         trace!("insert ghostdag data for {}", hash);
 
+        // V-22 Fix: Use fsync for critical GHOSTDAG consensus data
         // Store full data
-        self.insert_into_disk(Column::GhostdagData, hash, &*data)?;
+        self.insert_into_disk_sync(Column::GhostdagData, hash, &*data)?;
 
         // Store compact data for efficient queries
         let compact: CompactGhostdagData = data.as_ref().into();
-        self.insert_into_disk(Column::GhostdagCompact, hash, &compact)?;
+        self.insert_into_disk_sync(Column::GhostdagCompact, hash, &compact)?;
 
         Ok(())
     }

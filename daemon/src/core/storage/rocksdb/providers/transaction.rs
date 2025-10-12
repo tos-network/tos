@@ -66,7 +66,8 @@ impl TransactionProvider for RocksStorage {
     // Check if the transaction exists
     async fn add_transaction(&mut self, hash: &Hash, transaction: &Transaction) -> Result<(), BlockchainError> {
         trace!("add transaction {}", hash);
-        self.insert_into_disk(Column::Transactions, hash, transaction)
+        // V-22 Fix: Use fsync for critical transaction data
+        self.insert_into_disk_sync(Column::Transactions, hash, transaction)
     }
 
     // Delete a transaction from the storage using its hash

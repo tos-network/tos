@@ -1,11 +1,12 @@
 use curve25519_dalek::{
     ristretto::CompressedRistretto,
-    traits::{IsIdentity, MultiscalarMul, VartimeMultiscalarMul},
+    traits::{Identity, MultiscalarMul},
     RistrettoPoint,
     Scalar
 };
 use merlin::Transcript;
 use rand::rngs::OsRng;
+use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 use crate::{
     crypto::{
@@ -159,15 +160,15 @@ impl CommitmentEqProof {
         let Y_0 = self
             .Y_0
             .decompress()
-            .ok_or(DecompressionError)?;
+            .ok_or(DecompressionError::InvalidPoint)?;
         let Y_1 = self
             .Y_1
             .decompress()
-            .ok_or(DecompressionError)?;
+            .ok_or(DecompressionError::InvalidPoint)?;
         let Y_2 = self
             .Y_2
             .decompress()
-            .ok_or(DecompressionError)?;
+            .ok_or(DecompressionError::InvalidPoint)?;
 
         let batch_factor = Scalar::random(&mut OsRng);
 
@@ -239,46 +240,48 @@ impl CommitmentEqProof {
         let Y_0 = self
             .Y_0
             .decompress()
-            .ok_or(DecompressionError)?;
+            .ok_or(DecompressionError::InvalidPoint)?;
         let Y_1 = self
             .Y_1
             .decompress()
-            .ok_or(DecompressionError)?;
+            .ok_or(DecompressionError::InvalidPoint)?;
         let Y_2 = self
             .Y_2
             .decompress()
-            .ok_or(DecompressionError)?;
+            .ok_or(DecompressionError::InvalidPoint)?;
 
-        let check = RistrettoPoint::vartime_multiscalar_mul(
-            vec![
-                &self.z_s,           // z_s
-                &(-&c),              // -c
-                &(-&Scalar::ONE),    // -identity
-                &(&w * &self.z_x),   // w * z_x
-                &(&w * &self.z_s),   // w * z_s
-                &(&w_negated * &c),  // -w * c
-                &w_negated,          // -w
-                &(&ww * &self.z_x),  // ww * z_x
-                &(&ww * &self.z_r),  // ww * z_r
-                &(&ww_negated * &c), // -ww * c
-                &ww_negated,         // -ww
+        // Use constant-time multiscalar multiplication to prevent timing attacks
+        let check = RistrettoPoint::multiscalar_mul(
+            [
+                self.z_s,           // z_s
+                -c,                 // -c
+                -Scalar::ONE,       // -identity
+                w * self.z_x,       // w * z_x
+                w * self.z_s,       // w * z_s
+                w_negated * c,      // -w * c
+                w_negated,          // -w
+                ww * self.z_x,      // ww * z_x
+                ww * self.z_r,      // ww * z_r
+                ww_negated * c,     // -ww * c
+                ww_negated,         // -ww
             ],
-            vec![
-                P,            // P
-                &H,           // H
-                &Y_0,         // Y_0
-                &G,           // G
-                D,            // D
-                C_ciphertext, // C_ciphertext
-                &Y_1,         // Y_1
-                &G,           // G
-                &H,           // H
-                C_commitment, // C_commitment
-                &Y_2,         // Y_2
+            [
+                *P,           // P
+                *H,           // H
+                Y_0,          // Y_0
+                *G,           // G
+                *D,           // D
+                *C_ciphertext, // C_ciphertext
+                Y_1,          // Y_1
+                *G,           // G
+                *H,           // H
+                *C_commitment, // C_commitment
+                Y_2,          // Y_2
             ],
         );
 
-        if check.is_identity() {
+        // Use constant-time comparison to prevent timing leaks
+        if bool::from(check.ct_eq(&RistrettoPoint::identity())) {
             Ok(())
         } else {
             Err(ProofVerificationError::CommitmentEqProof)

@@ -81,6 +81,16 @@ pub trait BlockchainVerificationState<'a, E> {
         new_nonce: Nonce
     ) -> Result<(), E>;
 
+    /// Atomically compare and swap nonce to prevent race conditions
+    /// Returns true if the nonce matched expected value and was updated
+    /// Returns false if the current nonce didn't match expected value
+    async fn compare_and_swap_nonce(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        expected: Nonce,
+        new_value: Nonce
+    ) -> Result<bool, E>;
+
     /// Get the block version in which TX is executed
     fn get_block_version(&self) -> BlockVersion;
 

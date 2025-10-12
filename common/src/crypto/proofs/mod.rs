@@ -6,11 +6,12 @@ mod ownership;
 
 use std::iter;
 use curve25519_dalek::{
-    traits::{IsIdentity, VartimeMultiscalarMul},
+    traits::{Identity, MultiscalarMul},
     RistrettoPoint,
     Scalar
 };
 use lazy_static::lazy_static;
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 use bulletproofs::{BulletproofGens, PedersenGens};
 use crate::transaction::MAX_TRANSFER_COUNT;
@@ -86,19 +87,22 @@ pub struct BatchCollector {
 
 impl BatchCollector {
     pub fn verify(&self) -> Result<(), MultiscalarMulVerificationError> {
-        let mega_check = RistrettoPoint::vartime_multiscalar_mul(
+        // Use constant-time multiscalar multiplication to prevent timing attacks
+        let mega_check = RistrettoPoint::multiscalar_mul(
             self.dynamic_scalars
                 .iter()
-                .chain(iter::once(&self.g_scalar))
-                .chain(iter::once(&self.h_scalar)),
+                .copied()
+                .chain(iter::once(self.g_scalar))
+                .chain(iter::once(self.h_scalar)),
             self.dynamic_points
                 .iter()
-                .cloned()
+                .copied()
                 .chain(iter::once(*G))
                 .chain(iter::once(*H)),
         );
 
-        if mega_check.is_identity() {
+        // Use constant-time comparison to prevent timing leaks
+        if bool::from(mega_check.ct_eq(&RistrettoPoint::identity())) {
             Ok(())
         } else {
             Err(MultiscalarMulVerificationError)

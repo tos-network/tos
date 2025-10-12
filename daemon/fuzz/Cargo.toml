@@ -1,0 +1,23 @@
+[package]
+name = "tos-daemon-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tos_daemon = { path = ".." }
+tos_common = { path = "../../common" }
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "ghostdag_fuzzer"
+path = "fuzz_targets/ghostdag_fuzzer.rs"
+test = false
+doc = false

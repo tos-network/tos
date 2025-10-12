@@ -37,7 +37,7 @@ impl RocksStorage {
             if let Some(pointer) = pointer {
                 if pointer >= topoheight {
                     if let Some(prev_topo) = prev_topo {
-                        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &prev_topo.to_be_bytes())?;
+                        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &prev_topo.to_be_bytes(), false)?;
                     } else {
                         Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..])?;
                     }
@@ -59,7 +59,7 @@ impl RocksStorage {
                 let filtered = prev_topo.filter(|v| *v <= topoheight);
                 if filtered != pointer {
                     if let Some(pointer) = filtered {
-                        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &pointer.to_be_bytes())?;
+                        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &pointer.to_be_bytes(), false)?;
                     } else {
                         Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..])?;
                     }
@@ -99,7 +99,7 @@ impl RocksStorage {
                         let mut data: Versioned<RawBytes> = self.load_from_disk(column_versioned, &versioned_key)?;
                         data.set_previous_topoheight(None);
 
-                        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &versioned_key, &data)?;
+                        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &versioned_key, &data, false)?;
                     }
                 }
             }

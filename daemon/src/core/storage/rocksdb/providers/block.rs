@@ -78,14 +78,16 @@ impl BlockProvider for RocksStorage {
             }
         }
 
-        self.insert_into_disk(Column::Blocks, hash.as_bytes(), &block)?;
+        // V-22 Fix: Use fsync for critical block data
+        self.insert_into_disk_sync(Column::Blocks, hash.as_bytes(), &block)?;
 
         let block_difficulty = BlockDifficulty {
             covariance,
             difficulty,
             cumulative_difficulty
         };
-        self.insert_into_disk(Column::BlockDifficulty, hash.as_bytes(), &block_difficulty)?;
+        // V-22 Fix: Use fsync for critical block difficulty data
+        self.insert_into_disk_sync(Column::BlockDifficulty, hash.as_bytes(), &block_difficulty)?;
 
         self.add_block_hash_at_height(&hash, block.get_blue_score()).await?;
 

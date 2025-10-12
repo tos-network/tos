@@ -115,6 +115,16 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Applic
         self.inner.update_account_nonce(account, new_nonce).await
     }
 
+    /// SECURITY FIX V-11: Atomic compare-and-swap for nonce updates
+    async fn compare_and_swap_nonce(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        expected: Nonce,
+        new_value: Nonce
+    ) -> Result<bool, BlockchainError> {
+        self.inner.compare_and_swap_nonce(account, expected, new_value).await
+    }
+
     /// Get the block version
     fn get_block_version(&self) -> BlockVersion {
         self.block_version
@@ -166,13 +176,15 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Applic
 impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ApplicableChainState<'a, S> {
     /// Track burned supply
     async fn add_burned_coins(&mut self, amount: u64) -> Result<(), BlockchainError> {
-        self.burned_supply += amount;
+        self.burned_supply = self.burned_supply.checked_add(amount)
+            .ok_or(BlockchainError::BalanceOverflow)?;
         Ok(())
     }
 
     /// Track miner fees
     async fn add_gas_fee(&mut self, amount: u64) -> Result<(), BlockchainError> {
-        self.gas_fee += amount;
+        self.gas_fee = self.gas_fee.checked_add(amount)
+            .ok_or(BlockchainError::BalanceOverflow)?;
         Ok(())
     }
 
@@ -227,7 +239,8 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
                     Entry::Occupied(mut o) => match o.get_mut() {
                         Some((mut state, balance)) => {
                             state.mark_updated();
-                            *balance += amount;
+                            *balance = balance.checked_add(*amount)
+                                .ok_or(BlockchainError::BalanceOverflow)?;
                         },
                         None => {
                             // Balance was already fetched and we didn't had any balance before
@@ -240,7 +253,9 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
                             .unwrap_or((VersionedState::New, 0));
 
                         state.mark_updated();
-                        e.insert(Some((state, balance + amount)));
+                        let new_balance = balance.checked_add(*amount)
+                            .ok_or(BlockchainError::BalanceOverflow)?;
+                        e.insert(Some((state, new_balance)));
                     }
                 },
                 ContractDeposit::Private { .. } => {

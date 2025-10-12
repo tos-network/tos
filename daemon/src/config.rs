@@ -52,8 +52,13 @@ pub const DEFAULT_MINIMUM_HASHRATE: u64 = 100 * HASH;
 // Reduced from 1 H/s to 0.1 H/s for easier development
 pub const GENESIS_BLOCK_DIFFICULTY: Difficulty = Difficulty::from_u64(1);
 
-// 2 seconds maximum in future (prevent any attack on reducing difficulty but keep margin for unsynced devices)
-pub const TIMESTAMP_IN_FUTURE_LIMIT: TimestampSeconds = 2 * MILLIS_PER_SECOND;
+// V-21 Fix: Reduced from 2000ms to 500ms to strengthen timestamp validation
+// This prevents timestamp manipulation attacks while still allowing for network latency
+pub const TIMESTAMP_IN_FUTURE_LIMIT: TimestampSeconds = 500;
+
+// V-26 Fix: Maximum number of orphaned transactions to prevent unbounded memory growth
+// Using LRU eviction, oldest transactions are dropped when limit is reached
+pub const MAX_ORPHANED_TRANSACTIONS: usize = 10_000;
 
 // keep at least last N blocks until top topoheight when pruning the chain
 // WARNING: This must be at least 50 blocks for difficulty adjustement

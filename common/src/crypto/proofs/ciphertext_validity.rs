@@ -1,11 +1,12 @@
 use curve25519_dalek::{
     ristretto::CompressedRistretto,
-    traits::{IsIdentity, VartimeMultiscalarMul},
+    traits::{Identity, MultiscalarMul},
     RistrettoPoint,
     Scalar
 };
 use merlin::Transcript;
 use rand::rngs::OsRng;
+use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 use crate::{
@@ -132,16 +133,16 @@ impl CiphertextValidityProof {
         let Y_0 = self
             .Y_0
             .decompress()
-            .ok_or(DecompressionError)?;
+            .ok_or(DecompressionError::InvalidPoint)?;
         let Y_1 = self
             .Y_1
             .decompress()
-            .ok_or(DecompressionError)?;
+            .ok_or(DecompressionError::InvalidPoint)?;
         let Y_2 = if let Some(Y_2) = self.Y_2.as_ref() {
             Some(
                 Y_2
                     .decompress()
-                    .ok_or(DecompressionError)?,
+                    .ok_or(DecompressionError::InvalidPoint)?,
             )
         } else {
             None
@@ -240,16 +241,16 @@ impl CiphertextValidityProof {
         let Y_0 = self
             .Y_0
             .decompress()
-            .ok_or(DecompressionError)?;
+            .ok_or(DecompressionError::InvalidPoint)?;
         let Y_1 = self
             .Y_1
             .decompress()
-            .ok_or(DecompressionError)?;
+            .ok_or(DecompressionError::InvalidPoint)?;
         let Y_2 = if let Some(Y_2) = self.Y_2.as_ref() {
             Some(
                 Y_2
                     .decompress()
-                    .ok_or(DecompressionError)?,
+                    .ok_or(DecompressionError::InvalidPoint)?,
             )
         } else {
             None
@@ -266,57 +267,59 @@ impl CiphertextValidityProof {
         let D_dest = dest_handle.as_point();
         let D_source = source_handle.as_point();
 
+        // Use constant-time multiscalar multiplication to prevent timing attacks
         let check = if let Some(Y_2) = Y_2 {
-            RistrettoPoint::vartime_multiscalar_mul(
-                vec![
-                    &self.z_r,           // z_r
-                    &self.z_x,           // z_x
-                    &(-&c),              // -c
-                    &-(&Scalar::ONE),    // -identity
-                    &(&w * &self.z_r),   // w * z_r
-                    &(&w_negated * &c),  // -w * c
-                    &w_negated,          // -w
-                    &(&ww * &self.z_r),  // ww * z_r
-                    &(&ww_negated * &c), // -ww * c
-                    &ww_negated,         // -ww
+            RistrettoPoint::multiscalar_mul(
+                [
+                    self.z_r,           // z_r
+                    self.z_x,           // z_x
+                    -c,                 // -c
+                    -Scalar::ONE,       // -identity
+                    w * self.z_r,       // w * z_r
+                    w_negated * c,      // -w * c
+                    w_negated,          // -w
+                    ww * self.z_r,      // ww * z_r
+                    ww_negated * c,     // -ww * c
+                    ww_negated,         // -ww
                 ],
-                vec![
-                    &(*H), // H
-                    &(*G), // G
-                    C,        // C
-                    &Y_0,     // Y_0
-                    P_dest,  // P_first
-                    D_dest,  // D_first
-                    &Y_1,     // Y_1
-                    P_source, // P_second
-                    D_source, // D_second
-                    &Y_2, // Y_2
+                [
+                    *H,       // H
+                    *G,       // G
+                    *C,       // C
+                    Y_0,      // Y_0
+                    *P_dest,  // P_first
+                    *D_dest,  // D_first
+                    Y_1,      // Y_1
+                    *P_source, // P_second
+                    *D_source, // D_second
+                    Y_2,      // Y_2
                 ],
             )
         } else {
-            RistrettoPoint::vartime_multiscalar_mul(
-                vec![
-                    &self.z_r,           // z_r
-                    &self.z_x,           // z_x
-                    &(-&c),              // -c
-                    &-(&Scalar::ONE),    // -identity
-                    &(&w * &self.z_r),   // w * z_r
-                    &(&w_negated * &c),  // -w * c
-                    &w_negated,          // -w
+            RistrettoPoint::multiscalar_mul(
+                [
+                    self.z_r,           // z_r
+                    self.z_x,           // z_x
+                    -c,                 // -c
+                    -Scalar::ONE,       // -identity
+                    w * self.z_r,       // w * z_r
+                    w_negated * c,      // -w * c
+                    w_negated,          // -w
                 ],
-                vec![
-                    &(*H), // H
-                    &(*G), // G
-                    C,        // C
-                    &Y_0,     // Y_0
-                    P_dest,  // P_first
-                    D_dest,  // D_first
-                    &Y_1,     // Y_1
+                [
+                    *H,      // H
+                    *G,      // G
+                    *C,      // C
+                    Y_0,     // Y_0
+                    *P_dest, // P_first
+                    *D_dest, // D_first
+                    Y_1,     // Y_1
                 ],
             )
         };
 
-        if check.is_identity() {
+        // Use constant-time comparison to prevent timing leaks
+        if bool::from(check.ct_eq(&RistrettoPoint::identity())) {
             Ok(())
         } else {
             Err(ProofVerificationError::CiphertextValidityProof)

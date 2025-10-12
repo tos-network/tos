@@ -36,7 +36,7 @@ impl VersionedMultiSigProvider for RocksStorage {
             if account.multisig_pointer.is_some_and(|pointer| pointer >= topoheight) {
                 account.multisig_pointer = prev_topo;
 
-                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Account, account_key.as_bytes(), &account)?;
+                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Account, account_key.as_bytes(), &account, false)?;
             }
         }
 
@@ -67,7 +67,7 @@ impl VersionedMultiSigProvider for RocksStorage {
                 let filtered = prev_topo.filter(|v| *v <= topoheight);
                 if filtered != account.multisig_pointer {
                     account.multisig_pointer = filtered;
-                    Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Account, key.as_bytes(), &account)?;
+                    Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Account, key.as_bytes(), &account, false)?;
                 }
             }
         }
@@ -102,7 +102,7 @@ impl VersionedMultiSigProvider for RocksStorage {
                                 let mut data: Versioned<RawBytes> = self.load_from_disk(Column::VersionedMultisig, &key)?;
                                 data.set_previous_topoheight(None);
 
-                                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::VersionedMultisig, &key, &data)?;
+                                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::VersionedMultisig, &key, &data, false)?;
                             }
                         }
                     }

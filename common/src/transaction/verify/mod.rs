@@ -165,7 +165,7 @@ impl Transaction {
                         },
                         ContractDeposit::Private { .. } => {
                             let decompressed = decompressed_deposits.get(asset)
-                                .ok_or(DecompressionError)?;
+                                .ok_or(DecompressionError::InvalidPoint)?;
 
                             output += Ciphertext::new(decompressed.commitment.clone(), decompressed.sender_handle.clone())
                         }
@@ -185,7 +185,7 @@ impl Transaction {
                             },
                             ContractDeposit::Private { .. } => {
                                 let decompressed = decompressed_deposits.get(asset)
-                                    .ok_or(DecompressionError)?;
+                                    .ok_or(DecompressionError::InvalidPoint)?;
 
                                 output += Ciphertext::new(decompressed.commitment.clone(), decompressed.sender_handle.clone())
                             }
@@ -459,18 +459,23 @@ impl Transaction {
         state.pre_verify_tx(&self).await
             .map_err(VerificationError::State)?;
 
-        // First, check the nonce
-        let account_nonce = state.get_account_nonce(&self.source).await
-            .map_err(VerificationError::State)?;
+        // Atomically check and update nonce to prevent TOCTOU race condition
+        let success = state.compare_and_swap_nonce(
+            &self.source,
+            self.nonce,        // Expected value
+            self.nonce + 1     // New value
+        ).await.map_err(VerificationError::State)?;
 
-        if account_nonce != self.nonce {
-            return Err(VerificationError::InvalidNonce(tx_hash.clone(), account_nonce, self.nonce));
+        if !success {
+            // CAS failed, get current nonce for error reporting
+            let current = state.get_account_nonce(&self.source).await
+                .map_err(VerificationError::State)?;
+            return Err(VerificationError::InvalidNonce(
+                tx_hash.clone(),
+                current,
+                self.nonce
+            ));
         }
-
-        // Nonce is valid, update it for next transactions if any
-        state
-            .update_account_nonce(&self.source, self.nonce + 1).await
-            .map_err(VerificationError::State)?;
 
         match &self.data {
             TransactionType::Transfers(transfers) => {
@@ -665,18 +670,23 @@ impl Transaction {
         state.pre_verify_tx(&self).await
             .map_err(VerificationError::State)?;
 
-        // First, check the nonce
-        let account_nonce = state.get_account_nonce(&self.source).await
-            .map_err(VerificationError::State)?;
+        // Atomically check and update nonce to prevent TOCTOU race condition
+        let success = state.compare_and_swap_nonce(
+            &self.source,
+            self.nonce,        // Expected value
+            self.nonce + 1     // New value
+        ).await.map_err(VerificationError::State)?;
 
-        if account_nonce != self.nonce {
-            return Err(VerificationError::InvalidNonce(tx_hash.clone(), account_nonce, self.nonce));
+        if !success {
+            // CAS failed, get current nonce for error reporting
+            let current = state.get_account_nonce(&self.source).await
+                .map_err(VerificationError::State)?;
+            return Err(VerificationError::InvalidNonce(
+                tx_hash.clone(),
+                current,
+                self.nonce
+            ));
         }
-
-        // Nonce is valid, update it for next transactions if any
-        state
-            .update_account_nonce(&self.source, self.nonce + 1).await
-            .map_err(VerificationError::State)?;
 
         if !self.verify_commitment_assets() {
             debug!("Invalid commitment assets");

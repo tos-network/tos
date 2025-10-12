@@ -162,6 +162,8 @@ pub enum DiskContext {
 pub enum BlockchainError {
     #[error("Invalid configuration provided")]
     InvalidConfig,
+    #[error("V-27: Unsafe configuration flag 'skip_block_template_txs_verification' is NOT allowed on mainnet/testnet! Use devnet only.")]
+    UnsafeConfigurationOnMainnet,
     #[error("Invalid data on disk: corrupted")]
     CorruptedData,
     #[error("No contract balance found")]
@@ -328,6 +330,26 @@ pub enum BlockchainError {
     NoNonce(Address),
     #[error("Overflow detected")]
     Overflow,
+    #[error("Balance overflow detected - would exceed u64::MAX")]
+    BalanceOverflow,
+    #[error("Balance underflow detected - insufficient balance")]
+    BalanceUnderflow,
+    #[error("Blue score overflow detected - would exceed u64::MAX")]
+    BlueScoreOverflow,
+    #[error("Blue work overflow detected - would exceed U256::MAX")]
+    BlueWorkOverflow,
+    #[error("K-cluster violation: block {block} has anticone size {anticone_size} (k={k})")]
+    KClusterViolation {
+        block: Hash,
+        anticone_size: usize,
+        k: u16,
+    },
+    #[error("Parent block not found: {}", _0)]
+    ParentNotFound(Hash),
+    #[error("No valid parents found")]
+    NoValidParents,
+    #[error("Invalid timestamp order in DAA window")]
+    InvalidTimestampOrder,
     #[error("Error, block {} include a dead tx {} from stable height {} executed in block {}", _0, _1, _2, _3)]
     DeadTxFromStableHeight(Hash, Hash, u64, Hash),
     #[error("Error, block {} include a dead tx from tips {}", _0, _1)]

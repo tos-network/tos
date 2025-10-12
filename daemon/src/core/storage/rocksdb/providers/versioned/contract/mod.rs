@@ -38,7 +38,7 @@ impl VersionedContractProvider for RocksStorage {
             if contract.module_pointer.is_none_or(|pointer| pointer >= topoheight) {
                 if contract.module_pointer != prev_topo {
                     contract.module_pointer = prev_topo;
-                    Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Contracts, &contract_hash, &contract)?;
+                    Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Contracts, &contract_hash, &contract, false)?;
                 }
             }
         }
@@ -71,7 +71,7 @@ impl VersionedContractProvider for RocksStorage {
                 let filtered = prev_topo.filter(|v| *v <= topoheight);
                 if filtered != contract.module_pointer {
                     contract.module_pointer = filtered;
-                    Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Contracts, &hash, &contract)?;
+                    Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Contracts, &hash, &contract, false)?;
                 }
             }
         }
@@ -107,7 +107,7 @@ impl VersionedContractProvider for RocksStorage {
                                 let mut data: Versioned<RawBytes> = self.load_from_disk(Column::VersionedContracts, &key)?;
                                 data.set_previous_topoheight(None);
 
-                                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::VersionedContracts, &key, &data)?;
+                                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::VersionedContracts, &key, &data, false)?;
                             }
                         }
                     }

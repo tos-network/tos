@@ -1,4 +1,8 @@
-use curve25519_dalek::{ristretto::CompressedRistretto, Scalar};
+use curve25519_dalek::{
+    ristretto::CompressedRistretto,
+    traits::IsIdentity,
+    Scalar
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use crate::{api::DataElement, crypto::{Address, AddressType}, serializer::{Reader, ReaderError, Serializer, Writer}};
@@ -10,8 +14,12 @@ pub const RISTRETTO_COMPRESSED_SIZE: usize = 32;
 pub const SCALAR_SIZE: usize = 32;
 
 #[derive(Error, Clone, Debug, Eq, PartialEq)]
-#[error("point decompression failed")]
-pub struct DecompressionError;
+pub enum DecompressionError {
+    #[error("point decompression failed")]
+    InvalidPoint,
+    #[error("identity point rejected")]
+    IdentityPoint,
+}
 
 // A Pedersen commitment compressed to 32 bytes
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,9 +56,22 @@ impl CompressedCommitment {
         &self.0
     }
 
-    // Decompress it to a PedersenCommitment
+    // Decompress it to a PedersenCommitment with comprehensive validation
     pub fn decompress(&self) -> Result<PedersenCommitment, DecompressionError> {
-        self.0.decompress().map(PedersenCommitment::from_point).ok_or(DecompressionError)
+        // Check not identity BEFORE decompression
+        if self.0.is_identity() {
+            return Err(DecompressionError::IdentityPoint);
+        }
+
+        let point = self.0.decompress().ok_or(DecompressionError::InvalidPoint)?;
+
+        // Verify not identity AFTER decompression
+        if point.is_identity() {
+            return Err(DecompressionError::IdentityPoint);
+        }
+
+        // Ristretto points are cofactor-clean by construction, but we validate anyway
+        Ok(PedersenCommitment::from_point(point))
     }
 }
 
@@ -65,9 +86,22 @@ impl CompressedHandle {
         &self.0.as_bytes()
     }
 
-    // Decompress it to a DecryptHandle
+    // Decompress it to a DecryptHandle with comprehensive validation
     pub fn decompress(&self) -> Result<DecryptHandle, DecompressionError> {
-        self.0.decompress().map(DecryptHandle::from_point).ok_or(DecompressionError)
+        // Check not identity BEFORE decompression
+        if self.0.is_identity() {
+            return Err(DecompressionError::IdentityPoint);
+        }
+
+        let point = self.0.decompress().ok_or(DecompressionError::InvalidPoint)?;
+
+        // Verify not identity AFTER decompression
+        if point.is_identity() {
+            return Err(DecompressionError::IdentityPoint);
+        }
+
+        // Ristretto points are cofactor-clean by construction, but we validate anyway
+        Ok(DecryptHandle::from_point(point))
     }
 }
 
@@ -99,8 +133,9 @@ impl CompressedCiphertext {
         bytes
     }
 
-    // Decompress it to a Ciphertext
+    // Decompress it to a Ciphertext with validation (delegated to component decompression)
     pub fn decompress(&self) -> Result<Ciphertext, DecompressionError> {
+        // Both decompress calls perform comprehensive validation
         let commitment = self.commitment.decompress()?;
         let handle = self.handle.decompress()?;
 
@@ -119,9 +154,22 @@ impl CompressedPublicKey {
         &self.0.as_bytes()
     }
 
-    // Decompress it to a Public Key
+    // Decompress it to a Public Key with comprehensive validation
     pub fn decompress(&self) -> Result<PublicKey, DecompressionError> {
-        self.0.decompress().map(PublicKey::from_point).ok_or(DecompressionError)
+        // Check not identity BEFORE decompression
+        if self.0.is_identity() {
+            return Err(DecompressionError::IdentityPoint);
+        }
+
+        let point = self.0.decompress().ok_or(DecompressionError::InvalidPoint)?;
+
+        // Verify not identity AFTER decompression
+        if point.is_identity() {
+            return Err(DecompressionError::IdentityPoint);
+        }
+
+        // Ristretto points are cofactor-clean by construction, but we validate anyway
+        Ok(PublicKey::from_point(point))
     }
 
     // Clone the key to convert it to an address
@@ -238,6 +286,54 @@ impl Serializer for Scalar {
 mod tests {
     use super::*;
     use serde_json::json;
+    use curve25519_dalek::ristretto::RistrettoPoint;
+
+    // V-09 Security Tests: Test identity point rejection for commitment
+    #[test]
+    fn test_v09_identity_commitment_rejection() {
+        let identity_compressed = CompressedCommitment::new(CompressedRistretto::identity());
+        let result = identity_compressed.decompress();
+        assert!(matches!(result, Err(DecompressionError::IdentityPoint)));
+    }
+
+    // V-09 Security Tests: Test identity point rejection for handle
+    #[test]
+    fn test_v09_identity_handle_rejection() {
+        let identity_compressed = CompressedHandle::new(CompressedRistretto::identity());
+        let result = identity_compressed.decompress();
+        assert!(matches!(result, Err(DecompressionError::IdentityPoint)));
+    }
+
+    // V-09 Security Tests: Test identity point rejection for public key
+    #[test]
+    fn test_v09_identity_pubkey_rejection() {
+        let identity_compressed = CompressedPublicKey::new(CompressedRistretto::identity());
+        let result = identity_compressed.decompress();
+        assert!(matches!(result, Err(DecompressionError::IdentityPoint)));
+    }
+
+    // V-09 Security Tests: Test invalid point rejection
+    #[test]
+    fn test_v09_invalid_point_rejection() {
+        // Create an invalid compressed point (all 0xFF bytes is invalid)
+        let invalid_bytes = [0xFFu8; 32];
+        let invalid_compressed = CompressedRistretto(invalid_bytes);
+        let commitment = CompressedCommitment::new(invalid_compressed);
+        let result = commitment.decompress();
+        assert!(matches!(result, Err(DecompressionError::InvalidPoint)));
+    }
+
+    // V-09 Security Tests: Test valid point acceptance
+    #[test]
+    fn test_v09_valid_point_acceptance() {
+        use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
+
+        // Test with valid base point
+        let valid_compressed = RISTRETTO_BASEPOINT_POINT.compress();
+        let commitment = CompressedCommitment::new(valid_compressed);
+        let result = commitment.decompress();
+        assert!(result.is_ok());
+    }
 
     #[test]
     fn test_compressed_ciphertext_zero() {

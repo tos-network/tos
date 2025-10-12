@@ -23,7 +23,8 @@ use rocksdb::{
     Options,
     ReadOptions,
     SliceTransform,
-    WaitForCompactOptions
+    WaitForCompactOptions,
+    WriteOptions
 };
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
@@ -208,8 +209,14 @@ impl RocksStorage {
         trace!("load cache from disk");
     }
 
+    /// Insert into disk without fsync (backward compatible)
     pub(super) fn insert_into_disk<K: AsRef<[u8]>, V: Serializer>(&mut self, column: Column, key: K, value: &V) -> Result<(), BlockchainError> {
-        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column, key, value)
+        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column, key, value, false)
+    }
+
+    /// Insert into disk with fsync for critical data (V-22 fix)
+    pub(super) fn insert_into_disk_sync<K: AsRef<[u8]>, V: Serializer>(&mut self, column: Column, key: K, value: &V) -> Result<(), BlockchainError> {
+        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column, key, value, true)
     }
 
     pub(super) fn remove_from_disk<K: AsRef<[u8]>>(&mut self, column: Column, key: K) -> Result<(), BlockchainError> {
@@ -311,15 +318,35 @@ impl RocksStorage {
         }
     }
 
-    pub(super) fn insert_into_disk_internal<K: AsRef<[u8]>, V: Serializer>(db: &InnerDB, snapshot: Option<&mut Snapshot>, column: Column, key: K, value: &V) -> Result<(), BlockchainError> {
-        trace!("insert into disk {:?}", column);
+    /// Insert into disk with optional fsync for durability
+    ///
+    /// V-22 Fix: Added sync parameter to force fsync for critical writes
+    /// When sync=true, forces fsync to guarantee data durability
+    pub(super) fn insert_into_disk_internal<K: AsRef<[u8]>, V: Serializer>(
+        db: &InnerDB,
+        snapshot: Option<&mut Snapshot>,
+        column: Column,
+        key: K,
+        value: &V,
+        sync: bool
+    ) -> Result<(), BlockchainError> {
+        trace!("insert into disk {:?} (sync={})", column, sync);
 
         match snapshot {
             Some(snapshot) => snapshot.put(column, key.as_ref().to_vec(), value.to_bytes()),
             None => {
                 let cf = cf_handle!(db, column);
-                db.put_cf(&cf, key.as_ref(), value.to_bytes())
-                    .with_context(|| format!("Error while inserting into disk column {:?}", column))?
+                if sync {
+                    // V-22: Critical data - force fsync for durability
+                    let mut write_opts = WriteOptions::default();
+                    write_opts.set_sync(true);
+                    db.put_cf_opt(&cf, key.as_ref(), value.to_bytes(), &write_opts)
+                        .with_context(|| format!("Error while inserting into disk column {:?} with sync", column))?
+                } else {
+                    // Non-critical data - async write
+                    db.put_cf(&cf, key.as_ref(), value.to_bytes())
+                        .with_context(|| format!("Error while inserting into disk column {:?}", column))?
+                }
             }
         };
 

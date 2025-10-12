@@ -17,7 +17,7 @@ use tos_common::{
     block::{BlockVersion, TopoHeight},
     config::TOS_ASSET,
     crypto::{
-        elgamal::Ciphertext,
+        elgamal::{Ciphertext, CompressedPublicKey},
         Hash,
         PublicKey
     },
@@ -380,6 +380,26 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         new_nonce: Nonce
     ) -> Result<(), BlockchainError> {
         self.internal_update_account_nonce(account, new_nonce).await
+    }
+
+    /// SECURITY FIX V-11: Atomic compare-and-swap for nonce updates
+    /// Returns true if the nonce matched expected value and was updated
+    /// Returns false if the current nonce didn't match expected value
+    async fn compare_and_swap_nonce(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        expected: Nonce,
+        new_value: Nonce
+    ) -> Result<bool, BlockchainError> {
+        // For chain state, we don't have true atomicity
+        // Protection happens at blockchain level with per-account locks
+        let current = self.get_account_nonce(account).await?;
+        if current == expected {
+            self.update_account_nonce(account, new_value).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Get the block version

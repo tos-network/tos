@@ -184,6 +184,24 @@ impl TosReachability {
             parent_data.interval
         };
 
+        // SECURITY FIX V-02: Check for interval exhaustion
+        if remaining.size() <= 1 {
+            // WARNING: Reachability interval exhaustion detected!
+            // This is a DoS vulnerability - intervals have run out
+            log::error!(
+                "CRITICAL: Reachability interval exhaustion for parent {} (remaining size: {})",
+                selected_parent,
+                remaining.size()
+            );
+
+            // TODO: Implement full reindexing as in Kaspa
+            // For now, we return an error to prevent panic
+            // In production, this should trigger:
+            // 1. Reindex the entire reachability tree with fresh intervals
+            // 2. Retry adding the block
+            return Err(BlockchainError::InvalidReachability);
+        }
+
         // Allocate half of remaining interval to new block
         let (allocated, _right) = remaining.split_half();
 

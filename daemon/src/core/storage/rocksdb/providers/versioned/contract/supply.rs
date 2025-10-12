@@ -33,7 +33,7 @@ impl VersionedAssetsSupplyProvider for RocksStorage {
             if asset.supply_pointer.is_none_or(|pointer| pointer >= topoheight) {
                 asset.supply_pointer = prev_topo;
 
-                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Assets, &asset_hash, &asset)?;
+                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Assets, &asset_hash, &asset, false)?;
             }
         }
 
@@ -64,7 +64,7 @@ impl VersionedAssetsSupplyProvider for RocksStorage {
                 let filtered = prev_topo.filter(|v| *v <= topoheight);
                 if filtered != asset.supply_pointer {
                     asset.supply_pointer = filtered;
-                    Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Assets, &hash, &asset)?;
+                    Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Assets, &hash, &asset, false)?;
                 }
             }
         }
@@ -99,7 +99,7 @@ impl VersionedAssetsSupplyProvider for RocksStorage {
                                 let mut data: Versioned<RawBytes> = self.load_from_disk(Column::VersionedAssetsSupply, &key)?;
                                 data.set_previous_topoheight(None);
 
-                                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::VersionedAssetsSupply, &key, &data)?;
+                                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::VersionedAssetsSupply, &key, &data, false)?;
                             }
                         }
                     }

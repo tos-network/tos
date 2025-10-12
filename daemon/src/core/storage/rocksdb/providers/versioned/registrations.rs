@@ -30,7 +30,7 @@ impl VersionedRegistrationsProvider for RocksStorage {
 
             if account.registered_at.is_some_and(|pointer| pointer >= topoheight) {
                 account.registered_at = None;
-                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Account, account_key.as_bytes(), &account)?;
+                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Account, account_key.as_bytes(), &account, false)?;
             }
         }
 
@@ -51,7 +51,7 @@ impl VersionedRegistrationsProvider for RocksStorage {
 
             if account.registered_at.is_some_and(|pointer| pointer >= topoheight) {
                 account.registered_at = None;
-                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Account, account_key.as_bytes(), &account)?;
+                Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), Column::Account, account_key.as_bytes(), &account, false)?;
             }
         }
 

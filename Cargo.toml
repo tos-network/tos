@@ -37,6 +37,7 @@ rustls = { version = "0.23", default-features = true }
 tokio-tungstenite-wasm = { version = "0.6.0", features = ["rustls-tls-webpki-roots"] }
 siphasher = "1.0"
 primitive-types = { version = "0.13.1", features = ["serde"] }
+dashmap = "5.5"
 
 # cargo run --profile release-with-lto
 [profile.release-with-lto]

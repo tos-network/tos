@@ -188,19 +188,39 @@ pub async fn calculate_target_difficulty<S: Storage>(
     let _window_end_score = daa_score - 1;
 
     // Find blocks at these scores
-    let window_start_block = find_block_at_daa_score(storage, selected_parent, window_start_score).await?;
-    let window_end_block = selected_parent;
+    let _window_start_block = find_block_at_daa_score(storage, selected_parent, window_start_score).await?;
+    let _window_end_block = selected_parent;
 
-    // Get timestamps
-    let start_header = storage.get_block_header_by_hash(&window_start_block).await?;
-    let end_header = storage.get_block_header_by_hash(window_end_block).await?;
+    // SECURITY FIX V-07: Use median-time-past for timestamp manipulation resistance
+    // Collect timestamps from DAA window blocks
+    let mut timestamps: Vec<u64> = Vec::new();
 
-    let start_timestamp = start_header.get_timestamp();
-    let end_timestamp = end_header.get_timestamp();
+    // Get timestamps for blocks in the window
+    let window_blocks = find_daa_window_blocks(storage, selected_parent, window_start_score).await?;
+    for block_hash in window_blocks.iter() {
+        let header = storage.get_block_header_by_hash(block_hash).await?;
+        timestamps.push(header.get_timestamp());
+    }
+
+    // Sort timestamps for median calculation
+    timestamps.sort();
+
+    // Validate timestamp ordering
+    if timestamps.is_empty() {
+        return Err(BlockchainError::InvalidConfig);
+    }
+
+    let oldest_timestamp = timestamps[0];
+    let newest_timestamp = timestamps[timestamps.len() - 1];
+
+    // SECURITY FIX V-07: Validate timestamps are reasonable
+    if newest_timestamp < oldest_timestamp {
+        return Err(BlockchainError::InvalidTimestampOrder);
+    }
 
     // Calculate actual time taken (in seconds)
-    let actual_time = if end_timestamp > start_timestamp {
-        end_timestamp - start_timestamp
+    let actual_time = if newest_timestamp > oldest_timestamp {
+        newest_timestamp.saturating_sub(oldest_timestamp)
     } else {
         // Timestamp went backwards (shouldn't happen with proper validation)
         // Use minimum time to avoid division by zero

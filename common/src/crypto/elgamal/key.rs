@@ -1,4 +1,5 @@
 use curve25519_dalek::{
+    constants::RISTRETTO_BASEPOINT_POINT,
     ecdlp::{self, ECDLPArguments, ECDLPTablesFileView},
     ristretto::RistrettoPoint,
     Scalar
@@ -6,6 +7,7 @@ use curve25519_dalek::{
 use rand::rngs::OsRng;
 use serde::{Deserialize, Deserializer, Serialize};
 use sha3::Sha3_512;
+use thiserror::Error;
 use zeroize::Zeroize;
 use crate::{
     api::DataElement,
@@ -31,6 +33,14 @@ use super::{
     Signature
 };
 
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum KeyError {
+    #[error("scalar is zero")]
+    ZeroScalar,
+    #[error("weak entropy: scalar value too small")]
+    WeakEntropy,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct PublicKey(RistrettoPoint);
 
@@ -55,14 +65,39 @@ impl PublicKey {
         Self(RistrettoPoint::hash_from_bytes::<Sha3_512>(hash.as_bytes()))
     }
 
-    // Create a new public key from a private key
-    // The public key is H^(-1) * H
-    // Private key must not be zero
-    pub fn new(secret: &PrivateKey) -> Self {
-        let s = &secret.0;
-        assert!(s != &Scalar::ZERO);
+    // Create a new public key from a private key using STANDARD construction: P = s * G
+    // Private key must not be zero and must have sufficient entropy
+    pub fn new(secret: &PrivateKey) -> Result<Self, KeyError> {
+        let s = secret.as_scalar();
 
-        Self(s.invert() * (*H))
+        // Validate non-zero
+        if s == &Scalar::ZERO {
+            return Err(KeyError::ZeroScalar);
+        }
+
+        // Validate sufficient entropy (not a small value)
+        // Check that scalar is at least 2^32 to prevent weak keys
+        // We convert to bytes and check the value since Scalar doesn't implement PartialOrd
+        let bytes = s.to_bytes();
+        let mut is_weak = true;
+        // Check if any of the upper 28 bytes are non-zero (scalar >= 2^32)
+        for i in 4..32 {
+            if bytes[i] != 0 {
+                is_weak = false;
+                break;
+            }
+        }
+        // If all upper bytes are zero, check if lower 4 bytes represent a value >= 2^32
+        if is_weak && (bytes[0] != 0 || bytes[1] != 0 || bytes[2] != 0 || bytes[3] != 0) {
+            // Value is less than 2^32
+            return Err(KeyError::WeakEntropy);
+        } else if is_weak {
+            // All bytes are zero which means zero scalar (already checked above)
+            return Err(KeyError::WeakEntropy);
+        }
+
+        // Use STANDARD construction: P = s * G (not s^(-1) * H)
+        Ok(Self(s * RISTRETTO_BASEPOINT_POINT))
     }
 
     // Encrypt an amount to a Ciphertext
@@ -158,19 +193,25 @@ impl PrivateKey {
 impl KeyPair {
     // Generate a random new KeyPair
     pub fn new() -> Self {
-        let scalar = Scalar::random(&mut OsRng);
-        let private_key = PrivateKey::from_scalar(scalar);
+        loop {
+            let scalar = Scalar::random(&mut OsRng);
+            let private_key = PrivateKey::from_scalar(scalar);
 
-        Self::from_private_key(private_key)
+            // Random scalars from OsRng should always be valid, but handle it safely
+            if let Ok(keypair) = Self::from_private_key(private_key) {
+                return keypair;
+            }
+            // Extremely unlikely to reach here, but retry if we somehow got a weak key
+        }
     }
 
     // Generate a key pair from a private key
-    pub fn from_private_key(private_key: PrivateKey) -> Self {
-        let public_key = PublicKey::new(&private_key);
-        Self {
+    pub fn from_private_key(private_key: PrivateKey) -> Result<Self, KeyError> {
+        let public_key = PublicKey::new(&private_key)?;
+        Ok(Self {
             public_key,
             private_key,
-        }
+        })
     }
 
     // Create a new key pair from a public and private key
@@ -249,6 +290,54 @@ mod tests {
 
     use super::*;
     use super::super::G;
+
+    // V-08 Security Tests: Test zero scalar rejection
+    #[test]
+    fn test_v08_zero_scalar_rejection() {
+        let zero_key = PrivateKey(Scalar::ZERO);
+        let result = PublicKey::new(&zero_key);
+        assert!(matches!(result, Err(KeyError::ZeroScalar)));
+    }
+
+    // V-08 Security Tests: Test weak entropy rejection
+    #[test]
+    fn test_v08_weak_entropy_rejection() {
+        // Test scalar below 2^32 threshold
+        let weak_key = PrivateKey(Scalar::from(1000u64));
+        let result = PublicKey::new(&weak_key);
+        assert!(matches!(result, Err(KeyError::WeakEntropy)));
+
+        // Test scalar at boundary (should still fail)
+        let boundary_key = PrivateKey(Scalar::from((1u64 << 32) - 1));
+        let result = PublicKey::new(&boundary_key);
+        assert!(matches!(result, Err(KeyError::WeakEntropy)));
+    }
+
+    // V-08 Security Tests: Test valid key generation
+    #[test]
+    fn test_v08_valid_key_generation() {
+        // Random keys should always be valid
+        let keypair = KeyPair::new();
+        assert!(keypair.get_public_key().as_point() != &RistrettoPoint::identity());
+
+        // Test key above threshold
+        let strong_scalar = Scalar::from(1u64 << 32);
+        let strong_key = PrivateKey(strong_scalar);
+        let result = PublicKey::new(&strong_key);
+        assert!(result.is_ok());
+    }
+
+    // V-08 Security Tests: Test standard construction (P = s * G)
+    #[test]
+    fn test_v08_standard_construction() {
+        let scalar = Scalar::from(1u64 << 33); // Well above threshold
+        let private_key = PrivateKey(scalar);
+        let public_key = PublicKey::new(&private_key).unwrap();
+
+        // Verify standard construction: P = s * G
+        let expected = scalar * RISTRETTO_BASEPOINT_POINT;
+        assert_eq!(public_key.as_point(), &expected);
+    }
 
     #[test]
     fn test_signature() {

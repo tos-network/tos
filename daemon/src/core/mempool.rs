@@ -9,6 +9,7 @@ use std::{
     sync::Arc,
     mem,
 };
+use dashmap::DashMap;
 use linked_hash_map::LinkedHashMap;
 use serde::{Serialize, Deserialize};
 use indexmap::IndexSet;
@@ -28,7 +29,8 @@ use tos_common::{
     transaction::{
         MultiSigPayload,
         Transaction
-    }
+    },
+    tokio::sync::Mutex as TokioMutex,
 };
 use tos_vm::Environment;
 
@@ -75,6 +77,9 @@ pub struct Mempool {
     txs: LinkedHashMap<Arc<Hash>, SortedTx>,
     // store all sender's nonce for faster finding
     caches: HashMap<PublicKey, AccountCache>,
+    // Per-account locks to prevent race conditions when checking and inserting transactions
+    // with the same nonce from the same account
+    nonce_locks: Arc<DashMap<PublicKey, Arc<TokioMutex<()>>>>,
     disable_zkp_cache: bool,
 }
 
@@ -85,6 +90,7 @@ impl Mempool {
             mainnet: network.is_mainnet(),
             txs: LinkedHashMap::new(),
             caches: HashMap::new(),
+            nonce_locks: Arc::new(DashMap::new()),
             disable_zkp_cache,
         }
     }
@@ -251,6 +257,15 @@ impl Mempool {
     // Get the nonce cache for all keys
     pub fn get_caches(&self) -> &HashMap<PublicKey, AccountCache> {
         &self.caches
+    }
+
+    // Get or create a nonce lock for a specific account
+    // This ensures atomic check-and-insert operations for the same account
+    pub fn get_nonce_lock(&self, account: &PublicKey) -> Arc<TokioMutex<()>> {
+        self.nonce_locks
+            .entry(account.clone())
+            .or_insert_with(|| Arc::new(TokioMutex::new(())))
+            .clone()
     }
 
     // Verify if a TX is in mempool using its hash
