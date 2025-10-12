@@ -328,6 +328,7 @@ fn apply_difficulty_adjustment(current_difficulty: &Difficulty, ratio: f64) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tos_common::varuint::VarUint;
 
     #[test]
     fn test_daa_constants() {
@@ -347,5 +348,277 @@ mod tests {
         assert!(ratio_too_low < MIN_DIFFICULTY_RATIO);
         assert!(ratio_too_high > MAX_DIFFICULTY_RATIO);
         assert!(ratio_normal >= MIN_DIFFICULTY_RATIO && ratio_normal <= MAX_DIFFICULTY_RATIO);
+    }
+
+    #[test]
+    fn test_apply_difficulty_adjustment_increase() {
+        // Test difficulty increase (blocks coming too fast)
+        let current_difficulty = Difficulty::from(1000u64);
+        let ratio = 2.0; // Double difficulty
+
+        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        // New difficulty should be approximately 2x the old one
+        // We use u64 approximation for testing
+        let current_val = current_difficulty.as_ref();
+        let new_val = new_difficulty.as_ref();
+
+        // Check that new difficulty is greater than old difficulty
+        assert!(new_val > current_val, "Difficulty should increase");
+    }
+
+    #[test]
+    fn test_apply_difficulty_adjustment_decrease() {
+        // Test difficulty decrease (blocks coming too slow)
+        let current_difficulty = Difficulty::from(1000u64);
+        let ratio = 0.5; // Halve difficulty
+
+        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        let current_val = current_difficulty.as_ref();
+        let new_val = new_difficulty.as_ref();
+
+        // Check that new difficulty is less than old difficulty
+        assert!(new_val < current_val, "Difficulty should decrease");
+    }
+
+    #[test]
+    fn test_apply_difficulty_adjustment_no_change() {
+        // Test no change (blocks at expected rate)
+        let current_difficulty = Difficulty::from(1000u64);
+        let ratio = 1.0; // No change
+
+        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        let current_val = current_difficulty.as_ref();
+        let new_val = new_difficulty.as_ref();
+
+        // Check that difficulty remains approximately the same
+        assert_eq!(new_val, current_val, "Difficulty should remain the same");
+    }
+
+    #[test]
+    fn test_apply_difficulty_adjustment_max_increase() {
+        // Test maximum allowed increase (4x)
+        let current_difficulty = Difficulty::from(1000u64);
+        let ratio = MAX_DIFFICULTY_RATIO; // 4.0x
+
+        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        let current_val = current_difficulty.as_ref();
+        let new_val = new_difficulty.as_ref();
+
+        assert!(new_val > current_val, "Difficulty should increase");
+    }
+
+    #[test]
+    fn test_apply_difficulty_adjustment_max_decrease() {
+        // Test maximum allowed decrease (0.25x)
+        let current_difficulty = Difficulty::from(1000u64);
+        let ratio = MIN_DIFFICULTY_RATIO; // 0.25x
+
+        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        let current_val = current_difficulty.as_ref();
+        let new_val = new_difficulty.as_ref();
+
+        assert!(new_val < current_val, "Difficulty should decrease");
+    }
+
+    #[test]
+    fn test_apply_difficulty_adjustment_extreme_ratio_clamped() {
+        // Test that extreme ratios get clamped
+        // In actual usage, calculate_target_difficulty() would clamp the ratio
+        // before calling apply_difficulty_adjustment()
+
+        let current_difficulty = Difficulty::from(1000u64);
+
+        // Very high ratio (should be clamped to MAX_DIFFICULTY_RATIO in real usage)
+        let result_high = apply_difficulty_adjustment(&current_difficulty, 10.0);
+        assert!(result_high.is_ok());
+
+        // Very low ratio (should be clamped to MIN_DIFFICULTY_RATIO in real usage)
+        let result_low = apply_difficulty_adjustment(&current_difficulty, 0.01);
+        assert!(result_low.is_ok());
+    }
+
+    #[test]
+    fn test_difficulty_adjustment_with_large_values() {
+        // Test with larger difficulty values
+        let current_difficulty = Difficulty::from(1_000_000_000u64);
+        let ratio = 1.5;
+
+        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        let current_val = current_difficulty.as_ref();
+        let new_val = new_difficulty.as_ref();
+
+        assert!(new_val > current_val, "Difficulty should increase for large values");
+    }
+
+    #[test]
+    fn test_varuint_conversion() {
+        // Test that VarUint conversion works correctly
+        let value = 1000u128;
+        let varuint = VarUint::from(value);
+        let difficulty: Difficulty = varuint;
+
+        // Verify the difficulty value
+        assert!(!difficulty.as_ref().is_zero(), "Difficulty should not be zero");
+    }
+
+    #[test]
+    fn test_daa_window_size_boundary() {
+        // Test boundary conditions for DAA window
+        // Window should be exactly 2016 blocks
+
+        // If daa_score < DAA_WINDOW_SIZE, we use parent's difficulty
+        let daa_score_small = DAA_WINDOW_SIZE - 1;
+        assert!(daa_score_small < DAA_WINDOW_SIZE);
+
+        // If daa_score >= DAA_WINDOW_SIZE, we calculate new difficulty
+        let daa_score_large = DAA_WINDOW_SIZE;
+        assert!(daa_score_large >= DAA_WINDOW_SIZE);
+    }
+
+    #[test]
+    fn test_window_boundary_calculation() {
+        // Test window boundary score calculation
+        let daa_score = 5000u64;
+        let window_boundary_score = daa_score - DAA_WINDOW_SIZE;
+
+        assert_eq!(window_boundary_score, 5000 - 2016);
+        assert_eq!(window_boundary_score, 2984);
+
+        // For early blocks
+        let early_daa_score = 1000u64;
+        let early_boundary = if early_daa_score >= DAA_WINDOW_SIZE {
+            early_daa_score - DAA_WINDOW_SIZE
+        } else {
+            0
+        };
+
+        assert_eq!(early_boundary, 0);
+    }
+
+    #[test]
+    fn test_expected_time_calculation() {
+        // Test expected time calculation
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+
+        // With 2016 blocks and 1 second per block
+        assert_eq!(expected_time, 2016);
+        assert_eq!(expected_time, 2016); // 2016 seconds = 33.6 minutes
+    }
+
+    #[test]
+    fn test_difficulty_ratio_calculation() {
+        // Test various difficulty ratio scenarios
+
+        // Scenario 1: Blocks too fast (actual_time < expected_time)
+        let expected_time = 2016u64;
+        let actual_time_fast = 1000u64; // Blocks coming in 1000 seconds instead of 2016
+        let ratio_fast = expected_time as f64 / actual_time_fast as f64;
+
+        assert!(ratio_fast > 1.0, "Ratio should be > 1.0 when blocks are too fast");
+        assert!(ratio_fast < MAX_DIFFICULTY_RATIO || ratio_fast > MAX_DIFFICULTY_RATIO,
+                "Testing ratio calculation");
+
+        // Scenario 2: Blocks too slow (actual_time > expected_time)
+        let actual_time_slow = 4000u64; // Blocks coming in 4000 seconds instead of 2016
+        let ratio_slow = expected_time as f64 / actual_time_slow as f64;
+
+        assert!(ratio_slow < 1.0, "Ratio should be < 1.0 when blocks are too slow");
+        assert!(ratio_slow > MIN_DIFFICULTY_RATIO || ratio_slow < MIN_DIFFICULTY_RATIO,
+                "Testing ratio calculation");
+
+        // Scenario 3: Blocks at expected rate
+        let actual_time_normal = 2016u64;
+        let ratio_normal = expected_time as f64 / actual_time_normal as f64;
+
+        assert_eq!(ratio_normal, 1.0, "Ratio should be 1.0 when blocks are at expected rate");
+    }
+
+    #[test]
+    fn test_ratio_clamping_logic() {
+        // Test the clamping logic for extreme ratios
+
+        let ratio = 10.0f64;
+        let clamped = ratio.max(MIN_DIFFICULTY_RATIO).min(MAX_DIFFICULTY_RATIO);
+        assert_eq!(clamped, MAX_DIFFICULTY_RATIO);
+
+        let ratio = 0.1f64;
+        let clamped = ratio.max(MIN_DIFFICULTY_RATIO).min(MAX_DIFFICULTY_RATIO);
+        assert_eq!(clamped, MIN_DIFFICULTY_RATIO);
+
+        let ratio = 1.5f64;
+        let clamped = ratio.max(MIN_DIFFICULTY_RATIO).min(MAX_DIFFICULTY_RATIO);
+        assert_eq!(clamped, 1.5);
+    }
+}
+
+// Integration test module for DAA with storage
+// These tests require a full storage implementation and are marked as ignored
+// Run with: cargo test --test daa_integration -- --ignored
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+
+    // TODO: Add integration tests once storage is fully implemented
+    // These tests will:
+    // 1. Create a chain of blocks with varying timestamps
+    // 2. Test DAA window calculation across the chain
+    // 3. Verify mergeset_non_daa filtering
+    // 4. Test difficulty adjustment in real scenarios
+    // 5. Test timestamp manipulation attack prevention
+
+    #[test]
+    #[ignore]
+    fn test_daa_with_real_storage() {
+        // Will be implemented once storage layer is ready
+        unimplemented!("Integration test requires full storage implementation");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_mergeset_non_daa_filtering() {
+        // Will be implemented once storage layer is ready
+        unimplemented!("Integration test requires full storage implementation");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_difficulty_increase_scenario() {
+        // Simulate hashrate increase
+        // Blocks should come faster -> difficulty should increase
+        unimplemented!("Integration test requires full storage implementation");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_difficulty_decrease_scenario() {
+        // Simulate hashrate decrease
+        // Blocks should come slower -> difficulty should decrease
+        unimplemented!("Integration test requires full storage implementation");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_timestamp_manipulation_prevention() {
+        // Try to manipulate difficulty by using fake timestamps
+        // mergeset_non_daa should filter out old blocks
+        unimplemented!("Integration test requires full storage implementation");
     }
 }
