@@ -191,16 +191,22 @@ fn bench_100_proofs(c: &mut Criterion) {
             // Batch verify CommitmentEq + CiphertextValidity
             batch_collector.verify().expect("Batch verification failed");
 
-            // RangeProof needs to be verified individually
-            for proof in &proofs {
-                proof.range_proof.verify_single(
-                    &BP_GENS,
-                    &PC_GENS,
-                    &mut Transcript::new(b"test"),
-                    proof.rp_commitment.as_point(),
-                    BULLET_PROOF_SIZE
-                ).expect("Range proof verification failed");
-            }
+            // Batch verify RangeProofs
+            let mut transcripts_and_commitments: Vec<_> = proofs.iter().map(|proof| {
+                (Transcript::new(b"test"), vec![proof.rp_commitment.as_point().clone()])
+            }).collect();
+
+            RangeProof::verify_batch(
+                transcripts_and_commitments.iter_mut().zip(&proofs).map(|((transcript, commitments), proof)| {
+                    proof.range_proof.verification_view(
+                        transcript,
+                        commitments,
+                        BULLET_PROOF_SIZE
+                    )
+                }),
+                &BP_GENS,
+                &PC_GENS,
+            ).expect("Batch range proof verification failed");
         })
     });
 
@@ -231,15 +237,22 @@ fn bench_1000_proofs(c: &mut Criterion) {
 
             batch_collector.verify().expect("Batch verification failed");
 
-            for proof in &proofs {
-                proof.range_proof.verify_single(
-                    &BP_GENS,
-                    &PC_GENS,
-                    &mut Transcript::new(b"test"),
-                    proof.rp_commitment.as_point(),
-                    BULLET_PROOF_SIZE
-                ).expect("Range proof verification failed");
-            }
+            // Batch verify RangeProofs
+            let mut transcripts_and_commitments: Vec<_> = proofs.iter().map(|proof| {
+                (Transcript::new(b"test"), vec![proof.rp_commitment.as_point().clone()])
+            }).collect();
+
+            RangeProof::verify_batch(
+                transcripts_and_commitments.iter_mut().zip(&proofs).map(|((transcript, commitments), proof)| {
+                    proof.range_proof.verification_view(
+                        transcript,
+                        commitments,
+                        BULLET_PROOF_SIZE
+                    )
+                }),
+                &BP_GENS,
+                &PC_GENS,
+            ).expect("Batch range proof verification failed");
         })
     });
 
@@ -270,15 +283,22 @@ fn bench_scaling(c: &mut Criterion) {
 
                 batch_collector.verify().expect("Batch verification failed");
 
-                for proof in &proofs {
-                    proof.range_proof.verify_single(
-                        &BP_GENS,
-                        &PC_GENS,
-                        &mut Transcript::new(b"test"),
-                        proof.rp_commitment.as_point(),
-                        BULLET_PROOF_SIZE
-                    ).expect("Range proof verification failed");
-                }
+                // Batch verify RangeProofs
+                let mut transcripts_and_commitments: Vec<_> = proofs.iter().map(|proof| {
+                    (Transcript::new(b"test"), vec![proof.rp_commitment.as_point().clone()])
+                }).collect();
+
+                RangeProof::verify_batch(
+                    transcripts_and_commitments.iter_mut().zip(&proofs).map(|((transcript, commitments), proof)| {
+                        proof.range_proof.verification_view(
+                            transcript,
+                            commitments,
+                            BULLET_PROOF_SIZE
+                        )
+                    }),
+                    &BP_GENS,
+                    &PC_GENS,
+                ).expect("Batch range proof verification failed");
             })
         });
     }
