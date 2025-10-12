@@ -2263,6 +2263,22 @@ impl<S: Storage> P2pServer<S> {
                     }
                     trace!("End locking for PeerDisconnected event");
                 }
+            },
+            Packet::CompactBlockPropagation(_packet_wrapper) => {
+                trace!("{}: Compact Block Propagation packet", peer);
+                // TODO: Implement compact block reconstruction
+                // For now, log and skip
+                debug!("Received compact block from {}, reconstruction not yet implemented", peer.get_outgoing_address());
+            },
+            Packet::GetMissingTransactions(_packet_wrapper) => {
+                trace!("{}: Get Missing Transactions packet", peer);
+                // TODO: Implement missing transactions response
+                debug!("Received missing transactions request from {}, not yet implemented", peer.get_outgoing_address());
+            },
+            Packet::MissingTransactions(_response) => {
+                trace!("{}: Missing Transactions packet", peer);
+                // TODO: Implement missing transactions handling
+                debug!("Received missing transactions from {}, handling not yet implemented", peer.get_outgoing_address());
             }
         };
         Ok(())

@@ -5,6 +5,7 @@ mod object;
 mod inventory;
 mod bootstrap;
 mod peer_disconnected;
+mod compact_block;
 
 use std::borrow::Cow;
 use log::{debug, trace};
@@ -22,6 +23,7 @@ pub use chain::*;
 pub use handshake::*;
 pub use peer_disconnected::*;
 pub use ping::Ping;
+pub use compact_block::*;
 
 // All registered packet ids
 const KEY_EXCHANGE_ID: u8 = 0;
@@ -38,6 +40,9 @@ const NOTIFY_INV_RESPONSE_ID: u8 = 10;
 const BOOTSTRAP_CHAIN_REQUEST_ID: u8 = 11;
 const BOOTSTRAP_CHAIN_RESPONSE_ID: u8 = 12;
 const PEER_DISCONNECTED_ID: u8 = 13;
+const COMPACT_BLOCK_PROPAGATION_ID: u8 = 14;
+const GET_MISSING_TRANSACTIONS_ID: u8 = 15;
+const MISSING_TRANSACTIONS_ID: u8 = 16;
 
 // PacketWrapper allows us to link any Packet to a Ping
 #[derive(Debug)]
@@ -97,6 +102,10 @@ pub enum Packet<'a> {
     BootstrapChainRequest(BootstrapChainRequest<'a>),
     BootstrapChainResponse(BootstrapChainResponse),
     PeerDisconnected(PacketPeerDisconnected),
+    // Compact Blocks
+    CompactBlockPropagation(PacketWrapper<'a, CompactBlockPropagation<'a>>),
+    GetMissingTransactions(PacketWrapper<'a, GetMissingTransactions<'a>>),
+    MissingTransactions(MissingTransactions<'a>),
     // Encryption
     KeyExchange(Cow<'a, EncryptionKey>),
 }
@@ -117,6 +126,9 @@ impl Packet<'_> {
             Packet::BootstrapChainRequest(_) => BOOTSTRAP_CHAIN_REQUEST_ID,
             Packet::BootstrapChainResponse(_) => BOOTSTRAP_CHAIN_RESPONSE_ID,
             Packet::PeerDisconnected(_) => PEER_DISCONNECTED_ID,
+            Packet::CompactBlockPropagation(_) => COMPACT_BLOCK_PROPAGATION_ID,
+            Packet::GetMissingTransactions(_) => GET_MISSING_TRANSACTIONS_ID,
+            Packet::MissingTransactions(_) => MISSING_TRANSACTIONS_ID,
             Packet::KeyExchange(_) => KEY_EXCHANGE_ID,
         }
     }
@@ -160,6 +172,9 @@ impl<'a> Serializer for Packet<'a> {
             BOOTSTRAP_CHAIN_REQUEST_ID => Packet::BootstrapChainRequest(BootstrapChainRequest::read(reader)?),
             BOOTSTRAP_CHAIN_RESPONSE_ID => Packet::BootstrapChainResponse(BootstrapChainResponse::read(reader)?),
             PEER_DISCONNECTED_ID => Packet::PeerDisconnected(PacketPeerDisconnected::read(reader)?),
+            COMPACT_BLOCK_PROPAGATION_ID => Packet::CompactBlockPropagation(PacketWrapper::read(reader)?),
+            GET_MISSING_TRANSACTIONS_ID => Packet::GetMissingTransactions(PacketWrapper::read(reader)?),
+            MISSING_TRANSACTIONS_ID => Packet::MissingTransactions(MissingTransactions::read(reader)?),
             id => {
                 debug!("invalid packet id received: {}", id);
                 return Err(ReaderError::InvalidValue)
@@ -189,6 +204,9 @@ impl<'a> Serializer for Packet<'a> {
             Packet::BootstrapChainRequest(request) => Self::write_packet(writer, BOOTSTRAP_CHAIN_REQUEST_ID, request),
             Packet::BootstrapChainResponse(response) => Self::write_packet(writer, BOOTSTRAP_CHAIN_RESPONSE_ID, response),
             Packet::PeerDisconnected(disconnected) => Self::write_packet(writer, PEER_DISCONNECTED_ID, disconnected),
+            Packet::CompactBlockPropagation(compact_block) => Self::write_packet(writer, COMPACT_BLOCK_PROPAGATION_ID, compact_block),
+            Packet::GetMissingTransactions(request) => Self::write_packet(writer, GET_MISSING_TRANSACTIONS_ID, request),
+            Packet::MissingTransactions(response) => Self::write_packet(writer, MISSING_TRANSACTIONS_ID, response),
         };
     }
 }
