@@ -119,7 +119,11 @@ pub enum Column {
     GhostdagData,
     // Compact GHOSTDAG data for efficient queries
     // {block_hash} => {CompactGhostdagData}
-    GhostdagCompact
+    GhostdagCompact,
+
+    // Reachability data for DAG ancestry queries (TIP-2 Phase 2)
+    // {block_hash} => {ReachabilityData}
+    ReachabilityData
 }
 
 impl Column {

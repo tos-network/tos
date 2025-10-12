@@ -5,6 +5,7 @@
 use super::Interval;
 use serde::{Deserialize, Serialize};
 use tos_common::crypto::Hash;
+use tos_common::serializer::{Reader, ReaderError, Serializer, Writer};
 
 /// Reachability data for a single block
 ///
@@ -58,5 +59,23 @@ impl ReachabilityData {
             children: Vec::new(),
             future_covering_set: Vec::new(),
         }
+    }
+}
+
+// Serializer implementation for storage
+impl Serializer for ReachabilityData {
+    fn write(&self, writer: &mut Writer) {
+        // Use bincode for efficient serialization
+        let bytes = bincode::serialize(self).expect("Failed to serialize ReachabilityData");
+        writer.write_bytes(&bytes);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let bytes = reader.read_bytes_ref(reader.total_size())?;
+        bincode::deserialize(bytes).map_err(|_e| ReaderError::InvalidSize)
+    }
+
+    fn size(&self) -> usize {
+        bincode::serialized_size(self).expect("Failed to get size") as usize
     }
 }

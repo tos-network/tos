@@ -153,6 +153,9 @@ pub enum DiskContext {
     GhostdagData,
     #[error("ghostdag compact")]
     GhostdagCompact,
+    // Reachability (TIP-2 Phase 2)
+    #[error("reachability data")]
+    ReachabilityData,
 }
 
 #[derive(Error, Debug, EnumDiscriminants)]

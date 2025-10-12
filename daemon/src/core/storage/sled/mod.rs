@@ -164,6 +164,9 @@ pub struct SledStorage {
     // GHOSTDAG compact data for efficient queries
     // Key is the block hash, value is CompactGhostdagData
     pub(super) ghostdag_compact: Tree,
+    // Reachability data for DAG ancestry queries (TIP-2 Phase 2)
+    // Key is the block hash, value is ReachabilityData
+    pub(super) reachability_data: Tree,
     // opened DB used for assets to create dynamic assets
     pub(super) db: sled::Db,
 
@@ -276,6 +279,7 @@ impl SledStorage {
             versioned_ai_mining_states: sled.open_tree("versioned_ai_mining_states")?,
             ghostdag_data: sled.open_tree("ghostdag_data")?,
             ghostdag_compact: sled.open_tree("ghostdag_compact")?,
+            reachability_data: sled.open_tree("reachability_data")?,
             db: sled,
             cache: StorageCache::new(cache_size),
 

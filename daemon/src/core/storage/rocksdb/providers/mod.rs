@@ -21,3 +21,4 @@ mod multisig;
 mod contract;
 mod versioned;
 mod ghostdag;
+mod reachability; // TIP-2 Phase 2
