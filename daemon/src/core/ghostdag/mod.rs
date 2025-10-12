@@ -10,9 +10,46 @@ use anyhow::Result;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use tos_common::crypto::Hash;
+use tos_common::difficulty::Difficulty;
 
 use crate::core::error::BlockchainError;
 use crate::core::storage::Storage;
+
+/// Calculate work from difficulty
+/// Based on Kaspa's calc_work function
+/// Source: https://github.com/bitcoin/bitcoin/blob/2e34374bf3e12b37b0c66824a6c998073cdfab01/src/chain.cpp#L131
+///
+/// We need to compute 2**256 / (target+1), but we can't represent 2**256
+/// as it's too large. However, as 2**256 is at least as large
+/// as target+1, it is equal to ((2**256 - target - 1) / (target+1)) + 1,
+/// or ~target / (target+1) + 1.
+pub fn calc_work_from_difficulty(difficulty: &Difficulty) -> BlueWorkType {
+    // Convert difficulty (VarUint wrapping common's U256 v0.13.1) to daemon's U256 v0.12
+    // We do this by serializing to bytes and deserializing with the correct version
+    let diff_u256_common = difficulty.as_ref();
+
+    // Check for zero difficulty
+    if diff_u256_common.is_zero() {
+        return BlueWorkType::zero();
+    }
+
+    // Serialize common's U256 (v0.13.1) to bytes
+    // In v0.13.1, to_big_endian() returns [u8; 32] directly
+    let diff_bytes = diff_u256_common.to_big_endian();
+
+    // Deserialize into daemon's U256 v0.12 (BlueWorkType)
+    let diff_u256_daemon = BlueWorkType::from_big_endian(&diff_bytes);
+
+    // Calculate target = MAX / difficulty (TOS's difficulty semantics)
+    let target = BlueWorkType::max_value() / diff_u256_daemon;
+
+    // Calculate work: (~target / (target + 1)) + 1
+    // This formula is from Bitcoin and Kaspa
+    // Source: https://github.com/bitcoin/bitcoin/blob/2e34374bf3e12b37b0c66824a6c998073cdfab01/src/chain.cpp#L131
+    let res = (!target / (target + BlueWorkType::one())) + BlueWorkType::one();
+
+    res
+}
 
 /// SortableBlock for topological ordering by blue work
 /// Based on Kaspa's ordering.rs
@@ -210,9 +247,15 @@ impl TosGhostdag {
 
         // Step 6: Calculate blue_work
         // blue_work = parent's blue_work + sum of work for all blues in mergeset
-        // For now, use simplified work calculation (1 per block)
-        // TODO: Calculate actual work from block difficulty (bits field)
-        let added_blue_work = BlueWorkType::from(new_block_data.mergeset_blues.len() as u64);
+        // Calculate actual work from each block's difficulty
+        let mut added_blue_work = BlueWorkType::zero();
+        for blue_hash in new_block_data.mergeset_blues.iter() {
+            // Get the difficulty for this blue block
+            let difficulty = storage.get_difficulty_for_block_hash(blue_hash).await?;
+            // Calculate work from difficulty
+            let block_work = calc_work_from_difficulty(&difficulty);
+            added_blue_work = added_blue_work + block_work;
+        }
         let blue_work = parent_data.blue_work + added_blue_work;
 
         // Finalize the GHOSTDAG data
