@@ -20,3 +20,4 @@ mod contract;
 mod versioned;
 mod cache;
 mod state;
+mod ghostdag;

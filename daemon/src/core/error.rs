@@ -148,6 +148,11 @@ pub enum DiskContext {
     VersionedBalance,
     #[error("versioned energy resource")]
     VersionedEnergyResource,
+    // GHOSTDAG (TIP-2 Phase 1)
+    #[error("ghostdag data")]
+    GhostdagData,
+    #[error("ghostdag compact")]
+    GhostdagCompact,
 }
 
 #[derive(Error, Debug, EnumDiscriminants)]

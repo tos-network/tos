@@ -112,7 +112,14 @@ pub enum Column {
     AIMiningState,
     // Versioned AI mining states
     // {topoheight} => {ai_mining_state}
-    VersionedAIMiningStates
+    VersionedAIMiningStates,
+
+    // GHOSTDAG consensus data (TIP-2 Phase 1)
+    // {block_hash} => {TosGhostdagData}
+    GhostdagData,
+    // Compact GHOSTDAG data for efficient queries
+    // {block_hash} => {CompactGhostdagData}
+    GhostdagCompact
 }
 
 impl Column {

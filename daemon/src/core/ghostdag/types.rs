@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tos_common::crypto::Hash;
+use tos_common::serializer::{Reader, ReaderError, Serializer, Writer};
 
 /// Blue work type - represents cumulative work in the blue chain
 /// Using U256 to support very large work values
@@ -157,6 +158,42 @@ impl Default for TosGhostdagData {
     }
 }
 
+// Serializer implementations for storage
+// Using bincode for efficient serialization of complex structures
+impl Serializer for TosGhostdagData {
+    fn write(&self, writer: &mut Writer) {
+        // Use bincode to serialize the entire structure
+        let bytes = bincode::serialize(self).expect("Failed to serialize TosGhostdagData");
+        writer.write_bytes(&bytes);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let bytes = reader.read_bytes_ref(reader.total_size())?;
+        bincode::deserialize(bytes).map_err(|_e| ReaderError::InvalidSize)
+    }
+
+    fn size(&self) -> usize {
+        bincode::serialized_size(self).expect("Failed to get size") as usize
+    }
+}
+
+impl Serializer for CompactGhostdagData {
+    fn write(&self, writer: &mut Writer) {
+        // Use bincode for compact data as well
+        let bytes = bincode::serialize(self).expect("Failed to serialize CompactGhostdagData");
+        writer.write_bytes(&bytes);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let bytes = reader.read_bytes_ref(reader.total_size())?;
+        bincode::deserialize(bytes).map_err(|_e| ReaderError::InvalidSize)
+    }
+
+    fn size(&self) -> usize {
+        bincode::serialized_size(self).expect("Failed to get size") as usize
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,7 +202,7 @@ mod tests {
     fn test_ghostdag_data_creation() {
         let selected_parent = Hash::new([0u8; 32]);
         let k = 10;
-        let data = TosGhostdagData::new_with_selected_parent(selected_parent, k);
+        let data = TosGhostdagData::new_with_selected_parent(selected_parent.clone(), k);
 
         assert_eq!(data.blue_score, 0);
         assert_eq!(data.blue_work, BlueWorkType::zero());
@@ -182,9 +219,9 @@ mod tests {
 
         let blue_block = Hash::new([1u8; 32]);
         let mut anticone_sizes = HashMap::new();
-        anticone_sizes.insert(blue_block, 5);
+        anticone_sizes.insert(blue_block.clone(), 5);
 
-        data.add_blue(blue_block, 5, &anticone_sizes);
+        data.add_blue(blue_block.clone(), 5, &anticone_sizes);
 
         assert_eq!(data.mergeset_blues.len(), 2);
         assert!(data.mergeset_blues.contains(&blue_block));
@@ -197,7 +234,7 @@ mod tests {
         let mut data = TosGhostdagData::new_with_selected_parent(selected_parent, 10);
 
         let red_block = Hash::new([2u8; 32]);
-        data.add_red(red_block);
+        data.add_red(red_block.clone());
 
         assert_eq!(data.mergeset_reds.len(), 1);
         assert!(data.mergeset_reds.contains(&red_block));
@@ -211,11 +248,11 @@ mod tests {
         assert_eq!(data.mergeset_size(), 1); // Only selected parent
 
         let blue_block = Hash::new([1u8; 32]);
-        data.add_blue(blue_block, 0, &HashMap::new());
+        data.add_blue(blue_block.clone(), 0, &HashMap::new());
         assert_eq!(data.mergeset_size(), 2);
 
         let red_block = Hash::new([2u8; 32]);
-        data.add_red(red_block);
+        data.add_red(red_block.clone());
         assert_eq!(data.mergeset_size(), 3);
     }
 

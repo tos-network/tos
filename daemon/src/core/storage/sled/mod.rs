@@ -158,6 +158,12 @@ pub struct SledStorage {
     // Versioned AI mining states
     // Key is topoheight, value is the AI mining state at that topoheight
     pub(super) versioned_ai_mining_states: Tree,
+    // GHOSTDAG consensus data (TIP-2 Phase 1)
+    // Key is the block hash, value is TosGhostdagData
+    pub(super) ghostdag_data: Tree,
+    // GHOSTDAG compact data for efficient queries
+    // Key is the block hash, value is CompactGhostdagData
+    pub(super) ghostdag_compact: Tree,
     // opened DB used for assets to create dynamic assets
     pub(super) db: sled::Db,
 
@@ -268,6 +274,8 @@ impl SledStorage {
             versioned_energy_resources: sled.open_tree("versioned_energy_resources")?,
             ai_mining_state: sled.open_tree("ai_mining_state")?,
             versioned_ai_mining_states: sled.open_tree("versioned_ai_mining_states")?,
+            ghostdag_data: sled.open_tree("ghostdag_data")?,
+            ghostdag_compact: sled.open_tree("ghostdag_compact")?,
             db: sled,
             cache: StorageCache::new(cache_size),
 

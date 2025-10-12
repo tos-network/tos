@@ -22,6 +22,7 @@ mod cache;
 mod state;
 mod energy;
 mod ai_mining;
+mod ghostdag;
 
 pub use asset::*;
 pub use blocks_at_height::*;
@@ -47,3 +48,4 @@ pub use cache::*;
 pub use state::*;
 pub use energy::*;
 pub use ai_mining::*;
+pub use ghostdag::*;
