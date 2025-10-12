@@ -678,7 +678,7 @@ impl<S: Storage> Blockchain<S> {
             } else {
                 warn!("No genesis block found!");
                 info!("Generating a new genesis block...");
-                let header = BlockHeader::new(BlockVersion::V0, 0, get_current_time_in_millis(), IndexSet::new(), [0u8; EXTRA_NONCE_SIZE], DEV_PUBLIC_KEY.clone(), IndexSet::new());
+                let header = BlockHeader::new_simple(BlockVersion::V0, Vec::new(), get_current_time_in_millis(), [0u8; EXTRA_NONCE_SIZE], DEV_PUBLIC_KEY.clone(), Hash::zero());
                 let block = Block::new(Immutable::Owned(header), Vec::new());
                 let block_hash = block.hash();
                 info!("Genesis generated: {} with {:?} {}", block.to_hex(), block_hash, block_hash);
@@ -1879,7 +1879,8 @@ impl<S: Storage> Blockchain<S> {
         }
 
         let height = blockdag::calculate_height_at_tips(storage, sorted_tips.iter()).await?;
-        let block = BlockHeader::new(get_version_at_height(self.get_network(), height), height, timestamp, sorted_tips, extra_nonce, address, IndexSet::new());
+        let sorted_tips_vec: Vec<Hash> = sorted_tips.into_iter().collect();
+        let block = BlockHeader::new_simple(get_version_at_height(self.get_network(), height), sorted_tips_vec, timestamp, extra_nonce, address, Hash::zero());
 
         histogram!("tos_block_header_template_ms").record(start.elapsed().as_millis() as f64);
 
@@ -1923,6 +1924,9 @@ impl<S: Storage> Blockchain<S> {
         // size of block
         let mut block_size = block.size();
         let mut total_txs_size = 0;
+
+        // Track selected transaction hashes (since they're no longer in BlockHeader)
+        let mut selected_txs = IndexSet::new();
 
         // data used to verify txs
         let stable_topoheight = self.get_stable_topoheight();
@@ -1970,8 +1974,8 @@ impl<S: Storage> Blockchain<S> {
             }
 
             while let Some(TxSelectorEntry { size, hash, tx }) = tx_selector.next() {
-                if block_size + total_txs_size + size >= MAX_BLOCK_SIZE || block.txs_hashes.len() >= u16::MAX as usize {
-                    debug!("Stopping to include new TXs in this block, final size: {}, count: {}", human_bytes::human_bytes((block_size + total_txs_size) as f64), block.txs_hashes.len());
+                if block_size + total_txs_size + size >= MAX_BLOCK_SIZE || selected_txs.len() >= u16::MAX as usize {
+                    debug!("Stopping to include new TXs in this block, final size: {}, count: {}", human_bytes::human_bytes((block_size + total_txs_size) as f64), selected_txs.len());
                     break;
                 }
 
@@ -2019,7 +2023,7 @@ impl<S: Storage> Blockchain<S> {
 
                 trace!("Selected {} (nonce: {}, fees: {}) for mining", hash, tx.get_nonce(), format_tos(tx.get_fee()));
                 // TODO no clone
-                block.txs_hashes.insert(hash.as_ref().clone());
+                selected_txs.insert(hash.as_ref().clone());
                 block_size += HASH_SIZE; // add the hash size
                 total_txs_size += size;
             }
@@ -2132,7 +2136,7 @@ impl<S: Storage> Blockchain<S> {
         }
 
         for tip in block.get_tips() {
-            if !storage.has_block_with_hash(tip).await? {
+            if !storage.has_block_with_hash(&tip).await? {
                 debug!("This block ({}) has a TIP ({}) which is not present in chain", block_hash, tip);
                 return Err(BlockchainError::InvalidTipsNotFound(block_hash.into_owned(), tip.clone()))
             }
@@ -2155,13 +2159,13 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // Verify the reachability of the block
-        if !self.verify_non_reachability(&*storage, block.get_tips()).await? {
+        if !self.verify_non_reachability(&*storage, &block.get_immutable_tips()).await? {
             debug!("{} with hash {} has an invalid reachability", block, block_hash);
             return Err(BlockchainError::InvalidReachability)
         }
 
         for hash in block.get_tips() {
-            let previous_timestamp = storage.get_timestamp_for_block_hash(hash).await?;
+            let previous_timestamp = storage.get_timestamp_for_block_hash(&hash).await?;
             // block timestamp can't be less than previous block.
             if block.get_timestamp() < previous_timestamp {
                 debug!("Invalid block timestamp, parent ({}) is less than new block {}", hash, block_hash);
@@ -2172,7 +2176,7 @@ impl<S: Storage> Blockchain<S> {
 
             // We're processing the block tips, so we can't use the block height as it may not be in the chain yet
             let height = block_height_by_tips.saturating_sub(1);
-            if !self.is_near_enough_from_main_chain(&*storage, hash, height).await? {
+            if !self.is_near_enough_from_main_chain(&*storage, &hash, height).await? {
                 error!("{} with hash {} have deviated too much (current height: {}, block height: {})", block, block_hash, current_height, block_height_by_tips);
                 return Err(BlockchainError::BlockDeviation)
             }
@@ -2180,8 +2184,9 @@ impl<S: Storage> Blockchain<S> {
 
         if tips_count > 1 {
             // Use GHOSTDAG to find best tip (TIP-2 Phase 1)
+            let tips = block.get_tips();
             let best_tip = {
-                let tips_vec: Vec<_> = block.get_tips().iter().collect();
+                let tips_vec: Vec<_> = tips.iter().collect();
                 let mut best_hash = tips_vec[0];
                 let mut best_blue_work = storage.get_ghostdag_blue_work(best_hash).await?;
 
@@ -2196,8 +2201,8 @@ impl<S: Storage> Blockchain<S> {
             };
             debug!("Best tip selected by GHOSTDAG for block validation: {}", best_tip);
             for hash in block.get_tips() {
-                if best_tip != hash {
-                    if !self.validate_tips(&*storage, best_tip, hash).await? {
+                if best_tip != &hash {
+                    if !self.validate_tips(&*storage, best_tip, &hash).await? {
                         debug!("Tip {} is invalid, difficulty can't be less than 91% of {}", hash, best_tip);
                         return Err(BlockchainError::InvalidTipsDifficulty(block_hash.into_owned(), hash.clone()))
                     }
@@ -2418,7 +2423,8 @@ impl<S: Storage> Blockchain<S> {
             GENESIS_BLOCK_DIFFICULTY.into()
         } else {
             debug!("Computing cumulative difficulty for block {}", block_hash);
-            let (base, base_height) = self.find_common_base(&*storage, block.get_tips()).await?;
+            let tips_vec = block.get_tips();
+            let (base, base_height) = self.find_common_base(&*storage, tips_vec.as_slice()).await?;
             debug!("Common base found: {}, height: {}, calculating cumulative difficulty", base, base_height);
             self.find_tip_work_score(
                 &*storage,
@@ -2548,7 +2554,7 @@ impl<S: Storage> Blockchain<S> {
         // TODO: best would be to not clone
         tips.insert(block_hash.as_ref().clone());
         for hash in block.get_tips() {
-            tips.remove(hash);
+            tips.remove(&hash);
         }
         debug!("New tips: {}", tips.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","));
 
@@ -3279,7 +3285,7 @@ impl<S: Storage> Blockchain<S> {
 
                 // add all tips from block (but check that we didn't already added it)
                 for tip in block.get_tips() {
-                    if !processed.contains(tip) {
+                    if !processed.contains(&tip) {
                         processed.insert(tip.clone());
                         queue.insert(tip.clone());
                     }

@@ -1,10 +1,9 @@
 use tos_common::{
     block::{Block, BlockHeader, BlockVersion},
-    crypto::{Address, Hashable},
+    crypto::{Address, Hash, Hashable},
     immutable::Immutable,
     serializer::Serializer,
 };
-use indexmap::IndexSet;
 use std::env;
 
 const EXTRA_NONCE_SIZE: usize = 32;
@@ -32,14 +31,13 @@ fn main() {
         _ => (BlockVersion::V2, 1752336822401u64), // Mainnet timestamp
     };
 
-    let header = BlockHeader::new(
+    let header = BlockHeader::new_simple(
         version,
-        0, // height
+        Vec::new(), // parents (empty for genesis)
         timestamp, // fixed timestamp
-        IndexSet::new(), // tips
         [0u8; EXTRA_NONCE_SIZE], // extra nonce
         public_key, // miner
-        IndexSet::new() // transactions
+        Hash::zero() // hash_merkle_root (empty for genesis)
     );
     
     // Create genesis block

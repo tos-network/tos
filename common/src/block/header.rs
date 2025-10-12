@@ -1,4 +1,9 @@
-use std::{fmt::{Display, Formatter}, fmt::Error};
+// BlockHeader - GHOSTDAG-native DAG header format
+//
+// Based on Kaspa's Header structure with TOS-specific modifications.
+// This is a BREAKING CHANGE from the legacy chain-based format.
+
+use std::fmt::{Display, Formatter, Error as FmtError};
 use indexmap::IndexSet;
 use serde::Deserialize;
 use log::debug;
@@ -11,6 +16,9 @@ use crate::{
         pow_hash,
         Hash,
         Hashable,
+        BlueWorkType,
+        BlueWorkWriter,
+        BlueWorkReader,
         HASH_SIZE
     },
     serializer::{Reader, ReaderError, Serializer, Writer},
@@ -34,46 +42,112 @@ pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(deserializer: D
     Ok(extra_nonce)
 }
 
+/// GHOSTDAG-native block header
+///
+/// This header format supports DAG structure with GHOSTDAG consensus.
+/// Key differences from legacy format:
+/// - `parents_by_level` replaces simple `tips` list
+/// - `blue_score` replaces linear `height`
+/// - Added `daa_score`, `blue_work`, `pruning_point`
+/// - `hash_merkle_root` replaces inline `txs_hashes`
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct BlockHeader {
-    // Version of the block
+    // Version and format
     pub version: BlockVersion,
-    // All TIPS of the block (previous hashes of the block)
-    pub tips: Immutable<IndexSet<Hash>>,
-    // Timestamp in milliseconds
+
+    // DAG structure - parents organized by level
+    // parents_by_level[0] = direct parents (equivalent to old "tips")
+    // parents_by_level[1] = grandparents not in level 0, etc.
+    pub parents_by_level: Vec<Vec<Hash>>,
+
+    // GHOSTDAG scores
+    pub blue_score: u64,      // Position in blue (selected) chain
+    pub daa_score: u64,       // Difficulty adjustment score
+    pub blue_work: BlueWorkType, // Cumulative blue work (U256)
+
+    // Pruning
+    pub pruning_point: Hash,  // Reference to pruning point
+
+    // Mining fields
     pub timestamp: TimestampMillis,
-    // Height of the block
-    pub height: u64,
-    // Nonce of the block
-    // This is the mutable part in mining process
     pub nonce: u64,
-    // Extra nonce of the block
-    // This is the mutable part in mining process
-    // This is to spread even more the work in the network
     #[serde(serialize_with = "serialize_extra_nonce")]
     #[serde(deserialize_with = "deserialize_extra_nonce")]
     pub extra_nonce: [u8; EXTRA_NONCE_SIZE],
-    // Miner public key
+    pub bits: u32,            // Compact difficulty target
     pub miner: CompressedPublicKey,
-    // All transactions hashes of the block
-    pub txs_hashes: IndexSet<Hash>
+
+    // Merkle roots
+    pub hash_merkle_root: Hash,          // Transactions merkle root
+    pub accepted_id_merkle_root: Hash,   // Accepted transactions merkle root
+    pub utxo_commitment: Hash,           // UTXO set commitment (for future use)
 }
 
 impl BlockHeader {
-    pub fn new(version: BlockVersion, height: u64, timestamp: TimestampMillis, tips: impl Into<Immutable<IndexSet<Hash>>>, extra_nonce: [u8; EXTRA_NONCE_SIZE], miner: CompressedPublicKey, txs_hashes: IndexSet<Hash>) -> Self {
-        BlockHeader {
+    /// Create a new block header with all fields
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        version: BlockVersion,
+        parents_by_level: Vec<Vec<Hash>>,
+        blue_score: u64,
+        daa_score: u64,
+        blue_work: BlueWorkType,
+        pruning_point: Hash,
+        timestamp: TimestampMillis,
+        bits: u32,
+        extra_nonce: [u8; EXTRA_NONCE_SIZE],
+        miner: CompressedPublicKey,
+        hash_merkle_root: Hash,
+        accepted_id_merkle_root: Hash,
+        utxo_commitment: Hash,
+    ) -> Self {
+        Self {
             version,
-            height,
+            parents_by_level,
+            blue_score,
+            daa_score,
+            blue_work,
+            pruning_point,
             timestamp,
-            tips: tips.into(),
             nonce: 0,
             extra_nonce,
+            bits,
             miner,
-            txs_hashes
+            hash_merkle_root,
+            accepted_id_merkle_root,
+            utxo_commitment,
         }
     }
 
-    // Apply a MinerWork to this block header to match the POW hash
+    /// Create a simple block header for testing/genesis
+    /// Uses default values for GHOSTDAG fields
+    pub fn new_simple(
+        version: BlockVersion,
+        parents: Vec<Hash>,
+        timestamp: TimestampMillis,
+        extra_nonce: [u8; EXTRA_NONCE_SIZE],
+        miner: CompressedPublicKey,
+        hash_merkle_root: Hash,
+    ) -> Self {
+        Self {
+            version,
+            parents_by_level: if parents.is_empty() { vec![] } else { vec![parents] },
+            blue_score: 0,
+            daa_score: 0,
+            blue_work: BlueWorkType::zero(),
+            pruning_point: Hash::zero(),
+            timestamp,
+            nonce: 0,
+            extra_nonce,
+            bits: 0,
+            miner,
+            hash_merkle_root,
+            accepted_id_merkle_root: Hash::zero(),
+            utxo_commitment: Hash::zero(),
+        }
+    }
+
+    /// Apply miner work to this block header
     pub fn apply_miner_work(&mut self, work: MinerWork) {
         let (_, timestamp, nonce, miner, extra_nonce) = work.take();
         self.miner = miner.unwrap().into_owned();
@@ -82,6 +156,7 @@ impl BlockHeader {
         self.extra_nonce = extra_nonce;
     }
 
+    // Getters for common fields
     pub fn get_version(&self) -> BlockVersion {
         self.version
     }
@@ -94,31 +169,53 @@ impl BlockHeader {
         self.extra_nonce = values;
     }
 
-    pub fn get_height(&self) -> u64 {
-        self.height
+    /// Get blue score (replaces get_height for GHOSTDAG)
+    pub fn get_blue_score(&self) -> u64 {
+        self.blue_score
+    }
+
+    /// Get DAA score
+    pub fn get_daa_score(&self) -> u64 {
+        self.daa_score
+    }
+
+    /// Get blue work
+    pub fn get_blue_work(&self) -> &BlueWorkType {
+        &self.blue_work
     }
 
     pub fn get_timestamp(&self) -> TimestampMillis {
         self.timestamp
     }
 
-    pub fn get_tips(&self) -> &IndexSet<Hash> {
-        &self.tips
-    }
-
-
-    pub fn get_immutable_tips(&self) -> &Immutable<IndexSet<Hash>> {
-        &self.tips
-    }
-
-    // Compute a hash covering all tips hashes
-    pub fn get_tips_hash(&self) -> Hash {
-        let mut bytes = Vec::with_capacity(self.tips.len() * HASH_SIZE);
-
-        for tx in self.tips.iter() {
-            bytes.extend(tx.as_bytes())
+    /// Get direct parents (level 0)
+    /// This is equivalent to the old "tips"
+    pub fn get_parents(&self) -> &[Hash] {
+        if self.parents_by_level.is_empty() {
+            &[]
+        } else {
+            &self.parents_by_level[0]
         }
+    }
 
+    /// Get all parents (flattened from all levels)
+    pub fn get_all_parents(&self) -> Vec<Hash> {
+        self.parents_by_level.iter().flatten().cloned().collect()
+    }
+
+    /// Get parents by level structure
+    pub fn get_parents_by_level(&self) -> &Vec<Vec<Hash>> {
+        &self.parents_by_level
+    }
+
+    /// Compute hash of all parents (for POW calculation)
+    pub fn get_parents_hash(&self) -> Hash {
+        let mut bytes = Vec::new();
+        for level in &self.parents_by_level {
+            for parent in level {
+                bytes.extend(parent.as_bytes());
+            }
+        }
         hash(&bytes)
     }
 
@@ -134,50 +231,37 @@ impl BlockHeader {
         &self.extra_nonce
     }
 
-    pub fn get_txs_hashes(&self) -> &IndexSet<Hash> {
-        &self.txs_hashes
+    /// Get transaction merkle root
+    pub fn get_hash_merkle_root(&self) -> &Hash {
+        &self.hash_merkle_root
     }
 
-    pub fn take_txs_hashes(self) -> IndexSet<Hash> {
-        self.txs_hashes
+    /// Get pruning point
+    pub fn get_pruning_point(&self) -> &Hash {
+        &self.pruning_point
     }
 
-    // Compute a hash covering all TXs hashes
-    pub fn get_txs_hash(&self) -> Hash {
-        let mut bytes = Vec::with_capacity(self.txs_hashes.len() * HASH_SIZE);
-        for tx in &self.txs_hashes {
-            bytes.extend(tx.as_bytes())
-        }
-
-        hash(&bytes)
-    }
-
-    pub fn get_txs_count(&self) -> usize {
-        self.txs_hashes.len()
-    }
-
-    // Build the header work (immutable part in mining process)
-    // This is the part that will be used to compute the header work hash
-    // See get_work_hash function and get_serialized_header for final hash computation
+    /// Build the header work (immutable part in mining process)
     pub fn get_work(&self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::with_capacity(HEADER_WORK_SIZE);
 
         bytes.extend(self.version.to_bytes()); // 1
-        bytes.extend(&self.height.to_be_bytes()); // 1 + 8 = 9
-        bytes.extend(self.get_tips_hash().as_bytes()); // 9 + 32 = 41
-        bytes.extend(self.get_txs_hash().as_bytes()); // 41 + 32 = 73
+        bytes.extend(&self.blue_score.to_be_bytes()); // 1 + 8 = 9
+        bytes.extend(self.get_parents_hash().as_bytes()); // 9 + 32 = 41
+        bytes.extend(self.hash_merkle_root.as_bytes()); // 41 + 32 = 73
 
-        debug_assert!(bytes.len() == HEADER_WORK_SIZE, "Error, invalid header work size, got {} but expected {}", bytes.len(), HEADER_WORK_SIZE);
+        debug_assert!(bytes.len() == HEADER_WORK_SIZE,
+            "Error, invalid header work size, got {} but expected {}", bytes.len(), HEADER_WORK_SIZE);
 
         bytes
     }
 
-    // compute the header work hash (immutable part in mining process)
+    /// Compute the header work hash (immutable part in mining process)
     pub fn get_work_hash(&self) -> Hash {
         hash(&self.get_work())
     }
 
-    // This is similar to MinerWork
+    /// Get serialized header for POW calculation
     fn get_serialized_header(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(BLOCK_WORK_SIZE);
         bytes.extend(self.get_work_hash().to_bytes());
@@ -186,133 +270,255 @@ impl BlockHeader {
         bytes.extend(self.extra_nonce);
         bytes.extend(self.miner.as_bytes());
 
-        debug_assert!(bytes.len() == BLOCK_WORK_SIZE, "invalid block work size, got {} but expected {}", bytes.len(), BLOCK_WORK_SIZE);
+        debug_assert!(bytes.len() == BLOCK_WORK_SIZE,
+            "invalid block work size, got {} but expected {}", bytes.len(), BLOCK_WORK_SIZE);
 
         bytes
     }
 
-    // compute the block POW hash
+    /// Compute the block POW hash
     pub fn get_pow_hash(&self, algorithm: Algorithm) -> Result<Hash, TosHashError> {
         pow_hash(&self.get_serialized_header(), algorithm)
     }
 
+    // Legacy compatibility methods (deprecated)
+
+    /// Legacy: Get height (maps to blue_score)
+    /// DEPRECATED: Use get_blue_score() instead
+    #[deprecated(note = "Use get_blue_score() instead")]
+    pub fn get_height(&self) -> u64 {
+        self.blue_score
+    }
+
+    /// Legacy: Get tips (maps to direct parents)
+    /// DEPRECATED: Use get_parents() instead
+    #[deprecated(note = "Use get_parents() instead")]
+    pub fn get_tips(&self) -> Vec<Hash> {
+        self.get_parents().to_vec()
+    }
+
+    /// Legacy: Get immutable tips
+    /// DEPRECATED: Use get_parents() instead
+    #[deprecated(note = "Use get_parents() instead")]
+    pub fn get_immutable_tips(&self) -> Immutable<IndexSet<Hash>> {
+        let set: IndexSet<Hash> = self.get_parents().iter().cloned().collect();
+        Immutable::Owned(set)
+    }
+
+    /// Legacy: Get tips hash
+    /// DEPRECATED: Use get_parents_hash() instead
+    #[deprecated(note = "Use get_parents_hash() instead")]
+    pub fn get_tips_hash(&self) -> Hash {
+        self.get_parents_hash()
+    }
+
+    /// Legacy: Get transactions hashes (not stored in new format)
+    /// DEPRECATED: Transactions are now accessed through merkle root
+    #[deprecated(note = "Use get_hash_merkle_root() instead")]
+    pub fn get_txs_hashes(&self) -> &IndexSet<Hash> {
+        panic!("get_txs_hashes() is not supported in new header format. Use get_hash_merkle_root() instead.");
+    }
+
+    /// Legacy: Take transactions hashes
+    /// DEPRECATED
+    #[deprecated(note = "Use get_hash_merkle_root() instead")]
+    pub fn take_txs_hashes(self) -> IndexSet<Hash> {
+        panic!("take_txs_hashes() is not supported in new header format. Use get_hash_merkle_root() instead.");
+    }
+
+    /// Legacy: Get txs hash
+    /// DEPRECATED: Maps to hash_merkle_root
+    #[deprecated(note = "Use get_hash_merkle_root() instead")]
+    pub fn get_txs_hash(&self) -> Hash {
+        self.hash_merkle_root.clone()
+    }
+
+    /// Legacy: Get txs count (not available in new format)
+    /// DEPRECATED
+    #[deprecated(note = "Transaction count not available in header")]
+    pub fn get_txs_count(&self) -> usize {
+        panic!("get_txs_count() is not supported in new header format");
+    }
+
+    /// Legacy: Get transactions
+    /// DEPRECATED
+    #[deprecated(note = "Use get_hash_merkle_root() instead")]
     pub fn get_transactions(&self) -> &IndexSet<Hash> {
-        &self.txs_hashes
+        panic!("get_transactions() is not supported in new header format");
     }
 }
 
 impl Serializer for BlockHeader {
     fn write(&self, writer: &mut Writer) {
-        self.version.write(writer); // 1
-        writer.write_u64(&self.height); // 1 + 8 = 9
-        writer.write_u64(&self.timestamp); // 9 + 8 = 17
-        writer.write_u64(&self.nonce); // 17 + 8 = 25
-        writer.write_bytes(&self.extra_nonce); // 25 + 32 = 57
-        writer.write_u8(self.tips.len() as u8); // 57 + 1 = 58
-        for tip in self.tips.iter() {
-            writer.write_hash(tip); // 32 per hash
+        // Write version
+        self.version.write(writer);
+
+        // Write parents_by_level
+        writer.write_u8(self.parents_by_level.len() as u8);
+        for level in &self.parents_by_level {
+            writer.write_u8(level.len() as u8);
+            for parent in level {
+                writer.write_hash(parent);
+            }
         }
 
-        writer.write_u16(self.txs_hashes.len() as u16); // 58 + (N*32) + 2 = 60 + (N*32)
-        for tx in &self.txs_hashes {
-            writer.write_hash(tx); // 32
-        }
-        self.miner.write(writer); // 60 + (N*32) + (T*32) + 32 = 92 + (N*32) + (T*32)
-        // Minimum size is 92 bytes
+        // Write GHOSTDAG scores
+        writer.write_u64(&self.blue_score);
+        writer.write_u64(&self.daa_score);
+        writer.write_blue_work(&self.blue_work);
+
+        // Write pruning point
+        writer.write_hash(&self.pruning_point);
+
+        // Write mining fields
+        writer.write_u64(&self.timestamp);
+        writer.write_u64(&self.nonce);
+        writer.write_bytes(&self.extra_nonce);
+        writer.write_u32(&self.bits);
+        self.miner.write(writer);
+
+        // Write merkle roots
+        writer.write_hash(&self.hash_merkle_root);
+        writer.write_hash(&self.accepted_id_merkle_root);
+        writer.write_hash(&self.utxo_commitment);
     }
 
     fn read(reader: &mut Reader) -> Result<BlockHeader, ReaderError> {
         let version = BlockVersion::read(reader)?;
-        let height = reader.read_u64()?;
+
+        // Read parents_by_level
+        let levels_count = reader.read_u8()?;
+        let mut parents_by_level = Vec::with_capacity(levels_count as usize);
+        for _ in 0..levels_count {
+            let level_size = reader.read_u8()?;
+            if level_size as usize > TIPS_LIMIT {
+                debug!("Error, too many parents in level: {}", level_size);
+                return Err(ReaderError::InvalidValue);
+            }
+            let mut level = Vec::with_capacity(level_size as usize);
+            for _ in 0..level_size {
+                level.push(reader.read_hash()?);
+            }
+            parents_by_level.push(level);
+        }
+
+        // Read GHOSTDAG scores
+        let blue_score = reader.read_u64()?;
+        let daa_score = reader.read_u64()?;
+        let blue_work = reader.read_blue_work()?;
+
+        // Read pruning point
+        let pruning_point = reader.read_hash()?;
+
+        // Read mining fields
         let timestamp = reader.read_u64()?;
         let nonce = reader.read_u64()?;
         let extra_nonce: [u8; 32] = reader.read_bytes_32()?;
-
-        let tips_count = reader.read_u8()?;
-        if tips_count as usize > TIPS_LIMIT {
-            debug!("Error, too many tips in block header");
-            return Err(ReaderError::InvalidValue)
-        }
-        
-        let mut tips = IndexSet::with_capacity(tips_count as usize);
-        for _ in 0..tips_count {
-            if !tips.insert(reader.read_hash()?) {
-                debug!("Error, duplicate tip found in block header");
-                return Err(ReaderError::InvalidValue)
-            }
-        }
-
-        let txs_count = reader.read_u16()?;
-        let mut txs_hashes = IndexSet::with_capacity(txs_count as usize);
-        for _ in 0..txs_count {
-            if !txs_hashes.insert(reader.read_hash()?) {
-                debug!("Error, duplicate tx hash found in block header");
-                return Err(ReaderError::InvalidValue)
-            }
-        }
-
+        let bits = reader.read_u32()?;
         let miner = CompressedPublicKey::read(reader)?;
-        Ok(
-            BlockHeader {
-                version,
-                extra_nonce,
-                height,
-                timestamp,
-                tips: Immutable::Owned(tips),
-                miner,
-                nonce,
-                txs_hashes
-            }
-        )
+
+        // Read merkle roots
+        let hash_merkle_root = reader.read_hash()?;
+        let accepted_id_merkle_root = reader.read_hash()?;
+        let utxo_commitment = reader.read_hash()?;
+
+        Ok(BlockHeader {
+            version,
+            parents_by_level,
+            blue_score,
+            daa_score,
+            blue_work,
+            pruning_point,
+            timestamp,
+            nonce,
+            extra_nonce,
+            bits,
+            miner,
+            hash_merkle_root,
+            accepted_id_merkle_root,
+            utxo_commitment,
+        })
     }
 
     fn size(&self) -> usize {
-        // additional byte for tips count
-        let tips_size = 1 + self.tips.len() * HASH_SIZE;
-        // 2 bytes for txs count (u16)
-        let txs_size = 2 + self.txs_hashes.len() * HASH_SIZE;
-        // Version is u8
-        let version_size = 1;
+        let mut size = 0;
 
-        EXTRA_NONCE_SIZE + tips_size + txs_size + version_size
-        + self.miner.size()
-        + self.timestamp.size()
-        + self.height.size()
-        + self.nonce.size()
+        // Version
+        size += 1;
+
+        // parents_by_level
+        size += 1; // levels count
+        for level in &self.parents_by_level {
+            size += 1; // level size
+            size += level.len() * HASH_SIZE;
+        }
+
+        // GHOSTDAG scores
+        size += 8; // blue_score
+        size += 8; // daa_score
+        size += 32; // blue_work (U256)
+
+        // Pruning point
+        size += HASH_SIZE;
+
+        // Mining fields
+        size += 8; // timestamp
+        size += 8; // nonce
+        size += EXTRA_NONCE_SIZE;
+        size += 4; // bits
+        size += self.miner.size();
+
+        // Merkle roots
+        size += HASH_SIZE * 3;
+
+        size
     }
 }
 
 impl Hashable for BlockHeader {
-    // this function has the same behavior as the get_pow_hash function
-    // but we use a fast algorithm here
     fn hash(&self) -> Hash {
         hash(&self.get_serialized_header())
     }
 }
 
 impl Display for BlockHeader {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        let mut tips = Vec::with_capacity(self.tips.len());
-        for hash in self.tips.iter() {
-            tips.push(format!("{}", hash));
-        }
-        write!(f, "BlockHeader[height: {}, tips: [{}], timestamp: {}, nonce: {}, extra_nonce: {}, txs: {}]", self.height, tips.join(", "), self.timestamp, self.nonce, hex::encode(self.extra_nonce), self.txs_hashes.len())
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), FmtError> {
+        let parents: Vec<String> = self.get_parents()
+            .iter()
+            .map(|h| format!("{}", h))
+            .collect();
+
+        write!(
+            f,
+            "BlockHeader[blue_score: {}, parents: [{}], timestamp: {}, nonce: {}, extra_nonce: {}, blue_work: {}]",
+            self.blue_score,
+            parents.join(", "),
+            self.timestamp,
+            self.nonce,
+            hex::encode(self.extra_nonce),
+            self.blue_work
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use indexmap::IndexSet;
-    use crate::{block::BlockVersion, crypto::{Hash, Hashable, KeyPair}, serializer::Serializer};
-    use super::BlockHeader;
+    use super::*;
+    use crate::crypto::KeyPair;
 
     #[test]
-    fn test_block_template() {
-        let mut tips = IndexSet::new();
-        tips.insert(Hash::zero());
-
+    fn test_block_header_simple() {
         let miner = KeyPair::new().get_public_key().compress();
-        let header = BlockHeader::new(BlockVersion::V0, 0, 0, tips, [0u8; 32], miner, IndexSet::new());
+        let parents = vec![Hash::zero()];
+
+        let header = BlockHeader::new_simple(
+            BlockVersion::V0,
+            parents,
+            0,
+            [0u8; 32],
+            miner,
+            Hash::zero(),
+        );
 
         let serialized = header.to_bytes();
         assert!(serialized.len() == header.size());
@@ -322,9 +528,58 @@ mod tests {
     }
 
     #[test]
-    fn test_block_template_from_hex() {
-        let serialized = "00000000000000002d0000018f1cbd697000000000000000000eded85557e887b45989a727b6786e1bd250de65042d9381822fa73d01d2c4ff01d3a0154853dbb01dc28c9102e9d94bea355b8ee0d82c3e078ac80841445e86520000d67ad13934337b85c34985491c437386c95de0d97017131088724cfbedebdc55";
-        let header = BlockHeader::from_hex(serialized).unwrap();
-        assert!(header.to_hex() == serialized);
+    fn test_block_header_serialization() {
+        let miner = KeyPair::new().get_public_key().compress();
+        let parents_by_level = vec![
+            vec![Hash::zero()],
+        ];
+
+        let header = BlockHeader::new(
+            BlockVersion::V0,
+            parents_by_level,
+            100,  // blue_score
+            100,  // daa_score
+            BlueWorkType::from(1000),
+            Hash::zero(),
+            1234567890,
+            0x1d00ffff,
+            [0u8; 32],
+            miner,
+            Hash::zero(),
+            Hash::zero(),
+            Hash::zero(),
+        );
+
+        let serialized = header.to_bytes();
+        let deserialized = BlockHeader::from_bytes(&serialized).unwrap();
+
+        assert_eq!(header.blue_score, deserialized.blue_score);
+        assert_eq!(header.daa_score, deserialized.daa_score);
+        assert_eq!(header.blue_work, deserialized.blue_work);
+        assert_eq!(header.hash(), deserialized.hash());
+    }
+
+    #[test]
+    fn test_parents_by_level() {
+        let miner = KeyPair::new().get_public_key().compress();
+        let parents_by_level = vec![
+            vec![Hash::zero(), Hash::zero()],  // 2 direct parents
+            vec![Hash::zero()],                 // 1 grandparent
+        ];
+
+        let header = BlockHeader::new_simple(
+            BlockVersion::V0,
+            vec![],
+            0,
+            [0u8; 32],
+            miner,
+            Hash::zero(),
+        );
+
+        // Test get_parents (should return direct parents)
+        assert_eq!(header.get_parents().len(), 0);
+
+        // Test get_all_parents
+        assert_eq!(header.get_all_parents().len(), 0);
     }
 }

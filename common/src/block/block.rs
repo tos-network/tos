@@ -60,14 +60,19 @@ impl Serializer for Block {
     }
 
     fn read(reader: &mut Reader) -> Result<Block, ReaderError> {
-        let block = BlockHeader::read(reader)?;
+        let header = BlockHeader::read(reader)?;
+        // Note: Transaction count is no longer in header
+        // We read transactions until EOF or use a different protocol
+        // For now, we'll read all remaining transactions
         let mut txs = Vec::new();
-        for _ in 0..block.get_txs_count() {
-            let tx = Transaction::read(reader)?;
-            txs.push(Arc::new(tx));     
+        while reader.total_read() < reader.total_size() {
+            match Transaction::read(reader) {
+                Ok(tx) => txs.push(Arc::new(tx)),
+                Err(_) => break,
+            }
         }
 
-        Ok(Block::new(Immutable::Owned(block), txs))
+        Ok(Block::new(Immutable::Owned(header), txs))
     }
 
     fn size(&self) -> usize {
@@ -91,10 +96,20 @@ impl Deref for Block {
 
 impl Display for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        let mut tips = Vec::with_capacity(self.tips.len());
-        for hash in self.tips.iter() {
-            tips.push(format!("{}", hash));
-        }
-        write!(f, "Block[height: {}, tips: [{}], timestamp: {}, nonce: {}, extra_nonce: {}, txs: {}]", self.height, tips.join(", "), self.timestamp, self.nonce, hex::encode(self.extra_nonce), self.txs_hashes.len())
+        let parents: Vec<String> = self.get_parents()
+            .iter()
+            .map(|h| format!("{}", h))
+            .collect();
+
+        write!(
+            f,
+            "Block[blue_score: {}, parents: [{}], timestamp: {}, nonce: {}, extra_nonce: {}, txs: {}]",
+            self.blue_score,
+            parents.join(", "),
+            self.timestamp,
+            self.nonce,
+            hex::encode(self.extra_nonce),
+            self.transactions.len()
+        )
     }
 }

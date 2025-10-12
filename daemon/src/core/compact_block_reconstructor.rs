@@ -284,20 +284,19 @@ mod tests {
     #[test]
     fn test_missing_transactions_preparation() {
         // Create a simple block
-        let tips = IndexSet::from([Hash::new([0u8; 32])]);
+        let parents = vec![Hash::new([0u8; 32])];
         // Create a minimal miner key from bytes (32 bytes for CompressedRistretto)
         let miner_bytes = [1u8; 32];
         let mut reader = Reader::new(&miner_bytes);
         let miner = CompressedPublicKey::read(&mut reader).unwrap();
 
-        let header = BlockHeader::new(
+        let header = BlockHeader::new_simple(
             BlockVersion::V0,
-            100,
+            parents,
             1234567890,
-            Immutable::Owned(tips),
             [0u8; 32],
             miner,
-            IndexSet::new()
+            Hash::zero()
         );
 
         // Create block with empty transactions (would need real transactions for full test)

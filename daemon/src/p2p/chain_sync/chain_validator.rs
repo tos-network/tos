@@ -156,7 +156,7 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
 
         // verify that we have already all its tips
         {
-            for tip in tips {
+            for tip in &tips {
                 trace!("Checking tip {} for block {}", tip, hash);
                 if !self.blocks.contains_key(tip) && !provider.has_block_with_hash(tip).await? {
                     debug!("Block {} contains tip {} which is not present in chain validator", hash, tip);
@@ -180,7 +180,8 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         let (difficulty, p) = self.blockchain.verify_proof_of_work(&provider, &pow_hash, tips.iter()).await?;
 
         // Find the common base between the block and the current blockchain
-        let (base, base_height) = self.blockchain.find_common_base(&provider, header.get_tips()).await?;
+        let tips_vec = header.get_tips();
+        let (base, base_height) = self.blockchain.find_common_base(&provider, tips_vec.as_slice()).await?;
 
         trace!("Common base: {} at height {} and hash {}", base, base_height, hash);
 
@@ -276,7 +277,7 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
     async fn get_past_blocks_for_block_hash(&self, hash: &Hash) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
         trace!("get past blocks for block hash {}", hash);
         if let Some(data) = self.parent.blocks.get(hash) {
-            return Ok(Immutable::Owned(data.header.get_tips().clone()))
+            return Ok(data.header.get_immutable_tips())
         }
 
         trace!("fallback on storage for get_past_blocks_for_block_hash");

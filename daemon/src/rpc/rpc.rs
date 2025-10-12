@@ -167,7 +167,7 @@ where
         height: header.get_height(),
         version: header.get_version(),
         miner: Cow::Owned(header.get_miner().as_address(mainnet)),
-        tips: Cow::Borrowed(header.get_tips()),
+        tips: Cow::Owned(header.get_immutable_tips().into_owned()),
         txs_hashes: Cow::Borrowed(header.get_txs_hashes()),
         transactions
     }))
@@ -234,7 +234,7 @@ pub async fn get_block_response_for_hash<S: Storage>(blockchain: &Blockchain<S>,
             height: header.get_height(),
             version: header.get_version(),
             miner: Cow::Owned(header.get_miner().as_address(mainnet)),
-            tips: Cow::Borrowed(header.get_tips()),
+            tips: Cow::Owned(header.get_immutable_tips().into_owned()),
             txs_hashes: Cow::Borrowed(header.get_txs_hashes()),
             transactions: Vec::with_capacity(0),
         })
@@ -492,7 +492,7 @@ async fn get_block_template<S: Storage>(context: &Context, body: Value) -> Resul
     let storage = blockchain.get_storage().read().await;
     let block = blockchain.get_block_template_for_storage(&storage, params.address.into_owned().to_public_key()).await.context("Error while retrieving block template")?;
     let (difficulty, _) = blockchain.get_difficulty_at_tips(&*storage, block.get_tips().iter()).await.context("Error while retrieving difficulty at tips")?;
-    let height = block.height;
+    let height = block.blue_score;
     let algorithm = get_pow_algorithm_for_version(block.version);
     let topoheight = blockchain.get_topo_height();
 

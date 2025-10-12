@@ -2,6 +2,7 @@ mod hash;
 mod address;
 mod transcript;
 mod human_readable_proof;
+mod blue_work;
 
 pub mod elgamal;
 pub mod proofs;
@@ -11,6 +12,7 @@ pub use hash::*;
 pub use address::*;
 pub use transcript::*;
 pub use human_readable_proof::*;
+pub use blue_work::*;
 
 pub use elgamal::{PrivateKey, KeyPair, Signature, SIGNATURE_SIZE};
 

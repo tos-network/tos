@@ -140,19 +140,18 @@ mod tests {
 
     fn create_test_compact_block() -> CompactBlock {
         // Create a minimal block header
-        let tips = IndexSet::from([Hash::new([0u8; 32])]);
+        let parents = vec![Hash::new([0u8; 32])];
         let miner_bytes = [1u8; 32];
         let mut reader = Reader::new(&miner_bytes);
         let miner = CompressedPublicKey::read(&mut reader).unwrap();
 
-        let header = BlockHeader::new(
+        let header = BlockHeader::new_simple(
             BlockVersion::V0,
-            100,
+            parents,
             1234567890,
-            Immutable::Owned(tips),
             [0u8; 32],
             miner,
-            IndexSet::new(),
+            Hash::zero(),
         );
 
         CompactBlock {
