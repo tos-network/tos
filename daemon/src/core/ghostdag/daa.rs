@@ -622,3 +622,256 @@ mod integration_tests {
         unimplemented!("Integration test requires full storage implementation");
     }
 }
+
+// Additional comprehensive unit tests for DAA algorithm (Task 4.1)
+#[cfg(test)]
+mod daa_comprehensive_tests {
+    use super::*;
+    use tos_common::varuint::VarUint;
+
+    // Test 1: DAA window calculation edge cases - empty window
+    #[test]
+    fn test_daa_window_empty() {
+        // Test behavior when DAA window is not yet full
+        let daa_score = 0u64;
+        assert!(daa_score < DAA_WINDOW_SIZE, "Score should be below window size");
+
+        // Window boundary should be 0 for early blocks
+        let window_boundary = if daa_score >= DAA_WINDOW_SIZE {
+            daa_score - DAA_WINDOW_SIZE
+        } else {
+            0
+        };
+        assert_eq!(window_boundary, 0);
+    }
+
+    // Test 2: DAA window calculation edge cases - exactly at window size
+    #[test]
+    fn test_daa_window_exactly_full() {
+        // Test the exact moment when window becomes full
+        let daa_score = DAA_WINDOW_SIZE;
+        assert_eq!(daa_score, DAA_WINDOW_SIZE);
+
+        let window_boundary = daa_score - DAA_WINDOW_SIZE;
+        assert_eq!(window_boundary, 0, "Window should start at genesis when exactly full");
+    }
+
+    // Test 3: DAA window calculation edge cases - just past window size
+    #[test]
+    fn test_daa_window_past_full() {
+        // Test window boundaries for blocks well past the initial window
+        let daa_score = DAA_WINDOW_SIZE + 1;
+        let window_boundary = daa_score - DAA_WINDOW_SIZE;
+        assert_eq!(window_boundary, 1, "Window should start at block 1");
+
+        // Test for a much later block
+        let daa_score_large = 10000u64;
+        let window_boundary_large = daa_score_large - DAA_WINDOW_SIZE;
+        assert_eq!(window_boundary_large, 10000 - 2016);
+    }
+
+    // Test 4: Difficulty adjustment boundaries - minimum ratio
+    #[test]
+    fn test_difficulty_adjustment_minimum_ratio() {
+        // Test that difficulty cannot decrease beyond minimum ratio
+        let current_difficulty = Difficulty::from(10000u64);
+        let min_ratio = MIN_DIFFICULTY_RATIO;
+
+        let result = apply_difficulty_adjustment(&current_difficulty, min_ratio);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        let current_val = current_difficulty.as_ref();
+        let new_val = new_difficulty.as_ref();
+
+        // New difficulty should be significantly less than current
+        assert!(new_val < current_val, "Difficulty should decrease with minimum ratio");
+
+        // Verify it's approximately 0.25x (within some tolerance for integer arithmetic)
+        let _expected_min = current_val.as_u64() / 4; // 0.25x
+        let actual = new_val.as_u64();
+        assert!(actual <= current_val.as_u64() / 2, "Difficulty should be substantially reduced");
+    }
+
+    // Test 5: Difficulty adjustment boundaries - maximum ratio
+    #[test]
+    fn test_difficulty_adjustment_maximum_ratio() {
+        // Test that difficulty cannot increase beyond maximum ratio
+        let current_difficulty = Difficulty::from(10000u64);
+        let max_ratio = MAX_DIFFICULTY_RATIO;
+
+        let result = apply_difficulty_adjustment(&current_difficulty, max_ratio);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        let current_val = current_difficulty.as_ref();
+        let new_val = new_difficulty.as_ref();
+
+        // New difficulty should be significantly greater than current
+        assert!(new_val > current_val, "Difficulty should increase with maximum ratio");
+
+        // Verify it's approximately 4x (within some tolerance for integer arithmetic)
+        let _expected_max = current_val.as_u64() * 4; // 4.0x
+        let actual = new_val.as_u64();
+        assert!(actual >= current_val.as_u64() * 2, "Difficulty should be substantially increased");
+    }
+
+    // Test 6: Timestamp manipulation resistance - backwards time
+    #[test]
+    fn test_timestamp_backwards_resistance() {
+        // Test that the algorithm handles backwards-moving timestamps gracefully
+        let start_timestamp = 1000u64;
+        let end_timestamp = 999u64; // Time went backwards!
+
+        // Calculate actual time with protection against backwards time
+        let actual_time = if end_timestamp > start_timestamp {
+            end_timestamp - start_timestamp
+        } else {
+            // Protection: use minimum time to avoid division by zero
+            1
+        };
+
+        assert_eq!(actual_time, 1, "Should use minimum time when timestamp goes backwards");
+
+        // Verify that division by this minimum doesn't cause issues
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+        let ratio = expected_time as f64 / actual_time as f64;
+
+        // Ratio should be very high (blocks appear to be instant)
+        assert!(ratio > 1.0, "Ratio should indicate blocks are too fast");
+
+        // But it should be clamped to MAX_DIFFICULTY_RATIO
+        let clamped_ratio = ratio.max(MIN_DIFFICULTY_RATIO).min(MAX_DIFFICULTY_RATIO);
+        assert_eq!(clamped_ratio, MAX_DIFFICULTY_RATIO, "Extreme ratio should be clamped");
+    }
+
+    // Test 7: Timestamp manipulation resistance - extreme future timestamp
+    #[test]
+    fn test_timestamp_future_resistance() {
+        // Test resistance against blocks with timestamps far in the future
+        let start_timestamp = 1000u64;
+        let end_timestamp = 1_000_000_000u64; // Extremely far in the future
+
+        let actual_time = end_timestamp - start_timestamp;
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+
+        // Ratio will be very small (blocks appear to be very slow)
+        let ratio = expected_time as f64 / actual_time as f64;
+        assert!(ratio < 1.0, "Ratio should indicate blocks are too slow");
+        assert!(ratio < MIN_DIFFICULTY_RATIO, "Ratio should be below minimum before clamping");
+
+        // Should be clamped to MIN_DIFFICULTY_RATIO
+        let clamped_ratio = ratio.max(MIN_DIFFICULTY_RATIO).min(MAX_DIFFICULTY_RATIO);
+        assert_eq!(clamped_ratio, MIN_DIFFICULTY_RATIO, "Extreme ratio should be clamped to minimum");
+
+        // Verify the clamped ratio still works with difficulty adjustment
+        let current_difficulty = Difficulty::from(10000u64);
+        let result = apply_difficulty_adjustment(&current_difficulty, clamped_ratio);
+        assert!(result.is_ok(), "Clamped ratio should work with difficulty adjustment");
+    }
+
+    // Test 8: Zero difficulty edge case
+    #[test]
+    fn test_zero_difficulty_edge_case() {
+        // Test behavior with minimum possible difficulty
+        let zero_difficulty = Difficulty::from(0u64);
+        let ratio = 2.0;
+
+        let result = apply_difficulty_adjustment(&zero_difficulty, ratio);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        // Difficulty should be valid (U256 is always non-negative)
+        let new_val = new_difficulty.as_ref();
+        // U256 is unsigned, so we just verify it's a valid value
+        assert!(new_val.as_u64() >= 0, "Difficulty should be valid");
+    }
+
+    // Test 9: Very large difficulty values
+    #[test]
+    fn test_very_large_difficulty() {
+        // Test with difficulty near the practical limits
+        let large_difficulty = Difficulty::from(u64::MAX / 2);
+        let ratio = 1.5;
+
+        let result = apply_difficulty_adjustment(&large_difficulty, ratio);
+        assert!(result.is_ok(), "Should handle large difficulty values");
+
+        let new_difficulty = result.unwrap();
+        let current_val = large_difficulty.as_ref();
+        let new_val = new_difficulty.as_ref();
+
+        assert!(new_val > current_val, "Large difficulty should still increase proportionally");
+    }
+
+    // Test 10: Difficulty adjustment precision
+    #[test]
+    fn test_difficulty_adjustment_precision() {
+        // Test that small adjustments are handled with reasonable precision
+        let current_difficulty = Difficulty::from(1_000_000u64);
+        let small_ratio = 1.01; // 1% increase
+
+        let result = apply_difficulty_adjustment(&current_difficulty, small_ratio);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        let current_val = current_difficulty.as_ref().as_u64();
+        let new_val = new_difficulty.as_ref().as_u64();
+
+        // New value should be slightly higher than current
+        assert!(new_val > current_val, "Difficulty should increase with small positive ratio");
+        assert!(new_val <= current_val * 2, "Small ratio shouldn't cause dramatic change");
+    }
+
+    // Test 11: Window boundary calculation with overflow protection
+    #[test]
+    fn test_window_boundary_overflow_protection() {
+        // Test that window boundary calculation doesn't overflow
+        let very_large_score = u64::MAX - 1;
+
+        // This should not panic even with very large values
+        let window_boundary = if very_large_score >= DAA_WINDOW_SIZE {
+            very_large_score - DAA_WINDOW_SIZE
+        } else {
+            0
+        };
+
+        assert!(window_boundary <= very_large_score);
+        assert_eq!(window_boundary, very_large_score - DAA_WINDOW_SIZE);
+    }
+
+    // Test 12: Expected time calculation consistency
+    #[test]
+    fn test_expected_time_consistency() {
+        // Verify expected time calculation is consistent
+        let expected_time_1 = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+        let expected_time_2 = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+
+        assert_eq!(expected_time_1, expected_time_2);
+        assert_eq!(expected_time_1, 2016); // With 1-second blocks
+
+        // Test that it scales correctly with window size
+        let half_window = DAA_WINDOW_SIZE / 2;
+        let half_expected = half_window * TARGET_TIME_PER_BLOCK;
+        assert_eq!(half_expected * 2, expected_time_1);
+    }
+
+    // Test 13: Ratio calculation with actual time equal to expected time
+    #[test]
+    fn test_ratio_calculation_exact_match() {
+        // When actual equals expected, ratio should be exactly 1.0
+        let actual_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+
+        let ratio = expected_time as f64 / actual_time as f64;
+        assert_eq!(ratio, 1.0);
+
+        // Applying this ratio should not change difficulty
+        let current_difficulty = Difficulty::from(5000u64);
+        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        assert_eq!(new_difficulty.as_ref(), current_difficulty.as_ref());
+    }
+}

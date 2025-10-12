@@ -56,5 +56,12 @@ serde_json = { workspace = true }
 indexmap = { workspace = true }
 futures = { workspace = true }
 
+[lib]
+name = "tos_daemon"
+path = "src/lib.rs"
+
 [dev-dependencies]
 tempdir = "*"
+criterion = "0.6.0"
+rayon = "1.8"
+sysinfo = "0.32"
