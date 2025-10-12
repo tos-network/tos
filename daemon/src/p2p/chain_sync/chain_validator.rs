@@ -17,11 +17,13 @@ use crate::core::{
     blockchain::Blockchain,
     blockdag,
     error::BlockchainError,
+    ghostdag::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData},
     hard_fork::{get_pow_algorithm_for_version, get_version_at_height},
     storage::{
         BlocksAtHeightProvider,
         DagOrderProvider,
         DifficultyProvider,
+        GhostdagDataProvider,
         MerkleHashProvider,
         PrunedTopoheightProvider,
         Storage
@@ -416,6 +418,64 @@ impl<S: Storage> MerkleHashProvider for ChainValidatorProvider<'_, S> {
     }
 
     async fn set_balances_merkle_hash_at_topoheight(&mut self,  _: TopoHeight, _: &Hash) -> Result<(), BlockchainError> {
+        Err(BlockchainError::UnsupportedOperation)
+    }
+}
+
+// GHOSTDAG Data Provider implementation (TIP-2 Phase 1)
+// Delegates all GHOSTDAG operations to underlying storage
+#[async_trait]
+impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
+    async fn get_ghostdag_blue_score(&self, hash: &Hash) -> Result<u64, BlockchainError> {
+        trace!("fallback on storage for get_ghostdag_blue_score");
+        self.storage.get_ghostdag_blue_score(hash).await
+    }
+
+    async fn get_ghostdag_blue_work(&self, hash: &Hash) -> Result<BlueWorkType, BlockchainError> {
+        trace!("fallback on storage for get_ghostdag_blue_work");
+        self.storage.get_ghostdag_blue_work(hash).await
+    }
+
+    async fn get_ghostdag_selected_parent(&self, hash: &Hash) -> Result<Hash, BlockchainError> {
+        trace!("fallback on storage for get_ghostdag_selected_parent");
+        self.storage.get_ghostdag_selected_parent(hash).await
+    }
+
+    async fn get_ghostdag_mergeset_blues(&self, hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+        trace!("fallback on storage for get_ghostdag_mergeset_blues");
+        self.storage.get_ghostdag_mergeset_blues(hash).await
+    }
+
+    async fn get_ghostdag_mergeset_reds(&self, hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+        trace!("fallback on storage for get_ghostdag_mergeset_reds");
+        self.storage.get_ghostdag_mergeset_reds(hash).await
+    }
+
+    async fn get_ghostdag_blues_anticone_sizes(&self, hash: &Hash) -> Result<Arc<std::collections::HashMap<Hash, KType>>, BlockchainError> {
+        trace!("fallback on storage for get_ghostdag_blues_anticone_sizes");
+        self.storage.get_ghostdag_blues_anticone_sizes(hash).await
+    }
+
+    async fn get_ghostdag_data(&self, hash: &Hash) -> Result<Arc<TosGhostdagData>, BlockchainError> {
+        trace!("fallback on storage for get_ghostdag_data");
+        self.storage.get_ghostdag_data(hash).await
+    }
+
+    async fn get_ghostdag_compact_data(&self, hash: &Hash) -> Result<CompactGhostdagData, BlockchainError> {
+        trace!("fallback on storage for get_ghostdag_compact_data");
+        self.storage.get_ghostdag_compact_data(hash).await
+    }
+
+    async fn has_ghostdag_data(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        trace!("fallback on storage for has_ghostdag_data");
+        self.storage.has_ghostdag_data(hash).await
+    }
+
+    async fn insert_ghostdag_data(&mut self, _: &Hash, _: Arc<TosGhostdagData>) -> Result<(), BlockchainError> {
+        Err(BlockchainError::UnsupportedOperation)
+    }
+
+    async fn delete_ghostdag_data(&mut self, _: &Hash) -> Result<(), BlockchainError> {
         Err(BlockchainError::UnsupportedOperation)
     }
 }

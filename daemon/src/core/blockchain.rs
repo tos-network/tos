@@ -133,6 +133,7 @@ use super::storage::{
     AccountProvider,
     BlocksAtHeightProvider,
     ClientProtocolProvider,
+    GhostdagDataProvider,
     PrunedTopoheightProvider,
 };
 
@@ -1440,13 +1441,13 @@ impl<S: Storage> Blockchain<S> {
 
     // Get difficulty at tips
     // If tips is empty, returns genesis difficulty
-    // Find the best tip (highest cumulative difficulty), then its difficulty, timestamp and its own tips
+    // Find the best tip (highest blue_work via GHOSTDAG), then its difficulty, timestamp and its own tips
     // Same for its parent, then calculate the difficulty between the two timestamps
     // For Block C, take the timestamp and difficulty from parent block B, and then from parent of B, take the timestamp
     // We take the difficulty from the biggest tip, but compute the solve time from the newest tips
     pub async fn get_difficulty_at_tips<'a, P, I>(&self, provider: &P, tips: I) -> Result<(Difficulty, VarUint), BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider,
+        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider + GhostdagDataProvider,
         I: IntoIterator<Item = &'a Hash> + ExactSizeIterator + Clone,
         I::IntoIter: ExactSizeIterator
     {
@@ -1476,8 +1477,21 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        // Search the highest difficulty available
-        let best_tip = blockdag::find_best_tip_by_cumulative_difficulty(provider, tips.clone().into_iter()).await?;
+        // Search the highest difficulty available (using GHOSTDAG blue_work - TIP-2 Phase 1)
+        let best_tip = {
+            let tips_vec: Vec<_> = tips.clone().into_iter().collect();
+            let mut best_hash = tips_vec[0];
+            let mut best_blue_work = provider.get_ghostdag_blue_work(best_hash).await?;
+
+            for &tip in tips_vec.iter().skip(1) {
+                let blue_work = provider.get_ghostdag_blue_work(tip).await?;
+                if blue_work > best_blue_work {
+                    best_blue_work = blue_work;
+                    best_hash = tip;
+                }
+            }
+            best_hash
+        };
         let biggest_difficulty = provider.get_difficulty_for_block_hash(best_tip).await?;
 
         // Search the newest tip available to determine the real solve time
@@ -1520,7 +1534,7 @@ impl<S: Storage> Blockchain<S> {
     // if the difficulty is valid, returns it (prevent to re-compute it)
     pub async fn verify_proof_of_work<'a, P, I>(&self, provider: &P, hash: &Hash, tips: I) -> Result<(Difficulty, VarUint), BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider,
+        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider + GhostdagDataProvider,
         I: IntoIterator<Item = &'a Hash> + ExactSizeIterator + Clone,
         I::IntoIter: ExactSizeIterator
     {
@@ -1796,8 +1810,23 @@ impl<S: Storage> Blockchain<S> {
 
         let current_height = self.get_height();
         if tips.len() > 1 {
-            let best_tip = blockdag::find_best_tip_by_cumulative_difficulty(storage, tips.iter()).await?.clone();
-            debug!("Best tip selected for this block template is {}", best_tip);
+            // Use GHOSTDAG to select best tip (TIP-2 Phase 1)
+            // Find tip with highest blue_work
+            let best_tip = {
+                let mut best_hash = tips[0].clone();
+                let mut best_blue_work = storage.get_ghostdag_blue_work(&best_hash).await?;
+
+                for tip in tips.iter().skip(1) {
+                    let blue_work = storage.get_ghostdag_blue_work(tip).await?;
+                    if blue_work > best_blue_work {
+                        best_blue_work = blue_work;
+                        best_hash = tip.clone();
+                    }
+                }
+                debug!("Best tip selected by GHOSTDAG (blue_work={}): {}", best_blue_work, best_hash);
+                best_hash
+            };
+
             let mut selected_tips = Vec::with_capacity(tips.len());
             for hash in tips {
                 if best_tip != hash {
@@ -2145,8 +2174,22 @@ impl<S: Storage> Blockchain<S> {
         }
 
         if tips_count > 1 {
-            let best_tip = blockdag::find_best_tip_by_cumulative_difficulty(&*storage, block.get_tips().iter()).await?;
-            debug!("Best tip selected for this new block is {}", best_tip);
+            // Use GHOSTDAG to find best tip (TIP-2 Phase 1)
+            let best_tip = {
+                let tips_vec: Vec<_> = block.get_tips().iter().collect();
+                let mut best_hash = tips_vec[0];
+                let mut best_blue_work = storage.get_ghostdag_blue_work(best_hash).await?;
+
+                for &tip in tips_vec.iter().skip(1) {
+                    let blue_work = storage.get_ghostdag_blue_work(tip).await?;
+                    if blue_work > best_blue_work {
+                        best_blue_work = blue_work;
+                        best_hash = tip;
+                    }
+                }
+                best_hash
+            };
+            debug!("Best tip selected by GHOSTDAG for block validation: {}", best_tip);
             for hash in block.get_tips() {
                 if best_tip != hash {
                     if !self.validate_tips(&*storage, best_tip, hash).await? {
@@ -2859,8 +2902,21 @@ impl<S: Storage> Blockchain<S> {
         }
 
         tips = HashSet::new();
-        debug!("find best tip by cumulative difficulty");
-        let best_tip = blockdag::find_best_tip_by_cumulative_difficulty(&*storage, new_tips.iter()).await?.clone();
+        debug!("find best tip by GHOSTDAG blue_work");
+        // Use GHOSTDAG to find best tip (TIP-2 Phase 1)
+        let best_tip = {
+            let mut best_hash = new_tips[0].clone();
+            let mut best_blue_work = storage.get_ghostdag_blue_work(&best_hash).await?;
+
+            for tip in new_tips.iter().skip(1) {
+                let blue_work = storage.get_ghostdag_blue_work(tip).await?;
+                if blue_work > best_blue_work {
+                    best_blue_work = blue_work;
+                    best_hash = tip.clone();
+                }
+            }
+            best_hash
+        };
         for hash in new_tips {
             if best_tip != hash {
                 if !self.validate_tips(&*storage, &best_tip, &hash).await? {
