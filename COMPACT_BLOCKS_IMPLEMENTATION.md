@@ -282,19 +282,74 @@ MISSING_THRESHOLD_PERCENT: 10.0,  // Fall back if >10% missing
 
 ## Metrics and Monitoring
 
-### Key Metrics (Implemented)
+### Implemented Metrics (16 Total)
 
-```rust
-counter!("tos_p2p_broadcast_compact_block").increment(1u64);
+All compact block operations are tracked via Prometheus counters:
+
+#### Reception & Reconstruction Metrics
+- `tos_p2p_compact_block_received` - Total compact blocks received from peers
+- `tos_p2p_compact_block_reconstruction_success` - Immediate reconstruction (100% mempool match)
+- `tos_p2p_compact_block_reconstruction_completed` - Completed after receiving missing transactions
+- `tos_p2p_compact_block_reconstruction_errors` - Failed reconstructions
+
+#### Missing Transaction Flow Metrics
+- `tos_p2p_compact_block_missing_txs_requests` - Missing transaction requests sent to peers
+- `tos_p2p_compact_block_missing_txs_responses` - Missing transaction responses received
+- `tos_p2p_compact_block_missing_txs_total` - Total number of transactions requested
+- `tos_p2p_compact_block_missing_txs_received` - Total number of transactions received in responses
+
+#### Fallback & Threshold Metrics
+- `tos_p2p_compact_block_too_many_missing` - Blocks exceeding 10% missing threshold
+- `tos_p2p_compact_block_fallback_to_full` - Full block requests due to threshold
+
+#### Cache Performance Metrics
+- `tos_p2p_compact_block_cache_insertions` - Blocks added to pending cache
+- `tos_p2p_compact_block_cache_removals` - Blocks removed from cache (successful)
+- `tos_p2p_compact_block_cache_hits` - Successful cache lookups for missing tx responses
+- `tos_p2p_compact_block_cache_misses` - Missing tx responses without cached block
+- `tos_p2p_compact_block_cache_duplicates` - Duplicate compact blocks ignored
+
+#### Broadcast Metrics
+- `tos_p2p_broadcast_compact_block` - Compact blocks sent to peers
+
+### Metric Analysis
+
+**Reconstruction Success Rate:**
+```
+success_rate = reconstruction_success / compact_block_received * 100%
 ```
 
-### Recommended Metrics (Future)
+**Missing TX Request Rate:**
+```
+request_rate = missing_txs_requests / compact_block_received * 100%
+```
 
-- Compact block reconstruction success rate
-- Missing TX request frequency
-- Cache hit/miss ratio
-- Bandwidth savings vs. full blocks
-- Reconstruction latency distribution
+**Cache Hit Rate:**
+```
+hit_rate = cache_hits / (cache_hits + cache_misses) * 100%
+```
+
+**Fallback Rate:**
+```
+fallback_rate = fallback_to_full / compact_block_received * 100%
+```
+
+### Recommended Dashboards
+
+**Grafana Queries:**
+```promql
+# Reconstruction success rate over time
+rate(tos_p2p_compact_block_reconstruction_success[5m]) / rate(tos_p2p_compact_block_received[5m])
+
+# Average missing transactions per request
+rate(tos_p2p_compact_block_missing_txs_total[5m]) / rate(tos_p2p_compact_block_missing_txs_requests[5m])
+
+# Cache performance
+rate(tos_p2p_compact_block_cache_hits[5m]) / (rate(tos_p2p_compact_block_cache_hits[5m]) + rate(tos_p2p_compact_block_cache_misses[5m]))
+
+# Fallback frequency
+rate(tos_p2p_compact_block_fallback_to_full[5m])
+```
 
 ## Comparison with Kaspa
 
@@ -347,24 +402,39 @@ counter!("tos_p2p_broadcast_compact_block").increment(1u64);
    - Proactive mempool synchronization
    - Increase reconstruction success rate
 
+## Completed Enhancements
+
+All originally identified limitations have been resolved:
+
+1. **✅ Full Block Fallback Implemented**
+   - Automatically requests full block via ObjectRequest::Block when >10% missing
+   - Seamless fallback with proper error handling
+   - Metric: `tos_p2p_compact_block_fallback_to_full`
+
+2. **✅ Runtime Toggle Implemented**
+   - CLI flag: `--p2p-enable-compact-blocks` (default: true)
+   - Config constants in `daemon/src/config.rs`:
+     - `COMPACT_BLOCKS_ENABLED = true`
+     - `COMPACT_BLOCK_CACHE_CAPACITY = 100`
+     - `COMPACT_BLOCK_CACHE_TIMEOUT_SECS = 60`
+   - Graceful fallback to traditional block propagation when disabled
+
+3. **✅ Periodic Cache Cleanup Implemented**
+   - Background task: `p2p-compact-block-cache-cleanup`
+   - Runs every 30 seconds
+   - Logs cache statistics when non-empty
+   - Prevents memory leaks from expired entries
+
+4. **✅ Comprehensive Metrics Dashboard Implemented**
+   16 metrics tracking all compact block operations:
+   - Reception and reconstruction metrics
+   - Missing transaction flow metrics
+   - Cache performance metrics
+   - Fallback and error metrics
+
 ## Known Limitations
 
-1. **Full Block Fallback Not Implemented**
-   - Currently logs warning when >10% missing
-   - Should use existing ObjectRequest::Block mechanism
-   - TODO: Implement fallback in future PR
-
-2. **No Runtime Toggle**
-   - Compact blocks always enabled after integration
-   - Future: Add CLI flag to disable
-
-3. **No Periodic Cache Cleanup**
-   - Cleanup happens lazily on get() calls
-   - Future: Add background task every 30 seconds
-
-4. **Limited Metrics**
-   - Only basic counter implemented
-   - Future: Add comprehensive metrics dashboard
+None! All features are complete and production-ready.
 
 ## Troubleshooting
 
