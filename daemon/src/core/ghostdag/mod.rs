@@ -7,11 +7,51 @@ pub mod types;
 pub use types::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData};
 
 use anyhow::Result;
+use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tos_common::crypto::Hash;
 
 use crate::core::error::BlockchainError;
 use crate::core::storage::Storage;
+
+/// SortableBlock for topological ordering by blue work
+/// Based on Kaspa's ordering.rs
+#[derive(Clone, Debug)]
+struct SortableBlock {
+    hash: Hash,
+    blue_work: BlueWorkType,
+}
+
+impl SortableBlock {
+    fn new(hash: Hash, blue_work: BlueWorkType) -> Self {
+        Self { hash, blue_work }
+    }
+}
+
+impl PartialEq for SortableBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+
+impl Eq for SortableBlock {}
+
+impl PartialOrd for SortableBlock {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SortableBlock {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // First compare by blue_work, then by hash for determinism
+        self.blue_work.cmp(&other.blue_work).then_with(|| {
+            // Compare hash bytes
+            self.hash.as_bytes().cmp(other.hash.as_bytes())
+        })
+    }
+}
 
 /// TOS GHOSTDAG Manager
 /// Implements the GHOSTDAG protocol for block ordering and selection
@@ -114,6 +154,7 @@ impl<S: Storage> TosGhostdag<S> {
     /// Run the GHOSTDAG algorithm for a new block with given parents
     ///
     /// This is the core GHOSTDAG protocol implementation.
+    /// Based on Kaspa's ghostdag() in protocol.rs (lines 127-168)
     ///
     /// # Arguments
     /// * `parents` - Slice of parent block hashes
@@ -121,102 +162,196 @@ impl<S: Storage> TosGhostdag<S> {
     /// # Returns
     /// TosGhostdagData for the new block
     ///
-    /// # Algorithm
+    /// # Algorithm (from GHOSTDAG whitepaper)
     /// 1. Find selected parent (highest blue_work)
     /// 2. Initialize new block data with selected parent
-    /// 3. Get ordered mergeset (topological sort)
+    /// 3. Get ordered mergeset (topological sort by blue_work)
     /// 4. For each candidate in mergeset:
-    ///    a. Check if adding it violates k-cluster
+    ///    a. Check k-cluster conditions:
+    ///       - |anticone(candidate) ∩ blue_set| ≤ K
+    ///       - For all blues: |(anticone(blue) ∩ blue_set) ∪ {candidate}| ≤ K
     ///    b. If no violation: add as blue
     ///    c. If violation: add as red
-    /// 5. Finalize by calculating blue_score and blue_work
+    /// 5. Calculate blue_score = parent.blue_score + |mergeset_blues|
+    /// 6. Calculate blue_work = parent.blue_work + sum(work of blues in mergeset)
+    ///
+    /// See: https://eprint.iacr.org/2018/104.pdf
     pub async fn ghostdag(&self, parents: &[Hash]) -> Result<TosGhostdagData, BlockchainError> {
         // Genesis block special case
         if parents.is_empty() {
             return Ok(self.genesis_ghostdag_data());
         }
 
-        // Step 1: Find selected parent (highest blue_work)
+        // Step 1: Find selected parent (parent with highest blue_work)
         let selected_parent = self.find_selected_parent(parents.iter().cloned()).await?;
 
-        // Step 2: Initialize new block data
+        // Step 2: Initialize new block data with selected parent as first blue
         let mut new_block_data = TosGhostdagData::new_with_selected_parent(selected_parent.clone(), self.k);
 
-        // Step 3: Get ordered mergeset (TODO: implement topological ordering)
-        // For now, we use a simplified version that just returns non-selected parents
+        // Step 3: Get ordered mergeset (topologically sorted by blue_work)
         let ordered_mergeset = self.ordered_mergeset_without_selected_parent(selected_parent.clone(), parents).await?;
 
-        // Step 4: Process each candidate block
+        // Step 4: Process each candidate block in topological order
         for candidate in ordered_mergeset {
-            // TODO: Implement proper k-cluster checking
-            // For now, simplified: check if anticone size ≤ k
-            let is_blue = self.check_blue_candidate(&new_block_data, &candidate).await?;
+            // Check if candidate can be blue without violating k-cluster
+            let (is_blue, anticone_size, blues_anticone_sizes) =
+                self.check_blue_candidate(&new_block_data, &candidate).await?;
 
             if is_blue {
-                // No k-cluster violation, add as blue
-                let anticone_size = self.calculate_anticone_size(&new_block_data, &candidate).await?;
-                let blues_anticone_sizes = std::collections::HashMap::new(); // TODO: calculate properly
-                new_block_data.add_blue(candidate.clone(), anticone_size, &blues_anticone_sizes);
+                // No k-cluster violation - add as blue
+                new_block_data.add_blue(candidate, anticone_size, &blues_anticone_sizes);
             } else {
-                // K-cluster violation, add as red
-                new_block_data.add_red(candidate.clone());
+                // K-cluster violation - add as red
+                new_block_data.add_red(candidate);
             }
         }
 
-        // Step 5: Finalize by calculating blue_score and blue_work
+        // Step 5: Calculate blue_score
+        // blue_score = parent's blue_score + number of blues in mergeset
         let parent_data = self.get_ghostdag_data(&selected_parent).await?;
-        let block_work = BlueWorkType::from(1u64); // TODO: calculate from difficulty
-        new_block_data.finalize(parent_data.blue_score, parent_data.blue_work, block_work);
+        let blue_score = parent_data.blue_score + new_block_data.mergeset_blues.len() as u64;
+
+        // Step 6: Calculate blue_work
+        // blue_work = parent's blue_work + sum of work for all blues in mergeset
+        // For now, use simplified work calculation (1 per block)
+        // TODO: Calculate actual work from block difficulty (bits field)
+        let added_blue_work = BlueWorkType::from(new_block_data.mergeset_blues.len() as u64);
+        let blue_work = parent_data.blue_work + added_blue_work;
+
+        // Finalize the GHOSTDAG data
+        new_block_data.finalize_score_and_work(blue_score, blue_work);
 
         Ok(new_block_data)
     }
 
-    /// Get GHOSTDAG data for a specific block
-    /// TODO: This will query from storage once storage traits are implemented
-    async fn get_ghostdag_data(&self, _block_hash: &Hash) -> Result<TosGhostdagData, BlockchainError> {
-        // Placeholder: In real implementation, query from storage
-        // For now, return default data
-        Ok(TosGhostdagData::default())
+    /// Get GHOSTDAG data for a specific block from storage
+    async fn get_ghostdag_data(&self, block_hash: &Hash) -> Result<Arc<TosGhostdagData>, BlockchainError> {
+        self.storage.get_ghostdag_data(block_hash).await
+    }
+
+    /// Sort blocks by blue work (topological order)
+    /// Based on Kaspa's sort_blocks in ordering.rs
+    async fn sort_blocks(&self, blocks: Vec<Hash>) -> Result<Vec<Hash>, BlockchainError> {
+        let mut sortable_blocks = Vec::with_capacity(blocks.len());
+
+        for hash in blocks {
+            let blue_work = self.storage.get_ghostdag_blue_work(&hash).await?;
+            sortable_blocks.push(SortableBlock::new(hash, blue_work));
+        }
+
+        sortable_blocks.sort();
+        Ok(sortable_blocks.into_iter().map(|sb| sb.hash).collect())
     }
 
     /// Get ordered mergeset without the selected parent
-    /// TODO: Implement proper topological ordering
+    /// Simplified version: collects non-selected parents and sorts by blue work
+    ///
+    /// Based on Kaspa's ordered_mergeset_without_selected_parent in mergeset.rs
+    /// Note: This is a simplified version. Full Kaspa implementation uses BFS
+    /// with reachability filtering to exclude blocks in the past of selected parent.
+    ///
+    /// For Phase 1, we use a conservative approach: include all non-selected parents
+    /// and let k-cluster validation filter out violations.
     async fn ordered_mergeset_without_selected_parent(
         &self,
         selected_parent: Hash,
         parents: &[Hash],
     ) -> Result<Vec<Hash>, BlockchainError> {
-        // Simplified: just return other parents
-        // Real implementation needs topological sort based on blue work
-        Ok(parents.iter()
+        // Collect all parents except selected parent
+        let mergeset: Vec<Hash> = parents.iter()
             .filter(|&p| p != &selected_parent)
-            .cloned()  // Clone each Hash
-            .collect())
+            .cloned()
+            .collect();
+
+        // Sort by blue work (topological order)
+        self.sort_blocks(mergeset).await
+    }
+
+    /// Returns the blue anticone size of `block` from the worldview of `context`.
+    /// Expects `block` to be in the blue set of `context`.
+    ///
+    /// Based on Kaspa's blue_anticone_size in protocol.rs (lines 234-249)
+    ///
+    /// Walks the selected parent chain until finding the block in blues_anticone_sizes map.
+    async fn blue_anticone_size(
+        &self,
+        block: &Hash,
+        context: &TosGhostdagData,
+    ) -> Result<KType, BlockchainError> {
+        let mut current_blues_anticone_sizes = context.blues_anticone_sizes.clone();
+        let mut current_selected_parent = context.selected_parent.clone();
+
+        loop {
+            // Check if we have the anticone size for this block
+            if let Some(&size) = current_blues_anticone_sizes.get(block) {
+                return Ok(size);
+            }
+
+            // Check if we reached genesis
+            if current_selected_parent == self.genesis_hash {
+                // Block not found in blue set - this shouldn't happen if called correctly
+                return Err(BlockchainError::InvalidConfig);
+            }
+
+            // Move to parent's GHOSTDAG data
+            let parent_data = self.get_ghostdag_data(&current_selected_parent).await?;
+            current_blues_anticone_sizes = parent_data.blues_anticone_sizes.clone();
+            current_selected_parent = parent_data.selected_parent.clone();
+        }
     }
 
     /// Check if a candidate block can be blue (doesn't violate k-cluster)
-    /// TODO: Implement proper k-cluster validation
+    ///
+    /// Based on Kaspa's check_blue_candidate in protocol.rs (lines 251-287)
+    ///
+    /// Simplified version for Phase 1:
+    /// - Checks if mergeset_blues size would exceed k+1
+    /// - For each existing blue, checks if candidate would violate k-cluster
+    /// - Conservative: may reject valid blues, but won't accept invalid ones
+    ///
+    /// Returns: (is_blue, blue_anticone_size, blues_anticone_sizes_map)
     async fn check_blue_candidate(
         &self,
-        _new_block_data: &TosGhostdagData,
+        new_block_data: &TosGhostdagData,
         _candidate: &Hash,
-    ) -> Result<bool, BlockchainError> {
-        // Placeholder: simplified check
-        // Real implementation needs to check:
-        // 1. |anticone(candidate) ∩ blue_set| ≤ K
-        // 2. For all blues: |(anticone(blue) ∩ blue_set) ∪ {candidate}| ≤ K
-        Ok(true)
-    }
+    ) -> Result<(bool, KType, HashMap<Hash, KType>), BlockchainError> {
+        // Check 1: Mergeset blues cannot exceed k+1 (selected parent + k blues)
+        if new_block_data.mergeset_blues.len() >= (self.k + 1) as usize {
+            return Ok((false, 0, HashMap::new()));
+        }
 
-    /// Calculate anticone size for a candidate block
-    /// TODO: Implement proper anticone calculation
-    async fn calculate_anticone_size(
-        &self,
-        _new_block_data: &TosGhostdagData,
-        _candidate: &Hash,
-    ) -> Result<KType, BlockchainError> {
-        // Placeholder
-        Ok(0)
+        let mut candidate_blues_anticone_sizes: HashMap<Hash, KType> = HashMap::new();
+        let mut candidate_blue_anticone_size: KType = 0;
+
+        // Check 2: Validate k-cluster with existing blues
+        // Iterate over all blues in new_block_data
+        for blue in new_block_data.mergeset_blues.iter() {
+            // Simplified check: assume all blues are in anticone of candidate
+            // (conservative - may reject valid candidates)
+            // Full implementation would use reachability to check if blue is ancestor of candidate
+
+            // Get the blue anticone size for this blue block
+            let blue_anticone_size = self.blue_anticone_size(blue, new_block_data).await?;
+
+            // Record this for the candidate's blues_anticone_sizes map
+            candidate_blues_anticone_sizes.insert(blue.clone(), blue_anticone_size);
+
+            // Increment candidate's blue anticone size
+            candidate_blue_anticone_size += 1;
+
+            // Check k-cluster condition 1: candidate's blue anticone must be ≤ k
+            if candidate_blue_anticone_size > self.k {
+                return Ok((false, 0, HashMap::new()));
+            }
+
+            // Check k-cluster condition 2: existing blue's anticone + candidate must be ≤ k
+            if blue_anticone_size >= self.k {
+                return Ok((false, 0, HashMap::new()));
+            }
+        }
+
+        // All checks passed - candidate can be blue
+        Ok((true, candidate_blue_anticone_size, candidate_blues_anticone_sizes))
     }
 }
 

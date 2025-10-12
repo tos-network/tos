@@ -133,6 +133,13 @@ impl TosGhostdagData {
         // Note: In simplified model, we assume each blue block adds block_work
         self.blue_work = parent_blue_work + (block_work * self.mergeset_blues.len());
     }
+
+    /// Finalize GHOSTDAG data with explicit blue_score and blue_work values
+    /// Used by GHOSTDAG algorithm after calculating final values
+    pub fn finalize_score_and_work(&mut self, blue_score: u64, blue_work: BlueWorkType) {
+        self.blue_score = blue_score;
+        self.blue_work = blue_work;
+    }
 }
 
 impl From<&TosGhostdagData> for CompactGhostdagData {
