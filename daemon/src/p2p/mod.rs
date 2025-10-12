@@ -85,6 +85,8 @@ use crate::{
         hard_fork,
         storage::Storage,
         config::ProxyKind,
+        CompactBlockReconstructor,
+        ReconstructionResult,
     },
     p2p::{
         connection::{Connection, State},
@@ -96,7 +98,9 @@ use crate::{
             ObjectResponse,
             Ping,
             Packet,
-            PacketWrapper
+            PacketWrapper,
+            MissingTransactions,
+            GetMissingTransactions,
         },
         peer_list::{
             PeerList,
@@ -2264,21 +2268,146 @@ impl<S: Storage> P2pServer<S> {
                     trace!("End locking for PeerDisconnected event");
                 }
             },
-            Packet::CompactBlockPropagation(_packet_wrapper) => {
+            Packet::CompactBlockPropagation(packet_wrapper) => {
                 trace!("{}: Compact Block Propagation packet", peer);
-                // TODO: Implement compact block reconstruction
-                // For now, log and skip
-                debug!("Received compact block from {}, reconstruction not yet implemented", peer.get_outgoing_address());
+                let (compact_block_msg, ping) = packet_wrapper.consume();
+                let compact_block = compact_block_msg.into_owned().into_owned();
+
+                ping.into_owned().update_peer(peer, &self.blockchain).await?;
+
+                let block_hash = Arc::new(compact_block.header.hash());
+                debug!("Received compact block {} from {}", block_hash, peer);
+
+                // Attempt reconstruction from mempool
+                let mempool = self.blockchain.get_mempool().read().await;
+                match CompactBlockReconstructor::reconstruct(compact_block.clone(), &mempool).await {
+                    Ok(ReconstructionResult::Success(block)) => {
+                        debug!("Successfully reconstructed block {} from compact block", block_hash);
+                        drop(mempool); // Release lock before processing
+
+                        // Process the reconstructed block through normal block processing
+                        if let Err(e) = self.blocks_processor.send((peer.clone(), block.get_header().clone(), block_hash.clone())).await {
+                            error!("Error while sending reconstructed block to blocks processor task: {}", e);
+                        }
+                    },
+                    Ok(ReconstructionResult::MissingTransactions(request)) => {
+                        debug!("Block {} missing {} transactions, requesting from peer",
+                            block_hash, request.missing_indices.len());
+                        drop(mempool); // Release lock before sending packet
+
+                        // Store compact block for later reconstruction
+                        // TODO: Implement compact block cache to store pending reconstructions
+
+                        // Request missing transactions from peer
+                        // Create a ping with current blockchain state
+                        match self.blockchain.get_top_block_hash().await {
+                            Ok(top_hash) => {
+                                let our_topoheight = self.blockchain.get_topo_height();
+                                let our_height = self.blockchain.get_height();
+
+                                // Try to get pruned topoheight from storage
+                                let pruned_topoheight = {
+                                    let storage = self.blockchain.get_storage().read().await;
+                                    storage.get_pruned_topoheight().await.ok().flatten()
+                                };
+
+                                // Get cumulative difficulty from top block
+                                let cumulative_difficulty = self.blockchain.get_difficulty().await;
+
+                                let ping = Ping::new(
+                                    Cow::Borrowed(&top_hash),
+                                    our_topoheight,
+                                    our_height,
+                                    pruned_topoheight,
+                                    cumulative_difficulty,
+                                    IndexSet::new()
+                                );
+
+                                let get_missing_txs = GetMissingTransactions::new(Cow::Owned(request));
+                                let packet = Packet::GetMissingTransactions(
+                                    PacketWrapper::new(Cow::Owned(get_missing_txs), Cow::Owned(ping))
+                                );
+
+                                if let Err(e) = peer.send_packet(packet).await {
+                                    error!("Failed to request missing transactions from {}: {}", peer, e);
+                                }
+                            },
+                            Err(e) => {
+                                error!("Failed to get top block hash for missing transactions request: {}", e);
+                            }
+                        }
+                    },
+                    Ok(ReconstructionResult::TooManyMissing { missing_count, total_count }) => {
+                        debug!("Block {} has too many missing transactions ({}/{}), falling back to full block request",
+                            block_hash, missing_count, total_count);
+                        drop(mempool); // Release lock before requesting
+
+                        // Fall back to requesting full block
+                        // Use the existing object request mechanism
+                        warn!("Compact block reconstruction failed for {}, would request full block (not yet implemented)", block_hash);
+                        // TODO: Request full block via ObjectRequest::Block
+                    },
+                    Err(e) => {
+                        error!("Error reconstructing compact block {}: {}", block_hash, e);
+                    }
+                }
             },
-            Packet::GetMissingTransactions(_packet_wrapper) => {
+            Packet::GetMissingTransactions(packet_wrapper) => {
                 trace!("{}: Get Missing Transactions packet", peer);
-                // TODO: Implement missing transactions response
-                debug!("Received missing transactions request from {}, not yet implemented", peer.get_outgoing_address());
+                let (request_msg, ping) = packet_wrapper.consume();
+                let request = request_msg.into_owned().request.into_owned();
+
+                ping.into_owned().update_peer(peer, &self.blockchain).await?;
+
+                debug!("Received request for {} missing transactions for block {}",
+                    request.missing_indices.len(), request.block_hash);
+
+                // Try to get the block from storage
+                let storage = self.blockchain.get_storage().read().await;
+                match storage.get_block_by_hash(&request.block_hash).await {
+                    Ok(block) => {
+                        debug!("Found block {} in storage, preparing missing transactions response", request.block_hash);
+
+                        // Prepare the missing transactions response
+                        match CompactBlockReconstructor::prepare_missing_transactions(request, &block) {
+                            Ok(response) => {
+                                debug!("Sending {} missing transactions to {}", response.transactions.len(), peer);
+
+                                let packet = Packet::MissingTransactions(
+                                    MissingTransactions::new(Cow::Owned(response))
+                                );
+
+                                if let Err(e) = peer.send_packet(packet).await {
+                                    error!("Failed to send missing transactions to {}: {}", peer, e);
+                                }
+                            },
+                            Err(e) => {
+                                error!("Failed to prepare missing transactions response: {}", e);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        error!("Error retrieving block {} from storage: {}", request.block_hash, e);
+                    }
+                }
             },
-            Packet::MissingTransactions(_response) => {
+            Packet::MissingTransactions(response_msg) => {
                 trace!("{}: Missing Transactions packet", peer);
-                // TODO: Implement missing transactions handling
-                debug!("Received missing transactions from {}, handling not yet implemented", peer.get_outgoing_address());
+                let response = response_msg.response.into_owned();
+
+                debug!("Received {} missing transactions for block {}",
+                    response.transactions.len(), response.block_hash);
+
+                // TODO: Implement compact block cache to retrieve the pending compact block
+                // For now, we can't complete reconstruction without the original compact block
+                warn!("Received missing transactions for block {}, but compact block cache not yet implemented",
+                    response.block_hash);
+
+                // Future implementation:
+                // 1. Retrieve pending compact block from cache using response.block_hash
+                // 2. Call CompactBlockReconstructor::complete_reconstruction()
+                // 3. Process the reconstructed block
+                // 4. Remove from cache
             }
         };
         Ok(())
