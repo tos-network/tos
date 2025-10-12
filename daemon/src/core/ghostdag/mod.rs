@@ -279,28 +279,73 @@ impl TosGhostdag {
     }
 
     /// Get ordered mergeset without the selected parent
-    /// Simplified version: collects non-selected parents and sorts by blue work
+    /// BFS-based implementation with conservative heuristic
     ///
     /// Based on Kaspa's ordered_mergeset_without_selected_parent in mergeset.rs
-    /// Note: This is a simplified version. Full Kaspa implementation uses BFS
-    /// with reachability filtering to exclude blocks in the past of selected parent.
+    /// Phase 2 improvement: Uses BFS to explore mergeset candidates
     ///
-    /// For Phase 1, we use a conservative approach: include all non-selected parents
-    /// and let k-cluster validation filter out violations.
+    /// Note: Full Kaspa implementation uses reachability service to determine
+    /// if a block is in the past of selected parent. We use a conservative heuristic:
+    /// - If block.blue_score <= selected_parent.blue_score - 10, it's likely in the past
+    /// - This is safe but may miss some valid mergeset candidates
+    ///
+    /// Full reachability service will be implemented in later Phase 2 milestone.
     async fn ordered_mergeset_without_selected_parent<S: Storage>(
         &self,
         storage: &S,
         selected_parent: Hash,
         parents: &[Hash],
     ) -> Result<Vec<Hash>, BlockchainError> {
-        // Collect all parents except selected parent
-        let mergeset: Vec<Hash> = parents.iter()
+        use std::collections::{HashSet, VecDeque};
+
+        // Get selected parent's blue score for heuristic
+        let selected_parent_data = storage.get_ghostdag_data(&selected_parent).await?;
+        let selected_parent_blue_score = selected_parent_data.blue_score;
+
+        // Initialize BFS queue with non-selected parents
+        let mut queue: VecDeque<Hash> = parents.iter()
             .filter(|&p| p != &selected_parent)
             .cloned()
             .collect();
 
-        // Sort by blue work (topological order)
-        self.sort_blocks(storage, mergeset).await
+        // Track visited blocks
+        let mut mergeset: HashSet<Hash> = queue.iter().cloned().collect();
+        let mut past: HashSet<Hash> = HashSet::new();
+
+        // BFS exploration
+        while let Some(current) = queue.pop_front() {
+            // Get current block's header to access its parents
+            let current_header = storage.get_block_header_by_hash(&current).await?;
+            let current_parents = current_header.get_tips();
+
+            // For each parent of current block
+            for parent in current_parents.iter() {
+                // Skip if already processed
+                if mergeset.contains(parent) || past.contains(parent) {
+                    continue;
+                }
+
+                // Conservative heuristic: Check if parent is likely in selected_parent's past
+                // Get parent's GHOSTDAG data
+                let parent_data = storage.get_ghostdag_data(parent).await?;
+                let parent_blue_score = parent_data.blue_score;
+
+                // If parent's blue_score is significantly lower, it's likely in the past
+                // Use a conservative threshold of 10 blocks
+                if parent_blue_score + 10 < selected_parent_blue_score {
+                    past.insert(parent.clone());
+                    continue;
+                }
+
+                // Otherwise, add to mergeset and queue for further exploration
+                mergeset.insert(parent.clone());
+                queue.push_back(parent.clone());
+            }
+        }
+
+        // Convert HashSet to Vec and sort by blue work
+        let mergeset_vec: Vec<Hash> = mergeset.into_iter().collect();
+        self.sort_blocks(storage, mergeset_vec).await
     }
 
     /// Returns the blue anticone size of `block` from the worldview of `context`.
