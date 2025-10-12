@@ -5,12 +5,13 @@ use tos_common::{
     time::TimestampMillis,
     crypto::Hash,
 };
-use super::{    
+use super::{
     storage::{
         Storage,
         DifficultyProvider
     },
     error::BlockchainError,
+    ghostdag::BlueWorkType,
 };
 
 // sort the scores by cumulative difficulty and, if equals, by hash value
@@ -38,6 +39,25 @@ where
     T: AsRef<Hash>,
 {
     trace!("sort ascending by cumulative difficulty");
+    scores.sort_by(|(a_hash, a), (b_hash, b)| {
+        if a != b {
+            a.cmp(b)
+        } else {
+            a_hash.as_ref().cmp(b_hash.as_ref())
+        }
+    });
+
+    if scores.len() >= 2 {
+        debug_assert!(scores[0].1 <= scores[1].1);
+    }
+}
+
+// sort the scores by GHOSTDAG blue work and, if equals, by hash value
+pub fn sort_ascending_by_blue_work<T>(scores: &mut Vec<(T, BlueWorkType)>)
+where
+    T: AsRef<Hash>,
+{
+    trace!("sort ascending by blue work");
     scores.sort_by(|(a_hash, a), (b_hash, b)| {
         if a != b {
             a.cmp(b)

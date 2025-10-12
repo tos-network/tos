@@ -90,7 +90,7 @@ use crate::{
         blockdag,
         difficulty,
         error::BlockchainError,
-        ghostdag::TosGhostdag,
+        ghostdag::{BlueWorkType, TosGhostdag},
         mempool::Mempool,
         nonce_checker::NonceChecker,
         simulator::Simulator,
@@ -1354,14 +1354,14 @@ impl<S: Storage> Blockchain<S> {
     }
 
     // this function generate a DAG paritial order into a full order using recursive calls.
-    // hash represents the best tip (biggest cumulative difficulty)
+    // hash represents the best tip (highest GHOSTDAG blue work)
     // base represents the block hash of a block already ordered and in stable height
     // the full order is re generated each time a new block is added based on new TIPS
     // first hash in order is the base hash
     // base_height is only used for the cache key
     async fn generate_full_order<P>(&self, provider: &P, hash: &Hash, base: &Hash, base_height: u64, base_topo_height: TopoHeight) -> Result<IndexSet<Hash>, BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider
+        P: DifficultyProvider + DagOrderProvider + GhostdagDataProvider
     {
         trace!("Generating full order for {} with base {}", hash, base);
         let mut cache = self.full_order_cache.lock().await;
@@ -1403,22 +1403,24 @@ impl<S: Storage> Blockchain<S> {
                 continue 'main;
             }
 
-            // Calculate the score for each tips above the base topoheight
+            // Calculate the GHOSTDAG blue work score for each tip above the base topoheight
             let mut scores = Vec::new();
             for tip_hash in block_tips.iter() {
                 let is_ordered = provider.is_block_topological_ordered(tip_hash).await?;
                 if !is_ordered || (is_ordered && provider.get_topo_height_for_hash(tip_hash).await? >= base_topo_height) {
-                    let diff = provider.get_cumulative_difficulty_for_block_hash(tip_hash).await?;
-                    scores.push((tip_hash.clone(), diff));
+                    // Use GHOSTDAG blue work instead of cumulative difficulty
+                    let blue_work = provider.get_ghostdag_blue_work(tip_hash).await?;
+                    scores.push((tip_hash.clone(), blue_work));
                 } else {
                     debug!("Block {} is skipped in generate_full_order, is ordered = {}, base topo height = {}", tip_hash, is_ordered, base_topo_height);
                 }
             }
 
-            // We sort by ascending cumulative difficulty because it is faster
+            // We sort by ascending blue work because it is faster
             // than doing a .reverse() on scores and give correct order for tips processing
-            // using our stack impl 
-            blockdag::sort_ascending_by_cumulative_difficulty(&mut scores);
+            // using our stack impl
+            // Blue work is U256, so comparison works the same way
+            blockdag::sort_ascending_by_blue_work(&mut scores);
 
             processed.insert(current_hash.clone());
             stack.push_back(current_hash);
