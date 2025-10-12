@@ -8,7 +8,7 @@ use serde::Deserialize;
 use log::debug;
 use crate::{
     block::{BLOCK_WORK_SIZE, HEADER_WORK_SIZE, BlockVersion},
-    config::TIPS_LIMIT,
+    config::{TIPS_LIMIT, MAX_PARENT_LEVELS},
     crypto::{
         elgamal::CompressedPublicKey,
         hash,
@@ -36,6 +36,15 @@ pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(deserializer: D
     let mut extra_nonce = [0u8; EXTRA_NONCE_SIZE];
     let hex = String::deserialize(deserializer)?;
     let decoded = hex::decode(hex).map_err(serde::de::Error::custom)?;
+
+    // SECURITY FIX: Validate length before copy_from_slice to prevent panic
+    // An attacker could send malformed extraNonce with wrong length, causing node crash
+    if decoded.len() != EXTRA_NONCE_SIZE {
+        return Err(serde::de::Error::custom(
+            format!("Invalid extraNonce length: expected {} bytes, got {}", EXTRA_NONCE_SIZE, decoded.len())
+        ));
+    }
+
     extra_nonce.copy_from_slice(&decoded);
     Ok(extra_nonce)
 }
@@ -297,8 +306,28 @@ impl Serializer for BlockHeader {
         self.version.write(writer);
 
         // Write parents_by_level
+        // SECURITY FIX: Validate parent levels count to prevent overflow
+        // Without this check, truncation can cause consensus splits across nodes
+        assert!(
+            self.parents_by_level.len() <= MAX_PARENT_LEVELS,
+            "Block header has too many parent levels: {} > {}. This would cause byte overflow in serialization.",
+            self.parents_by_level.len(),
+            MAX_PARENT_LEVELS
+        );
+        assert!(
+            self.parents_by_level.len() <= 255,
+            "Parent levels count {} exceeds u8 maximum (255)",
+            self.parents_by_level.len()
+        );
+
         writer.write_u8(self.parents_by_level.len() as u8);
         for level in &self.parents_by_level {
+            // Also validate each level size doesn't overflow
+            assert!(
+                level.len() <= 255,
+                "Parent level size {} exceeds u8 maximum (255)",
+                level.len()
+            );
             writer.write_u8(level.len() as u8);
             for parent in level {
                 writer.write_hash(parent);
@@ -331,6 +360,14 @@ impl Serializer for BlockHeader {
 
         // Read parents_by_level
         let levels_count = reader.read_u8()?;
+
+        // SECURITY FIX: Validate levels count to prevent consensus splits
+        // Reject headers with too many parent levels
+        if levels_count as usize > MAX_PARENT_LEVELS {
+            debug!("Error, too many parent levels: {} > {}", levels_count, MAX_PARENT_LEVELS);
+            return Err(ReaderError::InvalidValue);
+        }
+
         let mut parents_by_level = Vec::with_capacity(levels_count as usize);
         for _ in 0..levels_count {
             let level_size = reader.read_u8()?;

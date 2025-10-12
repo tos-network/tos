@@ -45,6 +45,15 @@ pub fn deserialize_extra_nonce<'de, 'a, D: Deserializer<'de>>(deserializer: D) -
     let mut extra_nonce = [0u8; EXTRA_NONCE_SIZE];
     let hex = String::deserialize(deserializer)?;
     let decoded = hex::decode(hex).map_err(Error::custom)?;
+
+    // SECURITY FIX: Validate length before copy_from_slice to prevent panic
+    // An attacker could send malformed extraNonce via RPC, causing node crash
+    if decoded.len() != EXTRA_NONCE_SIZE {
+        return Err(Error::custom(
+            format!("Invalid extraNonce length: expected {} bytes, got {}", EXTRA_NONCE_SIZE, decoded.len())
+        ));
+    }
+
     extra_nonce.copy_from_slice(&decoded);
     Ok(Cow::Owned(extra_nonce))
 }

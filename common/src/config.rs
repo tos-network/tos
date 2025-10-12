@@ -105,6 +105,11 @@ pub const MAX_BLOCK_SIZE: usize = (BYTES_PER_KB * BYTES_PER_KB) + (256 * BYTES_P
 // Kaspa uses 10, but we want headroom for complex DAG scenarios
 pub const TIPS_LIMIT: usize = 32; // maximum 32 TIPS per block
 
+// Maximum number of parent levels in DAG header
+// SECURITY: This prevents byte overflow in serialization (u8 can only hold 0-255)
+// In practice, GHOSTDAG rarely needs more than 10 levels even in extreme DAG scenarios
+pub const MAX_PARENT_LEVELS: usize = 64;
+
 // Initialize the configuration
 pub fn init() {
     // register the opaque types
