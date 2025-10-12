@@ -1807,8 +1807,8 @@ impl<S: Storage> Blockchain<S> {
 
         let mut sorted_tips = blockdag::sort_tips(storage, tips.into_iter()).await?;
         if sorted_tips.len() > TIPS_LIMIT {
-            let dropped_tips = sorted_tips.drain(TIPS_LIMIT..); // keep only first 3 heavier tips
-            warn!("Dropping tips {} because they are not in the first 3 heavier tips", dropped_tips.map(|h| h.to_string()).collect::<Vec<String>>().join(", "));
+            let dropped_tips = sorted_tips.drain(TIPS_LIMIT..); // keep only first TIPS_LIMIT heavier tips
+            warn!("Dropping tips {} because they are not in the first {} heavier tips", dropped_tips.map(|h| h.to_string()).collect::<Vec<String>>().join(", "), TIPS_LIMIT);
         }
 
         // find the newest timestamp

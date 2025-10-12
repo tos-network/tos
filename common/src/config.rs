@@ -101,7 +101,9 @@ pub const MAX_TRANSACTION_SIZE: usize = BYTES_PER_KB * BYTES_PER_KB; // 1 MB
 pub const MAX_BLOCK_SIZE: usize = (BYTES_PER_KB * BYTES_PER_KB) + (256 * BYTES_PER_KB);
 
 // BlockDAG rules
-pub const TIPS_LIMIT: usize = 3; // maximum 3 TIPS per block
+// Increased from 3 to 32 for GHOSTDAG Phase 1 (TIP-2)
+// Kaspa uses 10, but we want headroom for complex DAG scenarios
+pub const TIPS_LIMIT: usize = 32; // maximum 32 TIPS per block
 
 // Initialize the configuration
 pub fn init() {
