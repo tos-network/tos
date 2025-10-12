@@ -121,6 +121,23 @@ impl<S: Storage> DaemonRpcServer<S> {
             None
         };
 
+        // SECURITY WARNING: Check if RPC is exposed to network
+        if config.bind_address.starts_with("0.0.0.0") {
+            warn!("⚠️  SECURITY WARNING: RPC server is bound to 0.0.0.0 (all interfaces)");
+            warn!("⚠️  This exposes administrative endpoints to the network WITHOUT authentication!");
+            warn!("⚠️  Attackers can:");
+            warn!("⚠️    - Submit malicious blocks");
+            warn!("⚠️    - Manipulate mempool");
+            warn!("⚠️    - Tamper with peer list");
+            warn!("⚠️    - Cause DoS via resource exhaustion");
+            warn!("⚠️  ");
+            warn!("⚠️  RECOMMENDED: Use 127.0.0.1:8080 for localhost-only access");
+            warn!("⚠️  If remote access is required, use a firewall to restrict access");
+            warn!("⚠️  ");
+        }
+
+        info!("Starting RPC server on {}", config.bind_address);
+
         {
             let clone = Arc::clone(&server);
             let builder = HttpServer::new(move || {

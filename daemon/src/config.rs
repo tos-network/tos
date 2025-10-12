@@ -20,7 +20,12 @@ pub const NETWORK_ID: [u8; NETWORK_ID_SIZE] = [0x74, 0x65, 0x72, 0x6d, 0x69, 0x6
 
 // bind addresses
 pub const DEFAULT_P2P_BIND_ADDRESS: &str = "0.0.0.0:2125";
-pub const DEFAULT_RPC_BIND_ADDRESS: &str = "0.0.0.0:8080";
+
+// SECURITY FIX: Changed from 0.0.0.0 to 127.0.0.1 to prevent unauthorized remote access
+// RPC endpoints include administrative functions (submit_block, mempool inspection, peer management)
+// that should NOT be exposed to the network without authentication.
+// To allow remote access, explicitly set --rpc-bind-address 0.0.0.0:8080 (not recommended without firewall)
+pub const DEFAULT_RPC_BIND_ADDRESS: &str = "127.0.0.1:8080";
 
 // Default cache size for storage DB
 pub const DEFAULT_CACHE_SIZE: usize = 1024;
