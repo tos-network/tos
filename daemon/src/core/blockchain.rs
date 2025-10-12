@@ -90,6 +90,7 @@ use crate::{
         blockdag,
         difficulty,
         error::BlockchainError,
+        ghostdag::TosGhostdag,
         mempool::Mempool,
         nonce_checker::NonceChecker,
         simulator::Simulator,
@@ -181,6 +182,8 @@ pub struct Blockchain<S: Storage> {
     // current difficulty at tips
     // its used as cache to display current network hashrate
     difficulty: Mutex<Difficulty>,
+    // GHOSTDAG consensus manager (TIP-2 Phase 1)
+    ghostdag: Arc<TosGhostdag>,
     // if a simulator is set
     simulator: Option<Simulator>,
     // if we should skip PoW verification
@@ -285,6 +288,18 @@ impl<S: Storage> Blockchain<S> {
 
         let environment = build_environment::<S>().build();
 
+        // Create GHOSTDAG manager (TIP-2 Phase 1)
+        // Get genesis hash for the network
+        let genesis_hash = get_genesis_block_hash(&network)
+            .cloned()
+            .unwrap_or_else(|| Hash::new([0u8; 32])); // Devnet uses zero hash
+
+        info!("Initializing GHOSTDAG manager with k=10, genesis={}", genesis_hash);
+        let ghostdag = Arc::new(TosGhostdag::new(
+            10, // k parameter (same as Kaspa)
+            genesis_hash,
+        ));
+
         info!("Initializing chain...");
         let blockchain = Self {
             height: AtomicU64::new(height),
@@ -298,6 +313,7 @@ impl<S: Storage> Blockchain<S> {
             p2p: RwLock::new(None),
             rpc: RwLock::new(None),
             difficulty: Mutex::new(GENESIS_BLOCK_DIFFICULTY),
+            ghostdag,
             skip_pow_verification: config.skip_pow_verification || config.simulator.is_some(),
             simulator: config.simulator,
             network,
@@ -2405,6 +2421,30 @@ impl<S: Storage> Blockchain<S> {
         counter!("tos_block_added").increment(1);
 
         let mut storage = self.storage.write().await;
+
+        // Calculate GHOSTDAG data for the new block (TIP-2 Phase 1)
+        {
+            debug!("Calculating GHOSTDAG data for block {}", block_hash);
+            let start = Instant::now();
+
+            // Get tips as parents for GHOSTDAG algorithm
+            let parents: Vec<Hash> = block.get_tips().iter().cloned().collect();
+
+            // Run GHOSTDAG algorithm
+            let ghostdag_data = self.ghostdag.ghostdag(&*storage, &parents).await?;
+
+            debug!("GHOSTDAG data calculated: blue_score={}, blue_work={}, mergeset_blues={}, mergeset_reds={}",
+                ghostdag_data.blue_score,
+                ghostdag_data.blue_work,
+                ghostdag_data.mergeset_blues.len(),
+                ghostdag_data.mergeset_reds.len()
+            );
+
+            // Store GHOSTDAG data
+            storage.insert_ghostdag_data(&block_hash, Arc::new(ghostdag_data)).await?;
+
+            histogram!("tos_ghostdag_ms").record(start.elapsed().as_millis() as f64);
+        }
 
         // Save transactions & block
         {

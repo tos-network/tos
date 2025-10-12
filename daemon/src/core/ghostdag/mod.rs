@@ -9,7 +9,6 @@ pub use types::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData};
 use anyhow::Result;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::sync::Arc;
 use tos_common::crypto::Hash;
 
 use crate::core::error::BlockchainError;
@@ -77,28 +76,23 @@ impl Ord for SortableBlock {
 /// 4. Calculate blue_score and blue_work based on blue blocks
 ///
 /// For details, see: https://eprint.iacr.org/2018/104.pdf
-pub struct TosGhostdag<S: Storage> {
+pub struct TosGhostdag {
     /// K-cluster parameter (typically 10 for Kaspa, we start with 10)
     k: KType,
-
-    /// Storage reference for accessing blockchain data
-    storage: Arc<S>,
 
     /// Genesis block hash
     genesis_hash: Hash,
 }
 
-impl<S: Storage> TosGhostdag<S> {
+impl TosGhostdag {
     /// Create a new GHOSTDAG manager
     ///
     /// # Arguments
     /// * `k` - The k-cluster parameter (maximum anticone size for blue blocks)
-    /// * `storage` - Reference to blockchain storage
     /// * `genesis_hash` - Hash of the genesis block
-    pub fn new(k: KType, storage: Arc<S>, genesis_hash: Hash) -> Self {
+    pub fn new(k: KType, genesis_hash: Hash) -> Self {
         Self {
             k,
-            storage,
             genesis_hash,
         }
     }
@@ -124,12 +118,14 @@ impl<S: Storage> TosGhostdag<S> {
     /// The selected parent is the one with the highest blue_work
     ///
     /// # Arguments
+    /// * `storage` - Reference to blockchain storage
     /// * `parents` - Iterator of parent block hashes
     ///
     /// # Returns
     /// Hash of the selected parent (the one with highest blue_work)
-    pub async fn find_selected_parent(
+    pub async fn find_selected_parent<S: Storage>(
         &self,
+        storage: &S,
         parents: impl IntoIterator<Item = Hash>,
     ) -> Result<Hash, BlockchainError> {
         let mut best_parent = None;
@@ -137,7 +133,7 @@ impl<S: Storage> TosGhostdag<S> {
 
         for parent in parents {
             // Get GHOSTDAG data for this parent
-            let parent_data = self.get_ghostdag_data(&parent).await?;
+            let parent_data = storage.get_ghostdag_data(&parent).await?;
 
             // Compare blue work
             if parent_data.blue_work > best_blue_work {
@@ -157,6 +153,7 @@ impl<S: Storage> TosGhostdag<S> {
     /// Based on Kaspa's ghostdag() in protocol.rs (lines 127-168)
     ///
     /// # Arguments
+    /// * `storage` - Reference to blockchain storage
     /// * `parents` - Slice of parent block hashes
     ///
     /// # Returns
@@ -176,26 +173,26 @@ impl<S: Storage> TosGhostdag<S> {
     /// 6. Calculate blue_work = parent.blue_work + sum(work of blues in mergeset)
     ///
     /// See: https://eprint.iacr.org/2018/104.pdf
-    pub async fn ghostdag(&self, parents: &[Hash]) -> Result<TosGhostdagData, BlockchainError> {
+    pub async fn ghostdag<S: Storage>(&self, storage: &S, parents: &[Hash]) -> Result<TosGhostdagData, BlockchainError> {
         // Genesis block special case
         if parents.is_empty() {
             return Ok(self.genesis_ghostdag_data());
         }
 
         // Step 1: Find selected parent (parent with highest blue_work)
-        let selected_parent = self.find_selected_parent(parents.iter().cloned()).await?;
+        let selected_parent = self.find_selected_parent(storage, parents.iter().cloned()).await?;
 
         // Step 2: Initialize new block data with selected parent as first blue
         let mut new_block_data = TosGhostdagData::new_with_selected_parent(selected_parent.clone(), self.k);
 
         // Step 3: Get ordered mergeset (topologically sorted by blue_work)
-        let ordered_mergeset = self.ordered_mergeset_without_selected_parent(selected_parent.clone(), parents).await?;
+        let ordered_mergeset = self.ordered_mergeset_without_selected_parent(storage, selected_parent.clone(), parents).await?;
 
         // Step 4: Process each candidate block in topological order
         for candidate in ordered_mergeset {
             // Check if candidate can be blue without violating k-cluster
             let (is_blue, anticone_size, blues_anticone_sizes) =
-                self.check_blue_candidate(&new_block_data, &candidate).await?;
+                self.check_blue_candidate(storage, &new_block_data, &candidate).await?;
 
             if is_blue {
                 // No k-cluster violation - add as blue
@@ -208,7 +205,7 @@ impl<S: Storage> TosGhostdag<S> {
 
         // Step 5: Calculate blue_score
         // blue_score = parent's blue_score + number of blues in mergeset
-        let parent_data = self.get_ghostdag_data(&selected_parent).await?;
+        let parent_data = storage.get_ghostdag_data(&selected_parent).await?;
         let blue_score = parent_data.blue_score + new_block_data.mergeset_blues.len() as u64;
 
         // Step 6: Calculate blue_work
@@ -224,18 +221,13 @@ impl<S: Storage> TosGhostdag<S> {
         Ok(new_block_data)
     }
 
-    /// Get GHOSTDAG data for a specific block from storage
-    async fn get_ghostdag_data(&self, block_hash: &Hash) -> Result<Arc<TosGhostdagData>, BlockchainError> {
-        self.storage.get_ghostdag_data(block_hash).await
-    }
-
     /// Sort blocks by blue work (topological order)
     /// Based on Kaspa's sort_blocks in ordering.rs
-    async fn sort_blocks(&self, blocks: Vec<Hash>) -> Result<Vec<Hash>, BlockchainError> {
+    async fn sort_blocks<S: Storage>(&self, storage: &S, blocks: Vec<Hash>) -> Result<Vec<Hash>, BlockchainError> {
         let mut sortable_blocks = Vec::with_capacity(blocks.len());
 
         for hash in blocks {
-            let blue_work = self.storage.get_ghostdag_blue_work(&hash).await?;
+            let blue_work = storage.get_ghostdag_blue_work(&hash).await?;
             sortable_blocks.push(SortableBlock::new(hash, blue_work));
         }
 
@@ -252,8 +244,9 @@ impl<S: Storage> TosGhostdag<S> {
     ///
     /// For Phase 1, we use a conservative approach: include all non-selected parents
     /// and let k-cluster validation filter out violations.
-    async fn ordered_mergeset_without_selected_parent(
+    async fn ordered_mergeset_without_selected_parent<S: Storage>(
         &self,
+        storage: &S,
         selected_parent: Hash,
         parents: &[Hash],
     ) -> Result<Vec<Hash>, BlockchainError> {
@@ -264,7 +257,7 @@ impl<S: Storage> TosGhostdag<S> {
             .collect();
 
         // Sort by blue work (topological order)
-        self.sort_blocks(mergeset).await
+        self.sort_blocks(storage, mergeset).await
     }
 
     /// Returns the blue anticone size of `block` from the worldview of `context`.
@@ -273,8 +266,9 @@ impl<S: Storage> TosGhostdag<S> {
     /// Based on Kaspa's blue_anticone_size in protocol.rs (lines 234-249)
     ///
     /// Walks the selected parent chain until finding the block in blues_anticone_sizes map.
-    async fn blue_anticone_size(
+    async fn blue_anticone_size<S: Storage>(
         &self,
+        storage: &S,
         block: &Hash,
         context: &TosGhostdagData,
     ) -> Result<KType, BlockchainError> {
@@ -294,7 +288,7 @@ impl<S: Storage> TosGhostdag<S> {
             }
 
             // Move to parent's GHOSTDAG data
-            let parent_data = self.get_ghostdag_data(&current_selected_parent).await?;
+            let parent_data = storage.get_ghostdag_data(&current_selected_parent).await?;
             current_blues_anticone_sizes = parent_data.blues_anticone_sizes.clone();
             current_selected_parent = parent_data.selected_parent.clone();
         }
@@ -310,8 +304,9 @@ impl<S: Storage> TosGhostdag<S> {
     /// - Conservative: may reject valid blues, but won't accept invalid ones
     ///
     /// Returns: (is_blue, blue_anticone_size, blues_anticone_sizes_map)
-    async fn check_blue_candidate(
+    async fn check_blue_candidate<S: Storage>(
         &self,
+        storage: &S,
         new_block_data: &TosGhostdagData,
         _candidate: &Hash,
     ) -> Result<(bool, KType, HashMap<Hash, KType>), BlockchainError> {
@@ -331,7 +326,7 @@ impl<S: Storage> TosGhostdag<S> {
             // Full implementation would use reachability to check if blue is ancestor of candidate
 
             // Get the blue anticone size for this blue block
-            let blue_anticone_size = self.blue_anticone_size(blue, new_block_data).await?;
+            let blue_anticone_size = self.blue_anticone_size(storage, blue, new_block_data).await?;
 
             // Record this for the candidate's blues_anticone_sizes map
             candidate_blues_anticone_sizes.insert(blue.clone(), blue_anticone_size);
