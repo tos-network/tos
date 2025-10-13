@@ -5,6 +5,9 @@
 pub mod types;
 pub mod daa;
 
+#[cfg(test)]
+mod tests_extended;
+
 pub use types::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData};
 pub use daa::{calculate_daa_score, calculate_target_difficulty, DAA_WINDOW_SIZE, TARGET_TIME_PER_BLOCK};
 
@@ -56,6 +59,13 @@ pub fn calc_work_from_difficulty(difficulty: &Difficulty) -> BlueWorkType {
     // Calculate target = MAX / difficulty (TOS's difficulty semantics)
     let target = BlueWorkType::max_value() / diff_u256_daemon;
 
+    // SECURITY FIX V-06 (extended): Handle edge case where target = MAX
+    // When difficulty = 1, target = MAX, and target + 1 would overflow
+    // In this case, work = 2^256 / (MAX + 1) = 2^256 / 0 = infinity (return 1)
+    if target == BlueWorkType::max_value() {
+        return BlueWorkType::one();
+    }
+
     // Calculate work: (~target / (target + 1)) + 1
     // This formula is from Bitcoin and Kaspa
     // Source: https://github.com/bitcoin/bitcoin/blob/2e34374bf3e12b37b0c66824a6c998073cdfab01/src/chain.cpp#L131
@@ -67,13 +77,13 @@ pub fn calc_work_from_difficulty(difficulty: &Difficulty) -> BlueWorkType {
 /// SortableBlock for topological ordering by blue work
 /// Based on Kaspa's ordering.rs
 #[derive(Clone, Debug)]
-struct SortableBlock {
-    hash: Hash,
-    blue_work: BlueWorkType,
+pub(crate) struct SortableBlock {
+    pub(crate) hash: Hash,
+    pub(crate) blue_work: BlueWorkType,
 }
 
 impl SortableBlock {
-    fn new(hash: Hash, blue_work: BlueWorkType) -> Self {
+    pub(crate) fn new(hash: Hash, blue_work: BlueWorkType) -> Self {
         Self { hash, blue_work }
     }
 }

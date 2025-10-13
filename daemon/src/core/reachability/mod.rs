@@ -11,6 +11,9 @@ mod store;
 mod reindex;
 mod tree;
 
+#[cfg(test)]
+mod tests_boundary;
+
 pub use interval::Interval;
 pub use store::ReachabilityData;
 pub(crate) use reindex::ReindexContext;
