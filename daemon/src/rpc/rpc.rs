@@ -74,7 +74,7 @@ use std::{borrow::Cow, collections::HashMap, sync::Arc};
 use log::{info, debug, trace};
 
 // Get the block type using the block hash and the blockchain current state
-pub async fn get_block_type_for_block<S: Storage, P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider>(blockchain: &Blockchain<S>, provider: &P, hash: &Hash) -> Result<BlockType, InternalRpcError> {
+pub async fn get_block_type_for_block<S: Storage, P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider + GhostdagDataProvider>(blockchain: &Blockchain<S>, provider: &P, hash: &Hash) -> Result<BlockType, InternalRpcError> {
     Ok(if blockchain.is_block_orphaned_for_storage(provider, hash).await? {
         BlockType::Orphaned
     } else if blockchain.is_sync_block(provider, hash).await.context("Error while checking if block is sync")? {
@@ -93,6 +93,7 @@ where
     + BlocksAtHeightProvider
     + PrunedTopoheightProvider
     + BlockDagProvider
+    + GhostdagDataProvider
 {
     let (topoheight, supply, reward) = if provider.is_block_topological_ordered(hash).await? {
         let topoheight = provider.get_topo_height_for_hash(&hash).await.context("Error while retrieving topo height")?;
@@ -124,6 +125,7 @@ where
     + PrunedTopoheightProvider
     + BlockDagProvider
     + ClientProtocolProvider
+    + GhostdagDataProvider
 {
     let (topoheight, supply, reward, block_type, cumulative_difficulty, difficulty) = get_block_data(blockchain, provider, hash).await?;
     let mut total_fees = 0;

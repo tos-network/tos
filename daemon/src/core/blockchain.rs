@@ -812,7 +812,7 @@ impl<S: Storage> Blockchain<S> {
     // determine the topoheight of the nearest sync block until limit topoheight
     pub async fn locate_nearest_sync_block_for_topoheight<P>(&self, provider: &P, mut topoheight: TopoHeight, current_height: u64) -> Result<TopoHeight, BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider
+        P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider + GhostdagDataProvider
     {
         while topoheight > 0 {
             let block_hash = provider.get_hash_at_topo_height(topoheight).await?;
@@ -903,17 +903,17 @@ impl<S: Storage> Blockchain<S> {
     }
 
     // Verify if the block is a sync block for current chain height
-    pub async fn is_sync_block<P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider>(&self, provider: &P, hash: &Hash) -> Result<bool, BlockchainError> {
+    pub async fn is_sync_block<P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider + GhostdagDataProvider>(&self, provider: &P, hash: &Hash) -> Result<bool, BlockchainError> {
         let current_height = self.get_blue_score();
         self.is_sync_block_at_height(provider, hash, current_height).await
     }
 
-    // Verify if the block is a sync block
-    // A sync block is a block that is ordered and has the highest cumulative difficulty at its height
+    // Verify if the block is a sync block (GHOSTDAG)
+    // A sync block is a block that is ordered and has the highest blue_work at its height
     // It is used to determine if the block is a stable block or not
     async fn is_sync_block_at_height<P>(&self, provider: &P, hash: &Hash, height: u64) -> Result<bool, BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider
+        P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider + GhostdagDataProvider
     {
         trace!("is sync block {} at height {}", hash, height);
         let block_height = provider.get_height_for_block_hash(hash).await?;
@@ -967,15 +967,16 @@ impl<S: Storage> Blockchain<S> {
             i -= 1;
         }
 
-        let sync_block_cumulative_difficulty = provider.get_cumulative_difficulty_for_block_hash(hash).await?;
-        // if potential sync block has lower cumulative difficulty than one of past blocks, it is not a sync block
+        // GHOSTDAG: Use blue_work to determine sync blocks
+        let sync_block_blue_work = provider.get_ghostdag_blue_work(hash).await?;
+        // if potential sync block has lower blue_work than one of past blocks, it is not a sync block
         for pre_hash in pre_blocks {
             // We compare only against block ordered otherwise we can have desync between node which could lead to fork
             // This is rare event but can happen
             if provider.is_block_topological_ordered(&pre_hash).await? {
-                let cumulative_difficulty = provider.get_cumulative_difficulty_for_block_hash(&pre_hash).await?;
-                if cumulative_difficulty >= sync_block_cumulative_difficulty {
-                    debug!("Block {} at height {} is not a sync block, it has lower cumulative difficulty than block {} at height {}", hash, block_height, pre_hash, i);
+                let blue_work = provider.get_ghostdag_blue_work(&pre_hash).await?;
+                if blue_work >= sync_block_blue_work {
+                    debug!("Block {} at height {} is not a sync block, it has lower blue_work than block {} (blue_work: {} vs {})", hash, block_height, pre_hash, sync_block_blue_work, blue_work);
                     return Ok(false)
                 }
             }
@@ -988,7 +989,7 @@ impl<S: Storage> Blockchain<S> {
 
     async fn find_tip_base<P>(&self, provider: &P, hash: &Hash, height: u64, pruned_topoheight: TopoHeight) -> Result<(Hash, u64), BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider
+        P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider + GhostdagDataProvider
     {
         debug!("Finding tip base for {} at height {}", hash, height);
         let mut cache = self.tip_base_cache.lock().await;
@@ -1079,7 +1080,7 @@ impl<S: Storage> Blockchain<S> {
     // find the common base (block hash and block height) of all tips
     pub async fn find_common_base<'a, P, I>(&self, provider: &P, tips: I) -> Result<(Hash, u64), BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider,
+        P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider + GhostdagDataProvider,
         I: IntoIterator<Item = &'a Hash> + Copy,
     {
         debug!("Searching for common base for tips {}", tips.into_iter().map(|h| h.to_string()).collect::<Vec<String>>().join(", "));
@@ -2501,7 +2502,8 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        // Compute cumulative difficulty for block
+        // Compute cumulative difficulty for block (for P2P protocol compatibility)
+        // TODO: Migrate P2P protocol to use GHOSTDAG blue_work directly
         // We retrieve it to pass it as a param below for p2p broadcast
         let cumulative_difficulty: CumulativeDifficulty = if tips_count == 0 {
             GENESIS_BLOCK_DIFFICULTY.into()
@@ -2693,8 +2695,10 @@ impl<S: Storage> Blockchain<S> {
 
         let (base_hash, base_height) = self.find_common_base(&*storage, &tips).await?;
         debug!("New base hash: {}, height: {}", base_hash, base_height);
-        let best_tip = self.find_best_tip(&*storage, &tips, &base_hash, base_height).await?;
-        debug!("Best tip selected: {}", best_tip);
+
+        // GHOSTDAG: Select best tip by blue_work instead of cumulative difficulty
+        let best_tip = blockdag::find_best_tip_by_blue_work(&*storage, tips.iter()).await?;
+        debug!("Best tip selected by GHOSTDAG (blue_work): {}", best_tip);
 
         let base_topo_height = storage.get_topo_height_for_hash(&base_hash).await?;
         // generate a full order until base_topo_height
