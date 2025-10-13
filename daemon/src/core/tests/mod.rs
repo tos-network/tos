@@ -21,3 +21,9 @@ mod ghostdag_consensus_tests;
 
 #[cfg(test)]
 mod ghostdag_dag_tests;
+
+#[cfg(test)]
+mod ghostdag_json_loader;
+
+#[cfg(test)]
+mod ghostdag_json_tests;

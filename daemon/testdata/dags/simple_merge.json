@@ -1,0 +1,88 @@
+{
+  "name": "test_simple_merge",
+  "description": "Tests a simple DAG merge with two parallel branches that merge. Both branches should be blue, demonstrating GHOSTDAG's ability to handle concurrent blocks without treating them as orphans.",
+  "config": {
+    "k": 10,
+    "genesis_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "version": "1.0"
+  },
+  "metadata": {
+    "author": "TOS Test Suite",
+    "created": "2025-10-13",
+    "tags": ["merge", "dag", "all_blues"],
+    "reference": "TIP-2 Section 3.2"
+  },
+  "blocks": [
+    {
+      "id": "genesis",
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "parents": [],
+      "difficulty": 1000,
+      "timestamp": 1000000000000,
+      "expected": {
+        "blue_score": 0,
+        "blue_work": "1000",
+        "selected_parent": "0000000000000000000000000000000000000000000000000000000000000000",
+        "mergeset_blues": [],
+        "mergeset_reds": [],
+        "blues_anticone_sizes": {},
+        "mergeset_non_daa": []
+      }
+    },
+    {
+      "id": "block_a",
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "parents": ["genesis"],
+      "difficulty": 1000,
+      "timestamp": 1000000003000,
+      "expected": {
+        "blue_score": 1,
+        "blue_work": "2000",
+        "selected_parent": "genesis",
+        "mergeset_blues": ["genesis"],
+        "mergeset_reds": [],
+        "blues_anticone_sizes": {
+          "genesis": 0
+        },
+        "mergeset_non_daa": []
+      }
+    },
+    {
+      "id": "block_b",
+      "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "parents": ["genesis"],
+      "difficulty": 1000,
+      "timestamp": 1000000003000,
+      "expected": {
+        "blue_score": 1,
+        "blue_work": "2000",
+        "selected_parent": "genesis",
+        "mergeset_blues": ["genesis"],
+        "mergeset_reds": [],
+        "blues_anticone_sizes": {
+          "genesis": 0
+        },
+        "mergeset_non_daa": []
+      }
+    },
+    {
+      "id": "block_c",
+      "hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "parents": ["block_a", "block_b"],
+      "difficulty": 1000,
+      "timestamp": 1000000006000,
+      "expected": {
+        "blue_score": 3,
+        "blue_work": "4000",
+        "selected_parent": "block_a",
+        "mergeset_blues": ["block_a", "block_b"],
+        "mergeset_reds": [],
+        "blues_anticone_sizes": {
+          "block_a": 0,
+          "block_b": 1
+        },
+        "mergeset_non_daa": []
+      }
+    }
+  ]
+}

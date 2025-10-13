@@ -1,0 +1,87 @@
+{
+  "name": "test_simple_chain",
+  "description": "Tests a simple linear chain with all blue blocks. This is the simplest GHOSTDAG test case where blocks form a single chain with no merges. All blocks should be blue, and blue_score should increase by 1 for each block.",
+  "config": {
+    "k": 10,
+    "genesis_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "version": "1.0"
+  },
+  "metadata": {
+    "author": "TOS Test Suite",
+    "created": "2025-10-13",
+    "tags": ["linear_chain", "basic", "all_blues"],
+    "reference": "TIP-2 Section 3.1"
+  },
+  "blocks": [
+    {
+      "id": "genesis",
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "parents": [],
+      "difficulty": 1000,
+      "timestamp": 1000000000000,
+      "expected": {
+        "blue_score": 0,
+        "blue_work": "1000",
+        "selected_parent": "0000000000000000000000000000000000000000000000000000000000000000",
+        "mergeset_blues": [],
+        "mergeset_reds": [],
+        "blues_anticone_sizes": {},
+        "mergeset_non_daa": []
+      }
+    },
+    {
+      "id": "block_1",
+      "hash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "parents": ["genesis"],
+      "difficulty": 1000,
+      "timestamp": 1000000003000,
+      "expected": {
+        "blue_score": 1,
+        "blue_work": "2000",
+        "selected_parent": "genesis",
+        "mergeset_blues": ["genesis"],
+        "mergeset_reds": [],
+        "blues_anticone_sizes": {
+          "genesis": 0
+        },
+        "mergeset_non_daa": []
+      }
+    },
+    {
+      "id": "block_2",
+      "hash": "2222222222222222222222222222222222222222222222222222222222222222",
+      "parents": ["block_1"],
+      "difficulty": 1000,
+      "timestamp": 1000000006000,
+      "expected": {
+        "blue_score": 2,
+        "blue_work": "3000",
+        "selected_parent": "block_1",
+        "mergeset_blues": ["block_1"],
+        "mergeset_reds": [],
+        "blues_anticone_sizes": {
+          "block_1": 0
+        },
+        "mergeset_non_daa": []
+      }
+    },
+    {
+      "id": "block_3",
+      "hash": "3333333333333333333333333333333333333333333333333333333333333333",
+      "parents": ["block_2"],
+      "difficulty": 1000,
+      "timestamp": 1000000009000,
+      "expected": {
+        "blue_score": 3,
+        "blue_work": "4000",
+        "selected_parent": "block_2",
+        "mergeset_blues": ["block_2"],
+        "mergeset_reds": [],
+        "blues_anticone_sizes": {
+          "block_2": 0
+        },
+        "mergeset_non_daa": []
+      }
+    }
+  ]
+}
