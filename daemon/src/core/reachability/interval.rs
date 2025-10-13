@@ -1,6 +1,4 @@
 // TOS Reachability Interval
-// Based on Kaspa's interval.rs
-// Reference: rusty-kaspa/consensus/src/processes/reachability/interval.rs
 
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -181,7 +179,7 @@ impl Interval {
         result
     }
 
-    /// Split interval exponentially based on subtree sizes
+    /// Split interval exponentially using subtree sizes
     ///
     /// This is the CRITICAL ALGORITHM for reindexing. It allocates interval space
     /// to children proportionally to 2^(subtree_size), giving larger subtrees

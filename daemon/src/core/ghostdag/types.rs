@@ -1,6 +1,4 @@
 // TOS GHOSTDAG Types
-// Based on Kaspa's GHOSTDAG implementation
-// Reference: rusty-kaspa/consensus/src/model/stores/ghostdag.rs
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

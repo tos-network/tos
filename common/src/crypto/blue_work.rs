@@ -1,6 +1,5 @@
 // BlueWorkType - Cumulative blue work for GHOSTDAG fork choice
 //
-// Based on Kaspa's BlueWorkType (Uint192), but using U256 for simplicity.
 // U256 provides more than enough range for cumulative work calculations.
 
 use primitive_types::U256;

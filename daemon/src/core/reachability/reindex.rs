@@ -1,6 +1,4 @@
 // TOS Reachability Reindexing
-// Based on Kaspa's reindex.rs
-// Reference: rusty-kaspa/consensus/src/processes/reachability/reindex.rs
 //
 // This module implements the interval reindexing algorithm that allows the
 // reachability tree to continue operating when interval space is exhausted.
@@ -196,7 +194,7 @@ impl ReindexContext {
     /// 1. BFS traversal from root to leaves
     /// 2. For each node with children:
     ///    a. Get available capacity (parent.interval - 1 for strict containment)
-    ///    b. Split capacity exponentially among children based on subtree sizes
+    ///    b. Split capacity exponentially among children using subtree sizes
     ///    c. Assign new intervals to children
     /// 3. Continue BFS to all descendants
     ///

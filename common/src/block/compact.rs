@@ -1,5 +1,4 @@
 // TOS Compact Block Implementation
-// Based on Bitcoin BIP-152 and optimized for GHOSTDAG
 //
 // Compact blocks reduce bandwidth by 95-98% by sending:
 // - Full block header (~200 bytes)

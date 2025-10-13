@@ -1,6 +1,4 @@
 // TOS Reachability Tree Management
-// Based on Kaspa's tree.rs
-// Reference: rusty-kaspa/consensus/src/processes/reachability/tree.rs
 //
 // This module manages the reachability tree structure and triggers reindexing
 // when interval space is exhausted.

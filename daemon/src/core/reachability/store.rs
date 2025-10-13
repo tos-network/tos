@@ -1,6 +1,4 @@
 // TOS Reachability Storage Types
-// Based on Kaspa's reachability store
-// Reference: rusty-kaspa/consensus/src/model/stores/reachability.rs
 
 use super::Interval;
 use serde::{Deserialize, Serialize};

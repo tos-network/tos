@@ -1,5 +1,4 @@
 // Comprehensive GHOSTDAG Tests for 100% Coverage
-// Based on Kaspa's test patterns and additional scenarios
 //
 // This file adds tests to achieve 100% coverage by testing:
 // 1. Complex DAG topologies (chains, trees, diamonds, meshes)
@@ -259,7 +258,7 @@ mod comprehensive_tests {
 
     #[test]
     fn test_mergeset_ordering_by_blue_work() {
-        // Mergeset should be ordered by topological sort based on blue_work
+        // Mergeset should be ordered by topological sort using blue_work
         let blocks: Vec<Hash> = (0..5).map(|i| Hash::new([i; 32])).collect();
 
         // In a real scenario, these would be sorted by blue_work

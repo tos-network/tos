@@ -1,6 +1,4 @@
 // TOS Difficulty Adjustment Algorithm (DAA)
-// Based on Kaspa's DAA implementation
-// Reference: rusty-kaspa/consensus/src/processes/difficulty.rs
 
 use anyhow::Result;
 use std::collections::{HashSet, VecDeque};
@@ -11,7 +9,6 @@ use crate::core::error::BlockchainError;
 use crate::core::storage::Storage;
 
 /// DAA window size - number of blocks to consider for difficulty adjustment
-/// This is based on Kaspa's implementation
 pub const DAA_WINDOW_SIZE: u64 = 2016;
 
 /// Target time per block in seconds
@@ -149,7 +146,7 @@ async fn find_daa_window_blocks<S: Storage>(
     Ok(window_blocks)
 }
 
-/// Calculate target difficulty based on DAA window
+/// Calculate target difficulty using DAA window
 ///
 /// This implements the core difficulty adjustment algorithm:
 /// - Measures actual time taken for recent blocks

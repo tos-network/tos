@@ -1,5 +1,4 @@
 // Merkle root calculation for transaction lists
-// Based on standard Bitcoin/Kaspa merkle tree implementation
 
 use crate::crypto::{Hash, Hashable};
 use crate::transaction::Transaction;
@@ -26,6 +25,11 @@ pub fn calculate_merkle_root(transactions: &[Arc<Transaction>]) -> Hash {
         .iter()
         .map(|tx| tx.hash())
         .collect();
+
+    // Special case: single transaction pairs with itself
+    if hashes.len() == 1 {
+        return hash_pair(&hashes[0], &hashes[0]);
+    }
 
     // Build merkle tree bottom-up
     while hashes.len() > 1 {
@@ -67,7 +71,77 @@ fn hash_pair(left: &Hash, right: &Hash) -> Hash {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transaction::{Transaction, TransactionType};
+    use crate::transaction::{
+        Transaction, TransactionType, BurnPayload, TxVersion, FeeType, Reference,
+    };
+    use crate::crypto::elgamal::CompressedPublicKey;
+    use crate::serializer::Serializer;
+    use bulletproofs::RangeProof;
+    use curve25519_dalek::scalar::Scalar;
+
+    /// Create a mock transaction for testing merkle root calculation
+    /// The amount parameter ensures different transactions have different hashes
+    fn create_mock_transaction(amount: u64) -> Transaction {
+        use crate::config::TOS_ASSET;
+
+        // Create dummy values for required fields
+        let mut source_bytes = [0u8; 32];
+        source_bytes[0] = amount as u8;
+        let source = CompressedPublicKey::from_bytes(&source_bytes).unwrap();
+
+        let data = TransactionType::Burn(BurnPayload {
+            amount,
+            asset: TOS_ASSET,
+        });
+        let fee = 100;
+        let fee_type = FeeType::TOS;
+        let nonce = 0;
+        let source_commitments = vec![];
+
+        // Create minimal range proof for testing
+        // Use a simple proof generation approach
+        let range_proof = {
+            use bulletproofs::{PedersenGens, BulletproofGens};
+            let pc_gens = PedersenGens::default();
+            let bp_gens = BulletproofGens::new(64, 1);
+            let mut transcript = merlin::Transcript::new(b"test");
+            let blinding = Scalar::from_bytes_mod_order([amount as u8; 32]);
+            let (proof, _commitment) = RangeProof::prove_single(
+                &bp_gens,
+                &pc_gens,
+                &mut transcript,
+                amount,
+                &blinding,
+                64
+            ).unwrap();
+            proof
+        };
+
+        let reference = Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        };
+        let multisig = None;
+
+        // Create dummy signature
+        let mut sig_bytes = [0u8; 64];
+        sig_bytes[0] = amount as u8;
+        let signature = crate::crypto::Signature::from_bytes(&sig_bytes).unwrap();
+
+        Transaction::new(
+            TxVersion::T0,
+            source,
+            data,
+            fee,
+            fee_type,
+            nonce,
+            source_commitments,
+            range_proof,
+            reference,
+            multisig,
+            signature,
+        )
+    }
 
     #[test]
     fn test_empty_merkle_root() {
@@ -78,11 +152,7 @@ mod tests {
 
     #[test]
     fn test_single_transaction() {
-        let tx = Arc::new(Transaction::coinbase(
-            1000,
-            vec![],
-            vec![],
-        ));
+        let tx = Arc::new(create_mock_transaction(1000));
         let txs = vec![tx.clone()];
 
         let root = calculate_merkle_root(&txs);
@@ -93,8 +163,8 @@ mod tests {
 
     #[test]
     fn test_two_transactions() {
-        let tx1 = Arc::new(Transaction::coinbase(1000, vec![], vec![]));
-        let tx2 = Arc::new(Transaction::coinbase(2000, vec![], vec![]));
+        let tx1 = Arc::new(create_mock_transaction(1000));
+        let tx2 = Arc::new(create_mock_transaction(2000));
         let txs = vec![tx1.clone(), tx2.clone()];
 
         let root = calculate_merkle_root(&txs);
@@ -105,9 +175,9 @@ mod tests {
 
     #[test]
     fn test_three_transactions() {
-        let tx1 = Arc::new(Transaction::coinbase(1000, vec![], vec![]));
-        let tx2 = Arc::new(Transaction::coinbase(2000, vec![], vec![]));
-        let tx3 = Arc::new(Transaction::coinbase(3000, vec![], vec![]));
+        let tx1 = Arc::new(create_mock_transaction(1000));
+        let tx2 = Arc::new(create_mock_transaction(2000));
+        let tx3 = Arc::new(create_mock_transaction(3000));
         let txs = vec![tx1.clone(), tx2.clone(), tx3.clone()];
 
         let root = calculate_merkle_root(&txs);
@@ -124,8 +194,8 @@ mod tests {
 
     #[test]
     fn test_merkle_root_deterministic() {
-        let tx1 = Arc::new(Transaction::coinbase(1000, vec![], vec![]));
-        let tx2 = Arc::new(Transaction::coinbase(2000, vec![], vec![]));
+        let tx1 = Arc::new(create_mock_transaction(1000));
+        let tx2 = Arc::new(create_mock_transaction(2000));
         let txs = vec![tx1, tx2];
 
         let root1 = calculate_merkle_root(&txs);

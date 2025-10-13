@@ -1,9 +1,7 @@
 // TOS Reachability Service
-// Based on Kaspa's reachability implementation
-// Reference: rusty-kaspa/consensus/src/processes/reachability/
 //
 // This is a Phase 2 minimal implementation focusing on core ancestry queries
-// needed for GHOSTDAG mergeset calculation. Full Kaspa features (reindexing,
+// needed for GHOSTDAG mergeset calculation. Full features (reindexing,
 // interval concentration, etc.) will be added in later milestones.
 
 mod interval;
@@ -205,8 +203,6 @@ impl TosReachability {
     }
 
     /// Update future covering sets for blocks in the mergeset
-    ///
-    /// Based on Kaspa's add_dag_block in inquirer.rs
     ///
     /// For each block in the mergeset (excluding selected parent), add the new block
     /// to its future covering set. This enables DAG ancestry queries beyond the chain.

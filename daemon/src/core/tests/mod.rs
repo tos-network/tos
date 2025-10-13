@@ -18,3 +18,6 @@ mod security_tests;
 
 #[cfg(test)]
 mod ghostdag_consensus_tests;
+
+#[cfg(test)]
+mod ghostdag_dag_tests;

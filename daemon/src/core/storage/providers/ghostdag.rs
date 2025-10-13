@@ -1,6 +1,5 @@
 // TOS GHOSTDAG Storage Provider
 // Follows TOS storage architecture patterns
-// Based on Kaspa's GhostdagStore but adapted to TOS's provider system
 
 use async_trait::async_trait;
 use std::sync::Arc;

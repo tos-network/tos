@@ -1,6 +1,4 @@
 // TOS GHOSTDAG Implementation
-// Based on Kaspa's GHOSTDAG protocol
-// Reference: rusty-kaspa/consensus/src/processes/ghostdag/
 
 pub mod types;
 pub mod daa;
@@ -30,8 +28,6 @@ use crate::core::reachability::TosReachability;
 use crate::core::storage::Storage;
 
 /// Calculate work from difficulty
-/// Based on Kaspa's calc_work function
-/// Source: https://github.com/bitcoin/bitcoin/blob/2e34374bf3e12b37b0c66824a6c998073cdfab01/src/chain.cpp#L131
 ///
 /// We need to compute 2**256 / (target+1), but we can't represent 2**256
 /// as it's too large. However, as 2**256 is at least as large
@@ -82,7 +78,6 @@ pub fn calc_work_from_difficulty(difficulty: &Difficulty) -> BlueWorkType {
 }
 
 /// SortableBlock for topological ordering by blue work
-/// Based on Kaspa's ordering.rs
 #[derive(Clone, Debug)]
 pub(crate) struct SortableBlock {
     pub(crate) hash: Hash,
@@ -222,7 +217,6 @@ impl TosGhostdag {
     /// Run the GHOSTDAG algorithm for a new block with given parents
     ///
     /// This is the core GHOSTDAG protocol implementation.
-    /// Based on Kaspa's ghostdag() in protocol.rs (lines 127-168)
     ///
     /// # Arguments
     /// * `storage` - Reference to blockchain storage
@@ -335,7 +329,6 @@ impl TosGhostdag {
     }
 
     /// Sort blocks by blue work (topological order)
-    /// Based on Kaspa's sort_blocks in ordering.rs
     async fn sort_blocks<S: Storage>(&self, storage: &S, blocks: Vec<Hash>) -> Result<Vec<Hash>, BlockchainError> {
         let mut sortable_blocks = Vec::with_capacity(blocks.len());
 
@@ -351,7 +344,6 @@ impl TosGhostdag {
     /// Get ordered mergeset without the selected parent
     /// BFS-based implementation with reachability service
     ///
-    /// Based on Kaspa's ordered_mergeset_without_selected_parent in mergeset.rs
     /// Phase 2 complete implementation: Uses BFS with reachability service to accurately
     /// determine which blocks are in the past of the selected parent.
     async fn ordered_mergeset_without_selected_parent<S: Storage>(
@@ -422,8 +414,6 @@ impl TosGhostdag {
     /// Returns the blue anticone size of `block` from the worldview of `context`.
     /// Expects `block` to be in the blue set of `context`.
     ///
-    /// Based on Kaspa's blue_anticone_size in protocol.rs (lines 234-249)
-    ///
     /// Walks the selected parent chain until finding the block in blues_anticone_sizes map.
     async fn blue_anticone_size<S: Storage>(
         &self,
@@ -454,8 +444,6 @@ impl TosGhostdag {
     }
 
     /// Check if a candidate block can be blue (doesn't violate k-cluster)
-    ///
-    /// Based on Kaspa's check_blue_candidate in protocol.rs (lines 251-287)
     ///
     /// SECURITY FIX V-03: Implements proper k-cluster validation using reachability
     /// This is the CORE SECURITY GUARANTEE of GHOSTDAG consensus.

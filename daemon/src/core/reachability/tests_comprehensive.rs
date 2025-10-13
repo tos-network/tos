@@ -1,5 +1,4 @@
 // Comprehensive Reachability Tests for 100% Coverage
-// Based on Kaspa's reachability test patterns
 //
 // This file tests complete reachability functionality:
 // 1. Chain ancestry queries (is_chain_ancestor_of)

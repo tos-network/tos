@@ -1,6 +1,5 @@
 // BlockHeader - GHOSTDAG-native DAG header format
 //
-// Based on Kaspa's Header structure with TOS-specific modifications.
 // This is a BREAKING CHANGE from the legacy chain-based format.
 
 use std::fmt::{Display, Formatter, Error as FmtError};

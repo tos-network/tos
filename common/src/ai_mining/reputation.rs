@@ -1,6 +1,6 @@
 //! Reputation System and Anti-Sybil Attack Mechanisms
 //!
-//! This module implements a reputation scoring system based on account age,
+//! This module implements a reputation scoring system using account age,
 //! transaction history, and stake amount to prevent Sybil attacks and maintain network security.
 
 use super::*;

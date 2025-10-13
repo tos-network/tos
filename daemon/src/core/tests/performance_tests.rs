@@ -116,6 +116,7 @@ mod performance_tests {
     }
 
     #[test]
+    #[cfg_attr(debug_assertions, ignore = "Performance test - run with --release")]
     fn test_performance_work_calculation_varying() {
         let difficulties: Vec<Difficulty> = (1..=100)
             .map(|i| Difficulty::from((i * 100) as u64))
@@ -127,17 +128,13 @@ mod performance_tests {
             }
         });
 
-        // Thresholds adjusted for debug vs release builds
+        // Thresholds adjusted for release builds
         // Release: 100 calculations in < 150μs (allows some variance)
-        // Debug: 100 calculations in < 500μs (unoptimized code, allows system variance)
-        #[cfg(debug_assertions)]
-        const THRESHOLD: u128 = 500;
-        #[cfg(not(debug_assertions))]
         const THRESHOLD: u128 = 150;
 
         assert!(micros < THRESHOLD,
-            "100 work calculations took {}μs (expected < {}μs in {} mode)",
-            micros, THRESHOLD, if cfg!(debug_assertions) { "debug" } else { "release" });
+            "100 work calculations took {}μs (expected < {}μs in release mode)",
+            micros, THRESHOLD);
     }
 
     #[test]
