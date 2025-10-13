@@ -158,12 +158,12 @@ impl BroadcastOption {
 }
 
 pub struct Blockchain<S: Storage> {
-    // current block height
-    height: AtomicU64,
+    // current block blue score
+    blue_score: AtomicU64,
     // current topo height
     topoheight: AtomicU64,
-    // current stable height
-    stable_height: AtomicU64,
+    // current stable blue score
+    stable_blue_score: AtomicU64,
     // Determine which last block is stable
     // It is used mostly for chain rewind limit
     stable_topoheight: AtomicU64,
@@ -316,9 +316,9 @@ impl<S: Storage> Blockchain<S> {
 
         info!("Initializing chain...");
         let blockchain = Self {
-            height: AtomicU64::new(height),
+            blue_score: AtomicU64::new(height),
             topoheight: AtomicU64::new(topoheight),
-            stable_height: AtomicU64::new(0),
+            stable_blue_score: AtomicU64::new(0),
             stable_topoheight: AtomicU64::new(0),
             mempool: RwLock::new(Mempool::new(network, config.disable_zkp_cache)),
             storage: RwLock::new(storage),
@@ -356,7 +356,7 @@ impl<S: Storage> Blockchain<S> {
             // now compute the stable height
             debug!("Retrieving tips for computing current stable height");
             let (stable_hash, stable_height) = blockchain.find_common_base::<S, _>(&storage, &tips).await?;
-            blockchain.stable_height.store(stable_height, Ordering::SeqCst);
+            blockchain.stable_blue_score.store(stable_height, Ordering::SeqCst);
             // Search the stable topoheight
             let stable_topoheight = storage.get_topo_height_for_hash(&stable_hash).await?;
             blockchain.stable_topoheight.store(stable_topoheight, Ordering::SeqCst);
@@ -625,12 +625,12 @@ impl<S: Storage> Blockchain<S> {
         let topoheight = storage.get_top_topoheight().await?;
         let height = storage.get_top_height().await?;
         self.topoheight.store(topoheight, Ordering::SeqCst);
-        self.height.store(height, Ordering::SeqCst);
+        self.blue_score.store(height, Ordering::SeqCst);
 
         let tips = storage.get_tips().await?;
         // Research stable height to update caches
         let (stable_hash, stable_height) = self.find_common_base(&*storage, &tips).await?;
-        self.stable_height.store(stable_height, Ordering::SeqCst);
+        self.stable_blue_score.store(stable_height, Ordering::SeqCst);
 
         // Research stable topoheight also
         let stable_topoheight = storage.get_topo_height_for_hash(&stable_hash).await?;
@@ -730,10 +730,10 @@ impl<S: Storage> Blockchain<S> {
         };
         let algorithm = get_pow_algorithm_for_version(header.get_version());
         let mut hash = header.get_pow_hash(algorithm)?;
-        let mut current_height = self.get_height();
+        let mut current_height = self.get_blue_score();
         while !self.is_simulator_enabled() && !check_difficulty(&hash, &difficulty)? {
-            if self.get_height() != current_height {
-                current_height = self.get_height();
+            if self.get_blue_score() != current_height {
+                current_height = self.get_blue_score();
                 header = self.get_block_template(key.clone()).await?;
             }
             header.nonce += 1;
@@ -778,7 +778,7 @@ impl<S: Storage> Blockchain<S> {
 
         // find new stable point based on a sync block under the limit topoheight
         let start = Instant::now();
-        let located_sync_topoheight = self.locate_nearest_sync_block_for_topoheight(storage, topoheight, self.get_height()).await?;
+        let located_sync_topoheight = self.locate_nearest_sync_block_for_topoheight(storage, topoheight, self.get_blue_score()).await?;
         debug!("Located sync topoheight found {} in {}ms", located_sync_topoheight, start.elapsed().as_millis());
 
         if located_sync_topoheight > last_pruned_topoheight {
@@ -827,9 +827,9 @@ impl<S: Storage> Blockchain<S> {
         Ok(0)
     }
 
-    // returns the highest (unstable) height on the chain
-    pub fn get_height(&self) -> u64 {
-        self.height.load(Ordering::Acquire)
+    // returns the highest (unstable) blue score on the chain
+    pub fn get_blue_score(&self) -> u64 {
+        self.blue_score.load(Ordering::Acquire)
     }
 
     // returns the highest topological height
@@ -837,10 +837,10 @@ impl<S: Storage> Blockchain<S> {
         self.topoheight.load(Ordering::Acquire)
     }
 
-    // Get the current block height stable
-    // No blocks can be added at or below this height
-    pub fn get_stable_height(&self) -> u64 {
-        self.stable_height.load(Ordering::Acquire)
+    // Get the current block blue score stable
+    // No blocks can be added at or below this blue score
+    pub fn get_stable_blue_score(&self) -> u64 {
+        self.stable_blue_score.load(Ordering::Acquire)
     }
 
     // Get the stable topoheight
@@ -903,7 +903,7 @@ impl<S: Storage> Blockchain<S> {
 
     // Verify if the block is a sync block for current chain height
     pub async fn is_sync_block<P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider>(&self, provider: &P, hash: &Hash) -> Result<bool, BlockchainError> {
-        let current_height = self.get_height();
+        let current_height = self.get_blue_score();
         self.is_sync_block_at_height(provider, hash, current_height).await
     }
 
@@ -1651,7 +1651,7 @@ impl<S: Storage> Blockchain<S> {
             let hash = hash.into_arc();
 
             let start = Instant::now();
-            let version = get_version_at_height(self.get_network(), self.get_height());
+            let version = get_version_at_height(self.get_network(), self.get_blue_score());
             mempool.add_tx(storage, &self.environment, stable_topoheight, current_topoheight, hash.clone(), tx.clone(), tx_size, version).await?;
 
             debug!("TX {} has been added to the mempool", hash);
@@ -1831,7 +1831,7 @@ impl<S: Storage> Blockchain<S> {
             tips.push(hash);
         }
 
-        let current_height = self.get_height();
+        let current_height = self.get_blue_score();
         if tips.len() > 1 {
             // Use GHOSTDAG to select best tip (TIP-2 Phase 1)
             // Find tip with highest blue_work
@@ -1953,7 +1953,7 @@ impl<S: Storage> Blockchain<S> {
 
         // data used to verify txs
         let stable_topoheight = self.get_stable_topoheight();
-        let stable_height = self.get_stable_height();
+        let stable_height = self.get_stable_blue_score();
         let topoheight = self.get_topo_height();
 
         trace!("build chain state for block template");
@@ -2127,7 +2127,7 @@ impl<S: Storage> Blockchain<S> {
             return Err(BlockchainError::InvalidTipsCount(block_hash.into_owned(), tips_count))
         }
 
-        let mut current_height = self.get_height();
+        let mut current_height = self.get_blue_score();
         if tips_count == 0 && current_height != 0 {
             debug!("Expected at least one previous block for this block {}", block_hash);
             return Err(BlockchainError::ExpectedTips)
@@ -2163,7 +2163,7 @@ impl<S: Storage> Blockchain<S> {
             return Err(BlockchainError::InvalidBlockHeight(block_height_by_tips, block.get_blue_score()))
         }
 
-        let stable_height = self.get_stable_height();
+        let stable_height = self.get_stable_blue_score();
         if tips_count > 0 {
             debug!("Height by tips: {}, stable height: {}", block_height_by_tips, stable_height);
 
@@ -3080,7 +3080,7 @@ impl<S: Storage> Blockchain<S> {
         if current_height == 0 || block.get_blue_score() > current_height {
             debug!("storing new top height {}", block.get_blue_score());
             storage.set_top_height(block.get_blue_score()).await?;
-            self.height.store(block.get_blue_score(), Ordering::Release);
+            self.blue_score.store(block.get_blue_score(), Ordering::Release);
             current_height = block.get_blue_score();
         }
 
@@ -3088,7 +3088,7 @@ impl<S: Storage> Blockchain<S> {
         {
             if should_track_events.contains(&NotifyEvent::StableHeightChanged) {
                 // detect the change in stable height
-                let previous_stable_height = self.get_stable_height();
+                let previous_stable_height = self.get_stable_blue_score();
                 if base_height != previous_stable_height {
                     let value = json!(StableHeightChangedEvent {
                         previous_stable_height,
@@ -3111,7 +3111,7 @@ impl<S: Storage> Blockchain<S> {
             }
 
             // Update caches
-            self.stable_height.store(base_height, Ordering::SeqCst);
+            self.stable_blue_score.store(base_height, Ordering::SeqCst);
             self.stable_topoheight.store(base_topo_height, Ordering::SeqCst);
 
             debug!("update difficulty in cache for new tips");
@@ -3438,7 +3438,7 @@ impl<S: Storage> Blockchain<S> {
         counter!("tos_rewind_chain").increment(1);
         histogram!("tos_rewind_chain_count").record(count as f64);
 
-        let current_height = self.get_height();
+        let current_height = self.get_blue_score();
         let current_topoheight = self.get_topo_height();
         warn!("Rewind chain with count = {}, height = {}, topoheight = {}", count, current_height, current_topoheight);
         let mut until_topo_height = if stop_at_stable_height {
@@ -3489,7 +3489,7 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        self.height.store(new_height, Ordering::Release);
+        self.blue_score.store(new_height, Ordering::Release);
         self.topoheight.store(new_topoheight, Ordering::Release);
         // update stable height if it's allowed
         if !stop_at_stable_height {
@@ -3499,7 +3499,7 @@ impl<S: Storage> Blockchain<S> {
 
             // if we have a RPC server, propagate the StableHeightChanged if necessary
             if let Some(rpc) = self.rpc.read().await.as_ref() {
-                let previous_stable_height = self.get_stable_height();
+                let previous_stable_height = self.get_stable_blue_score();
                 let previous_stable_topoheight = self.get_stable_topoheight();
 
                 if stable_height != previous_stable_height {
@@ -3534,7 +3534,7 @@ impl<S: Storage> Blockchain<S> {
                     }
                 }
             }
-            self.stable_height.store(stable_height, Ordering::SeqCst);
+            self.stable_blue_score.store(stable_height, Ordering::SeqCst);
             self.stable_topoheight.store(stable_topoheight, Ordering::SeqCst);
         }
 
@@ -3561,7 +3561,7 @@ impl<S: Storage> Blockchain<S> {
         let mut count = if topoheight > 50 {
             50
         } else if topoheight <= 1 {
-            let version = get_version_at_height(self.get_network(), self.get_height());
+            let version = get_version_at_height(self.get_network(), self.get_blue_score());
             return Ok(get_block_time_target_for_version(version));
         } else {
             topoheight - 1

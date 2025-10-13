@@ -588,7 +588,7 @@ impl<S: Storage> P2pServer<S> {
         info!("Fast sync done with {}, took {}", peer, humantime::format_duration(start.elapsed()));
 
         // Request its inventory
-        if self.blockchain.get_height() == peer.get_height() {
+        if self.blockchain.get_blue_score() == peer.get_height() {
             self.request_inventory_of(peer).await?;
         }
 

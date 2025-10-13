@@ -303,9 +303,9 @@ pub struct GetStableBalanceResult {
 
 #[derive(Serialize, Deserialize)]
 pub struct GetInfoResult {
-    pub height: u64,
+    pub blue_score: u64,
     pub topoheight: TopoHeight,
-    pub stableheight: u64,
+    pub stable_blue_score: u64,
     pub pruned_topoheight: Option<TopoHeight>,
     pub top_block_hash: Hash,
     // Current TOS circulating supply

@@ -190,9 +190,9 @@ impl DaemonClient {
         Ok(result.as_str().unwrap_or("unknown").to_string())
     }
 
-    /// Get current blockchain height
-    pub async fn get_height(&self) -> Result<u64> {
-        let result = self.make_request("get_height", Value::Null).await?;
+    /// Get current blockchain blue score
+    pub async fn get_blue_score(&self) -> Result<u64> {
+        let result = self.make_request("get_blue_score", Value::Null).await?;
         Ok(result.as_u64().unwrap_or(0))
     }
 

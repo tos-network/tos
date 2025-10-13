@@ -317,7 +317,7 @@ pub async fn get_peer_entry(peer: &Peer) -> PeerEntry<'_> {
 pub fn register_methods<S: Storage>(handler: &mut RPCHandler<Arc<Blockchain<S>>>, allow_mining_methods: bool) {
     info!("Registering RPC methods...");
     handler.register_method("get_version", async_handler!(version::<S>));
-    handler.register_method("get_height", async_handler!(get_height::<S>));
+    handler.register_method("get_blue_score", async_handler!(get_blue_score::<S>));
     handler.register_method("get_topoheight", async_handler!(get_topoheight::<S>));
     handler.register_method("get_pruned_topoheight", async_handler!(get_pruned_topoheight::<S>));
     handler.register_method("get_info", async_handler!(get_info::<S>));
@@ -326,14 +326,14 @@ pub fn register_methods<S: Storage>(handler: &mut RPCHandler<Arc<Blockchain<S>>>
     handler.register_method("get_dev_fee_thresholds", async_handler!(get_dev_fee_thresholds::<S>));
     handler.register_method("get_size_on_disk", async_handler!(get_size_on_disk::<S>));
 
-    // Retro compatibility, use stable_height
-    handler.register_method("get_stableheight", async_handler!(get_stable_height::<S>));
-    handler.register_method("get_stable_height", async_handler!(get_stable_height::<S>));
+    // Retro compatibility, use stable_blue_score
+    handler.register_method("get_stableheight", async_handler!(get_stable_blue_score::<S>));
+    handler.register_method("get_stable_blue_score", async_handler!(get_stable_blue_score::<S>));
     handler.register_method("get_stable_topoheight", async_handler!(get_stable_topoheight::<S>));
     handler.register_method("get_hard_forks", async_handler!(get_hard_forks::<S>));
 
     handler.register_method("get_block_at_topoheight", async_handler!(get_block_at_topoheight::<S>));
-    handler.register_method("get_blocks_at_height", async_handler!(get_blocks_at_height::<S>));
+    handler.register_method("get_blocks_at_blue_score", async_handler!(get_blocks_at_blue_score::<S>));
     handler.register_method("get_block_by_hash", async_handler!(get_block_by_hash::<S>));
     handler.register_method("get_top_block", async_handler!(get_top_block::<S>));
 
@@ -373,7 +373,7 @@ pub fn register_methods<S: Storage>(handler: &mut RPCHandler<Arc<Blockchain<S>>>
 
     handler.register_method("get_dag_order", async_handler!(get_dag_order::<S>));
     handler.register_method("get_blocks_range_by_topoheight", async_handler!(get_blocks_range_by_topoheight::<S>));
-    handler.register_method("get_blocks_range_by_height", async_handler!(get_blocks_range_by_height::<S>));
+    handler.register_method("get_blocks_range_by_blue_score", async_handler!(get_blocks_range_by_blue_score::<S>));
 
     handler.register_method("get_account_history", async_handler!(get_account_history::<S>));
     handler.register_method("get_account_assets", async_handler!(get_account_assets::<S>));
@@ -430,10 +430,10 @@ async fn version<S: Storage>(_: &Context, body: Value) -> Result<Value, Internal
     Ok(json!(VERSION))
 }
 
-async fn get_height<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+async fn get_blue_score<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     require_no_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    Ok(json!(blockchain.get_height()))
+    Ok(json!(blockchain.get_blue_score()))
 }
 
 async fn get_topoheight<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -452,10 +452,10 @@ async fn get_pruned_topoheight<S: Storage>(context: &Context, body: Value) -> Re
     Ok(json!(pruned_topoheight))
 }
 
-async fn get_stable_height<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+async fn get_stable_blue_score<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     require_no_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    Ok(json!(blockchain.get_stable_height()))
+    Ok(json!(blockchain.get_stable_blue_score()))
 }
 
 async fn get_stable_topoheight<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -654,9 +654,9 @@ async fn has_balance<S: Storage>(context: &Context, body: Value) -> Result<Value
 async fn get_info<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     require_no_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    let height = blockchain.get_height();
+    let blue_score = blockchain.get_blue_score();
     let topoheight = blockchain.get_topo_height();
-    let stableheight = blockchain.get_stable_height();
+    let stable_blue_score = blockchain.get_stable_blue_score();
     let (top_block_hash, emitted_supply, burned_supply, pruned_topoheight, average_block_time) = {
         let storage = blockchain.get_storage().read().await;
         let top_block_hash = storage.get_hash_at_topo_height(topoheight).await.context("Error while retrieving hash at topo height")?;
@@ -671,16 +671,16 @@ async fn get_info<S: Storage>(context: &Context, body: Value) -> Result<Value, I
     let mempool_size = blockchain.get_mempool_size().await;
     let version = VERSION.into();
     let network = *blockchain.get_network();
-    let block_version = get_version_at_height(&network, height);
+    let block_version = get_version_at_height(&network, blue_score);
     let block_time_target = get_block_time_target_for_version(block_version);
 
     let block_reward = get_block_reward(emitted_supply, block_time_target);
-    let (dev_reward, miner_reward) = get_block_rewards(height, block_reward);
+    let (dev_reward, miner_reward) = get_block_rewards(blue_score, block_reward);
 
     Ok(json!(GetInfoResult {
-        height,
+        blue_score,
         topoheight,
-        stableheight,
+        stable_blue_score,
         pruned_topoheight,
         top_block_hash,
         circulating_supply: emitted_supply - burned_supply,
@@ -1028,13 +1028,13 @@ async fn get_estimated_fee_rates<S: Storage>(context: &Context, body: Value) -> 
     Ok(json!(estimated))
 }
 
-async fn get_blocks_at_height<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+async fn get_blocks_at_blue_score<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetBlocksAtHeightParams = parse_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let storage = blockchain.get_storage().read().await;
 
     let mut blocks = Vec::new();
-    for hash in storage.get_blocks_at_height(params.height).await.context("Error while retrieving blocks at height")? {
+    for hash in storage.get_blocks_at_height(params.height).await.context("Error while retrieving blocks at blue score")? {
         blocks.push(get_block_response_for_hash(&blockchain, &storage, &hash, params.include_txs).await?)
     }
     Ok(json!(blocks))
@@ -1115,19 +1115,19 @@ async fn get_blocks_range_by_topoheight<S: Storage>(context: &Context, body: Val
     Ok(json!(blocks))
 }
 
-// get blocks between range of height
+// get blocks between range of blue score
 // if no params found, get last 20 blocks header
-// you can only request 
-async fn get_blocks_range_by_height<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+// you can only request
+async fn get_blocks_range_by_blue_score<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetHeightRangeParams = parse_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    let current_height = blockchain.get_height();
-    let (start_height, end_height) = get_range(params.start_height, params.end_height, MAX_BLOCKS, current_height)?;
+    let current_blue_score = blockchain.get_blue_score();
+    let (start_height, end_height) = get_range(params.start_height, params.end_height, MAX_BLOCKS, current_blue_score)?;
 
     let storage = blockchain.get_storage().read().await;
     let mut blocks = Vec::with_capacity((end_height - start_height) as usize);
     for i in start_height..=end_height {
-        let blocks_at_height = storage.get_blocks_at_height(i).await.context("Error while retrieving blocks at height")?;
+        let blocks_at_height = storage.get_blocks_at_height(i).await.context("Error while retrieving blocks at blue score")?;
         for hash in blocks_at_height {
             let response = get_block_response_for_hash(&blockchain, &storage, &hash, false).await?;
             blocks.push(response);
@@ -1594,7 +1594,7 @@ async fn get_difficulty<S: Storage>(context: &Context, body: Value) -> Result<Va
 
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let difficulty = blockchain.get_difficulty().await;
-    let version = get_version_at_height(blockchain.get_network(), blockchain.get_height());
+    let version = get_version_at_height(blockchain.get_network(), blockchain.get_blue_score());
     let block_time_target = get_block_time_target_for_version(version);
 
     let hashrate = difficulty / (block_time_target / MILLIS_PER_SECOND);

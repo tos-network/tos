@@ -574,7 +574,7 @@ impl<S: Storage> P2pServer<S> {
         }
 
         // check if the version of this peer is allowed
-        if !hard_fork::is_version_allowed_at_height(self.blockchain.get_network(), self.blockchain.get_height(), handshake.get_version()).map_err(|e| P2pError::InvalidP2pVersion(e.to_string()))? {
+        if !hard_fork::is_version_allowed_at_height(self.blockchain.get_network(), self.blockchain.get_blue_score(), handshake.get_version()).map_err(|e| P2pError::InvalidP2pVersion(e.to_string()))? {
             return Err(P2pError::InvalidP2pVersion(handshake.get_version().clone()));
         }
 
@@ -803,7 +803,7 @@ impl<S: Storage> P2pServer<S> {
             (cumulative_difficulty, top_block_hash, pruned_topoheight)
         };
         let highest_topo_height = self.blockchain.get_topo_height();
-        let highest_height = self.blockchain.get_height();
+        let highest_height = self.blockchain.get_blue_score();
         let new_peers = IndexSet::new();
         Ok(Ping::new(Cow::Owned(block_top_hash), highest_topo_height, highest_height, pruned_topoheight, cumulative_difficulty, new_peers))
     }
@@ -833,7 +833,7 @@ impl<S: Storage> P2pServer<S> {
             let storage = self.blockchain.get_storage().read().await;
 
             // We read those after having the storage locked to prevent issue
-            let our_height = self.blockchain.get_height();
+            let our_height = self.blockchain.get_blue_score();
             let our_topoheight = self.blockchain.get_topo_height();
 
             debug!("storage locked for cumulative difficulty");
@@ -1735,7 +1735,7 @@ impl<S: Storage> P2pServer<S> {
         }
 
         // verify that we are synced with him to receive all TXs correctly
-        let our_height = self.blockchain.get_height();
+        let our_height = self.blockchain.get_blue_score();
         let peer_height = peer.get_height();
         if our_height == peer_height {
             if let Err(e) = self.request_inventory_of(&peer).await {
@@ -2343,7 +2343,7 @@ impl<S: Storage> P2pServer<S> {
                         match self.blockchain.get_top_block_hash().await {
                             Ok(top_hash) => {
                                 let our_topoheight = self.blockchain.get_topo_height();
-                                let our_height = self.blockchain.get_height();
+                                let our_height = self.blockchain.get_blue_score();
 
                                 // Try to get pruned topoheight from storage
                                 let pruned_topoheight = {

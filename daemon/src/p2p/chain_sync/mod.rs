@@ -116,12 +116,12 @@ impl<S: Storage> P2pServer<S> {
             let top_topoheight = self.blockchain.get_topo_height();
             // used to detect if we find unstable height for alt tips
             let mut unstable_height = None;
-            let top_height = self.blockchain.get_height();
+            let top_height = self.blockchain.get_blue_score();
             // check to see if we should search for alt tips (and above unstable height)
             let should_search_alt_tips = top_topoheight - topoheight < accepted_response_size as u64;
             if should_search_alt_tips {
                 debug!("Peer is near to be synced, will send him alt tips blocks");
-                unstable_height = Some(self.blockchain.get_stable_height() + 1);
+                unstable_height = Some(self.blockchain.get_stable_blue_score() + 1);
             }
 
             // Search the lowest height
@@ -172,7 +172,7 @@ impl<S: Storage> P2pServer<S> {
 
             // now, lets check if peer is near to be synced, and send him alt tips blocks
             if let Some(mut height) = unstable_height {
-                let top_height = self.blockchain.get_height();
+                let top_height = self.blockchain.get_blue_score();
                 trace!("unstable height: {}, top height: {}", height, top_height);
                 while height <= top_height && top_blocks.len() < CHAIN_SYNC_TOP_BLOCKS {
                     trace!("get blocks at height {} for top blocks", height);
@@ -307,9 +307,9 @@ impl<S: Storage> P2pServer<S> {
             }
 
             let block_height = storage.get_height_for_block_hash(common_point.get_hash()).await?;
-            trace!("block height: {}, stable height: {}, topoheight: {}, hash: {}", block_height, self.blockchain.get_stable_height(), expected_common_topoheight, common_point.get_hash());
+            trace!("block height: {}, stable height: {}, topoheight: {}, hash: {}", block_height, self.blockchain.get_stable_blue_score(), expected_common_topoheight, common_point.get_hash());
             // We are under the stable height, rewind is necessary
-            let mut count = if skip_stable_height_check || peer.is_priority() || lowest_height <= self.blockchain.get_stable_height() {
+            let mut count = if skip_stable_height_check || peer.is_priority() || lowest_height <= self.blockchain.get_stable_blue_score() {
                 let our_topoheight = self.blockchain.get_topo_height();
                 if our_topoheight > expected_common_topoheight {
                     our_topoheight - expected_common_topoheight
@@ -337,7 +337,7 @@ impl<S: Storage> P2pServer<S> {
         debug!("handling chain response from {}, {} blocks, {} top blocks, pop count {}", peer, blocks.len(), top_blocks.len(), pop_count);
 
         let our_previous_topoheight = self.blockchain.get_topo_height();
-        let our_previous_height = self.blockchain.get_height();
+        let our_previous_height = self.blockchain.get_blue_score();
         let top_len = top_blocks.len();
         let blocks_len = blocks.len();
 

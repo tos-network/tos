@@ -2099,9 +2099,9 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
                 .context("Error while getting network info")?;
 
             manager.message("--- Daemon status ---");
-            manager.message(format!("Height: {}", info.height));
+            manager.message(format!("Blue Score: {}", info.blue_score));
             manager.message(format!("Topoheight: {}", info.topoheight));
-            manager.message(format!("Stable height: {}", info.stableheight));
+            manager.message(format!("Stable Blue Score: {}", info.stable_blue_score));
             manager.message(format!("Pruned topoheight: {:?}", info.pruned_topoheight));
             manager.message(format!("Top block hash: {}", info.top_block_hash));
             manager.message(format!("Network: {}", info.network));

@@ -374,7 +374,7 @@ async fn run_prompt<S: Storage>(prompt: ShareablePrompt, blockchain: Arc<Blockch
         let mempool = blockchain.get_mempool_size().await;
 
         trace!("Retrieving network hashrate");
-        let version = get_version_at_height(blockchain.get_network(), blockchain.get_height());
+        let version = get_version_at_height(blockchain.get_network(), blockchain.get_blue_score());
         let block_time_target = get_block_time_target_for_version(version);
         let network_hashrate: f64 = (blockchain.get_difficulty().await / (block_time_target / MILLIS_PER_SECOND)).into();
 
@@ -1159,9 +1159,9 @@ async fn status<S: Storage>(manager: &CommandManager, _: ArgumentManager) -> Res
 
     debug!("Retrieving blockchain status");
 
-    let height = blockchain.get_height();
+    let height = blockchain.get_blue_score();
     let topoheight = blockchain.get_topo_height();
-    let stableheight = blockchain.get_stable_height();
+    let stableheight = blockchain.get_stable_blue_score();
     let stable_topoheight = blockchain.get_stable_topoheight();
     let difficulty = blockchain.get_difficulty().await;
 
