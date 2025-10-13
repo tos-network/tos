@@ -9,10 +9,12 @@
 mod interval;
 mod store;
 mod reindex;
+mod tree;
 
 pub use interval::Interval;
 pub use store::ReachabilityData;
 pub(crate) use reindex::ReindexContext;
+pub(crate) use tree::{add_tree_block, try_advancing_reindex_root};
 
 use tos_common::crypto::Hash;
 use crate::core::error::BlockchainError;
@@ -154,76 +156,46 @@ impl TosReachability {
         }
     }
 
-    /// Add a new block to the reachability tree
+    /// Add a new block to the reachability tree with automatic reindexing
     ///
-    /// This is a simplified Phase 2 implementation that allocates intervals without reindexing.
-    /// Based on Kaspa's add_tree_block in tree.rs
+    /// Delegates to the tree module which handles interval allocation and
+    /// automatic reindexing when interval space is exhausted.
     ///
     /// # Algorithm
-    /// 1. Get parent's remaining interval capacity
-    /// 2. Allocate half of remaining interval to new block
-    /// 3. Add new block as child of parent
-    /// 4. Set height = parent_height + 1
+    /// 1. Check parent's remaining interval capacity
+    /// 2. If exhausted → trigger reindexing to redistribute intervals
+    /// 3. If sufficient → allocate half of remaining interval to new block
+    /// 4. Add new block as child of parent
+    /// 5. Set height = parent_height + 1
     ///
-    /// Note: Full Kaspa includes complex reindexing when intervals run out.
-    /// This simplified version will panic if parent has no remaining capacity.
+    /// # Arguments
+    /// * `storage` - Mutable storage reference
+    /// * `new_block` - Hash of the new block to add
+    /// * `selected_parent` - Hash of the selected parent block
     pub async fn add_tree_block<S: Storage>(
         &mut self,
         storage: &mut S,
         new_block: Hash,
         selected_parent: Hash,
     ) -> Result<(), BlockchainError> {
-        // Get parent's reachability data
-        let mut parent_data = storage.get_reachability_data(&selected_parent).await?;
+        // Delegate to tree module with full reindexing support
+        tree::add_tree_block(storage, new_block, selected_parent).await
+    }
 
-        // Calculate remaining interval capacity
-        // If parent has children, start after last child's interval
-        // Otherwise, use parent's full interval
-        let remaining = if let Some(last_child) = parent_data.children.last() {
-            let last_child_data = storage.get_reachability_data(last_child).await?;
-            Interval::new(last_child_data.interval.end + 1, parent_data.interval.end)
-        } else {
-            parent_data.interval
-        };
-
-        // SECURITY FIX V-02: Check for interval exhaustion
-        if remaining.size() <= 1 {
-            // WARNING: Reachability interval exhaustion detected!
-            // This is a DoS vulnerability - intervals have run out
-            log::error!(
-                "CRITICAL: Reachability interval exhaustion for parent {} (remaining size: {})",
-                selected_parent,
-                remaining.size()
-            );
-
-            // TODO: Implement full reindexing as in Kaspa
-            // For now, we return an error to prevent panic
-            // In production, this should trigger:
-            // 1. Reindex the entire reachability tree with fresh intervals
-            // 2. Retry adding the block
-            return Err(BlockchainError::InvalidReachability);
-        }
-
-        // Allocate half of remaining interval to new block
-        let (allocated, _right) = remaining.split_half();
-
-        // Create reachability data for new block
-        let new_block_data = ReachabilityData {
-            parent: selected_parent.clone(),
-            interval: allocated,
-            height: parent_data.height + 1,
-            children: Vec::new(),
-            future_covering_set: Vec::new(),
-        };
-
-        // Store new block's reachability data
-        storage.set_reachability_data(&new_block, &new_block_data).await?;
-
-        // Add new block as child of parent
-        parent_data.children.push(new_block);
-        storage.set_reachability_data(&selected_parent, &parent_data).await?;
-
-        Ok(())
+    /// Hint that the virtual selected parent has changed
+    ///
+    /// This is called periodically as the chain grows to advance the reindex root.
+    /// The reindex root stays approximately 100 blocks behind the tip.
+    ///
+    /// # Arguments
+    /// * `storage` - Mutable storage reference
+    /// * `hint` - Hash of the new virtual selected parent (tip)
+    pub async fn hint_virtual_selected_parent<S: Storage>(
+        &mut self,
+        storage: &mut S,
+        hint: Hash,
+    ) -> Result<(), BlockchainError> {
+        tree::try_advancing_reindex_root(storage, hint).await
     }
 
     /// Update future covering sets for blocks in the mergeset

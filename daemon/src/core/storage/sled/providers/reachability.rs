@@ -43,4 +43,21 @@ impl ReachabilityDataProvider for SledStorage {
         Self::remove_from_disk::<ReachabilityData>(self.snapshot.as_mut(), &self.reachability_data, hash.as_bytes())?;
         Ok(())
     }
+
+    async fn get_reindex_root(&self) -> Result<Hash, BlockchainError> {
+        trace!("get reindex root");
+        self.load_from_disk(&self.extra, b"reindex_root", DiskContext::ReachabilityData)
+    }
+
+    async fn set_reindex_root(&mut self, root: Hash) -> Result<(), BlockchainError> {
+        trace!("set reindex root to {}", root);
+        let root_bytes = root.to_bytes();
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.extra,
+            b"reindex_root",
+            root_bytes.to_vec(),
+        )?;
+        Ok(())
+    }
 }

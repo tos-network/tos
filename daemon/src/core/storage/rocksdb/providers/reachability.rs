@@ -35,4 +35,14 @@ impl ReachabilityDataProvider for RocksStorage {
         trace!("delete reachability data for {}", hash);
         self.remove_from_disk(Column::ReachabilityData, hash)
     }
+
+    async fn get_reindex_root(&self) -> Result<Hash, BlockchainError> {
+        trace!("get reindex root");
+        self.load_from_disk(Column::Common, b"reindex_root")
+    }
+
+    async fn set_reindex_root(&mut self, root: Hash) -> Result<(), BlockchainError> {
+        trace!("set reindex root to {}", root);
+        self.insert_into_disk(Column::Common, b"reindex_root", &root)
+    }
 }
