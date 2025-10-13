@@ -383,7 +383,7 @@ mod ghostdag_dag_tests {
         println!("  - K-cluster constraint enforcement");
         println!("  - Blue/red block classification");
         println!("  - Selected parent by maximum blue_work");
-        println!("  - Blue score calculation: max(parents.blue_score) + 1");
+        println!("  - Blue score calculation: max(parents.blue_score) + mergeset_size");
         println!();
     }
 }

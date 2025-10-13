@@ -72,11 +72,11 @@ where
 
 // GHOSTDAG: Calculate the expected blue score for a block with given tips
 //
-// In GHOSTDAG, blue_score is calculated as max(parent.blue_score) + 1.
-// This is the DAG equivalent of height calculation in a linear chain.
+// In GHOSTDAG, blue_score is calculated as max(tips.blue_score) + tips.len().
+// This is the DAG equivalent of height calculation, but accounts for mergeset size.
 //
 // For a DAG with multiple parents, this finds the parent with highest blue_score
-// and returns blue_score + 1. This matches Kaspa's header processing pipeline.
+// and adds the number of tips being merged (the mergeset size).
 pub async fn calculate_blue_score_at_tips<'a, G, I>(provider: &G, tips: I) -> Result<u64, BlockchainError>
 where
     G: GhostdagDataProvider,
