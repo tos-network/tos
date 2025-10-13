@@ -111,17 +111,6 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             .map(|data| data.blue_work)
     }
 
-    // Legacy: Kept for backwards compatibility only - DO NOT USE for consensus decisions
-    #[allow(dead_code)]
-    pub fn get_expected_chain_cumulative_difficulty(&self) -> Option<&CumulativeDifficulty> {
-        debug!("retrieving expected chain cumulative difficulty (legacy)");
-        let (_, hash) = self.hash_at_topo.last()?;
-
-        debug!("looking for cumulative difficulty of {}", hash);
-        self.blocks.get(hash)
-            .map(|data| &data.cumulative_difficulty)
-    }
-
     // validate the basic chain structure
     // We expect that the block added is the next block ordered by topoheight
     pub async fn insert_block(&mut self, hash: Hash, header: BlockHeader, topoheight: TopoHeight) -> Result<(), BlockchainError> {

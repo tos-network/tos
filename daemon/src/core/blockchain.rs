@@ -1345,27 +1345,6 @@ impl<S: Storage> Blockchain<S> {
         Ok((set, score))
     }
 
-    // find the best tip (highest cumulative difficulty)
-    // We get their cumulative difficulty and sort them then take the first one
-    // Legacy: Replaced by find_best_tip_by_blue_work in blockdag module
-    #[allow(dead_code)]
-    async fn find_best_tip<'a, P: DifficultyProvider + DagOrderProvider>(&self, provider: &P, tips: &'a HashSet<Hash>, base: &Hash, base_height: u64) -> Result<&'a Hash, BlockchainError> {
-        if tips.len() == 0 {
-            return Err(BlockchainError::ExpectedTips)
-        }
-
-        let mut scores = Vec::with_capacity(tips.len());
-        for hash in tips {
-            let block_tips = provider.get_past_blocks_for_block_hash(hash).await?;
-            let (_, cumulative_difficulty) = self.find_tip_work_score(provider, hash, block_tips.iter(), None, base, base_height).await?;
-            scores.push((hash, cumulative_difficulty));
-        }
-
-        blockdag::sort_descending_by_cumulative_difficulty(&mut scores);
-        let (best_tip, _) = scores[0];
-        Ok(best_tip)
-    }
-
     // this function generate a DAG paritial order into a full order using recursive calls.
     // hash represents the best tip (highest GHOSTDAG blue work)
     // base represents the block hash of a block already ordered and in stable height
