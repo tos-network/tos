@@ -1,10 +1,10 @@
-# Rusty-Kaspa JSON Test Data Analysis
+# GHOSTDAG JSON Test Data Analysis
 
 ## Executive Summary
 
-This document provides a comprehensive analysis of the six GHOSTDAG test files from rusty-kaspa's integration test suite. These JSON files define DAG topologies with expected GHOSTDAG algorithm outputs for validation purposes.
+This document provides a comprehensive analysis of the six GHOSTDAG test files from reference GHOSTDAG implementations. These JSON files define DAG topologies with expected GHOSTDAG algorithm outputs for validation purposes.
 
-**Test File Sources:** `/Users/tomisetsu/tos-network/rusty-kaspa/testing/integration/testdata/dags/`
+**Test File Sources:** `~/tos-network/rusty-kaspa/testing/integration/testdata/dags/`
 
 ---
 

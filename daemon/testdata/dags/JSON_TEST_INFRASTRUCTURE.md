@@ -8,7 +8,7 @@ This document describes the JSON-based test infrastructure for GHOSTDAG consensu
 
 ### 1. Data Structures (`ghostdag_json_loader.rs`)
 
-Located at: `/Users/tomisetsu/tos-network/tos/daemon/src/core/tests/ghostdag_json_loader.rs`
+Located at: `~/tos-network/tos/daemon/src/core/tests/ghostdag_json_loader.rs`
 
 **Key Structures:**
 
@@ -95,7 +95,7 @@ Located at: `/Users/tomisetsu/tos-network/tos/daemon/src/core/tests/ghostdag_jso
 
 ## Test Data Files
 
-Located at: `/Users/tomisetsu/tos-network/tos/daemon/test_data/ghostdag/`
+Located at: `~/tos-network/tos/daemon/test_data/ghostdag/`
 
 ### simple_chain.json
 
@@ -170,7 +170,7 @@ Located at: `/Users/tomisetsu/tos-network/tos/daemon/test_data/ghostdag/`
 
 ### Field Descriptions
 
-See `/Users/tomisetsu/tos-network/tos/daemon/test_data/ghostdag/README.md` for complete field descriptions.
+See `~/tos-network/tos/daemon/test_data/ghostdag/README.md` for complete field descriptions.
 
 ## Usage
 
