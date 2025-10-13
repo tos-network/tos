@@ -1470,19 +1470,19 @@ impl<S: Storage> Blockchain<S> {
     {
         trace!("get difficulty at tips");
 
-        // Get the height at the tips
-        let height = blockdag::calculate_height_at_tips(provider, tips.clone().into_iter()).await?;
+        // GHOSTDAG: Get the blue_score at the tips
+        let blue_score = blockdag::calculate_blue_score_at_tips(provider, tips.clone().into_iter()).await?;
 
-        // Get the version at the current height
-        let (has_hard_fork, version) = has_hard_fork_at_height(self.get_network(), height);
+        // Get the version at the current blue_score (used as height for version calculation)
+        let (has_hard_fork, version) = has_hard_fork_at_height(self.get_network(), blue_score);
 
         if tips.len() == 0 { // Genesis difficulty
             trace!("genesis difficulty");
             return Ok((GENESIS_BLOCK_DIFFICULTY, difficulty::get_covariance_p(version)))
         }
 
-        // if simulator is enabled or we are too low in height, don't calculate difficulty
-        if height <= 1 || self.is_simulator_enabled() {
+        // if simulator is enabled or we are too low in blue_score, don't calculate difficulty
+        if blue_score <= 1 || self.is_simulator_enabled() {
             let difficulty = difficulty::get_minimum_difficulty(self.get_network(), version);
             return Ok((difficulty, difficulty::get_covariance_p(version)))
         }
@@ -1902,9 +1902,10 @@ impl<S: Storage> Blockchain<S> {
             timestamp = current_timestamp;
         }
 
-        let height = blockdag::calculate_height_at_tips(storage, sorted_tips.iter()).await?;
+        // GHOSTDAG: Use blue_score instead of legacy height
+        let blue_score = blockdag::calculate_blue_score_at_tips(storage, sorted_tips.iter()).await?;
         let sorted_tips_vec: Vec<Hash> = sorted_tips.into_iter().collect();
-        let block = BlockHeader::new_simple(get_version_at_height(self.get_network(), height), sorted_tips_vec, timestamp, extra_nonce, address, Hash::zero());
+        let block = BlockHeader::new_simple(get_version_at_height(self.get_network(), blue_score), sorted_tips_vec, timestamp, extra_nonce, address, Hash::zero());
 
         histogram!("tos_block_header_template_ms").record(start.elapsed().as_millis() as f64);
 
@@ -2201,18 +2202,21 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        let block_height_by_tips = blockdag::calculate_height_at_tips(&*storage, block.get_parents().iter()).await?;
-        if block_height_by_tips != block.get_blue_score() {
-            debug!("Invalid block height {}, expected {} for this block {}", block.get_blue_score(), block_height_by_tips, block_hash);
-            return Err(BlockchainError::InvalidBlockHeight(block_height_by_tips, block.get_blue_score()))
+        // GHOSTDAG: Use blue_score calculation instead of legacy height
+        // This is the correct way to validate block blue_score in a DAG with multiple parents
+        let block_blue_score_by_tips = blockdag::calculate_blue_score_at_tips(&*storage, block.get_parents().iter()).await?;
+        if block_blue_score_by_tips != block.get_blue_score() {
+            debug!("Invalid block blue_score {}, expected {} for this block {} (GHOSTDAG validation)",
+                   block.get_blue_score(), block_blue_score_by_tips, block_hash);
+            return Err(BlockchainError::InvalidBlockHeight(block_blue_score_by_tips, block.get_blue_score()))
         }
 
         let stable_height = self.get_stable_blue_score();
         if tips_count > 0 {
-            debug!("Height by tips: {}, stable height: {}", block_height_by_tips, stable_height);
+            debug!("Blue score by tips: {}, stable blue score: {}", block_blue_score_by_tips, stable_height);
 
-            if block_height_by_tips < stable_height {
-                debug!("Invalid block height by tips {} for this block ({}), its height is in stable height {}", block_height_by_tips, block_hash, stable_height);
+            if block_blue_score_by_tips < stable_height {
+                debug!("Invalid block blue_score by tips {} for this block ({}), its blue_score is in stable height {}", block_blue_score_by_tips, block_hash, stable_height);
                 return Err(BlockchainError::InvalidBlockHeightStableHeight)
             }
         }
@@ -2240,10 +2244,10 @@ impl<S: Storage> Blockchain<S> {
 
             trace!("calculate distance from mainchain for tips: {}", hash);
 
-            // We're processing the block tips, so we can't use the block height as it may not be in the chain yet
-            let height = block_height_by_tips.saturating_sub(1);
+            // We're processing the block tips, so we can't use the block blue_score as it may not be in the chain yet
+            let height = block_blue_score_by_tips.saturating_sub(1);
             if !self.is_near_enough_from_main_chain(&*storage, &hash, height).await? {
-                error!("{} with hash {} have deviated too much (current height: {}, block height: {})", block, block_hash, current_height, block_height_by_tips);
+                error!("{} with hash {} have deviated too much (current blue score: {}, block blue score: {})", block, block_hash, current_height, block_blue_score_by_tips);
                 return Err(BlockchainError::BlockDeviation)
             }
         }

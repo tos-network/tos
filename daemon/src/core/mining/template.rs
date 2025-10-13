@@ -236,9 +236,10 @@ impl BlockTemplateGenerator {
             timestamp = current_timestamp;
         }
 
-        let height = blockdag::calculate_height_at_tips(storage, sorted_tips.iter()).await?;
+        // GHOSTDAG: Use blue_score instead of legacy height
+        let blue_score = blockdag::calculate_blue_score_at_tips(storage, sorted_tips.iter()).await?;
         let sorted_tips_vec: Vec<Hash> = sorted_tips.into_iter().collect();
-        let version = get_version_at_height(&self.network, height);
+        let version = get_version_at_height(&self.network, blue_score);
 
         let block = BlockHeader::new_simple(
             version,

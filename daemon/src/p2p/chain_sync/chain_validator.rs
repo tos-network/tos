@@ -138,11 +138,11 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             return Err(BlockchainError::InvalidBlockVersion)
         }
 
-        // Verify the block height by tips
-        let height_at_tips = blockdag::calculate_height_at_tips(&provider, header.get_parents().iter()).await?;
-        if height_at_tips != header.get_blue_score() {
-            debug!("Block {} has height {} while expected height is {}", hash, header.get_blue_score(), height_at_tips);
-            return Err(BlockchainError::InvalidBlockHeight(height_at_tips, header.get_blue_score()))
+        // GHOSTDAG: Verify the block blue_score by tips
+        let blue_score_at_tips = blockdag::calculate_blue_score_at_tips(&provider, header.get_parents().iter()).await?;
+        if blue_score_at_tips != header.get_blue_score() {
+            debug!("Block {} has blue_score {} while expected blue_score is {}", hash, header.get_blue_score(), blue_score_at_tips);
+            return Err(BlockchainError::InvalidBlockHeight(blue_score_at_tips, header.get_blue_score()))
         }
 
         let tips = header.get_parents();
@@ -165,12 +165,12 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             }
         }
 
-        // Verify the block height by tips
+        // GHOSTDAG: Verify the block blue_score by tips
         {
-            let height_by_tips = blockdag::calculate_height_at_tips(&provider, header.get_parents().iter()).await?;
-            if height_by_tips != header.get_blue_score() {
-                debug!("Block {} has height {} while expected height is {}", hash, header.get_blue_score(), height_by_tips);
-                return Err(BlockchainError::InvalidBlockHeight(height_by_tips, header.get_blue_score()))
+            let blue_score_by_tips = blockdag::calculate_blue_score_at_tips(&provider, header.get_parents().iter()).await?;
+            if blue_score_by_tips != header.get_blue_score() {
+                debug!("Block {} has blue_score {} while expected blue_score is {}", hash, header.get_blue_score(), blue_score_by_tips);
+                return Err(BlockchainError::InvalidBlockHeight(blue_score_by_tips, header.get_blue_score()))
             }
         }
 
