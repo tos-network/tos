@@ -426,8 +426,8 @@ impl<S: Storage> P2pServer<S> {
                 }
 
                 // GHOSTDAG: Verify that peer's chain has higher blue_work than ours
-                // blue_work (not cumulative_difficulty) is the correct metric for DAG consensus
-                if !chain_validator.has_higher_cumulative_difficulty().await? {
+                // blue_work is the correct metric for DAG consensus
+                if !chain_validator.has_higher_blue_work().await? {
                     error!("{} sent us a chain response with lower blue_work than ours (GHOSTDAG consensus)", peer);
                     return Err(BlockchainError::LowerCumulativeDifficulty) // Error name kept for compatibility
                 }

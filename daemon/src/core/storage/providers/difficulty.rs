@@ -3,10 +3,7 @@ use indexmap::IndexSet;
 use tos_common::{
     block::{BlockHeader, BlockVersion},
     crypto::Hash,
-    difficulty::{
-        CumulativeDifficulty,
-        Difficulty
-    },
+    difficulty::Difficulty,
     immutable::Immutable,
     time::TimestampMillis,
     varuint::VarUint
@@ -28,8 +25,9 @@ pub trait DifficultyProvider {
     // Get the difficulty for a block hash
     async fn get_difficulty_for_block_hash(&self, hash: &Hash) -> Result<Difficulty, BlockchainError>;
 
-    // Get the cumulative difficulty for a block hash
-    async fn get_cumulative_difficulty_for_block_hash(&self, hash: &Hash) -> Result<CumulativeDifficulty, BlockchainError>;
+    // Phase 2: get_cumulative_difficulty_for_block_hash REMOVED
+    // Migration Note: Use GHOSTDAG blue_work instead via GhostdagDataProvider::get_ghostdag_blue_work()
+    // RPC layer calculates cumulative_difficulty on-the-fly from blue_work for backward compatibility
 
     // Get past blocks (block tips) for a specific block hash
     async fn get_past_blocks_for_block_hash(&self, hash: &Hash) -> Result<Immutable<IndexSet<Hash>>, BlockchainError>;

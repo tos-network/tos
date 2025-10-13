@@ -2,7 +2,6 @@ use indexmap::IndexSet;
 use tos_common::{
     api::daemon::{NotifyEvent, PeerPeerListUpdatedEvent, TimedDirection},
     crypto::Hash,
-    difficulty::CumulativeDifficulty,
     serializer::{
         Reader,
         ReaderError,
@@ -15,6 +14,7 @@ use crate::{
     config::P2P_PING_PEER_LIST_LIMIT,
     core::{
         blockchain::Blockchain,
+        ghostdag::BlueWorkType,
         storage::Storage
     },
     p2p::{
@@ -32,24 +32,27 @@ use std::{
 };
 use log::{error, trace, debug};
 
+/// GHOSTDAG Ping packet using blue_work for chain selection
+/// blue_work represents the cumulative work of all blue blocks in the GHOSTDAG consensus
 #[derive(Clone, Debug)]
 pub struct Ping<'a> {
     top_hash: Cow<'a, Hash>,
     topoheight: u64,
     height: u64,
     pruned_topoheight: Option<u64>,
-    cumulative_difficulty: CumulativeDifficulty,
+    blue_work: BlueWorkType, // GHOSTDAG: Used for chain selection (replaces cumulative_difficulty)
     peer_list: IndexSet<SocketAddr>
 }
 
 impl<'a> Ping<'a> {
-    pub fn new(top_hash: Cow<'a, Hash>, topoheight: u64, height: u64, pruned_topoheight: Option<u64>, cumulative_difficulty: CumulativeDifficulty, peer_list: IndexSet<SocketAddr>) -> Self {
+    /// Create a new Ping packet with GHOSTDAG blue_work for chain selection
+    pub fn new(top_hash: Cow<'a, Hash>, topoheight: u64, height: u64, pruned_topoheight: Option<u64>, blue_work: BlueWorkType, peer_list: IndexSet<SocketAddr>) -> Self {
         Self {
             top_hash,
             topoheight,
             height,
             pruned_topoheight,
-            cumulative_difficulty,
+            blue_work,
             peer_list
         }
     }
@@ -78,7 +81,7 @@ impl<'a> Ping<'a> {
         }
 
         peer.set_pruned_topoheight(self.pruned_topoheight);
-        peer.set_cumulative_difficulty(self.cumulative_difficulty).await;
+        peer.set_blue_work(self.blue_work).await;
 
         if peer.sharable() {
             trace!("Locking RPC Server to notify PeerStateUpdated event");
@@ -167,7 +170,7 @@ impl Serializer for Ping<'_> {
         writer.write_u64(&self.topoheight);
         writer.write_u64(&self.height);
         self.pruned_topoheight.write(writer);
-        self.cumulative_difficulty.write(writer);
+        self.blue_work.write(writer);
         writer.write_u8(self.peer_list.len() as u8);
         for peer in &self.peer_list {
             peer.write(writer);
@@ -185,7 +188,7 @@ impl Serializer for Ping<'_> {
                 return Err(ReaderError::InvalidValue)
             }
         }
-        let cumulative_difficulty = CumulativeDifficulty::read(reader)?;
+        let blue_work = BlueWorkType::read(reader)?;
         let peers_len = reader.read_u8()? as usize;
         if peers_len > P2P_PING_PEER_LIST_LIMIT {
             debug!("Too much peers sent in this ping packet: received {} while max is {}", peers_len, P2P_PING_PEER_LIST_LIMIT);
@@ -201,7 +204,7 @@ impl Serializer for Ping<'_> {
             }
         }
 
-        Ok(Self { top_hash, topoheight, height, pruned_topoheight, cumulative_difficulty, peer_list })
+        Ok(Self { top_hash, topoheight, height, pruned_topoheight, blue_work, peer_list })
     }
 
     fn size(&self) -> usize {
@@ -209,7 +212,7 @@ impl Serializer for Ping<'_> {
         self.topoheight.size() +
         self.height.size() +
         self.pruned_topoheight.size() +
-        self.cumulative_difficulty.size() +
+        self.blue_work.size() +
         // u8 for the length of the peer list
         1 +
         self.peer_list.iter().map(|p| p.size()).sum::<usize>()

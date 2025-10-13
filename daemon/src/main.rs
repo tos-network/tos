@@ -264,10 +264,12 @@ async fn main() -> Result<()> {
             };
 
             let storage = SledStorage::new(dir_path.to_owned(), use_cache, config.network, blockchain_config.sled.internal_cache_size, blockchain_config.sled.internal_db_mode)?;
+
             start_chain(prompt, storage, config).await
         },
         StorageBackend::RocksDB => {
             let storage = RocksStorage::new(&dir_path, config.network, &blockchain_config.rocksdb);
+
             start_chain(prompt, storage, config).await
         }
     }

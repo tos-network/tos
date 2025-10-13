@@ -49,8 +49,7 @@ use tos_common::{
         TopoHeight,
     },
     config::{TIPS_LIMIT, VERSION},
-    crypto::{Hash, Hashable},
-    difficulty::CumulativeDifficulty,
+    crypto::{Hash, Hashable, BlueWorkType},
     immutable::Immutable,
     serializer::Serializer,
     time::{
@@ -590,7 +589,7 @@ impl<S: Storage> P2pServer<S> {
         let (block, top_hash) = storage.get_top_block_header().await?;
         let topoheight = self.blockchain.get_topo_height();
         let pruned_topoheight = storage.get_pruned_topoheight().await?;
-        let cumulative_difficulty = storage.get_cumulative_difficulty_for_block_hash(&top_hash).await?;
+        let blue_work = storage.get_ghostdag_blue_work(&top_hash).await?;
         let genesis_block = match get_genesis_block_hash(self.blockchain.get_network()) {
             Some(hash) => Cow::Borrowed(hash),
             None => {
@@ -598,7 +597,7 @@ impl<S: Storage> P2pServer<S> {
                 Cow::Owned(storage.get_hash_at_topo_height(0).await?)
             }
         };
-        let handshake = Handshake::new(Cow::Owned(VERSION.to_owned()), *self.blockchain.get_network(), Cow::Borrowed(self.get_tag()), Cow::Borrowed(&NETWORK_ID), self.get_peer_id(), self.bind_address.port(), get_current_time_in_seconds(), topoheight, block.get_blue_score(), pruned_topoheight, Cow::Borrowed(&top_hash), genesis_block, Cow::Borrowed(&cumulative_difficulty), self.sharable);
+        let handshake = Handshake::new(Cow::Owned(VERSION.to_owned()), *self.blockchain.get_network(), Cow::Borrowed(self.get_tag()), Cow::Borrowed(&NETWORK_ID), self.get_peer_id(), self.bind_address.port(), get_current_time_in_seconds(), topoheight, block.get_blue_score(), pruned_topoheight, Cow::Borrowed(&top_hash), genesis_block, Cow::Borrowed(&blue_work), self.sharable);
         Ok(Packet::Handshake(Cow::Owned(handshake)).to_bytes())
     }
 
@@ -796,16 +795,16 @@ impl<S: Storage> P2pServer<S> {
     async fn build_generic_ping_packet_with_storage(&self, storage: &S) -> Result<Ping<'_>, P2pError> {
         debug!("building generic ping packet");
         counter!("tos_p2p_ping_total").increment(1u64);
-        let (cumulative_difficulty, block_top_hash, pruned_topoheight) = {
+        let (blue_work, block_top_hash, pruned_topoheight) = {
             let pruned_topoheight = storage.get_pruned_topoheight().await?;
             let top_block_hash = storage.get_top_block_hash().await?;
-            let cumulative_difficulty = storage.get_cumulative_difficulty_for_block_hash(&top_block_hash).await?;
-            (cumulative_difficulty, top_block_hash, pruned_topoheight)
+            let blue_work = storage.get_ghostdag_blue_work(&top_block_hash).await?;
+            (blue_work, top_block_hash, pruned_topoheight)
         };
         let highest_topo_height = self.blockchain.get_topo_height();
         let highest_height = self.blockchain.get_blue_score();
         let new_peers = IndexSet::new();
-        Ok(Ping::new(Cow::Owned(block_top_hash), highest_topo_height, highest_height, pruned_topoheight, cumulative_difficulty, new_peers))
+        Ok(Ping::new(Cow::Owned(block_top_hash), highest_topo_height, highest_height, pruned_topoheight, blue_work, new_peers))
     }
 
     // Build a generic ping packet
@@ -819,28 +818,28 @@ impl<S: Storage> P2pServer<S> {
 
     // select a random peer which is greater than us to sync chain
     // candidate peer should have a greater topoheight or a higher block height than us
-    // It must also have a greater cumulative difficulty than us
-    // Cumulative difficulty is used in case two chains are running at same speed
+    // It must also have a greater blue_work than us (GHOSTDAG consensus metric)
+    // blue_work is used in case two chains are running at same speed
     // We must determine which one has the most work done
     // if we are not in fast sync mode, we must verify its pruned topoheight to be sure
     // he have the blocks we need
     async fn select_random_best_peer(&self, fast_sync: bool, previous_peer: Option<(u64, bool, bool)>) -> Result<Option<Arc<Peer>>, BlockchainError> {
         trace!("select random best peer");
 
-        // Search our cumulative difficulty
-        let (our_height, our_topoheight, our_cumulative_difficulty) = {
-            debug!("locking storage to search our cumulative difficulty");
+        // Search our blue_work (GHOSTDAG consensus metric)
+        let (our_height, our_topoheight, our_blue_work) = {
+            debug!("locking storage to search our blue_work");
             let storage = self.blockchain.get_storage().read().await;
 
             // We read those after having the storage locked to prevent issue
             let our_height = self.blockchain.get_blue_score();
             let our_topoheight = self.blockchain.get_topo_height();
 
-            debug!("storage locked for cumulative difficulty");
+            debug!("storage locked for blue_work");
             let hash = storage.get_hash_at_topo_height(our_topoheight).await?;
-            let our_cumulative_difficulty = storage.get_cumulative_difficulty_for_block_hash(&hash).await?;
+            let our_blue_work = storage.get_ghostdag_blue_work(&hash).await?;
 
-            (our_height, our_topoheight, our_cumulative_difficulty)
+            (our_height, our_topoheight, our_blue_work)
         };
 
         debug!("cloning peer list for select random best peer");
@@ -852,11 +851,11 @@ impl<S: Storage> P2pServer<S> {
 
         let mut peers = stream::iter(available_peers)
             .map(|p| async move {
-                // Avoid selecting peers that have a weaker cumulative difficulty than us
+                // Avoid selecting peers that have a weaker blue_work than us
                 {
-                    let cumulative_difficulty = p.get_cumulative_difficulty().lock().await;
-                    if *cumulative_difficulty <= our_cumulative_difficulty {
-                        trace!("{} has a lower cumulative difficulty than us, skipping...", p);
+                    let blue_work = p.get_blue_work().lock().await;
+                    if *blue_work <= our_blue_work {
+                        trace!("{} has a lower blue_work than us, skipping...", p);
                         return None;
                     }
                 }
@@ -2345,21 +2344,20 @@ impl<S: Storage> P2pServer<S> {
                                 let our_topoheight = self.blockchain.get_topo_height();
                                 let our_height = self.blockchain.get_blue_score();
 
-                                // Try to get pruned topoheight from storage
-                                let pruned_topoheight = {
+                                // Get pruned topoheight and blue_work from storage
+                                let (pruned_topoheight, blue_work) = {
                                     let storage = self.blockchain.get_storage().read().await;
-                                    storage.get_pruned_topoheight().await.ok().flatten()
+                                    let pruned_topoheight = storage.get_pruned_topoheight().await.ok().flatten();
+                                    let blue_work = storage.get_ghostdag_blue_work(&top_hash).await.unwrap_or_else(|_| BlueWorkType::zero());
+                                    (pruned_topoheight, blue_work)
                                 };
-
-                                // Get cumulative difficulty from top block
-                                let cumulative_difficulty = self.blockchain.get_difficulty().await;
 
                                 let ping = Ping::new(
                                     Cow::Borrowed(&top_hash),
                                     our_topoheight,
                                     our_height,
                                     pruned_topoheight,
-                                    cumulative_difficulty,
+                                    blue_work,
                                     IndexSet::new()
                                 );
 
@@ -2769,22 +2767,22 @@ impl<S: Storage> P2pServer<S> {
     }
 
     // broadcast block to all peers that can accept directly this new block
-    pub async fn broadcast_block(&self, block: &BlockHeader, cumulative_difficulty: CumulativeDifficulty, our_topoheight: u64, our_height: u64, pruned_topoheight: Option<u64>, hash: Arc<Hash>, is_from_mining: bool) {
+    pub async fn broadcast_block(&self, block: &BlockHeader, blue_work: BlueWorkType, our_topoheight: u64, our_height: u64, pruned_topoheight: Option<u64>, hash: Arc<Hash>, is_from_mining: bool) {
         debug!("Building the ping packet for broadcast block {}", hash);
         // we build the ping packet ourself this time (we have enough data for it)
         // because this function can be call from Blockchain, which would lead to a deadlock
-        let ping = Ping::new(Cow::Borrowed(&hash), our_topoheight, our_height, pruned_topoheight, cumulative_difficulty, IndexSet::new());
+        let ping = Ping::new(Cow::Borrowed(&hash), our_topoheight, our_height, pruned_topoheight, blue_work, IndexSet::new());
         self.broadcast_block_with_ping(block, ping, &hash, is_from_mining, true).await;
     }
 
     // Broadcast a compact block (bandwidth-efficient block propagation)
     // This should be called with the full block (header + transactions)
-    pub async fn broadcast_compact_block(&self, full_block: &tos_common::block::Block, cumulative_difficulty: CumulativeDifficulty, our_topoheight: u64, our_height: u64, pruned_topoheight: Option<u64>, hash: Arc<Hash>, is_from_mining: bool) {
+    pub async fn broadcast_compact_block(&self, full_block: &tos_common::block::Block, blue_work: BlueWorkType, our_topoheight: u64, our_height: u64, pruned_topoheight: Option<u64>, hash: Arc<Hash>, is_from_mining: bool) {
         // Check if compact blocks are enabled
         if !self.compact_blocks_enabled {
             debug!("Compact blocks disabled, falling back to full block broadcast for {}", hash);
             // Fall back to full block broadcast (header only)
-            self.broadcast_block(full_block.get_header(), cumulative_difficulty, our_topoheight, our_height, pruned_topoheight, hash, is_from_mining).await;
+            self.broadcast_block(full_block.get_header(), blue_work, our_topoheight, our_height, pruned_topoheight, hash, is_from_mining).await;
             return;
         }
 
@@ -2801,7 +2799,7 @@ impl<S: Storage> P2pServer<S> {
             hash, nonce, compact_block.short_tx_ids.len(), compact_block.prefilled_txs.len());
 
         // Build ping packet
-        let ping = Ping::new(Cow::Borrowed(&hash), our_topoheight, our_height, pruned_topoheight, cumulative_difficulty, IndexSet::new());
+        let ping = Ping::new(Cow::Borrowed(&hash), our_topoheight, our_height, pruned_topoheight, blue_work, IndexSet::new());
 
         // Broadcast compact block with ping
         self.broadcast_compact_block_with_ping(compact_block, ping, &hash, is_from_mining, true).await;

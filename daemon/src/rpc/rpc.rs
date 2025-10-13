@@ -49,10 +49,7 @@ use tos_common::{
     },
     context::Context,
     crypto::{Address, AddressType, Hash, Hashable, elgamal::CompressedPublicKey},
-    difficulty::{
-        CumulativeDifficulty,
-        Difficulty
-    },
+    difficulty::Difficulty,
     immutable::Immutable,
     rpc::{
         parse_params,
@@ -86,7 +83,7 @@ pub async fn get_block_type_for_block<S: Storage, P: DifficultyProvider + DagOrd
     })
 }
 
-async fn get_block_data<S: Storage, P>(blockchain: &Blockchain<S>, provider: &P, hash: &Hash) -> Result<(Option<TopoHeight>, Option<u64>, Option<u64>, BlockType, CumulativeDifficulty, Difficulty), InternalRpcError>
+async fn get_block_data<S: Storage, P>(blockchain: &Blockchain<S>, provider: &P, hash: &Hash) -> Result<(Option<TopoHeight>, Option<u64>, Option<u64>, BlockType, tos_common::crypto::BlueWorkType, Difficulty), InternalRpcError>
 where
     P: DifficultyProvider
     + DagOrderProvider
@@ -111,10 +108,11 @@ where
     };
 
     let block_type = get_block_type_for_block(&blockchain, &*provider, hash).await?;
-    let cumulative_difficulty = provider.get_cumulative_difficulty_for_block_hash(hash).await.context("Error while retrieving cumulative difficulty")?;
+    // Get blue_work from GHOSTDAG data
+    let blue_work = provider.get_ghostdag_blue_work(hash).await.context("Error while retrieving blue_work")?;
     let difficulty = provider.get_difficulty_for_block_hash(&hash).await.context("Error while retrieving difficulty")?;
 
-    Ok((topoheight, supply, reward, block_type, cumulative_difficulty, difficulty))
+    Ok((topoheight, supply, reward, block_type, blue_work, difficulty))
 }
 
 pub async fn get_block_response<S: Storage, P>(blockchain: &Blockchain<S>, provider: &P, hash: &Hash, block: &Block, total_size_in_bytes: usize) -> Result<Value, InternalRpcError>
@@ -127,7 +125,7 @@ where
     + ClientProtocolProvider
     + GhostdagDataProvider
 {
-    let (topoheight, supply, reward, block_type, cumulative_difficulty, difficulty) = get_block_data(blockchain, provider, hash).await?;
+    let (topoheight, supply, reward, block_type, blue_work, difficulty) = get_block_data(blockchain, provider, hash).await?;
     let mut total_fees = 0;
     if block_type != BlockType::Orphaned {
         for tx in block.get_transactions().iter() {
@@ -169,7 +167,7 @@ where
         hash: Cow::Borrowed(hash),
         topoheight,
         block_type,
-        cumulative_difficulty: Cow::Borrowed(&cumulative_difficulty),
+        blue_work: Cow::Borrowed(&blue_work),
         difficulty: Cow::Borrowed(&difficulty),
         supply,
         reward,
@@ -218,7 +216,7 @@ pub async fn get_block_response_for_hash<S: Storage>(blockchain: &Blockchain<S>,
         let total_size_in_bytes = block.size();
         get_block_response(blockchain, storage, hash, &block, total_size_in_bytes).await?
     } else {
-        let (topoheight, supply, reward, block_type, cumulative_difficulty, difficulty) = get_block_data(blockchain, storage, hash).await?;
+        let (topoheight, supply, reward, block_type, blue_work, difficulty) = get_block_data(blockchain, storage, hash).await?;
         let block = storage.get_block_by_hash(&hash).await.context("Error while retrieving full block")?;
         let header = block.get_header();
 
@@ -236,11 +234,12 @@ pub async fn get_block_response_for_hash<S: Storage>(blockchain: &Blockchain<S>,
 
         let txs_hashes: indexmap::IndexSet<Hash> = block.get_transactions().iter().map(|tx| tx.hash()).collect();
         let tips: indexmap::IndexSet<Hash> = header.get_parents().iter().cloned().collect();
-        json!(RPCBlockResponse {
+
+        let response = RPCBlockResponse {
             hash: Cow::Borrowed(hash),
             topoheight,
             block_type,
-            cumulative_difficulty: Cow::Owned(cumulative_difficulty),
+            blue_work: Cow::Owned(blue_work),
             difficulty: Cow::Owned(difficulty),
             supply,
             reward,
@@ -257,7 +256,9 @@ pub async fn get_block_response_for_hash<S: Storage>(blockchain: &Blockchain<S>,
             tips: Cow::Owned(tips),
             txs_hashes: Cow::Owned(txs_hashes),
             transactions: Vec::with_capacity(0),
-        })
+        };
+
+        json!(response)
     };
 
     Ok(value)
@@ -295,7 +296,7 @@ pub async fn get_transaction_response_for_hash<S: Storage>(storage: &S, mempool:
 pub async fn get_peer_entry(peer: &Peer) -> PeerEntry<'_> {
     let top_block_hash = { peer.get_top_block_hash().lock().await.clone() };
     let peers = { peer.get_peers().lock().await.clone() };
-    let cumulative_difficulty = { peer.get_cumulative_difficulty().lock().await.clone() };
+    let blue_work = { peer.get_blue_work().lock().await.clone() };
     PeerEntry {
         id: peer.get_id(),
         addr: Cow::Borrowed(peer.get_connection().get_address()),
@@ -308,7 +309,7 @@ pub async fn get_peer_entry(peer: &Peer) -> PeerEntry<'_> {
         last_ping: peer.get_last_ping(),
         peers: Cow::Owned(peers.into_iter().collect()),
         pruned_topoheight: peer.get_pruned_topoheight(),
-        cumulative_difficulty: Cow::Owned(cumulative_difficulty),
+        blue_work: Cow::Owned(blue_work),
         connected_on: peer.get_connection().connected_on(),
         bytes_recv: peer.get_connection().bytes_in(),
         bytes_sent: peer.get_connection().bytes_out(),

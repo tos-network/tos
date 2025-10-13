@@ -4,10 +4,7 @@ use log::trace;
 use tos_common::{
     block::{BlockHeader, BlockVersion},
     crypto::Hash,
-    difficulty::{
-        CumulativeDifficulty,
-        Difficulty
-    },
+    difficulty::Difficulty,
     immutable::Immutable,
     time::TimestampMillis,
     varuint::VarUint
@@ -43,10 +40,8 @@ impl DifficultyProvider for SledStorage {
         self.load_from_disk(&self.difficulty, hash.as_bytes(), DiskContext::DifficultyForBlockHash)
     }
 
-    async fn get_cumulative_difficulty_for_block_hash(&self, hash: &Hash) -> Result<CumulativeDifficulty, BlockchainError> {
-        trace!("get cumulative difficulty for hash {}", hash);
-        self.get_cacheable_data(&self.cumulative_difficulty, &self.cumulative_difficulty_cache, hash, DiskContext::CumulativeDifficultyForBlockHash).await
-    }
+    // Phase 2: get_cumulative_difficulty_for_block_hash method removed
+    // Use GhostdagDataProvider::get_ghostdag_blue_work() instead
 
     async fn get_past_blocks_for_block_hash(&self, hash: &Hash) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
         trace!("get past blocks of {}", hash);

@@ -1258,92 +1258,6 @@ impl<S: Storage> Blockchain<S> {
         Ok(true)
     }
 
-    // Find tip work score internal for a block hash
-    // this will recursively find all tips and their difficulty
-    async fn find_tip_work_score_internal<'a, P>(&self, provider: &P, map: &mut HashMap<Hash, CumulativeDifficulty>, hash: &'a Hash, base_topoheight: TopoHeight) -> Result<(), BlockchainError>
-    where
-        P: DifficultyProvider + DagOrderProvider
-    {
-        trace!("Finding tip work score for {}", hash);
-
-        let mut stack: VecDeque<Hash> = VecDeque::new();
-        stack.push_back(hash.clone());
-
-        while let Some(current_hash) = stack.pop_back() {
-            let tips = provider.get_past_blocks_for_block_hash(&current_hash).await?;
-
-            for tip_hash in tips.iter() {
-                if !map.contains_key(tip_hash) {
-                    let is_ordered = provider.is_block_topological_ordered(tip_hash).await?;
-                    if !is_ordered || (is_ordered && provider.get_topo_height_for_hash(tip_hash).await? >= base_topoheight) {
-                        stack.push_back(tip_hash.clone());
-                    }
-                }
-            }
-
-            if !map.contains_key(&current_hash) {
-                map.insert(current_hash.clone(), provider.get_difficulty_for_block_hash(&current_hash).await?.into());
-            }
-        }
-    
-        Ok(())
-    }
-
-    // find the sum of work done
-    pub async fn find_tip_work_score<P>(
-        &self,
-        provider: &P,
-        block_hash: &Hash,
-        block_tips: impl Iterator<Item = &Hash>,
-        block_difficulty: Option<Difficulty>,
-        base_block: &Hash,
-        base_block_height: u64
-    ) -> Result<(HashSet<Hash>, CumulativeDifficulty), BlockchainError>
-    where
-        P: DifficultyProvider + DagOrderProvider
-    {
-        trace!("find tip work score for {} at base {}", block_hash, base_block);
-        let mut cache = self.tip_work_score_cache.lock().await;
-        if let Some(value) = cache.get(&(block_hash.clone(), base_block.clone(), base_block_height)) {
-            trace!("Found tip work score in cache: set [{}], height: {}", value.0.iter().map(|h| h.to_string()).collect::<Vec<String>>().join(", "), value.1);
-            return Ok(value.clone())
-        }
-
-        let mut map: HashMap<Hash, CumulativeDifficulty> = HashMap::new();
-        let block_difficulty = if let Some(diff) = block_difficulty {
-            diff
-        } else {
-            provider.get_difficulty_for_block_hash(&block_hash).await?
-        };
-
-        map.insert(block_hash.clone(), block_difficulty);
-
-        let base_topoheight = provider.get_topo_height_for_hash(base_block).await?;
-        for hash in block_tips {
-            if !map.contains_key(hash) {
-                let is_ordered = provider.is_block_topological_ordered(hash).await?;
-                if !is_ordered || (is_ordered && provider.get_topo_height_for_hash(hash).await? >= base_topoheight) {
-                    self.find_tip_work_score_internal(provider, &mut map, hash, base_topoheight).await?;
-                }
-            }
-        }
-
-        if base_block != block_hash {
-            map.insert(base_block.clone(), provider.get_cumulative_difficulty_for_block_hash(base_block).await?);
-        }
-
-        let mut set = HashSet::with_capacity(map.len());
-        let mut score = CumulativeDifficulty::zero();
-        for (hash, value) in map {
-            set.insert(hash);
-            score += value;
-        }
-
-        // save this result in cache
-        cache.put((block_hash.clone(), base_block.clone(), base_block_height), (set.clone(), score));
-
-        Ok((set, score))
-    }
 
     // this function generate a DAG paritial order into a full order using recursive calls.
     // hash represents the best tip (highest GHOSTDAG blue work)
@@ -2483,26 +2397,12 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        // Compute cumulative difficulty for block (for P2P protocol compatibility)
-        // TODO: Migrate P2P protocol to use GHOSTDAG blue_work directly
-        // We retrieve it to pass it as a param below for p2p broadcast
-        let cumulative_difficulty: CumulativeDifficulty = if tips_count == 0 {
-            GENESIS_BLOCK_DIFFICULTY.into()
-        } else {
-            debug!("Computing cumulative difficulty for block {}", block_hash);
-            let tips_vec = block.get_parents();
-            let (base, base_height) = self.find_common_base(&*storage, tips_vec).await?;
-            debug!("Common base found: {}, height: {}, calculating cumulative difficulty", base, base_height);
-            self.find_tip_work_score(
-                &*storage,
-                &block_hash,
-                block.get_parents().iter(),
-                Some(difficulty),
-                &base,
-                base_height
-            ).await?.1
-        };
-        debug!("Cumulative difficulty for block {}: {}", block_hash, cumulative_difficulty);
+        // Get GHOSTDAG blue_work for P2P protocol (replaces cumulative_difficulty)
+        // Now using GHOSTDAG blue_work directly for P2P broadcast
+        let blue_work = storage.get_ghostdag_blue_work(&block_hash).await?;
+        debug!("Blue work for block {}: {}", block_hash, blue_work);
+
+        // Phase 2: cumulative_difficulty no longer stored - blue_work is used directly
 
         // Clone full block for compact block broadcast (before split)
         let full_block_for_broadcast = block.clone();
@@ -2520,11 +2420,12 @@ impl<S: Storage> Blockchain<S> {
                 let pruned_topoheight = storage.get_pruned_topoheight().await?;
                 let block_hash = block_hash.clone();
                 let block_height = full_block_for_broadcast.get_header().get_blue_score();
+                let blue_work_for_broadcast = blue_work;
                 spawn_task("broadcast-compact-block", async move {
                     // Use compact blocks for bandwidth efficiency
                     p2p.broadcast_compact_block(
                         &full_block_for_broadcast,
-                        cumulative_difficulty,
+                        blue_work_for_broadcast,
                         current_topoheight,
                         current_height.max(block_height),
                         pruned_topoheight,
@@ -2658,7 +2559,8 @@ impl<S: Storage> Blockchain<S> {
         {
             debug!("Saving block {} on disk", block_hash);
             let start = Instant::now();
-            storage.save_block(block.clone(), &txs, difficulty, cumulative_difficulty, p, Immutable::Arc(block_hash.clone())).await?;
+            // Phase 2: cumulative_difficulty parameter removed from save_block
+            storage.save_block(block.clone(), &txs, difficulty, p, Immutable::Arc(block_hash.clone())).await?;
             storage.add_block_execution_to_order(&block_hash).await?;
 
             histogram!("tos_block_store_ms").record(start.elapsed().as_millis() as f64);

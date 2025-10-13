@@ -6,9 +6,8 @@ use std::sync::Arc;
 use tos_common::crypto::Hash;
 use tos_common::serializer::{Reader, ReaderError, Serializer, Writer};
 
-/// Blue work type - represents cumulative work in the blue chain
-/// Using U256 to support very large work values
-pub type BlueWorkType = primitive_types::U256;
+/// Re-export BlueWorkType from common (includes Serializer implementation)
+pub use tos_common::crypto::BlueWorkType;
 
 /// K-cluster parameter type
 /// Defines the maximum anticone size for blue blocks

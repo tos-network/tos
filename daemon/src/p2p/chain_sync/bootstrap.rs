@@ -314,7 +314,7 @@ impl<S: Storage> P2pServer<S> {
                         let burned_supply = storage.get_burned_supply_at_topo_height(topoheight).await?;
                         let reward = storage.get_block_reward_at_topo_height(topoheight)?;
                         let difficulty = storage.get_difficulty_for_block_hash(&hash).await?;
-                        let cumulative_difficulty = storage.get_cumulative_difficulty_for_block_hash(&hash).await?;
+                        let blue_work = storage.get_ghostdag_blue_work(&hash).await?;
                         let p = storage.get_estimated_covariance_for_block_hash(&hash).await?;
 
                         // Also track all executions
@@ -329,7 +329,7 @@ impl<S: Storage> P2pServer<S> {
                             }
                         }
 
-                        Ok::<_, BlockchainError>(BlockMetadata { hash, supply, burned_supply, reward, difficulty, cumulative_difficulty, p, executed_transactions })
+                        Ok::<_, BlockchainError>(BlockMetadata { hash, supply, burned_supply, reward, difficulty, blue_work, p, executed_transactions })
                     })
                     .buffered(self.stream_concurrency)
                     .try_collect()
@@ -547,7 +547,8 @@ impl<S: Storage> P2pServer<S> {
                             }
 
                             // save the block with its transactions, difficulty
-                            storage.save_block(header.into_arc(), &txs, metadata.difficulty, metadata.cumulative_difficulty, metadata.p, Immutable::Owned(hash)).await?;
+                            // Phase 2: cumulative_difficulty parameter removed from save_block
+                            storage.save_block(header.into_arc(), &txs, metadata.difficulty, metadata.p, Immutable::Owned(hash)).await?;
 
                             Ok(())
                         }).await?;

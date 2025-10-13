@@ -17,8 +17,8 @@ use tos_vm::ValueCell;
 use crate::{
     account::{Nonce, CiphertextCache, VersionedBalance, VersionedNonce},
     block::{TopoHeight, Algorithm, BlockVersion, EXTRA_NONCE_SIZE},
-    crypto::{Address, Hash},
-    difficulty::{CumulativeDifficulty, Difficulty},
+    crypto::{Address, Hash, BlueWorkType},
+    difficulty::Difficulty,
     network::Network,
     time::{TimestampMillis, TimestampSeconds},
     transaction::extra_data::{SharedKey, UnknownExtraDataFormat},
@@ -82,7 +82,7 @@ pub struct RPCBlockResponse<'a> {
     pub miner_reward: Option<u64>,
     // And Dev Fee reward if enabled
     pub dev_reward: Option<u64>,
-    pub cumulative_difficulty: Cow<'a, CumulativeDifficulty>,
+    pub blue_work: Cow<'a, BlueWorkType>,
     pub total_fees: Option<u64>,
     pub total_size_in_bytes: usize,
     pub version: BlockVersion,
@@ -395,7 +395,7 @@ pub struct PeerEntry<'a> {
     pub last_ping: TimestampSeconds,
     pub pruned_topoheight: Option<TopoHeight>,
     pub peers: Cow<'a, HashMap<SocketAddr, TimedDirection>>,
-    pub cumulative_difficulty: Cow<'a, CumulativeDifficulty>,
+    pub blue_work: Cow<'a, BlueWorkType>,
     pub connected_on: TimestampSeconds,
     pub bytes_sent: usize,
     pub bytes_recv: usize,

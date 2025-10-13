@@ -4,7 +4,7 @@ use log::trace;
 use tos_common::{
     block::{Block, BlockHeader},
     crypto::{Hash, Hashable},
-    difficulty::{CumulativeDifficulty, Difficulty},
+    difficulty::Difficulty,
     immutable::Immutable,
     transaction::Transaction,
     varuint::VarUint
@@ -66,7 +66,7 @@ impl BlockProvider for RocksStorage {
     // Save a new block with its transactions and difficulty
     // Hash is Immutable to be stored efficiently in caches and sharing the same object
     // with others caches (like P2p or GetWork)
-    async fn save_block(&mut self, block: Arc<BlockHeader>, txs: &[Arc<Transaction>], difficulty: Difficulty, cumulative_difficulty: CumulativeDifficulty, covariance: VarUint, hash: Immutable<Hash>) -> Result<(), BlockchainError> {
+    async fn save_block(&mut self, block: Arc<BlockHeader>, txs: &[Arc<Transaction>], difficulty: Difficulty, covariance: VarUint, hash: Immutable<Hash>) -> Result<(), BlockchainError> {
         trace!("save block");
 
         let mut count_txs = 0;
@@ -84,7 +84,6 @@ impl BlockProvider for RocksStorage {
         let block_difficulty = BlockDifficulty {
             covariance,
             difficulty,
-            cumulative_difficulty
         };
         // V-22 Fix: Use fsync for critical block difficulty data
         self.insert_into_disk_sync(Column::BlockDifficulty, hash.as_bytes(), &block_difficulty)?;

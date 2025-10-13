@@ -1,7 +1,6 @@
 use log::debug;
 use tos_common::{
-    crypto::Hash,
-    difficulty::CumulativeDifficulty,
+    crypto::{Hash, BlueWorkType},
     network::Network,
     serializer::{Reader, ReaderError, Serializer, Writer},
     time::TimestampSeconds
@@ -50,8 +49,8 @@ pub struct Handshake<'a> {
     top_hash: Cow<'a, Hash>,
     // genesis hash
     genesis_hash: Cow<'a, Hash>,
-    // cumulative difficulty of its chain at top
-    cumulative_difficulty: Cow<'a, CumulativeDifficulty>,
+    // GHOSTDAG blue_work of its chain at top (used for chain selection)
+    blue_work: Cow<'a, BlueWorkType>,
     // By default it's true, and peer allow to be shared to others and/or through API
     // If false, we must not share it
     can_be_shared: bool
@@ -60,7 +59,7 @@ pub struct Handshake<'a> {
 impl<'a> Handshake<'a> {
     pub const MAX_LEN: usize = 16;
 
-    pub fn new(version: Cow<'a, String>, network: Network, node_tag: Cow<'a, Option<String>>, network_id: Cow<'a, [u8; 16]>, peer_id: u64, local_port: u16, utc_time: TimestampSeconds, topoheight: u64, height: u64, pruned_topoheight: Option<u64>, top_hash: Cow<'a, Hash>, genesis_hash: Cow<'a, Hash>, cumulative_difficulty: Cow<'a, CumulativeDifficulty>, can_be_shared: bool) -> Self {
+    pub fn new(version: Cow<'a, String>, network: Network, node_tag: Cow<'a, Option<String>>, network_id: Cow<'a, [u8; 16]>, peer_id: u64, local_port: u16, utc_time: TimestampSeconds, topoheight: u64, height: u64, pruned_topoheight: Option<u64>, top_hash: Cow<'a, Hash>, genesis_hash: Cow<'a, Hash>, blue_work: Cow<'a, BlueWorkType>, can_be_shared: bool) -> Self {
         debug_assert!(version.len() > 0 && version.len() <= Handshake::MAX_LEN);
         // version cannot be greater than 16 chars
         if let Some(node_tag) = node_tag.as_ref() {
@@ -81,7 +80,7 @@ impl<'a> Handshake<'a> {
             pruned_topoheight,
             top_hash,
             genesis_hash,
-            cumulative_difficulty,
+            blue_work,
             can_be_shared
         }
     }
@@ -99,7 +98,7 @@ impl<'a> Handshake<'a> {
             self.height,
             self.pruned_topoheight,
             priority,
-            self.cumulative_difficulty.into_owned(),
+            self.blue_work.into_owned(),
             peer_list,
             self.can_be_shared,
             propagate_txs
@@ -176,7 +175,7 @@ impl Serializer for Handshake<'_> {
         self.pruned_topoheight.write(writer); // Pruned Topo Height
         writer.write_hash(&self.top_hash); // Block Top Hash (32 bytes)
         writer.write_hash(&self.genesis_hash); // Genesis Hash
-        self.cumulative_difficulty.write(writer); // Cumulative Difficulty
+        self.blue_work.write(writer); // GHOSTDAG blue_work (32 bytes)
         writer.write_bool(self.can_be_shared); // Can be shared
     }
 
@@ -217,10 +216,10 @@ impl Serializer for Handshake<'_> {
         }
         let top_hash = reader.read_hash()?;
         let genesis_hash = reader.read_hash()?;
-        let cumulative_difficulty = CumulativeDifficulty::read(reader)?;
+        let blue_work = BlueWorkType::read(reader)?;
         let can_be_shared = reader.read_bool()?;
 
-        Ok(Handshake::new(Cow::Owned(version), network, Cow::Owned(node_tag), Cow::Owned(network_id), peer_id, local_port, utc_time, topoheight, height, pruned_topoheight, Cow::Owned(top_hash), Cow::Owned(genesis_hash), Cow::Owned(cumulative_difficulty), can_be_shared))
+        Ok(Handshake::new(Cow::Owned(version), network, Cow::Owned(node_tag), Cow::Owned(network_id), peer_id, local_port, utc_time, topoheight, height, pruned_topoheight, Cow::Owned(top_hash), Cow::Owned(genesis_hash), Cow::Owned(blue_work), can_be_shared))
     }
 
     fn size(&self) -> usize {
@@ -248,8 +247,8 @@ impl Serializer for Handshake<'_> {
         self.top_hash.size() +
         // Genesis Hash
         self.genesis_hash.size() +
-        // Cumulative Difficulty
-        self.cumulative_difficulty.size() +
+        // GHOSTDAG blue_work
+        self.blue_work.size() +
         // Can be shared
         self.can_be_shared.size()
     }

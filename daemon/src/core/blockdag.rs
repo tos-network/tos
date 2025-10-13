@@ -1,57 +1,19 @@
 use indexmap::IndexSet;
 use log::trace;
 use tos_common::{
-    difficulty::CumulativeDifficulty,
     time::TimestampMillis,
     crypto::Hash,
 };
 use super::{
     storage::{
         Storage,
-        DifficultyProvider,
-        GhostdagDataProvider
+        GhostdagDataProvider,
+        DifficultyProvider
     },
     error::BlockchainError,
     ghostdag::BlueWorkType,
 };
 
-// sort the scores by cumulative difficulty and, if equals, by hash value
-pub fn sort_descending_by_cumulative_difficulty<T>(scores: &mut Vec<(T, CumulativeDifficulty)>)
-where
-    T: AsRef<Hash>,
-{
-    trace!("sort descending by cumulative difficulty");
-    scores.sort_by(|(a_hash, a), (b_hash, b)| {
-        if a != b {
-            b.cmp(a)
-        } else {
-            b_hash.as_ref().cmp(a_hash.as_ref())
-        }
-    });
-
-    if scores.len() >= 2 {
-        debug_assert!(scores[0].1 >= scores[1].1);
-    }
-}
-
-// sort the scores by cumulative difficulty and, if equals, by hash value
-pub fn sort_ascending_by_cumulative_difficulty<T>(scores: &mut Vec<(T, CumulativeDifficulty)>)
-where
-    T: AsRef<Hash>,
-{
-    trace!("sort ascending by cumulative difficulty");
-    scores.sort_by(|(a_hash, a), (b_hash, b)| {
-        if a != b {
-            a.cmp(b)
-        } else {
-            a_hash.as_ref().cmp(b_hash.as_ref())
-        }
-    });
-
-    if scores.len() >= 2 {
-        debug_assert!(scores[0].1 <= scores[1].1);
-    }
-}
 
 // sort the scores by GHOSTDAG blue work and, if equals, by hash value
 pub fn sort_ascending_by_blue_work<T>(scores: &mut Vec<(T, BlueWorkType)>)
@@ -72,9 +34,9 @@ where
     }
 }
 
-// Sort the TIPS by cumulative difficulty
-// If the cumulative difficulty is the same, the hash value is used to sort
-// Hashes are sorted in descending order
+// Sort the TIPS by GHOSTDAG blue_work
+// If the blue_work is the same, the hash value is used to sort
+// Hashes are sorted in descending order (higher blue_work first)
 pub async fn sort_tips<S, I>(storage: &S, tips: I) -> Result<IndexSet<Hash>, BlockchainError>
 where
     S: Storage,
@@ -86,13 +48,23 @@ where
         0 => Err(BlockchainError::ExpectedTips),
         1 => Ok(tips.into_iter().collect()),
         _ => {
-            let mut scores: Vec<(Hash, CumulativeDifficulty)> = Vec::with_capacity(tips_len);
+            // Use GHOSTDAG blue_work for sorting
+            let mut scores: Vec<(Hash, BlueWorkType)> = Vec::with_capacity(tips_len);
             for hash in tips {
-                let cumulative_difficulty = storage.get_cumulative_difficulty_for_block_hash(&hash).await?;
-                scores.push((hash, cumulative_difficulty));
+                let blue_work = storage.get_ghostdag_blue_work(&hash).await?;
+                scores.push((hash, blue_work));
             }
 
-            sort_descending_by_cumulative_difficulty(&mut scores);
+            // Sort by blue_work (descending - higher blue_work first)
+            // If equal, sort by hash value for deterministic ordering
+            scores.sort_by(|(a_hash, a), (b_hash, b)| {
+                if a != b {
+                    b.cmp(a)
+                } else {
+                    b_hash.cmp(a_hash)
+                }
+            });
+
             Ok(scores.into_iter().map(|(hash, _)| hash).collect())
         }
     }

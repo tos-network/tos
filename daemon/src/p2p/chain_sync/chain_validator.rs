@@ -5,10 +5,7 @@ use tos_common::{
     block::{BlockHeader, BlockVersion, TopoHeight},
     config::TIPS_LIMIT,
     crypto::Hash,
-    difficulty::{
-        CumulativeDifficulty,
-        Difficulty
-    },
+    difficulty::Difficulty,
     immutable::Immutable,
     time::TimestampMillis,
     varuint::VarUint
@@ -36,7 +33,6 @@ struct BlockData {
     header: Arc<BlockHeader>,
     topoheight: TopoHeight,
     difficulty: Difficulty,
-    cumulative_difficulty: CumulativeDifficulty, // Legacy: kept for P2P compatibility only
     blue_work: BlueWorkType, // GHOSTDAG: Used for consensus chain selection
     p: VarUint
 }
@@ -82,8 +78,8 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
 
     // GHOSTDAG: Check if the chain validator has a higher blue_work than our blockchain
     // blue_work is the cumulative work of all blue blocks in GHOSTDAG consensus
-    // This is the correct metric for DAG chain selection (NOT cumulative_difficulty)
-    pub async fn has_higher_cumulative_difficulty(&self) -> Result<bool, BlockchainError> {
+    // This is the correct metric for DAG chain selection
+    pub async fn has_higher_blue_work(&self) -> Result<bool, BlockchainError> {
         let new_blue_work = self.get_expected_chain_blue_work()
             .ok_or(BlockchainError::NotEnoughBlocks)?;
 
@@ -188,16 +184,6 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
 
         trace!("Common base: {} at height {} and hash {}", base, base_height, hash);
 
-        // Find the cumulative difficulty for this block (legacy - kept for P2P compatibility)
-        let (_, cumulative_difficulty) = self.blockchain.find_tip_work_score(
-            &provider,
-            &hash,
-            header.get_parents().iter(),
-            Some(difficulty.clone()),
-            &base,
-            base_height
-        ).await?;
-
         // GHOSTDAG: Calculate blue_work for consensus chain selection
         // blue_work = max(parent.blue_work) + difficulty of this block
         // This is the correct metric for DAG chain selection
@@ -215,7 +201,7 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             max_parent_blue_work + block_work
         };
 
-        debug!("Block {} - blue_work: {}, cumulative_difficulty (legacy): {}", hash, blue_work, cumulative_difficulty);
+        debug!("Block {} - blue_work: {}", hash, blue_work);
 
         let hash = Arc::new(hash);
         // Store the block in both maps
@@ -228,7 +214,6 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             header: Arc::new(header),
             topoheight,
             difficulty,
-            cumulative_difficulty, // Legacy: kept for P2P compatibility only
             blue_work, // GHOSTDAG: Used for consensus chain selection
             p
         });
@@ -287,15 +272,6 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
         self.storage.get_difficulty_for_block_hash(hash).await
     }
 
-    async fn get_cumulative_difficulty_for_block_hash(&self, hash: &Hash) -> Result<CumulativeDifficulty, BlockchainError> {
-        trace!("get cumulative difficulty for block hash {}", hash);
-        if let Some(data) = self.parent.blocks.get(hash) {
-            return Ok(data.cumulative_difficulty)
-        }
-
-        trace!("fallback on storage for get_cumulative_difficulty_for_block_hash");
-        self.storage.get_cumulative_difficulty_for_block_hash(hash).await
-    }
 
     async fn get_past_blocks_for_block_hash(&self, hash: &Hash) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
         trace!("get past blocks for block hash {}", hash);

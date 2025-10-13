@@ -12,7 +12,6 @@ impl CacheProvider for SledStorage {
             self.blocks_cache,
             self.topo_by_hash_cache,
             self.hash_at_topo_cache,
-            self.cumulative_difficulty_cache,
             self.assets_cache
         );
 

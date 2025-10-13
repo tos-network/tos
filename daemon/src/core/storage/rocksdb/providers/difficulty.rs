@@ -4,7 +4,7 @@ use log::trace;
 use tos_common::{
     block::{BlockHeader, BlockVersion},
     crypto::Hash,
-    difficulty::{CumulativeDifficulty, Difficulty},
+    difficulty::Difficulty,
     immutable::Immutable,
     time::TimestampMillis,
     varuint::VarUint
@@ -51,12 +51,8 @@ impl DifficultyProvider for RocksStorage {
             .map(|block_difficulty| block_difficulty.difficulty)
     }
 
-    // Get the cumulative difficulty for a block hash
-    async fn get_cumulative_difficulty_for_block_hash(&self, hash: &Hash) -> Result<CumulativeDifficulty, BlockchainError> {
-        trace!("get cumulative difficulty for block hash {}", hash);
-        self.load_block_difficulty(hash)
-            .map(|block_difficulty| block_difficulty.cumulative_difficulty)
-    }
+    // Phase 2: get_cumulative_difficulty_for_block_hash method removed
+    // Use GhostdagDataProvider::get_ghostdag_blue_work() instead
 
     // Get past blocks (block tips) for a specific block hash
     async fn get_past_blocks_for_block_hash(&self, hash: &Hash) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {

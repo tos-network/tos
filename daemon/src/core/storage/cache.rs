@@ -5,7 +5,6 @@ use tos_common::{
     tokio::sync::Mutex,
     block::{BlockHeader, TopoHeight},
     crypto::Hash,
-    difficulty::CumulativeDifficulty,
     transaction::Transaction
 };
 
@@ -57,8 +56,6 @@ pub struct StorageCache {
     pub topo_by_hash_cache: Option<Mutex<LruCache<Hash, TopoHeight>>>,
     // Hash by topoheight cache
     pub hash_at_topo_cache: Option<Mutex<LruCache<TopoHeight, Hash>>>,
-    // Cumulative difficulty cache
-    pub cumulative_difficulty_cache: Option<Mutex<LruCache<Hash, CumulativeDifficulty>>>,
     // Assets cache
     pub assets_cache: Option<Mutex<LruCache<Hash, TopoHeight>>>,
 
@@ -74,7 +71,6 @@ impl StorageCache {
             blocks_cache: init_cache!(cache_size),
             topo_by_hash_cache: init_cache!(cache_size),
             hash_at_topo_cache: init_cache!(cache_size),
-            cumulative_difficulty_cache: init_cache!(cache_size),
             assets_cache: init_cache!(cache_size),
             cache_size
         }

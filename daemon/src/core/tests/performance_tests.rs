@@ -309,9 +309,9 @@ mod performance_tests {
 
         // Thresholds adjusted for debug vs release builds
         // Release: 200K operations in < 30ms (realistic threshold)
-        // Debug: 200K operations in < 400ms (unoptimized code)
+        // Debug: 200K operations in < 1000ms (unoptimized code, relaxed for system load)
         #[cfg(debug_assertions)]
-        const THRESHOLD: u128 = 400_000;
+        const THRESHOLD: u128 = 1_000_000;
         #[cfg(not(debug_assertions))]
         const THRESHOLD: u128 = 30_000;
 

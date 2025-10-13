@@ -591,10 +591,10 @@ mod comprehensive_tests {
 
     #[test]
     fn test_reachability_data_height_valid() {
-        // Height is non-negative and reasonable
+        // Height is non-negative (u64 is always non-negative) and reasonable
         let height = 12345u64;
 
-        assert!(height >= 0);
+        // u64 is always >= 0, so only check upper bound
         assert!(height < u64::MAX / 2); // Reasonable bound
     }
 

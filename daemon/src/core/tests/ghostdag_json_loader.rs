@@ -84,7 +84,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tos_common::crypto::Hash;
-use primitive_types::U256;
 
 use crate::core::{
     error::BlockchainError,
@@ -461,6 +460,7 @@ pub struct TestResult {
     pub test_name: String,
 
     /// Whether test passed
+    #[allow(dead_code)] // Used in test assertions and debug output
     pub passed: bool,
 
     /// Block-by-block results
@@ -755,7 +755,7 @@ fn parse_blue_work(s: &str) -> Result<BlueWorkType, Box<dyn std::error::Error>> 
 
     // Try parsing as hex (with or without 0x prefix)
     let hex_str = s.strip_prefix("0x").unwrap_or(s);
-    U256::from_str_radix(hex_str, 16)
+    BlueWorkType::from_str_radix(hex_str, 16)
         .map_err(|e| format!("Failed to parse blue_work '{}': {}", s, e).into())
 }
 

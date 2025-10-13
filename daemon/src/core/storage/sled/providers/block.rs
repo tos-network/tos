@@ -4,7 +4,7 @@ use log::{debug, trace};
 use tos_common::{
     block::{Block, BlockHeader},
     crypto::{Hash, Hashable},
-    difficulty::{CumulativeDifficulty, Difficulty},
+    difficulty::Difficulty,
     immutable::Immutable,
     serializer::Serializer,
     transaction::Transaction,
@@ -68,7 +68,7 @@ impl BlockProvider for SledStorage {
         self.contains_data_cached(&self.blocks, &self.blocks_cache, hash).await
     }
 
-    async fn save_block(&mut self, block: Arc<BlockHeader>, txs: &[Arc<Transaction>], difficulty: Difficulty, cumulative_difficulty: CumulativeDifficulty, p: VarUint, hash: Immutable<Hash>) -> Result<(), BlockchainError> {
+    async fn save_block(&mut self, block: Arc<BlockHeader>, txs: &[Arc<Transaction>], difficulty: Difficulty, p: VarUint, hash: Immutable<Hash>) -> Result<(), BlockchainError> {
         debug!("Storing new {} with hash: {}, difficulty: {}, snapshot mode: {}", block, hash, difficulty, self.snapshot.is_some());
 
         // Store transactions
@@ -95,8 +95,7 @@ impl BlockProvider for SledStorage {
         // Store difficulty
         Self::insert_into_disk(self.snapshot.as_mut(), &self.difficulty, hash.as_bytes(), difficulty.to_bytes())?;
 
-        // Store cumulative difficulty
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.cumulative_difficulty, hash.as_bytes(), cumulative_difficulty.to_bytes())?;
+        // Phase 2: cumulative_difficulty storage removed - use blue_work from GHOSTDAG instead
 
         // Store P
         Self::insert_into_disk(self.snapshot.as_mut(), &self.difficulty_covariance, hash.as_bytes(), p.to_bytes())?;

@@ -2,8 +2,8 @@ use std::hash::{Hasher, Hash as StdHash};
 
 use indexmap::IndexSet;
 use tos_common::{
-    crypto::Hash,
-    difficulty::{CumulativeDifficulty, Difficulty},
+    crypto::{Hash, BlueWorkType},
+    difficulty::Difficulty,
     varuint::VarUint,
     serializer::*
 };
@@ -21,8 +21,9 @@ pub struct BlockMetadata {
     pub reward: u64,
     // Difficulty of the block
     pub difficulty: Difficulty,
-    // Cumulative difficulty of the chain
-    pub cumulative_difficulty: CumulativeDifficulty,
+    // OLD: cumulative_difficulty - replaced with blue_work for GHOSTDAG consensus
+    // Blue work (cumulative PoW) of the chain - used for heaviest chain selection
+    pub blue_work: BlueWorkType,
     // Difficulty P variable
     pub p: VarUint,
     // All transactions marked as executed in this block
@@ -50,7 +51,7 @@ impl Serializer for BlockMetadata {
         let burned_supply = reader.read_u64()?;
         let reward = reader.read_u64()?;
         let difficulty = Difficulty::read(reader)?;
-        let cumulative_difficulty = CumulativeDifficulty::read(reader)?;
+        let blue_work = BlueWorkType::read(reader)?;
         let p = VarUint::read(reader)?;
 
         // We don't write it through IndexSet impl directly
@@ -71,7 +72,7 @@ impl Serializer for BlockMetadata {
             burned_supply,
             reward,
             difficulty,
-            cumulative_difficulty,
+            blue_work,
             p,
             executed_transactions
         })
@@ -83,7 +84,7 @@ impl Serializer for BlockMetadata {
         writer.write_u64(&self.burned_supply);
         writer.write_u64(&self.reward);
         self.difficulty.write(writer);
-        self.cumulative_difficulty.write(writer);
+        self.blue_work.write(writer);
         self.p.write(writer);
         self.executed_transactions.write(writer);
     }
@@ -94,7 +95,7 @@ impl Serializer for BlockMetadata {
         + self.burned_supply.size()
         + self.reward.size()
         + self.difficulty.size()
-        + self.cumulative_difficulty.size()
+        + self.blue_work.size()
         + self.p.size()
         + self.executed_transactions.size()
     }

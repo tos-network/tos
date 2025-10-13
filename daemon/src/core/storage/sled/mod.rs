@@ -1,5 +1,4 @@
 mod snapshot;
-mod migrations;
 mod providers;
 
 use async_trait::async_trait;
@@ -10,7 +9,7 @@ use tos_common::{
     ai_mining::AIMiningState,
     block::{BlockHeader, TopoHeight},
     crypto::{Hash, PublicKey},
-    difficulty::{CumulativeDifficulty, Difficulty},
+    difficulty::Difficulty,
     immutable::Immutable,
     network::Network,
     serializer::Serializer,
@@ -26,7 +25,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use lru::LruCache;
 use sled::{IVec, Tree};
-use log::{debug, trace, info, error};
+use log::{debug, trace, info};
 
 pub use snapshot::Snapshot;
 
@@ -52,6 +51,8 @@ pub(super) const BLOCKS_EXECUTION_ORDER_COUNT: &[u8; 4] = b"EBLK";
 // AI Mining state keys
 pub(super) const AI_MINING_STATE_TOPOHEIGHT: &[u8; 4] = b"AIMT";
 pub(super) const CONTRACTS_COUNT: &[u8; 4] = b"CCON";
+// Reserved for future database versioning/migration functionality
+#[allow(dead_code)]
 pub(super) const DB_VERSION: &[u8; 4] = b"VRSN";
 
 pub struct SledStorage {
@@ -74,8 +75,6 @@ pub struct SledStorage {
     pub(super) topo_by_hash: Tree,
     // hash at topo height on disk
     pub(super) hash_at_topo: Tree,
-    // cumulative difficulty for each block hash on disk
-    pub(super) cumulative_difficulty: Tree,
     // Difficulty estimated covariance (P)
     pub(super) difficulty_covariance: Tree,
     // keep tracks of all available assets on network
@@ -246,7 +245,6 @@ impl SledStorage {
             extra: sled.open_tree("extra")?,
             topo_by_hash: sled.open_tree("topo_at_hash")?,
             hash_at_topo: sled.open_tree("hash_at_topo")?,
-            cumulative_difficulty: sled.open_tree("cumulative_difficulty")?,
             difficulty_covariance: sled.open_tree("difficulty_covariance")?,
             assets: sled.open_tree("assets")?,
             versioned_assets: sled.open_tree("versioned_assets")?,
@@ -295,10 +293,6 @@ impl SledStorage {
             }
         } else {
             storage.set_network(&network)?;
-        }
-
-        if let Err(e) = storage.handle_migrations() {
-            error!("Error while migrating database: {}", e);
         }
 
         storage.load_cache_from_disk();
@@ -666,9 +660,8 @@ impl Storage for SledStorage {
         trace!("Deleting difficulty");
         let _: Difficulty = Self::delete_cacheable_data(self.snapshot.as_mut(), &self.difficulty, None, &hash).await?;
 
-        trace!("Deleting cumulative difficulty");
-        let cumulative_difficulty: CumulativeDifficulty = Self::delete_cacheable_data(self.snapshot.as_mut(), &self.cumulative_difficulty, self.cache.cumulative_difficulty_cache.as_mut(), &hash).await?;
-        trace!("Cumulative difficulty deleted: {}", cumulative_difficulty);
+        // Phase 2: cumulative_difficulty deletion removed - no longer stored
+        trace!("Skipping cumulative difficulty deletion (Phase 2: no longer stored)");
 
         // TODO: Headers no longer contain transaction data
         // Transaction cleanup needs to be refactored to fetch transactions separately

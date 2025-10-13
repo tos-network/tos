@@ -6,6 +6,7 @@ use crate::{
         PEER_PACKET_CHANNEL_SIZE, PEER_PEERS_CACHE_SIZE,
         PEER_OBJECTS_CONCURRENCY
     },
+    core::ghostdag::BlueWorkType,
     p2p::packet::PacketWrapper
 };
 use anyhow::Context;
@@ -19,7 +20,6 @@ use tos_common::{
     api::daemon::{Direction, TimedDirection},
     block::TopoHeight,
     crypto::Hash,
-    difficulty::CumulativeDifficulty,
     serializer::Serializer,
     time::{
         get_current_time_in_seconds,
@@ -118,8 +118,8 @@ pub struct Peer {
     last_ping: AtomicU64,
     // last time we sent a ping packet to this peer
     last_ping_sent: AtomicU64,
-    // cumulative difficulty of peer chain
-    cumulative_difficulty: Mutex<CumulativeDifficulty>,
+    // GHOSTDAG blue_work of peer chain (replaces cumulative_difficulty)
+    blue_work: Mutex<BlueWorkType>,
     // All transactions propagated from/to this peer
     txs_cache: Mutex<LruCache<Arc<Hash>, (Direction, bool)>>,
     // last blocks propagated to/from this peer
@@ -161,6 +161,7 @@ pub struct Peer {
 }
 
 impl Peer {
+    /// Create a new Peer instance with GHOSTDAG blue_work for chain comparison
     pub fn new(
         connection: Connection,
         id: u64,
@@ -172,7 +173,7 @@ impl Peer {
         height: u64,
         pruned_topoheight: Option<TopoHeight>,
         priority: bool,
-        cumulative_difficulty: CumulativeDifficulty,
+        blue_work: BlueWorkType,
         peer_list: SharedPeerList,
         sharable: bool,
         propagate_txs: bool
@@ -202,7 +203,7 @@ impl Peer {
             last_peer_list: AtomicU64::new(0),
             last_ping: AtomicU64::new(0),
             last_ping_sent: AtomicU64::new(0),
-            cumulative_difficulty: Mutex::new(cumulative_difficulty),
+            blue_work: Mutex::new(blue_work),
             txs_cache: Mutex::new(LruCache::new(NonZeroUsize::new(PEER_TX_CACHE_SIZE).expect("PEER_TX_CACHE_SIZE must be non-zero"))),
             blocks_propagation: Mutex::new(LruCache::new(NonZeroUsize::new(PEER_BLOCK_CACHE_SIZE).expect("PEER_BLOCK_CACHE_SIZE must be non-zero"))),
             last_inventory: AtomicU64::new(0),
@@ -331,15 +332,16 @@ impl Peer {
         &self.top_hash
     }
 
-    // Get the cumulative difficulty
-    pub fn get_cumulative_difficulty(&self) -> &Mutex<CumulativeDifficulty> {
-        &self.cumulative_difficulty
+    /// Get the GHOSTDAG blue_work for chain comparison
+    /// blue_work is the cumulative work of all blue blocks in the GHOSTDAG consensus
+    pub fn get_blue_work(&self) -> &Mutex<BlueWorkType> {
+        &self.blue_work
     }
 
-    // Store the cumulative difficulty
-    // This is updated by ping packet
-    pub async fn set_cumulative_difficulty(&self, cumulative_difficulty: CumulativeDifficulty) {
-        *self.cumulative_difficulty.lock().await = cumulative_difficulty;
+    /// Store the GHOSTDAG blue_work
+    /// This is updated by ping packet and used for chain selection
+    pub async fn set_blue_work(&self, blue_work: BlueWorkType) {
+        *self.blue_work.lock().await = blue_work;
     }
 
     // Verify if its a outgoing connection
