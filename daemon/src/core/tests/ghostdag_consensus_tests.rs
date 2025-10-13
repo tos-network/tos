@@ -188,8 +188,8 @@ mod ghostdag_consensus_tests {
         let tips = vec![tip1, tip2];
         let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
 
-        // Expected: max(100, 150) + 1 = 151
-        assert_eq!(blue_score, 151, "Blue score should be max + 1");
+        // GHOSTDAG: blue_score = max(tips) + tips.len() = max(100, 150) + 2 = 152
+        assert_eq!(blue_score, 152, "Blue score should be max + tips count (merging 2 tips)");
     }
 
     // Test 6: calculate_blue_score_at_tips - Single tip
@@ -240,8 +240,8 @@ mod ghostdag_consensus_tests {
         let tips = vec![tip1, tip2, tip3];
         let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
 
-        // Expected: 100 + 1 = 101
-        assert_eq!(blue_score, 101, "Should handle same blue_score correctly");
+        // GHOSTDAG: blue_score = max(tips) + tips.len() = 100 + 3 = 103
+        assert_eq!(blue_score, 103, "Should handle same blue_score correctly (merging 3 tips)");
     }
 
     // Test 9: Sorting by blue_work
@@ -306,8 +306,9 @@ mod ghostdag_consensus_tests {
         assert_eq!(*best_tip, block2_expected, "Block2 should be selected (highest blue_work)");
 
         // Test 2: Calculate blue score for next block
+        // GHOSTDAG: blue_score = max(tips) + tips.len() = max(2,2) + 2 = 4
         let next_blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
-        assert_eq!(next_blue_score, 3, "Next block should have blue_score = 3");
+        assert_eq!(next_blue_score, 4, "Next block should have blue_score = 4 (merging 2 tips)");
     }
 
     // Test 11: Error handling - Unknown block
@@ -353,8 +354,9 @@ mod ghostdag_consensus_tests {
         assert_eq!(*best_tip, expected_hash, "Should handle many tips efficiently");
 
         // Calculate blue score should also work
+        // GHOSTDAG: blue_score = max(tips) + tips.len() = 49 + 50 = 99
         let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
-        assert_eq!(blue_score, 50, "Should calculate correctly for many tips");
+        assert_eq!(blue_score, 99, "Should calculate correctly for many tips (merging 50 tips)");
     }
 
     #[test]

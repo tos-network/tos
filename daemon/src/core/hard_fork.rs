@@ -148,22 +148,22 @@ mod tests {
 
     #[test]
     fn test_has_hard_fork_at_height() {
+        // Updated for new devnet/testnet configuration: V1 at height 0 (1-second blocks)
         let (hard_fork, version) = has_hard_fork_at_height(&Network::Testnet, 0);
         assert_eq!(hard_fork, true);
-        assert_eq!(version, BlockVersion::V0);
+        assert_eq!(version, BlockVersion::V1);
 
         let (hard_fork, version) = has_hard_fork_at_height(&Network::Testnet, 1);
         assert_eq!(hard_fork, false);
-        assert_eq!(version, BlockVersion::V0);
+        assert_eq!(version, BlockVersion::V1);
 
-
-        let (hard_fork, version) = has_hard_fork_at_height(&Network::Testnet, 5);
+        let (hard_fork, version) = has_hard_fork_at_height(&Network::Testnet, 10);
         assert_eq!(hard_fork, true);
-        assert_eq!(version, BlockVersion::V1);
+        assert_eq!(version, BlockVersion::V2);
 
-        let (hard_fork, version) = has_hard_fork_at_height(&Network::Testnet, 6);
+        let (hard_fork, version) = has_hard_fork_at_height(&Network::Testnet, 11);
         assert_eq!(hard_fork, false);
-        assert_eq!(version, BlockVersion::V1);
+        assert_eq!(version, BlockVersion::V2);
     }
 
     #[test]
@@ -173,11 +173,11 @@ mod tests {
         assert_eq!(get_version_at_height(&Network::Mainnet, 435_000), BlockVersion::V2);
         assert_eq!(get_version_at_height(&Network::Mainnet, 2_000_000), BlockVersion::V2);
 
-        // Testnet
-        assert_eq!(get_version_at_height(&Network::Testnet, 0), BlockVersion::V0);
-        assert_eq!(get_version_at_height(&Network::Testnet, 6), BlockVersion::V1);
+        // Testnet - Updated for new devnet/testnet configuration: V1 at height 0 (1-second blocks)
+        assert_eq!(get_version_at_height(&Network::Testnet, 0), BlockVersion::V1);
+        assert_eq!(get_version_at_height(&Network::Testnet, 9), BlockVersion::V1);
         assert_eq!(get_version_at_height(&Network::Testnet, 10), BlockVersion::V2);
-        assert_eq!(get_version_at_height(&Network::Testnet, 50), BlockVersion::V3);
+        assert_eq!(get_version_at_height(&Network::Testnet, 15), BlockVersion::V3);
     }
 
     #[test]
@@ -209,16 +209,16 @@ mod tests {
         // V3 is not yet enabled
         assert!(!is_version_enabled_at_height(&Network::Mainnet, 2_000_000, BlockVersion::V3));
 
-        // Testnet
-        assert!(is_version_enabled_at_height(&Network::Testnet, 0, BlockVersion::V0));
-        assert!(!is_version_enabled_at_height(&Network::Testnet, 0, BlockVersion::V1));
+        // Testnet - Updated for new devnet/testnet configuration: V1 at height 0 (1-second blocks)
+        assert!(!is_version_enabled_at_height(&Network::Testnet, 0, BlockVersion::V0));
+        assert!(is_version_enabled_at_height(&Network::Testnet, 0, BlockVersion::V1));
         assert!(!is_version_enabled_at_height(&Network::Testnet, 0, BlockVersion::V2));
 
-        assert!(is_version_enabled_at_height(&Network::Testnet, 5, BlockVersion::V0));
-        assert!(is_version_enabled_at_height(&Network::Testnet, 5, BlockVersion::V1));
-        assert!(!is_version_enabled_at_height(&Network::Testnet, 5, BlockVersion::V2));
+        assert!(!is_version_enabled_at_height(&Network::Testnet, 9, BlockVersion::V0));
+        assert!(is_version_enabled_at_height(&Network::Testnet, 9, BlockVersion::V1));
+        assert!(!is_version_enabled_at_height(&Network::Testnet, 9, BlockVersion::V2));
 
-        assert!(is_version_enabled_at_height(&Network::Testnet, 10, BlockVersion::V0));
+        assert!(!is_version_enabled_at_height(&Network::Testnet, 10, BlockVersion::V0));
         assert!(is_version_enabled_at_height(&Network::Testnet, 10, BlockVersion::V1));
         assert!(is_version_enabled_at_height(&Network::Testnet, 10, BlockVersion::V2));
     }

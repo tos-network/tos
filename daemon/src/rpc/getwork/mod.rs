@@ -184,7 +184,9 @@ impl<S: Storage> GetWorkServer<S> {
                     .ok_or(InternalRpcError::InternalError("No mining job found"))?;
 
                 // Calculate blue_score for the cached header
+                // GHOSTDAG: blue_score increases by the mergeset size (number of parents being merged)
                 let blue_score = {
+                    let tips_count = header.get_parents().len() as u64;
                     let storage = self.blockchain.get_storage().read().await;
                     let mut max_blue_score = 0u64;
                     for tip in header.get_parents().iter() {
@@ -194,7 +196,7 @@ impl<S: Storage> GetWorkServer<S> {
                             max_blue_score = tip_ghostdag.blue_score;
                         }
                     }
-                    max_blue_score + 1
+                    max_blue_score + tips_count
                 };
 
                 let job = MinerWork::new(header.get_work_hash(), get_current_time_in_millis());
@@ -299,7 +301,9 @@ impl<S: Storage> GetWorkServer<S> {
             let (difficulty, _) = self.blockchain.get_difficulty_at_tips(&*storage, header.get_parents().iter()).await
                 .context("Error while retrieving difficulty at tips when notifying new job")?;
 
-            // Calculate blue_score for the new block: max(tips' blue_scores) + 1
+            // Calculate blue_score for the new block: max(tips' blue_scores) + number of tips
+            // GHOSTDAG: blue_score increases by the mergeset size (number of parents being merged)
+            let tips_count = header.get_parents().len() as u64;
             let mut max_blue_score = 0u64;
             for tip in header.get_parents().iter() {
                 let tip_ghostdag = storage.get_ghostdag_data(tip).await
@@ -308,7 +312,7 @@ impl<S: Storage> GetWorkServer<S> {
                     max_blue_score = tip_ghostdag.blue_score;
                 }
             }
-            let blue_score = max_blue_score + 1;
+            let blue_score = max_blue_score + tips_count;
 
             (header, difficulty, blue_score)
         };
