@@ -12,3 +12,6 @@ mod property_tests;
 
 #[cfg(test)]
 mod integration_tests;
+
+#[cfg(test)]
+mod security_tests;

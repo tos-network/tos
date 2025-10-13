@@ -32,7 +32,8 @@ use tos_common::{
         BlockVersion,
         TopoHeight,
         EXTRA_NONCE_SIZE,
-        get_combined_hash_for_tips
+        get_combined_hash_for_tips,
+        calculate_merkle_root
     },
     config::{
         COIN_DECIMALS,
@@ -2060,20 +2061,34 @@ impl<S: Storage> Blockchain<S> {
     }
 
     // Build a block using the header and search for TXs in mempool and storage
-    // TODO: This function needs to be refactored to use a transaction cache
-    // since BlockHeader no longer contains transaction hashes
+    // SECURITY FIX: This function now rejects blocks without transaction caching
+    // to prevent merkle root validation bypass attacks
     pub async fn build_block_from_header(&self, header: Immutable<BlockHeader>) -> Result<Block, BlockchainError> {
         trace!("Building block from header at height {}", header.get_blue_score());
 
-        // For now, return an empty block since headers no longer contain transaction hashes
-        // In a full implementation, we would need to:
-        // 1. Cache transactions when creating the mining template
-        // 2. Retrieve cached transactions using the header hash or timestamp as key
-        // 3. Validate that the transactions still match the merkle root
+        // SECURITY: Check if this is an empty block (merkle root is zero)
+        let merkle_root = header.get_hash_merkle_root();
+        if *merkle_root == Hash::zero() {
+            // Empty block is valid - no transactions to retrieve
+            debug!("Building empty block from header (merkle root is zero)");
+            let block = Block::new(header, Vec::new());
+            return Ok(block);
+        }
 
-        warn!("build_block_from_header: BlockHeader no longer contains transaction hashes - returning empty block");
-        let block = Block::new(header, Vec::new());
-        Ok(block)
+        // SECURITY CRITICAL: Block has non-zero merkle root but we have no transaction cache
+        // Returning an empty block would allow merkle root validation bypass
+        // This is a security vulnerability - we must reject the block
+        error!("SECURITY: Cannot build block from header - no transaction cache available, but merkle root is non-zero: {}",
+               merkle_root);
+        error!("This indicates either:");
+        error!("  1. A miner submitting a block without using get_block_template");
+        error!("  2. Missing transaction caching implementation");
+        error!("  3. A potential security attack attempting to bypass merkle root validation");
+
+        // Return an error instead of an empty block
+        // This prevents the vulnerability where a malicious miner could submit
+        // a header with any merkle root and have it accepted with an empty transaction list
+        Err(BlockchainError::UnsupportedOperation)
     }
 
     // Add a new block in chain
@@ -2149,6 +2164,34 @@ impl<S: Storage> Blockchain<S> {
         if block_size > MAX_BLOCK_SIZE {
             debug!("Block size ({} bytes) is greater than the limit ({} bytes)", block.size(), MAX_BLOCK_SIZE);
             return Err(BlockchainError::InvalidBlockSize(MAX_BLOCK_SIZE, block.size()));
+        }
+
+        // SECURITY FIX: Validate merkle root matches transaction list
+        // This prevents malicious miners from submitting headers with fake merkle roots
+        let transactions = block.get_transactions();
+        let header_merkle_root = block.get_header().get_hash_merkle_root();
+
+        if transactions.is_empty() {
+            // Empty block must have zero merkle root
+            if *header_merkle_root != Hash::zero() {
+                debug!("Block {} has no transactions but non-zero merkle root {}", block_hash, header_merkle_root);
+                return Err(BlockchainError::EmptyBlockWithMerkleRoot(block_hash.into_owned()));
+            }
+        } else {
+            // Calculate merkle root from actual transactions
+            let calculated_merkle_root = calculate_merkle_root(transactions);
+
+            // Verify it matches the header
+            if calculated_merkle_root != *header_merkle_root {
+                debug!("Block {} has invalid merkle root: header has {}, but calculated from transactions is {}",
+                       block_hash, header_merkle_root, calculated_merkle_root);
+                return Err(BlockchainError::InvalidMerkleRoot(
+                    block_hash.into_owned(),
+                    calculated_merkle_root,
+                    header_merkle_root.clone()
+                ));
+            }
+            debug!("Block {} merkle root validated successfully: {}", block_hash, calculated_merkle_root);
         }
 
         for tip in block.get_parents() {
