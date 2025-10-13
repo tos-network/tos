@@ -8,6 +8,9 @@ pub mod daa;
 #[cfg(test)]
 mod tests_extended;
 
+#[cfg(test)]
+mod tests_comprehensive;
+
 pub use types::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData};
 pub use daa::{calculate_daa_score, calculate_target_difficulty, DAA_WINDOW_SIZE, TARGET_TIME_PER_BLOCK};
 
