@@ -688,10 +688,11 @@ impl<S: Storage> Blockchain<S> {
             } else {
                 warn!("No genesis block found!");
                 info!("Generating a new genesis block...");
-                let header = BlockHeader::new_simple(BlockVersion::V0, Vec::new(), get_current_time_in_millis(), [0u8; EXTRA_NONCE_SIZE], DEV_PUBLIC_KEY.clone(), Hash::zero());
+                let genesis_version = get_version_at_height(&self.network, 0);
+                let header = BlockHeader::new_simple(genesis_version, Vec::new(), get_current_time_in_millis(), [0u8; EXTRA_NONCE_SIZE], DEV_PUBLIC_KEY.clone(), Hash::zero());
                 let block = Block::new(Immutable::Owned(header), Vec::new());
                 let block_hash = block.hash();
-                info!("Genesis generated: {} with {:?} {}", block.to_hex(), block_hash, block_hash);
+                info!("Genesis generated with version {:?}: {} with {:?} {}", genesis_version, block.to_hex(), block_hash, block_hash);
                 (block, block_hash)
             };
     
@@ -1801,7 +1802,11 @@ impl<S: Storage> Blockchain<S> {
         // GHOSTDAG: Use blue_score instead of legacy height
         let blue_score = blockdag::calculate_blue_score_at_tips(storage, sorted_tips.iter()).await?;
         let sorted_tips_vec: Vec<Hash> = sorted_tips.into_iter().collect();
-        let block = BlockHeader::new_simple(get_version_at_height(self.get_network(), blue_score), sorted_tips_vec, timestamp, extra_nonce, address, Hash::zero());
+        let mut block = BlockHeader::new_simple(get_version_at_height(self.get_network(), blue_score), sorted_tips_vec, timestamp, extra_nonce, address, Hash::zero());
+
+        // Set the calculated blue_score in the block header
+        block.blue_score = blue_score;
+        debug!("Block template created with blue_score: {}", blue_score);
 
         histogram!("tos_block_header_template_ms").record(start.elapsed().as_millis() as f64);
 
@@ -2397,46 +2402,12 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        // Get GHOSTDAG blue_work for P2P protocol (replaces cumulative_difficulty)
-        // Now using GHOSTDAG blue_work directly for P2P broadcast
-        let blue_work = storage.get_ghostdag_blue_work(&block_hash).await?;
-        debug!("Blue work for block {}: {}", block_hash, blue_work);
-
-        // Phase 2: cumulative_difficulty no longer stored - blue_work is used directly
-
         // Clone full block for compact block broadcast (before split)
         let full_block_for_broadcast = block.clone();
 
         let (block, txs) = block.split();
         let block = block.into_arc();
         let block_hash = block_hash.into_arc();
-
-        // Broadcast to p2p nodes the block asap as its valid
-        if broadcast.p2p() {
-            debug!("Broadcasting block");
-            if let Some(p2p) = self.p2p.read().await.as_ref() {
-                trace!("P2p locked, broadcasting in new task");
-                let p2p = p2p.clone();
-                let pruned_topoheight = storage.get_pruned_topoheight().await?;
-                let block_hash = block_hash.clone();
-                let block_height = full_block_for_broadcast.get_header().get_blue_score();
-                let blue_work_for_broadcast = blue_work;
-                spawn_task("broadcast-compact-block", async move {
-                    // Use compact blocks for bandwidth efficiency
-                    p2p.broadcast_compact_block(
-                        &full_block_for_broadcast,
-                        blue_work_for_broadcast,
-                        current_topoheight,
-                        current_height.max(block_height),
-                        pruned_topoheight,
-                        block_hash,
-                        mining
-                    ).await;
-                });
-            }
-        } else {
-            debug!("Not broadcasting block {} because broadcast is disabled", block_hash);
-        }
 
         // If we have reached this part, it means the block is valid and we can start integrating it
 
@@ -2511,6 +2482,38 @@ impl<S: Storage> Blockchain<S> {
             };
 
             histogram!("tos_ghostdag_ms").record(start.elapsed().as_millis() as f64);
+
+            // Get GHOSTDAG blue_work for P2P protocol (replaces cumulative_difficulty)
+            // Now using GHOSTDAG blue_work directly for P2P broadcast
+            let blue_work = ghostdag_data.blue_work.clone();
+            debug!("Blue work for block {}: {}", block_hash, blue_work);
+
+            // Broadcast to p2p nodes the block asap as its valid
+            if broadcast.p2p() {
+                debug!("Broadcasting block");
+                if let Some(p2p) = self.p2p.read().await.as_ref() {
+                    trace!("P2p locked, broadcasting in new task");
+                    let p2p = p2p.clone();
+                    let pruned_topoheight = storage.get_pruned_topoheight().await?;
+                    let block_hash_for_broadcast = block_hash.clone();
+                    let block_height = full_block_for_broadcast.get_header().get_blue_score();
+                    let blue_work_for_broadcast = blue_work;
+                    spawn_task("broadcast-compact-block", async move {
+                        // Use compact blocks for bandwidth efficiency
+                        p2p.broadcast_compact_block(
+                            &full_block_for_broadcast,
+                            blue_work_for_broadcast,
+                            current_topoheight,
+                            current_height.max(block_height),
+                            pruned_topoheight,
+                            block_hash_for_broadcast,
+                            mining
+                        ).await;
+                    });
+                }
+            } else {
+                debug!("Not broadcasting block {} because broadcast is disabled", block_hash);
+            }
 
             // Populate reachability data (TIP-2 Phase 2)
             // Only populate if this is genesis or if selected parent has reachability data

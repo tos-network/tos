@@ -136,7 +136,6 @@ impl ReindexContext {
         }
 
         let mut queue = VecDeque::<Hash>::from([block.clone()]);
-        let mut counts: HashMap<Hash, u64> = HashMap::new();
 
         while let Some(current) = queue.pop_front() {
             // Skip if already calculated
@@ -164,21 +163,15 @@ impl ReindexContext {
                         .sum();
                     self.subtree_sizes.insert(current.clone(), subtree_sum + 1);
                 } else {
-                    // Not all children ready - add children to queue and increment count
+                    // Not all children ready - add unprocessed children to queue
                     for child in children {
                         if !self.subtree_sizes.contains_key(child) {
                             queue.push_back(child.clone());
                         }
                     }
 
-                    // Track how many children have been processed for this node
-                    let count = counts.entry(current.clone()).or_insert(0);
-                    *count += 1;
-
-                    // Re-add current to queue to check again later
-                    if *count < children.len() as u64 {
-                        queue.push_back(current);
-                    }
+                    // Re-add current to queue to check again after children are processed
+                    queue.push_back(current);
                 }
             }
         }

@@ -211,7 +211,9 @@ impl<S: Storage> GetWorkServer<S> {
                     let (difficulty, _) = self.blockchain.get_difficulty_at_tips(&*storage, header.get_parents().iter()).await
                         .context("Error while retrieving difficulty at tips")?;
 
-                    // Calculate blue_score for the new block: max(tips' blue_scores) + 1
+                    // Calculate blue_score for the new block: max(tips' blue_scores) + number of tips
+                    // GHOSTDAG: blue_score increases by the mergeset size (number of parents being merged)
+                    let tips_count = header.get_parents().len() as u64;
                     let mut max_blue_score = 0u64;
                     for tip in header.get_parents().iter() {
                         let tip_ghostdag = storage.get_ghostdag_data(tip).await
@@ -220,7 +222,7 @@ impl<S: Storage> GetWorkServer<S> {
                             max_blue_score = tip_ghostdag.blue_score;
                         }
                     }
-                    let blue_score = max_blue_score + 1;
+                    let blue_score = max_blue_score + tips_count;
 
                     (header, difficulty, blue_score)
                 };

@@ -94,7 +94,9 @@ where
     }
 
     if tips_len != 0 {
-        blue_score += 1;
+        // GHOSTDAG: blue_score increases by the number of blocks in the mergeset
+        // When merging N tips, the mergeset contains all N blocks, so blue_score += N
+        blue_score += tips_len as u64;
     }
 
     Ok(blue_score)

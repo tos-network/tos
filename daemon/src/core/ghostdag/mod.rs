@@ -196,10 +196,18 @@ impl TosGhostdag {
         storage: &S,
         parents: impl IntoIterator<Item = Hash>,
     ) -> Result<Hash, BlockchainError> {
+        let parents_vec: Vec<Hash> = parents.into_iter().collect();
+
+        // Optimization: if there's only one parent, return it directly
+        // This avoids needing to load GHOSTDAG data
+        if parents_vec.len() == 1 {
+            return Ok(parents_vec[0].clone());
+        }
+
         let mut best_parent = None;
         let mut best_blue_work = BlueWorkType::zero();
 
-        for parent in parents {
+        for parent in parents_vec {
             // Get GHOSTDAG data for this parent
             let parent_data = storage.get_ghostdag_data(&parent).await?;
 

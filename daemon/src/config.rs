@@ -239,18 +239,13 @@ const HARD_FORKS: [HardFork; 3] = [
 ];
 
 // Testnet / Stagenet / Devnet hard forks
-const OTHERS_NETWORK_HARD_FORKS: [HardFork; 4] = [
+// Note: V0 (60s blocks) removed from devnet - starts directly with V1 (1s blocks)
+const OTHERS_NETWORK_HARD_FORKS: [HardFork; 3] = [
     HardFork {
         height: 0,
-        version: BlockVersion::V0,
-        changelog: "Initial version",
-        version_requirement: None
-    },
-    HardFork {
-        height: 5,
         version: BlockVersion::V1,
-        changelog: "tos-hash v2",
-        version_requirement: Some(">=1.13.0")
+        changelog: "tos-hash v2, 1-second blocks",
+        version_requirement: None
     },
     HardFork {
         height: 10,
