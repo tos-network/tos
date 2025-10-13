@@ -89,10 +89,9 @@ pub const DEV_FEES: [DevFeeThreshold; 2] = [
     },
     // Activated for the rest
     DevFeeThreshold {
-        // TIP-1: With 3s blocks, this triggers after ~1.5 years
-        // 15 768 000 blocks * 3s block time / 60s / 60m / 24h / 365d = 1.5 years
-        // Note: Old comment referenced 12s blocks (3_942_000 blocks)
-        // New calculation: 3_942_000 * (12/3) = 15_768_000 blocks for same duration
+        // With 1s blocks, this triggers after ~6 months
+        // 15 768 000 blocks * 1s block time / 60s / 60m / 24h / 365d ≈ 0.5 years
+        // Note: TIP-1's 3s block proposal was deprecated, using 1s blocks
         height: 15_768_000,
         fee_percentage: 5
     }

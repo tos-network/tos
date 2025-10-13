@@ -15,7 +15,8 @@ use crate::core::storage::Storage;
 pub const DAA_WINDOW_SIZE: u64 = 2016;
 
 /// Target time per block in seconds
-/// TOS uses 1 second per block (vs Kaspa's 1 second)
+/// TOS uses 1 second per block (TIP-1's 3s proposal was deprecated)
+/// This value is used by DAA for difficulty adjustment calculations
 pub const TARGET_TIME_PER_BLOCK: u64 = 1;
 
 /// Minimum difficulty adjustment ratio (0.25x = difficulty can drop to 1/4)

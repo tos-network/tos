@@ -3683,8 +3683,7 @@ mod tests {
         // ~ current height - should still be at 10% threshold
         assert_eq!(get_block_dev_fee(55_000), 10);
 
-        // TIP-1: Removed hardcoded 3_942_000 test (was for 12s blocks)
-        // New threshold is at 15_768_000 blocks (for 3s blocks, same ~1.5 year duration)
+        // TIP-1 deprecated: Threshold is at 15_768_000 blocks (for 1s blocks, ~6 month duration)
         // Test using DEV_FEES constants instead for flexibility
 
         assert_eq!(get_block_dev_fee(DEV_FEES[0].height), 10);
