@@ -10,7 +10,7 @@ mod security_tests {
     use std::sync::Arc;
     use tos_common::{
         block::calculate_merkle_root,
-        crypto::{Hash, Hashable},
+        crypto::Hash,
         transaction::Transaction,
     };
 

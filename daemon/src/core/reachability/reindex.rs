@@ -3,7 +3,6 @@
 // This module implements the interval reindexing algorithm that allows the
 // reachability tree to continue operating when interval space is exhausted.
 
-use super::{Interval, ReachabilityData};
 use crate::core::error::BlockchainError;
 use crate::core::storage::Storage;
 use std::collections::{HashMap, VecDeque};

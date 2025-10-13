@@ -17,8 +17,6 @@ mod tests_comprehensive;
 
 pub use interval::Interval;
 pub use store::ReachabilityData;
-pub(crate) use reindex::ReindexContext;
-pub(crate) use tree::{add_tree_block, try_advancing_reindex_root};
 
 use tos_common::crypto::Hash;
 use crate::core::error::BlockchainError;

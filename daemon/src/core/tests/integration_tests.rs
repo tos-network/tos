@@ -13,7 +13,7 @@ mod integration_tests {
     use crate::core::{
         ghostdag::{TosGhostdag, TosGhostdagData, BlueWorkType, calc_work_from_difficulty},
         reachability::{TosReachability, Interval, ReachabilityData},
-        ghostdag::daa::{calculate_daa_score, TARGET_TIME_PER_BLOCK, DAA_WINDOW_SIZE},
+        ghostdag::daa::{TARGET_TIME_PER_BLOCK, DAA_WINDOW_SIZE},
     };
 
     // ========================================================================
