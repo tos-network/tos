@@ -15,3 +15,6 @@ mod integration_tests;
 
 #[cfg(test)]
 mod security_tests;
+
+#[cfg(test)]
+mod ghostdag_consensus_tests;
