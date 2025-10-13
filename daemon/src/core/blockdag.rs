@@ -98,36 +98,10 @@ where
     }
 }
 
-// LEGACY: determine the lowest height possible based on tips and do N+1
-// NOTE: This uses legacy height calculation. For GHOSTDAG DAG, use calculate_blue_score_at_tips instead.
-// This function is deprecated and should only be used for backward compatibility with chain-based logic.
-#[deprecated(note = "Use calculate_blue_score_at_tips for GHOSTDAG DAG support")]
-pub async fn calculate_height_at_tips<'a, D, I>(provider: &D, tips: I) -> Result<u64, BlockchainError>
-where
-    D: DifficultyProvider,
-    I: Iterator<Item = &'a Hash> + ExactSizeIterator
-{
-    trace!("calculate height at tips (LEGACY)");
-    let mut height = 0;
-    let tips_len = tips.len();
-    for hash in tips {
-        let past_height = provider.get_height_for_block_hash(hash).await?;
-        if height <= past_height {
-            height = past_height;
-        }
-    }
-
-    if tips_len != 0 {
-        height += 1;
-    }
-    Ok(height)
-}
-
 // GHOSTDAG: Calculate the expected blue score for a block with given tips
-// This is the GHOSTDAG-aware version of calculate_height_at_tips.
 //
-// In GHOSTDAG, blue_score is calculated as max(parent.blue_score) + 1,
-// where parent is selected based on blue_work (not cumulative difficulty).
+// In GHOSTDAG, blue_score is calculated as max(parent.blue_score) + 1.
+// This is the DAG equivalent of height calculation in a linear chain.
 //
 // For a DAG with multiple parents, this finds the parent with highest blue_score
 // and returns blue_score + 1. This matches Kaspa's header processing pipeline.
@@ -154,44 +128,14 @@ where
     Ok(blue_score)
 }
 
-// LEGACY: find the best tip based on cumulative difficulty of the blocks
-// NOTE: This uses legacy cumulative difficulty. For GHOSTDAG DAG, use find_best_tip_by_blue_work instead.
-// This function is deprecated and should only be used for backward compatibility with chain-based logic.
-#[deprecated(note = "Use find_best_tip_by_blue_work for GHOSTDAG DAG support")]
-pub async fn find_best_tip_by_cumulative_difficulty<'a, D, I>(provider: &D, tips: I) -> Result<&'a Hash, BlockchainError>
-where
-    D: DifficultyProvider,
-    I: Iterator<Item = &'a Hash> + ExactSizeIterator
-{
-    trace!("find best tip by cumulative difficulty (LEGACY)");
-    let tips_len = tips.len();
-    match tips_len {
-        0 => Err(BlockchainError::ExpectedTips),
-        1 => Ok(tips.into_iter().next().unwrap()),
-        _ => {
-            let mut highest_cumulative_difficulty = CumulativeDifficulty::zero();
-            let mut selected_tip = None;
-            for hash in tips {
-                let cumulative_difficulty = provider.get_cumulative_difficulty_for_block_hash(hash).await?;
-                if highest_cumulative_difficulty < cumulative_difficulty {
-                    highest_cumulative_difficulty = cumulative_difficulty;
-                    selected_tip = Some(hash);
-                }
-            }
-
-            selected_tip.ok_or(BlockchainError::ExpectedTips)
-        }
-    }
-}
-
 // GHOSTDAG: Find the best tip based on blue work
-// This is the GHOSTDAG-aware version of find_best_tip_by_cumulative_difficulty.
 //
-// In GHOSTDAG, the "heaviest" chain is determined by blue_work (cumulative difficulty of blue blocks)
-// rather than cumulative difficulty of all blocks. This implements the core GHOSTDAG selection rule.
+// In GHOSTDAG, the "heaviest" chain is determined by blue_work (cumulative difficulty of blue blocks).
+// This is the DAG equivalent of selecting the chain with highest cumulative difficulty.
 //
 // For multiple parents, this selects the parent with highest blue_work,
 // which becomes the "selected parent" in GHOSTDAG terminology.
+// This implements the core GHOSTDAG chain selection rule.
 pub async fn find_best_tip_by_blue_work<'a, G, I>(provider: &G, tips: I) -> Result<&'a Hash, BlockchainError>
 where
     G: GhostdagDataProvider,
