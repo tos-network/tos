@@ -220,8 +220,16 @@ pub fn validate_stratum_share(share: &StratumShare) -> Result<(), StratumError> 
     }
 
     // Validate extra nonce format
-    if !share.extra_nonce2.is_empty() && hex::decode(&share.extra_nonce2).is_err() {
-        return Err(StratumError::new(20, "Invalid extra nonce format"));
+    if !share.extra_nonce2.is_empty() {
+        // SECURITY FIX: Hard limit on input string length to prevent memory exhaustion DoS
+        const MAX_EXTRA_NONCE2_HEX_LENGTH: usize = 128;
+        if share.extra_nonce2.len() > MAX_EXTRA_NONCE2_HEX_LENGTH {
+            return Err(StratumError::new(20, "Invalid extra nonce2: hex string too long"));
+        }
+
+        if hex::decode(&share.extra_nonce2).is_err() {
+            return Err(StratumError::new(20, "Invalid extra nonce format"));
+        }
     }
 
     Ok(())

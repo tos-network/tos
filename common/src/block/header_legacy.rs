@@ -29,7 +29,25 @@ pub fn serialize_extra_nonce<S: serde::Serializer>(extra_nonce: &[u8; EXTRA_NONC
 pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<[u8; EXTRA_NONCE_SIZE], D::Error> {
     let mut extra_nonce = [0u8; EXTRA_NONCE_SIZE];
     let hex = String::deserialize(deserializer)?;
+
+    // SECURITY FIX: Hard limit on input string length to prevent memory exhaustion DoS
+    // EXTRA_NONCE_SIZE (32 bytes) = 64 hex chars. Allow up to 128 chars as safety margin.
+    const MAX_HEX_LENGTH: usize = 128;
+    if hex.len() > MAX_HEX_LENGTH {
+        return Err(serde::de::Error::custom(
+            format!("Invalid extraNonce hex string: length {} exceeds maximum {}", hex.len(), MAX_HEX_LENGTH)
+        ));
+    }
+
     let decoded = hex::decode(hex).map_err(serde::de::Error::custom)?;
+
+    // SECURITY FIX: Validate decoded length before copy_from_slice to prevent panic
+    if decoded.len() != EXTRA_NONCE_SIZE {
+        return Err(serde::de::Error::custom(
+            format!("Invalid extraNonce length: expected {} bytes, got {}", EXTRA_NONCE_SIZE, decoded.len())
+        ));
+    }
+
     extra_nonce.copy_from_slice(&decoded);
     Ok(extra_nonce)
 }

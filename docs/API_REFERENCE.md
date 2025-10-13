@@ -4,6 +4,43 @@
 
 This document describes the RPC API interface for TOS AI Mining functionality. The API provides comprehensive access to task management, miner operations, validation, and reward distribution.
 
+## SECURITY WARNING: RPC Access Control
+
+**CRITICAL**: TOS RPC endpoints currently do NOT have built-in authentication or authorization.
+
+### Production Deployment Requirements
+
+If you need to expose RPC endpoints for remote access:
+
+1. **REQUIRED**: Deploy a firewall with IP whitelist restrictions
+2. **REQUIRED**: Use reverse proxy with authentication (nginx + basic auth, OAuth2, etc.)
+3. **REQUIRED**: Enable TLS/SSL encryption for all RPC traffic
+4. **RECOMMENDED**: Use VPN for administrative RPC access
+5. **RECOMMENDED**: Implement rate limiting to prevent DoS attacks
+
+### Example: nginx with Basic Auth
+
+```nginx
+location /rpc {
+    auth_basic "TOS RPC Access";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+}
+```
+
+### Local Development
+
+For local development, bind RPC to localhost only:
+
+```bash
+tos_daemon --rpc-bind 127.0.0.1:8080
+```
+
+**Never expose RPC directly to the internet without authentication!**
+
 ## RPC Interface Structure
 
 ### Core API Handler

@@ -172,6 +172,84 @@ Before committing, verify:
 - [ ] Commit message follows format with Co-Authored-By
 - [ ] Changes pushed to correct branch
 
+## Security Audit Checklist
+
+Before releasing or deploying, verify:
+
+### Input Validation
+
+- [ ] All user input strings have length limits before processing
+- [ ] All deserialization functions validate input size
+- [ ] Hex string inputs are limited (e.g., max 128 chars for 32-byte values)
+- [ ] No unbounded memory allocation from user input
+
+**Example**: `extra_nonce` deserialization (common/src/block/header.rs:38-45)
+```rust
+// SECURITY FIX: Hard limit on input string length to prevent memory exhaustion DoS
+const MAX_HEX_LENGTH: usize = 128;
+if hex.len() > MAX_HEX_LENGTH {
+    return Err(serde::de::Error::custom(
+        format!("Invalid extraNonce hex string: length {} exceeds maximum {}", hex.len(), MAX_HEX_LENGTH)
+    ));
+}
+```
+
+### RPC Security
+
+- [ ] RPC endpoints have authentication/authorization
+- [ ] RPC is bound to localhost only in default config
+- [ ] Documentation warns about RPC security requirements
+- [ ] Rate limiting is implemented or documented
+- [ ] TLS/SSL is required for remote RPC access
+
+**Documentation**: See docs/API_REFERENCE.md "SECURITY WARNING: RPC Access Control" section
+
+### Consensus Security
+
+- [ ] Merkle root validation enforced for all blocks
+- [ ] Blue score validation against parent tips
+- [ ] Blue work calculation verified against GHOSTDAG algorithm
+- [ ] Empty blocks must have zero merkle root
+- [ ] Non-empty blocks must have matching merkle root
+
+**Reference**: daemon/src/core/blockchain.rs:2155-2181 (merkle root validation)
+
+### Memory Safety
+
+- [ ] No `.unwrap()` on user input
+- [ ] Array bounds checked before `copy_from_slice()`
+- [ ] Collection sizes limited to prevent DoS
+- [ ] No unbounded loops on user-controlled data
+
+### Audit Documentation
+
+When security issues are found and fixed:
+
+1. Document the vulnerability in code comments
+2. Add test cases for the attack scenario
+3. Update security checklist if new pattern found
+4. Reference the fix in commit message
+
+**Example Commit Message**:
+```
+fix: Add hard limit for extra_nonce input length to prevent DoS
+
+SECURITY FIX: Prevent memory exhaustion DoS attack via extremely long
+hex strings in extra_nonce deserialization. Added 128-character limit
+before hex decoding in three locations:
+- common/src/block/header.rs
+- common/src/block/header_legacy.rs
+- common/src/api/daemon/mod.rs
+- daemon/src/core/mining/stratum.rs
+
+Risk: Low (requires RPC access, mitigated by other limits)
+Impact: Memory exhaustion, potential node crash
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
 ## Automated Checks (Future)
 
 These checks should be automated in CI/CD:
@@ -223,5 +301,5 @@ Exceptions to these rules require:
 ---
 
 **Last Updated**: 2025-10-13
-**Version**: 1.0
+**Version**: 1.1
 **Maintainer**: TOS Development Team
