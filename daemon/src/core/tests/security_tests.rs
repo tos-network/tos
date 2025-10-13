@@ -6,6 +6,7 @@
 // IMPORTANT: These tests verify fixes for HIGH SEVERITY security vulnerabilities
 
 #[cfg(test)]
+#[allow(unused)]
 mod security_tests {
     use std::sync::Arc;
     use tos_common::{

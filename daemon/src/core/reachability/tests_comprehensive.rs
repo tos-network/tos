@@ -9,6 +9,7 @@
 // 6. Tree block addition
 
 #[cfg(test)]
+#[allow(unused)]
 mod comprehensive_tests {
     use super::super::*;
     use tos_common::crypto::Hash;

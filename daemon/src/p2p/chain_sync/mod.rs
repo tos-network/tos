@@ -367,8 +367,8 @@ impl<S: Storage> P2pServer<S> {
             } else {
                 // Verify that someone isn't trying to trick us
                 if pop_count > blocks_len as u64 {
-                    // TODO: maybe we could request its whole chain for comparison until chain validator has_higher_cumulative_difficulty ?
-                    // If after going through all its chain and we still have a higher cumulative difficulty, we should not rewind 
+                    // TODO: maybe we could request its whole chain for comparison until chain validator has_higher_blue_work (GHOSTDAG) ?
+                    // If after going through all its chain and we still have higher blue_work, we should not rewind
                     warn!("{} sent us a pop count of {} but only sent us {} blocks, ignoring", peer, pop_count, blocks_len);
                     return Err(P2pError::InvalidPopCount(pop_count, blocks_len as u64).into())
                 }
@@ -425,11 +425,11 @@ impl<S: Storage> P2pServer<S> {
                     };
                 }
 
-                // Verify that it has a higher cumulative difficulty than us
-                // Otherwise we don't switch to his chain
+                // GHOSTDAG: Verify that peer's chain has higher blue_work than ours
+                // blue_work (not cumulative_difficulty) is the correct metric for DAG consensus
                 if !chain_validator.has_higher_cumulative_difficulty().await? {
-                    error!("{} sent us a chain response with lower cumulative difficulty than ours", peer);
-                    return Err(BlockchainError::LowerCumulativeDifficulty)
+                    error!("{} sent us a chain response with lower blue_work than ours (GHOSTDAG consensus)", peer);
+                    return Err(BlockchainError::LowerCumulativeDifficulty) // Error name kept for compatibility
                 }
 
                 // Handle the chain validator

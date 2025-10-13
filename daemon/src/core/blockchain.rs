@@ -1347,6 +1347,8 @@ impl<S: Storage> Blockchain<S> {
 
     // find the best tip (highest cumulative difficulty)
     // We get their cumulative difficulty and sort them then take the first one
+    // Legacy: Replaced by find_best_tip_by_blue_work in blockdag module
+    #[allow(dead_code)]
     async fn find_best_tip<'a, P: DifficultyProvider + DagOrderProvider>(&self, provider: &P, tips: &'a HashSet<Hash>, base: &Hash, base_height: u64) -> Result<&'a Hash, BlockchainError> {
         if tips.len() == 0 {
             return Err(BlockchainError::ExpectedTips)

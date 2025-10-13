@@ -3,6 +3,7 @@
 // Focuses on algorithm logic and data structure interactions
 
 #[cfg(test)]
+#[allow(unused)]
 mod integration_tests {
     use std::sync::Arc;
     use std::collections::HashMap;

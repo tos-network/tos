@@ -11,6 +11,7 @@
 // 7. Error handling and recovery
 
 #[cfg(test)]
+#[allow(unused)]
 mod extended_tests {
     use super::super::*;
     use tos_common::crypto::Hash;

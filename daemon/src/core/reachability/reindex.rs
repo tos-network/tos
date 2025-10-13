@@ -18,10 +18,12 @@ pub struct ReindexContext {
 
     /// Reindex depth: reindex root stays this many blocks behind tip
     /// Default: 100 blocks (from Kaspa)
+    #[allow(dead_code)]
     depth: u64,
 
     /// Reindex slack: minimum height difference required to switch reindex root chains
     /// Default: 16384 blocks (from Kaspa) - provides reorg protection
+    #[allow(dead_code)]
     slack: u64,
 }
 

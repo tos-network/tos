@@ -1,4 +1,7 @@
-use crate::p2p::error::P2pError;
+use crate::{
+    core::ghostdag::BlueWorkType,
+    p2p::error::P2pError
+};
 use std::sync::PoisonError;
 use strum::{EnumDiscriminants, IntoDiscriminant};
 use thiserror::Error;
@@ -260,6 +263,10 @@ pub enum BlockchainError {
     LowerCumulativeDifficulty,
     #[error("No cumulative difficulty found")]
     NoCumulativeDifficulty,
+    #[error("Invalid blue_score for block {}: expected {}, got {}", _0, _1, _2)]
+    InvalidBlueScore(Hash, u64, u64),
+    #[error("Invalid blue_work for block {}: expected {}, got {}", _0, _1, _2)]
+    InvalidBlueWork(Hash, BlueWorkType, BlueWorkType),
     #[error(transparent)]
     ErrorStd(#[from] std::io::Error),
     #[error(transparent)]

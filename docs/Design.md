@@ -1,5 +1,10 @@
 # TOS AI Mining Technical Implementation Design
 
+> **Note on Consensus Architecture**: This document focuses on AI mining features. For the core consensus protocol (GHOSTDAG, block structure, chain selection), see the [TIPs directory](../TIPs/):
+> - [TIP-1: GHOSTDAG Consensus](../TIPs/TIP-1-GHOSTDAG.md) - Core consensus specification
+> - [Consensus Layered Design](../TIPs/CONSENSUS_LAYERED_DESIGN.md) - topoheight vs blue_work separation
+> - [Consensus Refactoring Guide](../TIPs/CONSENSUS_REFACTORING_GUIDE.md) - Migration guide
+
 ## Overview
 
 This document provides a detailed technical implementation design for AI mining functionality in the TOS network, based on the vision outlined in AI-CN.md. The design leverages TOS's existing architecture and extends transaction types to implement a "Proof of Intelligent Work" mechanism, allowing AI agents to earn TOS rewards by solving real-world problems.
