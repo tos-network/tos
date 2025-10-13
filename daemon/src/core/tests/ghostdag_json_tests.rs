@@ -1,6 +1,6 @@
 // GHOSTDAG JSON Test Suite
 //
-// This module implements tests using the JSON test data from rusty-kaspa.
+// This module implements tests using JSON test data from reference GHOSTDAG implementations.
 // These tests verify that we can load and parse the JSON test format correctly.
 //
 // NOTE: These tests currently verify JSON structure and expected data format.
@@ -17,12 +17,12 @@ use tos_common::crypto::Hash;
 use crate::core::ghostdag::KType;
 
 // ============================================================================
-// Rusty-Kaspa JSON Format Structures
+// Reference JSON Format Structures
 // ============================================================================
 
-/// Rusty-Kaspa test DAG format
+/// Reference test DAG format (from reference GHOSTDAG implementations)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct RustyKaspaDag {
+struct ReferenceDag {
     #[serde(rename = "K")]
     k: KType,
 
@@ -33,12 +33,12 @@ struct RustyKaspaDag {
     expected_reds: Vec<String>,
 
     #[serde(rename = "Blocks")]
-    blocks: Vec<RustyKaspaBlock>,
+    blocks: Vec<ReferenceBlock>,
 }
 
-/// Rusty-Kaspa block definition
+/// Reference block definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct RustyKaspaBlock {
+struct ReferenceBlock {
     #[serde(rename = "ID")]
     id: String,
 
@@ -62,7 +62,7 @@ struct RustyKaspaBlock {
 // Test Execution Functions
 // ============================================================================
 
-/// Convert string ID to hash (rusty-kaspa uses string IDs)
+/// Convert string ID to hash (reference format uses string IDs)
 fn string_to_hash(s: &str) -> Hash {
     let mut data = s.as_bytes().to_vec();
     data.resize(32, 0);
@@ -71,17 +71,17 @@ fn string_to_hash(s: &str) -> Hash {
     Hash::new(bytes)
 }
 
-/// Load and parse a rusty-kaspa JSON test file
-fn load_rusty_kaspa_test<P: AsRef<Path>>(path: P) -> Result<RustyKaspaDag, Box<dyn std::error::Error>> {
+/// Load and parse a reference format JSON test file
+fn load_reference_test<P: AsRef<Path>>(path: P) -> Result<ReferenceDag, Box<dyn std::error::Error>> {
     let json_str = fs::read_to_string(path)?;
-    let dag: RustyKaspaDag = serde_json::from_str(&json_str)?;
+    let dag: ReferenceDag = serde_json::from_str(&json_str)?;
     Ok(dag)
 }
 
-/// Validate rusty-kaspa test structure
-fn validate_rusty_kaspa_test(
+/// Validate reference test structure
+fn validate_reference_test(
     test_name: &str,
-    dag_def: &RustyKaspaDag,
+    dag_def: &ReferenceDag,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Validating test: {} ===", test_name);
     println!("K parameter: {}", dag_def.k);
@@ -151,7 +151,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_all_json_tests() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
-        println!("Loading JSON tests from: {}", testdata_dir);
+        println!("Loading reference format JSON tests from: {}", testdata_dir);
 
         let entries = fs::read_dir(testdata_dir)
             .expect("Failed to read testdata directory");
@@ -161,17 +161,22 @@ mod tests {
             let entry = entry.expect("Failed to read directory entry");
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                json_files.push(path);
+                let filename = path.file_name().unwrap().to_str().unwrap();
+                // Only load reference format files (dag*.json)
+                // TOS native format files (simple_*.json) are tested in ghostdag_json_loader
+                if filename.starts_with("dag") {
+                    json_files.push(path);
+                }
             }
         }
 
-        assert!(!json_files.is_empty(), "No JSON test files found");
-        println!("Found {} JSON test files", json_files.len());
+        assert!(!json_files.is_empty(), "No reference format JSON test files found");
+        println!("Found {} reference format JSON test files", json_files.len());
 
         for path in json_files {
             let filename = path.file_name().unwrap().to_str().unwrap();
             println!("Verifying can load: {}", filename);
-            let dag = load_rusty_kaspa_test(&path)
+            let dag = load_reference_test(&path)
                 .expect(&format!("Failed to load {}", filename));
             println!("  ✓ K={}, {} blocks", dag.k, dag.blocks.len());
         }
@@ -181,9 +186,9 @@ mod tests {
     async fn test_dag0_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag0.json", testdata_dir);
-        let dag = load_rusty_kaspa_test(&test_path)
+        let dag = load_reference_test(&test_path)
             .expect("Failed to load dag0.json");
-        validate_rusty_kaspa_test("dag0", &dag)
+        validate_reference_test("dag0", &dag)
             .expect("dag0 validation failed");
     }
 
@@ -191,9 +196,9 @@ mod tests {
     async fn test_dag1_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag1.json", testdata_dir);
-        let dag = load_rusty_kaspa_test(&test_path)
+        let dag = load_reference_test(&test_path)
             .expect("Failed to load dag1.json");
-        validate_rusty_kaspa_test("dag1", &dag)
+        validate_reference_test("dag1", &dag)
             .expect("dag1 validation failed");
     }
 
@@ -201,9 +206,9 @@ mod tests {
     async fn test_dag2_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag2.json", testdata_dir);
-        let dag = load_rusty_kaspa_test(&test_path)
+        let dag = load_reference_test(&test_path)
             .expect("Failed to load dag2.json");
-        validate_rusty_kaspa_test("dag2", &dag)
+        validate_reference_test("dag2", &dag)
             .expect("dag2 validation failed");
     }
 
@@ -211,9 +216,9 @@ mod tests {
     async fn test_dag3_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag3.json", testdata_dir);
-        let dag = load_rusty_kaspa_test(&test_path)
+        let dag = load_reference_test(&test_path)
             .expect("Failed to load dag3.json");
-        validate_rusty_kaspa_test("dag3", &dag)
+        validate_reference_test("dag3", &dag)
             .expect("dag3 validation failed");
     }
 
@@ -221,9 +226,9 @@ mod tests {
     async fn test_dag4_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag4.json", testdata_dir);
-        let dag = load_rusty_kaspa_test(&test_path)
+        let dag = load_reference_test(&test_path)
             .expect("Failed to load dag4.json");
-        validate_rusty_kaspa_test("dag4", &dag)
+        validate_reference_test("dag4", &dag)
             .expect("dag4 validation failed");
     }
 
@@ -231,9 +236,9 @@ mod tests {
     async fn test_dag5_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag5.json", testdata_dir);
-        let dag = load_rusty_kaspa_test(&test_path)
+        let dag = load_reference_test(&test_path)
             .expect("Failed to load dag5.json");
-        validate_rusty_kaspa_test("dag5", &dag)
+        validate_reference_test("dag5", &dag)
             .expect("dag5 validation failed");
     }
 
@@ -242,19 +247,22 @@ mod tests {
         println!();
         println!("=== GHOSTDAG JSON TEST SUITE SUMMARY ===");
         println!();
+        println!("This test suite validates reference format JSON files (dag*.json).");
+        println!("TOS native format files (simple_*.json) are tested in ghostdag_json_loader module.");
+        println!();
         println!("Test Coverage:");
-        println!("  [✓] test_load_all_json_tests - Verifies all JSON files can be loaded");
-        println!("  [✓] test_dag0_json - DAG with K=4, structure validation");
-        println!("  [✓] test_dag1_json - DAG with K=4, structure validation");
-        println!("  [✓] test_dag2_json - DAG with K=4, structure validation");
-        println!("  [✓] test_dag3_json - DAG with K=4, structure validation");
-        println!("  [✓] test_dag4_json - DAG with K=4, structure validation");
-        println!("  [✓] test_dag5_json - DAG with K=4, structure validation");
+        println!("  [✓] test_load_all_json_tests - Verifies all dag*.json files can be loaded");
+        println!("  [✓] test_dag0_json - DAG with K=4, 19 blocks, complex merge");
+        println!("  [✓] test_dag1_json - DAG with K=4, 30 blocks, large-scale conflicts");
+        println!("  [✓] test_dag2_json - DAG with K=18, 9 blocks, high-K linear chain");
+        println!("  [✓] test_dag3_json - DAG with K=3, 10 blocks, K-constraint violation");
+        println!("  [✓] test_dag4_json - DAG with K=2, 9 blocks, low-K stress test");
+        println!("  [✓] test_dag5_json - DAG with K=3, 7 blocks, multi-parent merge");
         println!();
         println!("Each test verifies:");
         println!("  - JSON file can be loaded and parsed");
-        println!("  - Block structure is valid (all references exist)");
-        println!("  - Expected data format matches rusty-kaspa");
+        println!("  - Block structure is valid (all parent references exist)");
+        println!("  - Expected data format matches reference implementation");
         println!();
         println!("NOTE: Full GHOSTDAG computation testing requires Storage implementation.");
         println!("For full validation, use integration tests with actual consensus.");
