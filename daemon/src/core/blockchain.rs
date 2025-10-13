@@ -2527,6 +2527,18 @@ impl<S: Storage> Blockchain<S> {
                     ghostdag_data.mergeset_reds.len()
                 );
 
+                // SECURITY FIX: Validate blue_score consistency (Kaspa audit finding)
+                // Verify that the block's claimed blue_score matches the GHOSTDAG-calculated value
+                // This prevents malicious blocks from claiming incorrect blue_score values
+                if block.get_blue_score() != ghostdag_data.blue_score {
+                    debug!("Block {} has invalid blue_score: claimed={}, calculated={}",
+                           block_hash, block.get_blue_score(), ghostdag_data.blue_score);
+                    return Err(BlockchainError::InvalidBlockHeight(
+                        ghostdag_data.blue_score,
+                        block.get_blue_score()
+                    ));
+                }
+
                 // Store GHOSTDAG data
                 // Note: There's still a small race window here between has_ghostdag_data check and insert
                 // Ideally, we'd use a try_insert_ghostdag_data with atomic compare-and-swap

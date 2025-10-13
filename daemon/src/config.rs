@@ -57,9 +57,10 @@ pub const DEFAULT_MINIMUM_HASHRATE: u64 = 100 * HASH;
 // Reduced from 1 H/s to 0.1 H/s for easier development
 pub const GENESIS_BLOCK_DIFFICULTY: Difficulty = Difficulty::from_u64(1);
 
-// V-21 Fix: Reduced from 2000ms to 500ms to strengthen timestamp validation
-// This prevents timestamp manipulation attacks while still allowing for network latency
-pub const TIMESTAMP_IN_FUTURE_LIMIT: TimestampSeconds = 500;
+// V-21 Fix: Increased from 500ms to 10 seconds (10000ms) to allow reasonable clock skew
+// Previous value (500ms) was too restrictive and caused network synchronization issues
+// Kaspa uses 132 seconds; 10 seconds provides good balance between security and reliability
+pub const TIMESTAMP_IN_FUTURE_LIMIT: TimestampSeconds = 10_000;
 
 // V-26 Fix: Maximum number of orphaned transactions to prevent unbounded memory growth
 // Using LRU eviction, oldest transactions are dropped when limit is reached

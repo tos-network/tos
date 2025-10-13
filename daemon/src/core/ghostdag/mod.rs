@@ -484,8 +484,10 @@ impl TosGhostdag {
                 // Candidate and this blue are in each other's anticone
                 candidate_blue_anticone_size += 1;
 
-                // Check k-cluster condition 1: candidate's blue anticone must be < k
-                if candidate_blue_anticone_size >= self.k {
+                // Check k-cluster condition 1: candidate's blue anticone must be ≤ k
+                // BUGFIX: Changed >= to > (off-by-one error fix)
+                // K-cluster rule allows up to K blues in anticone, reject only at K+1
+                if candidate_blue_anticone_size > self.k {
                     return Err(BlockchainError::KClusterViolation {
                         block: candidate.clone(),
                         anticone_size: candidate_blue_anticone_size as usize,
@@ -493,8 +495,9 @@ impl TosGhostdag {
                     });
                 }
 
-                // Check k-cluster condition 2: existing blue's anticone + candidate must be < k
-                if blue_anticone_size >= self.k {
+                // Check k-cluster condition 2: existing blue's anticone + candidate must be ≤ k
+                // BUGFIX: Changed >= to > (off-by-one error fix)
+                if blue_anticone_size > self.k {
                     return Err(BlockchainError::KClusterViolation {
                         block: blue.clone(),
                         anticone_size: (blue_anticone_size + 1) as usize,
