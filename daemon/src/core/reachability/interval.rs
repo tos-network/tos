@@ -112,6 +112,174 @@ impl Interval {
     pub fn decrease(&self, offset: u64) -> Self {
         Self::new(self.start - offset, self.end - offset)
     }
+
+    /// Increase start by offset (shrink from left)
+    pub fn increase_start(&self, offset: u64) -> Self {
+        Self::new(self.start + offset, self.end)
+    }
+
+    /// Decrease start by offset (expand to left)
+    pub fn decrease_start(&self, offset: u64) -> Self {
+        Self::new(self.start - offset, self.end)
+    }
+
+    /// Increase end by offset (expand to right)
+    pub fn increase_end(&self, offset: u64) -> Self {
+        Self::new(self.start, self.end + offset)
+    }
+
+    /// Decrease end by offset (shrink from right)
+    pub fn decrease_end(&self, offset: u64) -> Self {
+        Self::new(self.start, self.end - offset)
+    }
+
+    /// Check if this interval strictly contains another interval
+    ///
+    /// Strict containment means self contains other AND they are not equal
+    /// Used for parent-child relationship: parent must strictly contain child
+    pub fn strictly_contains(&self, other: Interval) -> bool {
+        self.contains(other) && *self != other
+    }
+
+    /// Split interval into exact sizes
+    ///
+    /// Splits this interval into sub-intervals with the given sizes.
+    /// The sum of sizes must equal the interval size.
+    ///
+    /// # Arguments
+    /// * `sizes` - Array of sizes for each sub-interval
+    ///
+    /// # Returns
+    /// Vector of intervals with exact sizes
+    ///
+    /// # Panics
+    /// Panics if sum(sizes) != self.size()
+    pub fn split_exact(&self, sizes: &[u64]) -> Vec<Self> {
+        let total_size: u64 = sizes.iter().sum();
+        assert_eq!(
+            total_size,
+            self.size(),
+            "sum of sizes ({}) must equal interval size ({})",
+            total_size,
+            self.size()
+        );
+
+        let mut result = Vec::with_capacity(sizes.len());
+        let mut current_start = self.start;
+
+        for &size in sizes {
+            if size == 0 {
+                // Empty interval
+                result.push(Self::new(current_start, current_start - 1));
+            } else {
+                let current_end = current_start + size - 1;
+                result.push(Self::new(current_start, current_end));
+                current_start = current_end + 1;
+            }
+        }
+
+        result
+    }
+
+    /// Split interval exponentially based on subtree sizes
+    ///
+    /// This is the CRITICAL ALGORITHM for reindexing. It allocates interval space
+    /// to children proportionally to 2^(subtree_size), giving larger subtrees
+    /// exponentially more space since they're more likely to grow.
+    ///
+    /// # Algorithm
+    /// 1. Each child gets AT LEAST its subtree size
+    /// 2. Remaining space (slack) is distributed exponentially:
+    ///    fraction[i] = 2^(size[i]) / Σ(2^(size[j]))
+    /// 3. Larger subtrees get proportionally more slack
+    ///
+    /// # Arguments
+    /// * `sizes` - Subtree sizes for each child
+    ///
+    /// # Returns
+    /// Vector of intervals allocated to children
+    ///
+    /// # Panics
+    /// Panics if self.size() < sum(sizes)
+    pub fn split_exponential(&self, sizes: &[u64]) -> Vec<Self> {
+        let interval_size = self.size();
+        let sizes_sum: u64 = sizes.iter().sum();
+
+        assert!(
+            interval_size >= sizes_sum,
+            "interval size ({}) must be >= sum of sizes ({})",
+            interval_size,
+            sizes_sum
+        );
+
+        // If exact match, no slack to distribute
+        if interval_size == sizes_sum {
+            return self.split_exact(sizes);
+        }
+
+        // Calculate exponential fractions for slack distribution
+        let mut remaining_bias = interval_size - sizes_sum;
+        let total_bias = remaining_bias as f64;
+        let exp_fractions = exponential_fractions(sizes);
+
+        // Add exponentially-biased slack to each size
+        let mut biased_sizes = Vec::with_capacity(sizes.len());
+        for (i, &fraction) in exp_fractions.iter().enumerate() {
+            let bias: u64 = if i == exp_fractions.len() - 1 {
+                // Last child gets all remaining bias (avoid rounding errors)
+                remaining_bias
+            } else {
+                remaining_bias.min((total_bias * fraction).round() as u64)
+            };
+            biased_sizes.push(sizes[i] + bias);
+            remaining_bias -= bias;
+        }
+
+        self.split_exact(&biased_sizes)
+    }
+}
+
+/// Calculate exponential fractions for slack distribution
+///
+/// Returns fraction[i] = 2^(size[i]) / Σ(2^(size[j]))
+///
+/// This gives larger subtrees exponentially higher fractions,
+/// following GHOSTDAG's principle that larger subtrees dominate growth.
+///
+/// # Algorithm
+/// To avoid overflow with 2^size, we use:
+/// 2^size[i] / Σ(2^size[j]) = 2^(size[i] - max_size) / Σ(2^(size[j] - max_size))
+///
+/// By subtracting max_size, all exponents become ≤ 0, preventing overflow.
+fn exponential_fractions(sizes: &[u64]) -> Vec<f64> {
+    if sizes.is_empty() {
+        return Vec::new();
+    }
+
+    let max_size = sizes.iter().copied().max().unwrap_or(0);
+
+    // Calculate 2^(size[i] - max_size) for each size
+    // Since size[i] - max_size ≤ 0, these are all ≤ 1, avoiding overflow
+    let mut fractions: Vec<f64> = sizes
+        .iter()
+        .map(|&s| {
+            if max_size >= s {
+                1f64 / 2f64.powi((max_size - s) as i32)
+            } else {
+                2f64.powi((s - max_size) as i32)
+            }
+        })
+        .collect();
+
+    // Normalize to sum to 1
+    let fractions_sum: f64 = fractions.iter().sum();
+    if fractions_sum > 0.0 {
+        for fraction in &mut fractions {
+            *fraction /= fractions_sum;
+        }
+    }
+
+    fractions
 }
 
 #[cfg(test)]
@@ -195,5 +363,163 @@ mod tests {
         let maximal = Interval::maximal();
         let no_remaining = maximal.remaining_after();
         assert!(no_remaining.is_empty());
+    }
+
+    #[test]
+    fn test_interval_manipulation() {
+        let interval = Interval::new(100, 200);
+
+        // Test increase_start (shrink from left)
+        let shrunk_left = interval.increase_start(10);
+        assert_eq!(shrunk_left.start, 110);
+        assert_eq!(shrunk_left.end, 200);
+        assert_eq!(shrunk_left.size(), 91);
+
+        // Test decrease_end (shrink from right)
+        let shrunk_right = interval.decrease_end(10);
+        assert_eq!(shrunk_right.start, 100);
+        assert_eq!(shrunk_right.end, 190);
+        assert_eq!(shrunk_right.size(), 91);
+
+        // Test increase_end (expand to right)
+        let expanded_right = interval.increase_end(10);
+        assert_eq!(expanded_right.start, 100);
+        assert_eq!(expanded_right.end, 210);
+        assert_eq!(expanded_right.size(), 111);
+
+        // Test decrease_start (expand to left)
+        let expanded_left = interval.decrease_start(10);
+        assert_eq!(expanded_left.start, 90);
+        assert_eq!(expanded_left.end, 200);
+        assert_eq!(expanded_left.size(), 111);
+    }
+
+    #[test]
+    fn test_strictly_contains() {
+        let parent = Interval::new(1, 100);
+        let child = Interval::new(10, 50);
+
+        assert!(parent.strictly_contains(child));
+        assert!(!parent.strictly_contains(parent)); // Not strict (equal)
+        assert!(!child.strictly_contains(parent));
+    }
+
+    #[test]
+    fn test_split_exact() {
+        let interval = Interval::new(1, 100);
+        let sizes = vec![20, 30, 50];
+
+        let splits = interval.split_exact(&sizes);
+        assert_eq!(splits.len(), 3);
+
+        assert_eq!(splits[0], Interval::new(1, 20));
+        assert_eq!(splits[1], Interval::new(21, 50));
+        assert_eq!(splits[2], Interval::new(51, 100));
+
+        // Verify sizes
+        assert_eq!(splits[0].size(), 20);
+        assert_eq!(splits[1].size(), 30);
+        assert_eq!(splits[2].size(), 50);
+    }
+
+    #[test]
+    fn test_split_exact_with_empty() {
+        let interval = Interval::new(1, 50);
+        let sizes = vec![20, 0, 30]; // Middle child gets empty interval
+
+        let splits = interval.split_exact(&sizes);
+        assert_eq!(splits.len(), 3);
+
+        assert_eq!(splits[0].size(), 20);
+        assert!(splits[1].is_empty());
+        assert_eq!(splits[2].size(), 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "sum of sizes")]
+    fn test_split_exact_wrong_sum() {
+        let interval = Interval::new(1, 100);
+        let sizes = vec![20, 30, 40]; // Sum = 90, not 100
+        interval.split_exact(&sizes);
+    }
+
+    #[test]
+    fn test_exponential_fractions() {
+        let sizes = vec![10, 20, 40];
+        let fractions = exponential_fractions(&sizes);
+
+        assert_eq!(fractions.len(), 3);
+
+        // Fractions should sum to ~1.0
+        let sum: f64 = fractions.iter().sum();
+        assert!((sum - 1.0).abs() < 0.0001);
+
+        // Larger sizes should get larger fractions
+        assert!(fractions[2] > fractions[1]);
+        assert!(fractions[1] > fractions[0]);
+
+        // For sizes [10, 20, 40]:
+        // 2^10 = 1024, 2^20 = 1048576, 2^40 = 1099511627776
+        // But we use 2^(size - max_size) to avoid overflow
+        // So: 2^(10-40), 2^(20-40), 2^(40-40) = 2^-30, 2^-20, 2^0
+        // fraction[0] ≈ 2^-30 / (2^-30 + 2^-20 + 1) ≈ 0
+        // fraction[1] ≈ 2^-20 / (2^-30 + 2^-20 + 1) ≈ 0.001
+        // fraction[2] ≈ 1 / (2^-30 + 2^-20 + 1) ≈ 0.999
+
+        println!("Fractions: {:?}", fractions);
+        assert!(fractions[2] > 0.99); // Largest subtree gets almost all slack
+    }
+
+    #[test]
+    fn test_split_exponential() {
+        let interval = Interval::new(1, 1000);
+        let sizes = vec![10, 20, 40]; // Subtree sizes
+
+        let splits = interval.split_exponential(&sizes);
+        assert_eq!(splits.len(), 3);
+
+        // Each child gets AT LEAST its subtree size
+        assert!(splits[0].size() >= 10);
+        assert!(splits[1].size() >= 20);
+        assert!(splits[2].size() >= 40);
+
+        // Larger subtree should get more space
+        assert!(splits[2].size() > splits[1].size());
+        assert!(splits[1].size() > splits[0].size());
+
+        // Total should equal interval size
+        let total_size: u64 = splits.iter().map(|s| s.size()).sum();
+        assert_eq!(total_size, 1000);
+
+        println!("Exponential splits: {:?}", splits);
+        println!("Sizes: {:?}", splits.iter().map(|s| s.size()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_split_exponential_exact_match() {
+        let interval = Interval::new(1, 70);
+        let sizes = vec![10, 20, 40]; // Sum = 70, exact match
+
+        let splits = interval.split_exponential(&sizes);
+
+        // When exact match, should behave like split_exact
+        assert_eq!(splits[0].size(), 10);
+        assert_eq!(splits[1].size(), 20);
+        assert_eq!(splits[2].size(), 40);
+    }
+
+    #[test]
+    fn test_split_exponential_equal_sizes() {
+        let interval = Interval::new(1, 1000);
+        let sizes = vec![10, 10, 10]; // All equal
+
+        let splits = interval.split_exponential(&sizes);
+
+        // With equal sizes, slack should be distributed roughly equally
+        // (within rounding error)
+        let size_diff = splits[0].size().abs_diff(splits[1].size());
+        assert!(size_diff <= 1);
+        let size_diff = splits[1].size().abs_diff(splits[2].size());
+        assert!(size_diff <= 1);
     }
 }

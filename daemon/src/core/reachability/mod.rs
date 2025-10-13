@@ -8,9 +8,11 @@
 
 mod interval;
 mod store;
+mod reindex;
 
 pub use interval::Interval;
 pub use store::ReachabilityData;
+pub(crate) use reindex::ReindexContext;
 
 use tos_common::crypto::Hash;
 use crate::core::error::BlockchainError;
