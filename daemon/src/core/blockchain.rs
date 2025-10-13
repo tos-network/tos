@@ -2559,9 +2559,13 @@ impl<S: Storage> Blockchain<S> {
                 // Initialize genesis reachability data
                 debug!("Initializing genesis reachability data for block {}", block_hash);
                 let genesis_hash = block_hash.as_ref().clone();
-                let reachability = crate::core::reachability::TosReachability::new(genesis_hash);
+                let reachability = crate::core::reachability::TosReachability::new(genesis_hash.clone());
                 let genesis_data = reachability.genesis_reachability_data();
                 storage.set_reachability_data(&block_hash, &genesis_data).await?;
+
+                // Initialize reindex root to genesis (Phase 2)
+                debug!("Initializing reindex root to genesis {}", genesis_hash);
+                storage.set_reindex_root(genesis_hash).await?;
             } else if storage.has_reachability_data(&selected_parent).await.unwrap_or(false) {
                 // Populate reachability data for non-genesis block
                 debug!("Populating reachability data for block {}", block_hash);
@@ -2580,6 +2584,10 @@ impl<S: Storage> Blockchain<S> {
                     .cloned()
                     .collect();
                 reachability.add_dag_block(&mut *storage, &block_hash, &mergeset_blues).await?;
+
+                // Hint for reindex root advancement (Phase 2)
+                // This keeps the reindex root ~100 blocks behind the tip
+                reachability.hint_virtual_selected_parent(&mut *storage, block_hash.as_ref().clone()).await?;
 
                 debug!("Reachability data populated in {:?}", start_reach.elapsed());
             }
