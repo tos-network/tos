@@ -294,9 +294,9 @@ Exceptions to these rules require:
 
 ## References
 
-- TIPs Directory: `/Users/tomisetsu/tos-network/TIPs/`
-- Consensus Design: `TIPs/CONSENSUS_LAYERED_DESIGN.md`
-- Refactoring Guide: `TIPs/CONSENSUS_REFACTORING_GUIDE.md`
+- TIPs Directory: `../TIPs/`
+- Consensus Design: `../TIPs/CONSENSUS_LAYERED_DESIGN.md`
+- Refactoring Guide: `../TIPs/CONSENSUS_REFACTORING_GUIDE.md`
 
 ---
 

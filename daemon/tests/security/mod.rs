@@ -50,7 +50,7 @@
 //! ## Security Audit Reference:
 //!
 //! All tests reference the security audit report at:
-//! `/Users/tomisetsu/tos-network/TIPs/SECURITY_AUDIT_REPORT.md`
+//! `../../../TIPs/SECURITY_AUDIT_REPORT.md`
 
 pub mod ghostdag_security_tests;
 pub mod state_security_tests;

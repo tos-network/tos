@@ -460,7 +460,7 @@ Batch + Parallel (8T)      | 520       | 28.85x (~29x)
 ### 5.1 Prerequisites
 
 ```bash
-cd /Users/tomisetsu/tos-network/tos/daemon
+cd daemon  # From project root: tos-network/tos/
 cargo build --release
 ```
 

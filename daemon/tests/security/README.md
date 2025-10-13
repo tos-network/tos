@@ -4,7 +4,7 @@
 
 This directory contains comprehensive security tests for all 27 vulnerabilities discovered in the TOS blockchain security audit. The test suite validates that security fixes are working correctly and prevents regression of critical vulnerabilities.
 
-**Audit Reference**: `/Users/tomisetsu/tos-network/TIPs/SECURITY_AUDIT_REPORT.md`
+**Audit Reference**: `../../../TIPs/SECURITY_AUDIT_REPORT.md`
 
 ## Test Organization
 
@@ -393,7 +393,7 @@ If a security test fails:
 
 ## References
 
-- **Security Audit Report**: `/Users/tomisetsu/tos-network/TIPs/SECURITY_AUDIT_REPORT.md`
+- **Security Audit Report**: `../../../TIPs/SECURITY_AUDIT_REPORT.md`
 - **Kaspa GHOSTDAG**: https://github.com/kaspanet/rusty-kaspa
 - **GHOSTDAG Paper**: https://eprint.iacr.org/2018/104.pdf
 - **Curve25519**: https://cr.yp.to/ecdh.html
