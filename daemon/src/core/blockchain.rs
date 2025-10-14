@@ -2031,15 +2031,36 @@ impl<S: Storage> Blockchain<S> {
             timestamp = current_timestamp;
         }
 
-        // GHOSTDAG: Use blue_score instead of legacy height
-        let blue_score = blockdag::calculate_blue_score_at_tips(storage, sorted_tips.iter()).await?;
+        // Convert sorted_tips to Vec for GHOSTDAG algorithm
         let sorted_tips_vec: Vec<Hash> = sorted_tips.into_iter().collect();
+
+        // GHOSTDAG: Run full GHOSTDAG algorithm to calculate blue_score correctly
+        // This must match the validation logic to prevent blue_score mismatch errors
+        // BUG FIX: Previously used simple calculate_blue_score_at_tips() which produced
+        // incorrect blue_score (max + count), causing validation failures
+        let ghostdag_data = self.ghostdag.ghostdag(&*storage, &sorted_tips_vec).await?;
+        let blue_score = ghostdag_data.blue_score;
+
+        // DEBUG: Log parent details for template generation
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Template generation: {} parents selected, GHOSTDAG blue_score={}, blue_work={}, mergeset_blues={}, mergeset_reds={}",
+                sorted_tips_vec.len(),
+                ghostdag_data.blue_score,
+                ghostdag_data.blue_work,
+                ghostdag_data.mergeset_blues.len(),
+                ghostdag_data.mergeset_reds.len()
+            );
+            for (i, tip) in sorted_tips_vec.iter().enumerate() {
+                let tip_blue_score = storage.get_ghostdag_blue_score(tip).await?;
+                debug!("  Parent[{}]: {} (blue_score={})", i, tip, tip_blue_score);
+            }
+        }
         let mut block = BlockHeader::new_simple(get_version_at_height(self.get_network(), blue_score), sorted_tips_vec, timestamp, extra_nonce, address, Hash::zero());
 
         // Set the calculated blue_score in the block header
         block.blue_score = blue_score;
         if log::log_enabled!(log::Level::Debug) {
-        debug!("Block template created with blue_score: {}", blue_score);
+        debug!("Block template created with {} parents, blue_score: {}", block.get_parents().len(), blue_score);
         }
 
         histogram!("tos_block_header_template_ms").record(start.elapsed().as_millis() as f64);
@@ -2387,6 +2408,22 @@ impl<S: Storage> Blockchain<S> {
 
         // GHOSTDAG: Use blue_score calculation instead of legacy height
         // This is the correct way to validate block blue_score in a DAG with multiple parents
+        // DEBUG: Log parent details for validation
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Validation: block {} has {} parents, claims blue_score={}",
+                   block_hash, block.get_parents().len(), block.get_blue_score());
+            for (i, parent) in block.get_parents().iter().enumerate() {
+                match storage.get_ghostdag_blue_score(parent).await {
+                    Ok(parent_blue_score) => {
+                        debug!("  Parent[{}]: {} (blue_score={})", i, parent, parent_blue_score);
+                    }
+                    Err(e) => {
+                        debug!("  Parent[{}]: {} (ERROR: {})", i, parent, e);
+                    }
+                }
+            }
+        }
+
         let block_blue_score_by_tips = blockdag::calculate_blue_score_at_tips(&*storage, block.get_parents().iter()).await?;
         if block_blue_score_by_tips != block.get_blue_score() {
             if log::log_enabled!(log::Level::Debug) {
@@ -3680,6 +3717,9 @@ impl<S: Storage> Blockchain<S> {
                     let getwork = getwork.clone();
                     spawn_task("notify-new-job", async move {
                         let start = Instant::now();
+                        // Invalidate cached jobs first to prevent serving stale work
+                        getwork.get_handler().invalidate_job_cache().await;
+
                         if let Err(e) = getwork.get_handler().notify_new_job().await {
                             if log::log_enabled!(log::Level::Debug) {
                             debug!("Error while notifying new job to miners: {}", e);

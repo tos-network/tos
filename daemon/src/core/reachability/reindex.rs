@@ -115,12 +115,17 @@ impl ReindexContext {
     /// Calculates the number of blocks in the subtree rooted at each block.
     /// Uses BFS to avoid stack overflow on deep chains.
     ///
-    /// # Algorithm
+    /// This is the CORRECT algorithm from Kaspa:
     /// 1. BFS traversal to reach all leaves
     /// 2. When leaf found (no children), mark subtree_size = 1
-    /// 3. Push updates upward through parent chain
-    /// 4. Wait until all children processed before computing parent
+    /// 3. Walk UP parent chain from leaf to root, updating parent sizes
+    /// 4. Track child completion counts to know when parent is ready
     /// 5. Formula: subtree_size(node) = sum(subtree_size(children)) + 1
+    ///
+    /// Key improvement over previous implementation:
+    /// - Never re-queues nodes (avoids circular dependencies)
+    /// - Uses parent-chain walk instead of re-queue-and-retry
+    /// - Uses `counts` map to track children completion
     ///
     /// # Arguments
     /// * `storage` - Reference to blockchain storage
@@ -136,43 +141,52 @@ impl ReindexContext {
         }
 
         let mut queue = VecDeque::<Hash>::from([block.clone()]);
+        let mut counts = HashMap::<Hash, u64>::new();
 
-        while let Some(current) = queue.pop_front() {
-            // Skip if already calculated
-            if self.subtree_sizes.contains_key(&current) {
-                continue;
-            }
-
+        while let Some(mut current) = queue.pop_front() {
             let current_data = storage.get_reachability_data(&current).await?;
             let children = &current_data.children;
 
             if children.is_empty() {
-                // Leaf node - subtree size is 1
+                // We reached a leaf - subtree size is 1
                 self.subtree_sizes.insert(current.clone(), 1);
-            } else {
-                // Check if all children have been processed
-                let all_children_ready = children
-                    .iter()
-                    .all(|c| self.subtree_sizes.contains_key(c));
-
-                if all_children_ready {
-                    // All children ready - compute this node's subtree size
-                    let subtree_sum: u64 = children
-                        .iter()
-                        .map(|c| self.subtree_sizes[c])
-                        .sum();
-                    self.subtree_sizes.insert(current.clone(), subtree_sum + 1);
-                } else {
-                    // Not all children ready - add unprocessed children to queue
-                    for child in children {
-                        if !self.subtree_sizes.contains_key(child) {
-                            queue.push_back(child.clone());
-                        }
-                    }
-
-                    // Re-add current to queue to check again after children are processed
-                    queue.push_back(current);
+            } else if !self.subtree_sizes.contains_key(&current) {
+                // We haven't yet calculated the subtree size of
+                // the current block. Add all its children to the queue
+                for child in children {
+                    queue.push_back(child.clone());
                 }
+                continue;
+            }
+
+            // We reached a leaf or a pre-calculated subtree.
+            // Push information up the parent chain
+            while current != block {
+                let parent_hash = storage.get_reachability_data(&current).await?.parent;
+
+                // Self-loop check (genesis)
+                if parent_hash == current {
+                    break;
+                }
+
+                current = parent_hash;
+
+                let count = counts.entry(current.clone()).or_insert(0);
+                let parent_children = storage.get_reachability_data(&current).await?.children;
+
+                *count += 1;
+                if *count < parent_children.len() as u64 {
+                    // Not all subtrees of the current block are ready
+                    break;
+                }
+
+                // All children of `current` have calculated their subtree size.
+                // Sum them all together and add 1 to get the subtree size of `current`.
+                let subtree_sum: u64 = parent_children
+                    .iter()
+                    .map(|c| self.subtree_sizes[c])
+                    .sum();
+                self.subtree_sizes.insert(current.clone(), subtree_sum + 1);
             }
         }
 

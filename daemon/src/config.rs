@@ -50,8 +50,8 @@ pub const TERA_HASH: u64 = GIGA_HASH * 1000;
 // Currently set to 100 H/s (same as testnet for easier solo mining)
 pub const MAINNET_MINIMUM_HASHRATE: u64 = 100 * HASH;
 // Testnet & Devnet minimum hashrate
-// Currently set to 100 H/s (reduced from 2 KH/s for easier development)
-pub const DEFAULT_MINIMUM_HASHRATE: u64 = 100 * HASH;
+// Set to 1000 H/s (1 KH/s) to achieve ~1 block per second
+pub const DEFAULT_MINIMUM_HASHRATE: u64 = 1000 * HASH;
 
 // This is also used as testnet and devnet minimum difficulty
 // Reduced from 1 H/s to 0.1 H/s for easier development

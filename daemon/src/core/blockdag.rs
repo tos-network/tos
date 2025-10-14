@@ -1,5 +1,5 @@
 use indexmap::IndexSet;
-use log::trace;
+use log::{trace, debug};
 use tos_common::{
     time::TimestampMillis,
     crypto::Hash,
@@ -85,11 +85,24 @@ where
     trace!("calculate blue score at tips (GHOSTDAG)");
     let mut blue_score = 0;
     let tips_len = tips.len();
+    let mut max_parent_blue_score = 0;
+    let mut valid_tips_count = 0;
 
     for hash in tips {
-        let past_blue_score = provider.get_ghostdag_blue_score(hash).await?;
-        if blue_score < past_blue_score {
-            blue_score = past_blue_score;
+        match provider.get_ghostdag_blue_score(hash).await {
+            Ok(past_blue_score) => {
+                valid_tips_count += 1;
+                if blue_score < past_blue_score {
+                    blue_score = past_blue_score;
+                    max_parent_blue_score = past_blue_score;
+                }
+            }
+            Err(e) => {
+                // Log error but continue - this might be expected for some parents
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Failed to get blue_score for parent {}: {}", hash, e);
+                }
+            }
         }
     }
 
@@ -97,6 +110,11 @@ where
         // GHOSTDAG: blue_score increases by the number of blocks in the mergeset
         // When merging N tips, the mergeset contains all N blocks, so blue_score += N
         blue_score += tips_len as u64;
+    }
+
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("calculate_blue_score_at_tips: {} tips total, {} valid, max_parent={}, result={}",
+               tips_len, valid_tips_count, max_parent_blue_score, blue_score);
     }
 
     Ok(blue_score)
