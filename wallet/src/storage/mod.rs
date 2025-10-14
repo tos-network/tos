@@ -208,7 +208,9 @@ impl EncryptedStorage {
     pub async fn stop(&mut self) {
         trace!("Stopping storage");
         if let Err(e) = self.inner.db.flush_async().await {
-            error!("Error while flushing the database: {}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while flushing the database: {}", e);
+            }
         }
     }
 
@@ -236,14 +238,14 @@ impl EncryptedStorage {
     fn load_from_disk<V: Serializer>(&self, tree: &Tree, key: &[u8]) -> Result<V> {
         trace!("load from disk");
         self.load_from_disk_optional(tree, key)?
-            .context(format!("Error while loading data with hashed key {} from disk", String::from_utf8_lossy(key)))
+            .with_context(|| format!("Error while loading data with hashed key {} from disk", String::from_utf8_lossy(key)))
     }
 
     // Load from disk with key passed
     fn load_from_disk_with_key<V: Serializer>(&self, tree: &Tree, key: &[u8]) -> Result<V> {
         trace!("load from disk with key");
         self.internal_load(tree, key)?
-            .context(format!("Error while loading data with key {} from disk", String::from_utf8_lossy(key)))
+            .with_context(|| format!("Error while loading data with key {} from disk", String::from_utf8_lossy(key)))
     }
 
     // Parse encrypted data
@@ -271,7 +273,7 @@ impl EncryptedStorage {
     fn load_from_disk_with_encrypted_key<V: Serializer>(&self, tree: &Tree, key: &[u8]) -> Result<V> {
         trace!("load from disk with encrypted key");
         self.load_from_disk_optional_with_encrypted_key(tree, key)?
-            .context(format!("Error while loading data with encrypted key {} from disk", String::from_utf8_lossy(key)))
+            .with_context(|| format!("Error while loading data with encrypted key {} from disk", String::from_utf8_lossy(key)))
     }
 
 
@@ -343,7 +345,8 @@ impl EncryptedStorage {
     // Open the named tree
     fn get_custom_tree(&self, name: impl Into<String>) -> Result<Tree> {
         trace!("get custom tree");
-        let hash = self.cipher.hash_key(format!("custom_{}", name.into()));
+        let name_str = name.into();
+        let hash = self.cipher.hash_key(format!("custom_{}", name_str));
         let tree = self.inner.db.open_tree(&hash)?;
         Ok(tree)
     }
@@ -690,7 +693,9 @@ impl EncryptedStorage {
 
     // Retrieve the stored decimals for this asset for better display
     pub async fn get_asset(&self, asset: &Hash) -> Result<AssetData> {
-        trace!("get asset {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get asset {}", asset);
+        }
         let mut cache = self.assets_cache.lock().await;
         if let Some(asset) = cache.get(asset) {
             return Ok(asset.clone());
@@ -705,7 +710,9 @@ impl EncryptedStorage {
 
     // Retrieve the stored decimals for this asset for better display
     pub async fn has_asset(&self, asset: &Hash) -> Result<bool> {
-        trace!("has asset {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has asset {}", asset);
+        }
         {
             let cache = self.assets_cache.lock().await;
             if cache.contains(asset) {
@@ -777,7 +784,9 @@ impl EncryptedStorage {
 
     // Retrieve the plaintext balance for this asset
     pub async fn get_plaintext_balance_for(&self, asset: &Hash) -> Result<u64> {
-        trace!("get plaintext balance for {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get plaintext balance for {}", asset);
+        }
         let mut cache = self.balances_cache.lock().await;
         if let Some(balance) = cache.get(asset) {
             return Ok(balance.amount);
@@ -792,7 +801,9 @@ impl EncryptedStorage {
 
     // Retrieve the balance for this asset
     pub async fn get_balance_for(&self, asset: &Hash) -> Result<Balance> {
-        trace!("get balance for {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get balance for {}", asset);
+        }
         let mut cache = self.balances_cache.lock().await;
         if let Some(balance) = cache.get(asset) {
             return Ok(balance.clone());
@@ -807,7 +818,9 @@ impl EncryptedStorage {
     // Retrieve the unconfirmed balance for this asset if present
     // otherwise, fall back on the confirmed balance
     pub async fn get_unconfirmed_balance_for(&self, asset: &Hash) -> Result<(Balance, bool)> {
-        trace!("get unconfirmed balance for {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get unconfirmed balance for {}", asset);
+        }
         {
             let cache = self.unconfirmed_balances_cache.lock().await;
             if let Some(balances) = cache.get(asset) {
@@ -824,7 +837,9 @@ impl EncryptedStorage {
 
     // Verify if we have any unconfirmed balance stored
     pub async fn has_unconfirmed_balance_for(&self, asset: &Hash) -> Result<bool> {
-        trace!("has unconfirmed balance for {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has unconfirmed balance for {}", asset);
+        }
         let cache = self.unconfirmed_balances_cache.lock().await;
         if let Some(balances) = cache.get(asset) {
             return Ok(!balances.is_empty());
@@ -835,7 +850,9 @@ impl EncryptedStorage {
 
     // Retrieve the unconfirmed balance decoded for this asset if present
     pub async fn get_unconfirmed_balance_decoded_for(&self, asset: &Hash, compressed_ct: &CompressedCiphertext) -> Result<Option<u64>> {
-        trace!("get unconfirmed balance decoded for {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get unconfirmed balance decoded for {}", asset);
+        }
         let mut cache = self.unconfirmed_balances_cache.lock().await;
         if let Some(balances) = cache.get_mut(asset) {
             for balance in balances.iter_mut() {
@@ -852,7 +869,9 @@ impl EncryptedStorage {
 
     // Set the unconfirmed balance for this asset
     pub async fn set_unconfirmed_balance_for(&self, asset: Hash, balance: Balance) -> Result<()> {
-        trace!("set unconfirmed balance for {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set unconfirmed balance for {}", asset);
+        }
         let mut cache = self.unconfirmed_balances_cache.lock().await;
         let balances = cache.entry(asset).or_insert_with(VecDeque::new);
         balances.push_back(balance);
@@ -884,7 +903,9 @@ impl EncryptedStorage {
 
     // Determine if we have a balance for this asset
     pub async fn has_balance_for(&self, asset: &Hash) -> Result<bool> {
-        trace!("has balance for {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has balance for {}", asset);
+        }
         let cache = self.balances_cache.lock().await;
         if cache.contains(asset) {
             return Ok(true);
@@ -895,7 +916,9 @@ impl EncryptedStorage {
 
     // Set the balance for this asset
     pub async fn set_balance_for(&mut self, asset: &Hash, mut balance: Balance) -> Result<()> {
-        trace!("set balance for {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set balance for {}", asset);
+        }
         // Clear the cache of all outdated balances
         // for this, we simply go through all versions available and delete them all until we find the one we are looking for
         // The unconfirmed balances cache may not work during front running
@@ -907,12 +930,16 @@ impl EncryptedStorage {
             if let Some(balances) = cache.get_mut(asset) {
                 while let Some(mut b) = balances.pop_front() {
                     if *b.ciphertext.compressed() == *balance.ciphertext.compressed() {
-                        debug!("unconfirmed balance previously stored found for {}", asset);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("unconfirmed balance previously stored found for {}", asset);
+                        }
                         break;
                     }
 
                     if balances.is_empty() && self.tx_cache.is_some() {
-                        debug!("no matching unconfirmed balance found for asset {} but last TX still not processed, inject back", asset);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("no matching unconfirmed balance found for asset {} but last TX still not processed, inject back", asset);
+                        }
                         balances.push_front(b);
                         break;
                     }
@@ -921,12 +948,16 @@ impl EncryptedStorage {
             }
 
             if delete_entry {
-                debug!("no more unconfirmed balance cache for {}", asset);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("no more unconfirmed balance cache for {}", asset);
+                }
                 cache.remove(asset);
 
                 // If we have no more unconfirmed balance, we can clean the last tx reference
                 if cache.is_empty() {
-                    debug!("no more unconfirmed balance cache, cleaning tx cache ({:?})", self.tx_cache);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("no more unconfirmed balance cache, cleaning tx cache ({:?})", self.tx_cache);
+                    }
                     self.tx_cache = None;
                 }
             }
@@ -941,13 +972,17 @@ impl EncryptedStorage {
 
     // Retrieve a transaction saved in wallet using its hash
     pub fn get_transaction(&self, hash: &Hash) -> Result<TransactionEntry> {
-        trace!("get transaction {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get transaction {}", hash);
+        }
         self.load_from_disk(&self.transactions, hash.as_bytes())
     }
 
     // Find the transaction index by its hash
     pub fn get_transaction_id(&self, hash: &Hash) -> Result<Option<u64>> {
-        trace!("get transaction id of {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get transaction id of {}", hash);
+        }
 
         let hashed_key = self.cipher.hash_key(hash.as_bytes());
         // TODO: optimize
@@ -965,7 +1000,9 @@ impl EncryptedStorage {
 
     // Raw search of the transaction by its hash
     pub fn search_transaction(&self, hash: &Hash) -> Result<Option<TransactionEntry>> {
-        trace!("get transaction id of {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get transaction id of {}", hash);
+        }
 
         for el in self.transactions.iter() {
             let (key, value) = el?;
@@ -973,7 +1010,9 @@ impl EncryptedStorage {
             let decrypted = self.cipher.decrypt_value(&value)?;
             let entry_hash = Hash::from_bytes(&decrypted)?;
             if entry_hash == *hash {
-                debug!("Entry key is {}, expected is {}", Hash::from_bytes(&key)?, Hash::from_bytes(&self.cipher.hash_key(hash))?);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Entry key is {}, expected is {}", Hash::from_bytes(&key)?, Hash::from_bytes(&self.cipher.hash_key(hash))?);
+                }
                 let entry = TransactionEntry::from_bytes(&value)?;
                 return Ok(Some(entry))
             }
@@ -1019,13 +1058,17 @@ impl EncryptedStorage {
     // delete all transactions above the specified topoheight
     // This will go through each transaction, deserialize it, check topoheight, and delete it if required
     pub fn delete_transactions_above_topoheight(&mut self, topoheight: u64) -> Result<()> {
-        warn!("delete transactions above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("delete transactions above topoheight {}", topoheight);
+        }
         self.delete_transactions_at_or_above_topoheight(topoheight + 1)
     }
 
     // delete all transactions at or above the specified topoheight
     pub fn delete_transactions_at_or_above_topoheight(&mut self, topoheight: u64) -> Result<()> {
-        trace!("delete transactions at or above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete transactions at or above topoheight {}", topoheight);
+        }
 
         let min = self.search_transaction_id_for_topoheight(topoheight, None, None, true)?;
         let iterator = match min {
@@ -1049,14 +1092,18 @@ impl EncryptedStorage {
         right_id: Option<u64>,
         nearest: bool,
     ) -> Result<Option<u64>> {
-        debug!("search transaction id for topoheight {}, nearest = {}", topoheight, nearest);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("search transaction id for topoheight {}, nearest = {}", topoheight, nearest);
+        }
 
         let mut right = match right_id {
             Some(r) => r,
             None => match self.get_last_transaction_id()? {
                 Some(r) => r,
                 None => {
-                    debug!("no transaction index found");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("no transaction index found");
+                    }
                     return Ok(None);
                 }
             },
@@ -1069,7 +1116,9 @@ impl EncryptedStorage {
             let mid = left + (right - left) / 2;
 
             let Some(tx_hash) = self.transactions_indexes.get(&mid.to_be_bytes())? else {
-                debug!("no transaction index found for {}", mid);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("no transaction index found for {}", mid);
+                }
                 return Ok(None);
             };
 
@@ -1179,7 +1228,9 @@ impl EncryptedStorage {
         for el in iterator.values().rev().skip(skip.unwrap_or(0)) {
             let tx_key = el?;
             let mut entry: TransactionEntry = self.load_from_disk_with_key(&self.transactions, &tx_key)?;
-            trace!("entry: {}", entry.get_hash());
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("entry: {}", entry.get_hash());
+            }
 
             let mut transfers: Option<Vec<Transfer>> = None;
             match entry.get_mut_entry() {
@@ -1187,7 +1238,9 @@ impl EncryptedStorage {
                 EntryData::Burn { asset: burn_asset, .. } if accept_burn => {
                     if let Some(asset) = asset {
                         if *asset != *burn_asset {
-                            trace!("entry burn asset {} != requested asset {}", burn_asset, asset);
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("entry burn asset {} != requested asset {}", burn_asset, asset);
+                            }
                             continue;
                         }
                     }
@@ -1272,7 +1325,9 @@ impl EncryptedStorage {
                 },
                 // All the left is discarded
                 e => {
-                    trace!("entry has no transfers, discarding {:?}", e);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("entry has no transfers, discarding {:?}", e);
+                    }
                 }
             }
 
@@ -1287,7 +1342,9 @@ impl EncryptedStorage {
 
     // Delete a transaction saved in wallet using its hash
     pub fn delete_transaction(&mut self, hash: &Hash) -> Result<()> {
-        trace!("delete transaction {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete transaction {}", hash);
+        }
         self.transactions.remove(self.cipher.hash_key(hash.as_bytes()))?;
         Ok(())
     }
@@ -1359,10 +1416,14 @@ impl EncryptedStorage {
     // We hash the hash of the TX to use it as a key to not let anyone being able to see txs saved on disk
     // with no access to the decrypted master key
     pub fn save_transaction(&mut self, hash: &Hash, transaction: &TransactionEntry) -> Result<()> {
-        trace!("save transaction {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("save transaction {}", hash);
+        }
 
         if self.tx_cache.as_ref().is_some_and(|c| c.last_tx_hash_created.as_ref() == Some(hash)) {
-            debug!("Transaction {} has been executed, deleting cache", hash);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Transaction {} has been executed, deleting cache", hash);
+            }
             self.tx_cache = None;
         }
 
@@ -1377,9 +1438,13 @@ impl EncryptedStorage {
     // Reorg all the TXs written after a certain ID
     // To reorg them, we only need to reverse the order written
     pub fn reverse_transactions_indexes(&mut self, id: Option<u64>) -> Result<()> {
-        trace!("reverse transactions indexes after {:?}", id);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("reverse transactions indexes after {:?}", id);
+        }
         let Some(end_id) = self.get_last_transaction_id()? else {
-            debug!("no transactions indexes to reverse");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("no transactions indexes to reverse");
+            }
             return Ok(());
         };
 
@@ -1392,12 +1457,16 @@ impl EncryptedStorage {
         while low_id < high_id {
             // Load TX hashes for swapping
             let Some(low_tx_hash) = self.transactions_indexes.get(&low_id.to_be_bytes())? else {
-                warn!("No transaction index found for low {}", low_id);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("No transaction index found for low {}", low_id);
+                }
                 return Ok(());
             };
             let Some(high_tx_hash) = self.transactions_indexes.get(&high_id.to_be_bytes())? else {
-                warn!("No transaction index found for high {}", high_id);
-                return Ok(()); 
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("No transaction index found for high {}", high_id);
+                }
+                return Ok(());
             };
 
             // Swap the transaction indexes on disk
@@ -1414,7 +1483,9 @@ impl EncryptedStorage {
 
     // Check if the transaction is stored in wallet
     pub fn has_transaction(&self, hash: &Hash) -> Result<bool> {
-        trace!("has transaction {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has transaction {}", hash);
+        }
         self.contains_data(&self.transactions, hash.as_bytes())
     }
 
@@ -1450,17 +1521,23 @@ impl EncryptedStorage {
     // Set the new nonce used to create new transactions
     // If the unconfirmed nonce is lower than the new nonce, we reset it
     pub fn set_nonce(&mut self, nonce: u64) -> Result<()> {
-        trace!("set nonce to {}", nonce);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set nonce to {}", nonce);
+        }
         self.save_to_disk(&self.extra, NONCE_KEY, &nonce.to_be_bytes())
     }
 
     // Store the last coinbase reward topoheight
     // This is used to determine if we should use a stable balance or not
     pub fn set_last_coinbase_reward_topoheight(&mut self, topoheight: Option<u64>) -> Result<()> {
-        trace!("set last coinbase reward topoheight to {:?}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set last coinbase reward topoheight to {:?}", topoheight);
+        }
         if let Some(topoheight) = topoheight {
             if let Some(last_topo) = self.last_coinbase_reward_topoheight.filter(|v| *v > topoheight) {
-                debug!("last coinbase reward topoheight ({}) already set to a higher value ({}), ignoring", topoheight, last_topo);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("last coinbase reward topoheight ({}) already set to a higher value ({}), ignoring", topoheight, last_topo);
+                }
                 return Ok(());
             }
 
@@ -1493,7 +1570,9 @@ impl EncryptedStorage {
 
     // Set the topoheight until which the wallet is synchronized
     pub fn set_synced_topoheight(&mut self, topoheight: u64) -> Result<()> {
-        trace!("set synced topoheight to {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set synced topoheight to {}", topoheight);
+        }
         self.synced_topoheight = Some(topoheight);
         self.save_to_disk(&self.extra, TOPOHEIGHT_KEY, &topoheight.to_be_bytes())
     }
@@ -1503,7 +1582,9 @@ impl EncryptedStorage {
         trace!("get synced topoheight");
 
         if let Some(topoheight) = self.synced_topoheight {
-            trace!("returning cached synced topoheight {}", topoheight);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("returning cached synced topoheight {}", topoheight);
+            }
             return Ok(topoheight);
         }
 
@@ -1519,7 +1600,9 @@ impl EncryptedStorage {
 
     // Set the top block hash until which the wallet is synchronized
     pub fn set_top_block_hash(&mut self, hash: &Hash) -> Result<()> {
-        trace!("set top block hash to {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set top block hash to {}", hash);
+        }
         self.save_to_disk(&self.extra, TOP_BLOCK_HASH_KEY, hash.as_bytes())
     }
 
@@ -1553,7 +1636,9 @@ impl EncryptedStorage {
 
     // Save the network to disk
     fn set_network(&mut self, network: &Network) -> Result<()> {
-        trace!("set network to {}", network);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set network to {}", network);
+        }
         self.save_to_disk(&self.extra, NETWORK, &network.to_bytes())
     }
 
@@ -1565,33 +1650,43 @@ impl EncryptedStorage {
 
     // Add a topoheight where a change occured
     pub fn add_topoheight_to_changes(&mut self, topoheight: u64, block_hash: &Hash) -> Result<()> {
-        trace!("add topoheight to changes: {} at {}", topoheight, block_hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("add topoheight to changes: {} at {}", topoheight, block_hash);
+        }
         self.save_to_disk_with_encrypted_key(&self.changes_topoheight, &topoheight.to_be_bytes(), block_hash.as_bytes())
     }
 
     // Get the block hash for the requested topoheight
     pub fn get_block_hash_for_topoheight(&self, topoheight: u64) -> Result<Hash> {
-        trace!("get block hash for topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block hash for topoheight {}", topoheight);
+        }
         self.load_from_disk_with_encrypted_key(&self.changes_topoheight, &topoheight.to_be_bytes())
     }
 
     // Check if the topoheight is present in the changes tree
     pub fn has_topoheight_in_changes(&self, topoheight: u64) -> Result<bool> {
-        trace!("has topoheight {} in changes", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has topoheight {} in changes", topoheight);
+        }
         self.contains_with_encrypted_key(&self.changes_topoheight, &topoheight.to_be_bytes())
     }
 
     // Delete all changes above topoheight
     // This will returns true if a changes was deleted
     pub fn delete_changes_above_topoheight(&mut self, topoheight: u64) -> Result<bool> {
-        trace!("delete changes above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete changes above topoheight {}", topoheight);
+        }
         let mut deleted = false;
         for res in self.changes_topoheight.iter().keys() {
             let key = res?;
             let raw = self.cipher.decrypt_value(&key).context("Error while decrypting key from disk")?;
             let topo = u64::from_bytes(&raw)?;
             if topo > topoheight {
-                trace!("deleting topoheight changes at {}", topo);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("deleting topoheight changes at {}", topo);
+                }
                 self.changes_topoheight.remove(key)?;
                 deleted = true;
             }
@@ -1603,7 +1698,9 @@ impl EncryptedStorage {
     // Delete changes at topoheight
     // This will returns true if a changes was deleted
     pub fn delete_changes_at_topoheight(&mut self, topoheight: u64) -> Result<()> {
-        trace!("delete changes at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete changes at topoheight {}", topoheight);
+        }
         self.delete_from_disk_with_encrypted_key(&self.changes_topoheight, &topoheight.to_be_bytes())?;
 
         Ok(())
@@ -1622,7 +1719,9 @@ impl EncryptedStorage {
 
     // Find highest topoheight in changes
     pub fn get_highest_topoheight_in_changes_below(&self, max: u64) -> Result<u64> {
-        trace!("get highest topoheight in changes below {}", max);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get highest topoheight in changes below {}", max);
+        }
         let mut highest = 0;
         for res in self.changes_topoheight.iter().keys() {
             let key = res?;

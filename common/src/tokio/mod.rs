@@ -81,7 +81,9 @@ where
     F::Output: Send + 'static,
 {
     let name_str = name.into();
-    trace!("Spawning task: {}", name_str);
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("Spawning task: {}", name_str);
+    }
     #[cfg(feature = "tracing")]
     {
         let name = name_str.as_str();
@@ -107,7 +109,9 @@ where
     F::Output: 'static,
 {
     let name_str = name.into();
-    log::trace!("Spawning wasm task: {}", name_str);
+    if log::log_enabled!(log::Level::Trace) {
+        log::trace!("Spawning wasm task: {}", name_str);
+    }
     spawn(future)
 }
 
@@ -126,7 +130,9 @@ pub fn is_multi_threads_supported() -> bool {
             let supported = runtime::Handle::try_current()
                 .map(|v| matches!(v.runtime_flavor(), runtime::RuntimeFlavor::MultiThread))
                 .unwrap_or(false);
-            trace!("multi threads supported: {}", supported);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("multi threads supported: {}", supported);
+            }
         
             supported
         } else {

@@ -13,8 +13,8 @@ use crate::core::error::BlockchainError;
 // this trait is useful for P2p to check itself the validty of a chain
 #[async_trait]
 pub trait DifficultyProvider {
-    // Get the block height using its hash
-    async fn get_height_for_block_hash(&self, hash: &Hash) -> Result<u64, BlockchainError>;
+    // Get the block blue_score (DAG depth position) using its hash
+    async fn get_blue_score_for_block_hash(&self, hash: &Hash) -> Result<u64, BlockchainError>;
 
     // Get the block version using its hash
     async fn get_version_for_block_hash(&self, hash: &Hash) -> Result<BlockVersion, BlockchainError>;

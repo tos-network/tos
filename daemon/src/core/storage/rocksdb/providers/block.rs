@@ -41,7 +41,9 @@ impl BlockProvider for RocksStorage {
     }
 
     async fn decrease_blocks_count(&mut self, minus: u64) -> Result<(), BlockchainError> {
-        trace!("decrease blocks count by {}", minus);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("decrease blocks count by {}", minus);
+        }
         let count = self.count_blocks().await?;
         self.insert_into_disk(Column::Common, BLOCKS_COUNT, &(count.saturating_sub(minus)))
     }
@@ -88,7 +90,7 @@ impl BlockProvider for RocksStorage {
         // V-22 Fix: Use fsync for critical block difficulty data
         self.insert_into_disk_sync(Column::BlockDifficulty, hash.as_bytes(), &block_difficulty)?;
 
-        self.add_block_hash_at_height(&hash, block.get_blue_score()).await?;
+        self.add_block_hash_at_blue_score(&hash, block.get_blue_score()).await?;
 
         if count_txs > 0 {
             count_txs += self.count_transactions().await?;

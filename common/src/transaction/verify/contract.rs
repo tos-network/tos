@@ -52,7 +52,9 @@ impl Transaction {
         max_gas: u64,
         invoke: InvokeContract,
     ) -> Result<bool, VerificationError<E>> {
-        debug!("Invoking contract {} from TX {}: {:?}", contract, tx_hash, invoke);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Invoking contract {} from TX {}: {:?}", contract, tx_hash, invoke);
+        }
         let (contract_environment, mut chain_state) = state.get_contract_environment_for(contract, deposits, tx_hash).await
             .map_err(VerificationError::State)?;
     
@@ -73,7 +75,9 @@ impl Transaction {
                 },
                 InvokeContract::Hook(hook) => {
                     if !vm.invoke_hook_id(hook).context("invoke hook")? {
-                        warn!("Invoke contract {} from TX {} hook {} not found", contract, tx_hash, hook);
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("Invoke contract {} from TX {} hook {} not found", contract, tx_hash, hook);
+                        }
                         return Ok((0, None))
                     }
                 }
@@ -81,7 +85,9 @@ impl Transaction {
  
             // We need to push it in reverse order because the VM will pop them in reverse order
             for constant in parameters.rev() {
-                trace!("Pushing constant: {}", constant);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Pushing constant: {}", constant);
+                }
                 vm.push_stack(constant)
                     .context("push param")?;
             }
@@ -111,13 +117,17 @@ impl Transaction {
     
             let exit_code = match res {
                 Ok(res) => {
-                    debug!("Invoke contract {} from TX {} result: {:#}", contract, tx_hash, res);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invoke contract {} from TX {} result: {:#}", contract, tx_hash, res);
+                    }
                     // If the result return 0 as exit code, it means that everything went well
                     let exit_code = res.as_u64().ok();
                     exit_code
                 },
                 Err(err) => {
-                    debug!("Invoke contract {} from TX {} error: {:#}", contract, tx_hash, err);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invoke contract {} from TX {} error: {:#}", contract, tx_hash, err);
+                    }
                     None
                 }
             };
@@ -156,7 +166,9 @@ impl Transaction {
 
         // We must refund all the gas not used by the contract
         let refund_gas = self.handle_gas(state, used_gas, max_gas).await?;
-        debug!("used gas: {}, refund gas: {}", used_gas, refund_gas);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("used gas: {}, refund gas: {}", used_gas, refund_gas);
+        }
         if refund_gas > 0 {
             outputs.push(ContractOutput::RefundGas { amount: refund_gas });
         }
@@ -183,7 +195,9 @@ impl Transaction {
         let refund_gas = max_gas.checked_sub(used_gas)
             .ok_or(VerificationError::GasOverflow)?;
 
-        debug!("Invoke contract used gas: {}, burned: {}, fee: {}, refund: {}", used_gas, burned_gas, gas_fee, refund_gas);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Invoke contract used gas: {}, burned: {}, fee: {}, refund: {}", used_gas, burned_gas, gas_fee, refund_gas);
+        }
         state.add_burned_coins(burned_gas).await
             .map_err(VerificationError::State)?;
 
@@ -210,7 +224,9 @@ impl Transaction {
         decompressed_deposits: &HashMap<&Hash, DecompressedDepositCt>,
     ) -> Result<(), VerificationError<E>> {
         for (asset, deposit) in deposits.iter() {
-            trace!("Refunding deposit {:?} for asset: {} to {}", deposit, asset, self.source.as_address(state.is_mainnet()));
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Refunding deposit {:?} for asset: {} to {}", deposit, asset, self.source.as_address(state.is_mainnet()));
+            }
 
             let balance = state.get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Borrowed(asset)).await
                 .map_err(VerificationError::State)?;

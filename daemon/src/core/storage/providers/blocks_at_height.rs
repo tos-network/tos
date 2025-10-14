@@ -15,20 +15,20 @@ pub struct OrderedHashes<'a>(pub Cow<'a, IndexSet<Hash>>);
 
 #[async_trait]
 pub trait BlocksAtHeightProvider {
-    // Check if there are blocks at a specific height
-    async fn has_blocks_at_height(&self, height: u64) -> Result<bool, BlockchainError>;
+    // Check if there are blocks at a specific blue_score (DAG depth position)
+    async fn has_blocks_at_blue_score(&self, blue_score: u64) -> Result<bool, BlockchainError>;
 
-    // Retrieve the blocks hashes at a specific height
-    async fn get_blocks_at_height(&self, height: u64) -> Result<IndexSet<Hash>, BlockchainError>;
+    // Retrieve the blocks hashes at a specific blue_score (DAG depth position)
+    async fn get_blocks_at_blue_score(&self, blue_score: u64) -> Result<IndexSet<Hash>, BlockchainError>;
 
-    // This is used to store the blocks hashes at a specific height
-    async fn set_blocks_at_height(&mut self, tips: &IndexSet<Hash>, height: u64) -> Result<(), BlockchainError>;
+    // Store the blocks hashes at a specific blue_score (DAG depth position)
+    async fn set_blocks_at_blue_score(&mut self, tips: &IndexSet<Hash>, blue_score: u64) -> Result<(), BlockchainError>;
 
-    // Append a block hash at a specific height
-    async fn add_block_hash_at_height(&mut self, hash: &Hash, height: u64) -> Result<(), BlockchainError>;
+    // Append a block hash at a specific blue_score (DAG depth position)
+    async fn add_block_hash_at_blue_score(&mut self, hash: &Hash, blue_score: u64) -> Result<(), BlockchainError>;
 
-    // Remove a block hash at a specific height
-    async fn remove_block_hash_at_height(&mut self, hash: &Hash, height: u64) -> Result<(), BlockchainError>;
+    // Remove a block hash at a specific blue_score (DAG depth position)
+    async fn remove_block_hash_at_blue_score(&mut self, hash: &Hash, blue_score: u64) -> Result<(), BlockchainError>;
 }
 
 impl Serializer for OrderedHashes<'_> {
@@ -41,7 +41,9 @@ impl Serializer for OrderedHashes<'_> {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let total_size = reader.total_size();
         if total_size % HASH_SIZE != 0 {
-            error!("Invalid size: {}, expected a multiple of 32 for hashes", total_size);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Invalid size: {}, expected a multiple of 32 for hashes", total_size);
+            }
             return Err(ReaderError::InvalidSize)
         }
 
@@ -52,8 +54,10 @@ impl Serializer for OrderedHashes<'_> {
         }
 
         if hashes.len() != count {
-            error!("Invalid size: received {} elements while sending {}", hashes.len(), count);
-            return Err(ReaderError::InvalidSize) 
+            if log::log_enabled!(log::Level::Error) {
+                error!("Invalid size: received {} elements while sending {}", hashes.len(), count);
+            }
+            return Err(ReaderError::InvalidSize)
         }
 
         Ok(OrderedHashes(Cow::Owned(hashes)))

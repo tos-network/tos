@@ -147,7 +147,9 @@ impl<S: Storage> GetWorkServer<S> {
             if self.is_job_dirty.load(Ordering::SeqCst) {
                 debug!("job is dirty, resending job to all miners");
                 if let Err(e) = self.notify_new_job().await {
-                    error!("Error while notifying new job to miners: {}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while notifying new job to miners: {}", e);
+                    }
                 }
             }
         }
@@ -170,7 +172,9 @@ impl<S: Storage> GetWorkServer<S> {
     async fn send_new_job(&self, session: &WebSocketSessionShared<Self>, key: &PublicKey) -> Result<(), anyhow::Error> {
         debug!("Sending new job to miner");
         let (version, mut job, height, difficulty, blue_score) = {
-            debug!("locking last header hashfor new job");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("locking last header hash for new job");
+            }
             let mut hash = self.last_header_hash.lock().await;
 
             // if we have a job in cache, and we are rate limited, we can send it
@@ -364,12 +368,16 @@ impl<S: Storage> GetWorkServer<S> {
             // now let's send the job to every miner
             let miners = self.miners.lock().await;
 
-            debug!("Notifying {} miners for new job", miners.len());
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Notifying {} miners for new job", miners.len());
+            }
             stream::iter(miners.iter())
                 .for_each_concurrent(self.notify_job_concurrency, |(addr, miner)| {
                     let mut job = job.clone();
                     async move {
-                        debug!("Notifying {} for new job", miner);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Notifying {} for new job", miner);
+                        }
                         let addr = addr.clone();
 
                         job.set_miner(Cow::Borrowed(miner.get_public_key()));
@@ -377,7 +385,9 @@ impl<S: Storage> GetWorkServer<S> {
                         let template = job.to_hex();
 
                         if let Err(e) = addr.send_json(Response::NewJob(GetMinerWorkResult { algorithm, miner_work: template, height, topoheight, difficulty, blue_score })).await {
-                            warn!("Error while notifying {} about new job: {}", miner, e);
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Error while notifying {} about new job: {}", miner, e);
+                            }
                         }
                     }
                 }).await;
@@ -407,7 +417,9 @@ impl<S: Storage> GetWorkServer<S> {
                 miner_header.apply_miner_work(job);
             } else {
                 // really old job, or miner send invalid job
-                debug!("Job {} was not found in cache", job.get_header_work_hash());
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Job {} was not found in cache", job.get_header_work_hash());
+                }
                 return Err(InternalRpcError::InvalidParams("Job was not found in cache"))
             };
         }
@@ -418,7 +430,9 @@ impl<S: Storage> GetWorkServer<S> {
         Ok(match self.blockchain.add_new_block(block, Some(Immutable::Arc(block_hash.clone())), BroadcastOption::All, true).await {
             Ok(_) => BlockResult::Accepted(block_hash),
             Err(e) => {
-                debug!("Error while accepting miner block: {}", e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while accepting miner block: {}", e);
+                }
                 BlockResult::Rejected(e.into())
             }
         })
@@ -433,12 +447,16 @@ impl<S: Storage> GetWorkServer<S> {
             Ok(job) => match self.accept_miner_job(job).await {
                 Ok(result) => result,
                 Err(e) => {
-                    debug!("Error while accepting miner job: {}", e);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Error while accepting miner job: {}", e);
+                    }
                     BlockResult::Rejected(e.into())
                 }
             },
             Err(e) => {
-                debug!("Error while decoding block miner: {}", e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while decoding block miner: {}", e);
+                }
                 BlockResult::Rejected(e.into())
             }
         };
@@ -452,13 +470,17 @@ impl<S: Storage> GetWorkServer<S> {
 
         match result {
             BlockResult::Accepted(hash) => {
-                debug!("Miner {} found block {}!", miner, hash);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Miner {} found block {}!", miner, hash);
+                }
                 miner.add_new_accepted_block(hash);
 
                 session.send_json(Response::BlockAccepted).await?;
             },
             BlockResult::Rejected(err) => {
-                debug!("Miner {} sent an invalid block", miner);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Miner {} sent an invalid block", miner);
+                }
                 miner.mark_rejected_block();
 
                 session.send_json(Response::BlockRejected(err.to_string())).await?;
@@ -496,7 +518,9 @@ impl<S: Storage> WebSocketHandler for GetWorkServer<S> {
         let address: Address = match Address::from_string(&addr) {
             Ok(address) => address,
             Err(e) => {
-                debug!("Invalid miner address for getwork server: {}", e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Invalid miner address for getwork server: {}", e);
+                }
                 return Ok(Some(HttpResponse::BadRequest().body("Invalid miner address for getwork server")))
             }
         };
@@ -506,7 +530,11 @@ impl<S: Storage> WebSocketHandler for GetWorkServer<S> {
 
         let network = self.blockchain.get_network();
         if address.is_mainnet() != network.is_mainnet() {
-            return Ok(Some(HttpResponse::BadRequest().body(format!("Address is not in same network state, should be in {} mode", network.to_string().to_lowercase()))))
+            if log::log_enabled!(log::Level::Debug) {
+                return Ok(Some(HttpResponse::BadRequest().body(format!("Address is not in same network state, should be in {} mode", network.to_string().to_lowercase()))))
+            } else {
+                return Ok(Some(HttpResponse::BadRequest().body("Address is not in correct network state")))
+            }
         }
 
         let key = address.to_public_key();

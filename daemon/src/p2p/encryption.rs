@@ -114,10 +114,14 @@ impl Encryption {
 
     // Encrypt a packet using the shared symetric key
     pub async fn encrypt_packet(&self, input: &mut impl Buffer) -> Result<(), EncryptionError> {
-        trace!("Encrypting packet");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Encrypting packet");
+        }
         let mut lock = self.our_cipher.lock().await;
 
-        trace!("our cipher locked");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("our cipher locked");
+        }
         let cipher_state = lock.as_mut()
             .ok_or(EncryptionError::WriteNotReady)?;
 
@@ -136,10 +140,14 @@ impl Encryption {
 
     // Decrypt a packet using the shared symetric key
     pub async fn decrypt_packet(&self, buf: &mut impl Buffer) -> Result<(), EncryptionError> {
-        trace!("Decrypting packet");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Decrypting packet");
+        }
         let mut lock = self.peer_cipher.lock().await;
 
-        trace!("peer cipher locked");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("peer cipher locked");
+        }
         let cipher_state = lock.as_mut()
             .ok_or(EncryptionError::ReadNotReady)?;
 

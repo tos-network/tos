@@ -397,9 +397,14 @@ impl TosGhostdag {
                     }
                     _ => {
                         // Fall back to conservative heuristic for blocks without reachability data
+                        // FIXME: This heuristic assumes linear growth but GHOSTDAG allows blue_score jumps
+                        // when merging multiple tips (blue_score = max(tips) + tips.len()).
+                        // A chain with heavy merging could have large blue_score differences without
+                        // being many "generations" apart. Threshold increased to 50 to be more conservative.
+                        // Long-term solution: ensure reachability data is always available.
                         let parent_data = storage.get_ghostdag_data(parent).await?;
                         let selected_parent_data = storage.get_ghostdag_data(&selected_parent).await?;
-                        parent_data.blue_score + 10 < selected_parent_data.blue_score
+                        parent_data.blue_score + 50 < selected_parent_data.blue_score
                     }
                 };
 

@@ -17,22 +17,30 @@ use crate::core::{
 #[async_trait]
 impl ReachabilityDataProvider for RocksStorage {
     async fn get_reachability_data(&self, hash: &Hash) -> Result<ReachabilityData, BlockchainError> {
-        trace!("get reachability data for {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get reachability data for {}", hash);
+        }
         self.load_from_disk(Column::ReachabilityData, hash)
     }
 
     async fn has_reachability_data(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has reachability data for {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has reachability data for {}", hash);
+        }
         self.contains_data(Column::ReachabilityData, hash)
     }
 
     async fn set_reachability_data(&mut self, hash: &Hash, data: &ReachabilityData) -> Result<(), BlockchainError> {
-        trace!("set reachability data for {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set reachability data for {}", hash);
+        }
         self.insert_into_disk(Column::ReachabilityData, hash, data)
     }
 
     async fn delete_reachability_data(&mut self, hash: &Hash) -> Result<(), BlockchainError> {
-        trace!("delete reachability data for {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete reachability data for {}", hash);
+        }
         self.remove_from_disk(Column::ReachabilityData, hash)
     }
 
@@ -42,7 +50,9 @@ impl ReachabilityDataProvider for RocksStorage {
     }
 
     async fn set_reindex_root(&mut self, root: Hash) -> Result<(), BlockchainError> {
-        trace!("set reindex root to {}", root);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set reindex root to {}", root);
+        }
         self.insert_into_disk(Column::Common, b"reindex_root", &root)
     }
 }

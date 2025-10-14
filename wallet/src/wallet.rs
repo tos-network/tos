@@ -270,7 +270,9 @@ impl Account {
         let _permit = self.semaphore.acquire().await
             .context("Error while acquiring semaphore for decryption")?;
 
-        trace!("decrypt ciphertext with max supply {}", max_supply);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("decrypt ciphertext with max supply {}", max_supply);
+        }
 
         let inner = Arc::clone(&self.inner);
         let res = tokio::task::spawn_blocking(move || {
@@ -352,7 +354,9 @@ impl Wallet {
         debug!("hashing provided password");
         let hashed_password = hash_password(password, &salt)?;
 
-        debug!("Creating storage for {}", name);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Creating storage for {}", name);
+        }
         let mut inner = Storage::new(name)?;
 
         // generate the Cipher
@@ -393,7 +397,9 @@ impl Wallet {
             return Err(WalletError::EmptyName.into())
         }
 
-        debug!("Creating storage for {}", name);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Creating storage for {}", name);
+        }
         let storage = Storage::new(name)?;
         
         // get password salt for KDF
@@ -414,7 +420,9 @@ impl Wallet {
         let encrypted_storage_salt = storage.get_encrypted_storage_salt()?;
         let storage_salt = cipher.decrypt_value(&encrypted_storage_salt).context("Invalid encrypted storage salt for this wallet")?;
         if storage_salt.len() != SALT_SIZE {
-            error!("Invalid size received after decrypting storage salt: {} bytes", storage_salt.len());
+            if log::log_enabled!(log::Level::Error) {
+                error!("Invalid size received after decrypting storage salt: {} bytes", storage_salt.len());
+            }
             return Err(WalletError::InvalidSaltSize.into());
         }
 
@@ -469,7 +477,9 @@ impl Wallet {
             let mut lock = self.network_handler.lock().await;
             if let Some(handler) = lock.take() {
                 if let Err(e) = handler.stop(true).await {
-                    error!("Error while stopping network handler: {}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while stopping network handler: {}", e);
+                    }
                 }
             }
         }
@@ -514,7 +524,9 @@ impl Wallet {
     // Propagate a new event to registered listeners
     pub async fn propagate_event(&self, event: Event) {
         let kind = event.kind();
-        trace!("Propagate event {:?}: {:?}", kind, event);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Propagate event {:?}: {:?}", kind, event);
+        }
         // Broadcast it to the API Server
         #[cfg(feature = "api_server")]
         {
@@ -547,7 +559,9 @@ impl Wallet {
 
     // Mark an asset tracked by the wallet
     pub async fn track_asset(&self, asset: Hash) -> Result<bool, WalletError> {
-        debug!("track asset {}", asset);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("track asset {}", asset);
+        }
         {
             let mut storage = self.storage.write().await;
             if storage.is_asset_tracked(&asset)? {
@@ -562,7 +576,9 @@ impl Wallet {
         #[cfg(feature = "network_handler")]
         {
             if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
-                debug!("Syncing head state for newly tracked asset {}", asset);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Syncing head state for newly tracked asset {}", asset);
+                }
                 network_handler.sync_head_state(&self.get_address(), Some(HashSet::from_iter([asset])), None, false, false).await?;
             }
         }
@@ -573,7 +589,9 @@ impl Wallet {
 
     // Mark an asset tracked by the wallet
     pub async fn untrack_asset(&self, asset: Hash) -> Result<bool, WalletError> {
-        debug!("untrack asset {}", asset);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("untrack asset {}", asset);
+        }
         {
             let mut storage = self.storage.write().await;
             if !storage.is_asset_tracked(&asset)? {
@@ -743,7 +761,9 @@ impl Wallet {
     // Wallet has to be under a Arc to be shared to the spawn_blocking function
     // This will read the max supply from the storage
     pub async fn decrypt_ciphertext_of_asset(&self, ciphertext: Ciphertext, asset: &Hash) -> Result<Option<u64>, WalletError> {
-        trace!("decrypt ciphertext of asset {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("decrypt ciphertext of asset {}", asset);
+        }
         let max_supply = {
             let storage = self.storage.read().await;
             storage.get_asset(asset).await?
@@ -753,7 +773,9 @@ impl Wallet {
     }
 
     pub async fn decrypt_ciphertext_with(&self, ciphertext: Ciphertext, max_supply: Option<u64>) -> Result<Option<u64>, WalletError> {
-        trace!("decrypt ciphertext with max supply {:?}", max_supply);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("decrypt ciphertext with max supply {:?}", max_supply);
+        }
         self.account.decrypt_ciphertext(ciphertext, max_supply.unwrap_or(i64::MAX as _)).await
     }
 
@@ -838,7 +860,9 @@ impl Wallet {
                     let mut use_stable_balance = if let Some(topoheight) = storage.get_last_coinbase_reward_topoheight().filter(|_| !force_stable_balance) {
                         let stable_topoheight = network_handler.get_api().get_stable_topoheight().await?;
                         daemon_stable_topoheight = Some(stable_topoheight);
-                        debug!("stable topoheight: {}, topoheight: {}", stable_topoheight, topoheight);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("stable topoheight: {}, topoheight: {}", stable_topoheight, topoheight);
+                        }
                         topoheight > stable_topoheight
                     } else {
                         force_stable_balance
@@ -848,7 +872,9 @@ impl Wallet {
                         // Verify that we don't have a pending TX with unconfirmed balance
                         for asset in used_assets.iter() {
                             if storage.has_unconfirmed_balance_for(asset).await? {
-                                warn!("Cannot use stable balance because we have unconfirmed balance for {}", asset);
+                                if log::log_enabled!(log::Level::Warn) {
+                                    warn!("Cannot use stable balance because we have unconfirmed balance for {}", asset);
+                                }
                                 use_stable_balance = false;
                                 break;
                             }
@@ -866,7 +892,9 @@ impl Wallet {
                             };
 
                             if stable_topo < entry.get_topoheight() {
-                                warn!("Cannot use stable balance because we have an outgoing TX not confirmed in stable height yet");
+                                if log::log_enabled!(log::Level::Warn) {
+                                    warn!("Cannot use stable balance because we have an outgoing TX not confirmed in stable height yet");
+                                }
                                 use_stable_balance = false;
                             }
                         }
@@ -876,13 +904,17 @@ impl Wallet {
                         warn!("Using stable balance for TX creation");
                         let address = self.get_address();
                         for asset in used_assets.iter() {
-                            debug!("Searching stable balance for asset {}", asset);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Searching stable balance for asset {}", asset);
+                            }
                             match network_handler.get_api().get_stable_balance(&address, &asset).await {
                                 Ok(stable_point) => {
                                     // Store the stable balance version into unconfirmed balance
                                     // So it will be fetch later by state
                                     let mut ciphertext = stable_point.version.take_balance();
-                                    debug!("decrypting stable balance for asset {}", asset);
+                                    if log::log_enabled!(log::Level::Debug) {
+                                        debug!("decrypting stable balance for asset {}", asset);
+                                    }
                                     let decompressed = ciphertext.decompressed()
                                         .map_err(|_| WalletError::CiphertextDecode)?;
 
@@ -893,7 +925,9 @@ impl Wallet {
                                     let amount = match self.decrypt_ciphertext_with(decompressed.clone(), max_supply).await? {
                                         Some(amount) => amount,
                                         None => {
-                                            warn!("Couldn't decrypt the ciphertext for asset {}: no result found, skipping this stable balance", asset);
+                                            if log::log_enabled!(log::Level::Warn) {
+                                                warn!("Couldn't decrypt the ciphertext for asset {}: no result found, skipping this stable balance", asset);
+                                            }
                                             continue;
                                         }
                                     };
@@ -902,13 +936,17 @@ impl Wallet {
                                         ciphertext
                                     };
 
-                                    debug!("Using stable balance for asset {} ({}) with amount {}", asset, balance.ciphertext, balance.amount);
+                                    if log::log_enabled!(log::Level::Debug) {
+                                        debug!("Using stable balance for asset {} ({}) with amount {}", asset, balance.ciphertext, balance.amount);
+                                    }
                                     state.add_balance((*asset).clone(), balance);
 
                                     // Build the stable reference
                                     // We need to find the highest stable point
                                     if generated || state.get_reference().topoheight < stable_point.stable_topoheight {
-                                        debug!("Setting stable reference for TX creation at topoheight {} with hash {}", stable_point.stable_topoheight, stable_point.stable_block_hash);
+                                        if log::log_enabled!(log::Level::Debug) {
+                                            debug!("Setting stable reference for TX creation at topoheight {} with hash {}", stable_point.stable_topoheight, stable_point.stable_block_hash);
+                                        }
                                         state.set_reference(Reference {
                                             topoheight: stable_point.stable_topoheight,
                                             hash: stable_point.stable_block_hash
@@ -917,14 +955,18 @@ impl Wallet {
                                     }
                                 },
                                 Err(e) => {
-                                    warn!("Couldn't fetch stable balance for asset ({}), will try without: {}", asset, e);
+                                    if log::log_enabled!(log::Level::Warn) {
+                                        warn!("Couldn't fetch stable balance for asset ({}), will try without: {}", asset, e);
+                                    }
                                 }
                             }
                         }
                     }
 
                     if let Some(topoheight) = daemon_stable_topoheight {
-                        debug!("Setting stable topoheight to {} for state", topoheight);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Setting stable topoheight to {} for state", topoheight);
+                        }
                         state.set_stable_topoheight(topoheight);
                     }
                 }
@@ -933,9 +975,13 @@ impl Wallet {
 
         // Get all balances used
         for asset in used_assets {
-            trace!("Checking balance for asset {}", asset);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Checking balance for asset {}", asset);
+            }
             if state.has_balance_for(&asset) {
-                trace!("Already have balance for asset {} in state", asset);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Already have balance for asset {} in state", asset);
+                }
                 continue;
             }
 
@@ -948,7 +994,9 @@ impl Wallet {
             }
 
             let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(&asset).await?;
-            debug!("Using balance (unconfirmed: {}) for asset {} with amount {}, ciphertext: {}", unconfirmed, asset, balance.amount, balance.ciphertext);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Using balance (unconfirmed: {}) for asset {} with amount {}, ciphertext: {}", unconfirmed, asset, balance.amount, balance.ciphertext);
+            }
             state.add_balance(asset.clone(), balance);
         }
 
@@ -965,7 +1013,9 @@ impl Wallet {
             .map_err(|e| WalletError::Any(e.into()))?;
 
         let tx_hash = transaction.hash();
-        debug!("Transaction created: {} with nonce {} and reference {}", tx_hash, transaction.get_nonce(), transaction.get_reference());
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Transaction created: {} with nonce {} and reference {}", tx_hash, transaction.get_nonce(), transaction.get_reference());
+        }
         state.set_tx_hash_built(tx_hash);
 
         Ok(transaction)
@@ -985,7 +1035,9 @@ impl Wallet {
     // It will increase the local nonce by 1 if the TX is accepted by the daemon
     // returns error if the wallet is in offline mode or if the TX is rejected
     pub async fn submit_transaction(&self, transaction: &Transaction) -> Result<(), WalletError> {
-        trace!("submit transaction {}", transaction.hash());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("submit transaction {}", transaction.hash());
+        }
         #[cfg(feature = "network_handler")]
         {
             let network_handler = self.network_handler.lock().await;
@@ -1014,9 +1066,13 @@ impl Wallet {
                     trace!("Network handler is running, checking if keys are registered");
                     for key in used_keys {
                         let addr = key.as_address(self.network.is_mainnet());
-                        trace!("Checking if {} is registered in stable height", addr);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("Checking if {} is registered in stable height", addr);
+                        }
                         let registered = network_handler.get_api().is_account_registered(&addr, true).await?;
-                        trace!("registered: {}", registered);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("registered: {}", registered);
+                        }
                         if registered {
                             state.add_registered_key(addr.to_public_key());
                         }
@@ -1136,7 +1192,9 @@ impl Wallet {
     // set wallet in online mode: start a communication task which will keep the wallet synced
     #[cfg(feature = "network_handler")]
     pub async fn set_online_mode(self: &Arc<Self>, daemon_address: &String, auto_reconnect: bool) -> Result<(), WalletError> {
-        trace!("Set online mode to daemon {} with auto reconnect set to {}", daemon_address, auto_reconnect);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Set online mode to daemon {} with auto reconnect set to {}", daemon_address, auto_reconnect);
+        }
         if self.is_online().await {
             // user have to set in offline mode himself first
             return Err(WalletError::AlreadyOnlineMode)
@@ -1154,7 +1212,9 @@ impl Wallet {
     // this allows to share the same connection/Daemon API across several wallets to save resources
     #[cfg(feature = "network_handler")]
     pub async fn set_online_mode_with_api(self: &Arc<Self>, daemon_api: Arc<DaemonAPI>, auto_reconnect: bool) -> Result<(), WalletError> {
-        trace!("Set online mode with API with auto reconnect set to {}", auto_reconnect);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Set online mode with API with auto reconnect set to {}", auto_reconnect);
+        }
         if self.is_online().await {
             // user have to set in offline mode himself first
             return Err(WalletError::AlreadyOnlineMode)
@@ -1188,7 +1248,9 @@ impl Wallet {
     // then it will re-fetch all transactions and balances from daemon
     #[cfg(feature = "network_handler")]
     pub async fn rescan(&self, mut topoheight: u64, auto_reconnect: bool) -> Result<(), WalletError> {
-        trace!("Rescan wallet from topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Rescan wallet from topoheight {}", topoheight);
+        }
         if !self.is_online().await {
             // user have to set it online
             return Err(WalletError::NotOnlineMode)
@@ -1205,14 +1267,19 @@ impl Wallet {
             let pruned_topo = pruned_topoheight.unwrap_or(0);
             // Prevent people losing their history if they rescan from a pruned chain
             if topoheight < pruned_topo {
-                warn!("Rescan topoheight is below pruned topoheight, setting it to {} to avoid losing history", pruned_topo);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Rescan topoheight is below pruned topoheight, setting it to {} to avoid losing history", pruned_topo);
+                }
                 topoheight = pruned_topo;
             }
 
             debug!("Stopping network handler!");
             network_handler.stop(false).await?;
             {
-                debug!("set synced topoheight to {}", topoheight);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("set synced topoheight to {}", topoheight);
+                }
+
                 storage.set_synced_topoheight(topoheight)?;
                 storage.delete_top_block_hash()?;
                 // balances will be re-fetched from daemon

@@ -43,7 +43,9 @@ impl ThreadPool {
 
     pub fn stop(&mut self) {
         for worker in self.workers.drain(..) {
-            debug!("Stopping worker {}", worker.id);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Stopping worker {}", worker.id);
+            }
             worker.handle.abort();
         }
     }
@@ -57,7 +59,9 @@ struct Worker {
 impl Worker {
     pub fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Self {
         let handle = spawn_task(format!("thread-pool-#{}", id), async move {
-            debug!("Worker {} started", id);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Worker {} started", id);
+            }
             loop {
                 let job = {
                     let mut receiver = receiver.lock().await;

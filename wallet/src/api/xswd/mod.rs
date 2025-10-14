@@ -124,7 +124,9 @@ where
 
         for perm in app_data.get_permissions() {
             if !self.handler.has_method(perm) {
-                debug!("Permission '{}' is unknown", perm);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Permission '{}' is unknown", perm);
+                }
                 return Err(XSWDError::UnknownMethodInPermissionsList)
             }
         }
@@ -147,7 +149,9 @@ where
         let permission = match wallet.request_permission(&state, PermissionRequest::Application).await {
             Ok(v) => v,
             Err(e) => {
-                debug!("Error while requesting permission: {}", e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while requesting permission: {}", e);
+                }
                 PermissionResult::Reject
             }
         };
@@ -211,9 +215,13 @@ where
     }
 
     pub async fn on_close(&self, app: AppStateShared) -> Result<(), Error> {
-        info!("Application {} has disconnected", app.get_name());
+        if log::log_enabled!(log::Level::Info) {
+            info!("Application {} has disconnected", app.get_name());
+        }
         if app.is_requesting() {
-            debug!("Application {} is requesting a permission, aborting...", app.get_name());
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Application {} is requesting a permission, aborting...", app.get_name());
+            }
             self.handler.get_data().cancel_request_permission(&app).await?;
         }
 

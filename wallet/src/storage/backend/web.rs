@@ -231,7 +231,9 @@ impl Db {
         match trees.remove(name_ref) {
             Some(_) => Ok(()),
             None => {
-                warn!("Tree {} does not exist", String::from_utf8_lossy(name_ref));
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Tree {} does not exist", String::from_utf8_lossy(name_ref));
+                }
                 Ok(())
             }
         }

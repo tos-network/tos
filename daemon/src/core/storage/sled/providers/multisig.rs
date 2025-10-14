@@ -18,7 +18,9 @@ impl MultiSigProvider for SledStorage {
     }
 
     async fn get_multisig_at_topoheight_for<'a>(&'a self, account: &PublicKey, topoheight: TopoHeight) -> Result<VersionedMultiSig<'a>, BlockchainError> {
-        trace!("get multisig at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get multisig at topoheight {}", topoheight);
+        }
         self.load_from_disk(&self.versioned_multisigs, &self.get_versioned_multisig_key(account, topoheight), DiskContext::Multisig )
     }
 
@@ -29,7 +31,9 @@ impl MultiSigProvider for SledStorage {
     }
 
     async fn get_multisig_at_maximum_topoheight_for<'a>(&'a self, account: &PublicKey, maximum_topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedMultiSig<'a>)>, BlockchainError> {
-        trace!("get multisig at maximum topoheight {}", maximum_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get multisig at maximum topoheight {}", maximum_topoheight);
+        }
         let mut previous_topoheight = if self.has_multisig_at_exact_topoheight(account, maximum_topoheight).await? {
             Some(maximum_topoheight)
         } else {
@@ -59,12 +63,16 @@ impl MultiSigProvider for SledStorage {
     }
 
     async fn has_multisig_at_exact_topoheight(&self, account: &PublicKey, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        trace!("has multisig at exact topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has multisig at exact topoheight {}", topoheight);
+        }
         self.contains_data(&self.versioned_multisigs, &self.get_versioned_multisig_key(account, topoheight))
     }
 
     async fn set_last_multisig_to<'a>(&mut self, account: &PublicKey, topoheight: TopoHeight, multisig: VersionedMultiSig<'a>) -> Result<(), BlockchainError> {
-        trace!("set last multisig to topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set last multisig to topoheight {}", topoheight);
+        }
         let key: [u8; 40] = self.get_versioned_multisig_key(account, topoheight);
         Self::insert_into_disk(self.snapshot.as_mut(), &self.versioned_multisigs, &key, multisig.to_bytes())?;
         Self::insert_into_disk(self.snapshot.as_mut(), &self.multisig, account.as_bytes(), &topoheight.to_be_bytes())?;

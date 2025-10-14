@@ -30,7 +30,9 @@ impl AccountEntry {
     }
 
     pub fn insert_nonce_at_topoheight(&mut self, nonce: Nonce, topoheight: TopoHeight) -> bool {
-        trace!("insert nonce {} at topoheight {}, (expected: {})", nonce, topoheight, self.expected_nonce);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("insert nonce {} at topoheight {}, (expected: {})", nonce, topoheight, self.expected_nonce);
+        }
         if self.contains_nonce(&nonce) || nonce != self.expected_nonce {
             return false;
         }
@@ -72,7 +74,9 @@ impl NonceChecker {
     // Key may be cloned on first entry
     // Returns false if nonce is already used
     pub async fn use_nonce<S: Storage>(&mut self, storage: &S, key: &PublicKey, nonce: Nonce, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        trace!("use_nonce {} for {} at topoheight {}", nonce, key.as_address(storage.is_mainnet()), topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("use_nonce {} for {} at topoheight {}", nonce, key.as_address(storage.is_mainnet()), topoheight);
+        }
 
         match self.cache.get_mut(key) {
             Some(entry) => {

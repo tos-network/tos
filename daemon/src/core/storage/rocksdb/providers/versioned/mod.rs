@@ -94,7 +94,9 @@ impl RocksStorage {
                     if patched {
                         Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &versioned_key)?;
                     } else if prev_version.is_some_and(|v| v < topoheight) {
-                        trace!("Patching versioned data at topoheight {}", topoheight);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("Patching versioned data at topoheight {}", topoheight);
+                        }
                         patched = true;
                         let mut data: Versioned<RawBytes> = self.load_from_disk(column_versioned, &versioned_key)?;
                         data.set_previous_topoheight(None);

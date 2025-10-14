@@ -337,8 +337,9 @@ fn bench_full_pipeline(c: &mut Criterion) {
 
                         // 2. Get GHOSTDAG data
                         if let Some(data) = storage.get_ghostdag_data(&hash) {
-                            // 3. Validate
-                            let _is_valid = data.blue_score <= i as u64 + 1;
+                            // 3. Validate (loosely - in DAG, blue_score can jump by up to TIPS_LIMIT)
+                            // This is just to ensure the compiler doesn't optimize away the read
+                            let _is_valid = data.blue_score <= i as u64 + 32; // TIPS_LIMIT = 32
                             black_box(_is_valid);
                         }
                     }

@@ -23,30 +23,38 @@ use crate::core::{
 
 #[async_trait]
 impl DifficultyProvider for RocksStorage {
-    // Get the block height using its hash
-    async fn get_height_for_block_hash(&self, hash: &Hash) -> Result<u64, BlockchainError> {
-        trace!("get height for block hash {}", hash);
+    // Get the block blue_score (DAG depth position) using its hash
+    async fn get_blue_score_for_block_hash(&self, hash: &Hash) -> Result<u64, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get blue_score for block hash {}", hash);
+        }
         let header = self.get_block_header_by_hash(hash).await?;
         Ok(header.get_blue_score())
     }
 
     // Get the block version using its hash
     async fn get_version_for_block_hash(&self, hash: &Hash) -> Result<BlockVersion, BlockchainError> {
-        trace!("get version for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get version for block hash {}", hash);
+        }
         let block = self.get_block_header_by_hash(hash).await?;
         Ok(block.get_version())
     }
 
     // Get the timestamp from the block using its hash
     async fn get_timestamp_for_block_hash(&self, hash: &Hash) -> Result<TimestampMillis, BlockchainError> {
-        trace!("get timestamp for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get timestamp for block hash {}", hash);
+        }
         let header = self.get_block_header_by_hash(hash).await?;
         Ok(header.get_timestamp())
     }
 
     // Get the difficulty for a block hash
     async fn get_difficulty_for_block_hash(&self, hash: &Hash) -> Result<Difficulty, BlockchainError> {
-        trace!("get difficulty for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get difficulty for block hash {}", hash);
+        }
         self.load_block_difficulty(hash)
             .map(|block_difficulty| block_difficulty.difficulty)
     }
@@ -56,7 +64,9 @@ impl DifficultyProvider for RocksStorage {
 
     // Get past blocks (block tips) for a specific block hash
     async fn get_past_blocks_for_block_hash(&self, hash: &Hash) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
-        trace!("get past blocks for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get past blocks for block hash {}", hash);
+        }
         let header = self.get_block_header_by_hash(hash).await?;
         let tips: IndexSet<Hash> = header.get_parents().iter().cloned().collect();
         Ok(Immutable::Owned(tips))
@@ -64,13 +74,17 @@ impl DifficultyProvider for RocksStorage {
 
     // Get a block header using its hash
     async fn get_block_header_by_hash(&self, hash: &Hash) -> Result<Immutable<BlockHeader>, BlockchainError> {
-        trace!("get block header by hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block header by hash {}", hash);
+        }
         self.load_from_disk(Column::Blocks, hash)
     }
 
     // Retrieve the estimated covariance (P) for a block hash
     async fn get_estimated_covariance_for_block_hash(&self, hash: &Hash) -> Result<VarUint, BlockchainError> {
-        trace!("get estimated covariance for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get estimated covariance for block hash {}", hash);
+        }
         self.load_block_difficulty(hash)
         .map(|block_difficulty| block_difficulty.covariance)
     }
@@ -78,7 +92,9 @@ impl DifficultyProvider for RocksStorage {
 
 impl RocksStorage {
     fn load_block_difficulty(&self, hash: &Hash) -> Result<BlockDifficulty, BlockchainError> {
-        trace!("load block difficulty {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("load block difficulty {}", hash);
+        }
         self.load_from_disk(Column::BlockDifficulty, hash)
     }
 }

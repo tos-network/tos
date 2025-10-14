@@ -40,7 +40,9 @@ pub async fn read_or_generate_precomputed_tables<P: ecdlp::ProgressTableGenerati
     let full_path = format!("{path}precomputed_tables_{l1}.bin");
 
     let tables = if Path::new(&full_path).exists() {
-        info!("Loading precomputed tables from {}", full_path);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Loading precomputed tables from {}", full_path);
+        }
         ecdlp::ECDLPTables::load_from_file(l1, full_path.as_str())?
     } else {
         // File does not exists, generate and store it
@@ -48,10 +50,14 @@ pub async fn read_or_generate_precomputed_tables<P: ecdlp::ProgressTableGenerati
         let instant = Instant::now();
         let tables = ecdlp::ECDLPTables::generate_with_progress_report_par(l1, detect_available_parallelism(), progress_report)?;
         if store_on_disk {
-            info!("Precomputed tables generated, storing to {}", full_path);
+            if log::log_enabled!(log::Level::Info) {
+                info!("Precomputed tables generated, storing to {}", full_path);
+            }
             tables.write_to_file(full_path.as_str())?;
         }
-        info!("Took {:?} to generate the precomputed tables", instant.elapsed());
+        if log::log_enabled!(log::Level::Info) {
+            info!("Took {:?} to generate the precomputed tables", instant.elapsed());
+        }
 
         tables
     };

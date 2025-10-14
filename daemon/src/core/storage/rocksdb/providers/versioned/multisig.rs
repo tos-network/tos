@@ -97,7 +97,9 @@ impl VersionedMultiSigProvider for RocksStorage {
                             Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), Column::VersionedMultisig, &key)?;
                         } else {
                             if prev_version.is_some_and(|v| v < topoheight) {
-                                trace!("Patching versioned data at topoheight {}", topoheight);
+                                if log::log_enabled!(log::Level::Trace) {
+                                    trace!("Patching versioned data at topoheight {}", topoheight);
+                                }
                                 patched = true;
                                 let mut data: Versioned<RawBytes> = self.load_from_disk(Column::VersionedMultisig, &key)?;
                                 data.set_previous_topoheight(None);

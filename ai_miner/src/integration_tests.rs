@@ -196,7 +196,9 @@ impl AIMiningIntegrationTester {
             Err(e) => {
                 scenario.status = TestStatus::Failed;
                 scenario.errors.push(e.to_string());
-                error!("❌ Miner registration test failed: {}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("❌ Miner registration test failed: {}", e);
+                }
             }
         }
 
@@ -224,12 +226,16 @@ impl AIMiningIntegrationTester {
             Ok(task_id) => {
                 scenario.task_id = Some(task_id);
                 scenario.status = TestStatus::Passed;
-                info!("✅ Task publication test passed - Task ID: {}", hex::encode(task_id.as_bytes()));
+                if log::log_enabled!(log::Level::Info) {
+                    info!("✅ Task publication test passed - Task ID: {}", hex::encode(task_id.as_bytes()));
+                }
             }
             Err(e) => {
                 scenario.status = TestStatus::Failed;
                 scenario.errors.push(e.to_string());
-                error!("❌ Task publication test failed: {}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("❌ Task publication test failed: {}", e);
+                }
             }
         }
 
@@ -266,12 +272,16 @@ impl AIMiningIntegrationTester {
             Ok(answer_id) => {
                 scenario.answer_id = Some(answer_id);
                 scenario.status = TestStatus::Passed;
-                info!("✅ Answer submission test passed - Answer ID: {}", hex::encode(answer_id.as_bytes()));
+                if log::log_enabled!(log::Level::Info) {
+                    info!("✅ Answer submission test passed - Answer ID: {}", hex::encode(answer_id.as_bytes()));
+                }
             }
             Err(e) => {
                 scenario.status = TestStatus::Failed;
                 scenario.errors.push(e.to_string());
-                error!("❌ Answer submission test failed: {}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("❌ Answer submission test failed: {}", e);
+                }
             }
         }
 
@@ -315,12 +325,16 @@ impl AIMiningIntegrationTester {
             Ok(validation_id) => {
                 scenario.validation_id = Some(validation_id);
                 scenario.status = TestStatus::Passed;
-                info!("✅ Answer validation test passed - Validation ID: {}", hex::encode(validation_id.as_bytes()));
+                if log::log_enabled!(log::Level::Info) {
+                    info!("✅ Answer validation test passed - Validation ID: {}", hex::encode(validation_id.as_bytes()));
+                }
             }
             Err(e) => {
                 scenario.status = TestStatus::Failed;
                 scenario.errors.push(e.to_string());
-                error!("❌ Answer validation test failed: {}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("❌ Answer validation test failed: {}", e);
+                }
             }
         }
 
@@ -348,7 +362,9 @@ impl AIMiningIntegrationTester {
             Ok(distributed_amount) => {
                 if distributed_amount >= scenario.expected_rewards {
                     scenario.status = TestStatus::Passed;
-                    info!("✅ Reward distribution test passed - {} nanoTOS distributed", distributed_amount);
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("✅ Reward distribution test passed - {} nanoTOS distributed", distributed_amount);
+                    }
                 } else {
                     scenario.status = TestStatus::Failed;
                     scenario.errors.push(format!("Insufficient rewards distributed: {} < {}", distributed_amount, scenario.expected_rewards));
@@ -358,7 +374,9 @@ impl AIMiningIntegrationTester {
             Err(e) => {
                 scenario.status = TestStatus::Failed;
                 scenario.errors.push(e.to_string());
-                error!("❌ Reward distribution test failed: {}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("❌ Reward distribution test failed: {}", e);
+                }
             }
         }
 
@@ -395,7 +413,9 @@ impl AIMiningIntegrationTester {
                 Err(e) => {
                     scenario.status = TestStatus::Failed;
                     scenario.errors.push(e.to_string());
-                    error!("❌ Full cycle verification failed: {}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("❌ Full cycle verification failed: {}", e);
+                    }
                 }
             }
         } else {
@@ -424,7 +444,9 @@ impl AIMiningIntegrationTester {
         storage.register_miner(&self.test_config.miner_address.to_public_key(), 1_000_000_000).await?;
         storage.add_transaction(&metadata, None).await?;
 
-        info!("Miner registration metadata created: {} bytes, {} nanoTOS fee", metadata.estimated_size, metadata.estimated_fee);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Miner registration metadata created: {} bytes, {} nanoTOS fee", metadata.estimated_size, metadata.estimated_fee);
+        }
         Ok(())
     }
 
@@ -452,7 +474,9 @@ impl AIMiningIntegrationTester {
         storage.add_task(&task_id, reward_amount, difficulty, deadline).await?;
         storage.add_transaction(&metadata, Some(task_id.clone())).await?;
 
-        info!("Task publication metadata created: {} bytes, {} nanoTOS fee", metadata.estimated_size, metadata.estimated_fee);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Task publication metadata created: {} bytes, {} nanoTOS fee", metadata.estimated_size, metadata.estimated_fee);
+        }
         Ok(task_id)
     }
 
@@ -476,7 +500,9 @@ impl AIMiningIntegrationTester {
         let mut storage = self.storage_manager.lock().await;
         storage.add_transaction(&metadata, Some(task_id)).await?;
 
-        info!("Answer submission metadata created: {} bytes, {} nanoTOS fee", metadata.estimated_size, metadata.estimated_fee);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Answer submission metadata created: {} bytes, {} nanoTOS fee", metadata.estimated_size, metadata.estimated_fee);
+        }
         Ok(answer_hash)
     }
 
@@ -499,7 +525,9 @@ impl AIMiningIntegrationTester {
         let mut storage = self.storage_manager.lock().await;
         storage.add_transaction(&metadata, Some(task_id)).await?;
 
-        info!("Answer validation metadata created: {} bytes, {} nanoTOS fee", metadata.estimated_size, metadata.estimated_fee);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Answer validation metadata created: {} bytes, {} nanoTOS fee", metadata.estimated_size, metadata.estimated_fee);
+        }
         Ok(validation_id)
     }
 
@@ -509,7 +537,9 @@ impl AIMiningIntegrationTester {
         // For now, we simulate successful reward distribution
         let distributed_rewards = 50_000_000_000; // 50 TOS
 
-        info!("Simulated reward distribution: {} nanoTOS", distributed_rewards);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Simulated reward distribution: {} nanoTOS", distributed_rewards);
+        }
         Ok(distributed_rewards)
     }
 
@@ -522,7 +552,9 @@ impl AIMiningIntegrationTester {
             return Err(anyhow::anyhow!("No transactions found in storage"));
         }
 
-        info!("Storage consistency verified: {} transactions recorded", transactions.len());
+        if log::log_enabled!(log::Level::Info) {
+            info!("Storage consistency verified: {} transactions recorded", transactions.len());
+        }
         Ok(())
     }
 
@@ -535,7 +567,9 @@ impl AIMiningIntegrationTester {
         let failed = scenarios.iter().filter(|s| s.status == TestStatus::Failed).count();
         let total = scenarios.len();
 
-        info!("Total Tests: {} | Passed: {} | Failed: {}", total, passed, failed);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Total Tests: {} | Passed: {} | Failed: {}", total, passed, failed);
+        }
         info!("");
 
         for scenario in scenarios {
@@ -552,19 +586,27 @@ impl AIMiningIntegrationTester {
                 TestStatus::Pending => "⏳",
             };
 
-            info!("{} {} ({})", status_icon, scenario.name, duration);
+            if log::log_enabled!(log::Level::Info) {
+                info!("{} {} ({})", status_icon, scenario.name, duration);
+            }
 
             if !scenario.errors.is_empty() {
                 for error in &scenario.errors {
-                    warn!("   Error: {}", error);
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("   Error: {}", error);
+                    }
                 }
             }
 
             if let Some(task_id) = &scenario.task_id {
-                info!("   Task ID: {}", hex::encode(task_id.as_bytes()));
+                if log::log_enabled!(log::Level::Info) {
+                    info!("   Task ID: {}", hex::encode(task_id.as_bytes()));
+                }
             }
             if let Some(answer_id) = &scenario.answer_id {
-                info!("   Answer ID: {}", hex::encode(answer_id.as_bytes()));
+                if log::log_enabled!(log::Level::Info) {
+                    info!("   Answer ID: {}", hex::encode(answer_id.as_bytes()));
+                }
             }
         }
 
@@ -573,7 +615,9 @@ impl AIMiningIntegrationTester {
         if failed == 0 {
             info!("🎉 All AI mining workflow tests PASSED!");
         } else {
-            warn!("⚠️  {} test(s) failed. Check logs for details.", failed);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("⚠️  {} test(s) failed. Check logs for details.", failed);
+            }
         }
     }
 }

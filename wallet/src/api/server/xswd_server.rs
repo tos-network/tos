@@ -76,7 +76,9 @@ where
         let handle = http_server.handle();
         spawn_task("xswd-server", http_server);
 
-        info!("XSWD is listening on ws://{}", XSWD_BIND_ADDRESS);
+        if log::log_enabled!(log::Level::Info) {
+            info!("XSWD is listening on ws://{}", XSWD_BIND_ADDRESS);
+        }
 
         Ok(Self {
             websocket,
@@ -149,7 +151,9 @@ where
                 let session = session.clone();
                 spawn_task("xswd-notify", async move {
                     if let Err(e) = session.send_text(response.to_string()).await {
-                        debug!("Error occured while notifying a new event: {}", e);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Error occured while notifying a new event: {}", e);
+                        }
                     };
                 });
             }
@@ -228,16 +232,22 @@ where
             match self.add_application(session, app_data).await {
                 Ok(v) => Ok(Some(v)),
                 Err(e) => {
-                    debug!("Error while adding application: {}", e);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Error while adding application: {}", e);
+                    }
                     if !session.is_closed().await {
                         // Send error message and then close the session
                         if let Err(e) = session.send_text(&e.to_json().to_string()).await {
-                            error!("Error while sending error message to session: {}", e);
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Error while sending error message to session: {}", e);
+                            }
                         }
                     }
 
                     if let Err(e) = session.close(None).await {
-                        error!("Error while closing session: {}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error while closing session: {}", e);
+                        }
                     }
 
                     Ok(None)

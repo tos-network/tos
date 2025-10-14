@@ -32,7 +32,9 @@ impl SledStorage {
         tree_versioned: &Tree,
         topoheight: u64,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned data at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned data at topoheight {}", topoheight);
+        }
         for el in Self::scan_prefix(snapshot.as_ref(), tree_versioned, &topoheight.to_be_bytes()) {
             let prefixed_key = el?;
 
@@ -65,13 +67,17 @@ impl SledStorage {
         topoheight: u64,
         context: DiskContext,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned data above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned data above topoheight {}", topoheight);
+        }
         for el in Self::iter(snapshot.as_ref(), tree_pointer) {
             let (key, value) = el?;
             let topo = u64::from_bytes(&value)?;
 
             if topo > topoheight {
-                debug!("found pointer at {} above the requested topoheight {} with context {}", topo, topoheight, context);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("found pointer at {} above the requested topoheight {} with context {}", topo, topoheight, context);
+                }
 
                 // We fetch the last version to take its previous topoheight
                 // And we loop on it to delete them all until the end of the chained data
@@ -86,7 +92,9 @@ impl SledStorage {
                         break;
                     }
 
-                    trace!("deleting versioned data at topoheight {}", prev_topo);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("deleting versioned data at topoheight {}", prev_topo);
+                    }
                     let key = Self::get_versioned_key(&key, prev_topo);
                     prev_version = Self::remove_from_disk::<Option<u64>>(snapshot.as_mut(), tree_versioned, &key)?
                         .ok_or(BlockchainError::NotFoundOnDisk(context))?;
@@ -117,7 +125,9 @@ impl SledStorage {
         keep_last: bool,
         context: DiskContext,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned data below topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned data below topoheight {}", topoheight);
+        }
         if keep_last {
             for el in Self::iter(snapshot.as_ref(), tree_pointer) {
                 let (key, value) = el?;
@@ -137,7 +147,9 @@ impl SledStorage {
                     } else {
                         prev_version = Self::load_from_disk_internal(snapshot.as_ref(), tree_versioned, &key, context)?;
                         if prev_version.filter(|v| *v < topoheight).is_some() {
-                            trace!("Patching versioned data at topoheight {}", topoheight);
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("Patching versioned data at topoheight {}", topoheight);
+                            }
                             patched = true;
                             let mut data: Versioned<NoTransform> = Self::load_from_disk_internal(snapshot.as_ref(), tree_versioned, &key, context)?;
                             data.set_previous_topoheight(None);

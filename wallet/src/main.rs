@@ -177,10 +177,14 @@ async fn main() -> Result<()> {
         let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(config.precomputed_tables.precomputed_tables_path.as_deref(), config.precomputed_tables.precomputed_tables_l1, LogProgressTableGenerationReportFunction, true).await?;
         let p = Path::new(path);
         let wallet = if p.exists() && p.is_dir() && Path::new(&format!("{}/db", path)).exists() {
-            info!("Opening wallet {}", path);
+            if log::log_enabled!(log::Level::Info) {
+                info!("Opening wallet {}", path);
+            }
             Wallet::open(path, &password, config.network, precomputed_tables, config.n_decryption_threads, config.network_concurrency)?
         } else {
-            info!("Creating a new wallet at {}", path);
+            if log::log_enabled!(log::Level::Info) {
+                info!("Creating a new wallet at {}", path);
+            }
             Wallet::create(path, &password, config.seed.as_deref().map(RecoverOption::Seed), config.network, precomputed_tables, config.n_decryption_threads, config.network_concurrency).await?
         };
 
@@ -195,18 +199,24 @@ async fn main() -> Result<()> {
                 info!("Executing batch command from JSON string");
                 execute_json_batch(&command_manager, json_str, &config).await?;
             } else if let Some(json_file) = config.json_file.as_ref() {
-                info!("Executing batch command from JSON file: {}", json_file);
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Executing batch command from JSON file: {}", json_file);
+                }
                 let json_content = std::fs::read_to_string(json_file)
                     .with_context(|| format!("Failed to read JSON file: {}", json_file))?;
                 execute_json_batch(&command_manager, &json_content, &config).await?;
             } else if let Some(cmd) = config.get_exec_command() {
-                info!("Executing command: {}", cmd);
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Executing command: {}", cmd);
+                }
                 match command_manager.handle_command(cmd.clone()).await {
                     Ok(_) => {
                         info!("Batch command executed successfully");
                     }
                     Err(e) => {
-                        error!("Error executing batch command: {:#}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error executing batch command: {:#}", e);
+                        }
                         return Err(e.into());
                     }
                 }
@@ -217,22 +227,28 @@ async fn main() -> Result<()> {
         } else {
             // Normal interactive mode
             if let Err(e) = prompt.start(Duration::from_millis(1000), Box::new(async_handler!(prompt_message_builder)), Some(&command_manager)).await {
-                error!("Error while running prompt: {:#}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while running prompt: {:#}", e);
+                }
             }
         }
     } else {
         register_default_commands(&command_manager).await?;
-        
+
         // Handle exec mode without wallet
         if config.is_exec_mode() {
             if let Some(cmd) = config.get_exec_command() {
-                info!("Executing command: {}", cmd);
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Executing command: {}", cmd);
+                }
                 match command_manager.handle_command(cmd.clone()).await {
                     Ok(_) => {
                         info!("Batch command executed successfully");
                     }
                     Err(e) => {
-                        error!("Error executing batch command: {:#}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error executing batch command: {:#}", e);
+                        }
                         return Err(e.into());
                     }
                 }
@@ -243,7 +259,9 @@ async fn main() -> Result<()> {
         } else {
             // Normal interactive mode
             if let Err(e) = prompt.start(Duration::from_millis(1000), Box::new(async_handler!(prompt_message_builder)), Some(&command_manager)).await {
-                error!("Error while running prompt: {:#}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while running prompt: {:#}", e);
+                }
             }
         }
     }
@@ -386,9 +404,13 @@ async fn xswd_handle_request_permission(prompt: &ShareablePrompt, app_state: App
 async fn apply_config(config: Config, wallet: &Arc<Wallet>, #[cfg(feature = "xswd")] prompt: &ShareablePrompt) {
     #[cfg(feature = "network_handler")]
     if !config.network_handler.offline_mode {
-        info!("Trying to connect to daemon at '{}'", config.network_handler.daemon_address);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Trying to connect to daemon at '{}'", config.network_handler.daemon_address);
+        }
         if let Err(e) = wallet.set_online_mode(&config.network_handler.daemon_address, true).await {
-            error!("Couldn't connect to daemon: {:#}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Couldn't connect to daemon: {:#}", e);
+            }
             info!("You can activate online mode using 'online_mode [daemon_address]'");
         } else {
             info!("Online mode enabled");
@@ -415,9 +437,13 @@ async fn apply_config(config: Config, wallet: &Arc<Wallet>, #[cfg(feature = "xsw
                 None
             };
 
-            info!("Enabling RPC Server on {} {}", address, if auth_config.is_some() { "with authentication" } else { "without authentication" });
+            if log::log_enabled!(log::Level::Info) {
+                info!("Enabling RPC Server on {} {}", address, if auth_config.is_some() { "with authentication" } else { "without authentication" });
+            }
             if let Err(e) = wallet.enable_rpc_server(address, auth_config, config.rpc.rpc_threads).await {
-                error!("Error while enabling RPC Server: {:#}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while enabling RPC Server: {:#}", e);
+                }
             }
         } else if config.enable_xswd {
             match wallet.enable_xswd().await {
@@ -3338,7 +3364,9 @@ async fn execute_json_batch(command_manager: &CommandManager, json_content: &str
     let json_config: JsonBatchConfig = serde_json::from_str(json_content)
         .with_context(|| "Failed to parse JSON batch configuration")?;
 
-    info!("Executing JSON batch command: {}", json_config.command);
+    if log::log_enabled!(log::Level::Info) {
+        info!("Executing JSON batch command: {}", json_config.command);
+    }
 
     // Override wallet_path and password from JSON if provided
     // but CLI parameters take precedence
@@ -3360,7 +3388,9 @@ async fn execute_json_batch(command_manager: &CommandManager, json_content: &str
             Ok(())
         }
         Err(e) => {
-            error!("Error executing JSON batch command: {:#}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error executing JSON batch command: {:#}", e);
+            }
             Err(e.into())
         }
     }

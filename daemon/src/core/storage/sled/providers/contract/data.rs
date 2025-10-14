@@ -15,7 +15,9 @@ use crate::core::{
 #[async_trait]
 impl ContractDataProvider for SledStorage {
     async fn set_last_contract_data_to(&mut self, contract: &Hash, key: &ValueCell, topoheight: TopoHeight, data: &VersionedContractData) -> Result<(), BlockchainError> {
-        trace!("set last contract data to topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set last contract data to topoheight {}", topoheight);
+        }
         let versioned_key = self.get_versioned_contract_data_key(contract, key, topoheight);
         Self::insert_into_disk(self.snapshot.as_mut(), &self.versioned_contracts_data, &versioned_key, data.to_bytes())?;
 
@@ -32,12 +34,16 @@ impl ContractDataProvider for SledStorage {
     }
 
     async fn get_contract_data_at_exact_topoheight_for<'a>(&self, contract: &Hash, key: &ValueCell, topoheight: TopoHeight) -> Result<VersionedContractData, BlockchainError> {
-        trace!("get contract data at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get contract data at topoheight {}", topoheight);
+        }
         self.load_from_disk(&self.versioned_contracts_data, &self.get_versioned_contract_data_key(contract, key, topoheight), DiskContext::ContractData)
     }
 
     async fn get_contract_data_at_maximum_topoheight_for<'a>(&self, contract: &Hash, key: &ValueCell, maximum_topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedContractData)>, BlockchainError> {
-        trace!("get contract data at maximum topoheight {}", maximum_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get contract data at maximum topoheight {}", maximum_topoheight);
+        }
         match self.get_contract_data_topoheight_at_maximum_topoheight_for(contract, key, maximum_topoheight).await? {
             Some(topoheight) => {
                 let contract = self.get_contract_data_at_exact_topoheight_for(&contract, key, topoheight).await?;
@@ -48,7 +54,9 @@ impl ContractDataProvider for SledStorage {
     }
 
     async fn get_contract_data_topoheight_at_maximum_topoheight_for<'a>(&self, contract: &Hash, key: &ValueCell, maximum_topoheight: TopoHeight) -> Result<Option<TopoHeight>, BlockchainError> {
-        trace!("get contract data topoheight at maximum topoheight {}", maximum_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get contract data topoheight at maximum topoheight {}", maximum_topoheight);
+        }
         let Some(pointer) = self.get_last_topoheight_for_contract_data(contract, key).await? else {
             return Ok(None)
         };
@@ -62,7 +70,9 @@ impl ContractDataProvider for SledStorage {
         let mut previous_topo = Some(topo);
         while let Some(topoheight) = previous_topo {
             if topoheight <= maximum_topoheight {
-                trace!("Contract data topoheight {} is at maximum topoheight", topoheight);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Contract data topoheight {} is at maximum topoheight", topoheight);
+                }
                 return Ok(Some(topoheight))
             }
 
@@ -77,13 +87,17 @@ impl ContractDataProvider for SledStorage {
     }
 
     async fn has_contract_data_at_maximum_topoheight(&self, contract: &Hash, key: &ValueCell, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        trace!("has contract data at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has contract data at topoheight {}", topoheight);
+        }
         self.get_contract_data_at_maximum_topoheight_for(contract, key, topoheight).await
             .map(|res| res.map_or(false, |v| v.1.take().is_some()))
     }
 
     async fn has_contract_data_at_exact_topoheight(&self, contract: &Hash, key: &ValueCell, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        trace!("has contract data at exact topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has contract data at exact topoheight {}", topoheight);
+        }
         self.contains_data(&self.versioned_contracts_data, &self.get_versioned_contract_data_key(contract, key, topoheight))
     }
 

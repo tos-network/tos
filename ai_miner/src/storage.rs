@@ -111,14 +111,18 @@ impl StorageManager {
         // Ensure storage directory exists
         if !storage_dir.exists() {
             fs::create_dir_all(&storage_dir).await?;
-            info!("Created storage directory: {:?}", storage_dir);
+            if log::log_enabled!(log::Level::Info) {
+                info!("Created storage directory: {:?}", storage_dir);
+            }
         }
 
         let storage_path = storage_dir.join(format!("ai_mining_{}.json", network.to_string().to_lowercase()));
 
         // Load existing state or create new one
         let state = if storage_path.exists() {
-            debug!("Loading existing state from: {:?}", storage_path);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Loading existing state from: {:?}", storage_path);
+            }
             let content = fs::read_to_string(&storage_path).await?;
             match serde_json::from_str::<AIMiningState>(&content) {
                 Ok(mut loaded_state) => {
@@ -127,14 +131,18 @@ impl StorageManager {
                     loaded_state
                 }
                 Err(e) => {
-                    warn!("Failed to parse existing state file: {}. Creating new state.", e);
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Failed to parse existing state file: {}. Creating new state.", e);
+                    }
                     let mut new_state = AIMiningState::default();
                     new_state.network = network;
                     new_state
                 }
             }
         } else {
-            info!("Creating new AI mining state for network: {:?}", network);
+            if log::log_enabled!(log::Level::Info) {
+                info!("Creating new AI mining state for network: {:?}", network);
+            }
             let mut new_state = AIMiningState::default();
             new_state.network = network;
             new_state
@@ -151,7 +159,9 @@ impl StorageManager {
         self.state.last_updated = chrono::Utc::now().timestamp() as u64;
         let content = serde_json::to_string_pretty(&self.state)?;
         fs::write(&self.storage_path, content).await?;
-        debug!("Saved AI mining state to: {:?}", self.storage_path);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Saved AI mining state to: {:?}", self.storage_path);
+        }
         Ok(())
     }
 
@@ -169,7 +179,9 @@ impl StorageManager {
 
         self.state.miner_info = Some(miner_info);
         self.save().await?;
-        info!("Registered miner: {}", hex::encode(miner_address.as_bytes()));
+        if log::log_enabled!(log::Level::Info) {
+            info!("Registered miner: {}", hex::encode(miner_address.as_bytes()));
+        }
         Ok(())
     }
 
@@ -193,7 +205,9 @@ impl StorageManager {
         }
 
         self.save().await?;
-        info!("Added task: {}", hex::encode(task_id.as_bytes()));
+        if log::log_enabled!(log::Level::Info) {
+            info!("Added task: {}", hex::encode(task_id.as_bytes()));
+        }
         Ok(())
     }
 
@@ -205,9 +219,13 @@ impl StorageManager {
             task.state = new_state;
             task.updated_at = chrono::Utc::now().timestamp() as u64;
             self.save().await?;
-            info!("Updated task {} state", task_key);
+            if log::log_enabled!(log::Level::Info) {
+                info!("Updated task {} state", task_key);
+            }
         } else {
-            warn!("Task not found: {}", task_key);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Task not found: {}", task_key);
+            }
         }
 
         Ok(())
@@ -249,7 +267,9 @@ impl StorageManager {
         }
 
         self.save().await?;
-        info!("Added transaction record: {:?}", payload_type);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Added transaction record: {:?}", payload_type);
+        }
         Ok(())
     }
 

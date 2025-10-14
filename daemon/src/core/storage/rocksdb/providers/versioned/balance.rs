@@ -15,20 +15,26 @@ use crate::core::{
 impl VersionedBalanceProvider for RocksStorage {
     // delete versioned balances at topoheight
     async fn delete_versioned_balances_at_topoheight(&mut self, topoheight: TopoHeight) -> Result<(), BlockchainError> {
-        trace!("delete versioned balances at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned balances at topoheight {}", topoheight);
+        }
         self.delete_versioned_at_topoheight(Column::Balances, Column::VersionedBalances, topoheight)
     }
 
     // delete versioned balances above topoheight
     async fn delete_versioned_balances_above_topoheight(&mut self, topoheight: TopoHeight) -> Result<(), BlockchainError> {
-        trace!("delete versioned balances above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned balances above topoheight {}", topoheight);
+        }
         self.delete_versioned_above_topoheight(Column::Balances, Column::VersionedBalances, topoheight)
     }
 
     // delete versioned balances below topoheight
     // Difference is, if we have
     async fn delete_versioned_balances_below_topoheight(&mut self, topoheight: TopoHeight, keep_last: bool) -> Result<(), BlockchainError> {
-        trace!("delete versioned balances below topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned balances below topoheight {}", topoheight);
+        }
         let start = topoheight.to_be_bytes();
         if keep_last {
             for res in Self::iter_owned_internal::<(AccountId, AssetId), TopoHeight>(&self.db, self.snapshot.as_ref(), IteratorMode::Start, Column::Balances)? {

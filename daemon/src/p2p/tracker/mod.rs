@@ -175,7 +175,9 @@ impl ObjectTracker {
                         if let Some(requested_at) = request.get_requested() {
                             // check if the request is timed out
                             if requested_at.elapsed() > TIME_OUT {
-                                warn!("Request timed out for object {}", request.get_hash());
+                                if log::log_enabled!(log::Level::Warn) {
+                                    warn!("Request timed out for object {}", request.get_hash());
+                                }
                                 let peer_id = request.get_peer().get_id();
                                 let group_id = request.get_group_id();
 
@@ -185,7 +187,9 @@ impl ObjectTracker {
                             }
                         } else {
                             // It wasn't yet requested
-                            debug!("Request not yet sent for object {}", request.get_hash());
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Request not yet sent for object {}", request.get_hash());
+                            }
                             break;
                         }
                     }
@@ -230,7 +234,9 @@ impl ObjectTracker {
     // This function is called from P2p Server when a peer sends an object response that we requested
     // It will pass the response to the handler task loop
     pub async fn handle_object_response(&self, response: OwnedObjectResponse) -> Result<bool, P2pError> {
-        trace!("handle object response {}", response.get_hash());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("handle object response {}", response.get_hash());
+        }
         {
             let mut queue = self.queue.lock().await;
             if let Some(request) = queue.remove(response.get_hash()) {
@@ -249,7 +255,9 @@ impl ObjectTracker {
     // Request the object from the peer and returns the response blocker
     #[allow(dead_code)]
     pub async fn request_object_from_peer_with_or_get_notified(&self, peer: Arc<Peer>, request: ObjectRequest, group_id: Option<u64>) -> Result<RequestResponse, P2pError> {
-        trace!("Requesting object {} from {}", request.get_hash(), peer);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Requesting object {} from {}", request.get_hash(), peer);
+        }
         let (listener, hash) = {
             let mut queue = self.queue.lock().await;
             if let Some(request) = queue.get(request.get_hash()) {
@@ -264,7 +272,9 @@ impl ObjectTracker {
             (receiver, hash)
         };
 
-        trace!("Transfering object request {} to task", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Transfering object request {} to task", hash);
+        }
         self.request_sender.send(hash).await?;
         Ok(listener)
     }
@@ -294,7 +304,9 @@ impl ObjectTracker {
         });
 
         for (hash, _) in iter {
-            debug!("Adding requested object with hash {} in expirable cache", hash);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Adding requested object with hash {} in expirable cache", hash);
+            }
             self.cache.insert(hash).await;
         }
     }
@@ -302,7 +314,9 @@ impl ObjectTracker {
     // Request the object from the peer
     // This is called from the requester task loop
     async fn request_object_from_peer_internal(&self, request_hash: Hash) {
-        debug!("Requesting object with hash {}", request_hash);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Requesting object with hash {}", request_hash);
+        }
         let mut queue = self.queue.lock().await;
         debug!("queue locked");
 
@@ -312,16 +326,22 @@ impl ObjectTracker {
             let packet = Bytes::from(Packet::ObjectRequest(Cow::Borrowed(req.get_object())).to_bytes());
             request = Some((req.get_peer().clone(), packet, req.get_group_id()));
         } else {
-            debug!("Object {} not requested anymore", request_hash);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Object {} not requested anymore", request_hash);
+            }
         };
 
         let mut fail = None;
         if let Some((peer, packet, group_id)) = request {
-            debug!("requesting object from {} internal", peer);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("requesting object from {} internal", peer);
+            }
 
             // Make sure its not closed
             if peer.get_connection().is_closed() {
-                warn!("Peer {} is disconnected but still has a pending request object {}", peer, request_hash);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Peer {} is disconnected but still has a pending request object {}", peer, request_hash);
+                }
                 fail = Some((peer.get_id(), group_id));
             } else {
                 let mut peer_exit = peer.get_exit_receiver();
@@ -331,7 +351,9 @@ impl ObjectTracker {
                     }
                     res = peer.send_bytes(packet) => {
                         if let Err(e) = res {
-                            debug!("failed to request object from {}: {}", peer, e);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("failed to request object from {}: {}", peer, e);
+                            }
                             fail = Some((peer.get_id(), group_id));
                         }
                     }

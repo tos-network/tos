@@ -36,23 +36,31 @@ impl SledStorage {
 #[async_trait]
 impl TransactionProvider for SledStorage {
     async fn get_transaction(&self, hash: &Hash) -> Result<Immutable<Transaction>, BlockchainError> {
-        trace!("get transaction for hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get transaction for hash {}", hash);
+        }
         self.get_cacheable_arc_data(&self.transactions, &self.transactions_cache, hash, DiskContext::GetTransaction).await
     }
 
     async fn get_transaction_size(&self, hash: &Hash) -> Result<usize, BlockchainError> {
-        trace!("get transaction size for hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get transaction size for hash {}", hash);
+        }
         self.get_size_from_disk(&self.transactions, hash.as_bytes())
     }
 
     async fn has_transaction(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has transaction {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has transaction {}", hash);
+        }
         self.contains_data_cached(&self.transactions, &self.transactions_cache, hash).await
     }
 
     // Store a new transaction
     async fn add_transaction(&mut self, hash: &Hash, transaction: &Transaction) -> Result<(), BlockchainError> {
-        trace!("add transaction {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("add transaction {}", hash);
+        }
         Self::insert_into_disk(self.snapshot.as_mut(), &self.transactions, hash, transaction.to_bytes())?;
 
         Ok(())

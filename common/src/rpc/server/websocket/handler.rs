@@ -87,11 +87,17 @@ where
 
                 async move {
                     if let Some(data) = data {
-                        trace!("sending event to #{}", session.id);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("sending event to #{}", session.id);
+                        }
                         if let Err(e) = session.send_text(data.to_string()).await {
-                            debug!("Error occured while notifying a new event: {}", e);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Error occured while notifying a new event: {}", e);
+                            }
                         };
-                        trace!("event sent to #{}", session.id);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("event sent to #{}", session.id);
+                        }
                     }
                 }
             }).await;

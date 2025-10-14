@@ -50,8 +50,6 @@ use std::{
 use lru::LruCache;
 use bytes::Bytes;
 use log::{
-    Level,
-    log_enabled,
     trace,
     debug,
     warn,
@@ -429,24 +427,32 @@ impl Peer {
         objects.pop(request)
     }
 
-    // Request a object from this peer and wait on it until we receive it or until timeout 
+    // Request a object from this peer and wait on it until we receive it or until timeout
     pub async fn request_blocking_object(&self, request: ObjectRequest) -> Result<OwnedObjectResponse, P2pError> {
-        trace!("waiting for permit {}", request);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("waiting for permit {}", request);
+        }
         let _permit = self.objects_semaphore.acquire().await?;
-        debug!("requesting {}", request);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("requesting {}", request);
+        }
         counter!("tos_p2p_objects_requests", "peer" => self.get_id().to_string()).increment(1u64);
 
         let mut receiver = {
             let mut objects = self.objects_requested.lock().await;
             if let Some(sender) = objects.get(&request) {
-                debug!("{} was already sent to {}, subscribing to the same channel", request, self);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("{} was already sent to {}, subscribing to the same channel", request, self);
+                }
                 sender.subscribe()
             } else {
                 self.send_packet(Packet::ObjectRequest(Cow::Borrowed(&request))).await?;
                 let (sender, receiver) = broadcast::channel(1);
                 // clone is necessary in case timeout has occured
                 if objects.put(request.clone(), sender).is_some() {
-                    warn!("{} was already pending for {}", request, self);
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("{} was already pending for {}", request, self);
+                    }
                 };
                 receiver
             }
@@ -458,7 +464,9 @@ impl Peer {
             res = timeout(Duration::from_millis(PEER_TIMEOUT_REQUEST_OBJECT), receiver.recv()) => match res {
                 Ok(res) => res.context("Error on blocking object response")?,
                 Err(_) => {
-                    warn!("Requested data {} from {} has timed out", request, self);
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Requested data {} from {} has timed out", request, self);
+                    }
                     let mut objects = self.objects_requested.lock().await;
                     // remove it from request list
                     objects.pop(&request);
@@ -466,7 +474,9 @@ impl Peer {
                 }
             }
         };
-        debug!("received response for request {}", request);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("received response for request {}", request);
+        }
 
         // Verify that the object is the one we requested
         let object_hash = object.get_hash();
@@ -485,10 +495,14 @@ impl Peer {
     // Request a bootstrap chain from this peer and wait on it until we receive it or until timeout
     pub async fn request_boostrap_chain(&self, step: StepRequest<'_>) -> Result<StepResponse, P2pError> {
         let step_kind = step.kind();
-        debug!("waiting for permit for bootstrap chain step: {:?}", step_kind);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("waiting for permit for bootstrap chain step: {:?}", step_kind);
+        }
 
         let _permit = self.objects_semaphore.acquire().await?;
-        debug!("Requesting bootstrap chain step: {:?}", step_kind);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Requesting bootstrap chain step: {:?}", step_kind);
+        }
         counter!("tos_p2p_bootstrap_requests", "peer" => self.get_id().to_string()).increment(1u64);
 
         let (sender, receiver) = tokio::sync::oneshot::channel();
@@ -513,7 +527,9 @@ impl Peer {
                         senders.pop_front();
                     }
 
-                    debug!("Requested bootstrap chain step {:?} has timed out", step_kind);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Requested bootstrap chain step {:?} has timed out", step_kind);
+                    }
                     return Err(P2pError::AsyncTimeOut(e));
                 }
             }
@@ -549,7 +565,9 @@ impl Peer {
                 Err(e) => {
                     // Clear the sync chain channel
                     let contains = self.sync_chain.lock().await.take().is_some();
-                    debug!("Requested sync chain has timed out, contains: {}", contains);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Requested sync chain has timed out, contains: {}", contains);
+                    }
                     return Err(P2pError::AsyncTimeOut(e));
                 }
             }
@@ -641,11 +659,15 @@ impl Peer {
 
     // Close the peer connection and remove it from the peer list
     pub async fn close_and_temp_ban(&self, seconds: u64) -> Result<(), P2pError> {
-        trace!("temp ban {}", self);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("temp ban {}", self);
+        }
         if !self.is_priority() {
             self.peer_list.temp_ban_address(&self.get_connection().get_address().ip(), seconds, false).await?;
         } else {
-            debug!("{} is a priority peer, closing only", self);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("{} is a priority peer, closing only", self);
+            }
         }
 
         self.peer_list.remove_peer(self.get_id(), true).await?;
@@ -664,10 +686,14 @@ impl Peer {
 
     // Close the peer connection and remove it from the peer list
     pub async fn close(&self) -> Result<(), P2pError> {
-        trace!("Deleting peer {} from peerlist", self);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Deleting peer {} from peerlist", self);
+        }
         let res = self.peer_list.remove_peer(self.get_id(), true).await;
 
-        trace!("Closing connection internal with {}", self);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Closing connection internal with {}", self);
+        }
         self.get_connection()
             .close()
             .await
@@ -679,7 +705,9 @@ impl Peer {
     // Send a packet to the peer
     // This will transform the packet into bytes and send it to the peer
     pub async fn send_packet(&self, packet: Packet<'_>) -> Result<(), P2pError> {
-        trace!("Sending {:?}", packet);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Sending {:?}", packet);
+        }
         self.send_bytes(Bytes::from(packet.to_bytes())).await
     }
 
@@ -712,7 +740,7 @@ impl Display for Peer {
         // update fail counter to have up-to-date data to display
         self.update_fail_count_default();
         let peers = if let Ok(peers) = self.get_peers().try_lock() {
-            if log_enabled!(Level::Trace) {
+            if log::log_enabled!(log::Level::Trace) {
                 format!("{}", peers.iter().map(|(p, d)| format!("{} = {:?}", p, d)).collect::<Vec<_>>().join(", "))
             } else {
                 format!("{}", peers.len())
@@ -760,7 +788,9 @@ impl Drop for Peer {
     fn drop(&mut self) {
         // This shouldn't happen, but in case we have a lurking bug somewhere
         if !self.get_connection().is_closed() {
-            warn!("{} was not closed correctly /!\\", self)
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("{} was not closed correctly /!\\", self)
+            }
         }
     }
 }

@@ -67,7 +67,9 @@ impl DaemonAPI {
         trace!("disconnect");
         let count = Arc::strong_count(self);
         if count > 1 {
-            debug!("There are still {} references to the daemon API", count);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("There are still {} references to the daemon API", count);
+            }
             return Ok(false);
         }
         self.client.disconnect().await?;
@@ -105,7 +107,9 @@ impl DaemonAPI {
     }
 
     pub async fn call<P: Serialize>(&self, method: &String, params: &P) -> JsonRPCResult<Value> {
-        trace!("call: {}", method);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("call: {}", method);
+        }
         self.client.call_with(method.as_str(), params).await
     }
 

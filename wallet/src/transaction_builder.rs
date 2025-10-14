@@ -140,7 +140,9 @@ impl TransactionBuilderState {
         trace!("Applying changes to storage");
 
         for (asset, balance) in self.balances.drain() {
-            debug!("Setting balance for asset {} to {} ({})", asset, balance.amount, balance.ciphertext);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Setting balance for asset {} to {} ({})", asset, balance.amount, balance.ciphertext);
+            }
             storage.set_unconfirmed_balance_for(asset, balance).await?;
         }
 

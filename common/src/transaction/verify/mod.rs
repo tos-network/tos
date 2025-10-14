@@ -207,15 +207,21 @@ impl Transaction {
                         if *asset == TOS_ASSET {
                             output += Scalar::from(*amount);
                             let _energy_gained = (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier();
-                            debug!("FreezeTos operation: deducting {} TOS from balance for asset {}", amount, asset);
-                            debug!("  Duration: {:?}, Energy gained: {} units", duration, _energy_gained);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("FreezeTos operation: deducting {} TOS from balance for asset {}", amount, asset);
+                            }
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("  Duration: {:?}, Energy gained: {} units", duration, _energy_gained);
+                            }
                         }
                     },
                     EnergyPayload::UnfreezeTos { amount } => {
                         // For unfreeze operations, no TOS deduction (it's returned to balance)
                         // But we still need to account for the energy removal
                         // The amount is already handled in the energy system
-                        debug!("UnfreezeTos operation: no TOS deduction for asset {} (amount: {})", asset, amount);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("UnfreezeTos operation: no TOS deduction for asset {} (amount: {})", asset, amount);
+                        }
                         debug!("  Energy will be removed from energy resource during apply phase");
                     }
                 }
@@ -698,7 +704,9 @@ impl Transaction {
         match &self.data {
             TransactionType::Transfers(transfers) => {
                 if transfers.len() > MAX_TRANSFER_COUNT || transfers.is_empty() {
-                    debug!("incorrect transfers size: {}", transfers.len());
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("incorrect transfers size: {}", transfers.len());
+                    }
                     return Err(VerificationError::TransferCount);
                 }
 
@@ -863,7 +871,9 @@ impl Transaction {
 
                 let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
                 if !sig.signature.verify(hash.as_bytes(), &decompressed) {
-                    debug!("Multisig signature verification failed for participant {}", index);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Multisig signature verification failed for participant {}", index);
+                    }
                     return Err(VerificationError::InvalidSignature);
                 }
             }
@@ -1042,15 +1052,19 @@ impl Transaction {
                 // Note: Transfer transactions with energy fees are TransactionType::Transfers, not TransactionType::Energy
                 Transaction::append_energy_transcript(&mut transcript, payload);
 
-                debug!("Energy transaction verification - payload: {:?}, fee: {}, nonce: {}",
-                       payload, self.fee, self.nonce);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Energy transaction verification - payload: {:?}, fee: {}, nonce: {}",
+                           payload, self.fee, self.nonce);
+                }
             },
             TransactionType::AIMining(payload) => {
                 // AI Mining transactions - add to transcript for consistency
                 transcript.append_message(b"ai_mining_payload", &format!("{:?}", payload).as_bytes());
 
-                debug!("AI Mining transaction verification - payload: {:?}, fee: {}, nonce: {}",
-                       payload, self.fee, self.nonce);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("AI Mining transaction verification - payload: {:?}, fee: {}, nonce: {}",
+                           payload, self.fee, self.nonce);
+                }
             }
         }
 
@@ -1111,7 +1125,9 @@ impl Transaction {
             let dynamic_parts_only = cache.is_already_verified(hash).await
                 .map_err(VerificationError::State)?;
             if dynamic_parts_only {
-                debug!("TX {} is known from ZKPCache, verifying dynamic parts only", hash);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("TX {} is known from ZKPCache, verifying dynamic parts only", hash);
+                }
                 tx.verify_dynamic_parts(hash, state, &mut sigma_batch_collector).await?;
             } else {
                 let (transcript, commitments) = tx
@@ -1166,7 +1182,9 @@ impl Transaction {
         let dynamic_parts_only = cache.is_already_verified(tx_hash).await
             .map_err(VerificationError::State)?;
         let res = if dynamic_parts_only {
-            debug!("TX {} is known from ZKPCache, verifying dynamic parts only", tx_hash);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("TX {} is known from ZKPCache, verifying dynamic parts only", tx_hash);
+            }
             self.verify_dynamic_parts(tx_hash, state, &mut sigma_batch_collector).await?;
             None
         }
@@ -1238,7 +1256,9 @@ impl Transaction {
                     state.set_energy_resource(&self.source, energy_resource).await
                         .map_err(VerificationError::State)?;
                     
-                    debug!("Consumed {} energy for transaction {}", energy_cost, tx_hash);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Consumed {} energy for transaction {}", energy_cost, tx_hash);
+                    }
                 } else {
                     return Err(VerificationError::InsufficientEnergy(energy_cost));
                 }
@@ -1287,7 +1307,9 @@ impl Transaction {
                         InvokeContract::Entry(payload.chunk_id)
                     ).await?;
                 } else {
-                    debug!("Contract {} invoked from {} not available", payload.contract, tx_hash);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Contract {} invoked from {} not available", payload.contract, tx_hash);
+                    }
 
                     // Nothing was spent, we must refund the gas and deposits
                     self.handle_gas(state, 0, payload.max_gas).await?;
@@ -1313,7 +1335,9 @@ impl Transaction {
                     // if it has failed, we don't want to deploy the contract
                     // TODO: we must handle this carefully
                     if !is_success {
-                        debug!("Contract deploy for {} failed", tx_hash);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Contract deploy for {} failed", tx_hash);
+                        }
                         state.remove_contract_module(tx_hash).await
                             .map_err(VerificationError::State)?;
                     }
@@ -1337,8 +1361,10 @@ impl Transaction {
                         state.set_energy_resource(&self.source, energy_resource).await
                             .map_err(VerificationError::State)?;
                         
-                        debug!("FreezeTos applied: {} TOS frozen for {} duration, energy gained: {} units", 
-                               amount, duration.name(), (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier());
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("FreezeTos applied: {} TOS frozen for {} duration, energy gained: {} units",
+                                   amount, duration.name(), (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier());
+                        }
                     },
                     EnergyPayload::UnfreezeTos { amount } => {
                         // Get current energy resource for the account
@@ -1355,7 +1381,9 @@ impl Transaction {
                             state.set_energy_resource(&self.source, energy_resource).await
                                 .map_err(VerificationError::State)?;
                             
-                            debug!("UnfreezeTos applied: {} TOS unfrozen, energy removed: {} units", amount, amount);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("UnfreezeTos applied: {} TOS unfrozen, energy removed: {} units", amount, amount);
+                            }
                         } else {
                             return Err(VerificationError::AnyError(anyhow::anyhow!("Invalid energy operation")));
                         }
@@ -1399,8 +1427,10 @@ impl Transaction {
                 state.set_ai_mining_state(&ai_mining_state).await
                     .map_err(VerificationError::State)?;
 
-                debug!("AI Mining operation processed - payload: {:?}, miners: {}, active_tasks: {}, completed_tasks: {}",
-                       payload, result.total_miners, result.active_tasks, result.completed_tasks);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("AI Mining operation processed - payload: {:?}, miners: {}, active_tasks: {}, completed_tasks: {}",
+                           payload, result.total_miners, result.active_tasks, result.completed_tasks);
+                }
             }
         }
 

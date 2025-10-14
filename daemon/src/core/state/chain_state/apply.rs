@@ -452,12 +452,16 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
     pub async fn apply_changes(mut self) -> Result<(), BlockchainError> {
         // Apply changes for sender accounts
         for (key, account) in &mut self.inner.accounts {
-            trace!("Saving nonce {} for {} at topoheight {}", account.nonce, key.as_address(self.inner.storage.is_mainnet()), self.inner.topoheight);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Saving nonce {} for {} at topoheight {}", account.nonce, key.as_address(self.inner.storage.is_mainnet()), self.inner.topoheight);
+            }
             self.inner.storage.set_last_nonce_to(key, self.inner.topoheight, &account.nonce).await?;
 
             // Save the multisig state if needed
             if let Some((state, multisig)) = account.multisig.as_ref().filter(|(state, _)| state.should_be_stored()) {
-                trace!("Saving multisig for {} at topoheight {}", key.as_address(self.inner.storage.is_mainnet()), self.inner.topoheight);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Saving multisig for {} at topoheight {}", key.as_address(self.inner.storage.is_mainnet()), self.inner.topoheight);
+                }
                 let multisig = multisig.as_ref().map(|v| Cow::Borrowed(v));
                 let versioned = VersionedMultiSig::new(multisig, state.get_topoheight());
                 self.inner.storage.set_last_multisig_to(key, self.inner.topoheight, versioned).await?;
@@ -470,12 +474,18 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             // Example: Alice sends 100 to Bob, Bob sends 100 to Charlie
             // But Bob built its ZK Proof with the balance before Alice's transaction
             for (asset, echange) in account.assets.drain() {
-                trace!("{} {} updated for {} at topoheight {}", echange.version, asset, key.as_address(self.inner.storage.is_mainnet()), self.inner.topoheight);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("{} {} updated for {} at topoheight {}", echange.version, asset, key.as_address(self.inner.storage.is_mainnet()), self.inner.topoheight);
+                }
                 let Echange { mut version, output_sum, output_balance_used, new_version, .. } = echange;
-                trace!("sender output sum: {:?}", output_sum.compress());
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("sender output sum: {:?}", output_sum.compress());
+                }
                 match balances.entry(Cow::Borrowed(asset)) {
                     Entry::Occupied(mut o) => {
-                        trace!("{} already has a balance for {} at topoheight {}", key.as_address(self.inner.storage.is_mainnet()), asset, self.inner.topoheight);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("{} already has a balance for {} at topoheight {}", key.as_address(self.inner.storage.is_mainnet()), asset, self.inner.topoheight);
+                        }
                         // We got incoming funds while spending some
                         // We need to split the version in two
                         // Output balance is the balance after outputs spent without incoming funds
@@ -512,7 +522,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                         *final_balance -= output_sum;
                     },
                     Entry::Vacant(e) => {
-                        trace!("{} has no balance for {} at topoheight {}", key.as_address(self.inner.storage.is_mainnet()), asset, self.inner.topoheight);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("{} has no balance for {} at topoheight {}", key.as_address(self.inner.storage.is_mainnet()), asset, self.inner.topoheight);
+                        }
                         // We have no incoming update for this key
                         // Select the right final version
                         // For that, we must check if we used the output balance and/or if we are not on the last version 
@@ -521,7 +533,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                             // This is necessary to build the final balance
                             let (mut new_version, _) = self.inner.storage.get_new_versioned_balance(key, asset, self.inner.topoheight).await?;
                             // Substract the output sum
-                            trace!("{} has no balance for {} at topoheight {}, substract output sum", key.as_address(self.inner.storage.is_mainnet()), asset, self.inner.topoheight);
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("{} has no balance for {} at topoheight {}, substract output sum", key.as_address(self.inner.storage.is_mainnet()), asset, self.inner.topoheight);
+                            }
                             *new_version.get_mut_balance().computable()? -= output_sum;
 
                             if self.inner.block_version == BlockVersion::V0 {
@@ -558,13 +572,17 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             if let Some(changes) = changes {
                 let (state, data) = changes.data;
                 if state.should_be_stored() {
-                    trace!("Saving asset {} at topoheight {}", asset, self.inner.topoheight);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Saving asset {} at topoheight {}", asset, self.inner.topoheight);
+                    }
                     self.inner.storage.add_asset(&asset, self.inner.topoheight, VersionedAssetData::new(data, state.get_topoheight())).await?;
                 }
 
                 if let Some((state, supply)) = changes.supply {
                     if state.should_be_stored() {
-                        trace!("Saving supply {} for {} at topoheight {}", supply, asset, self.inner.topoheight);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("Saving supply {} for {} at topoheight {}", supply, asset, self.inner.topoheight);
+                        }
                         self.inner.storage.set_last_supply_for_asset(&asset, self.inner.topoheight, &VersionedSupply::new(supply, state.get_topoheight())).await?;
                     }
                 }
@@ -575,7 +593,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         debug!("Storing contracts");
         for (hash, (state, module)) in self.inner.contracts.iter() {
             if state.should_be_stored() {
-                trace!("Saving contract {} at topoheight {}", hash, self.inner.topoheight);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Saving contract {} at topoheight {}", hash, self.inner.topoheight);
+                }
                 // Prevent cloning the value
                 let module = module.as_ref()
                     .map(|v| Cow::Borrowed(v.as_ref()));
@@ -589,7 +609,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             // Apply all storage changes
             for (key, (state, value)) in cache.storage {
                 if state.should_be_stored() {
-                    trace!("Saving contract data {} key {} at topoheight {}", contract, key, self.inner.topoheight);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Saving contract data {} key {} at topoheight {}", contract, key, self.inner.topoheight);
+                    }
                     self.inner.storage.set_last_contract_data_to(&contract, &key, self.inner.topoheight, &VersionedContractData::new(value, state.get_topoheight())).await?;
                 }
             }
@@ -597,7 +619,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             for (asset, data) in cache.balances {
                 if let Some((state, balance)) = data {
                     if state.should_be_stored() {
-                        trace!("Saving contract balance {} for {} at topoheight {}", balance, asset, self.inner.topoheight);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("Saving contract balance {} for {} at topoheight {}", balance, asset, self.inner.topoheight);
+                        }
                         self.inner.storage.set_last_contract_balance_to(&contract, &asset, self.inner.topoheight, VersionedContractBalance::new(balance, state.get_topoheight())).await?;
                     }
                 }
@@ -608,7 +632,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         // Apply all the transfers to the receiver accounts
         for (key, assets) in self.contract_manager.tracker.transfers {
             for (asset, amount) in assets {
-                trace!("Transfering {} {} to {} at topoheight {}", amount, asset, key.as_address(self.inner.storage.is_mainnet()), self.inner.topoheight);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Transfering {} {} to {} at topoheight {}", amount, asset, key.as_address(self.inner.storage.is_mainnet()), self.inner.topoheight);
+                }
                 let receiver_balance = self.inner.internal_get_receiver_balance(Cow::Owned(key.clone()), Cow::Owned(asset)).await?;
                 *receiver_balance += amount;
             }
@@ -625,7 +651,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         for (account, balances) in self.inner.receiver_balances {
             // If the account has no nonce set, set it to 0
             if !self.inner.accounts.contains_key(account.as_ref()) && !self.inner.storage.has_nonce(&account).await? {
-                debug!("{} has now a balance but without any nonce registered, set default (0) nonce", account.as_address(self.inner.storage.is_mainnet()));
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("{} has now a balance but without any nonce registered, set default (0) nonce", account.as_address(self.inner.storage.is_mainnet()));
+                }
                 self.inner.storage.set_last_nonce_to(&account, self.inner.topoheight, &VersionedNonce::new(0, None)).await?;
             }
 
@@ -635,7 +663,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             }
 
             for (asset, version) in balances {
-                trace!("Saving versioned balance {} for {} at topoheight {}", version, account.as_address(self.inner.storage.is_mainnet()), self.inner.topoheight);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Saving versioned balance {} for {} at topoheight {}", version, account.as_address(self.inner.storage.is_mainnet()), self.inner.topoheight);
+                }
                 self.inner.storage.set_last_balance_to(&account, &asset, self.inner.topoheight, &version).await?;
             }
         }

@@ -93,7 +93,9 @@ pub async fn add_tree_block<S: Storage>(
         let mut ctx = ReindexContext::new(DEFAULT_REINDEX_DEPTH, DEFAULT_REINDEX_SLACK);
         ctx.reindex_intervals(storage, new_block.clone(), reindex_root).await?;
 
-        log::info!("Reindexing completed successfully for block {}", new_block);
+        if log::log_enabled!(log::Level::Info) {
+            log::info!("Reindexing completed successfully for block {}", new_block);
+        }
     } else {
         // Normal case: sufficient space - use split-half allocation
         let (allocated, _right) = remaining.split_half();
@@ -171,7 +173,9 @@ pub async fn try_advancing_reindex_root<S: Storage>(
         Ok(root) => root,
         Err(_) => {
             // Reindex root not initialized - initialize with the hint
-            log::info!("Initializing reindex root to {}", hint);
+            if log::log_enabled!(log::Level::Info) {
+                log::info!("Initializing reindex root to {}", hint);
+            }
             storage.set_reindex_root(hint).await?;
             return Ok(());
         }

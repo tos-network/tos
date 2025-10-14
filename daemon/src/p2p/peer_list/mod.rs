@@ -137,7 +137,9 @@ impl PeerList {
     // Remove a peer from the list
     // We will notify all peers that have this peer in common
     pub async fn remove_peer(&self, peer_id: u64, notify: bool) -> Result<(), P2pError> {
-        trace!("removing peer {}, notify = {}", peer_id, notify);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("removing peer {}, notify = {}", peer_id, notify);
+        }
 
         let (peer, peers) = {
             let mut peers = self.peers.write().await;
@@ -146,7 +148,9 @@ impl PeerList {
             (peer, peers)
         };
 
-        trace!("Signaling exit of {}", peer);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Signaling exit of {}", peer);
+        }
         gauge!("tos_p2p_peers_current").set(peers.len() as f64);
 
         let res = peer.signal_exit().await;
@@ -161,37 +165,51 @@ impl PeerList {
             let packet = &packet;
             stream::iter(peers.iter())
                 .for_each_concurrent(self.stream_concurrency, |peer| async move {
-                    trace!("Locking shared peers for {}", peer.get_connection().get_address());
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Locking shared peers for {}", peer.get_connection().get_address());
+                    }
                     let mut shared_peers = peer.get_peers().lock().await;
-                    trace!("locked shared peers for {}", peer.get_connection().get_address());
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("locked shared peers for {}", peer.get_connection().get_address());
+                    }
 
                     // check if it was a common peer (we sent it and we received it)
                     // Because its a common peer, we can expect that he will send us the same packet
                     if let Some(direction) = shared_peers.pop(addr) {
                         // If its a outgoing direction, send a packet to notify that the peer disconnected
                         if !direction.is_in() {
-                            debug!("Sending PeerDisconnected packet to peer {} for {}", peer.get_outgoing_address(), addr);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Sending PeerDisconnected packet to peer {} for {}", peer.get_outgoing_address(), addr);
+                            }
                             // we send the packet to notify the peer that we don't have it in common anymore
                             if let Err(e) = peer.send_bytes(packet.clone()).await {
-                                error!("Error while trying to send PeerDisconnected packet to peer {}: {}", peer.get_connection().get_address(), e);
+                                if log::log_enabled!(log::Level::Error) {
+                                    error!("Error while trying to send PeerDisconnected packet to peer {}: {}", peer.get_connection().get_address(), e);
+                                }
                             }
                         }
                     }
                 }).await;
         }
 
-        info!("Peer disconnected: {}", peer);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Peer disconnected: {}", peer);
+        }
         if peer.is_out() {
             self.decrement_outgoing_peers_count();
         }
 
         // Update the peerlist entry
         self.update_peer(&peer).await?;
-        
+
         if let Some(peer_disconnect_channel) = &self.peer_disconnect_channel {
-            debug!("Notifying server that {} disconnected", peer);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Notifying server that {} disconnected", peer);
+            }
             if let Err(e) = peer_disconnect_channel.send(peer).await {
-                error!("Error while sending peer disconnect notification: {}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while sending peer disconnect notification: {}", e);
+                }
             }
         }
 
@@ -214,7 +232,9 @@ impl PeerList {
             peers.insert(peer.get_id(), Arc::clone(&peer));
             peers.len()
         };
-        info!("New peer connected: {}", peer);
+        if log::log_enabled!(log::Level::Info) {
+            info!("New peer connected: {}", peer);
+        }
         gauge!("tos_p2p_peers_current").set(count as f64);
 
         if peer.is_out() {
@@ -232,7 +252,9 @@ impl PeerList {
         let ip = addr.ip();
         if self.cache.has_peerlist_entry(&ip)? {
             let mut entry = self.cache.get_peerlist_entry(&ip)?;
-            debug!("Updating {} in stored peerlist", peer);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Updating {} in stored peerlist", peer);
+            }
             // reset the fail count and update the last seen time
             entry.set_fail_count(0);
             if entry.get_first_seen().is_none() {
@@ -248,7 +270,9 @@ impl PeerList {
 
             self.cache.set_peerlist_entry(&ip, entry)?;
         } else {
-            debug!("Saving {} in stored peerlist", peer);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Saving {} in stored peerlist", peer);
+            }
             let mut entry = PeerListEntry::new(Some(peer.get_local_port()), PeerListEntryState::Graylist, peer.is_out());
             entry.set_first_seen(peer.get_connection().connected_on());
             entry.set_last_seen(get_current_time_in_seconds());
@@ -296,23 +320,33 @@ impl PeerList {
             peers.drain().collect::<Vec<(u64, Arc<Peer>)>>()
         };
 
-        info!("Closing {} peers", peers.len());
+        if log::log_enabled!(log::Level::Info) {
+            info!("Closing {} peers", peers.len());
+        }
         stream::iter(peers)
             .for_each_concurrent(self.stream_concurrency, |(_, peer)| async move {
-                debug!("Closing {}", peer);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Closing {}", peer);
+                }
 
                 if let Err(e) = peer.signal_exit().await {
-                    error!("Error while trying to signal exit to {}: {}", peer, e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while trying to signal exit to {}: {}", peer, e);
+                    }
                 }
-    
+
                 if let Err(e) = self.update_peer(&peer).await {
-                    error!("Error while updating peer {}: {}", peer, e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while updating peer {}: {}", peer, e);
+                    }
                 }
             })
             .await;
 
         if let Err(e) = self.cache.flush().await {
-            error!("Error while flushing cache to disk: {}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while flushing cache to disk: {}", e);
+            }
         }
     }
 
@@ -429,7 +463,9 @@ impl PeerList {
         if self.cache.has_peerlist_entry(ip)? {
             let mut entry = self.cache.get_peerlist_entry(ip)?;
             if entry.get_local_port().is_none() {
-                info!("Deleting {} from stored peerlist", ip);
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Deleting {} from stored peerlist", ip);
+                }
                 self.cache.remove_peerlist_entry(ip)?;
             } else {
                 entry.set_state(PeerListEntryState::Graylist);
@@ -483,7 +519,9 @@ impl PeerList {
 
     // temp ban a peer address for a duration in seconds
     pub async fn temp_ban_address(&self, ip: &IpAddr, seconds: u64, close_peer: bool) -> Result<(), P2pError> {
-        trace!("temp banning {} for {} seconds", ip, seconds);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("temp banning {} for {} seconds", ip, seconds);
+        }
         if self.cache.has_peerlist_entry(ip)? {
             let mut entry = self.cache.get_peerlist_entry(ip)?;
             entry.set_temp_ban_until(Some(get_current_time_in_seconds() + seconds));
@@ -497,7 +535,9 @@ impl PeerList {
             let peers = self.peers.read().await;
             for peer in peers.values() {
                 if peer.get_connection().get_address().ip() == *ip {
-                    debug!("Kicking {} due to temp ban", peer);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Kicking {} due to temp ban", peer);
+                    }
                     peer.signal_exit().await?;
                 }
             }
@@ -536,17 +576,23 @@ impl PeerList {
         let mut potential_gray_peer = None;
         for res in peerlist_entries {
             let (ip, mut entry) = res?;
-            trace!("Checking peer {}: {}", ip, entry);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Checking peer {}: {}", ip, entry);
+            }
 
             // Check for out success only
             if out_success_only && !entry.is_out_success() {
-                debug!("{} was never reached by us, skip it", ip);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("{} was never reached by us, skip it", ip);
+                }
                 continue;
             }
 
             // If the peer is blacklisted or temp banned, skip it
             if *entry.get_state() == PeerListEntryState::Blacklist || entry.get_temp_ban_until().map(|temp_ban_until| temp_ban_until > current_time).unwrap_or(false) {
-                debug!("Skipping {} because it's blacklisted or temp banned ({})", ip, format_duration(Duration::from_secs(entry.get_temp_ban_until().map(|v| v - current_time).unwrap_or(0))));
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Skipping {} because it's blacklisted or temp banned ({})", ip, format_duration(Duration::from_secs(entry.get_temp_ban_until().map(|v| v - current_time).unwrap_or(0))));
+                }
                 continue;
             }
 
@@ -566,23 +612,31 @@ impl PeerList {
                     if potential_gray_peer.is_none() && *entry.get_state() == PeerListEntryState::Graylist {
                         potential_gray_peer = Some((ip, addr));
                     } else if *entry.get_state() == PeerListEntryState::Whitelist {
-                        debug!("Found peer to connect: {}, updating last connection try", addr);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Found peer to connect: {}, updating last connection try", addr);
+                        }
                         entry.set_last_connection_try(Some(current_time));
                         self.cache.set_peerlist_entry(&ip, entry)?;
                         return Ok(Some(addr));
                     }
                 } else {
-                    debug!("{} can try to connect to {}: {}, not in peerlist: {}", entry, ip, try_connect, not_in_peerlist);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("{} can try to connect to {}: {}, not in peerlist: {}", entry, ip, try_connect, not_in_peerlist);
+                    }
                 }
             } else {
-                debug!("Skipping {} because it has no local port", ip);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Skipping {} because it has no local port", ip);
+                }
             }
         }
 
         // If we didn't find a whitelisted peer, try to connect to a graylisted peer
         Ok(match potential_gray_peer {
             Some((ip, addr)) => {
-                debug!("Found gray peer to connect: {}, updating last connection try", addr);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Found gray peer to connect: {}, updating last connection try", addr);
+                }
                 let mut entry = self.cache.get_peerlist_entry(&ip)?;
                 entry.set_last_connection_try(Some(current_time));
                 self.cache.set_peerlist_entry(&ip, entry)?;
@@ -596,7 +650,9 @@ impl PeerList {
     // increase the fail count of a peer
     // If tempban is allowed, and the fail count is at the limit, temp ban the peer
     pub async fn increase_fail_count_for_peerlist_entry(&self, ip: &IpAddr, temp_ban: bool) -> Result<(), P2pError> {
-        trace!("increasing fail count for {}, allow temp ban: {}", ip, temp_ban);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("increasing fail count for {}, allow temp ban: {}", ip, temp_ban);
+        }
         let mut entry = if self.cache.has_peerlist_entry(ip)? {
             self.cache.get_peerlist_entry(ip)?
         } else {
@@ -604,25 +660,35 @@ impl PeerList {
         };
 
         if *entry.get_state() != PeerListEntryState::Whitelist {
-            debug!("Increasing fail count for {}", ip);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Increasing fail count for {}", ip);
+            }
             let mut fail_count = entry.get_fail_count();
             if fail_count == u8::MAX {
-                debug!("Removing {} from stored peerlist because fail count is at max", ip);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Removing {} from stored peerlist because fail count is at max", ip);
+                }
                 self.cache.remove_peerlist_entry(ip)?;
             } else {
                 // If we allow to temp ban, and the fail count is at the limit, temp ban the peer
                 if temp_ban && fail_count != 0 && fail_count % PEER_FAIL_TO_CONNECT_LIMIT == 0 {
-                    debug!("Temp banning {} for failing too many times (count = {})", ip, fail_count);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Temp banning {} for failing too many times (count = {})", ip, fail_count);
+                    }
                     entry.set_temp_ban_until(Some(get_current_time_in_seconds() + PEER_TEMP_BAN_TIME_ON_CONNECT));
                 }
 
                 fail_count += 1;
-                debug!("Fail count is now {} for {}", fail_count, ip);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Fail count is now {} for {}", fail_count, ip);
+                }
                 entry.set_fail_count(fail_count);
                 self.cache.set_peerlist_entry(ip, entry)?;
             }
         } else {
-            debug!("{} is whitelisted, not increasing fail count", ip);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("{} is whitelisted, not increasing fail count", ip);
+            }
         }
 
         Ok(())

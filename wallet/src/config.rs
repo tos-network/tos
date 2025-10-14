@@ -289,7 +289,9 @@ pub struct LogProgressTableGenerationReportFunction;
 
 impl ecdlp::ProgressTableGenerationReportFunction for LogProgressTableGenerationReportFunction {
     fn report(&self, progress: f64, step: ecdlp::ReportStep) -> ControlFlow<()> {
-        info!("Progress: {:.2}% on step {:?}", progress * 100.0, step);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Progress: {:.2}% on step {:?}", progress * 100.0, step);
+        }
         ControlFlow::Continue(())
     }
 }

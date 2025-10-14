@@ -60,13 +60,17 @@ impl<T: ?Sized> RwLock<T> {
         }
 
         let guards = self.read_guards.load(Ordering::SeqCst);
-        error!("RwLock {} (write = {}) (active guards = {}) timed out at {}: {}", self.init_location, write, guards, location, msg)
+        if log::log_enabled!(log::Level::Error) {
+            error!("RwLock {} (write = {}) (active guards = {}) timed out at {}: {}", self.init_location, write, guards, location, msg);
+        }
     }
 
     #[track_caller]
     pub fn read(&self) -> impl Future<Output = RwLockReadGuard<'_, T>> {
         let location = Location::caller();
-        debug!("RwLock {} trying to read at {}", self.init_location, location);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("RwLock {} trying to read at {}", self.init_location, location);
+        }
 
         async move {
             let mut interval = interval(Duration::from_secs(10));
@@ -114,7 +118,9 @@ impl<T: ?Sized> RwLock<T> {
     #[track_caller]
     pub fn write(&self) -> impl Future<Output = RwLockWriteGuard<'_, T>> {
         let location = Location::caller();
-        debug!("RwLock {} trying to write at {}", self.init_location, location);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("RwLock {} trying to write at {}", self.init_location, location);
+        }
 
         async move {
             let mut interval = interval(Duration::from_secs(10));
@@ -180,7 +186,9 @@ impl<'a, T: ?Sized> Drop for RwLockReadGuard<'a, T> {
     
         let (_, lifetime) = locations.remove(index);
         let guards = self.read_guards.fetch_sub(1, Ordering::SeqCst);
-        debug!("Dropping {} RwLockReadGuard at {} after {:?} (guards = {})", self.init_location, self.location, lifetime.elapsed(), guards);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Dropping {} RwLockReadGuard at {} after {:?} (guards = {})", self.init_location, self.location, lifetime.elapsed(), guards);
+        }
     }
 }
 
@@ -211,7 +219,9 @@ impl<'a, T: ?Sized> Drop for RwLockWriteGuard<'a, T> {
             .take()
             .expect("active write location should be set");
 
-        debug!("Dropping {} RwLockWriteGuard at {} after {:?}", self.init_location, active_location, lifetime.elapsed());
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Dropping {} RwLockWriteGuard at {} after {:?}", self.init_location, active_location, lifetime.elapsed());
+        }
     }
 }
 

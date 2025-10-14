@@ -89,7 +89,9 @@ where
                     return Err(anyhow::anyhow!("The number of workers must be greater than 0"));
                 }
 
-                info!("Setting the number of workers to: {}", threads);
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Setting the number of workers to: {}", threads);
+                }
                 builder = builder.workers(threads);
             }
 

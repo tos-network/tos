@@ -373,7 +373,9 @@ impl Serializer for BlockHeader {
         // SECURITY FIX: Validate levels count to prevent consensus splits
         // Reject headers with too many parent levels
         if levels_count as usize > MAX_PARENT_LEVELS {
-            debug!("Error, too many parent levels: {} > {}", levels_count, MAX_PARENT_LEVELS);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Error, too many parent levels: {} > {}", levels_count, MAX_PARENT_LEVELS);
+            }
             return Err(ReaderError::InvalidValue);
         }
 
@@ -381,7 +383,9 @@ impl Serializer for BlockHeader {
         for _ in 0..levels_count {
             let level_size = reader.read_u8()?;
             if level_size as usize > TIPS_LIMIT {
-                debug!("Error, too many parents in level: {}", level_size);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error, too many parents in level: {}", level_size);
+                }
                 return Err(ReaderError::InvalidValue);
             }
             let mut level = Vec::with_capacity(level_size as usize);

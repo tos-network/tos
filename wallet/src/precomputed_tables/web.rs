@@ -67,7 +67,9 @@ pub async fn has_precomputed_tables(_: Option<&str>, l1: usize) -> Result<bool> 
     let directory: FileSystemDirectoryHandle = match execute!(storage.get_directory(), Directory) {
         Ok(directory) => directory,
         Err(e) => {
-            warn!("Directory not available, precomputed tables cannot be present: {}", e);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Directory not available, precomputed tables cannot be present: {}", e);
+            }
             return Ok(false)
         }
     };
@@ -108,18 +110,24 @@ pub async fn read_or_generate_precomputed_tables<P: ecdlp::ProgressTableGenerati
             Some(directory)
         ),
         Err(e) => {
-            warn!("Directory not available: {}", e);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Directory not available: {}", e);
+            }
             (None, None)
         }
     };
 
     let tables = match file_handle {
         Some(file_handle) => {
-            info!("Loading precomputed tables from {}", path);
+            if log::log_enabled!(log::Level::Info) {
+                info!("Loading precomputed tables from {}", path);
+            }
 
             // Read the tables
             let file: File = execute!(file_handle.get_file(), IntoFile)?;
-            info!("File size: {}", file.size());
+            if log::log_enabled!(log::Level::Info) {
+                info!("File size: {}", file.size());
+            }
 
             let value: JsValue = execute!(file.array_buffer(), ArrayBuffer)?;
             let buffer = Uint8Array::new(&value).to_vec();
@@ -127,7 +135,9 @@ pub async fn read_or_generate_precomputed_tables<P: ecdlp::ProgressTableGenerati
                 info!("File stored has an invalid size, generating precomputed tables again...");
                 generate_tables(path.as_str(), l1, Some(file_handle), progress_report, store_on_disk).await?
             } else {
-                info!("Loading {} bytes", buffer.len());
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Loading {} bytes", buffer.len());
+                }
                 let tables = ecdlp::ECDLPTables::from_bytes(l1, &buffer);
                 tables
             }
@@ -167,7 +177,9 @@ async fn generate_tables<P: ecdlp::ProgressTableGenerationReportFunction>(path: 
     };
 
     if let Some(writable) = res.filter(|_| store_on_disk) {
-        info!("Writing precomputed tables to {} with {} bytes", path, slice.len());
+        if log::log_enabled!(log::Level::Info) {
+            info!("Writing precomputed tables to {} with {} bytes", path, slice.len());
+        }
         // We are forced to copy the slice to a buffer
         // which means we are using twice the memory
         let buffer = Uint8Array::new_with_length(slice.len() as u32);

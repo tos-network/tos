@@ -338,9 +338,11 @@ impl Transaction {
                 // FreezeTos deducts TOS from balance and adds energy
                 transcript.append_u64(b"tos_balance_change", *amount); // Amount deducted from TOS balance
                 transcript.append_u64(b"energy_gained", (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier());
-                
-                debug!("Energy transcript - FreezeTos: amount={}, duration={}, tos_deducted={}, energy_gained={}",
-                       amount, duration.duration_in_blocks(), amount, (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier());
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Energy transcript - FreezeTos: amount={}, duration={}, tos_deducted={}, energy_gained={}",
+                           amount, duration.duration_in_blocks(), amount, (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier());
+                }
             },
             EnergyPayload::UnfreezeTos { amount } => {
                 // Add energy operation parameters
@@ -351,9 +353,11 @@ impl Transaction {
                 // UnfreezeTos returns TOS to balance and removes energy
                 transcript.append_u64(b"tos_balance_change", *amount); // Amount returned to TOS balance
                 transcript.append_u64(b"energy_removed", *amount); // Energy removed (1:1 ratio for unfreeze)
-                
-                debug!("Energy transcript - UnfreezeTos: amount={}, tos_returned={}, energy_removed={}", 
-                       amount, amount, amount);
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Energy transcript - UnfreezeTos: amount={}, tos_returned={}, energy_removed={}",
+                           amount, amount, amount);
+                }
             }
         }
     }

@@ -43,7 +43,9 @@ impl BlockProvider for SledStorage {
     }
 
     async fn count_blocks(&self) -> Result<u64, BlockchainError> {
-        trace!("count blocks");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("count blocks");
+        }
         let count = if let Some(snapshot) = &self.snapshot {
             snapshot.cache.blocks_count
         } else {
@@ -53,7 +55,9 @@ impl BlockProvider for SledStorage {
     }
 
     async fn decrease_blocks_count(&mut self, amount: u64) -> Result<(), BlockchainError> {
-        trace!("count blocks");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("count blocks");
+        }
         if let Some(snapshot) = self.snapshot.as_mut() {
             snapshot.cache.blocks_count -= amount;
         } else {
@@ -64,12 +68,16 @@ impl BlockProvider for SledStorage {
     }
 
     async fn has_block_with_hash(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has block {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has block {}", hash);
+        }
         self.contains_data_cached(&self.blocks, &self.blocks_cache, hash).await
     }
 
     async fn save_block(&mut self, block: Arc<BlockHeader>, txs: &[Arc<Transaction>], difficulty: Difficulty, p: VarUint, hash: Immutable<Hash>) -> Result<(), BlockchainError> {
-        debug!("Storing new {} with hash: {}, difficulty: {}, snapshot mode: {}", block, hash, difficulty, self.snapshot.is_some());
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Storing new {} with hash: {}, difficulty: {}, snapshot mode: {}", block, hash, difficulty, self.snapshot.is_some());
+        }
 
         // Store transactions
         let mut txs_count = 0;
@@ -100,7 +108,7 @@ impl BlockProvider for SledStorage {
         // Store P
         Self::insert_into_disk(self.snapshot.as_mut(), &self.difficulty_covariance, hash.as_bytes(), p.to_bytes())?;
 
-        self.add_block_hash_at_height(&hash, block.get_blue_score()).await?;
+        self.add_block_hash_at_blue_score(&hash, block.get_blue_score()).await?;
 
         if let Some(cache) = self.blocks_cache.as_mut() {
             // TODO: no clone
@@ -111,7 +119,9 @@ impl BlockProvider for SledStorage {
     }
 
     async fn get_block_by_hash(&self, hash: &Hash) -> Result<Block, BlockchainError> {
-        trace!("get block by hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block by hash {}", hash);
+        }
         let header = self.get_block_header_by_hash(hash).await?;
         // TODO: Headers no longer contain transaction data - need to fetch from separate storage
         // For now, return empty transactions as temporary fix
@@ -122,7 +132,9 @@ impl BlockProvider for SledStorage {
     }
 
     async fn delete_block_with_hash(&mut self, hash: &Hash) -> Result<Block, BlockchainError> {
-        debug!("Deleting block with hash: {}", hash);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Deleting block with hash: {}", hash);
+        }
 
         // Delete block header
         let header = Self::delete_arc_cacheable_data(self.snapshot.as_mut(), &self.blocks, self.cache.blocks_cache.as_mut(), &hash).await?;
@@ -136,7 +148,7 @@ impl BlockProvider for SledStorage {
         // Delete P
         Self::remove_from_disk_without_reading(self.snapshot.as_mut(), &self.difficulty_covariance, hash.as_bytes())?;
 
-        self.remove_block_hash_at_height(&hash, header.get_blue_score()).await?;
+        self.remove_block_hash_at_blue_score(&hash, header.get_blue_score()).await?;
 
         // TODO: Headers no longer contain transaction data - need to fetch from separate storage
         // For now, return empty transactions as temporary fix

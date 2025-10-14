@@ -163,19 +163,25 @@ impl BlockTemplateGenerator {
             }
         }
 
-        debug!("Best tip selected by GHOSTDAG (blue_work={}): {}", best_blue_work, best_tip);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Best tip selected by GHOSTDAG (blue_work={}): {}", best_blue_work, best_tip);
+        }
 
         // Validate other tips
         let mut selected_tips = Vec::with_capacity(tips.len());
         for hash in tips {
             if best_tip != hash {
                 if !self.validate_tip(storage, &best_tip, &hash).await? {
-                    warn!("Tip {} is invalid, not selecting it because difficulty can't be less than 91% of {}", hash, best_tip);
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Tip {} is invalid, not selecting it because difficulty can't be less than 91% of {}", hash, best_tip);
+                    }
                     continue;
                 }
 
                 if !self.is_near_enough_from_main_chain(storage, &hash, current_height).await? {
-                    warn!("Tip {} is not selected for mining: too far from mainchain at height: {}", hash, current_height);
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Tip {} is not selected for mining: too far from mainchain at height: {}", hash, current_height);
+                    }
                     continue;
                 }
             }
@@ -183,7 +189,9 @@ impl BlockTemplateGenerator {
         }
 
         if selected_tips.is_empty() {
-            warn!("No valid tips found for block template, using best tip {}", best_tip);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("No valid tips found for block template, using best tip {}", best_tip);
+            }
             selected_tips.push(best_tip);
         }
 
@@ -214,9 +222,11 @@ impl BlockTemplateGenerator {
         let mut sorted_tips = blockdag::sort_tips(storage, tips.into_iter()).await?;
         if sorted_tips.len() > TIPS_LIMIT {
             let dropped_tips = sorted_tips.drain(TIPS_LIMIT..);
-            warn!("Dropping tips {} because they are not in the first {} heavier tips",
-                  dropped_tips.map(|h| h.to_string()).collect::<Vec<String>>().join(", "),
-                  TIPS_LIMIT);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Dropping tips {} because they are not in the first {} heavier tips",
+                      dropped_tips.map(|h| h.to_string()).collect::<Vec<String>>().join(", "),
+                      TIPS_LIMIT);
+            }
         }
 
         // Find the newest timestamp
@@ -231,7 +241,9 @@ impl BlockTemplateGenerator {
         // Check that our current timestamp is correct
         let current_timestamp = get_current_time_in_millis();
         if current_timestamp < timestamp {
-            warn!("Current timestamp is less than the newest tip timestamp, using newest timestamp from tips");
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Current timestamp is less than the newest tip timestamp, using newest timestamp from tips");
+            }
         } else {
             timestamp = current_timestamp;
         }

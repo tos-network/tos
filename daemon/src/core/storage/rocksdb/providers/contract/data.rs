@@ -22,7 +22,9 @@ use crate::core::{
 impl ContractDataProvider for RocksStorage {
     // Set a contract data
     async fn set_last_contract_data_to(&mut self, contract: &Hash, key: &ValueCell, topoheight: TopoHeight, version: &VersionedContractData) -> Result<(), BlockchainError> {
-        trace!("set last contract {} data {} to {}", contract, key, topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set last contract {} data {} to {}", contract, key, topoheight);
+        }
 
         let contract_id = self.get_contract_id(contract)?;
         let versioned_key = Self::get_versioned_contract_data_key(contract_id, key, topoheight);
@@ -36,7 +38,9 @@ impl ContractDataProvider for RocksStorage {
 
     // Retrieve the last topoheight for a given contract data
     async fn get_last_topoheight_for_contract_data(&self, contract: &Hash, key: &ValueCell) -> Result<Option<TopoHeight>, BlockchainError> {
-        trace!("get last topoheight for contract {} data {}", contract, key);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get last topoheight for contract {} data {}", contract, key);
+        }
         let Some(contract_id) = self.get_optional_contract_id(contract)? else {
             return Ok(None)
         };
@@ -46,7 +50,9 @@ impl ContractDataProvider for RocksStorage {
 
     // Retrieve a contract data at a given topoheight
     async fn get_contract_data_at_exact_topoheight_for<'a>(&self, contract: &Hash, key: &ValueCell, topoheight: TopoHeight) -> Result<VersionedContractData, BlockchainError> {
-        trace!("get contract {} data {}  at exact topoheight {}", contract, key, topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get contract {} data {}  at exact topoheight {}", contract, key, topoheight);
+        }
         let contract_id = self.get_contract_id(contract)?;
         let key = Self::get_versioned_contract_data_key(contract_id, key, topoheight);
         self.load_from_disk(Column::VersionedContractsData, &key)
@@ -54,7 +60,9 @@ impl ContractDataProvider for RocksStorage {
 
     // Retrieve a contract data at maximum topoheight
     async fn get_contract_data_at_maximum_topoheight_for<'a>(&self, contract: &Hash, key: &ValueCell, maximum_topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedContractData)>, BlockchainError> {
-        trace!("get contract {} data {} at maximum topoheight {}", contract, key, maximum_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get contract {} data {} at maximum topoheight {}", contract, key, maximum_topoheight);
+        }
 
         if let Some(topo) = self.get_contract_data_topoheight_at_maximum_topoheight_for(contract, key, maximum_topoheight).await? {
             let version = self.get_contract_data_at_exact_topoheight_for(contract, key, topo).await?;
@@ -65,7 +73,9 @@ impl ContractDataProvider for RocksStorage {
 
     // Retrieve the topoheight of a contract data at maximum topoheight
     async fn get_contract_data_topoheight_at_maximum_topoheight_for<'a>(&self, contract: &Hash, key: &ValueCell, maximum_topoheight: TopoHeight) -> Result<Option<TopoHeight>, BlockchainError> {
-        trace!("get contract {} data {} topoheight at maximum topoheight {}", contract, key, maximum_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get contract {} data {} topoheight at maximum topoheight {}", contract, key, maximum_topoheight);
+        }
         let Some(contract_id) = self.get_optional_contract_id(contract)? else {
             return Ok(None)
         };
@@ -88,7 +98,9 @@ impl ContractDataProvider for RocksStorage {
     // Check if a contract data exists at a given topoheight
     // If the version is None, it returns false
     async fn has_contract_data_at_maximum_topoheight(&self, contract: &Hash, key: &ValueCell, maximum_topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        trace!("has contract {} data {} at maximum topoheight {}", contract, key, maximum_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has contract {} data {} at maximum topoheight {}", contract, key, maximum_topoheight);
+        }
         let Some(contract_id) = self.get_optional_contract_id(contract)? else {
             return Ok(false)
         };
@@ -111,7 +123,9 @@ impl ContractDataProvider for RocksStorage {
     // Check if we have a contract data version at a given topoheight
     // It only checks if the topoheight exists
     async fn has_contract_data_at_exact_topoheight(&self, contract: &Hash, key: &ValueCell, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        trace!("has contract {} data {} at exact topoheight {}", contract, key, topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has contract {} data {} at exact topoheight {}", contract, key, topoheight);
+        }
         let contract_id = self.get_contract_id(contract)?;
         let key = Self::get_versioned_contract_data_key(contract_id, key, topoheight);
         self.load_from_disk(Column::VersionedContractsData, &key)

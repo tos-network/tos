@@ -23,19 +23,25 @@ impl BlockExecutionOrderProvider for RocksStorage {
 
     // Get the position of a block in the execution order
     async fn get_block_position_in_order(&self, hash: &Hash) -> Result<u64, BlockchainError> {
-        trace!("get block {} position in order", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block {} position in order", hash);
+        }
         self.load_from_disk(Column::BlocksExecutionOrder, hash)
     }
 
     // Check if a block is in the execution order
     async fn has_block_position_in_order(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("check if block {} is in execution order", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("check if block {} is in execution order", hash);
+        }
         self.contains_data(Column::BlocksExecutionOrder, hash)
     }
 
     // Add a block to the execution order
     async fn add_block_execution_to_order(&mut self, hash: &Hash) -> Result<(), BlockchainError> {
-        trace!("add block {} to execution order", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("add block {} to execution order", hash);
+        }
         let position = self.get_next_block_position()?;
         self.insert_into_disk(Column::BlocksExecutionOrder, hash, &position)
     }
@@ -50,7 +56,9 @@ impl BlockExecutionOrderProvider for RocksStorage {
 
     // Swap the position of two blocks in the execution order
     async fn swap_blocks_executions_positions(&mut self, left: &Hash, right: &Hash) -> Result<(), BlockchainError> {
-        trace!("swap blocks {} and {} execution positions", left, right);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("swap blocks {} and {} execution positions", left, right);
+        }
         let left_position = self.get_block_position_in_order(left).await?;
         let right_position = self.get_block_position_in_order(right).await?;
 
@@ -67,7 +75,9 @@ impl RocksStorage {
         let position = self.load_optional_from_disk(Column::Common, BLOCKS_EXECUTION_ORDER_COUNT)?
             .unwrap_or(0);
 
-        trace!("next block position is {}", position);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("next block position is {}", position);
+        }
         self.insert_into_disk(Column::Common, BLOCKS_EXECUTION_ORDER_COUNT, &(position + 1))?;
         Ok(position)
     }

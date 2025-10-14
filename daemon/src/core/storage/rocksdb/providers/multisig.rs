@@ -19,14 +19,18 @@ use crate::core::{
 impl MultiSigProvider for RocksStorage {
     // Retrieve the last topoheight for a given account
     async fn get_last_topoheight_for_multisig(&self, key: &PublicKey) -> Result<Option<TopoHeight>, BlockchainError> {
-        trace!("get last topoheight for multisig for {}", key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get last topoheight for multisig for {}", key.as_address(self.is_mainnet()));
+        }
         self.get_account_type(key)
             .map(|account| account.multisig_pointer)
     }
 
     // Retrieve a multisig setup for a given account
     async fn get_multisig_at_topoheight_for<'a>(&'a self, key: &PublicKey, topoheight: TopoHeight) -> Result<VersionedMultiSig<'a>, BlockchainError> {
-        trace!("get multisig at topoheight for {}", key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get multisig at topoheight for {}", key.as_address(self.is_mainnet()));
+        }
         let account_id = self.get_account_id(key)?;
         let key = Self::get_versioned_multisig_key(account_id, topoheight);
 
@@ -35,7 +39,9 @@ impl MultiSigProvider for RocksStorage {
 
     // Delete the last topoheight for a given account
     async fn delete_last_topoheight_for_multisig(&mut self, key: &PublicKey) -> Result<(), BlockchainError> {
-        trace!("delete last topoheight for multisig for {}", key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete last topoheight for multisig for {}", key.as_address(self.is_mainnet()));
+        }
         let mut account = self.get_account_type(key)?;
         account.multisig_pointer = None;
 
@@ -44,7 +50,9 @@ impl MultiSigProvider for RocksStorage {
 
     // Retrieve the multisig setup at the maximum topoheight for a given account
     async fn get_multisig_at_maximum_topoheight_for<'a>(&'a self, account: &PublicKey, maximum_topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedMultiSig<'a>)>, BlockchainError> {
-        trace!("get multisig at maximum topoheight for {}", account.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get multisig at maximum topoheight for {}", account.as_address(self.is_mainnet()));
+        }
         let account = self.get_account_type(account)?;
         let Some(topoheight_pointer) = account.multisig_pointer else {
             return Ok(None);
@@ -74,14 +82,18 @@ impl MultiSigProvider for RocksStorage {
     // Verify if an account has a multisig setup
     // If the latest version is None, the account has no multisig setup
     async fn has_multisig(&self, account: &PublicKey) -> Result<bool, BlockchainError> {
-        trace!("has multisig for {}", account.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has multisig for {}", account.as_address(self.is_mainnet()));
+        }
         self.get_account_type(account)
             .map(|account| account.multisig_pointer.is_some())
     }
 
     // Verify if a version exists at a given topoheight
     async fn has_multisig_at_exact_topoheight(&self, account: &PublicKey, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        trace!("has multisig at exact topoheight for account {}", account.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has multisig at exact topoheight for account {}", account.as_address(self.is_mainnet()));
+        }
         let account_id = self.get_account_id(account)?;
         let versioned_key = Self::get_versioned_multisig_key(account_id, topoheight);
 
@@ -90,7 +102,9 @@ impl MultiSigProvider for RocksStorage {
 
     // Retrieve the last multisig setup for a given account
     async fn get_last_multisig<'a>(&'a self, account: &PublicKey) -> Result<(TopoHeight, VersionedMultiSig<'a>), BlockchainError> {
-        trace!("get last multisig for {}", account.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get last multisig for {}", account.as_address(self.is_mainnet()));
+        }
         let account = self.get_account_type(account)?;
         let topoheight = account.multisig_pointer
             .ok_or(BlockchainError::NoMultisig)?;
@@ -102,7 +116,9 @@ impl MultiSigProvider for RocksStorage {
 
     // Store the last multisig setup for a given account
     async fn set_last_multisig_to<'a>(&mut self, key: &PublicKey, topoheight: TopoHeight, multisig: VersionedMultiSig<'a>) -> Result<(), BlockchainError> {
-        trace!("set last multisig to {} for {}", topoheight, key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set last multisig to {} for {}", topoheight, key.as_address(self.is_mainnet()));
+        }
         let mut account = self.get_account_type(key)?;
         account.multisig_pointer = Some(topoheight);
 

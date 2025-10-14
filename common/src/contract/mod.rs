@@ -1023,7 +1023,9 @@ fn fire_event_fn(_: FnInstance, mut params: FnParams, context: &mut Context) -> 
 fn println_fn(_: FnInstance, params: FnParams, context: &mut Context) -> FnReturnType {
     let state: &ChainState = context.get().context("chain state not found")?;
     if state.debug_mode {
-        info!("[{}]: {}", state.contract, params[0].as_ref()?);
+        if log::log_enabled!(log::Level::Info) {
+            info!("[{}]: {}", state.contract, params[0].as_ref()?);
+        }
     }
 
     Ok(None)
@@ -1032,7 +1034,9 @@ fn println_fn(_: FnInstance, params: FnParams, context: &mut Context) -> FnRetur
 fn debug_fn(_: FnInstance, params: FnParams, context: &mut Context) -> FnReturnType {
     let state: &ChainState = context.get().context("chain state not found")?;
     if state.debug_mode {
-        debug!("{:?}", params[0].as_ref()?);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("{:?}", params[0].as_ref()?);
+        }
     }
 
     Ok(None)
@@ -1074,7 +1078,9 @@ fn get_balance_for_asset<P: ContractProvider>(_: FnInstance, mut params: FnParam
 }
 
 fn transfer<P: ContractProvider>(_: FnInstance, mut params: FnParams, context: &mut Context) -> FnReturnType {
-    debug!("Transfer called {:?}", params);
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("Transfer called {:?}", params);
+    }
 
     let asset: Hash = params.remove(2)
         .into_owned()?

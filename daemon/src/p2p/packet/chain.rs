@@ -116,14 +116,18 @@ impl Serializer for ChainRequest {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let len = reader.read_u8()?;
         if len == 0 || len > CHAIN_SYNC_REQUEST_MAX_BLOCKS as u8 {
-            debug!("Invalid chain request length: {}", len);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Invalid chain request length: {}", len);
+            }
             return Err(ReaderError::InvalidValue)
         }
 
         let mut blocks = IndexSet::with_capacity(len as usize);
         for _ in 0..len {
             if !blocks.insert(BlockId::read(reader)?) {
-                debug!("Duplicated block id in chain request");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Duplicated block id in chain request");
+                }
                 return Err(ReaderError::InvalidValue)
             }
         }
@@ -131,7 +135,9 @@ impl Serializer for ChainRequest {
         let accepted_response_size = reader.read_u16()?;
         // Verify that the requested response size is in the protocol bounds
         if accepted_response_size < CHAIN_SYNC_RESPONSE_MIN_BLOCKS as u16 || accepted_response_size > CHAIN_SYNC_RESPONSE_MAX_BLOCKS as u16 {
-            debug!("Invalid accepted response size: {}", accepted_response_size);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Invalid accepted response size: {}", accepted_response_size);
+            }
             return Err(ReaderError::InvalidValue)
         }
 
@@ -260,30 +266,38 @@ impl Serializer for ChainResponse {
         let lowest_height = reader.read_u64()?;
         let len = reader.read_u16()?;
         if len > CHAIN_SYNC_RESPONSE_MAX_BLOCKS as u16 {
-            debug!("Invalid chain response length: {}", len);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Invalid chain response length: {}", len);
+            }
             return Err(ReaderError::InvalidValue)
         }
 
-        let mut blocks: IndexSet<Hash> = IndexSet::with_capacity(len as usize); 
+        let mut blocks: IndexSet<Hash> = IndexSet::with_capacity(len as usize);
         for _ in 0..len {
             let hash = reader.read_hash()?;
             if !blocks.insert(hash) {
-                debug!("Invalid chain response duplicate block");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Invalid chain response duplicate block");
+                }
                 return Err(ReaderError::InvalidValue)
             }
         }
 
         let len = reader.read_u8()?;
         if len > (CHAIN_SYNC_TOP_BLOCKS * TIPS_LIMIT) as u8 {
-            debug!("Invalid chain response top blocks length: {}", len);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Invalid chain response top blocks length: {}", len);
+            }
             return Err(ReaderError::InvalidValue)
         }
 
-        let mut top_blocks: IndexSet<Hash> = IndexSet::with_capacity(len as usize); 
+        let mut top_blocks: IndexSet<Hash> = IndexSet::with_capacity(len as usize);
         for _ in 0..len {
             let hash = reader.read_hash()?;
             if blocks.contains(&hash) || !top_blocks.insert(hash) {
-                debug!("Invalid chain response duplicate top block");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Invalid chain response duplicate top block");
+                }
                 return Err(ReaderError::InvalidValue)
             }
         }

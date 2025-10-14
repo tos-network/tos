@@ -34,7 +34,9 @@ impl<T: ?Sized> Mutex<T> {
     #[track_caller]
     pub fn lock(&self) -> impl Future<Output = MutexGuard<'_, T>> {
         let location = Location::caller();
-        debug!("Mutex at {} locking at {}", self.init_location, location);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Mutex at {} locking at {}", self.init_location, location);
+        }
 
         async move {
             let mut interval = interval(Duration::from_secs(10));
@@ -59,7 +61,9 @@ impl<T: ?Sized> Mutex<T> {
                                 None => {}
                             };
  
-                            error!("{}", msg);
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("{}", msg);
+                            }
                         }
                     }
                     guard = &mut future => {

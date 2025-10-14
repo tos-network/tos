@@ -211,7 +211,9 @@ impl<'a, S: Storage> ChainState<'a, S> {
     // This is used for TX outputs verification
     // This depends on the transaction and can be final balance or output balance
     async fn internal_get_sender_verification_balance<'b>(&'b mut self, key: &'a PublicKey, asset: &'a Hash, reference: &Reference) -> Result<&'b mut CiphertextCache, BlockchainError> {
-        trace!("getting sender verification balance for {} at topoheight {}, reference: {}", key.as_address(self.storage.is_mainnet()), self.topoheight, reference.topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("getting sender verification balance for {} at topoheight {}, reference: {}", key.as_address(self.storage.is_mainnet()), self.topoheight, reference.topoheight);
+        }
         match self.accounts.entry(key) {
             Entry::Occupied(o) => {
                 let account = o.into_mut();
@@ -238,7 +240,9 @@ impl<'a, S: Storage> ChainState<'a, S> {
     // Update the output echanges of an account
     // Account must have been fetched before calling this function
     async fn internal_update_sender_echange(&mut self, key: &'a PublicKey, asset: &'a Hash, new_ct: Ciphertext) -> Result<(), BlockchainError> {
-        trace!("update sender echange: {:?}", new_ct.compress());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("update sender echange: {:?}", new_ct.compress());
+        }
         let change = self.accounts.get_mut(key)
             .and_then(|a| a.assets.get_mut(asset))
             .ok_or_else(|| BlockchainError::NoTxSender(key.as_address(self.storage.is_mainnet())))?;
@@ -270,7 +274,9 @@ impl<'a, S: Storage> ChainState<'a, S> {
     // Only sender accounts should be used here
     // For each TX, we must update the nonce by one
     async fn internal_update_account_nonce(&mut self, account: &'a PublicKey, new_nonce: Nonce) -> Result<(), BlockchainError> {
-        trace!("Updating nonce for {} to {} at topoheight {}", account.as_address(self.storage.is_mainnet()), new_nonce, self.topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Updating nonce for {} to {} at topoheight {}", account.as_address(self.storage.is_mainnet()), new_nonce, self.topoheight);
+        }
         let account = self.get_internal_account(account).await?;
         account.nonce.set_nonce(new_nonce);
         Ok(())
@@ -294,7 +300,9 @@ impl<'a, S: Storage> ChainState<'a, S> {
 
     // Load a contract from the storage if its not already loaded
     async fn load_versioned_contract(&mut self, hash: &'a Hash) -> Result<bool, BlockchainError> {
-        trace!("Loading contract {} at topoheight {}", hash, self.topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Loading contract {} at topoheight {}", hash, self.topoheight);
+        }
         match self.contracts.entry(hash) {
             Entry::Occupied(o) => Ok(o.get().1.is_some()),
             Entry::Vacant(e) => {
@@ -309,7 +317,9 @@ impl<'a, S: Storage> ChainState<'a, S> {
 
     // Get the contract module from our cache
     async fn internal_get_contract_module(&self, hash: &Hash) -> Result<&Module, BlockchainError> {
-        trace!("Getting contract module {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Getting contract module {}", hash);
+        }
         self.contracts.get(hash)
             .ok_or_else(|| BlockchainError::ContractNotFound(hash.clone()))
             .and_then(|(_, module)| module.as_ref().map(|m| m.as_ref()).ok_or_else(|| BlockchainError::ContractNotFound(hash.clone())))
@@ -317,7 +327,9 @@ impl<'a, S: Storage> ChainState<'a, S> {
 
     // Reward a miner for the block mined
     pub async fn reward_miner(&mut self, miner: &'a PublicKey, reward: u64) -> Result<(), BlockchainError> {
-        debug!("Rewarding miner {} with {} TOS at topoheight {}", miner.as_address(self.storage.is_mainnet()), format_tos(reward), self.topoheight);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Rewarding miner {} with {} TOS at topoheight {}", miner.as_address(self.storage.is_mainnet()), format_tos(reward), self.topoheight);
+        }
         let miner_balance = self.internal_get_receiver_balance(Cow::Borrowed(miner), Cow::Borrowed(&TOS_ASSET)).await?;
         *miner_balance += reward;
 

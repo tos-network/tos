@@ -46,7 +46,9 @@ impl<S: Storage> P2pServer<S> {
     // We verify that they are send in good order
     pub async fn handle_bootstrap_chain_request(self: &Arc<Self>, peer: &Arc<Peer>, request: StepRequest<'_>) -> Result<(), BlockchainError> {
         let request_kind = request.kind();
-        debug!("Handle bootstrap chain request {:?} from {}", request_kind, peer);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Handle bootstrap chain request {:?} from {}", request_kind, peer);
+        }
 
         let storage = self.blockchain.get_storage().read().await;
         let pruned_topoheight = storage.get_pruned_topoheight().await?.unwrap_or(0);
@@ -58,13 +60,17 @@ impl<S: Storage> P2pServer<S> {
                 (pruned_topoheight >= topoheight && !matches!(request, StepRequest::SpendableBalances(_, _, _, _)))
                 || topoheight > our_topoheight
             {
-                warn!("Invalid begin topoheight (received {}, our is {}, pruned: {}) received from {} on step {:?}", topoheight, our_topoheight, pruned_topoheight, peer, request_kind);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Invalid begin topoheight (received {}, our is {}, pruned: {}) received from {} on step {:?}", topoheight, our_topoheight, pruned_topoheight, peer, request_kind);
+                }
                 return Err(P2pError::InvalidRequestedTopoheight.into())
             }
 
             // Check that the block is in stable topoheight
             if topoheight > self.blockchain.get_stable_topoheight() {
-                warn!("Requested topoheight {} is not stable ({}), ignoring {:?}", topoheight, self.blockchain.get_stable_topoheight(), request_kind);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Requested topoheight {} is not stable ({}), ignoring {:?}", topoheight, self.blockchain.get_stable_topoheight(), request_kind);
+                }
                 return Err(P2pError::InvalidRequestedTopoheight.into())
             }
         }
@@ -139,7 +145,9 @@ impl<S: Storage> P2pServer<S> {
                 }
 
                 if max > self.blockchain.get_stable_topoheight() {
-                    warn!("Requested spendable balances for topoheight {} but our stable topoheight is {}", max, self.blockchain.get_stable_topoheight());
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Requested spendable balances for topoheight {} but our stable topoheight is {}", max, self.blockchain.get_stable_topoheight());
+                    }
                     return Err(P2pError::InvalidRequestedTopoheight.into())
                 }
 
@@ -350,7 +358,9 @@ impl<S: Storage> P2pServer<S> {
     // NOTE: it could be even faster without retrieving each TXs, but we do it in case user don't enable pruning
     pub async fn bootstrap_chain(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
         let start = Instant::now();
-        info!("Starting fast sync with {}", peer);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Starting fast sync with {}", peer);
+        }
 
         let mut our_topoheight = self.blockchain.get_topo_height();
         let is_fresh_sync = our_topoheight == 0;
@@ -369,7 +379,9 @@ impl<S: Storage> P2pServer<S> {
 
         loop {
             let response = if let Some(step) = step.take() {
-                info!("Requesting step {:?}", step.kind());
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Requesting step {:?}", step.kind());
+                }
                 // This will also verify that the received step is the requested one
                 peer.request_boostrap_chain(step).await?
             } else {
@@ -381,31 +393,43 @@ impl<S: Storage> P2pServer<S> {
                     // first, check the common point in case we deviated from the chain
                     if let Some(common_point) = common_point {
                         let mut storage = self.blockchain.get_storage().write().await;
-                        debug!("Unverified common point found at {} with hash {}", common_point.get_topoheight(), common_point.get_hash());
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Unverified common point found at {} with hash {}", common_point.get_topoheight(), common_point.get_hash());
+                        }
                         let hash_at_topo = storage.get_hash_at_topo_height(common_point.get_topoheight()).await?;
                         if hash_at_topo != *common_point.get_hash() {
-                            warn!("Common point is {} while our hash at topoheight {} is {}. Aborting", common_point.get_hash(), common_point.get_topoheight(), storage.get_hash_at_topo_height(common_point.get_topoheight()).await?);
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Common point is {} while our hash at topoheight {} is {}. Aborting", common_point.get_hash(), common_point.get_topoheight(), storage.get_hash_at_topo_height(common_point.get_topoheight()).await?);
+                            }
                             return Err(BlockchainError::Unknown)
                         }
 
                         let top_block_hash = storage.get_top_block_hash().await?;
                         if *common_point.get_hash() != top_block_hash {
                             let pruned_topoheight = storage.get_pruned_topoheight().await?.unwrap_or(0);
-                            
+
                             let top_topoheight = storage.get_topo_height_for_hash(&top_block_hash).await?;
-                            warn!("Common point is {} while our top block hash is {} at {} !", common_point.get_hash(), top_block_hash, top_topoheight);
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Common point is {} while our top block hash is {} at {} !", common_point.get_hash(), top_block_hash, top_topoheight);
+                            }
                             // Count how much blocks we need to pop
                             let pop_count = if pruned_topoheight >= common_point.get_topoheight() {
                                 our_topoheight - pruned_topoheight
                             } else {
                                 our_topoheight - common_point.get_topoheight()
                             };
-                            warn!("We need to pop {} blocks for fast sync", pop_count);
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("We need to pop {} blocks for fast sync", pop_count);
+                            }
                             (our_topoheight, _) = self.blockchain.rewind_chain_for_storage(&mut *storage, pop_count, !peer.is_priority()).await?;
-                            debug!("New topoheight after rewind is now {}", our_topoheight);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("New topoheight after rewind is now {}", our_topoheight);
+                            }
                         }
                     } else {
-                        warn!("No common point with {} ! Not same chain ?", peer);
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("No common point with {} ! Not same chain ?", peer);
+                        }
                         return Err(BlockchainError::Unknown)
                     }
 
@@ -421,7 +445,9 @@ impl<S: Storage> P2pServer<S> {
                     {
                         let mut storage = self.blockchain.get_storage().write().await;
                         for (asset, data) in assets {
-                            info!("Saving asset {} at topoheight {}", asset, stable_topoheight);
+                            if log::log_enabled!(log::Level::Info) {
+                                info!("Saving asset {} at topoheight {}", asset, stable_topoheight);
+                            }
                             storage.add_asset(&asset, stable_topoheight, VersionedAssetData::new(data, None)).await?;
                         }
                     }
@@ -434,7 +460,9 @@ impl<S: Storage> P2pServer<S> {
                         let mut skip = 0;
                         loop {
                             // We request our current keys so we don't miss them
-                            info!("Requesting local keys #{} until our topoheight {}", i, our_topoheight);
+                            if log::log_enabled!(log::Level::Info) {
+                                info!("Requesting local keys #{} until our topoheight {}", i, our_topoheight);
+                            }
                             let keys = {
                                 let storage = self.blockchain.get_storage().read().await;
                                 // We search with no bounds, if they don't exists anymore they will either get deleted or updated
@@ -464,7 +492,9 @@ impl<S: Storage> P2pServer<S> {
                             i += 1;
                         }
 
-                        info!("Updated {} local keys in {} steps", skip, i);
+                        if log::log_enabled!(log::Level::Info) {
+                            info!("Updated {} local keys in {} steps", skip, i);
+                        }
 
                         // Go to next step
                         Some(StepRequest::Keys(our_topoheight, stable_topoheight, None))
@@ -483,7 +513,9 @@ impl<S: Storage> P2pServer<S> {
                     }
                 },
                 StepResponse::Contracts(contracts, page) => {
-                    info!("Requesting contract metadata for {} contracts #{}", contracts.len(), page.unwrap_or(0));
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Requesting contract metadata for {} contracts #{}", contracts.len(), page.unwrap_or(0));
+                    }
                     self.update_bootstrap_contracts(peer, &contracts, our_topoheight, stable_topoheight).await?;
 
                     if page.is_some() {
@@ -496,7 +528,9 @@ impl<S: Storage> P2pServer<S> {
                 StepResponse::BlocksMetadata(blocks) => {
                     // Last N blocks + stable block
                     if blocks.len() != PRUNE_SAFETY_LIMIT as usize + 1 {
-                        error!("Received {} blocks metadata while expecting {}", blocks.len(), PRUNE_SAFETY_LIMIT + 1);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Received {} blocks metadata while expecting {}", blocks.len(), PRUNE_SAFETY_LIMIT + 1);
+                        }
                         return Err(P2pError::InvalidPacket.into())
                     }
 
@@ -505,21 +539,29 @@ impl<S: Storage> P2pServer<S> {
                     stream::iter(blocks.into_iter().enumerate().map(Ok))
                         .try_for_each_concurrent(self.stream_concurrency, |(i, metadata)| async move {
                             let topoheight = lowest_topoheight + i as u64;
-                            trace!("Processing block metadata {} at topoheight {}", metadata.hash, topoheight);
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("Processing block metadata {} at topoheight {}", metadata.hash, topoheight);
+                            }
                             // check that we don't already have this block in storage
                             if self.blockchain.has_block(&metadata.hash).await? {
-                                warn!("Block {} at topo {} already in storage, skipping", metadata.hash, topoheight);
+                                if log::log_enabled!(log::Level::Warn) {
+                                    warn!("Block {} at topo {} already in storage, skipping", metadata.hash, topoheight);
+                                }
                                 return Ok::<(), BlockchainError>(());
                             }
 
-                            debug!("Saving block metadata {}", metadata.hash);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Saving block metadata {}", metadata.hash);
+                            }
                             let (block, hash) = peer.request_blocking_object(ObjectRequest::Block(Immutable::Owned(metadata.hash))).await?
                                 .into_block()?;
 
                             let (header, txs) = block.split();
                             let tx_hashes: IndexSet<Hash> = txs.iter().map(|tx| tx.hash()).collect();
 
-                            debug!("Retrieved {} txs for block {}", txs.len(), hash);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Retrieved {} txs for block {}", txs.len(), hash);
+                            }
 
                             // link its TX to the block
                             let mut storage = self.blockchain.get_storage().write().await;
@@ -577,7 +619,9 @@ impl<S: Storage> P2pServer<S> {
                     None
                 },
                 response => { // shouldn't happens
-                    error!("Received bootstrap chain response {:?} but didn't asked for it", response);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Received bootstrap chain response {:?} but didn't asked for it", response);
+                    }
                     return Err(P2pError::InvalidPacket.into());
                 }
             };
@@ -586,7 +630,9 @@ impl<S: Storage> P2pServer<S> {
         info!("Reload caches from disk");
         self.blockchain.reload_from_disk().await?;
 
-        info!("Fast sync done with {}, took {}", peer, humantime::format_duration(start.elapsed()));
+        if log::log_enabled!(log::Level::Info) {
+            info!("Fast sync done with {}, took {}", peer, humantime::format_duration(start.elapsed()));
+        }
 
         // Request its inventory
         if self.blockchain.get_blue_score() == peer.get_height() {
@@ -610,14 +656,20 @@ impl<S: Storage> P2pServer<S> {
         for (key, (nonce, multisig)) in keys.iter().zip(nonces) {
             match nonce {
                 State::Clean => {
-                    trace!("No nonce change for {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("No nonce change for {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    }
                 },
                 State::Deleted | State::None => {
-                    trace!("Deleting account of {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Deleting account of {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    }
                     storage.delete_account_for(key).await?;
                 },
                 State::Some(nonce) => {
-                    trace!("Saving nonce for {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Saving nonce for {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    }
                     storage.set_last_nonce_to(key, stable_topoheight, &VersionedNonce::new(nonce, None)).await?;
                     if update_registration {
                         storage.set_account_registration_topoheight(key, stable_topoheight).await?;
@@ -627,14 +679,20 @@ impl<S: Storage> P2pServer<S> {
 
             match multisig {
                 State::None | State::Clean => {
-                    trace!("No multisig change for {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("No multisig change for {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    }
                 },
                 State::Deleted => {
-                    trace!("Deleting multisig for {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Deleting multisig for {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    }
                     storage.delete_last_topoheight_for_multisig(key).await?;
                 },
                 State::Some(multisig) => {
-                    trace!("Saving multisig for {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Saving multisig for {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                    }
                     let data = VersionedMultiSig::new(Some(Cow::Owned(multisig)), None);
                     storage.set_last_multisig_to(key, stable_topoheight, data).await?;
                 },
@@ -649,7 +707,9 @@ impl<S: Storage> P2pServer<S> {
     // This will request in chunks the account summary per asset
     // Each asset will be handled in parallel
     async fn handle_balances(&self, peer: &Arc<Peer>, key: &PublicKey, our_topoheight: u64, stable_topoheight: u64) -> Result<(), P2pError> {
-        debug!("Requesting balances assets for {} at topo {}", key.as_address(self.blockchain.get_network().is_mainnet()), stable_topoheight);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Requesting balances assets for {} at topo {}", key.as_address(self.blockchain.get_network().is_mainnet()), stable_topoheight);
+        }
         let mut page = None;
         loop {
             let StepResponse::KeyBalances(balances, next_page) = peer.request_boostrap_chain(StepRequest::KeyBalances(Cow::Borrowed(&key), our_topoheight, stable_topoheight, page)).await? else {
@@ -666,7 +726,9 @@ impl<S: Storage> P2pServer<S> {
                 .try_for_each_concurrent(self.stream_concurrency, |(asset, summary)| async move {
                     // check that the account have balance for this asset
                     if let Some(account) = summary {
-                        debug!("Fetching balance {} history for {}", asset, key.as_address(blockchain.get_network().is_mainnet()));
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Fetching balance {} history for {}", asset, key.as_address(blockchain.get_network().is_mainnet()));
+                        }
 
                         // Each version are applied on iteration N+1 of the loop
                         // This is done to get the previous topoheight of the current version
@@ -680,7 +742,9 @@ impl<S: Storage> P2pServer<S> {
                         let mut total_versions = 0;
                         // Go through all balance history
                         while let Some(max) = max_topoheight {
-                            debug!("Requesting spendable balances for asset {} at max topo {} for {}", asset, max, key.as_address(blockchain.get_network().is_mainnet()));
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Requesting spendable balances for asset {} at max topo {} for {}", asset, max, key.as_address(blockchain.get_network().is_mainnet()));
+                            }
                             let StepResponse::SpendableBalances(balances, max_next) = peer.request_boostrap_chain(StepRequest::SpendableBalances(Cow::Borrowed(&key), Cow::Borrowed(&asset), min_topo, max)).await? else {
                                 // shouldn't happen
                                 error!("Received an invalid StepResponse (how ?) while fetching balances");
@@ -720,16 +784,22 @@ impl<S: Storage> P2pServer<S> {
                             storage.set_last_topoheight_for_balance(&key, &asset, highest_topoheight)?;
                         }
 
-                        info!("Synced {} balance versions {} of {}", total_versions, asset, key.as_address(blockchain.get_network().is_mainnet()));
+                        if log::log_enabled!(log::Level::Info) {
+                            info!("Synced {} balance versions {} of {}", total_versions, asset, key.as_address(blockchain.get_network().is_mainnet()));
+                        }
                     } else {
-                        debug!("No balance for key {} at topoheight {}", key.as_address(blockchain.get_network().is_mainnet()), stable_topoheight);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("No balance for key {} at topoheight {}", key.as_address(blockchain.get_network().is_mainnet()), stable_topoheight);
+                        }
                     }
 
                     Ok(())
                 }).await?;
 
             if page.is_none() {
-                debug!("Finished fetching balances for key {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Finished fetching balances for key {}", key.as_address(self.blockchain.get_network().is_mainnet()));
+                }
                 break;
             }
         }
@@ -746,9 +816,13 @@ impl<S: Storage> P2pServer<S> {
         }
 
         let mut start = Instant::now();
-        info!("Updating {} keys", keys.len());
+        if log::log_enabled!(log::Level::Info) {
+            info!("Updating {} keys", keys.len());
+        }
         self.handle_accounts(peer, keys, our_topoheight, stable_topoheight, update_registration).await?;
-        info!("Updated {} keys in {}", keys.len(), humantime::format_duration(start.elapsed()));
+        if log::log_enabled!(log::Level::Info) {
+            info!("Updated {} keys in {}", keys.len(), humantime::format_duration(start.elapsed()));
+        }
         start = Instant::now();
 
         stream::iter(keys.iter().map(Ok))
@@ -756,14 +830,18 @@ impl<S: Storage> P2pServer<S> {
                 self.handle_balances(peer, key, our_topoheight, stable_topoheight).await
             }).await?;
 
-        info!("Updated {} balances in {}", keys.len(), humantime::format_duration(start.elapsed()));
+        if log::log_enabled!(log::Level::Info) {
+            info!("Updated {} balances in {}", keys.len(), humantime::format_duration(start.elapsed()));
+        }
 
         Ok(())
     }
 
     // Retrieve the latest contract module
     async fn handle_contract_module(&self, peer: &Arc<Peer>, contract: &Hash, our_topoheight: u64, stable_topoheight: u64) -> Result<(), P2pError> {
-        debug!("Requesting contract metadata for {}", contract);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Requesting contract metadata for {}", contract);
+        }
         let StepResponse::ContractModule(metadata) = peer.request_boostrap_chain(StepRequest::ContractModule(our_topoheight, stable_topoheight, Cow::Borrowed(&contract))).await? else {
             // shouldn't happen
             error!("Received an invalid StepResponse (how ?) while fetching contract metadata");
@@ -774,19 +852,27 @@ impl<S: Storage> P2pServer<S> {
         match metadata {
             // It wasn't found on their side or was deleted
             State::None => {
-                debug!("contract metadata for {}", contract);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("contract metadata for {}", contract);
+                }
                 storage.delete_last_topoheight_for_contract(&contract).await?;
             },
             State::Deleted => {
-                debug!("contract {} killed itself, mark it as a tombstone only", contract);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("contract {} killed itself, mark it as a tombstone only", contract);
+                }
                 let versioned = VersionedContract::new(None, None);
                 storage.set_last_contract_to(&contract, stable_topoheight, &versioned).await?;
             },
             State::Clean => {
-                debug!("contract {} didn't changed", contract);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("contract {} didn't changed", contract);
+                }
             },
             State::Some(module) => {
-                debug!("Saving contract metadata for {}", contract);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Saving contract metadata for {}", contract);
+                }
                 let versioned = VersionedContract::new(Some(Cow::Owned(module)), None);
                 storage.set_last_contract_to(&contract, stable_topoheight, &versioned).await?;
             },

@@ -109,20 +109,26 @@ impl Connection {
 
     // Exchange keys in the old way for compatibility reasons
     pub async fn exchange_keys_old(&mut self, buffer: &mut [u8]) -> P2pResult<()> {
-        trace!("Exchanging keys with {}", self.addr);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Exchanging keys with {}", self.addr);
+        }
 
         // Update our state
         self.set_state(State::KeyExchange);
 
         // Send our key if we initiated the connection
         if self.is_out() {
-            trace!("Sending our key to {}", self.addr);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Sending our key to {}", self.addr);
+            }
             let mut packet = self.rotate_key_packet().await?;
             self.send_bytes(&mut packet).await?;
             self.encryption.mark_ready();
         }
 
-        trace!("Waiting for key from {}", self.addr);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Waiting for key from {}", self.addr);
+        }
         // Wait for the peer to receive its key
         let Packet::KeyExchange(peer_key) = timeout(
             Duration::from_millis(PEER_TIMEOUT_INIT_CONNECTION),
@@ -137,13 +143,17 @@ impl Connection {
 
         // Send back our key if we are the server
         if !self.is_out() {
-            trace!("Replying with our key to {}", self.addr);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Replying with our key to {}", self.addr);
+            }
             let mut packet = self.rotate_key_packet().await?;
             self.send_bytes(&mut packet).await?;
             self.encryption.mark_ready();
         }
 
-        trace!("Key exchange with {} successful", self.addr);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Key exchange with {} successful", self.addr);
+        }
 
         Ok(())
     }
@@ -161,14 +171,18 @@ impl Connection {
     // A potential idea would be to hardcode seed nodes keys,
     // and each nodes share the key of other along the socket address
     pub async fn exchange_keys(&mut self, keypair: &diffie_hellman::DHKeyPair, expected_key: Option<&diffie_hellman::PublicKey>, action: diffie_hellman::KeyVerificationAction, buffer: &mut [u8]) -> P2pResult<diffie_hellman::PublicKey> {
-        trace!("Exchanging keys with {}", self.addr);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Exchanging keys with {}", self.addr);
+        }
 
         // Update our state
         self.set_state(State::KeyExchange);
 
         // Send our DH key
         {
-            trace!("Sending our DH key to {}", self.addr);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Sending our DH key to {}", self.addr);
+            }
             let pk_bytes = keypair.get_public_key().as_bytes();
             let packet = Packet::KeyExchange(Cow::Borrowed(pk_bytes));
 
@@ -185,7 +199,9 @@ impl Connection {
             return Err(P2pError::InvalidPacket);
         };
 
-        trace!("Received DH key from {}", self.addr);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Received DH key from {}", self.addr);
+        }
 
         let peer_dh_key = diffie_hellman::PublicKey::from(peer_dh_key.into_owned());
 
@@ -194,14 +210,20 @@ impl Connection {
             if expected_key != &peer_dh_key {
                 match action {
                     diffie_hellman::KeyVerificationAction::Warn => {
-                        warn!("Expected Diffie-Hellman key from {} is different from the received key, ignoring", self.addr);
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("Expected Diffie-Hellman key from {} is different from the received key, ignoring", self.addr);
+                        }
                     },
                     diffie_hellman::KeyVerificationAction::Reject => {
-                        error!("Expected Diffie-Hellman key from {} is different from the received key", self.addr);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Expected Diffie-Hellman key from {} is different from the received key", self.addr);
+                        }
                         return Err(P2pError::InvalidDHKey);
                     },
                     diffie_hellman::KeyVerificationAction::Ignore => {
-                        debug!("Expected Diffie-Hellman key from {} is different from the received key, ignoring", self.addr);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Expected Diffie-Hellman key from {} is different from the received key, ignoring", self.addr);
+                        }
                     }
                 }
             }
@@ -212,7 +234,9 @@ impl Connection {
 
         // Send our newly generated key if we initiated the connection
         {
-            trace!("Sending our encryption key to {}", self.addr);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Sending our encryption key to {}", self.addr);
+            }
             self.encryption.rotate_key(secret, CipherSide::Both).await?;
             let mut packet = self.rotate_key_packet().await?;
             self.send_bytes(&mut packet).await?;
@@ -221,7 +245,9 @@ impl Connection {
         // Mark the encryption as ready because we have shared our key
         self.encryption.mark_ready();
 
-        trace!("Waiting for key from {}", self.addr);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Waiting for key from {}", self.addr);
+        }
         // Wait for the shared key of the peer to receive
         let Packet::KeyExchange(peer_key) = timeout(
             Duration::from_millis(PEER_TIMEOUT_INIT_CONNECTION),
@@ -231,12 +257,16 @@ impl Connection {
             return Err(P2pError::InvalidPacket);
         };
 
-        trace!("Received encryption key from {}", self.addr);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Received encryption key from {}", self.addr);
+        }
 
         // Now that we got the shared peer key, update our encryption state
         self.encryption.rotate_key(peer_key.into_owned(), CipherSide::Peer).await?;
 
-        trace!("Key exchange with {} successful", self.addr);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Key exchange with {} successful", self.addr);
+        }
 
         Ok(peer_dh_key)
     }
@@ -248,7 +278,9 @@ impl Connection {
 
     // Generate a new key and rotate the current key
     async fn rotate_key_packet(&self) -> P2pResult<Vec<u8>> {
-        trace!("rotating our encryption key for peer {}", self.get_address());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("rotating our encryption key for peer {}", self.get_address());
+        }
         // Generate a new key to use
         let new_key = self.encryption.generate_key()?;
         self.generate_rotate_key_packet(new_key).await
@@ -283,7 +315,9 @@ impl Connection {
     // We don't need to send a ACK to the peer to confirm the key rotation
     // as all next packets will be encrypted with the new key and we have updated it before
     pub async fn rotate_peer_key(&self, key: EncryptionKey) -> P2pResult<()> {
-        trace!("Rotating encryption key of peer {}", self.get_address());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Rotating encryption key of peer {}", self.get_address());
+        }
         self.encryption.rotate_key(key, CipherSide::Peer).await?;
         // Increment the key rotation counter
         self.rotate_key_in.fetch_add(1, Ordering::Relaxed);
@@ -308,12 +342,16 @@ impl Connection {
         match timeout(Duration::from_millis(PEER_SEND_BYTES_TIMEOUT), self.send_bytes_internal(packet)).await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => {
-                debug!("Failed to send bytes to {}: {}", self.get_address(), e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Failed to send bytes to {}: {}", self.get_address(), e);
+                }
                 self.closed.store(true, Ordering::SeqCst);
                 Err(e.into())
             }
             Err(e) => {
-                debug!("Failed to send bytes in requested time to {}: {}", self.get_address(), e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Failed to send bytes in requested time to {}: {}", self.get_address(), e);
+                }
                 self.closed.store(true, Ordering::SeqCst);
                 Err(e.into())
             }
@@ -323,7 +361,9 @@ impl Connection {
     // Send bytes to the peer
     // Encrypt must be used all time starting handshake
     async fn send_bytes_internal(&self, packet: &mut impl Buffer) -> P2pResult<()> {
-        trace!("Sending {} bytes to {}", packet.len(), self.get_address());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Sending {} bytes to {}", packet.len(), self.get_address());
+        }
         let mut stream = self.write.lock().await;
 
         // Count the bytes sent
@@ -341,7 +381,9 @@ impl Connection {
 
             // Rotate the key if necessary
             if sum >= ROTATE_EVERY_N_BYTES {
-                debug!("Rotating our encryption key with peer {}", self.get_address());
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Rotating our encryption key with peer {}", self.get_address());
+                }
                 let packet = self.rotate_key_packet().await?;
                 // Send the new key to the peer
                 self.send_packet_bytes_internal(&mut stream, &packet).await?;
@@ -363,11 +405,15 @@ impl Connection {
         let size = self.read_packet_size(&mut stream, buf, max_size).await?;
         if size == 0 || size > max_size {
             if self.get_state() == State::Success {
-                warn!("Received invalid packet size: {} bytes (max: {} bytes) from peer {}", size, max_size, self.get_address());
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Received invalid packet size: {} bytes (max: {} bytes) from peer {}", size, max_size, self.get_address());
+                }
             }
             return Err(P2pError::InvalidPacketSize)
         }
-        trace!("Size received: {}", size);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Size received: {}", size);
+        }
 
         self.read_all_bytes(&mut stream, buf, size as usize).await
     }
@@ -377,7 +423,9 @@ impl Connection {
         let mut reader = Reader::new(&bytes);
         let packet = Packet::read(&mut reader)?;
         if reader.total_read() != bytes.len() {
-            debug!("read {:?} only {}/{} on bytes available from {}", packet, reader.total_read(), bytes.len(), self);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("read {:?} only {}/{} on bytes available from {}", packet, reader.total_read(), bytes.len(), self);
+            }
             return Err(P2pError::InvalidPacketNotFullRead)
         }
 
@@ -397,8 +445,10 @@ impl Connection {
         let read = self.read_bytes_from_stream(stream, &mut buf[0..4]).await?;
         if read != 4 {
             if self.get_state() == State::Success {
-                warn!("Received invalid packet size: expected to read 4 bytes but read only {} bytes from {}", read, self);
-                warn!("Read: {:?}", &buf[0..read]);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Received invalid packet size: expected to read 4 bytes but read only {} bytes from {}", read, self);
+                    warn!("Read: {:?}", &buf[0..read]);
+                }
             }
             return Err(P2pError::InvalidPacketSize)
         }
@@ -408,7 +458,9 @@ impl Connection {
         // Verify if the size is valid
         if size > max_usize {
             if self.get_state() == State::Success {
-                warn!("Received invalid packet size: {} bytes from {}", size, self);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Received invalid packet size: {} bytes from {}", size, self);
+                }
             }
             return Err(P2pError::InvalidPacketSize)
         }
@@ -471,7 +523,9 @@ impl Connection {
         match self.read_bytes_from_stream_internal(stream, buf).await {
             Ok(read) => Ok(read),
             Err(e) => {
-                debug!("Failed to read bytes from {}: {}", self.get_address(), e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Failed to read bytes from {}: {}", self.get_address(), e);
+                }
                 self.closed.store(true, Ordering::SeqCst);
                 Err(e)
             }
@@ -481,9 +535,13 @@ impl Connection {
     // Close internal close directly the stream
     // This must be called only from the write connection task
     pub async fn close(&self) -> P2pResult<()> {
-        trace!("Closing internal connection with {}", self.addr);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Closing internal connection with {}", self.addr);
+        }
         if self.closed.swap(true, Ordering::SeqCst) {
-            debug!("Connection with {} already closed", self.addr);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Connection with {} already closed", self.addr);
+            }
             return Ok(());
         }
 

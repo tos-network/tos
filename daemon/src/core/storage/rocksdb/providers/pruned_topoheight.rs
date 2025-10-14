@@ -22,7 +22,9 @@ impl PrunedTopoheightProvider for RocksStorage {
 
     // set the pruned topoheight on disk
     async fn set_pruned_topoheight(&mut self, pruned_topoheight: Option<TopoHeight>) -> Result<(), BlockchainError> {
-        trace!("set pruned topoheight {:?}", pruned_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set pruned topoheight {:?}", pruned_topoheight);
+        }
         if let Some(pruned_topoheight) = pruned_topoheight {
             self.insert_into_disk(Column::Common, PRUNED_TOPOHEIGHT, &pruned_topoheight)
         } else {

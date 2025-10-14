@@ -9,18 +9,53 @@ This document defines mandatory rules for all code contributions to the TOS bloc
 **RULE: All code comments, documentation, and text content must be in English only.**
 
 - ❌ **PROHIBITED**: Chinese (中文), Japanese (日本語), Korean (한국어), or any non-English languages
-- ❌ **PROHIBITED**: Unicode symbols that are not ASCII (arrows →, subscripts ₁₂, superscripts ²³, etc.)
-- ✅ **REQUIRED**: ASCII characters only (a-z, A-Z, 0-9, and standard punctuation)
-- ✅ **REQUIRED**: Use ASCII equivalents:
-  - Use `->` instead of `→`
-  - Use `P1, P2` instead of `P₁, P₂`
-  - Use `n^2` instead of `n²`
-  - Use `O(k*n)` instead of `O(k·n)`
+- ✅ **REQUIRED**: Use English for all comments, documentation, and user-facing text
+- ✅ **ALLOWED**: Unicode symbols for mathematical and technical notation in code comments
+
+#### Allowed Unicode Symbols
+
+The following Unicode symbols are **permitted** in code comments for clarity and precision:
+
+**Mathematical symbols:**
+- Arrows: →, ←, ↔, ⇒, ⇐, ⇔
+- Comparison: ≈, ≠, ≤, ≥, <, >
+- Set operations: ∩ (intersection), ∪ (union), ∈ (element of), ∉ (not element of), ⊂ (subset), ⊆ (subset or equal)
+- Summation/Product: Σ (summation), ∏ (product)
+
+**Special symbols:**
+- Bullets: •, ◦, ▪, ▫
+- Numbered circles: ①, ②, ③, ④, ⑤, ⑥, ⑦, ⑧, ⑨
+- Dots: ·, ⋅ (middle dot)
+
+**Technical symbols:**
+- Math operators: ±, ×, ÷, √, ∞
+- Logic: ∧ (and), ∨ (or), ¬ (not)
+
+#### Examples
+
+✅ **CORRECT**: Using Unicode for clarity
+```rust
+// GHOSTDAG: Select chain with maximum blue work
+// Blue blocks: B ∩ past(v) where v is the tip
+// Chain selection: max(blue_work) → best tip
+```
+
+✅ **CORRECT**: Mathematical notation
+```rust
+// Time complexity: O(n²) where n is the number of blocks
+// Condition: height(v) ≥ height(u) ⇒ v is descendant of u
+```
+
+✅ **CORRECT**: Set theory notation
+```rust
+// anticone(B) = {v ∈ G | v ∉ past(B) ∧ B ∉ past(v)}
+// mergeset_blues = past(tip) ∩ blue_set
+```
 
 #### Verification Command
 ```bash
-# Check for non-ASCII characters in code files
-perl -ne 'print "$ARGV:$.: $_" if /[^\x00-\x7F]/' **/*.rs **/*.md
+# Check for non-English text in code files (manual review recommended)
+# Focus on ensuring English-only comments and documentation
 ```
 
 ### 2. Compilation Requirements
@@ -102,6 +137,104 @@ git commit -m "<message>"
 git push origin <branch>
 ```
 
+### 5. Logging Performance Requirements
+
+**RULE: All log statements with format arguments must be wrapped with log level checks for zero-overhead logging.**
+
+#### Optimization Pattern
+
+Log macros (`error!`, `warn!`, `info!`, `debug!`, `trace!`) that contain format arguments (`{}` or `{:?}`) must be wrapped with `if log::log_enabled!` checks to prevent expensive string formatting when the log level is disabled.
+
+✅ **CORRECT**: Zero-overhead logging
+```rust
+// Wrap logs with format arguments
+if log::log_enabled!(log::Level::Debug) {
+    debug!("Processing block {} at height {}", hash, height);
+}
+
+if log::log_enabled!(log::Level::Trace) {
+    trace!("Peer {} sent {} bytes", peer_id, data.len());
+}
+
+if log::log_enabled!(log::Level::Error) {
+    error!("Failed to verify transaction {}: {}", tx_hash, err);
+}
+```
+
+❌ **INCORRECT**: Unoptimized logging (format arguments evaluated even when disabled)
+```rust
+// DO NOT write logs like this - wastes CPU on formatting
+debug!("Processing block {} at height {}", hash, height);
+trace!("Peer {} sent {} bytes", peer_id, data.len());
+error!("Failed to verify transaction {}: {}", tx_hash, err);
+```
+
+#### When to Apply
+
+- ✅ **REQUIRED**: All logs with format arguments (containing `{}` or `{:?}`)
+- ✅ **REQUIRED**: Logs in hot paths (consensus, network I/O, storage operations)
+- ✅ **REQUIRED**: Debug and trace logs (frequently disabled in production)
+- ⚠️ **OPTIONAL**: Simple string logs without arguments (minimal overhead)
+
+#### Examples by Log Level
+
+```rust
+// Error logs (critical errors)
+if log::log_enabled!(log::Level::Error) {
+    error!("Consensus failure at block {}: {}", block_hash, error);
+}
+
+// Warning logs (important warnings)
+if log::log_enabled!(log::Level::Warn) {
+    warn!("Peer {} exceeded rate limit: {} requests/sec", peer, rate);
+}
+
+// Info logs (notable events)
+if log::log_enabled!(log::Level::Info) {
+    info!("New block {} accepted at height {}", hash, height);
+}
+
+// Debug logs (development debugging)
+if log::log_enabled!(log::Level::Debug) {
+    debug!("Cache hit for key {} with value {:?}", key, value);
+}
+
+// Trace logs (verbose tracing)
+if log::log_enabled!(log::Level::Trace) {
+    trace!("Acquired lock {} at {}", lock_name, location);
+}
+```
+
+#### Logs That Don't Need Optimization
+
+Simple string logs without format arguments have minimal overhead and don't require wrapping:
+
+```rust
+// These are fine without wrapping (no format arguments)
+info!("Daemon started");
+debug!("Cache initialized");
+error!("Connection failed");
+```
+
+#### Performance Impact
+
+This optimization provides:
+- **Zero overhead** when log level is disabled
+- **No format argument evaluation** when not needed
+- **No string allocation** when logging is filtered
+- **Significant performance improvement** in hot paths (consensus, network, storage)
+
+#### Verification
+
+Check for unoptimized logs with format arguments:
+```bash
+# Find logs with format arguments that may need optimization
+rg '^\s*(error|warn|info|debug|trace)!\(.*\{' --type rust
+
+# Count optimized logs
+rg 'if log::log_enabled!\(log::Level::' --type rust | wc -l
+```
+
 ## Project-Specific Rules
 
 ### 1. Consensus Logic
@@ -165,7 +298,7 @@ async fn get_balance_at_topoheight(addr: &Address, topoheight: u64) -> Result<u6
 Before committing, verify:
 
 - [ ] No Chinese, Japanese, or other non-English text in code/docs
-- [ ] No Unicode symbols (arrows, subscripts, etc.) - ASCII only
+- [ ] All log statements with format arguments are wrapped with `if log::log_enabled!`
 - [ ] `cargo build --workspace` produces 0 warnings
 - [ ] `cargo test --workspace` produces 0 warnings and 0 failures
 - [ ] All modified files staged with `git add`
@@ -300,6 +433,34 @@ Exceptions to these rules require:
 
 ---
 
-**Last Updated**: 2025-10-13
-**Version**: 1.1
+**Last Updated**: 2025-10-14
+**Version**: 1.2
 **Maintainer**: TOS Development Team
+
+## Development Environment
+
+### Development Wallet Addresses
+
+**Development Wallet Address 1**:
+```
+tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u
+```
+
+**Development Wallet Address 2**:
+```
+tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk
+```
+
+### Running Development Chain
+
+Stop the daemon, then run:
+
+```bash
+./target/debug/tos_daemon --network devnet --dir-path ~/tos_devnet/ --log-level info --auto-compress-logs
+```
+
+### Running Development Miner
+
+```bash
+./target/debug/tos_miner --miner-address tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u --daemon-address 127.0.0.1:8080 --num-threads 1
+```

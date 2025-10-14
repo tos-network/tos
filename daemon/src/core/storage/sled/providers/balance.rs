@@ -23,7 +23,9 @@ impl SledStorage {
     // Generate a key including the key and its asset
     // It is used to store/retrieve the highest topoheight version available
     pub fn get_balance_key_for(&self, key: &PublicKey, asset: &Hash) -> [u8; 64] {
-        trace!("get balance {} key for {}", asset, key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get balance {} key for {}", asset, key.as_address(self.is_mainnet()));
+        }
         let mut bytes = [0; 64];
         bytes[0..32].copy_from_slice(key.as_bytes());
         bytes[32..64].copy_from_slice(asset.as_bytes());
@@ -32,7 +34,9 @@ impl SledStorage {
 
     // Versioned key is a 72 bytes key with topoheight, key, assets bytes
     pub fn get_versioned_balance_key(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> [u8; 72] {
-        trace!("get versioned balance {} key at {} for {}", asset, topoheight, key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get versioned balance {} key at {} for {}", asset, topoheight, key.as_address(self.is_mainnet()));
+        }
         let mut bytes = [0; 72];
         bytes[0..8].copy_from_slice(&topoheight.to_be_bytes());
         bytes[8..40].copy_from_slice(key.as_bytes());
@@ -52,7 +56,9 @@ impl SledStorage {
 impl BalanceProvider for SledStorage {
     // Check if a balance exists for asset and key
     async fn has_balance_for(&self, key: &PublicKey, asset: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has balance {} for {}", asset, key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has balance {} for {}", asset, key.as_address(self.is_mainnet()));
+        }
         if !self.has_asset(asset).await? {
             return Err(BlockchainError::AssetNotFound(asset.clone()))
         }
@@ -62,7 +68,9 @@ impl BalanceProvider for SledStorage {
 
     // returns the highest topoheight where a balance changes happened
     async fn get_last_topoheight_for_balance(&self, key: &PublicKey, asset: &Hash) -> Result<TopoHeight, BlockchainError> {
-        trace!("get last topoheight for balance {} for {}", asset, key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get last topoheight for balance {} for {}", asset, key.as_address(self.is_mainnet()));
+        }
         let key = self.get_balance_key_for(key, asset);
         if !self.has_balance_internal(&key).await? {
             return Ok(0)
@@ -73,7 +81,9 @@ impl BalanceProvider for SledStorage {
 
     // set in storage the new top topoheight (the most up-to-date versioned balance)
     fn set_last_topoheight_for_balance(&mut self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<(), BlockchainError> {
-        trace!("set last topoheight to {} for balance {} for {}", topoheight, asset, key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set last topoheight to {} for balance {} for {}", topoheight, asset, key.as_address(self.is_mainnet()));
+        }
         let key = self.get_balance_key_for(key, asset);
         Self::insert_into_disk(self.snapshot.as_mut(), &self.balances, &key, &topoheight.to_be_bytes())?;
         Ok(())
@@ -82,7 +92,9 @@ impl BalanceProvider for SledStorage {
     // get the balance at a specific topoheight
     // if there is no balance change at this topoheight just return an error
     async fn has_balance_at_exact_topoheight(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        trace!("has balance {} for {} at exact topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has balance {} for {} at exact topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        }
         // check first that this address has balance, if no returns
         if !self.has_balance_for(key, asset).await? {
             return Ok(false)
@@ -95,10 +107,14 @@ impl BalanceProvider for SledStorage {
     // get the balance at a specific topoheight
     // if there is no balance change at this topoheight just return an error
     async fn get_balance_at_exact_topoheight(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<VersionedBalance, BlockchainError> {
-        trace!("get balance {} for {} at exact topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get balance {} for {} at exact topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        }
         // check first that this address has balance, if no returns
         if !self.has_balance_at_exact_topoheight(key, asset, topoheight).await? {
-            trace!("No balance {} found for {} at exact topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("No balance {} found for {} at exact topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+            }
             return Err(BlockchainError::NoBalanceChanges(key.as_address(self.is_mainnet()), topoheight, asset.clone()))
         }
 
@@ -112,10 +128,14 @@ impl BalanceProvider for SledStorage {
     // returns None if the key has no balances for this asset
     // Maximum topoheight is inclusive
     async fn get_balance_at_maximum_topoheight(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedBalance)>, BlockchainError> {
-        trace!("get balance {} for {} at maximum topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get balance {} for {} at maximum topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        }
         // check first that this address has balance for this asset, if no returns None
         if !self.has_balance_for(key, asset).await? {
-            trace!("No balance {} found for {} at maximum topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("No balance {} found for {} at maximum topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+            }
             return Ok(None)
         }
 
@@ -143,11 +163,15 @@ impl BalanceProvider for SledStorage {
     // Topoheight is the new topoheight for the versioned balance,
     // We create a new versioned balance by taking the previous version and setting it as previous topoheight
     async fn get_new_versioned_balance(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<(VersionedBalance, bool), BlockchainError> {
-        trace!("get new versioned balance {} for {} at {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get new versioned balance {} for {} at {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        }
 
         match self.get_balance_at_maximum_topoheight(key, asset, topoheight).await? {
             Some((topo, mut version)) => {
-                trace!("new versioned balance (balance at maximum topoheight) topo: {}, previous: {:?}, requested topo: {}", topo, version.get_previous_topoheight(), topo);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("new versioned balance (balance at maximum topoheight) topo: {}, previous: {:?}, requested topo: {}", topo, version.get_previous_topoheight(), topo);
+                }
                 // Mark it as clean
                 version.prepare_new(Some(topo));
                 Ok((version, false))
@@ -158,9 +182,13 @@ impl BalanceProvider for SledStorage {
     }
 
     async fn get_output_balance_at_maximum_topoheight(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedBalance)>, BlockchainError> {
-        trace!("get output balance {} for {} at maximum topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get output balance {} for {} at maximum topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        }
         if !self.has_balance_for(key, asset).await? {
-            trace!("No balance {} found for {} at maximum topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("No balance {} found for {} at maximum topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+            }
             return Ok(None)
         }
 
@@ -186,9 +214,13 @@ impl BalanceProvider for SledStorage {
     }
 
     async fn get_output_balance_in_range(&self, key: &PublicKey, asset: &Hash, min_topoheight: TopoHeight, max_topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedBalance)>, BlockchainError> {
-        trace!("get output balance {} for {} in range {} - {}", asset, key.as_address(self.is_mainnet()), min_topoheight, max_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get output balance {} for {} in range {} - {}", asset, key.as_address(self.is_mainnet()), min_topoheight, max_topoheight);
+        }
         if !self.has_balance_for(key, asset).await? {
-            trace!("No balance {} found for {} in range {} - {}", asset, key.as_address(self.is_mainnet()), min_topoheight, max_topoheight);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("No balance {} found for {} in range {} - {}", asset, key.as_address(self.is_mainnet()), min_topoheight, max_topoheight);
+            }
             return Ok(None)
         }
 
@@ -219,7 +251,9 @@ impl BalanceProvider for SledStorage {
 
     // save a new versioned balance in storage and update the pointer
     async fn set_last_balance_to(&mut self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight, version: &VersionedBalance) -> Result<(), BlockchainError> {
-        trace!("set balance {} for {} to topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set balance {} for {} to topoheight {}", asset, key.as_address(self.is_mainnet()), topoheight);
+        }
         self.set_balance_at_topoheight(asset, topoheight, key, &version).await?;
         self.set_last_topoheight_for_balance(key, asset, topoheight)?;
         Ok(())
@@ -227,9 +261,13 @@ impl BalanceProvider for SledStorage {
 
     // get the last version of balance and returns topoheight
     async fn get_last_balance(&self, key: &PublicKey, asset: &Hash) -> Result<(TopoHeight, VersionedBalance), BlockchainError> {
-        trace!("get last balance {} for {}", asset, key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get last balance {} for {}", asset, key.as_address(self.is_mainnet()));
+        }
         if !self.has_balance_for(key, asset).await? {
-            trace!("No balance {} found for {}", asset, key.as_address(self.is_mainnet()));
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("No balance {} found for {}", asset, key.as_address(self.is_mainnet()));
+            }
             return Err(BlockchainError::NoBalance(key.as_address(self.is_mainnet())))
         }
 
@@ -240,7 +278,9 @@ impl BalanceProvider for SledStorage {
 
     // save the asset balance at specific topoheight
     async fn set_balance_at_topoheight(&mut self, asset: &Hash, topoheight: TopoHeight, key: &PublicKey, balance: &VersionedBalance) -> Result<(), BlockchainError> {
-        trace!("set balance {} at topoheight {} for {}", asset, topoheight, key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set balance {} at topoheight {} for {}", asset, topoheight, key.as_address(self.is_mainnet()));
+        }
         let key = self.get_versioned_balance_key(key, asset, topoheight);
         Self::insert_into_disk(self.snapshot.as_mut(), &self.versioned_balances, &key, balance.to_bytes())?;
 
@@ -248,12 +288,16 @@ impl BalanceProvider for SledStorage {
     }
 
     async fn get_account_summary_for(&self, key: &PublicKey, asset: &Hash, min_topoheight: TopoHeight, max_topoheight: TopoHeight) -> Result<Option<AccountSummary>, BlockchainError> {
-        trace!("get account summary {} for {} at maximum topoheight {}", asset, key.as_address(self.is_mainnet()), max_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get account summary {} for {} at maximum topoheight {}", asset, key.as_address(self.is_mainnet()), max_topoheight);
+        }
 
         // first search if we have a valid balance at the maximum topoheight
         if let Some((topo, version)) = self.get_balance_at_maximum_topoheight(key, asset, max_topoheight).await? {
             if topo < min_topoheight {
-                trace!("No changes found for {} above min topoheight {}", key.as_address(self.is_mainnet()), min_topoheight);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("No changes found for {} above min topoheight {}", key.as_address(self.is_mainnet()), min_topoheight);
+                }
                 return Ok(None)
             }
 
@@ -262,10 +306,12 @@ impl BalanceProvider for SledStorage {
                 output_topoheight: None,
                 stable_topoheight: topo,
             };
-            
+
             // We have an output in it, we can return the account
             if version.contains_output() {
-                trace!("Stable with output balance found for {} at topoheight {}", key.as_address(self.is_mainnet()), topo);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Stable with output balance found for {} at topoheight {}", key.as_address(self.is_mainnet()), topo);
+                }
                 return Ok(Some(account))
             }
 
@@ -274,7 +320,9 @@ impl BalanceProvider for SledStorage {
             while let Some(topo) = previous {
                 let previous_version = self.get_balance_at_exact_topoheight(key, asset, topo).await?;
                 if previous_version.contains_output() {
-                    trace!("Output balance found for {} at topoheight {}", key.as_address(self.is_mainnet()), topo);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Output balance found for {} at topoheight {}", key.as_address(self.is_mainnet()), topo);
+                    }
                     account.output_topoheight = Some(topo);
                     break;
                 }
@@ -285,12 +333,16 @@ impl BalanceProvider for SledStorage {
             return Ok(Some(account))
         }
 
-        trace!("No balance found for {} at maximum topoheight {}", key.as_address(self.is_mainnet()), max_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("No balance found for {} at maximum topoheight {}", key.as_address(self.is_mainnet()), max_topoheight);
+        }
         Ok(None)
     }
 
     async fn get_spendable_balances_for(&self, key: &PublicKey, asset: &Hash, min_topoheight: TopoHeight, max_topoheight: TopoHeight, maximum: usize) -> Result<(Vec<Balance>, Option<TopoHeight>), BlockchainError> {
-        trace!("get spendable balances for {} at maximum topoheight {}", key.as_address(self.is_mainnet()), max_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get spendable balances for {} at maximum topoheight {}", key.as_address(self.is_mainnet()), max_topoheight);
+        }
 
         let mut balances = Vec::new();
 
@@ -302,14 +354,18 @@ impl BalanceProvider for SledStorage {
             balances.push(version.as_balance(topo));
 
             if has_output {
-                trace!("Output balance found for {} at topoheight {}", key.as_address(self.is_mainnet()), topo);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Output balance found for {} at topoheight {}", key.as_address(self.is_mainnet()), topo);
+                }
                 break;
             } else {
                 fetch_topoheight = previous_topoheight;
             }
         }
 
-        trace!("balances {} {}, {} - {}", balances.len(), key.as_address(self.is_mainnet()), min_topoheight, max_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("balances {} {}, {} - {}", balances.len(), key.as_address(self.is_mainnet()), min_topoheight, max_topoheight);
+        }
         Ok((balances, fetch_topoheight))
     }
 }

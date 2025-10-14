@@ -26,9 +26,13 @@ pub const P: VarUint = LEFT_SHIFT;
 // We are using a Kalman filter to estimate the hashrate and adjust the difficulty
 pub fn calculate_difficulty(solve_time: TimestampMillis, previous_difficulty: Difficulty, p: VarUint, minimum_difficulty: Difficulty, block_time_target: TimestampMillis) -> (Difficulty, VarUint) {
     let z = previous_difficulty * MILLIS_PER_SECOND / solve_time;
-    trace!("Calculating difficulty v2, solve time: {}, previous_difficulty: {}, z: {}, p: {}", format_duration(Duration::from_millis(solve_time)), format_difficulty(previous_difficulty), z, p);
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("Calculating difficulty v2, solve time: {}, previous_difficulty: {}, z: {}, p: {}", format_duration(Duration::from_millis(solve_time)), format_difficulty(previous_difficulty), z, p);
+    }
     let (x_est_new, p_new) = kalman_filter(z, previous_difficulty * MILLIS_PER_SECOND / block_time_target, p, SHIFT, LEFT_SHIFT, PROCESS_NOISE_COVAR);
-    trace!("x_est_new: {}, p_new: {}", x_est_new, p_new);
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("x_est_new: {}, p_new: {}", x_est_new, p_new);
+    }
 
     let difficulty = x_est_new * block_time_target / MILLIS_PER_SECOND;
     if difficulty < minimum_difficulty {

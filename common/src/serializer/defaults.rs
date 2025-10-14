@@ -30,7 +30,9 @@ impl Serializer for HashSet<Hash> {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let total_size = reader.total_size();
         if total_size % HASH_SIZE != 0 {
-            error!("Invalid size: {}, expected a multiple of 32 for hashes", total_size);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Invalid size: {}, expected a multiple of 32 for hashes", total_size);
+            }
             return Err(ReaderError::InvalidSize)
         }
 
@@ -42,8 +44,10 @@ impl Serializer for HashSet<Hash> {
         }
 
         if tips.len() != count {
-            error!("Invalid size: received {} elements while sending {}", tips.len(), count);
-            return Err(ReaderError::InvalidSize) 
+            if log::log_enabled!(log::Level::Error) {
+                error!("Invalid size: received {} elements while sending {}", tips.len(), count);
+            }
+            return Err(ReaderError::InvalidSize)
         }
 
         Ok(tips)
@@ -65,7 +69,9 @@ impl Serializer for HashSet<Cow<'_, Hash>> {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let total_size = reader.total_size();
         if total_size % 32 != 0 {
-            error!("Invalid size: {}, expected a multiple of 32 for hashes", total_size);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Invalid size: {}, expected a multiple of 32 for hashes", total_size);
+            }
             return Err(ReaderError::InvalidSize)
         }
 
@@ -77,8 +83,10 @@ impl Serializer for HashSet<Cow<'_, Hash>> {
         }
 
         if tips.len() != count {
-            error!("Invalid size: received {} elements while sending {}", tips.len(), count);
-            return Err(ReaderError::InvalidSize) 
+            if log::log_enabled!(log::Level::Error) {
+                error!("Invalid size: received {} elements while sending {}", tips.len(), count);
+            }
+            return Err(ReaderError::InvalidSize)
         }
 
         Ok(tips)
@@ -173,7 +181,9 @@ impl<T: Serializer + std::hash::Hash + Ord> Serializer for BTreeSet<T> {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let count = reader.read_u16()?;
         if count > DEFAULT_MAX_ITEMS as u16 {
-            warn!("Received {} in BTreeSet while maximum is set to {}", count, DEFAULT_MAX_ITEMS);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Received {} in BTreeSet while maximum is set to {}", count, DEFAULT_MAX_ITEMS);
+            }
             return Err(ReaderError::InvalidSize)
         }
 
@@ -181,7 +191,9 @@ impl<T: Serializer + std::hash::Hash + Ord> Serializer for BTreeSet<T> {
         for _ in 0..count {
             let value = T::read(reader)?;
             if !set.insert(value) {
-                error!("Value is duplicated in BTreeSet");
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Value is duplicated in BTreeSet");
+                }
                 return Err(ReaderError::InvalidSize)
             }
         }
@@ -208,7 +220,9 @@ impl<T: Serializer + std::hash::Hash + Eq> Serializer for IndexSet<T> {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let count = reader.read_u16()?;
         if count > DEFAULT_MAX_ITEMS as u16 {
-            warn!("Received {} in IndexSet while maximum is set to {}", count, DEFAULT_MAX_ITEMS);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Received {} in IndexSet while maximum is set to {}", count, DEFAULT_MAX_ITEMS);
+            }
             return Err(ReaderError::InvalidSize)
         }
 
@@ -216,7 +230,9 @@ impl<T: Serializer + std::hash::Hash + Eq> Serializer for IndexSet<T> {
         for _ in 0..count {
             let value = T::read(reader)?;
             if !set.insert(value) {
-                error!("Value is duplicated in IndexSet");
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Value is duplicated in IndexSet");
+                }
                 return Err(ReaderError::InvalidSize)
             }
         }
@@ -296,7 +312,9 @@ impl<T: Serializer> Serializer for Vec<T> {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let count = reader.read_u16()?;
         if count > DEFAULT_MAX_ITEMS as u16 {
-            warn!("Received {} in Vec while maximum is set to {}", count, DEFAULT_MAX_ITEMS);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Received {} in Vec while maximum is set to {}", count, DEFAULT_MAX_ITEMS);
+            }
             return Err(ReaderError::InvalidSize)
         }
 

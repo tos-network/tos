@@ -73,7 +73,9 @@ impl Request {
 
     pub fn notify(self, msg: OwnedObjectResponse) {
         if self.callback.send(msg).is_err() {
-            error!("Error while notifying about request {}: channel seems closed", self.request.get_hash());
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while notifying about request {}: channel seems closed", self.request.get_hash());
+            }
         }
     }
 }

@@ -41,12 +41,16 @@ impl AccountProvider for SledStorage {
     }
 
     async fn get_account_registration_topoheight(&self, key: &PublicKey) -> Result<TopoHeight, BlockchainError> {
-        trace!("get account registration topoheight: {}", key.as_address(self.network.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get account registration topoheight: {}", key.as_address(self.network.is_mainnet()));
+        }
         self.load_from_disk(&self.registrations, key.as_bytes(), DiskContext::AccountRegistrationTopoHeight)
     }
 
     async fn set_account_registration_topoheight(&mut self, key: &PublicKey, topoheight: TopoHeight) -> Result<(), BlockchainError> {
-        trace!("set account registration topoheight: {} {}", key.as_address(self.network.is_mainnet()), topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set account registration topoheight: {} {}", key.as_address(self.network.is_mainnet()), topoheight);
+        }
         if let Some(old) = Self::insert_into_disk(self.snapshot.as_mut(), &self.registrations, key.as_bytes(), &topoheight.to_be_bytes())? {
             Self::remove_from_disk_without_reading(self.snapshot.as_mut(), &self.registrations_prefixed, &prefixed_db_key_no_u64(&old, key))?;
         }
@@ -57,7 +61,9 @@ impl AccountProvider for SledStorage {
     }
 
     async fn delete_account_for(&mut self, key: &PublicKey) -> Result<(), BlockchainError> {
-        trace!("delete account registration topoheight: {}", key.as_address(self.network.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete account registration topoheight: {}", key.as_address(self.network.is_mainnet()));
+        }
 
         let value = self.load_optional_from_disk::<TopoHeight>(&self.registrations, key.as_bytes())?;
         if let Some(topo) = value {
@@ -70,7 +76,9 @@ impl AccountProvider for SledStorage {
     }
 
     async fn is_account_registered(&self, key: &PublicKey) -> Result<bool, BlockchainError> {
-        trace!("is account registered: {}", key.as_address(self.network.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is account registered: {}", key.as_address(self.network.is_mainnet()));
+        }
         let value = self.load_optional_from_disk::<TopoHeight>(&self.registrations, key.as_bytes())?;
         if let Some(topo) = value {
             let k = prefixed_db_key(topo, key);
@@ -81,9 +89,13 @@ impl AccountProvider for SledStorage {
     }
 
     async fn is_account_registered_for_topoheight(&self, key: &PublicKey, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        trace!("is account registered for topoheight: {} {}", key.as_address(self.network.is_mainnet()), topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is account registered for topoheight: {} {}", key.as_address(self.network.is_mainnet()), topoheight);
+        }
         if !self.is_account_registered(key).await? {
-            debug!("account {} is not registered", key.as_address(self.network.is_mainnet()));
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("account {} is not registered", key.as_address(self.network.is_mainnet()));
+            }
             return Ok(false);
         }
 
@@ -93,7 +105,9 @@ impl AccountProvider for SledStorage {
 
     // Get all keys that got registered in the range given
     async fn get_registered_keys<'a>(&'a self, minimum_topoheight: Option<TopoHeight>, maximum_topoheight: Option<TopoHeight>) -> Result<impl Iterator<Item = Result<PublicKey, BlockchainError>> + 'a, BlockchainError> {
-        trace!("get partial keys  minimum_topoheight: {:?}, maximum_topoheight: {:?}", minimum_topoheight, maximum_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get partial keys  minimum_topoheight: {:?}, maximum_topoheight: {:?}", minimum_topoheight, maximum_topoheight);
+        }
 
         Ok(
             Self::iter_keys(self.snapshot.as_ref(), &self.registrations_prefixed)
@@ -105,7 +119,9 @@ impl AccountProvider for SledStorage {
 
                         // Skip if not in range
                         if minimum_topoheight.is_some_and(|v| topo < v) || maximum_topoheight.is_some_and(|v| topo > v) {
-                            trace!("skipping {} at {}: {:?} {:?}", PublicKey::from_bytes(&key[8..40])?.as_address(self.is_mainnet()), topo, minimum_topoheight, maximum_topoheight);
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("skipping {} at {}: {:?} {:?}", PublicKey::from_bytes(&key[8..40])?.as_address(self.is_mainnet()), topo, minimum_topoheight, maximum_topoheight);
+                            }
                             return Ok(None);
                         }
                     }
@@ -118,7 +134,9 @@ impl AccountProvider for SledStorage {
     }
 
     async fn has_key_updated_in_range(&self, key: &PublicKey, minimum_topoheight: TopoHeight, maximum_topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        trace!("has key {} updated in range min topoheight {} and max topoheight {}", key.as_address(self.is_mainnet()), minimum_topoheight, maximum_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has key {} updated in range min topoheight {} and max topoheight {}", key.as_address(self.is_mainnet()), minimum_topoheight, maximum_topoheight);
+        }
         // check first that this address has nonce, if no returns None
         if !self.has_nonce(key).await? {
             return Ok(false)
@@ -126,11 +144,15 @@ impl AccountProvider for SledStorage {
 
         // fast path check the latest nonce
         let (topo, mut version) = self.get_last_nonce(key).await?;
-        trace!("Last version of nonce for {} is at topoheight {}", key.as_address(self.is_mainnet()), topo);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Last version of nonce for {} is at topoheight {}", key.as_address(self.is_mainnet()), topo);
+        }
 
         // if it's the latest and its under the maximum topoheight and above minimum topoheight
         if topo >= minimum_topoheight && topo <= maximum_topoheight {
-            trace!("Last version nonce (valid) found at {} (maximum topoheight = {})", topo, maximum_topoheight);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Last version nonce (valid) found at {} (maximum topoheight = {})", topo, maximum_topoheight);
+            }
             return Ok(true)
         }
 
@@ -142,16 +164,22 @@ impl AccountProvider for SledStorage {
             }
 
             let previous_version = self.get_nonce_at_exact_topoheight(key, previous).await?;
-            trace!("previous nonce version is at {}", previous);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("previous nonce version is at {}", previous);
+            }
             if previous <= maximum_topoheight {
-                trace!("Highest version nonce found at {} (maximum topoheight = {})", previous, maximum_topoheight);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Highest version nonce found at {} (maximum topoheight = {})", previous, maximum_topoheight);
+                }
                 return Ok(true)
             }
 
             // security in case of DB corruption
             if let Some(value) = previous_version.get_previous_topoheight() {
                 if value > previous {
-                    error!("FATAL ERROR: Previous topoheight ({}) should not be higher than current version ({})!", value, previous);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("FATAL ERROR: Previous topoheight ({}) should not be higher than current version ({})!", value, previous);
+                    }
                     return Err(BlockchainError::Unknown)
                 }
             }
@@ -184,7 +212,9 @@ impl AccountProvider for SledStorage {
                 // security in case of DB corruption
                 if let Some(value) = previous_version.get_previous_topoheight() {
                     if value > previous {
-                        error!("FATAL ERROR: Previous topoheight for balance ({}) should not be higher than current version of balance ({})!", value, previous);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("FATAL ERROR: Previous topoheight for balance ({}) should not be higher than current version of balance ({})!", value, previous);
+                        }
                         return Err(BlockchainError::Unknown)
                     }
                 }

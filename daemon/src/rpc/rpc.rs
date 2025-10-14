@@ -178,6 +178,7 @@ where
         extra_nonce: Cow::Borrowed(header.get_extra_nonce()),
         timestamp: header.get_timestamp(),
         nonce: header.get_nonce(),
+        // RPC compatibility: "height" field represents blue_score (DAG depth position)
         height: header.get_blue_score(),
         version: header.get_version(),
         miner: Cow::Owned(header.get_miner().as_address(mainnet)),
@@ -250,6 +251,7 @@ pub async fn get_block_response_for_hash<S: Storage>(blockchain: &Blockchain<S>,
             extra_nonce: Cow::Borrowed(header.get_extra_nonce()),
             timestamp: header.get_timestamp(),
             nonce: header.get_nonce(),
+            // RPC compatibility: "height" field represents blue_score (DAG depth position)
             height: header.get_blue_score(),
             version: header.get_version(),
             miner: Cow::Owned(header.get_miner().as_address(mainnet)),
@@ -1041,7 +1043,7 @@ async fn get_blocks_at_blue_score<S: Storage>(context: &Context, body: Value) ->
     let storage = blockchain.get_storage().read().await;
 
     let mut blocks = Vec::new();
-    for hash in storage.get_blocks_at_height(params.height).await.context("Error while retrieving blocks at blue score")? {
+    for hash in storage.get_blocks_at_blue_score(params.height).await.context("Error while retrieving blocks at blue score")? {
         blocks.push(get_block_response_for_hash(&blockchain, &storage, &hash, params.include_txs).await?)
     }
     Ok(json!(blocks))
@@ -1089,13 +1091,17 @@ fn get_range(start: Option<TopoHeight>, end: Option<TopoHeight>, maximum: u64, c
 
     let range_end = end.unwrap_or(current);
     if range_end < range_start || range_end > current {
-        debug!("get range: start = {}, end = {}, max = {}", range_start, range_end, current);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("get range: start = {}, end = {}, max = {}", range_start, range_end, current);
+        }
         return Err(InternalRpcError::InvalidJSONRequest).context(format!("Invalid range requested, start: {}, end: {}", range_start, range_end))?
     }
 
     let count = range_end - range_start;
     if count > maximum { // only retrieve max 20 blocks hash per request
-        debug!("get range requested count: {}", count);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("get range requested count: {}", count);
+        }
         return Err(InternalRpcError::InvalidJSONRequest).context(format!("Invalid range count requested, received {} but maximum is {}", count, maximum))?
     }
 
@@ -1134,7 +1140,7 @@ async fn get_blocks_range_by_blue_score<S: Storage>(context: &Context, body: Val
     let storage = blockchain.get_storage().read().await;
     let mut blocks = Vec::with_capacity((end_height - start_height) as usize);
     for i in start_height..=end_height {
-        let blocks_at_height = storage.get_blocks_at_height(i).await.context("Error while retrieving blocks at blue score")?;
+        let blocks_at_height = storage.get_blocks_at_blue_score(i).await.context("Error while retrieving blocks at blue score")?;
         for hash in blocks_at_height {
             let response = get_block_response_for_hash(&blockchain, &storage, &hash, false).await?;
             blocks.push(response);
@@ -1163,7 +1169,9 @@ async fn get_transactions<S: Storage>(context: &Context, body: Value) -> Result<
         let tx = match get_transaction_response_for_hash(&*storage, &mempool, &hash).await {
             Ok(data) => Some(data),
             Err(e) => {
-                debug!("Error while retrieving tx {} from storage: {}", hash, e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while retrieving tx {} from storage: {}", hash, e);
+                }
                 None
             }
         };
@@ -1262,7 +1270,9 @@ async fn get_account_history<S: Storage>(context: &Context, body: Value) -> Resu
 
     let is_dev_address = *key == *DEV_PUBLIC_KEY;
     while let Some((topo, prev_nonce, versioned_balance)) = version.take() {
-        trace!("Searching history of {} ({}) at topoheight {}, nonce: {:?}, type: {:?}", params.address, params.asset, topo, prev_nonce, versioned_balance.get_balance_type());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Searching history of {} ({}) at topoheight {}, nonce: {:?}, type: {:?}", params.address, params.asset, topo, prev_nonce, versioned_balance.get_balance_type());
+        }
         if topo < minimum_topoheight || topo < pruned_topoheight {
             break;
         }
@@ -1312,7 +1322,9 @@ async fn get_account_history<S: Storage>(context: &Context, body: Value) -> Resu
                 continue;
             }
 
-            trace!("Searching tx {} in block {}", tx_hash, hash);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Searching tx {} in block {}", tx_hash, hash);
+            }
             let tx = storage.get_transaction(&tx_hash).await.context(format!("Error while retrieving transaction {tx_hash} from block {hash}"))?;
             let is_sender = *tx.get_source() == *key;
             match tx.get_data() {

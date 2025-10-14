@@ -43,7 +43,9 @@ pub trait Storage:
 
     // Count is the number of blocks (topoheight) to rewind
     async fn pop_blocks(&mut self, mut height: u64, mut topoheight: TopoHeight, count: u64, until_topo_height: TopoHeight) -> Result<(u64, TopoHeight, Vec<(Hash, Immutable<Transaction>)>), BlockchainError> {
-        trace!("pop blocks from height: {}, topoheight: {}, count: {}", height, topoheight, count);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("pop blocks from height: {}, topoheight: {}, count: {}", height, topoheight, count);
+        }
         if topoheight < count as u64 { // also prevent removing genesis block
             return Err(BlockchainError::NotEnoughBlocks);
         }
@@ -52,7 +54,9 @@ pub trait Storage:
         // search the lowest topo height available based on count + 1
         // (last lowest topo height accepted)
         let mut lowest_topo = topoheight - count;
-        trace!("Lowest topoheight for rewind: {}", lowest_topo);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Lowest topoheight for rewind: {}", lowest_topo);
+        }
 
         let pruned_topoheight = self.get_pruned_topoheight().await?.unwrap_or(0);
 
@@ -60,13 +64,17 @@ pub trait Storage:
         // easy way for this: check the block at topo is currently alone at height
         while lowest_topo > pruned_topoheight {
             let hash = self.get_hash_at_topo_height(lowest_topo).await?;
-            let block_height = self.get_height_for_block_hash(&hash).await?;
-            let blocks_at_height = self.get_blocks_at_height(block_height).await?;
+            let block_height = self.get_blue_score_for_block_hash(&hash).await?;
+            let blocks_at_height = self.get_blocks_at_blue_score(block_height).await?;
             if blocks_at_height.len() == 1 {
-                debug!("Sync block found at topoheight {}", lowest_topo);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Sync block found at topoheight {}", lowest_topo);
+                }
                 break;
             } else {
-                warn!("No sync block found at topoheight {} we must go lower if possible", lowest_topo);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("No sync block found at topoheight {} we must go lower if possible", lowest_topo);
+                }
                 lowest_topo -= 1;
             }
         }
@@ -74,7 +82,9 @@ pub trait Storage:
         if pruned_topoheight != 0 {
             let safety_pruned_topoheight = pruned_topoheight + PRUNE_SAFETY_LIMIT;
             if lowest_topo <= safety_pruned_topoheight && until_topo_height != 0 {
-                warn!("Pruned topoheight is {}, lowest topoheight is {}, rewind only until {}", pruned_topoheight, lowest_topo, safety_pruned_topoheight);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Pruned topoheight is {}, lowest topoheight is {}, rewind only until {}", pruned_topoheight, lowest_topo, safety_pruned_topoheight);
+                }
                 lowest_topo = safety_pruned_topoheight;
             }
         }
@@ -85,7 +95,9 @@ pub trait Storage:
         // Delete all orphaned blocks tips
         for tip in tips.clone() {
             if !self.is_block_topological_ordered(&tip).await? {
-                debug!("Tip {} is not ordered, removing", tip);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Tip {} is not ordered, removing", tip);
+                }
                 tips.remove(&tip);
             }
         }
@@ -96,7 +108,9 @@ pub trait Storage:
         'main: loop {
             // stop rewinding if its genesis block or if we reached the lowest topo
             if topoheight <= lowest_topo || topoheight <= until_topo_height || topoheight == 0 { // prevent removing genesis block
-                trace!("Done: {done}, count: {count}, height: {height}, topoheight: {topoheight}, lowest topo: {lowest_topo}, stable topo: {until_topo_height}");
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Done: {done}, count: {count}, height: {height}, topoheight: {topoheight}, lowest topo: {lowest_topo}, stable topo: {until_topo_height}");
+                }
                 break 'main;
             }
 
@@ -104,15 +118,21 @@ pub trait Storage:
             let (hash, block, block_txs) = self.delete_block_at_topoheight(topoheight).await?;
             self.delete_versioned_data_at_topoheight(topoheight).await?;
 
-            debug!("Block {} at topoheight {} deleted", hash, topoheight);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Block {} at topoheight {} deleted", hash, topoheight);
+            }
             txs.extend(block_txs);
 
             // generate new tips
-            trace!("Removing {} from {} tips", hash, tips.len());
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Removing {} from {} tips", hash, tips.len());
+            }
             tips.remove(&hash);
 
             for hash in block.get_parents().iter() {
-                trace!("Adding {} to {} tips", hash, tips.len());
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Adding {} to {} tips", hash, tips.len());
+                }
                 tips.insert(hash.clone());
             }
 
@@ -143,7 +163,9 @@ pub trait Storage:
             done += 1;
         }
 
-        warn!("Blocks rewinded: {}, new topoheight: {}, new height: {}", done, topoheight, height);
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("Blocks rewinded: {}, new topoheight: {}, new height: {}", done, topoheight, height);
+        }
 
         trace!("Cleaning caches");
         // Clear all caches to not have old data after rewind

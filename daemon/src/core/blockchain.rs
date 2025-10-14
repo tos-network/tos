@@ -258,7 +258,9 @@ impl<S: Storage> Blockchain<S> {
                 error!("TXs threads count must be above 0");
                 return Err(BlockchainError::InvalidConfig.into());
             } else {
+                if log::log_enabled!(log::Level::Info) {
                 info!("Will use {} threads for TXs verification", config.txs_verification_threads_count);
+                }
             }
 
             if config.rpc.threads == 0 {
@@ -283,7 +285,9 @@ impl<S: Storage> Blockchain<S> {
 
             let priority_len = config.p2p.priority_nodes.len();
             if priority_len > config.p2p.max_outgoing_peers {
+                if log::log_enabled!(log::Level::Warn) {
                 warn!("{} priority nodes configured while max outgoing peers is set to {}, increasing max outgoing peers", priority_len, config.p2p.max_outgoing_peers);
+                }
                 config.p2p.max_outgoing_peers = priority_len;
             }
         }
@@ -305,10 +309,14 @@ impl<S: Storage> Blockchain<S> {
             .cloned()
             .unwrap_or_else(|| Hash::new([0u8; 32])); // Devnet uses zero hash
 
+        if log::log_enabled!(log::Level::Info) {
         info!("Initializing reachability service for genesis={}", genesis_hash);
+        }
         let reachability = Arc::new(crate::core::reachability::TosReachability::new(genesis_hash.clone()));
 
+        if log::log_enabled!(log::Level::Info) {
         info!("Initializing GHOSTDAG manager with k=10, genesis={}", genesis_hash);
+        }
         let ghostdag = Arc::new(TosGhostdag::new(
             10, // k parameter (same as Kaspa)
             genesis_hash,
@@ -364,7 +372,9 @@ impl<S: Storage> Blockchain<S> {
 
             // also do some clean up in case of DB corruption
             if config.check_db_integrity {
+                if log::log_enabled!(log::Level::Info) {
                 info!("Cleaning data above topoheight {} in case of potential DB corruption", topoheight);
+                }
                 storage.delete_versioned_data_above_topoheight(topoheight).await?;
             }
         } else {
@@ -388,14 +398,20 @@ impl<S: Storage> Blockchain<S> {
                         Err(e) => {
                             match lookup_host(&peer).await {
                                 Ok(it) => {
+                                    if log::log_enabled!(log::Level::Info) {
                                     info!("Valid host found for {}", peer);
+                                    }
                                     for addr in it {
+                                        if log::log_enabled!(log::Level::Info) {
                                         info!("IP from DNS resolution: {}", addr);
+                                        }
                                         exclusive_nodes.push(addr);
                                     }
                                 },
                                 Err(e2) => {
+                                    if log::log_enabled!(log::Level::Error) {
                                     error!("Error while parsing {} as exclusive node address: {}, {}", peer, e, e2);
+                                    }
                                 }
                             };
                             continue;
@@ -453,24 +469,36 @@ impl<S: Storage> Blockchain<S> {
                                 Err(e) => {
                                     match lookup_host(&origin).await {
                                         Ok(it) => {
+                                            if log::log_enabled!(log::Level::Info) {
                                             info!("Valid host found for {}", origin);
+                                            }
                                             for addr in it {
+                                                if log::log_enabled!(log::Level::Info) {
                                                 info!("Trying to connect to priority node with IP from DNS resolution: {}", addr);
+                                                }
                                                 if let Err(e) = p2p.try_to_connect_to_peer(addr, true).await {
+                                                    if log::log_enabled!(log::Level::Error) {
                                                     error!("Error while trying to connect to priority node {}: {}", origin, e);
+                                                    }
                                                 }
                                             }
                                         },
                                         Err(e2) => {
+                                            if log::log_enabled!(log::Level::Error) {
                                             error!("Error while parsing {} as priority node address: {}, {}", origin, e, e2);
+                                            }
                                         }
                                     };
                                     continue;
                                 }
                             };
+                            if log::log_enabled!(log::Level::Info) {
                             info!("Trying to connect to priority node: {}", addr);
+                            }
                             if let Err(e) = p2p.try_to_connect_to_peer(addr, true).await {
+                                if log::log_enabled!(log::Level::Error) {
                                 error!("Error while trying to connect to priority node {}: {}", addr, e);
+                                }
                             }
                         }
                     }
@@ -483,24 +511,36 @@ impl<S: Storage> Blockchain<S> {
                                 Err(e) => {
                                     match lookup_host(&origin).await {
                                         Ok(it) => {
+                                            if log::log_enabled!(log::Level::Info) {
                                             info!("Valid host found for bootstrap node {}", origin);
+                                            }
                                             for addr in it {
+                                                if log::log_enabled!(log::Level::Info) {
                                                 info!("Trying to connect to bootstrap node with IP from DNS resolution: {}", addr);
+                                                }
                                                 if let Err(e) = p2p.try_to_connect_to_peer(addr, false).await {
+                                                    if log::log_enabled!(log::Level::Error) {
                                                     error!("Error while trying to connect to bootstrap node {}: {}", origin, e);
+                                                    }
                                                 }
                                             }
                                         },
                                         Err(e2) => {
+                                            if log::log_enabled!(log::Level::Error) {
                                             error!("Error while parsing {} as bootstrap node address: {}, {}", origin, e, e2);
+                                            }
                                         }
                                     };
                                     continue;
                                 }
                             };
+                            if log::log_enabled!(log::Level::Info) {
                             info!("Trying to connect to bootstrap node: {}", addr);
+                            }
                             if let Err(e) = p2p.try_to_connect_to_peer(addr, false).await {
+                                if log::log_enabled!(log::Level::Error) {
                                 error!("Error while trying to connect to bootstrap node {}: {}", addr, e);
+                                }
                             }
                         }
                     }
@@ -511,7 +551,9 @@ impl<S: Storage> Blockchain<S> {
 
         // create RPC Server
         if !config.rpc.disable {
+            if log::log_enabled!(log::Level::Info) {
             info!("RPC Server will listen on: {}", config.rpc.bind_address);
+            }
             match DaemonRpcServer::new(
                 Arc::clone(&arc),
                 config.rpc
@@ -523,7 +565,9 @@ impl<S: Storage> Blockchain<S> {
 
         // Start the simulator task if necessary
         if let Some(simulator) = arc.simulator {
+            if log::log_enabled!(log::Level::Warn) {
             warn!("Simulator {} mode enabled!", simulator);
+            }
             let blockchain = Arc::clone(&arc);
             spawn_task("simulator", async move {
                 simulator.start(blockchain).await;
@@ -578,7 +622,9 @@ impl<S: Storage> Blockchain<S> {
             debug!("stopping storage module");
             let mut storage = self.storage.write().await;
             if let Err(e) = storage.stop().await {
+                if log::log_enabled!(log::Level::Error) {
                 error!("Error while stopping storage: {}", e);
+                }
             }
         }
 
@@ -662,7 +708,9 @@ impl<S: Storage> Blockchain<S> {
             let mut storage = self.storage.write().await;
     
             // register TOS asset
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Registering TOS asset: {} at topoheight 0", TOS_ASSET);
+            }
             let ticker = "TOS".to_owned();
     
             storage.add_asset(
@@ -675,7 +723,9 @@ impl<S: Storage> Blockchain<S> {
             ).await?;
     
             let (genesis_block, genesis_hash) = if let Some(genesis_block) = get_hex_genesis_block(&self.network) {
+                if log::log_enabled!(log::Level::Info) {
                 info!("De-serializing genesis block for network {}...", self.network);
+                }
                 let genesis = Block::from_hex(genesis_block)?;
                 let expected_hash = genesis.hash();
                 (genesis, expected_hash)
@@ -692,7 +742,9 @@ impl<S: Storage> Blockchain<S> {
                 let header = BlockHeader::new_simple(genesis_version, Vec::new(), get_current_time_in_millis(), [0u8; EXTRA_NONCE_SIZE], DEV_PUBLIC_KEY.clone(), Hash::zero());
                 let block = Block::new(Immutable::Owned(header), Vec::new());
                 let block_hash = block.hash();
+                if log::log_enabled!(log::Level::Info) {
                 info!("Genesis generated with version {:?}: {} with {:?} {}", genesis_version, block.to_hex(), block_hash, block_hash);
+                }
                 (block, block_hash)
             };
     
@@ -702,11 +754,15 @@ impl<S: Storage> Blockchain<S> {
     
             if let Some(expected_hash) = get_genesis_block_hash(&self.network) {
                 if genesis_hash != *expected_hash {
+                    if log::log_enabled!(log::Level::Error) {
                     error!("Genesis block hash is invalid! Expected: {}, got: {}", expected_hash, genesis_hash);
+                    }
                     return Err(BlockchainError::InvalidGenesisHash)
                 }
             }
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Adding genesis block '{}' to chain", genesis_hash);
+            }
     
             // hardcode genesis block topoheight
             storage.set_topo_height_for_block(&genesis_hash, 0).await?;
@@ -745,14 +801,18 @@ impl<S: Storage> Blockchain<S> {
 
         let block = self.build_block_from_header(Immutable::Owned(header)).await?;
         let block_height = block.get_blue_score();
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Mined a new block {} at height {}", hash, block_height);
+        }
         Ok(block)
     }
 
     // Prune the chain until topoheight
     // This will delete all blocks / versioned balances / txs until topoheight in param
     pub async fn prune_until_topoheight(&self, topoheight: TopoHeight) -> Result<TopoHeight, BlockchainError> {
+        if log::log_enabled!(log::Level::Debug) {
         debug!("prune until topoheight {}", topoheight);
+        }
         let mut storage = self.storage.write().await;
         debug!("storage write acquired for pruning");
         self.prune_until_topoheight_for_storage(topoheight, &mut *storage).await
@@ -781,23 +841,31 @@ impl<S: Storage> Blockchain<S> {
         // find new stable point based on a sync block under the limit topoheight
         let start = Instant::now();
         let located_sync_topoheight = self.locate_nearest_sync_block_for_topoheight(storage, topoheight, self.get_blue_score()).await?;
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Located sync topoheight found {} in {}ms", located_sync_topoheight, start.elapsed().as_millis());
+        }
 
         if located_sync_topoheight > last_pruned_topoheight {
             // delete all blocks until the new topoheight
             let start = Instant::now();
             for topoheight in last_pruned_topoheight..located_sync_topoheight {
+                if log::log_enabled!(log::Level::Trace) {
                 trace!("Pruning block at topoheight {}", topoheight);
+                }
                 // delete block
                 let _ = storage.delete_block_at_topoheight(topoheight).await?;
             }
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Pruned blocks until topoheight {} in {}ms", located_sync_topoheight, start.elapsed().as_millis());
+            }
 
             let start = Instant::now();
             // delete balances for all assets
             // TODO: this is currently going through ALL data, we need to only detect changes made in last..located
             storage.delete_versioned_data_below_topoheight(located_sync_topoheight, true).await?;
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Pruned versioned data until topoheight {} in {}ms", located_sync_topoheight, start.elapsed().as_millis());
+            }
 
             // Update the pruned topoheight
             storage.set_pruned_topoheight(Some(located_sync_topoheight)).await?;
@@ -897,9 +965,13 @@ impl<S: Storage> Blockchain<S> {
 
     // Verify if we have the current block in storage by locking it ourself
     pub async fn has_block(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        if log::log_enabled!(log::Level::Debug) {
         debug!("has block {} in chain", hash);
+        }
         let storage = self.storage.read().await;
+        if log::log_enabled!(log::Level::Debug) {
         debug!("storage read acquired for has block {}", hash);
+        }
         storage.has_block_with_hash(hash).await
     }
 
@@ -916,16 +988,22 @@ impl<S: Storage> Blockchain<S> {
     where
         P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider + GhostdagDataProvider
     {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("is sync block {} at height {}", hash, height);
-        let block_height = provider.get_height_for_block_hash(hash).await?;
+        }
+        let block_height = provider.get_blue_score_for_block_hash(hash).await?;
         if block_height == 0 { // genesis block is a sync block
+            if log::log_enabled!(log::Level::Trace) {
             trace!("Block {} at height {} is a sync block because it can only be the genesis block", hash, block_height);
+            }
             return Ok(true)
         }
 
         // block must be ordered and in stable height
         if block_height + STABLE_LIMIT > height || !provider.is_block_topological_ordered(hash).await? {
+            if log::log_enabled!(log::Level::Trace) {
             trace!("Block {} at height {} is not a sync block, it is not in stable height", hash, block_height);
+            }
             return Ok(false)
         }
 
@@ -934,13 +1012,15 @@ impl<S: Storage> Blockchain<S> {
             let topoheight = provider.get_topo_height_for_hash(hash).await?;
             if pruned_topo == topoheight {
                 // We only prune at sync block, if block is pruned, it is a sync block
+                if log::log_enabled!(log::Level::Trace) {
                 trace!("Block {} at height {} is a sync block, it is pruned", hash, block_height);
+                }
                 return Ok(true)
             }
         }
 
         // if block is alone at its height, it is a sync block
-        let tips_at_height = provider.get_blocks_at_height(block_height).await?;
+        let tips_at_height = provider.get_blocks_at_blue_score(block_height).await?;
         // This may be an issue with orphaned blocks, we can't rely on this
         // if tips_at_height.len() == 1 {
         //     return Ok(true)
@@ -949,7 +1029,9 @@ impl<S: Storage> Blockchain<S> {
         // if block is not alone at its height and they are ordered (not orphaned), it can't be a sync block
         for hash_at_height in tips_at_height {
             if *hash != hash_at_height && provider.is_block_topological_ordered(&hash_at_height).await? {
+                if log::log_enabled!(log::Level::Trace) {
                 trace!("Block {} at height {} is not a sync block, it has more than 1 block at its height", hash, block_height);
+                }
                 return Ok(false)
             }
         }
@@ -963,7 +1045,7 @@ impl<S: Storage> Blockchain<S> {
         let mut i = block_height - 1;
         let mut pre_blocks = HashSet::new();
         while i >= stable_point && i != 0 {
-            let blocks = provider.get_blocks_at_height(i).await?;
+            let blocks = provider.get_blocks_at_blue_score(i).await?;
             pre_blocks.extend(blocks);
             i -= 1;
         }
@@ -977,13 +1059,17 @@ impl<S: Storage> Blockchain<S> {
             if provider.is_block_topological_ordered(&pre_hash).await? {
                 let blue_work = provider.get_ghostdag_blue_work(&pre_hash).await?;
                 if blue_work >= sync_block_blue_work {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Block {} at height {} is not a sync block, it has lower blue_work than block {} (blue_work: {} vs {})", hash, block_height, pre_hash, sync_block_blue_work, blue_work);
+                    }
                     return Ok(false)
                 }
             }
         }
 
+        if log::log_enabled!(log::Level::Trace) {
         trace!("block {} at height {} is a sync block", hash, block_height);
+        }
 
         Ok(true)
     }
@@ -992,9 +1078,13 @@ impl<S: Storage> Blockchain<S> {
     where
         P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider + GhostdagDataProvider
     {
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Finding tip base for {} at height {}", hash, height);
+        }
         let mut cache = self.tip_base_cache.lock().await;
+        if log::log_enabled!(log::Level::Debug) {
         debug!("tip base cache locked for {} at height {}", hash, height);
+        }
 
         let mut stack: VecDeque<Hash> = VecDeque::new();
         stack.push_back(hash.clone());
@@ -1003,14 +1093,18 @@ impl<S: Storage> Blockchain<S> {
         let mut processed = HashSet::new();
 
         'main: while let Some(current_hash) = stack.pop_back() {
+            if log::log_enabled!(log::Level::Trace) {
             trace!("Finding tip base for {} at height {}", current_hash, height);
+            }
             processed.insert(current_hash.clone());
             if pruned_topoheight > 0 && provider.is_block_topological_ordered(&current_hash).await? {
                 let topoheight = provider.get_topo_height_for_hash(&current_hash).await?;
                 // Node is pruned, we only prune chain to stable height / sync block so we can return the hash
                 if topoheight <= pruned_topoheight {
-                    let block_height = provider.get_height_for_block_hash(&current_hash).await?;
+                    let block_height = provider.get_blue_score_for_block_hash(&current_hash).await?;
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Node is pruned, returns tip {} at {} as stable tip base", current_hash, block_height);
+                    }
                     bases.insert((current_hash.clone(), block_height));
                     continue 'main;
                 }
@@ -1018,7 +1112,9 @@ impl<S: Storage> Blockchain<S> {
 
             // first, check if we have it in cache
             if let Some((base_hash, base_height)) = cache.get(&(current_hash.clone(), height)) {
+                if log::log_enabled!(log::Level::Trace) {
                 trace!("Tip Base for {} at height {} found in cache: {} for height {}", current_hash, height, base_hash, base_height);
+                }
                 bases.insert((base_hash.clone(), *base_height));
                 continue 'main;
             }
@@ -1037,8 +1133,10 @@ impl<S: Storage> Blockchain<S> {
                     let topoheight = provider.get_topo_height_for_hash(&tip_hash).await?;
                     // Node is pruned, we only prune chain to stable height / sync block so we can return the hash
                     if topoheight <= pruned_topoheight {
-                        let block_height = provider.get_height_for_block_hash(&tip_hash).await?;
+                        let block_height = provider.get_blue_score_for_block_hash(&tip_hash).await?;
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Node is pruned, returns tip {} at {} as stable tip base", tip_hash, block_height);
+                        }
                         bases.insert((tip_hash.clone(), block_height));
                         continue 'main;
                     }
@@ -1046,7 +1144,7 @@ impl<S: Storage> Blockchain<S> {
 
                 // if block is sync, it is a tip base
                 if self.is_sync_block_at_height(provider, &tip_hash, height).await? {
-                    let block_height = provider.get_height_for_block_hash(&tip_hash).await?;
+                    let block_height = provider.get_blue_score_for_block_hash(&tip_hash).await?;
                     // save in cache
                     cache.put((hash.clone(), height), (tip_hash.clone(), block_height));
                     bases.insert((tip_hash.clone(), block_height));
@@ -1061,7 +1159,9 @@ impl<S: Storage> Blockchain<S> {
         }
 
         if bases.is_empty() {
+            if log::log_enabled!(log::Level::Error) {
             error!("Tip base for {} at height {} not found", hash, height);
+            }
             return Err(BlockchainError::ExpectedTips)
         }
 
@@ -1073,7 +1173,9 @@ impl<S: Storage> Blockchain<S> {
 
         // save in cache
         cache.put((hash.clone(), height), (base_hash.clone(), base_height));
+        if log::log_enabled!(log::Level::Trace) {
         trace!("Tip Base for {} at height {} found: {} for height {}", hash, height, base_hash, base_height);
+        }
 
         Ok((base_hash, base_height))
     }
@@ -1084,20 +1186,24 @@ impl<S: Storage> Blockchain<S> {
         P: DifficultyProvider + DagOrderProvider + BlocksAtHeightProvider + PrunedTopoheightProvider + GhostdagDataProvider,
         I: IntoIterator<Item = &'a Hash> + Copy,
     {
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Searching for common base for tips {}", tips.into_iter().map(|h| h.to_string()).collect::<Vec<String>>().join(", "));
+        }
         let mut cache = self.common_base_cache.lock().await;
         debug!("common base cache locked");
 
         let combined_tips = get_combined_hash_for_tips(tips.into_iter());
         if let Some((hash, height)) = cache.get(&combined_tips) {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Common base found in cache: {} at height {}", hash, height);
+            }
             return Ok((hash.clone(), *height))
         }
 
         let mut best_height = 0;
         // first, we check the best (highest) height of all tips
         for hash in tips.into_iter() {
-            let height = provider.get_height_for_block_hash(hash).await?;
+            let height = provider.get_blue_score_for_block_hash(hash).await?;
             if height > best_height {
                 best_height = height;
             }
@@ -1106,7 +1212,9 @@ impl<S: Storage> Blockchain<S> {
         let pruned_topoheight = provider.get_pruned_topoheight().await?.unwrap_or(0);
         let mut bases = Vec::new();
         for hash in tips.into_iter() {
+            if log::log_enabled!(log::Level::Trace) {
             trace!("Searching tip base for {}", hash);
+            }
             bases.push(self.find_tip_base(provider, hash, best_height, pruned_topoheight).await?);
         }
 
@@ -1125,7 +1233,9 @@ impl<S: Storage> Blockchain<S> {
         // we delete the last element because we sorted it descending
         // and we want the lowest height
         let (base_hash, base_height) = bases.remove(bases.len() - 1);
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Common base {} with height {} on {}", base_hash, base_height, bases.len() + 1);
+        }
 
         // save in cache
         cache.put(combined_tips, (base_hash.clone(), base_height));
@@ -1140,10 +1250,14 @@ impl<S: Storage> Blockchain<S> {
     
         while let Some((current_hash, current_level)) = stack.pop_back() {
             if current_level >= 2 * STABLE_LIMIT {
+                if log::log_enabled!(log::Level::Trace) {
                 trace!("Level limit reached, adding {}", current_hash);
+                }
                 set.insert(current_hash);
             } else {
+                if log::log_enabled!(log::Level::Trace) {
                 trace!("Level {} reached with hash {}", current_level, current_hash);
+                }
                 let tips = provider.get_past_blocks_for_block_hash(&current_hash).await?;
                 set.insert(current_hash);
                 for past_hash in tips.iter() {
@@ -1171,8 +1285,12 @@ impl<S: Storage> Blockchain<S> {
             for j in 0..tips_count {
                 // if a tip can be referenced as another's past block, its not a tip
                 if i != j && reach[j].contains(&tips[i]) {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Tip {} (index {}) is reachable from tip {} (index {})", tips[i], i, tips[j], j);
+                    }
+                    if log::log_enabled!(log::Level::Trace) {
                     trace!("reach: {}", reach[j].iter().map(|x| x.to_string()).collect::<Vec<String>>().join(", "));
+                    }
                     return Ok(false)
                 }
             }
@@ -1204,7 +1322,7 @@ impl<S: Storage> Blockchain<S> {
             let tips = provider.get_past_blocks_for_block_hash(&current_hash).await?;
             for tip_hash in tips.iter() {
                 if provider.is_block_topological_ordered(tip_hash).await? {
-                    let height = provider.get_height_for_block_hash(tip_hash).await?;
+                    let height = provider.get_blue_score_for_block_hash(tip_hash).await?;
                     if lowest_height.is_none_or(|h| h > height) {
                         lowest_height = Some(height);
                     }
@@ -1227,14 +1345,20 @@ impl<S: Storage> Blockchain<S> {
         P: DifficultyProvider + DagOrderProvider
     {
         if provider.is_block_topological_ordered(hash).await? {
-            let height = provider.get_height_for_block_hash(hash).await?;
+            let height = provider.get_blue_score_for_block_hash(hash).await?;
+            if log::log_enabled!(log::Level::Debug) {
             debug!("calculate_distance: Block {} is at height {}", hash, height);
+            }
             return Ok(Some(height))
         }
+        if log::log_enabled!(log::Level::Debug) {
         debug!("calculate_distance: Block {} is not ordered, calculate distance from mainchain", hash);
+        }
         let lowest_height = self.find_lowest_height_from_mainchain(provider, hash.clone()).await?;
 
+        if log::log_enabled!(log::Level::Debug) {
         debug!("calculate_distance: lowest height found is {:?}", lowest_height);
+        }
         Ok(lowest_height)
     }
 
@@ -1248,7 +1372,9 @@ impl<S: Storage> Blockchain<S> {
             return Ok(false);
         };
 
+        if log::log_enabled!(log::Level::Debug) {
         debug!("distance for block {}: {} at chain height {}", hash, lowest_ordered_height, chain_height);
+        }
 
         // If the lowest ordered height is below or equal to current chain height
         // and that we have a difference bigger than our stable limit
@@ -1270,7 +1396,9 @@ impl<S: Storage> Blockchain<S> {
     where
         P: DifficultyProvider + DagOrderProvider + GhostdagDataProvider
     {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("Generating full order for {} with base {}", hash, base);
+        }
         let mut cache = self.full_order_cache.lock().await;
 
         // Full order that is generated
@@ -1319,7 +1447,9 @@ impl<S: Storage> Blockchain<S> {
                     let blue_work = provider.get_ghostdag_blue_work(tip_hash).await?;
                     scores.push((tip_hash.clone(), blue_work));
                 } else {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Block {} is skipped in generate_full_order, is ordered = {}, base topo height = {}", tip_hash, is_ordered, base_topo_height);
+                    }
                 }
             }
 
@@ -1452,9 +1582,13 @@ impl<S: Storage> Blockchain<S> {
         I: IntoIterator<Item = &'a Hash> + ExactSizeIterator + Clone,
         I::IntoIter: ExactSizeIterator
     {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("Verifying proof of work for block {}", hash);
+        }
         let (difficulty, p) = self.get_difficulty_at_tips(provider, tips).await?;
+        if log::log_enabled!(log::Level::Trace) {
         trace!("Difficulty at tips: {}", difficulty);
+        }
         if check_difficulty(hash, &difficulty)? {
             Ok((difficulty, p))
         } else {
@@ -1490,7 +1624,9 @@ impl<S: Storage> Blockchain<S> {
 
     // Add a tx to the mempool with the given hash, it is not computed and the TX is transformed into an Arc
     pub async fn add_tx_to_mempool_with_hash(&self, tx: Arc<Transaction>, hash: Immutable<Hash>, broadcast: bool) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Debug) {
         debug!("add tx to mempool with hash {}", hash);
+        }
         let storage = self.storage.read().await;
         debug!("storage read acquired to add tx to mempool with hash");
         self.add_tx_to_mempool_with_storage_and_hash(&storage, tx, hash, broadcast).await
@@ -1499,7 +1635,9 @@ impl<S: Storage> Blockchain<S> {
     // Add a tx to the mempool with the given hash, it will verify the TX and check that it is not already in mempool or in blockchain
     // and its validity (nonce, balance, etc...)
     pub async fn add_tx_to_mempool_with_storage_and_hash(&self, storage: &S, tx: Arc<Transaction>, hash: Immutable<Hash>, broadcast: bool) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Debug) {
         debug!("add tx to mempool with storage and hash {} (broadcast = {})", hash, broadcast);
+        }
         let tx_size = tx.size();
         if tx_size > MAX_TRANSACTION_SIZE {
             return Err(BlockchainError::TxTooBig(tx_size, MAX_TRANSACTION_SIZE))
@@ -1524,7 +1662,9 @@ impl<S: Storage> Blockchain<S> {
             // from both passing the nonce check and being added to the mempool
             let nonce_lock = mempool.get_nonce_lock(tx.get_source());
             let _guard = nonce_lock.lock().await;
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Acquired nonce lock for account {}", tx.get_source().as_address(self.network.is_mainnet()));
+            }
 
             let stable_topoheight = self.get_stable_topoheight();
             let current_topoheight = self.get_topo_height();
@@ -1534,13 +1674,17 @@ impl<S: Storage> Blockchain<S> {
                 // we accept to delete a tx from mempool if the new one has a higher fee
                 if let Some(hash2) = cache.has_tx_with_same_nonce(tx.get_nonce()) {
                     // A TX with the same nonce is already in mempool
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("TX {} nonce is already used by TX {}", hash, hash2);
+                    }
                     return Err(BlockchainError::TxNonceAlreadyUsed(tx.get_nonce(), hash2.as_ref().clone()))
                 }
 
                 // check that the nonce is in the range
                 if !(tx.get_nonce() <= cache.get_max() + 1 && tx.get_nonce() >= cache.get_min()) {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("TX {} nonce is not in the range of the pending TXs for this owner, received: {}, expected between {} and {}", hash, tx.get_nonce(), cache.get_min(), cache.get_max());
+                    }
                     return Err(BlockchainError::InvalidTxNonceMempoolCache(tx.get_nonce(), cache.get_min(), cache.get_max()))
                 }
             }
@@ -1552,7 +1696,9 @@ impl<S: Storage> Blockchain<S> {
             let version = get_version_at_height(self.get_network(), self.get_blue_score());
             mempool.add_tx(storage, &self.environment, stable_topoheight, current_topoheight, hash.clone(), tx.clone(), tx_size, version).await?;
 
+            if log::log_enabled!(log::Level::Debug) {
             debug!("TX {} has been added to the mempool", hash);
+            }
 
             // Record the time taken to add the transaction to the mempool
             histogram!("tos_mempool_tx_added_ms").record(start.elapsed().as_millis() as f64);
@@ -1562,7 +1708,9 @@ impl<S: Storage> Blockchain<S> {
         };
 
         if broadcast {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("broadcast new tx {} added in mempool", hash);
+            }
             // P2p broadcast to others peers
             if let Some(p2p) = self.p2p.read().await.as_ref() {
                 let p2p = p2p.clone();
@@ -1579,7 +1727,9 @@ impl<S: Storage> Blockchain<S> {
                     let getwork = getwork.clone();
                     spawn_task("tx-notify-new-job", async move {
                         if let Err(e) = getwork.get_handler().notify_new_job_rate_limited().await {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("Error while notifying miners for new tx: {}", e);
+                            }
                         }
                     });
                 }
@@ -1597,7 +1747,9 @@ impl<S: Storage> Blockchain<S> {
                     let rpc = rpc.clone();
                     spawn_task("rpc-notify-tx", async move {
                         if let Err(e) = rpc.notify_clients(&NotifyEvent::TransactionAddedInMempool, json).await {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("Error while broadcasting event TransactionAddedInMempool to websocket: {}", e);
+                            }
                         }
                     });
                 }
@@ -1617,91 +1769,137 @@ impl<S: Storage> Blockchain<S> {
 
     // check that the TX Hash is present in mempool or in chain disk
     pub async fn has_tx(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("has tx {}", hash);
+        }
 
         // check in mempool first
         // if its present, returns it
         // Hopefully no deadlock appear here as we lock independently
+        if log::log_enabled!(log::Level::Debug) {
         debug!("has tx {} in mempool", hash);
+        }
         {
             let mempool = self.mempool.read().await;
+            if log::log_enabled!(log::Level::Debug) {
             debug!("mempool lock acquired for has tx {}", hash);
+            }
             if mempool.contains_tx(hash) {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("TX {} found in mempool", hash);
+                }
                 return Ok(true)
             }
         }
 
         // check in storage now
+        if log::log_enabled!(log::Level::Debug) {
         debug!("has tx {} in storage", hash);
+        }
         {
             let storage = self.storage.read().await;
+            if log::log_enabled!(log::Level::Debug) {
             debug!("storage read acquired for has tx {}", hash);
+            }
             if storage.has_transaction(hash).await? {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("TX {} found in storage", hash);
+                }
                 return Ok(true)
             }
         }
 
+        if log::log_enabled!(log::Level::Debug) {
         debug!("TX {} was not found in storage or mempool", hash);
+        }
 
         Ok(false)
     }
 
     // Check if the TX is either executed in chain or already present in mempool
     pub async fn is_tx_included(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("is tx {} maybe compatible", hash);
+        }
 
         // check in mempool first
         // if its present, returns it
+        if log::log_enabled!(log::Level::Debug) {
         debug!("is tx {} included in mempool", hash);
+        }
         {
             let mempool = self.mempool.read().await;
+            if log::log_enabled!(log::Level::Debug) {
             debug!("mempool lock acquired for is tx included {}", hash);
+            }
             if mempool.contains_tx(hash) {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("TX {} found in mempool", hash);
+                }
                 return Ok(true)
             }
         }
 
         // check in storage now
+        if log::log_enabled!(log::Level::Debug) {
         debug!("is tx {} already executed", hash);
+        }
         {
             let storage = self.storage.read().await;
+            if log::log_enabled!(log::Level::Debug) {
             debug!("storage read acquired for is tx {} compatible", hash);
+            }
             if storage.is_tx_executed_in_a_block(hash)? {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("TX {} found in storage", hash);
+                }
                 return Ok(true)
             }
         }
 
+        if log::log_enabled!(log::Level::Debug) {
         debug!("TX {} is not included anywhere", hash);
+        }
         Ok(false)
     }
 
     // retrieve the TX based on its hash by searching in mempool then on disk
     pub async fn get_tx(&self, hash: &Hash) -> Result<Immutable<Transaction>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("get tx {} from blockchain", hash);
+        }
 
         // check in mempool first
         // if its present, returns it
         {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Locking mempool for get tx {}", hash);
+            }
             let mempool = self.mempool.read().await;
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Mempool locked for get tx {}", hash);
+            }
             if let Ok(tx) =  mempool.get_tx(hash) {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("found {} in mempool", hash);
+                }
                 return Ok(Immutable::Arc(tx))
             }
         }
 
         // check in storage now
         {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("get tx {} storage lock", hash);
+            }
             let storage = self.storage.read().await;
+            if log::log_enabled!(log::Level::Debug) {
             debug!("get tx {} storage read acquired", hash);
+            }
             if storage.has_transaction(&hash).await? {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("tx {} is in storage", hash);
+                }
                 return storage.get_transaction(hash).await
             }
         }
@@ -1725,7 +1923,9 @@ impl<S: Storage> Blockchain<S> {
         let tips_set = storage.get_tips().await?;
         let mut tips = Vec::with_capacity(tips_set.len());
         for hash in tips_set {
+            if log::log_enabled!(log::Level::Trace) {
             trace!("Tip found from storage: {}", hash);
+            }
             tips.push(hash);
         }
 
@@ -1744,7 +1944,9 @@ impl<S: Storage> Blockchain<S> {
                         best_hash = tip.clone();
                     }
                 }
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Best tip selected by GHOSTDAG (blue_work={}): {}", best_blue_work, best_hash);
+                }
                 best_hash
             };
 
@@ -1752,12 +1954,16 @@ impl<S: Storage> Blockchain<S> {
             for hash in tips {
                 if best_tip != hash {
                     if !self.validate_tips(storage, &best_tip, &hash).await? {
+                        if log::log_enabled!(log::Level::Warn) {
                         warn!("Tip {} is invalid, not selecting it because difficulty can't be less than 91% of {}", hash, best_tip);
+                        }
                         continue;
                     }
 
                     if !self.is_near_enough_from_main_chain(storage, &hash, current_height).await? {
+                        if log::log_enabled!(log::Level::Warn) {
                         warn!("Tip {} is not selected for mining: too far from mainchain at height: {}", hash, current_height);
+                        }
                         continue;
                     }
                 }
@@ -1768,7 +1974,9 @@ impl<S: Storage> Blockchain<S> {
             // V-24 Fix: Require at least one valid tip
             // If all tips were filtered out (invalid), use the best tip as fallback
             if tips.is_empty() {
+                if log::log_enabled!(log::Level::Warn) {
                 warn!("No valid tips found for block template after validation, using best tip {} as fallback", best_tip);
+                }
                 tips.push(best_tip);
             }
 
@@ -1779,7 +1987,9 @@ impl<S: Storage> Blockchain<S> {
         let mut sorted_tips = blockdag::sort_tips(storage, tips.into_iter()).await?;
         if sorted_tips.len() > TIPS_LIMIT {
             let dropped_tips = sorted_tips.drain(TIPS_LIMIT..); // keep only first TIPS_LIMIT heavier tips
+            if log::log_enabled!(log::Level::Warn) {
             warn!("Dropping tips {} because they are not in the first {} heavier tips", dropped_tips.map(|h| h.to_string()).collect::<Vec<String>>().join(", "), TIPS_LIMIT);
+            }
         }
 
         // find the newest timestamp
@@ -1806,7 +2016,9 @@ impl<S: Storage> Blockchain<S> {
 
         // Set the calculated blue_score in the block header
         block.blue_score = blue_score;
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Block template created with blue_score: {}", blue_score);
+        }
 
         histogram!("tos_block_header_template_ms").record(start.elapsed().as_millis() as f64);
 
@@ -1885,7 +2097,9 @@ impl<S: Storage> Blockchain<S> {
                 for hash in processed_txs.iter() {
                     if storage.is_tx_executed_in_a_block(&hash)? {
                         // If the TX is executed in a block, we can skip it
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Skipping TX {} because it is already executed in a block", hash);
+                        }
                         continue;
                     }
 
@@ -1901,23 +2115,31 @@ impl<S: Storage> Blockchain<S> {
 
             while let Some(TxSelectorEntry { size, hash, tx }) = tx_selector.next() {
                 if block_size + total_txs_size + size >= MAX_BLOCK_SIZE || selected_txs.len() >= u16::MAX as usize {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Stopping to include new TXs in this block, final size: {}, count: {}", human_bytes::human_bytes((block_size + total_txs_size) as f64), selected_txs.len());
+                    }
                     break;
                 }
 
                 // Check if the TX is already in the block
                 if processed_txs.contains(hash.as_ref()) {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Skipping TX {} because it is already in the DAG branch", hash);
+                    }
                     continue;
                 }
 
                 if !self.skip_block_template_txs_verification {
                     // Check if the TX is valid for this potential block
+                    if log::log_enabled!(log::Level::Trace) {
                     trace!("Checking TX {} with nonce {}, {}", hash, tx.get_nonce(), tx.get_source().as_address(self.network.is_mainnet()));
+                    }
 
                     let source = tx.get_source();
                     if failed_sources.contains(source) {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Skipping TX {} because its source has failed before", hash);
+                        }
                         continue;
                     }
 
@@ -1929,7 +2151,9 @@ impl<S: Storage> Blockchain<S> {
                             &mut chain_state,
                             &tx_cache,
                         ).await {
+                            if log::log_enabled!(log::Level::Warn) {
                             warn!("Orphaned TXs for source {} are not valid anymore: {}", source.as_address(self.network.is_mainnet()), e);
+                            }
                             failed_sources.insert(source);
                             continue;
                         }
@@ -1941,13 +2165,17 @@ impl<S: Storage> Blockchain<S> {
                         &mut chain_state,
                         &tx_cache,
                     ).await {
+                        if log::log_enabled!(log::Level::Warn) {
                         warn!("TX {} ({}) is not valid for mining: {}", hash, source.as_address(self.network.is_mainnet()), e);
+                        }
                         failed_sources.insert(source);
                         continue;
                     }
                 }
 
+                if log::log_enabled!(log::Level::Trace) {
                 trace!("Selected {} (nonce: {}, fees: {}) for mining", hash, tx.get_nonce(), format_tos(tx.get_fee()));
+                }
                 // Clone the Arc (cheap reference count increment) instead of cloning the inner Hash
                 // This is more efficient than hash.as_ref().clone() which would copy the 32-byte hash
                 selected_txs.insert(Arc::clone(hash));
@@ -1966,7 +2194,9 @@ impl<S: Storage> Blockchain<S> {
     // SECURITY FIX: This function now rejects blocks without transaction caching
     // to prevent merkle root validation bypass attacks
     pub async fn build_block_from_header(&self, header: Immutable<BlockHeader>) -> Result<Block, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("Building block from header at height {}", header.get_blue_score());
+        }
 
         // SECURITY: Check if this is an empty block (merkle root is zero)
         let merkle_root = header.get_hash_merkle_root();
@@ -1980,8 +2210,10 @@ impl<S: Storage> Blockchain<S> {
         // SECURITY CRITICAL: Block has non-zero merkle root but we have no transaction cache
         // Returning an empty block would allow merkle root validation bypass
         // This is a security vulnerability - we must reject the block
+        if log::log_enabled!(log::Level::Error) {
         error!("SECURITY: Cannot build block from header - no transaction cache available, but merkle root is non-zero: {}",
                merkle_root);
+        }
         error!("This indicates either:");
         error!("  1. A miner submitting a block without using get_block_template");
         error!("  2. Missing transaction caching implementation");
@@ -2022,49 +2254,69 @@ impl<S: Storage> Blockchain<S> {
         debug!("add block semaphore acquired, locking storage for block verification");
         let storage = self.storage.read().await;
 
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Add new block {}", block_hash);
+        }
         if storage.has_block_with_hash(&block_hash).await? {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Block {} is already in chain!", block_hash);
+            }
             return Err(BlockchainError::AlreadyInChain)
         }
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Block {} is not in chain, processing it", block_hash);
+        }
 
         // V-21 Fix: Strengthen timestamp validation
         let current_timestamp = get_current_time_in_millis();
         if block.get_timestamp() > current_timestamp + TIMESTAMP_IN_FUTURE_LIMIT {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Block timestamp {} is too far in future! Current: {}, limit: {}ms",
                    block.get_timestamp(), current_timestamp, TIMESTAMP_IN_FUTURE_LIMIT);
+            }
             return Err(BlockchainError::TimestampIsInFuture(current_timestamp, block.get_timestamp()));
         }
 
         let tips_count = block.get_parents().len();
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Tips count for this new {}: {}", block, tips_count);
+        }
         // only 3 tips are allowed
         if tips_count > TIPS_LIMIT {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Invalid tips count, got {} but maximum allowed is {}", tips_count, TIPS_LIMIT);
+            }
             return Err(BlockchainError::InvalidTipsCount(block_hash.into_owned(), tips_count))
         }
 
         let mut current_height = self.get_blue_score();
         if tips_count == 0 && current_height != 0 {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Expected at least one previous block for this block {}", block_hash);
+            }
             return Err(BlockchainError::ExpectedTips)
         }
 
         if tips_count > 0 && block.get_blue_score() == 0 {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Invalid block height, got height 0 but tips are present for this block {}", block_hash);
+            }
             return Err(BlockchainError::BlockHeightZeroNotAllowed)
         }
 
         if tips_count == 0 && block.get_blue_score() != 0 {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Invalid tips count, got {} but current height is {} with block height {}", tips_count, current_height, block.get_blue_score());
+            }
             return Err(BlockchainError::InvalidTipsCount(block_hash.into_owned(), tips_count))
         }
 
         // block contains header and full TXs
         let block_size = block.size();
         if block_size > MAX_BLOCK_SIZE {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Block size ({} bytes) is greater than the limit ({} bytes)", block.size(), MAX_BLOCK_SIZE);
+            }
             return Err(BlockchainError::InvalidBlockSize(MAX_BLOCK_SIZE, block.size()));
         }
 
@@ -2076,7 +2328,9 @@ impl<S: Storage> Blockchain<S> {
         if transactions.is_empty() {
             // Empty block must have zero merkle root
             if *header_merkle_root != Hash::zero() {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Block {} has no transactions but non-zero merkle root {}", block_hash, header_merkle_root);
+                }
                 return Err(BlockchainError::EmptyBlockWithMerkleRoot(block_hash.into_owned()));
             }
         } else {
@@ -2085,20 +2339,26 @@ impl<S: Storage> Blockchain<S> {
 
             // Verify it matches the header
             if calculated_merkle_root != *header_merkle_root {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Block {} has invalid merkle root: header has {}, but calculated from transactions is {}",
                        block_hash, header_merkle_root, calculated_merkle_root);
+                }
                 return Err(BlockchainError::InvalidMerkleRoot(
                     block_hash.into_owned(),
                     calculated_merkle_root,
                     header_merkle_root.clone()
                 ));
             }
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Block {} merkle root validated successfully: {}", block_hash, calculated_merkle_root);
+            }
         }
 
         for tip in block.get_parents() {
             if !storage.has_block_with_hash(&tip).await? {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("This block ({}) has a TIP ({}) which is not present in chain", block_hash, tip);
+                }
                 return Err(BlockchainError::InvalidTipsNotFound(block_hash.into_owned(), tip.clone()))
             }
         }
@@ -2107,17 +2367,23 @@ impl<S: Storage> Blockchain<S> {
         // This is the correct way to validate block blue_score in a DAG with multiple parents
         let block_blue_score_by_tips = blockdag::calculate_blue_score_at_tips(&*storage, block.get_parents().iter()).await?;
         if block_blue_score_by_tips != block.get_blue_score() {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Invalid block blue_score {}, expected {} for this block {} (GHOSTDAG validation)",
                    block.get_blue_score(), block_blue_score_by_tips, block_hash);
+            }
             return Err(BlockchainError::InvalidBlockHeight(block_blue_score_by_tips, block.get_blue_score()))
         }
 
         let stable_height = self.get_stable_blue_score();
         if tips_count > 0 {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Blue score by tips: {}, stable blue score: {}", block_blue_score_by_tips, stable_height);
+            }
 
             if block_blue_score_by_tips < stable_height {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Invalid block blue_score by tips {} for this block ({}), its blue_score is in stable height {}", block_blue_score_by_tips, block_hash, stable_height);
+                }
                 return Err(BlockchainError::InvalidBlockHeightStableHeight)
             }
         }
@@ -2125,7 +2391,9 @@ impl<S: Storage> Blockchain<S> {
         // Verify the reachability of the block
         let parents_set: IndexSet<Hash> = block.get_header().get_parents().iter().cloned().collect();
         if !self.verify_non_reachability(&*storage, &parents_set).await? {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("{} with hash {} has an invalid reachability", block, block_hash);
+            }
             return Err(BlockchainError::InvalidReachability)
         }
 
@@ -2138,17 +2406,23 @@ impl<S: Storage> Blockchain<S> {
 
             // Block timestamp can't be less than any parent
             if block.get_timestamp() < previous_timestamp {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Invalid block timestamp {}, parent {} has timestamp {} which is greater",
                        block.get_timestamp(), hash, previous_timestamp);
+                }
                 return Err(BlockchainError::TimestampIsLessThanParent(block.get_timestamp()));
             }
 
+            if log::log_enabled!(log::Level::Trace) {
             trace!("calculate distance from mainchain for tips: {}", hash);
+            }
 
             // We're processing the block tips, so we can't use the block blue_score as it may not be in the chain yet
             let height = block_blue_score_by_tips.saturating_sub(1);
             if !self.is_near_enough_from_main_chain(&*storage, &hash, height).await? {
+                if log::log_enabled!(log::Level::Error) {
                 error!("{} with hash {} have deviated too much (current blue score: {}, block blue score: {})", block, block_hash, current_height, block_blue_score_by_tips);
+                }
                 return Err(BlockchainError::BlockDeviation)
             }
         }
@@ -2158,8 +2432,10 @@ impl<S: Storage> Blockchain<S> {
             parent_timestamps.sort_unstable();
             let median_timestamp = parent_timestamps[tips_count / 2];
             if block.get_timestamp() < median_timestamp {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Invalid block timestamp {}, less than median parent time {}",
                        block.get_timestamp(), median_timestamp);
+                }
                 return Err(BlockchainError::TimestampIsLessThanParent(median_timestamp));
             }
         }
@@ -2181,11 +2457,15 @@ impl<S: Storage> Blockchain<S> {
                 }
                 best_hash
             };
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Best tip selected by GHOSTDAG for block validation: {}", best_tip);
+            }
             for hash in block.get_parents() {
                 if best_tip != hash {
                     if !self.validate_tips(&*storage, best_tip, &hash).await? {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Tip {} is invalid, difficulty can't be less than 91% of {}", hash, best_tip);
+                        }
                         return Err(BlockchainError::InvalidTipsDifficulty(block_hash.into_owned(), hash.clone()))
                     }
                 }
@@ -2205,9 +2485,13 @@ impl<S: Storage> Blockchain<S> {
             histogram!("tos_block_pow_ms").record(start.elapsed().as_millis() as f64);
             hash
         };
+        if log::log_enabled!(log::Level::Debug) {
         debug!("POW hash: {}, skipped: {}", pow_hash, skip_pow);
+        }
         let (difficulty, p) = self.verify_proof_of_work(&*storage, &pow_hash, block.get_parents().iter()).await?;
+        if log::log_enabled!(log::Level::Debug) {
         debug!("PoW is valid for difficulty {}", difficulty);
+        }
 
         let mut current_topoheight = self.get_topo_height();
         // Transaction verification
@@ -2222,11 +2506,15 @@ impl<S: Storage> Blockchain<S> {
             // Serializer support only up to u16::MAX txs per block
             let limit = u16::MAX as usize;
             if txs_len > limit {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Block {} has an invalid block header, transactions count is bigger than limit (expected max {} got {})!", block_hash, limit, txs_len);
+                }
                 return Err(BlockchainError::InvalidBlockTxs(limit, txs_len));
             }
 
+            if log::log_enabled!(log::Level::Trace) {
             trace!("verifying {} TXs in block {}", txs_len, block_hash);
+            }
 
             // V2 helps us to determine if we should retrieve all TXs from parents
             // that are not only executed, but also just in block tips to prevent re integration
@@ -2245,7 +2533,9 @@ impl<S: Storage> Blockchain<S> {
             // Cache to retrieve only one time all TXs hashes until stable height from our TIPS
             // This include all TXs that were executed (or not if any TIP branch is orphaned)
             let parents_txs = if !block.get_transactions().is_empty() {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Loading all TXs until height {} for block {} (executed only: {})", stable_height, block_hash, !is_v2_enabled);
+                }
                 self.get_all_txs_until_height(
                     &*storage,
                     stable_height,
@@ -2259,10 +2549,14 @@ impl<S: Storage> Blockchain<S> {
             if is_v3_enabled {
                 // if V3 is enabled, we should also group the TXs by source
                 // to re inject them in case of orphaned blocks
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Grouping all TXs from parents by source for block {}", block_hash);
+                }
                 for hash in parents_txs.iter() {
                     if storage.is_tx_executed_in_a_block(hash)? {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("TX {} from parent is executed, skipping it", hash);
+                        }
                         continue;
                     }
 
@@ -2286,16 +2580,22 @@ impl<S: Storage> Blockchain<S> {
                     return Err(BlockchainError::TxTooBig(tx_size, MAX_TRANSACTION_SIZE))
                 }
 
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Verifying TX {}", tx_hash);
+                }
                 // check that the TX included is not executed in stable height
                 let is_executed = storage.is_tx_executed_in_a_block(&tx_hash)?;
                 if is_executed {
                     let block_executor = storage.get_block_executor_for_tx(&tx_hash)?;
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Tx {} was executed in {}", tx_hash, block_executor);
-                    let block_executor_height = storage.get_height_for_block_hash(&block_executor).await?;
+                    }
+                    let block_executor_height = storage.get_blue_score_for_block_hash(&block_executor).await?;
                     // if the tx was executed below stable height, reject whole block!
                     if block_executor_height <= stable_height {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Block {} contains a dead tx {} from stable height {}", block_hash, tx_hash, stable_height);
+                        }
                         return Err(BlockchainError::DeadTxFromStableHeight(block_hash.into_owned(), tx_hash, stable_height, block_executor))
                     }
                 }
@@ -2307,12 +2607,16 @@ impl<S: Storage> Blockchain<S> {
                     // miner knows this tx was already executed because its present in block tips
                     // reject the whole block
                     if parents_txs.contains(&tx_hash) {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Malicious Block {} formed, contains a dead tx {}, is executed: {}", block_hash, tx_hash, is_executed);
+                        }
                         return Err(BlockchainError::DeadTxFromTips(block_hash.into_owned(), tx_hash))
                     } else if is_executed {
                         // otherwise, all looks good but because the TX was executed in another branch, we skip verification
                         // DAG will choose which branch will execute the TX
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("TX {} was executed in another branch, skipping verification", tx_hash);
+                        }
 
                         // because TX was already validated & executed and is not in block tips
                         // we can safely skip the verification of this TX
@@ -2330,7 +2634,9 @@ impl<S: Storage> Blockchain<S> {
             }
 
             if !txs_grouped.is_empty() {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("proof verifications of {} TXs from {} sources with {} outputs in block {}", total_txs, txs_grouped.len(), total_outputs, block_hash);
+                }
 
                 debug!("locking mempool read mode for cache usage");
                 let mempool = self.mempool.read().await;
@@ -2346,11 +2652,15 @@ impl<S: Storage> Blockchain<S> {
                 if self.txs_verification_threads_count > 1 && txs_grouped.len() > 1 && is_multi_threads_supported() {
                     let mut batches_count = txs_grouped.len();
                     if batches_count > self.txs_verification_threads_count {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Batches count ({}) is above configured threads ({}), capping it", batches_count, self.txs_verification_threads_count);
+                        }
                         batches_count = self.txs_verification_threads_count;
                     }
 
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("using multi-threading mode to verify the transactions in {} batches", batches_count);
+                    }
                     let mut batches = vec![Vec::new(); batches_count];
 
                     // Track batch sizes for better load balancing
@@ -2372,7 +2682,9 @@ impl<S: Storage> Blockchain<S> {
                         batch_sizes[min_batch_idx] += group_size;
                     }
 
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Batch sizes: {:?}", batch_sizes);
+                    }
 
                     let storage = &*storage;
                     let environment = &self.environment;
@@ -2394,7 +2706,9 @@ impl<S: Storage> Blockchain<S> {
                     Transaction::verify_batch(iter, &mut chain_state, &tx_cache).await?;
                 }
 
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Verified {} transactions in {}ms", total_txs, start.elapsed().as_millis());
+                }
 
                 // Record metrics
                 counter!("tos_txs_verified").increment(total_txs as u64);
@@ -2421,7 +2735,9 @@ impl<S: Storage> Blockchain<S> {
 
         // Calculate GHOSTDAG data for the new block (TIP-2 Phase 1)
         {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Calculating GHOSTDAG data for block {}", block_hash);
+            }
             let start = Instant::now();
 
             // Get tips as parents for GHOSTDAG algorithm
@@ -2430,26 +2746,32 @@ impl<S: Storage> Blockchain<S> {
             // SECURITY FIX V-04: Check if GHOSTDAG data already exists (race detection)
             // If another thread already computed this, use their result instead
             let ghostdag_data = if storage.has_ghostdag_data(&block_hash).await? {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("GHOSTDAG data already exists for block {} - using existing data (race detected)", block_hash);
+                }
                 // Another thread already computed this - fetch existing data
                 storage.get_ghostdag_data(&block_hash).await?
             } else {
                 // Run GHOSTDAG algorithm
                 let ghostdag_data = self.ghostdag.ghostdag(&*storage, &parents).await?;
 
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("GHOSTDAG data calculated: blue_score={}, blue_work={}, mergeset_blues={}, mergeset_reds={}",
                     ghostdag_data.blue_score,
                     ghostdag_data.blue_work,
                     ghostdag_data.mergeset_blues.len(),
                     ghostdag_data.mergeset_reds.len()
                 );
+                }
 
                 // SECURITY FIX: Validate blue_score consistency (Kaspa audit finding)
                 // Verify that the block's claimed blue_score matches the GHOSTDAG-calculated value
                 // This prevents malicious blocks from claiming incorrect blue_score values
                 if block.get_blue_score() != ghostdag_data.blue_score {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Block {} has invalid blue_score: claimed={}, calculated={}",
                            block_hash, block.get_blue_score(), ghostdag_data.blue_score);
+                    }
                     return Err(BlockchainError::InvalidBlockHeight(
                         ghostdag_data.blue_score,
                         block.get_blue_score()
@@ -2469,8 +2791,10 @@ impl<S: Storage> Blockchain<S> {
                     let stored_data = storage.get_ghostdag_data(&block_hash).await?;
                     if stored_data.blue_score != data_to_store.blue_score ||
                        stored_data.blue_work != data_to_store.blue_work {
+                        if log::log_enabled!(log::Level::Warn) {
                         warn!("GHOSTDAG data mismatch detected for block {} (race condition): computed blue_score={}, stored blue_score={}",
                               block_hash, data_to_store.blue_score, stored_data.blue_score);
+                        }
                         // Use the stored data to maintain consistency
                         stored_data
                     } else {
@@ -2486,7 +2810,9 @@ impl<S: Storage> Blockchain<S> {
             // Get GHOSTDAG blue_work for P2P protocol (replaces cumulative_difficulty)
             // Now using GHOSTDAG blue_work directly for P2P broadcast
             let blue_work = ghostdag_data.blue_work.clone();
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Blue work for block {}: {}", block_hash, blue_work);
+            }
 
             // Broadcast to p2p nodes the block asap as its valid
             if broadcast.p2p() {
@@ -2512,7 +2838,9 @@ impl<S: Storage> Blockchain<S> {
                     });
                 }
             } else {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Not broadcasting block {} because broadcast is disabled", block_hash);
+                }
             }
 
             // Populate reachability data (TIP-2 Phase 2)
@@ -2522,18 +2850,24 @@ impl<S: Storage> Blockchain<S> {
 
             if is_genesis {
                 // Initialize genesis reachability data
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Initializing genesis reachability data for block {}", block_hash);
+                }
                 let genesis_hash = block_hash.as_ref().clone();
                 let reachability = crate::core::reachability::TosReachability::new(genesis_hash.clone());
                 let genesis_data = reachability.genesis_reachability_data();
                 storage.set_reachability_data(&block_hash, &genesis_data).await?;
 
                 // Initialize reindex root to genesis (Phase 2)
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Initializing reindex root to genesis {}", genesis_hash);
+                }
                 storage.set_reindex_root(genesis_hash).await?;
             } else if storage.has_reachability_data(&selected_parent).await.unwrap_or(false) {
                 // Populate reachability data for non-genesis block
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Populating reachability data for block {}", block_hash);
+                }
                 let start_reach = Instant::now();
 
                 let genesis_hash = crate::config::get_genesis_block_hash(&self.network)
@@ -2554,13 +2888,17 @@ impl<S: Storage> Blockchain<S> {
                 // This keeps the reindex root ~100 blocks behind the tip
                 reachability.hint_virtual_selected_parent(&mut *storage, block_hash.as_ref().clone()).await?;
 
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Reachability data populated in {:?}", start_reach.elapsed());
+                }
             }
         }
 
         // Save transactions & block
         {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Saving block {} on disk", block_hash);
+            }
             let start = Instant::now();
             // Phase 2: cumulative_difficulty parameter removed from save_block
             storage.save_block(block.clone(), &txs, difficulty, p, Immutable::Arc(block_hash.clone())).await?;
@@ -2569,7 +2907,9 @@ impl<S: Storage> Blockchain<S> {
             histogram!("tos_block_store_ms").record(start.elapsed().as_millis() as f64);
         }
 
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Block {} saved on disk", block_hash);
+        }
 
         let mut tips = storage.get_tips().await?;
         // TODO: best would be to not clone
@@ -2577,20 +2917,30 @@ impl<S: Storage> Blockchain<S> {
         for hash in block.get_parents() {
             tips.remove(&hash);
         }
+        if log::log_enabled!(log::Level::Debug) {
         debug!("New tips: {}", tips.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","));
+        }
 
         let (base_hash, base_height) = self.find_common_base(&*storage, &tips).await?;
+        if log::log_enabled!(log::Level::Debug) {
         debug!("New base hash: {}, height: {}", base_hash, base_height);
+        }
 
         // GHOSTDAG: Select best tip by blue_work instead of cumulative difficulty
         let best_tip = blockdag::find_best_tip_by_blue_work(&*storage, tips.iter()).await?;
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Best tip selected by GHOSTDAG (blue_work): {}", best_tip);
+        }
 
         let base_topo_height = storage.get_topo_height_for_hash(&base_hash).await?;
         // generate a full order until base_topo_height
         let mut full_order = self.generate_full_order(&*storage, &best_tip, &base_hash, base_height, base_topo_height).await?;
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Generated full order size: {}, with base ({}) topo height: {}", full_order.len(), base_hash, base_topo_height);
+        }
+        if log::log_enabled!(log::Level::Trace) {
         trace!("Full order: {}", full_order.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "));
+        }
 
         // rpc server lock
         let rpc_server = self.rpc.read().await;
@@ -2623,12 +2973,16 @@ impl<S: Storage> Blockchain<S> {
                 let mut topoheight = base_topo_height;
                 while topoheight <= current_topoheight {
                     let hash_at_topo = storage.get_hash_at_topo_height(topoheight).await?;
+                    if log::log_enabled!(log::Level::Trace) {
                     trace!("Cleaning txs at topoheight {} ({})", topoheight, hash_at_topo);
+                    }
                     if !is_written {
                         if let Some(order) = full_order.first() {
                             // Verify that the block is still at the same topoheight
                             if storage.is_block_topological_ordered(order).await? && *order == hash_at_topo {
+                                if log::log_enabled!(log::Level::Trace) {
                                 trace!("Hash {} at topo {} stay the same, skipping cleaning", hash_at_topo, topoheight);
+                                }
                                 // remove the hash from the order because we don't need to recompute it
                                 full_order.shift_remove_index(0);
                                 topoheight += 1;
@@ -2640,7 +2994,9 @@ impl<S: Storage> Blockchain<S> {
                         is_written = true;
                     }
 
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Cleaning transactions executions at topo height {} (block {})", topoheight, hash_at_topo);
+                    }
 
                     let block = storage.get_block_by_hash(&hash_at_topo).await?;
 
@@ -2659,17 +3015,23 @@ impl<S: Storage> Blockchain<S> {
                     let txs_hashes: IndexSet<Hash> = block.get_transactions().iter().map(|tx| tx.hash()).collect();
                     for tx_hash in txs_hashes.iter() {
                         if storage.is_tx_executed_in_block(tx_hash, &hash_at_topo)? {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("Removing execution of {}", tx_hash);
+                            }
                             storage.unmark_tx_from_executed(tx_hash)?;
                             storage.delete_contract_outputs_for_tx(tx_hash).await?;
 
                             if is_orphaned {
                                 // V-26 Fix: Add with size check (LRU will evict oldest if at capacity)
                                 if orphaned_transactions.len() >= MAX_ORPHANED_TRANSACTIONS {
+                                    if log::log_enabled!(log::Level::Warn) {
                                     warn!("Orphaned TX set at capacity {}, evicting oldest", MAX_ORPHANED_TRANSACTIONS);
+                                    }
                                 }
                                 orphaned_transactions.put(tx_hash.clone(), ());
+                                if log::log_enabled!(log::Level::Debug) {
                                 debug!("Tx {} is now marked as orphaned (total: {})", tx_hash, orphaned_transactions.len());
+                                }
                             }
                         }
                     }
@@ -2688,7 +3050,9 @@ impl<S: Storage> Blockchain<S> {
                 // Add cache coherence verification in debug builds
                 #[cfg(debug_assertions)]
                 if is_written {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Reorg completed with {} block(s) reordered", topoheight - base_topo_height);
+                    }
                 }
             }
 
@@ -2700,19 +3064,25 @@ impl<S: Storage> Blockchain<S> {
             let mut total_txs_execution_time = 0;
 
             // time to order the DAG that is moving
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Ordering blocks based on generated DAG order ({} blocks)", full_order.len());
+            }
             for (i, hash) in full_order.into_iter().enumerate() {
                 highest_topo = base_topo_height + skipped + i as u64;
 
                 // if block is not re-ordered and it's not genesis block
                 // because we don't need to recompute everything as it's still good in chain
                 if !is_written && tips_count != 0 && storage.is_block_topological_ordered(&hash).await? && storage.get_topo_height_for_hash(&hash).await? == highest_topo {
+                    if log::log_enabled!(log::Level::Trace) {
                     trace!("Block ordered {} stay at topoheight {}. Skipping...", hash, highest_topo);
+                    }
                     continue;
                 }
                 is_written = true;
 
+                if log::log_enabled!(log::Level::Trace) {
                 trace!("Ordering block {} at topoheight {}", hash, highest_topo);
+                }
 
                 storage.set_topo_height_for_block(&hash, highest_topo).await?;
                 let (past_emitted_supply, past_burned_supply) = if highest_topo == 0 {
@@ -2735,11 +3105,13 @@ impl<S: Storage> Blockchain<S> {
                     Entry::Occupied(entry) => entry.into_mut(),
                     Entry::Vacant(entry) => {
                         let mut count = 0;
-                        let blocks_at_height = storage.get_blocks_at_height(height).await?;
+                        let blocks_at_height = storage.get_blocks_at_blue_score(height).await?;
                         for block in blocks_at_height {
                             if block != hash && self.is_side_block_internal(&*storage, &block, highest_topo).await? {
                                 count += 1;
+                                if log::log_enabled!(log::Level::Debug) {
                                 debug!("Found side block {} at height {}", block, height);
+                                }
                             }
                         }
 
@@ -2748,7 +3120,9 @@ impl<S: Storage> Blockchain<S> {
                 };
 
                 let block_reward = self.internal_get_block_reward(past_emitted_supply, is_side_block, *side_blocks_count, block.get_version()).await?;
+                if log::log_enabled!(log::Level::Trace) {
                 trace!("set block {} reward to {} at {} (height {}, side block: {}, {} {}%)", hash, block_reward, highest_topo, height, is_side_block, side_blocks_count, side_block_reward_percentage(*side_blocks_count));
+                }
                 if is_side_block {
                     *side_blocks_count += 1;
                 }
@@ -2756,7 +3130,9 @@ impl<S: Storage> Blockchain<S> {
                 // All fees from the transactions executed in this block
                 let mut total_fees: u64 = 0;
                 // Chain State used for the verification
+                if log::log_enabled!(log::Level::Trace) {
                 trace!("building chain state to execute TXs in block {}", block_hash);
+                }
                 let mut chain_state = ApplicableChainState::new(
                     &mut *storage,
                     &self.environment,
@@ -2775,17 +3151,23 @@ impl<S: Storage> Blockchain<S> {
                 for (tx, tx_hash) in block.get_transactions().iter().zip(txs_hashes.iter()) { // execute all txs
                     // Link the transaction hash to this block
                     if !chain_state.get_mut_storage().add_block_linked_to_tx_if_not_present(&tx_hash, &hash)? {
+                        if log::log_enabled!(log::Level::Trace) {
                         trace!("Block {} is now linked to tx {}", hash, tx_hash);
+                        }
                     }
 
                     // check that the tx was not yet executed in another tip branch
                     if chain_state.get_storage().is_tx_executed_in_a_block(tx_hash)? {
+                        if log::log_enabled!(log::Level::Trace) {
                         trace!("Tx {} was already executed in a previous block, skipping...", tx_hash);
+                        }
                     } else {
                         // tx was not executed, but lets check that it is not a potential double spending
                         // check that the nonce is not already used
                         if !nonce_checker.use_nonce(chain_state.get_storage(), tx.get_source(), tx.get_nonce(), highest_topo).await? {
+                            if log::log_enabled!(log::Level::Warn) {
                             warn!("Malicious TX {}, it is a potential double spending with same nonce {}, skipping...", tx_hash, tx.get_nonce());
+                            }
                             // V-26 Fix: TX will be orphaned (LRU handles capacity)
                             orphaned_transactions.put(tx_hash.clone(), ());
                             continue;
@@ -2793,12 +3175,18 @@ impl<S: Storage> Blockchain<S> {
 
                         let start = Instant::now();
                         // Execute the transaction by applying changes in storage
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Executing tx {} in block {} with nonce {}", tx_hash, hash, tx.get_nonce());
+                        }
                         if let Err(e) = tx.apply_with_partial_verify(tx_hash, &mut chain_state).await {
+                            if log::log_enabled!(log::Level::Warn) {
                             warn!("Error while executing TX {} with current DAG org: {}", tx_hash, e);
+                            }
                             // CRITICAL: Rollback nonce on execution failure to prevent double-spend window
                             nonce_checker.undo_nonce(tx.get_source(), tx.get_nonce());
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("Rolled back nonce {} for {} due to TX execution failure", tx.get_nonce(), tx.get_source().as_address(self.network.is_mainnet()));
+                            }
                             // V-26 Fix: TX may be orphaned if not added again in good order in next blocks
                             orphaned_transactions.put(tx_hash.clone(), ());
                             continue;
@@ -2810,7 +3198,9 @@ impl<S: Storage> Blockchain<S> {
                         let expected_next_nonce = nonce_checker.get_new_nonce(tx.get_source(), self.network.is_mainnet())?;
                         let next_nonce = tx.get_nonce() + 1;
                         if expected_next_nonce != next_nonce {
+                            if log::log_enabled!(log::Level::Warn) {
                             warn!("TX {} has a nonce {}, but the next nonce is {}, forcing it...", tx_hash, next_nonce, expected_next_nonce);
+                            }
                             chain_state.as_mut().update_account_nonce(tx.get_source(), expected_next_nonce).await?;
                         }
 
@@ -2820,7 +3210,9 @@ impl<S: Storage> Blockchain<S> {
                         // Delete the transaction from  the list if it was marked as orphaned
                         // V-26 Fix: Remove from orphaned set using LruCache::pop
                         if orphaned_transactions.pop(tx_hash).is_some() {
+                            if log::log_enabled!(log::Level::Trace) {
                             trace!("Transaction {} was marked as orphaned, but got executed again", tx_hash);
+                            }
                         }
 
                         // if the rpc_server is enable, track events
@@ -2956,7 +3348,9 @@ impl<S: Storage> Blockchain<S> {
                         }
                     }
 
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Processed contracts events in {}ms", start.elapsed().as_millis());
+                    }
                 }
 
                 // apply changes from Chain State
@@ -2977,7 +3371,9 @@ impl<S: Storage> Blockchain<S> {
             }
 
             let elapsed = Duration::from_micros(total_txs_execution_time as _);
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Executed {} TXs in {:?}", total_txs_executed, elapsed);
+            }
 
             // Record metrics
             counter!("tos_txs_executed").increment(total_txs_executed as u64);
@@ -2985,14 +3381,18 @@ impl<S: Storage> Blockchain<S> {
             histogram!("tos_dag_ordering_ms").record(start.elapsed().as_millis() as f64);
         }
 
-        let best_height = storage.get_height_for_block_hash(best_tip).await?;
+        let best_height = storage.get_blue_score_for_block_hash(best_tip).await?;
         let mut new_tips = Vec::new();
         for hash in tips {
             if self.is_near_enough_from_main_chain(&*storage, &hash, current_height).await? {
+                if log::log_enabled!(log::Level::Trace) {
                 trace!("Adding {} as new tips", hash);
+                }
                 new_tips.push(hash);
             } else {
+                if log::log_enabled!(log::Level::Warn) {
                 warn!("Rusty TIP declared stale {} with best height: {}", hash, best_height);
+                }
             }
         }
 
@@ -3015,9 +3415,13 @@ impl<S: Storage> Blockchain<S> {
         for hash in new_tips {
             if best_tip != hash {
                 if !self.validate_tips(&*storage, &best_tip, &hash).await? {
+                    if log::log_enabled!(log::Level::Warn) {
                     warn!("Rusty TIP {} declared stale", hash);
+                    }
                 } else {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Tip {} is valid, adding to final Tips list", hash);
+                    }
                     tips.insert(hash);
                 }
             }
@@ -3025,10 +3429,14 @@ impl<S: Storage> Blockchain<S> {
         tips.insert(best_tip);
 
         // save highest topo height
+        if log::log_enabled!(log::Level::Debug) {
         debug!("Highest topo height found: {}", highest_topo);
+        }
         let extended = highest_topo > current_topoheight;
         if current_height == 0 || extended {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Blockchain height extended, current topoheight is now {} (previous was {})", highest_topo, current_topoheight);
+            }
             storage.set_top_topoheight(highest_topo).await?;
             self.topoheight.store(highest_topo, Ordering::Release);
             current_topoheight = highest_topo;
@@ -3037,7 +3445,9 @@ impl<S: Storage> Blockchain<S> {
         // If block is directly orphaned
         // Mark all TXs ourself as linked to it
         if !block_is_ordered {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Block {} is orphaned, marking all TXs as linked to it", block_hash);
+            }
             let txs_hashes: IndexSet<Hash> = txs.iter().map(|tx| tx.hash()).collect();
             for tx_hash in txs_hashes.iter() {
                 storage.add_block_linked_to_tx_if_not_present(tx_hash, &block_hash)?;
@@ -3050,13 +3460,19 @@ impl<S: Storage> Blockchain<S> {
                 // check that the topoheight is greater than the safety limit
                 // and that we can prune the chain using the config while respecting the safety limit
                 if current_topoheight % keep_only == 0 && current_topoheight - keep_only > 0 {
+                    if log::log_enabled!(log::Level::Info) {
                     info!("Auto pruning chain until topoheight {} (keep only {} blocks)", current_topoheight - keep_only, keep_only);
+                    }
                     let start = Instant::now();
                     if let Err(e) = self.prune_until_topoheight_for_storage(current_topoheight - keep_only, &mut *storage).await {
+                        if log::log_enabled!(log::Level::Warn) {
                         warn!("Error while trying to auto prune chain: {}", e);
+                        }
                     }
 
+                    if log::log_enabled!(log::Level::Info) {
                     info!("Auto pruning done in {}ms", start.elapsed().as_millis());
+                    }
                 }
             }
         }
@@ -3066,7 +3482,9 @@ impl<S: Storage> Blockchain<S> {
         storage.store_tips(&tips).await?;
 
         if current_height == 0 || block.get_blue_score() > current_height {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("storing new top height {}", block.get_blue_score());
+            }
             storage.set_top_height(block.get_blue_score()).await?;
             self.blue_score.store(block.get_blue_score(), Ordering::Release);
             current_height = block.get_blue_score();
@@ -3118,7 +3536,9 @@ impl<S: Storage> Blockchain<S> {
             let version = get_version_at_height(self.get_network(), current_height);
             let start = Instant::now();
             let res = mempool.clean_up(&*storage, &self.environment, base_topo_height, highest_topo, version).await;
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Took {:?} to clean mempool!", start.elapsed());
+            }
             histogram!("tos_mempool_clean_up_ms").record(start.elapsed().as_millis() as f64);
             res
         };
@@ -3129,12 +3549,16 @@ impl<S: Storage> Blockchain<S> {
                 // This save some performances as it will not try to add it back and
                 // consume resources for verifying the ZK Proof if we already know the answer
                 if orphaned_transactions.pop(tx_hash.as_ref()).is_some() {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Transaction {} was marked as orphaned, but got deleted from mempool. Prevent adding it back", tx_hash);
+                    }
                 }
 
                 // Verify that the TX was not executed in a block
                 if storage.is_tx_executed_in_a_block(&tx_hash)? {
+                    if log::log_enabled!(log::Level::Trace) {
                     trace!("Transaction {} was executed in a block, skipping orphaned event", tx_hash);
+                    }
                     continue;
                 }
 
@@ -3153,7 +3577,9 @@ impl<S: Storage> Blockchain<S> {
         // V-26 Fix: Now we can try to add back all transactions
         // Log tracking metric for orphaned TXs every 1000 transactions
         if orphaned_transactions.len() % 1000 == 0 && orphaned_transactions.len() > 0 {
+            if log::log_enabled!(log::Level::Debug) {
             debug!("Orphaned TXs count: {}", orphaned_transactions.len());
+            }
         }
         {
             counter!("tos_orphaned_txs").increment(orphaned_transactions.len() as u64);
@@ -3162,20 +3588,26 @@ impl<S: Storage> Blockchain<S> {
             // Collect keys first since we can't iterate LruCache directly
             let orphaned_keys: Vec<Hash> = orphaned_transactions.iter().map(|(k, _)| k.clone()).collect();
             for tx_hash in orphaned_keys {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Trying to add orphaned tx {} back in mempool", tx_hash);
+                }
                 // It is verified in add_tx_to_mempool function too
                 // But to prevent loading the TX from storage and to fire wrong event
                 if !storage.is_tx_executed_in_a_block(&tx_hash)? {
                     let tx = match storage.get_transaction(&tx_hash).await {
                         Ok(tx) => tx.into_arc(),
                         Err(e) => {
+                            if log::log_enabled!(log::Level::Warn) {
                             warn!("Error while loading orphaned tx: {}", e);
+                            }
                             continue;
                         }
                     };
     
                     if let Err(e) = self.add_tx_to_mempool_with_storage_and_hash(&*storage, tx.clone(), Immutable::Owned(tx_hash.clone()), false).await {
+                        if log::log_enabled!(log::Level::Warn) {
                         warn!("Error while adding back orphaned tx {}: {}", tx_hash, e);
+                        }
                         if !orphan_event_tracked {
                             // We couldn't add it back to mempool, let's notify this event
                             let data = RPCTransaction::from_tx(&tx, &tx_hash, storage.is_mainnet());
@@ -3201,7 +3633,9 @@ impl<S: Storage> Blockchain<S> {
         }
 
         let elapsed = start.elapsed().as_millis();
+        if log::log_enabled!(log::Level::Info) {
         info!("Processed block {} at height {} in {}ms with {} txs (DAG: {})", block_hash, block.get_blue_score(), elapsed, txs.len(), block_is_ordered);
+        }
 
         // Record metrics
         histogram!("tos_block_processing_ms").record(elapsed as f64);
@@ -3225,7 +3659,9 @@ impl<S: Storage> Blockchain<S> {
                     spawn_task("notify-new-job", async move {
                         let start = Instant::now();
                         if let Err(e) = getwork.get_handler().notify_new_job().await {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("Error while notifying new job to miners: {}", e);
+                            }
                         }
 
                         histogram!("tos_notify_new_job_ms").record(start.elapsed().as_millis() as f64);
@@ -3242,7 +3678,9 @@ impl<S: Storage> Blockchain<S> {
                         events.entry(NotifyEvent::NewBlock).or_insert_with(Vec::new).push(response);
                     },
                     Err(e) => {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Error while getting block response for websocket: {}", e);
+                        }
                     }
                 };
             }
@@ -3254,7 +3692,9 @@ impl<S: Storage> Blockchain<S> {
                 for (event, values) in events {
                     for value in values {
                         if let Err(e) = rpc.notify_clients(&event, value).await {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("Error while broadcasting event to websocket: {}", e);
+                            }
                         }
                     }
                 }
@@ -3274,7 +3714,9 @@ impl<S: Storage> Blockchain<S> {
         let mut block_reward = get_block_reward(past_supply, block_time_target);
         if is_side_block {
             let side_block_percent = side_block_reward_percentage(side_blocks_count);
+            if log::log_enabled!(log::Level::Trace) {
             trace!("side block reward: {}%", side_block_percent);
+            }
 
             block_reward = block_reward * side_block_percent / 100;
         }
@@ -3289,8 +3731,8 @@ impl<S: Storage> Blockchain<S> {
         let mut side_blocks_count = 0;
         if is_side_block {
             // get the block height for this hash
-            let height = provider.get_height_for_block_hash(hash).await?;
-            let blocks_at_height = provider.get_blocks_at_height(height).await?;
+            let height = provider.get_blue_score_for_block_hash(hash).await?;
+            let blocks_at_height = provider.get_blocks_at_blue_score(height).await?;
             for block in blocks_at_height {
                 if *hash != block && self.is_side_block_internal(provider, &block, current_topoheight).await? {
                     side_blocks_count += 1;
@@ -3309,7 +3751,9 @@ impl<S: Storage> Blockchain<S> {
     where
         P: DifficultyProvider + ClientProtocolProvider
     {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("get all txs until height {}", until_height);
+        }
         // All transactions hashes found under the stable height
         let mut hashes = IndexSet::new();
         // Current queue of blocks to process
@@ -3327,7 +3771,9 @@ impl<S: Storage> Blockchain<S> {
                 // Since BlockHeader no longer contains transaction hashes and provider doesn't have a method to get transactions,
                 // we need to skip collecting transaction hashes here
                 // TODO: Implement a proper way to get transactions for a block through the provider interface
+                if log::log_enabled!(log::Level::Warn) {
                 warn!("Skipping transaction collection for block {} - provider interface needs enhancement", hash);
+                }
 
                 // Continue with empty transaction set for now
                 for tx in std::iter::empty::<&Hash>() {
@@ -3356,7 +3802,9 @@ impl<S: Storage> Blockchain<S> {
 
     // if a block is not ordered, it's an orphaned block and its transactions are not honoured
     pub async fn is_block_orphaned_for_storage<P: DagOrderProvider>(&self, provider: &P, hash: &Hash) -> Result<bool, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("is block {} orphaned", hash);
+        }
         Ok(!provider.is_block_topological_ordered(hash).await?)
     }
 
@@ -3369,7 +3817,9 @@ impl<S: Storage> Blockchain<S> {
     where
         P: DifficultyProvider + DagOrderProvider
     {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("is block {} a side block", hash);
+        }
         if !provider.is_block_topological_ordered(hash).await? {
             return Ok(false)
         }
@@ -3380,14 +3830,14 @@ impl<S: Storage> Blockchain<S> {
             return Ok(false)
         }
 
-        let height = provider.get_height_for_block_hash(hash).await?;
+        let height = provider.get_blue_score_for_block_hash(hash).await?;
 
         // verify if there is a block with height higher than this block in past 8 topo blocks
         let mut counter = 0;
         let mut i = topoheight - 1;
         while counter < STABLE_LIMIT && i > 0 {
             let hash = provider.get_hash_at_topo_height(i).await?;
-            let previous_height = provider.get_height_for_block_hash(&hash).await?;
+            let previous_height = provider.get_blue_score_for_block_hash(&hash).await?;
 
             if height <= previous_height {
                 return Ok(true)
@@ -3404,7 +3854,9 @@ impl<S: Storage> Blockchain<S> {
     where
         P: DagOrderProvider
     {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("has block {} stable order at topoheight {}", hash, topoheight);
+        }
         if provider.is_block_topological_ordered(hash).await? {
             let block_topo_height = provider.get_topo_height_for_hash(hash).await?;
             return Ok(block_topo_height + STABLE_LIMIT <= topoheight)
@@ -3414,21 +3866,27 @@ impl<S: Storage> Blockchain<S> {
 
     // Rewind the chain by removing N blocks from the top
     pub async fn rewind_chain(&self, count: u64, until_stable_height: bool) -> Result<(TopoHeight, Vec<(Hash, Immutable<Transaction>)>), BlockchainError> {
+        if log::log_enabled!(log::Level::Debug) {
         debug!("rewind chain of {} blocks (stable height: {})", count, until_stable_height);
+        }
         let mut storage = self.storage.write().await;
         self.rewind_chain_for_storage(&mut storage, count, until_stable_height).await
     }
 
     // Rewind the chain by removing N blocks from the top
     pub async fn rewind_chain_for_storage(&self, storage: &mut S, count: u64, stop_at_stable_height: bool) -> Result<(TopoHeight, Vec<(Hash, Immutable<Transaction>)>), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
         trace!("rewind chain with count = {}", count);
+        }
 
         counter!("tos_rewind_chain").increment(1);
         histogram!("tos_rewind_chain_count").record(count as f64);
 
         let current_height = self.get_blue_score();
         let current_topoheight = self.get_topo_height();
+        if log::log_enabled!(log::Level::Warn) {
         warn!("Rewind chain with count = {}, height = {}, topoheight = {}", count, current_height, current_topoheight);
+        }
         let mut until_topo_height = if stop_at_stable_height {
             self.get_stable_topoheight()
         } else {
@@ -3439,7 +3897,9 @@ impl<S: Storage> Blockchain<S> {
             if storage.is_block_topological_ordered(hash).await? {
                 let topo = storage.get_topo_height_for_hash(hash).await?;
                 if until_topo_height <= topo {
+                    if log::log_enabled!(log::Level::Info) {
                     info!("Configured checkpoint {} is at topoheight {}. Prevent to rewind below", hash, topo);
+                    }
                     until_topo_height = topo;
                 }
             }
@@ -3447,7 +3907,9 @@ impl<S: Storage> Blockchain<S> {
 
         let start = Instant::now();
         let (new_height, new_topoheight, mut txs) = storage.pop_blocks(current_height, current_topoheight, count, until_topo_height).await?;
+        if log::log_enabled!(log::Level::Debug) {
         debug!("New topoheight: {} (diff: {})", new_topoheight, current_topoheight - new_topoheight);
+        }
 
         histogram!("tos_rewind_chain_ms").record(start.elapsed().as_millis() as f64);
 
@@ -3469,9 +3931,13 @@ impl<S: Storage> Blockchain<S> {
         let mut orphaned_txs = Vec::new();
         {
             for (hash, mut tx) in txs {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Trying to add TX {} to mempool again", hash);
+                }
                 if let Err(e) = self.add_tx_to_mempool_with_storage_and_hash(storage, tx.make_arc(), Immutable::Owned(hash.clone()), false).await {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("TX {} rewinded is not compatible anymore: {}", hash, e);
+                    }
                     orphaned_txs.push((hash, tx));
                 }
             }
@@ -3500,7 +3966,9 @@ impl<S: Storage> Blockchain<S> {
                             });
     
                             if let Err(e) = rpc.notify_clients(&NotifyEvent::StableHeightChanged, event).await {
+                                if log::log_enabled!(log::Level::Debug) {
                                 debug!("Error while broadcasting event StableHeightChanged to websocket: {}", e);
+                                }
                             }
                         });
                     }
@@ -3516,7 +3984,9 @@ impl<S: Storage> Blockchain<S> {
                             });
     
                             if let Err(e) = rpc.notify_clients(&NotifyEvent::StableTopoHeightChanged, event).await {
+                                if log::log_enabled!(log::Level::Debug) {
                                 debug!("Error while broadcasting event StableTopoHeightChanged to websocket: {}", e);
+                                }
                             }
                         });
                     }
@@ -3582,7 +4052,9 @@ pub async fn estimate_required_tx_fees<P: AccountProvider>(provider: &P, current
         output_count = transfers.len();
         for transfer in transfers {
             if !processed_keys.contains(transfer.get_destination()) && !provider.is_account_registered_for_topoheight(transfer.get_destination(), current_topoheight).await? {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Account {} is not registered for topoheight {}", transfer.get_destination().as_address(provider.is_mainnet()), current_topoheight);
+                }
                 processed_keys.insert(transfer.get_destination());
             }
         }

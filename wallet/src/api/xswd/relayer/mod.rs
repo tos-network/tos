@@ -144,7 +144,9 @@ where
         }
 
         if let Err(e) = self.xswd.on_close(state).await {
-            error!("Error while closing a XSWD Relayer: {}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while closing a XSWD Relayer: {}", e);
+            }
         }
     }
 }

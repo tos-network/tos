@@ -439,8 +439,12 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
     // if requested, broadcast the TX ourself
     if params.broadcast {
         if let Err(e) = wallet.submit_transaction(&tx).await {
-            warn!("Clearing Tx cache & unconfirmed balances because of broadcasting error: {}", e);
-            debug!("TX HEX: {}", tx.to_hex());
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Clearing Tx cache & unconfirmed balances because of broadcasting error: {}", e);
+            }
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("TX HEX: {}", tx.to_hex());
+            }
             storage.clear_tx_cache();
             storage.delete_unconfirmed_balances().await;
             return Err(e.into());
@@ -596,8 +600,12 @@ async fn finalize_unsigned_transaction(context: &Context, body: Value) -> Result
 
     if params.broadcast {
         if let Err(e) = wallet.submit_transaction(&tx).await {
-            warn!("Clearing Tx cache & unconfirmed balances because of broadcasting error: {}", e);
-            debug!("TX HEX: {}", tx.to_hex());
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Clearing Tx cache & unconfirmed balances because of broadcasting error: {}", e);
+            }
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("TX HEX: {}", tx.to_hex());
+            }
             storage.clear_tx_cache();
             storage.delete_unconfirmed_balances().await;
             return Err(e.into());

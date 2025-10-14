@@ -101,7 +101,9 @@ where
             Some(handler) => handler,
             None => return Err(RpcResponseError::new(request.id, InternalRpcError::MethodNotFound(request.method)))
         };
-        trace!("executing '{}' RPC method", request.method);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("executing '{}' RPC method", request.method);
+        }
         counter!("tos_rpc_calls", "method" => request.method.clone()).increment(1);
 
         let params = request.params.take().unwrap_or(Value::Null);
@@ -126,7 +128,9 @@ where
     // register a new RPC method handler
     pub fn register_method(&mut self, name: &str, handler: Handler) {
         if self.methods.insert(name.into(), handler).is_some() {
-            error!("The method '{}' was already registered !", name);
+            if log::log_enabled!(log::Level::Error) {
+                error!("The method '{}' was already registered !", name);
+            }
         }
     }
 

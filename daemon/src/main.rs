@@ -230,7 +230,9 @@ async fn main() -> Result<()> {
 
     if blockchain_config.simulator.is_some() && config.network != Network::Devnet {
         config.network = Network::Devnet;
-        warn!("Switching automatically to network {} because of simulator enabled", config.network);
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("Switching automatically to network {} because of simulator enabled", config.network);
+        }
     }
 
     let log_config = &config.log;
@@ -249,7 +251,9 @@ async fn main() -> Result<()> {
         log_config.datetime_format.clone(),
     )?;
 
-    info!("Tos Blockchain running version: {}", VERSION);
+    if log::log_enabled!(log::Level::Info) {
+        info!("Tos Blockchain running version: {}", VERSION);
+    }
     info!("----------------------------------------------");
 
     let dir_path = blockchain_config.dir_path.as_deref()
@@ -278,7 +282,9 @@ async fn main() -> Result<()> {
 async fn start_chain<S: Storage>(prompt: ShareablePrompt, storage: S, config: CliConfig) -> Result<()> {
     let blockchain = Blockchain::new(config.core.clone(), config.network, storage).await?;
     if let Err(e) = run_prompt(prompt, blockchain.clone(), config).await {
-        error!("Error while running prompt: {}", e);
+        if log::log_enabled!(log::Level::Error) {
+            error!("Error while running prompt: {}", e);
+        }
     }
 
     blockchain.stop().await;
@@ -503,7 +509,9 @@ async fn verify_chain<S: Storage>(manager: &CommandManager, mut args: ArgumentMa
         blockchain.get_topo_height()
     };
 
-    info!("Verifying chain supply from {} until topoheight {}", pruned_topoheight, topoheight);
+    if log::log_enabled!(log::Level::Info) {
+        info!("Verifying chain supply from {} until topoheight {}", pruned_topoheight, topoheight);
+    }
     for topo in pruned_topoheight..=topoheight {
         let hash_at_topo = storage.get_hash_at_topo_height(topo).await.context("Error while retrieving hash at topo")?;
         let block_reward = if pruned_topoheight == 0 || topo - pruned_topoheight > STABLE_LIMIT {
@@ -571,13 +579,17 @@ async fn verify_chain<S: Storage>(manager: &CommandManager, mut args: ArgumentMa
         }
 
         if !txs.is_empty() {
-            info!("Verifying {} txs ({} outputs) at {}", txs.len(), outputs, topo);
+            if log::log_enabled!(log::Level::Info) {
+                info!("Verifying {} txs ({} outputs) at {}", txs.len(), outputs, topo);
+            }
             let start = Instant::now();
             let mut state = ChainState::new(&*storage, blockchain.get_contract_environment(), 0, topo - 1, block.get_version());
             Transaction::verify_batch(txs.iter(), &mut state, &NoZKPCache::default()).await
                 .context("Error while verifying txs")?;
 
-            info!("Verified in {}ms", start.elapsed().as_millis());
+            if log::log_enabled!(log::Level::Info) {
+                info!("Verified in {}ms", start.elapsed().as_millis());
+            }
         }
 
         // Verify the burned supply
@@ -747,7 +759,9 @@ async fn broadcast_txs<S: Storage>(manager: &CommandManager, _: ArgumentManager)
     };
 
     for hash in txs {
-        info!("Broadcasting TX {}", hash);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Broadcasting TX {}", hash);
+        }
         p2p.broadcast_tx_hash(hash.clone()).await;
     }
 
@@ -1089,9 +1103,13 @@ async fn pop_blocks<S: Storage>(manager: &CommandManager, mut arguments: Argumen
         return Err(anyhow::anyhow!("Invalid amount of blocks to pop").into());
     }
 
-    info!("Trying to pop {} blocks from chain...", amount);
+    if log::log_enabled!(log::Level::Info) {
+        info!("Trying to pop {} blocks from chain...", amount);
+    }
     let (topoheight, txs) = blockchain.rewind_chain(amount, false).await.context("Error while rewinding chain")?;
-    info!("Chain as been rewinded until topoheight {}, {} rewinded txs", topoheight, txs.len());
+    if log::log_enabled!(log::Level::Info) {
+        info!("Chain as been rewinded until topoheight {}, {} rewinded txs", topoheight, txs.len());
+    }
 
     Ok(())
 }

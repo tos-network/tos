@@ -58,7 +58,9 @@ impl<'a> Ping<'a> {
     }
 
     pub async fn update_peer<S: Storage>(self, peer: &Arc<Peer>, blockchain: &Arc<Blockchain<S>>) -> Result<(), P2pError> {
-        trace!("Updating {} with {}", peer, self);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Updating {} with {}", peer, self);
+        }
         peer.set_top_block_hash(self.top_hash.into_owned()).await;
         peer.set_topoheight(self.topoheight);
         peer.set_height(self.height);
@@ -74,7 +76,9 @@ impl<'a> Ping<'a> {
 
             if let Some(old_pruned_topoheight) = peer.get_pruned_topoheight() {
                 if pruned_topoheight < old_pruned_topoheight {
-                    error!("Invalid protocol rules: pruned topoheight {} is less than old pruned topoheight {} in ping packet", pruned_topoheight, old_pruned_topoheight);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Invalid protocol rules: pruned topoheight {} is less than old pruned topoheight {} in ping packet", pruned_topoheight, old_pruned_topoheight);
+                    }
                     return Err(P2pError::InvalidNewPrunedTopoHeight(pruned_topoheight, old_pruned_topoheight))
                 }
             }
@@ -94,9 +98,13 @@ impl<'a> Ping<'a> {
         }
 
         if !self.peer_list.is_empty() {
-            debug!("Received a peer list ({:?}) for {}", self.peer_list, peer.get_outgoing_address());
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Received a peer list ({:?}) for {}", self.peer_list, peer.get_outgoing_address());
+            }
             let mut shared_peers = peer.get_peers().lock().await;
-            debug!("Our peer list is ({:?}) for {}", shared_peers, peer.get_outgoing_address());
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Our peer list is ({:?}) for {}", shared_peers, peer.get_outgoing_address());
+            }
             let peer_addr = peer.get_connection().get_address();
             for addr in &self.peer_list {
                 if peer_addr == addr {
@@ -108,7 +116,9 @@ impl<'a> Ping<'a> {
                     return Err(P2pError::LocalSocketAddress(*addr))
                 }
 
-                debug!("Adding {} for {} in ping packet", addr, peer.get_outgoing_address());
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Adding {} for {} in ping packet", addr, peer.get_outgoing_address());
+                }
                 let direction = TimedDirection::In {
                     received_at: get_current_time_in_millis()
                 };
@@ -117,7 +127,9 @@ impl<'a> Ping<'a> {
                     if !origin.update(direction) {
                         // prevent holding the lock below
                         let origin = *origin;
-                        debug!("Received peer list: {:?}, our peerlist is: {:?}", self.peer_list, shared_peers);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Received peer list: {:?}, our peerlist is: {:?}", self.peer_list, shared_peers);
+                        }
                         return Err(P2pError::DuplicatedPeer(*addr, *peer.get_outgoing_address(), origin))
                     }
                 } else {
@@ -191,7 +203,9 @@ impl Serializer for Ping<'_> {
         let blue_work = BlueWorkType::read(reader)?;
         let peers_len = reader.read_u8()? as usize;
         if peers_len > P2P_PING_PEER_LIST_LIMIT {
-            debug!("Too much peers sent in this ping packet: received {} while max is {}", peers_len, P2P_PING_PEER_LIST_LIMIT);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Too much peers sent in this ping packet: received {} while max is {}", peers_len, P2P_PING_PEER_LIST_LIMIT);
+            }
             return Err(ReaderError::InvalidValue)
         }
 
@@ -199,7 +213,9 @@ impl Serializer for Ping<'_> {
         for _ in 0..peers_len {
             let peer = SocketAddr::read(reader)?;
             if !peer_list.insert(peer) {
-                debug!("Duplicated peer {} in ping packet", peer);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Duplicated peer {} in ping packet", peer);
+                }
                 return Err(ReaderError::InvalidValue)
             }
         }

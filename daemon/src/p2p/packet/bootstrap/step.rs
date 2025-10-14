@@ -145,14 +145,18 @@ impl Serializer for StepRequest<'_> {
             0 => {
                 let len = reader.read_u8()?;
                 if len == 0 || len > CHAIN_SYNC_REQUEST_MAX_BLOCKS as u8 {
-                    debug!("Invalid chain info request length: {}", len);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid chain info request length: {}", len);
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
                 let mut blocks = IndexSet::with_capacity(len as usize);
                 for _ in 0..len {
                     if !blocks.insert(BlockId::read(reader)?) {
-                        debug!("Duplicated block id for chain info request");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated block id for chain info request");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -162,7 +166,9 @@ impl Serializer for StepRequest<'_> {
                 let min_topoheight = reader.read_u64()?;
                 let topoheight = reader.read_u64()?;
                 if min_topoheight > topoheight {
-                    debug!("Invalid min topoheight in Step Request");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid min topoheight in Step Request");
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
@@ -179,14 +185,18 @@ impl Serializer for StepRequest<'_> {
                 let min = reader.read_u64()?;
                 let max = reader.read_u64()?;
                 if min > max {
-                    debug!("Invalid min topoheight in Step Request");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid min topoheight in Step Request");
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
                 let page = Option::read(reader)?;
                 if let Some(page_number) = &page {
                     if *page_number == 0 {
-                        debug!("Invalid page number (0) in Step Request");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Invalid page number (0) in Step Request");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -197,14 +207,18 @@ impl Serializer for StepRequest<'_> {
                 let min = reader.read_u64()?;
                 let max = reader.read_u64()?;
                 if min > max {
-                    debug!("Invalid min topoheight in Step Request");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid min topoheight in Step Request");
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
                 let page = Option::read(reader)?;
                 if let Some(page_number) = &page {
                     if *page_number == 0 {
-                        debug!("Invalid page number (0) in Step Request");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Invalid page number (0) in Step Request");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -216,7 +230,9 @@ impl Serializer for StepRequest<'_> {
                 let min = reader.read_u64()?;
                 let max = reader.read_u64()?;
                 if min > max {
-                    debug!("Invalid min topoheight in Step Request");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid min topoheight in Step Request");
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
@@ -227,14 +243,18 @@ impl Serializer for StepRequest<'_> {
                 let max = reader.read_u64()?;
                 let len = reader.read_u16()?;
                 if len > MAX_ITEMS_PER_PAGE as u16 {
-                    debug!("Invalid accounts request length: {}", len);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid accounts request length: {}", len);
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
                 let mut keys = IndexSet::with_capacity(len as usize);
                 for _ in 0..len {
                     if !keys.insert(PublicKey::read(reader)?) {
-                        debug!("Duplicated public key for accounts request");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated public key for accounts request");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -247,7 +267,9 @@ impl Serializer for StepRequest<'_> {
                 let page = Option::read(reader)?;
                 if let Some(page_number) = &page {
                     if *page_number == 0 {
-                        debug!("Invalid page number (0) in Step Request");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Invalid page number (0) in Step Request");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -275,7 +297,9 @@ impl Serializer for StepRequest<'_> {
                 Self::BlocksMetadata(reader.read_u64()?)
             },
             id => {
-                debug!("Received invalid value for StepResponse: {}", id);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Received invalid value for StepResponse: {}", id);
+                }
                 return Err(ReaderError::InvalidValue)
             }
         })
@@ -436,7 +460,9 @@ impl Serializer for StepResponse {
             1 => {
                 let len = reader.read_u16()?;
                 if len > MAX_ITEMS_PER_PAGE as u16 {
-                    debug!("Invalid assets response length: {}", len);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid assets response length: {}", len);
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
@@ -445,7 +471,9 @@ impl Serializer for StepResponse {
                     let key = Hash::read(reader)?;
                     let value = AssetData::read(reader)?;
                     if assets.insert(key, value).is_some() {
-                        debug!("Duplicated asset key in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated asset key in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -453,7 +481,9 @@ impl Serializer for StepResponse {
                 let page = Option::read(reader)?;
                 if let Some(page_number) = &page {
                     if *page_number == 0 {
-                        debug!("Invalid page number (0) in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Invalid page number (0) in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -462,13 +492,17 @@ impl Serializer for StepResponse {
             2 => {
                 let len = reader.read_u16()?;
                 if len > MAX_ITEMS_PER_PAGE as u16 {
-                    debug!("Invalid keys response length: {}", len);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid keys response length: {}", len);
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
                 let mut keys = IndexSet::with_capacity(len as usize);
                 for _ in 0..len {
                     if !keys.insert(PublicKey::read(reader)?) {
-                        debug!("Duplicated public key in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated public key in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -476,7 +510,9 @@ impl Serializer for StepResponse {
                 let page = Option::read(reader)?;
                 if let Some(page_number) = &page {
                     if *page_number == 0 {
-                        debug!("Invalid page number (0) in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Invalid page number (0) in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -485,7 +521,9 @@ impl Serializer for StepResponse {
             3 => {
                 let len = reader.read_u16()?;
                 if len > MAX_ITEMS_PER_PAGE as u16 {
-                    debug!("Invalid key balances response length: {}", len);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid key balances response length: {}", len);
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
                 let mut keys = IndexMap::with_capacity(len as usize);
@@ -493,7 +531,9 @@ impl Serializer for StepResponse {
                     let key = Hash::read(reader)?;
                     let value = Option::read(reader)?;
                     if keys.insert(key, value).is_some() {
-                        debug!("Duplicated key in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated key in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -501,7 +541,9 @@ impl Serializer for StepResponse {
                 let page = Option::read(reader)?;
                 if let Some(page_number) = &page {
                     if *page_number == 0 {
-                        debug!("Invalid page number (0) in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Invalid page number (0) in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -510,7 +552,9 @@ impl Serializer for StepResponse {
             4 => {
                 let len = reader.read_u16()?;
                 if len > MAX_ITEMS_PER_PAGE as u16 {
-                    debug!("Invalid spendable balances response length: {}", len);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid spendable balances response length: {}", len);
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
@@ -525,7 +569,9 @@ impl Serializer for StepResponse {
             5 => {
                 let len = reader.read_u16()?;
                 if len > MAX_ITEMS_PER_PAGE as u16 {
-                    debug!("Invalid accounts response length: {}", len);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid accounts response length: {}", len);
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
                 let mut accounts = Vec::with_capacity(len as usize);
@@ -540,14 +586,18 @@ impl Serializer for StepResponse {
             6 => {
                 let len = reader.read_u16()?;
                 if len > MAX_ITEMS_PER_PAGE as u16 {
-                    debug!("Invalid contracts response length: {}", len);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid contracts response length: {}", len);
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
                 let mut contracts = IndexSet::with_capacity(len as usize);
                 for _ in 0..len {
                     if !contracts.insert(Hash::read(reader)?) {
-                        debug!("Duplicated contract hash in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated contract hash in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -555,7 +605,9 @@ impl Serializer for StepResponse {
                 let page = Option::read(reader)?;
                 if let Some(page_number) = &page {
                     if *page_number == 0 {
-                        debug!("Invalid page number (0) in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Invalid page number (0) in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -565,7 +617,9 @@ impl Serializer for StepResponse {
             8 => {
                 let len = reader.read_u16()?;
                 if len > MAX_ITEMS_PER_PAGE as u16 {
-                    debug!("Invalid contracts assets response length: {}", len);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid contracts assets response length: {}", len);
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
@@ -574,7 +628,9 @@ impl Serializer for StepResponse {
                     let asset = Hash::read(reader)?;
                     let value = reader.read_u64()?;
                     if assets.insert(asset, value).is_some() {
-                        debug!("Duplicated contract asset in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated contract asset in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -582,7 +638,9 @@ impl Serializer for StepResponse {
                 let page = Option::read(reader)?;
                 if let Some(page_number) = &page {
                     if *page_number == 0 {
-                        debug!("Invalid page number (0) in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Invalid page number (0) in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -592,7 +650,9 @@ impl Serializer for StepResponse {
             9 => {
                 let len = reader.read_u16()?;
                 if len > MAX_ITEMS_PER_PAGE as u16 {
-                    debug!("Invalid contracts assets response length: {}", len);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid contracts assets response length: {}", len);
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
@@ -601,7 +661,9 @@ impl Serializer for StepResponse {
                     let key = ValueCell::read(reader)?;
                     let value = ValueCell::read(reader)?;
                     if entries.insert(key, value).is_some() {
-                        debug!("Duplicated contract store in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated contract store in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -609,7 +671,9 @@ impl Serializer for StepResponse {
                 let page = Option::read(reader)?;
                 if let Some(page_number) = &page {
                     if *page_number == 0 {
-                        debug!("Invalid page number (0) in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Invalid page number (0) in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -619,7 +683,9 @@ impl Serializer for StepResponse {
             10 => {
                 let len = reader.read_u16()?;
                 if len > PRUNE_SAFETY_LIMIT as u16 + 1 {
-                    debug!("Invalid blocks metadata response length: {}", len);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid blocks metadata response length: {}", len);
+                    }
                     return Err(ReaderError::InvalidValue)
                 }
 
@@ -627,7 +693,9 @@ impl Serializer for StepResponse {
                 for _ in 0..len {
                     let metadata = BlockMetadata::read(reader)?;
                     if !blocks.insert(metadata) {
-                        debug!("Duplicated block metadata in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated block metadata in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue)
                     }
                 }
@@ -635,7 +703,9 @@ impl Serializer for StepResponse {
                 Self::BlocksMetadata(blocks)
             },
             id => {
-                debug!("Received invalid value for StepResponse: {}", id);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Received invalid value for StepResponse: {}", id);
+                }
                 return Err(ReaderError::InvalidValue)
             }
         })

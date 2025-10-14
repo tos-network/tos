@@ -38,7 +38,9 @@ pub trait VersionedProvider:
 
     // Delete versioned data at topoheight
     async fn delete_versioned_data_at_topoheight(&mut self, topoheight: TopoHeight) -> Result<(), BlockchainError> {
-        debug!("delete versioned data at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("delete versioned data at topoheight {}", topoheight);
+        }
         self.delete_versioned_balances_at_topoheight(topoheight).await?;
         self.delete_versioned_nonces_at_topoheight(topoheight).await?;
         self.delete_versioned_multisigs_at_topoheight(topoheight).await?;
@@ -59,7 +61,9 @@ pub trait VersionedProvider:
     // Special case for versioned balances:
     // Because users can link a TX to an old versioned balance, we need to keep track of them until the latest spent version
     async fn delete_versioned_data_below_topoheight(&mut self, topoheight: TopoHeight, keep_last: bool) -> Result<(), BlockchainError> {
-        debug!("delete versioned data below topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("delete versioned data below topoheight {}", topoheight);
+        }
         self.delete_versioned_balances_below_topoheight(topoheight, keep_last).await?;
         self.delete_versioned_nonces_below_topoheight(topoheight, keep_last).await?;
         self.delete_versioned_multisigs_below_topoheight(topoheight, keep_last).await?;
@@ -76,7 +80,9 @@ pub trait VersionedProvider:
 
     // Delete versioned data above topoheight
     async fn delete_versioned_data_above_topoheight(&mut self, topoheight: TopoHeight) -> Result<(), BlockchainError> {
-        debug!("delete versioned data above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("delete versioned data above topoheight {}", topoheight);
+        }
         self.delete_versioned_balances_above_topoheight(topoheight).await?;
         self.delete_versioned_nonces_above_topoheight(topoheight).await?;
         self.delete_versioned_multisigs_above_topoheight(topoheight).await?;

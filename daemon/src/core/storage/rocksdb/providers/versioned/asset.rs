@@ -24,7 +24,9 @@ use crate::core::{
 impl VersionedAssetProvider for RocksStorage {
     // delete versioned assets at topoheight
     async fn delete_versioned_assets_at_topoheight(&mut self, topoheight: TopoHeight) -> Result<(), BlockchainError> {
-        trace!("delete versioned assets at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned assets at topoheight {}", topoheight);
+        }
         let prefix = topoheight.to_be_bytes();
         for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(&self.db, self.snapshot.as_ref(), IteratorMode::WithPrefix(&prefix, Direction::Forward), Column::VersionedAssets)? {
             let (versioned_key, prev_topo) = res?;
@@ -50,7 +52,9 @@ impl VersionedAssetProvider for RocksStorage {
 
     // delete versioned assets above topoheight
     async fn delete_versioned_assets_above_topoheight(&mut self, topoheight: TopoHeight) -> Result<(), BlockchainError> {
-        trace!("delete versioned assets above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned assets above topoheight {}", topoheight);
+        }
         let start = (topoheight + 1).to_be_bytes();
         for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(&self.db, self.snapshot.as_ref(), IteratorMode::From(&start, Direction::Forward), Column::VersionedAssets)? {
             let (key, prev_topo) = res?;
@@ -83,7 +87,9 @@ impl VersionedAssetProvider for RocksStorage {
 
     // delete versioned assets below topoheight
     async fn delete_versioned_assets_below_topoheight(&mut self, topoheight: TopoHeight, keep_last: bool) -> Result<(), BlockchainError> {
-        trace!("delete versioned assets below topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned assets below topoheight {}", topoheight);
+        }
         let start = topoheight.to_be_bytes();
         if keep_last {
             for res in Self::iter_owned_internal::<(), Asset>(&self.db, self.snapshot.as_ref(), IteratorMode::Start, Column::Assets)? {
@@ -104,7 +110,9 @@ impl VersionedAssetProvider for RocksStorage {
                             Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), Column::VersionedAssets, &key)?;
                         } else {
                             if prev_version.is_some_and(|v| v < topoheight) {
-                                trace!("Patching versioned data at topoheight {}", topoheight);
+                                if log::log_enabled!(log::Level::Trace) {
+                                    trace!("Patching versioned data at topoheight {}", topoheight);
+                                }
                                 patched = true;
                                 let mut data: Versioned<RawBytes> = self.load_from_disk(Column::VersionedAssets, &key)?;
                                 data.set_previous_topoheight(None);

@@ -300,15 +300,21 @@ impl CommandManager {
     }
 
     pub fn message<D: Display>(&self, message: D) {
-        info!("{}", message);
+        if log::log_enabled!(log::Level::Info) {
+            info!("{}", message);
+        }
     }
 
     pub fn warn<D: Display>(&self, message: D) {
-        warn!("{}", message);
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("{}", message);
+        }
     }
 
     pub fn error<D: Display>(&self, message: D) {
-        error!("{}", message);
+        if log::log_enabled!(log::Level::Error) {
+            error!("{}", message);
+        }
     }
 
     pub fn running_since(&self) -> Duration {

@@ -227,7 +227,9 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
     // Turns off all connections
     pub async fn stop(&self) {
         if let Err(e) = self.clear_connections().await {
-            error!("Error while clearing connections: {}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while clearing connections: {}", e);
+            }
         }
     }
 
@@ -243,14 +245,20 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
             sessions.drain().collect::<Vec<_>>()
         };
 
-        debug!("Clear {} connections", sessions.len());
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Clear {} connections", sessions.len());
+        }
         for session in sessions {
             if let Err(e) = session.close_internal(None).await {
-                debug!("Error while closing internal session: {}", e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while closing internal session: {}", e);
+                }
             }
 
             if let Err(e) = self.get_handler().on_close(&session).await {
-                debug!("Error while closing session: {}", e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while closing session: {}", e);
+                }
             }
         }
 
@@ -283,23 +291,31 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
             channel: tx
         });
 
-        debug!("Created new WebSocketSession with id {}", id);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Created new WebSocketSession with id {}", id);
+        }
 
         // call on_connection
         match self.handler.on_connection(&session).await {
             Ok(Some(response)) => return Ok(response),
             Ok(None) => (),
             Err(e) => {
-                debug!("Error while calling on_connection: {}", e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while calling on_connection: {}", e);
+                }
                 return Ok(HttpResponse::InternalServerError().body(e.to_string()));
             }
         };
 
         {
-            debug!("Inserting session #{} into sessions", id);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Inserting session #{} into sessions", id);
+            }
             let mut sessions = self.sessions.write().await;
             let res = sessions.insert(Arc::clone(&session));
-            debug!("Session #{} has been inserted into sessions: {}", id, res);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Session #{} has been inserted into sessions: {}", id, res);
+            }
         }
 
         actix_rt::spawn(
@@ -321,24 +337,34 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
 
     // Delete a session from the server
     pub async fn delete_session(self: &Arc<Self>, session: &WebSocketSessionShared<H>, reason: Option<CloseReason>) {
-        trace!("deleting session #{}", session.id);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("deleting session #{}", session.id);
+        }
         // close session
         if let Err(e) = session.close_internal(reason).await {
-            debug!("Error while closing session: {}", e);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Error while closing session: {}", e);
+            }
         }
         trace!("session closed");
 
         let deleted = {
             let mut sessions = self.sessions.write().await;
-            trace!("sessions locked, size: {}", sessions.len());
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("sessions locked, size: {}", sessions.len());
+            }
             sessions.remove(session)
         };
 
         if deleted {
-            debug!("deleted session #{}", session.id);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("deleted session #{}", session.id);
+            }
             // call on_close
             if let Err(e) = self.handler.on_close(&session).await {
-                debug!("Error while calling on_close: {}", e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while calling on_close: {}", e);
+                }
             }
         }
         trace!("sessions unlocked");
@@ -354,7 +380,9 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
             select! {
                 // heartbeat
                 _ = interval.tick() => {
-                    trace!("Sending ping to session #{}", session.id);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Sending ping to session #{}", session.id);
+                    }
 
                     if session.is_closed().await {
                         debug!("Session is closed, stopping heartbeat");
@@ -363,12 +391,16 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
 
                     if self.get_handler().check_heartbeat(&session).await {
                         if last_pong_received.elapsed() > KEEP_ALIVE_TIME_OUT {
-                            debug!("session #{} didn't respond in time from our ping", session.id);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("session #{} didn't respond in time from our ping", session.id);
+                            }
                             break None;
                         }
 
                         if let Err(e) = session.ping().await {
-                            debug!("Error while sending ping to session #{}: {}", session.id, e);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Error while sending ping to session #{}: {}", session.id, e);
+                            }
                             break None;
                         }
                     }
@@ -376,31 +408,43 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
                 Some(msg) = rx.recv() => {
                     match msg {
                         InnerMessage::Text(text) => {
-                            trace!("Sending text message to session #{}: {}", session.id, text);
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("Sending text message to session #{}: {}", session.id, text);
+                            }
                             if let Err(e) = session.send_text_internal(text).await {
-                                debug!("Error while sending text message to session #{}: {}", session.id, e);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("Error while sending text message to session #{}: {}", session.id, e);
+                                }
                                 break Some(CloseReason::from(CloseCode::Error));
                             }
                         },
                         InnerMessage::Close(reason) => {
-                            debug!("Closing session #{} with reason: {:?}", session.id, reason);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Closing session #{} with reason: {:?}", session.id, reason);
+                            }
                             break reason;
                         }
                     }
                 },
                 // wait for next message
                 res = stream.next() => {
-                    trace!("Received stream message for session #{}", session.id);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Received stream message for session #{}", session.id);
+                    }
                     let msg = match res {
                         Some(msg) => match msg {
                             Ok(msg) => msg,
                             Err(e) => {
-                                debug!("Error while receiving message: {}", e);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("Error while receiving message: {}", e);
+                                }
                                 break Some(CloseReason::from(CloseCode::Error));
                             }
                         },
                         None => {
-                            debug!("Stream closed for session #{}", session.id);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Stream closed for session #{}", session.id);
+                            }
                             break None
                         },
                     };
@@ -408,32 +452,46 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
                     // handle message
                     match msg {
                         AggregatedMessage::Text(text) => {
-                            trace!("Received text message for session #{}: {}", session.id, text);
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("Received text message for session #{}: {}", session.id, text);
+                            }
                             if let Err(e) = self.handler.on_message(&session, text.as_bytes()).await {
-                                debug!("Error while calling on_message: {}", e);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("Error while calling on_message: {}", e);
+                                }
                             }
                         },
                         AggregatedMessage::Close(reason) => {
-                            trace!("Received close message for session #{}: {:?}", session.id, reason);
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("Received close message for session #{}: {:?}", session.id, reason);
+                            }
                             break reason;
                         },
                         AggregatedMessage::Ping(data) => {
-                            trace!("Received ping message with size {} bytes from session #{}", data.len(), session.id);
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("Received ping message with size {} bytes from session #{}", data.len(), session.id);
+                            }
                             if let Err(e) = session.pong().await {
-                                debug!("Error received while sending pong response to session #{}: {}", session.id, e);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("Error received while sending pong response to session #{}: {}", session.id, e);
+                                }
                                 break None;
                             }
                         },
                         AggregatedMessage::Pong(data) => {
                             trace!("received pong!");
                             if !data.is_empty() {
-                                debug!("Data in pong message is not empty for session #{}", session.id);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("Data in pong message is not empty for session #{}", session.id);
+                                }
                                 break None;
                             }
                             last_pong_received = Instant::now();
                         },
                         msg => {
-                            debug!("Received websocket message not supported: {:?}", msg);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Received websocket message not supported: {:?}", msg);
+                            }
                             break None;
                         }
                     }
@@ -441,9 +499,13 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
             };
         };
 
-        debug!("Session #{} is closing", session.id);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Session #{} is closing", session.id);
+        }
         // attempt to close connection gracefully
         self.delete_session(&session, reason).await;
-        debug!("Session #{} has been closed", session.id);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Session #{} has been closed", session.id);
+        }
     }
 }

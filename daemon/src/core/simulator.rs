@@ -110,7 +110,9 @@ impl Simulator {
                 match blockchain.add_new_block(block, None, BroadcastOption::None, false).await {
                     Ok(_) => {},
                     Err(e) => {
-                        error!("Error while adding block: {}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error while adding block: {}", e);
+                        }
                     }
                 }
             }
@@ -136,7 +138,11 @@ impl Simulator {
                 Ok(block) => {
                     blocks.push(block);
                 },
-                Err(e) => error!("Error while mining block: {}", e)
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while mining block: {}", e);
+                    }
+                }
             }
         }
 

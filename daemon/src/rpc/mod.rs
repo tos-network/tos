@@ -115,7 +115,9 @@ impl<S: Storage> DaemonRpcServer<S> {
             metrics::set_global_recorder(Box::new(recorder))
                 .context("Failed to set global recorder for Prometheus")?;
 
-            info!("Prometheus metrics enabled on route: {}", config.prometheus.route);
+            if log::log_enabled!(log::Level::Info) {
+                info!("Prometheus metrics enabled on route: {}", config.prometheus.route);
+            }
             Some((config.prometheus.route, handle))
         } else {
             None
@@ -136,7 +138,9 @@ impl<S: Storage> DaemonRpcServer<S> {
             warn!("⚠️  ");
         }
 
-        info!("Starting RPC server on {}", config.bind_address);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Starting RPC server on {}", config.bind_address);
+        }
 
         {
             let clone = Arc::clone(&server);
@@ -183,7 +187,9 @@ impl<S: Storage> DaemonRpcServer<S> {
 
     pub async fn notify_clients_with<V: serde::Serialize>(&self, event: &NotifyEvent, value: V) {
         if let Err(e) = self.notify_clients(event, json!(value)).await {
-            error!("Error while notifying event {:?}: {}", event, e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while notifying event {:?}: {}", event, e);
+            }
         }
     }
 

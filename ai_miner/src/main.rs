@@ -230,11 +230,17 @@ async fn main() -> Result<()> {
 
     // Remove init call since it returns ()
 
-    info!("TOS AI Miner v{} starting...", env!("CARGO_PKG_VERSION"));
-    info!("Daemon address: {}", config.daemon_address);
+    if log::log_enabled!(log::Level::Info) {
+        info!("TOS AI Miner v{} starting...", env!("CARGO_PKG_VERSION"));
+    }
+    if log::log_enabled!(log::Level::Info) {
+        info!("Daemon address: {}", config.daemon_address);
+    }
 
     if let Some(address) = &config.miner_address {
-        info!("Miner address: {}", address);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Miner address: {}", address);
+        }
     } else {
         warn!("No miner address specified. Some operations will require an address.");
     }
@@ -252,12 +258,16 @@ async fn main() -> Result<()> {
     // Initialize storage manager
     let storage_dir = PathBuf::from(&config.storage_path);
     let storage_manager = Arc::new(Mutex::new(StorageManager::new(storage_dir, network).await?));
-    info!("Storage initialized at: {}", config.storage_path);
+    if log::log_enabled!(log::Level::Info) {
+        info!("Storage initialized at: {}", config.storage_path);
+    }
 
     // Test connection to daemon
     info!("Testing connection to daemon...");
     if let Err(e) = daemon_client.test_connection().await {
-        warn!("Failed to connect to daemon: {}. AI mining commands may not work properly.", e);
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("Failed to connect to daemon: {}. AI mining commands may not work properly.", e);
+        }
     }
 
     if !config.disable_interactive_mode {
