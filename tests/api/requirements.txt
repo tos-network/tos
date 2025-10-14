@@ -1,0 +1,31 @@
+# TOS API Testing Dependencies
+
+# Testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-timeout>=2.1.0
+pytest-xdist>=3.3.1          # Parallel test execution
+
+# HTTP and JSON-RPC
+requests>=2.31.0
+aiohttp>=3.8.5
+
+# Data validation
+pydantic>=2.0.0
+jsonschema>=4.19.0
+
+# Utilities
+python-dotenv>=1.0.0         # Environment variables
+colorama>=0.4.6              # Colored output
+tabulate>=0.9.0              # Table formatting
+
+# Performance testing
+pytest-benchmark>=4.0.0
+
+# Code quality (optional, for development)
+black>=23.7.0
+pylint>=2.17.5
+mypy>=1.5.0
+
+# Logging and debugging
+loguru>=0.7.0
