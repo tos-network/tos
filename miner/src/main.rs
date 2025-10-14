@@ -636,23 +636,23 @@ fn start_thread(id: u16, mut job_receiver: broadcast::Receiver<ThreadNotificatio
             let message = match job_receiver.blocking_recv() {
                 Ok(message) => message,
                 Err(e) => {
-                    if log::log_enabled!(log::Level::Warn) {
-                        warn!("Error on thread #{} while waiting on new job: {}", id, e);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Mining thread #{} skipped lagged job ({}), syncing to latest", id, e);
                     }
-                    // Channel is maybe lagging, try to empty it
+                    // Channel is lagging, empty it to get the latest job
                     while job_receiver.len() > 1 {
                         let _ = job_receiver.blocking_recv();
                     }
-                    thread::sleep(Duration::from_millis(100));
+                    thread::sleep(Duration::from_millis(50));
                     continue;
                 }
             };
 
             match message {
                 ThreadNotification::WebSocketClosed => {
-                    // wait until we receive a new job, check every 100ms
+                    // wait until we receive a new job, check every 50ms
                     while job_receiver.is_empty() {
-                        thread::sleep(Duration::from_millis(100));
+                        thread::sleep(Duration::from_millis(50));
                     }
                 }
                 ThreadNotification::Exit => {
