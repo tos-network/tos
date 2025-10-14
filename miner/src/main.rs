@@ -706,6 +706,16 @@ fn start_thread(id: u16, mut job_receiver: broadcast::Receiver<ThreadNotificatio
 
                     // compute the reference hash for easier finding of the block
                     let block_hash = worker.get_block_hash().unwrap();
+
+                    // Check if there's a newer job available before submitting
+                    // This prevents submitting stale blocks that will be rejected
+                    if !job_receiver.is_empty() {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Thread #{}: discarding found block {} at height {} due to newer job available", id, block_hash, height);
+                        }
+                        continue 'main;
+                    }
+
                     if log::log_enabled!(log::Level::Info) {
                         info!("Thread #{}: block {} found at height {} with difficulty {}", id, block_hash, height, format_difficulty(difficulty_from_hash(&hash)));
                     }
