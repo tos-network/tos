@@ -337,6 +337,10 @@ pub struct GetInfoResult {
     // Average block time of last 50 blocks
     // in milliseconds
     pub average_block_time: u64,
+    // Target blocks per second (from BPS configuration)
+    pub bps: f64,
+    // Actual blocks per second (calculated from average_block_time)
+    pub actual_bps: f64,
     pub block_reward: u64,
     pub dev_reward: u64,
     pub miner_reward: u64,

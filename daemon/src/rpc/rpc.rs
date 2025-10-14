@@ -686,6 +686,14 @@ async fn get_info<S: Storage>(context: &Context, body: Value) -> Result<Value, I
     let block_reward = get_block_reward(emitted_supply, block_time_target);
     let (dev_reward, miner_reward) = get_block_rewards(blue_score, block_reward);
 
+    // Calculate BPS values
+    let bps = 1000.0 / block_time_target as f64;
+    let actual_bps = if average_block_time > 0 {
+        1000.0 / average_block_time as f64
+    } else {
+        0.0
+    };
+
     Ok(json!(GetInfoResult {
         blue_score,
         topoheight,
@@ -699,6 +707,8 @@ async fn get_info<S: Storage>(context: &Context, body: Value) -> Result<Value, I
         difficulty,
         block_time_target,
         average_block_time,
+        bps,
+        actual_bps,
         block_reward,
         dev_reward,
         miner_reward,
