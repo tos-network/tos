@@ -1921,15 +1921,42 @@ impl<S: Storage> Blockchain<S> {
 
         let extra_nonce: [u8; EXTRA_NONCE_SIZE] = rand::thread_rng().gen::<[u8; EXTRA_NONCE_SIZE]>(); // generate random bytes
         let tips_set = storage.get_tips().await?;
+        let current_height = self.get_blue_score();
+
+        // V-25: Filter tips early to ensure they are on or near the main chain
+        // This prevents generating block templates with off-chain parents
         let mut tips = Vec::with_capacity(tips_set.len());
+        let mut filtered_count = 0;
         for hash in tips_set {
             if log::log_enabled!(log::Level::Trace) {
-            trace!("Tip found from storage: {}", hash);
+                trace!("Evaluating tip from storage: {}", hash);
+            }
+
+            // Pre-filter: Check if tip is near enough to main chain before selecting
+            if !self.is_near_enough_from_main_chain(storage, &hash, current_height).await? {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Tip {} filtered (too far from main chain, current height: {})", hash, current_height);
+                }
+                filtered_count += 1;
+                continue;
+            }
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Tip {} accepted (near main chain, current height: {})", hash, current_height);
             }
             tips.push(hash);
         }
 
-        let current_height = self.get_blue_score();
+        if filtered_count > 0 {
+            if log::log_enabled!(log::Level::Info) {
+                info!("Filtered {} off-chain tips, {} valid tips remain for template", filtered_count, tips.len());
+            }
+        }
+
+        // V-25: Ensure we have at least one tip - if all were filtered, this is a critical error
+        if tips.is_empty() {
+            return Err(BlockchainError::ExpectedTips);
+        }
         if tips.len() > 1 {
             // Use GHOSTDAG to select best tip (TIP-2 Phase 1)
             // Find tip with highest blue_work
@@ -1945,24 +1972,19 @@ impl<S: Storage> Blockchain<S> {
                     }
                 }
                 if log::log_enabled!(log::Level::Debug) {
-                debug!("Best tip selected by GHOSTDAG (blue_work={}): {}", best_blue_work, best_hash);
+                    debug!("Best tip selected by GHOSTDAG (blue_work={}): {}", best_blue_work, best_hash);
                 }
                 best_hash
             };
 
+            // V-25: Validate difficulty relationships between tips
+            // Note: is_near_enough_from_main_chain already checked above, so we only check difficulty here
             let mut selected_tips = Vec::with_capacity(tips.len());
             for hash in tips {
                 if best_tip != hash {
                     if !self.validate_tips(storage, &best_tip, &hash).await? {
                         if log::log_enabled!(log::Level::Warn) {
-                        warn!("Tip {} is invalid, not selecting it because difficulty can't be less than 91% of {}", hash, best_tip);
-                        }
-                        continue;
-                    }
-
-                    if !self.is_near_enough_from_main_chain(storage, &hash, current_height).await? {
-                        if log::log_enabled!(log::Level::Warn) {
-                        warn!("Tip {} is not selected for mining: too far from mainchain at height: {}", hash, current_height);
+                            warn!("Tip {} is invalid, not selecting it because difficulty can't be less than 91% of {}", hash, best_tip);
                         }
                         continue;
                     }

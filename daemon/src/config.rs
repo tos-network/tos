@@ -71,8 +71,13 @@ pub const MAX_ORPHANED_TRANSACTIONS: usize = 10_000;
 pub const PRUNE_SAFETY_LIMIT: u64 = STABLE_LIMIT * 10;
 
 // BlockDAG rules
-// in how many height we consider the block stable
-pub const STABLE_LIMIT: u64 = 8;
+// Maximum distance for a block to be considered "near" the main chain
+// Used in deviation checks to prevent accepting blocks too far from consensus
+//
+// Reference: Kaspa uses 86,400 blocks (24 hours @ 1 BPS) for mainnet
+// TOS temporary setting: 1,000 blocks (~17 minutes @ 1 BPS)
+// TODO: Increase to production value (10,000-86,400) after virtual state implementation
+pub const STABLE_LIMIT: u64 = 1000;
 
 // Emission rules
 // 15% (6 months), 10% (6 months), 5% per block going to dev address
