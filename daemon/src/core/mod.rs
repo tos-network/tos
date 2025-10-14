@@ -14,6 +14,7 @@ pub mod state;
 pub mod merkle;
 
 pub mod hard_fork;
+pub mod bps; // TIP-BPS: Blocks Per Second configuration system
 pub mod ghostdag; // TIP-2 Phase 1: GHOSTDAG implementation
 pub mod reachability; // TIP-2 Phase 2: Reachability service
 pub mod compact_block_reconstructor; // TIP-2 Phase 2B: Compact blocks

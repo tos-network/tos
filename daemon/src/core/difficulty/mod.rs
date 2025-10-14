@@ -1,3 +1,16 @@
+// TOS Difficulty Adjustment Algorithm (DAA)
+//
+// TIP-BPS Integration:
+// The DAA works in conjunction with the BPS (Blocks Per Second) system to maintain
+// target block production rate:
+//
+// 1. BPS System: Defines target_time_per_block (e.g., 1000ms for OneBps)
+// 2. DAA: Measures actual block times and adjusts difficulty
+// 3. Feedback Loop: difficulty up -> blocks slower, difficulty down -> blocks faster
+//
+// Key Principle: BPS sets the *target*, DAA adjusts *difficulty* to achieve it.
+// No minimum hashrate hack needed - DAA naturally converges to target BPS.
+
 use log::trace;
 use tos_common::{
     block::BlockVersion,

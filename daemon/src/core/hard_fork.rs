@@ -6,6 +6,7 @@ use tos_common::{
     transaction::TxVersion
 };
 use crate::config::{get_hard_forks, MILLIS_PER_SECOND};
+use super::bps::OneBps;
 
 // Get the hard fork at a given height
 pub fn get_hard_fork_at_height(network: &Network, height: u64) -> Option<&HardFork> {
@@ -44,20 +45,25 @@ pub const fn get_pow_algorithm_for_version(version: BlockVersion) -> Algorithm {
 }
 
 // This function returns the block time target for a given version
-// TIP-1's 3-second proposal was deprecated - using 1 second blocks
-// V0: 60 seconds (kept for backward compatibility with genesis)
-// V1/V2/V3: 1 second (fast block time for high throughput)
+//
+// TIP-BPS: Elegant BPS Configuration System
+// Uses the BPS (Blocks Per Second) configuration system for type-safe,
+// compile-time calculation of all BPS-dependent parameters.
+//
+// V0: 60 seconds (legacy - kept for backward compatibility with genesis)
+// V1/V2/V3: 1 second (OneBps configuration - high throughput with GHOSTDAG K=10)
 //
 // Rationale:
-// - 1 second provides high throughput and fast confirmation
-// - Compatible with GHOSTDAG DAG consensus (K=10)
+// - OneBps (1 BPS) provides good balance between throughput and network convergence
+// - All GHOSTDAG parameters (K=10, finality depth, etc.) automatically calculated
 // - Block reward automatically adjusts proportionally via get_block_reward()
+// - Future BPS changes only require updating the type alias (e.g., TwoBps)
 pub const fn get_block_time_target_for_version(version: BlockVersion) -> u64 {
     match version {
-        BlockVersion::V0 => 60 * MILLIS_PER_SECOND,
+        BlockVersion::V0 => 60 * MILLIS_PER_SECOND,  // Legacy: 60 seconds
         BlockVersion::V1
         | BlockVersion::V2
-        | BlockVersion::V3 => 1 * MILLIS_PER_SECOND, // 1 second blocks (TIP-1 deprecated)
+        | BlockVersion::V3 => OneBps::target_time_per_block(),  // 1000ms (1 BPS)
     }
 }
 
@@ -225,12 +231,17 @@ mod tests {
 
     #[test]
     fn test_get_block_time_target_for_version() {
+        use super::super::bps::OneBps;
+
         // V0 kept at 60s for genesis compatibility
         assert_eq!(get_block_time_target_for_version(BlockVersion::V0), 60 * MILLIS_PER_SECOND);
 
-        // TIP-1 deprecated: All subsequent versions use 1 second blocks
-        assert_eq!(get_block_time_target_for_version(BlockVersion::V1), 1 * MILLIS_PER_SECOND);
-        assert_eq!(get_block_time_target_for_version(BlockVersion::V2), 1 * MILLIS_PER_SECOND);
-        assert_eq!(get_block_time_target_for_version(BlockVersion::V3), 1 * MILLIS_PER_SECOND);
+        // TIP-BPS: All subsequent versions use OneBps configuration (1 second blocks)
+        assert_eq!(get_block_time_target_for_version(BlockVersion::V1), OneBps::target_time_per_block());
+        assert_eq!(get_block_time_target_for_version(BlockVersion::V2), OneBps::target_time_per_block());
+        assert_eq!(get_block_time_target_for_version(BlockVersion::V3), OneBps::target_time_per_block());
+
+        // Verify OneBps is 1000ms (1 second)
+        assert_eq!(OneBps::target_time_per_block(), 1000);
     }
 }

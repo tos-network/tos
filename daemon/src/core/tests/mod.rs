@@ -27,3 +27,6 @@ mod ghostdag_json_loader;
 
 #[cfg(test)]
 mod ghostdag_json_tests;
+
+#[cfg(test)]
+mod bps_integration_tests;
