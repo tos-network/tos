@@ -188,8 +188,26 @@ Get comprehensive network information.
 **Key Fields (TIP-2):**
 - `blue_score`: DAG depth position (replaces legacy `height`)
 - `topoheight`: Sequential storage index (0, 1, 2, 3, ...)
-- `bps`: Target blocks per second (calculated from block_time_target)
-- `actual_bps`: Actual blocks per second (calculated from average_block_time)
+- `stable_blue_score`: Blue score confirmed with high probability (finality)
+- `pruned_topoheight`: Oldest topoheight still available (if pruning enabled)
+
+**BPS Metrics (Blocks Per Second System):**
+- `bps`: Target blocks per second (configured value, typically 1.0 for TOS)
+  - Calculated as: `1000.0 / block_time_target`
+  - For OneBps configuration: 1000ms target = 1.0 BPS
+  - This is the desired network throughput
+- `actual_bps`: Actual blocks per second (measured performance)
+  - Calculated as: `1000.0 / average_block_time`
+  - Based on average of last 50 blocks
+  - Shows real network performance
+  - Deviation from `bps` indicates DAA (Difficulty Adjustment Algorithm) is actively adjusting
+- `block_time_target`: Target time between blocks in milliseconds (typically 1000ms)
+- `average_block_time`: Actual average time between last 50 blocks in milliseconds
+
+**BPS Monitoring:**
+- When `actual_bps` ≈ `bps`: Network is operating at target performance
+- When `actual_bps` < `bps`: Blocks slower than target (DAA will reduce difficulty)
+- When `actual_bps` > `bps`: Blocks faster than target (DAA will increase difficulty)
 
 ### get_blue_score
 

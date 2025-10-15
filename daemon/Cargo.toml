@@ -66,3 +66,7 @@ tempdir = "*"
 criterion = "0.6.0"
 rayon = "1.8"
 sysinfo = "0.32"
+
+[[bench]]
+name = "tps"
+harness = false
