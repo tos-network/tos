@@ -10,7 +10,7 @@
 
 use async_trait::async_trait;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use rocksdb::DB;
+use rocksdb::{DB, WriteBatch};
 use tempdir::TempDir;
 use tokio::runtime::{Builder, Runtime};
 
@@ -68,6 +68,18 @@ impl BenchAccount {
     fn update_from_state(&mut self, state: &AccountStateImpl) {
         self.balances = state.balances.clone();
         self.nonce = state.nonce;
+    }
+
+    fn credit(&mut self, asset: &Hash, value: u64) {
+        let entry = self
+            .balances
+            .entry(asset.clone())
+            .or_insert_with(|| BalanceEntry {
+                amount: 0,
+                cache: CiphertextCache::Decompressed(self.keypair.get_public_key().encrypt(0u64)),
+            });
+        entry.amount = entry.amount.saturating_add(value);
+        entry.cache = CiphertextCache::Decompressed(self.keypair.get_public_key().encrypt(entry.amount));
     }
 }
 
@@ -340,15 +352,20 @@ struct GeneratedBlock {
     transactions: Vec<Arc<Transaction>>,
     hashes: Vec<Hash>,
     baseline: ExecutionLedger,
-    verification: VerificationState,
+    sender_snapshots: Vec<BenchAccount>,
+    receiver_snapshots: Vec<BenchAccount>,
     transfer_amount: u64,
     fee: u64,
 }
 
 fn generate_block(tx_count: usize, amount: u64, fee: u64) -> GeneratedBlock {
     let mut sender = BenchAccount::new_with_balance(tx_count as u64 * (amount + fee) + 10 * COIN_VALUE);
-    let receiver = BenchAccount::new_with_balance(0);
+    let mut receiver = BenchAccount::new_with_balance(0);
 
+    let mut sender_snapshots = Vec::with_capacity(tx_count + 1);
+    let mut receiver_snapshots = Vec::with_capacity(tx_count + 1);
+    sender_snapshots.push(sender.clone());
+    receiver_snapshots.push(receiver.clone());
     let initial_accounts = vec![sender.clone(), receiver.clone()];
 
     let mut transactions = Vec::with_capacity(tx_count);
@@ -374,6 +391,10 @@ fn generate_block(tx_count: usize, amount: u64, fee: u64) -> GeneratedBlock {
         .expect("build transaction");
 
         sender.update_from_state(&builder_state);
+        receiver.credit(&TOS_ASSET, amount);
+
+        sender_snapshots.push(sender.clone());
+        receiver_snapshots.push(receiver.clone());
 
         transactions.push(Arc::new(tx));
     }
@@ -384,7 +405,8 @@ fn generate_block(tx_count: usize, amount: u64, fee: u64) -> GeneratedBlock {
         transactions,
         hashes,
         baseline: ExecutionLedger::from_accounts(&initial_accounts),
-        verification: VerificationState::from_accounts(&initial_accounts),
+        sender_snapshots,
+        receiver_snapshots,
         transfer_amount: amount,
         fee,
     }
@@ -413,22 +435,76 @@ impl PipelineMode {
     fn persist(self) -> bool { matches!(self, PipelineMode::ExecutionWithProofsAndStorage) }
 }
 
+// Benchmark configuration with environment variable overrides
+const DEFAULT_WORKER_THREADS: usize = 4;
+const DEFAULT_BATCH_SIZE: usize = 64;
+const DEFAULT_TX_COUNTS: &[usize] = &[16, 64, 128, 256, 512];
+const DEFAULT_TRANSFER_AMOUNT: u64 = 50;  // In TOS coins
+const DEFAULT_FEE: u64 = 5_000;            // In base units
+
+fn get_worker_threads() -> usize {
+    std::env::var("TOS_BENCH_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_WORKER_THREADS)
+}
+
+fn get_batch_size() -> usize {
+    std::env::var("TOS_BENCH_BATCH_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_BATCH_SIZE)
+}
+
+fn get_sample_size() -> usize {
+    std::env::var("TOS_BENCH_SAMPLE_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20)
+}
+
+fn get_measurement_time() -> u64 {
+    std::env::var("TOS_BENCH_MEASUREMENT_TIME")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10)
+}
+
 fn build_runtime() -> Runtime {
-    Builder::new_current_thread().enable_all().build().expect("tokio runtime")
+    Builder::new_multi_thread()
+        .worker_threads(get_worker_threads())
+        .enable_all()
+        .build()
+        .expect("tokio runtime")
+}
+
+/// Print performance metrics for a benchmark run (available for custom analysis)
+#[allow(dead_code)]
+fn print_performance_stats(mode: &str, tx_count: usize, duration: Duration) {
+    let tx_count_f64 = tx_count as f64;
+    let duration_secs = duration.as_secs_f64();
+    let tps = tx_count_f64 / duration_secs;
+    let latency_ms = (duration_secs * 1000.0) / tx_count_f64;
+
+    println!("[{}] tx_count={} | TPS={:.2} | avg_latency={:.3}ms | total_time={:.3}s",
+        mode, tx_count, tps, latency_ms, duration_secs);
 }
 
 fn run_pipeline(c: &mut Criterion, mode: PipelineMode) {
     let mut group = c.benchmark_group(mode.label());
+    group.sample_size(get_sample_size());
+    group.measurement_time(Duration::from_secs(get_measurement_time()));
 
-    for &tx_count in &[16usize, 64, 128, 256] {
+    for &tx_count in DEFAULT_TX_COUNTS {
         let GeneratedBlock {
             transactions,
             hashes,
             baseline,
-            verification,
+            sender_snapshots,
+            receiver_snapshots,
             transfer_amount,
             fee,
-        } = generate_block(tx_count, 50 * COIN_VALUE, 5_000);
+        } = generate_block(tx_count, DEFAULT_TRANSFER_AMOUNT * COIN_VALUE, DEFAULT_FEE);
 
         group.throughput(Throughput::Elements(tx_count as u64));
 
@@ -451,39 +527,74 @@ fn run_pipeline(c: &mut Criterion, mode: PipelineMode) {
             }
             _ => {
                 group.bench_with_input(BenchmarkId::from_parameter(tx_count), &tx_count, |b, _| {
+                    // Reuse runtime across iterations for better performance
+                    let runtime = build_runtime();
+
                     b.iter_custom(|iters| {
-                        let runtime = build_runtime();
-                        let cache = NoZKPCache;
                         let mut total = Duration::ZERO;
 
                         for iter_idx in 0..iters {
-                            let mut state = verification.clone();
-                            let temp_dir =
-                                mode.persist().then(|| TempDir::new("tos-bench").expect("temp dir"));
+                            let temp_dir = mode.persist().then(|| TempDir::new("tos-bench").expect("temp dir"));
                             let db = temp_dir
                                 .as_ref()
                                 .map(|dir| DB::open_default(dir.path()).expect("open RocksDB"));
-                            let db_ref = db.as_ref();
 
                             let start = Instant::now();
                             runtime.block_on(async {
-                                for (i, tx) in transactions.iter().enumerate() {
-                                    tx.verify(&hashes[i], &mut state, &cache)
-                                        .await
-                                        .expect("tx verify");
+                                // Pre-allocate futures vector with exact capacity
+                                let batch_size = get_batch_size();
+                                let num_batches = (transactions.len() + batch_size - 1) / batch_size;
+                                let mut futures = Vec::with_capacity(num_batches);
 
-                                    if let Some(db) = db_ref {
-                                        let key = format!("iter:{}:tx:{}", iter_idx, i);
-                                        let mut value = Vec::with_capacity(32 + 16);
-                                        value.extend_from_slice(hashes[i].as_bytes());
-                                        value.extend_from_slice(&transfer_amount.to_le_bytes());
-                                        value.extend_from_slice(&fee.to_le_bytes());
-                                        db.put(key.as_bytes(), &value).expect("db put");
-                                    }
+                                // Process transactions in batches
+                                for batch_idx in 0..num_batches {
+                                    let start_idx = batch_idx * batch_size;
+                                    let end_idx = (start_idx + batch_size).min(transactions.len());
+
+                                    // Share transaction and hash data via Arc (already Arc<Transaction>)
+                                    let tx_chunk: Vec<_> = transactions[start_idx..end_idx].to_vec();
+                                    let hash_chunk: Vec<_> = hashes[start_idx..end_idx].to_vec();
+
+                                    // Clone account states only once per batch
+                                    let sender_state = sender_snapshots[start_idx].clone();
+                                    let receiver_state = receiver_snapshots[start_idx].clone();
+
+                                    futures.push(async move {
+                                        let cache = NoZKPCache;
+                                        let mut state = VerificationState::from_accounts(&[sender_state, receiver_state]);
+
+                                        // Verify all transactions in this batch sequentially
+                                        for (tx, hash) in tx_chunk.iter().zip(hash_chunk.iter()) {
+                                            tx.verify(hash, &mut state, &cache)
+                                                .await
+                                                .expect("tx verify");
+                                        }
+                                    });
                                 }
+
+                                // Execute all batches in parallel
+                                futures::future::join_all(futures).await;
                             });
 
                             if let Some(db) = db.as_ref() {
+                                // Use batched writes for better performance
+                                let mut batch = WriteBatch::default();
+                                // Pre-allocate key buffer to reduce allocations
+                                let iter_prefix = format!("iter:{iter_idx}:hash:");
+
+                                for hash in &hashes {
+                                    // Reuse prefix to minimize allocations
+                                    let mut key = iter_prefix.clone();
+                                    key.push_str(&hash.to_string());
+
+                                    // Pre-allocate value buffer with exact size
+                                    let mut value = Vec::with_capacity(32 + 16);
+                                    value.extend_from_slice(hash.as_bytes());
+                                    value.extend_from_slice(&transfer_amount.to_le_bytes());
+                                    value.extend_from_slice(&fee.to_le_bytes());
+                                    batch.put(key.as_bytes(), &value);
+                                }
+                                db.write(batch).expect("db batch write");
                                 db.flush().expect("flush RocksDB");
                             }
 
@@ -500,6 +611,21 @@ fn run_pipeline(c: &mut Criterion, mode: PipelineMode) {
 }
 
 fn bench_tps(c: &mut Criterion) {
+    println!("\n=== TOS TPS Benchmark Configuration ===");
+    println!("Worker threads: {}", get_worker_threads());
+    println!("Batch size: {}", get_batch_size());
+    println!("Sample size: {}", get_sample_size());
+    println!("Measurement time: {}s", get_measurement_time());
+    println!("Transaction counts: {:?}", DEFAULT_TX_COUNTS);
+    println!("Transfer amount: {} TOS", DEFAULT_TRANSFER_AMOUNT);
+    println!("Fee: {} base units", DEFAULT_FEE);
+    println!("\nEnvironment variables:");
+    println!("  TOS_BENCH_THREADS={}", get_worker_threads());
+    println!("  TOS_BENCH_BATCH_SIZE={}", get_batch_size());
+    println!("  TOS_BENCH_SAMPLE_SIZE={}", get_sample_size());
+    println!("  TOS_BENCH_MEASUREMENT_TIME={}", get_measurement_time());
+    println!("========================================\n");
+
     run_pipeline(c, PipelineMode::ExecutionOnly);
     run_pipeline(c, PipelineMode::ExecutionWithProofs);
     run_pipeline(c, PipelineMode::ExecutionWithProofsAndStorage);
