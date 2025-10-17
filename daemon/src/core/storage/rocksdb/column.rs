@@ -26,6 +26,9 @@ pub enum Column {
     // All blocks stored
     // {block_hash} => {block}
     Blocks,
+    // Block to transactions mapping (TIP-2 Phase 1 fix)
+    // {block_hash} => [tx_hash1, tx_hash2, ...]
+    BlockTransactions,
     // All blocks hashes stored per height
     // {height} => {block_hashes}
     BlocksAtHeight,

@@ -58,9 +58,17 @@ impl BlockProvider for RocksStorage {
     async fn get_block_by_hash(&self, hash: &Hash) -> Result<Block, BlockchainError> {
         trace!("get block by hash");
         let header = self.get_block_header_by_hash(hash).await?;
-        // TODO: Headers no longer contain transaction data - need to fetch from separate storage
-        // For now, return empty transactions as temporary fix
-        let transactions = Vec::new();
+
+        // TIP-2 Phase 1 fix: Load transaction hashes from BlockTransactions column
+        let tx_hashes: Vec<Hash> = self.load_optional_from_disk(Column::BlockTransactions, hash.as_bytes())?
+            .unwrap_or_default();
+
+        // Load each transaction from storage
+        let mut transactions = Vec::with_capacity(tx_hashes.len());
+        for tx_hash in tx_hashes {
+            let tx = self.get_transaction(&tx_hash).await?;
+            transactions.push(tx.into_arc());
+        }
 
         Ok(Block::new(header, transactions))
     }
@@ -72,8 +80,10 @@ impl BlockProvider for RocksStorage {
         trace!("save block");
 
         let mut count_txs = 0;
+        let mut tx_hashes = Vec::with_capacity(txs.len());
         for transaction in txs.iter() {
             let tx_hash = (**transaction).hash();
+            tx_hashes.push(tx_hash.clone());
             if !self.has_transaction(&tx_hash).await? {
                 self.add_transaction(&tx_hash, &transaction).await?;
                 count_txs += 1;
@@ -82,6 +92,9 @@ impl BlockProvider for RocksStorage {
 
         // V-22 Fix: Use fsync for critical block data
         self.insert_into_disk_sync(Column::Blocks, hash.as_bytes(), &block)?;
+
+        // TIP-2 Phase 1 fix: Store block → transactions mapping
+        self.insert_into_disk_sync(Column::BlockTransactions, hash.as_bytes(), &tx_hashes)?;
 
         let block_difficulty = BlockDifficulty {
             covariance,
@@ -106,6 +119,8 @@ impl BlockProvider for RocksStorage {
         trace!("delete block with hash");
         let block = self.get_block_by_hash(hash).await?;
         self.remove_from_disk(Column::Blocks, hash)?;
+        // TIP-2 Phase 1 fix: Also delete the block → transactions mapping
+        self.remove_from_disk(Column::BlockTransactions, hash)?;
 
         Ok(block)
     }

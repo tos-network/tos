@@ -67,6 +67,9 @@ pub struct SledStorage {
     pub(super) blocks_execution_order: Tree,
     // all blocks on disk
     pub(super) blocks: Tree,
+    // block to transactions mapping (TIP-2 Phase 1 fix)
+    // Key is the block hash, value is list of transaction hashes
+    pub(super) block_transactions: Tree,
     // all blocks height at specific height
     pub(super) blocks_at_height: Tree,
     // all extra data saved on disk
@@ -241,6 +244,7 @@ impl SledStorage {
             txs_executed: sled.open_tree("txs_executed")?,
             blocks_execution_order: sled.open_tree("blocks_execution_order")?,
             blocks: sled.open_tree("blocks")?,
+            block_transactions: sled.open_tree("block_transactions")?,
             blocks_at_height: sled.open_tree("blocks_at_height")?,
             extra: sled.open_tree("extra")?,
             topo_by_hash: sled.open_tree("topo_at_hash")?,

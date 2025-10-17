@@ -79,10 +79,12 @@ impl BlockProvider for SledStorage {
             debug!("Storing new {} with hash: {}, difficulty: {}, snapshot mode: {}", block, hash, difficulty, self.snapshot.is_some());
         }
 
-        // Store transactions
+        // Store transactions and collect tx hashes
         let mut txs_count = 0;
+        let mut tx_hashes = Vec::with_capacity(txs.len());
         for tx in txs { // first save all txs, then save block
             let tx_hash = (**tx).hash();
+            tx_hashes.push(tx_hash.clone());
             if !self.has_transaction(&tx_hash).await? {
                 self.add_transaction(&tx_hash, &tx).await?;
                 txs_count += 1;
@@ -99,6 +101,9 @@ impl BlockProvider for SledStorage {
         if no_prev {
             self.store_blocks_count(self.count_blocks().await? + 1)?;
         }
+
+        // TIP-2 Phase 1 fix: Store block → transactions mapping
+        Self::insert_into_disk(self.snapshot.as_mut(), &self.block_transactions, hash.as_bytes(), tx_hashes.to_bytes())?;
 
         // Store difficulty
         Self::insert_into_disk(self.snapshot.as_mut(), &self.difficulty, hash.as_bytes(), difficulty.to_bytes())?;
@@ -123,9 +128,17 @@ impl BlockProvider for SledStorage {
             trace!("get block by hash {}", hash);
         }
         let header = self.get_block_header_by_hash(hash).await?;
-        // TODO: Headers no longer contain transaction data - need to fetch from separate storage
-        // For now, return empty transactions as temporary fix
-        let transactions = Vec::new();
+
+        // TIP-2 Phase 1 fix: Load transaction hashes from block_transactions tree
+        let tx_hashes: Vec<Hash> = Self::load_optional_from_disk_internal(self.snapshot.as_ref(), &self.block_transactions, hash.as_bytes())?
+            .unwrap_or_default();
+
+        // Load each transaction from storage
+        let mut transactions = Vec::with_capacity(tx_hashes.len());
+        for tx_hash in tx_hashes {
+            let tx = self.get_transaction(&tx_hash).await?;
+            transactions.push(tx.into_arc());
+        }
 
         let block = Block::new(header, transactions);
         Ok(block)
@@ -136,11 +149,25 @@ impl BlockProvider for SledStorage {
             debug!("Deleting block with hash: {}", hash);
         }
 
+        // TIP-2 Phase 1 fix: Load transactions before deleting the mapping
+        let tx_hashes: Vec<Hash> = Self::load_optional_from_disk_internal(self.snapshot.as_ref(), &self.block_transactions, hash.as_bytes())?
+            .unwrap_or_default();
+
+        // Load transactions to return in the block
+        let mut transactions = Vec::with_capacity(tx_hashes.len());
+        for tx_hash in tx_hashes {
+            let tx = self.get_transaction(&tx_hash).await?;
+            transactions.push(tx.into_arc());
+        }
+
         // Delete block header
         let header = Self::delete_arc_cacheable_data(self.snapshot.as_mut(), &self.blocks, self.cache.blocks_cache.as_mut(), &hash).await?;
 
         // Decrease blocks count
         self.store_blocks_count(self.count_blocks().await? - 1)?;
+
+        // TIP-2 Phase 1 fix: Delete block → transactions mapping
+        Self::remove_from_disk_without_reading(self.snapshot.as_mut(), &self.block_transactions, hash.as_bytes())?;
 
         // Delete difficulty
         Self::remove_from_disk_without_reading(self.snapshot.as_mut(), &self.difficulty, hash.as_bytes())?;
@@ -149,10 +176,6 @@ impl BlockProvider for SledStorage {
         Self::remove_from_disk_without_reading(self.snapshot.as_mut(), &self.difficulty_covariance, hash.as_bytes())?;
 
         self.remove_block_hash_at_blue_score(&hash, header.get_blue_score()).await?;
-
-        // TODO: Headers no longer contain transaction data - need to fetch from separate storage
-        // For now, return empty transactions as temporary fix
-        let transactions = Vec::new();
 
         let block = Block::new(header, transactions);
 
