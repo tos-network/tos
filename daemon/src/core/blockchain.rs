@@ -132,6 +132,7 @@ use rand::Rng;
 
 use super::storage::{
     AccountProvider,
+    BlockProvider,
     BlocksAtHeightProvider,
     ClientProtocolProvider,
     GhostdagDataProvider,
@@ -3811,7 +3812,7 @@ impl<S: Storage> Blockchain<S> {
     // for this we get all tips and recursively retrieve all txs from tips until we reach height
     async fn get_all_txs_until_height<P>(&self, provider: &P, until_height: u64, tips: impl Iterator<Item = Hash>, executed_only: bool) -> Result<IndexSet<Hash>, BlockchainError>
     where
-        P: DifficultyProvider + ClientProtocolProvider
+        P: DifficultyProvider + ClientProtocolProvider + BlockProvider
     {
         if log::log_enabled!(log::Level::Trace) {
         trace!("get all txs until height {}", until_height);
@@ -3830,21 +3831,18 @@ impl<S: Storage> Blockchain<S> {
 
             // check that the block height is higher than the height passed in param
             if header.get_blue_score() >= until_height {
-                // Since BlockHeader no longer contains transaction hashes and provider doesn't have a method to get transactions,
-                // we need to skip collecting transaction hashes here
-                // TODO: Implement a proper way to get transactions for a block through the provider interface
-                if log::log_enabled!(log::Level::Warn) {
-                warn!("Skipping transaction collection for block {} - provider interface needs enhancement", hash);
-                }
+                // Get the block with transactions
+                let block = provider.get_block_by_hash(&hash).await?;
 
-                // Continue with empty transaction set for now
-                for tx in std::iter::empty::<&Hash>() {
+                // Iterate over the block's transaction hashes
+                for tx in block.get_transactions() {
+                    let tx_hash = tx.hash();
                     // Check that we don't have it yet
-                    if !hashes.contains(tx) {
+                    if !hashes.contains(&tx_hash) {
                         // Then check that it's executed in this block
-                        if !executed_only || (executed_only && provider.is_tx_executed_in_block(tx, &hash)?) {
+                        if !executed_only || (executed_only && provider.is_tx_executed_in_block(&tx_hash, &hash)?) {
                             // add it to the list
-                            hashes.insert(tx.clone());
+                            hashes.insert(tx_hash);
                         }
                     }
                 }
