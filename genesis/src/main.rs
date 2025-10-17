@@ -27,7 +27,7 @@ fn main() {
     
     // Create genesis block header with different timestamps for different networks
     let (version, timestamp) = match network {
-        "testnet" => (BlockVersion::V0, 1696132639000u64), // Different timestamp for testnet
+        "testnet" => (BlockVersion::V1, 1696132639000u64), // Testnet starts with V1 (1s blocks)
         _ => (BlockVersion::V2, 1752336822401u64), // Mainnet timestamp
     };
 
