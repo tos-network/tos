@@ -178,8 +178,8 @@ where
         extra_nonce: Cow::Borrowed(header.get_extra_nonce()),
         timestamp: header.get_timestamp(),
         nonce: header.get_nonce(),
-        // RPC compatibility: "height" field represents blue_score (DAG depth position)
-        height: header.get_blue_score(),
+        // GHOSTDAG: blue_score represents DAG depth (number of blue blocks in past set)
+        blue_score: header.get_blue_score(),
         version: header.get_version(),
         miner: Cow::Owned(header.get_miner().as_address(mainnet)),
         tips: Cow::Owned(tips),
@@ -251,8 +251,8 @@ pub async fn get_block_response_for_hash<S: Storage>(blockchain: &Blockchain<S>,
             extra_nonce: Cow::Borrowed(header.get_extra_nonce()),
             timestamp: header.get_timestamp(),
             nonce: header.get_nonce(),
-            // RPC compatibility: "height" field represents blue_score (DAG depth position)
-            height: header.get_blue_score(),
+            // GHOSTDAG: blue_score represents DAG depth (number of blue blocks in past set)
+            blue_score: header.get_blue_score(),
             version: header.get_version(),
             miner: Cow::Owned(header.get_miner().as_address(mainnet)),
             tips: Cow::Owned(tips),

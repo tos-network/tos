@@ -88,7 +88,7 @@ pub struct RPCBlockResponse<'a> {
     pub version: BlockVersion,
     pub tips: Cow<'a, IndexSet<Hash>>,
     pub timestamp: TimestampMillis,
-    pub height: u64,
+    pub blue_score: u64,
     pub nonce: Nonce,
     #[serde(serialize_with = "serialize_extra_nonce")]
     #[serde(deserialize_with = "deserialize_extra_nonce")]
