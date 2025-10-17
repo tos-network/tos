@@ -148,7 +148,7 @@ impl TransactionBuilderState {
 
         storage.set_tx_cache(TxCache {
             reference: self.reference.clone(),
-            nonce: self.nonce,
+            nonce: self.nonce + 1,  // Next nonce for subsequent transactions
             last_tx_hash_created: self.tx_hash_built.take(),
         });
 

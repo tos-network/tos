@@ -9,7 +9,7 @@ use std::{
 };
 use anyhow::{Result, Context};
 use indexmap::IndexSet;
-use log::{error, info};
+use log::{error, info, warn};
 use clap::Parser;
 use sha3::{Digest, Keccak256};
 use tos_common::{
@@ -3020,7 +3020,55 @@ async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction
 
     if wallet.is_online().await {
         if let Err(e) = wallet.submit_transaction(&tx).await {
-            manager.error(format!("Couldn't submit transaction: {:#}", e));
+            let error_msg = format!("{:#}", e);
+
+            // Check if error is due to nonce conflict
+            if error_msg.contains("nonce") && error_msg.contains("already used") {
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Detected nonce conflict, attempting to sync nonce from blockchain");
+                }
+                manager.warn("Nonce conflict detected. Attempting to sync nonce from blockchain...");
+
+                #[cfg(feature = "network_handler")]
+                {
+                    // Try to sync nonce from blockchain
+                    let network_handler_lock = wallet.get_network_handler().lock().await;
+                    if let Some(network_handler) = network_handler_lock.as_ref() {
+                        let address = wallet.get_address();
+                        match network_handler.get_api().get_nonce(&address).await {
+                            Ok(nonce_result) => {
+                                let blockchain_nonce = nonce_result.version.get_nonce();
+                                if log::log_enabled!(log::Level::Info) {
+                                    info!("Blockchain nonce: {}, topoheight: {}", blockchain_nonce, nonce_result.topoheight);
+                                }
+
+                                // Update local nonce to blockchain nonce
+                                let mut storage = wallet.get_storage().write().await;
+                                if let Err(nonce_err) = storage.set_nonce(blockchain_nonce) {
+                                    manager.error(format!("Failed to update nonce: {:#}", nonce_err));
+                                } else {
+                                    manager.message(format!("Nonce synced from blockchain: {}", blockchain_nonce));
+
+                                    // Clear cache and unconfirmed balances to reflect correct state
+                                    storage.clear_tx_cache();
+                                    storage.delete_unconfirmed_balances().await;
+
+                                    manager.error("Please retry the transaction with the updated nonce");
+                                    return;
+                                }
+                            }
+                            Err(nonce_err) => {
+                                if log::log_enabled!(log::Level::Warn) {
+                                    warn!("Failed to query nonce from blockchain: {:#}", nonce_err);
+                                }
+                                manager.error(format!("Failed to sync nonce from blockchain: {:#}", nonce_err));
+                            }
+                        }
+                    }
+                }
+            }
+
+            manager.error(format!("Couldn't submit transaction: {}", error_msg));
             manager.error("You can try to rescan your balance with the command 'rescan'");
 
             // Maybe cache is corrupted, clear it
