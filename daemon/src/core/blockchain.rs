@@ -219,6 +219,8 @@ pub struct Blockchain<S: Storage> {
     txs_verification_threads_count: usize,
     // Disable the ZKP Cache
     disable_zkp_cache: bool,
+    // Cache for block template transactions (supports block reconstruction from header)
+    transaction_cache: crate::core::mining::TransactionCache,
 }
 
 impl<S: Storage> Blockchain<S> {
@@ -351,6 +353,7 @@ impl<S: Storage> Blockchain<S> {
             txs_verification_threads_count: config.txs_verification_threads_count,
             flush_db_every_n_blocks: config.flush_db_every_n_blocks,
             disable_zkp_cache: config.disable_zkp_cache,
+            transaction_cache: crate::core::mining::TransactionCache::new(100, 60000), // 100 templates, 60s TTL
         };
 
         // include genesis block
@@ -2251,6 +2254,27 @@ impl<S: Storage> Blockchain<S> {
         debug!("Block template with {} transactions, merkle root: {}", selected_tx_objects.len(), merkle_root);
         }
 
+        // Cache transactions by merkle root so we can reconstruct block from mined header
+        // Use merkle root as key since it uniquely identifies this transaction set
+        // TTL is 60s which is enough time for a miner to find a nonce and submit
+        if !selected_tx_objects.is_empty() {
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+
+            self.transaction_cache.put(
+                merkle_root.clone(),
+                selected_tx_objects.clone(),
+                current_time,
+                60000, // 60 second TTL
+            ).await;
+
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Cached {} transactions for merkle root: {}", selected_tx_objects.len(), merkle_root);
+            }
+        }
+
         Ok(updated_block)
     }
 
@@ -2271,17 +2295,32 @@ impl<S: Storage> Blockchain<S> {
             return Ok(block);
         }
 
-        // SECURITY CRITICAL: Block has non-zero merkle root but we have no transaction cache
+        // Try to retrieve cached transactions by merkle root
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        if let Some(transactions) = self.transaction_cache.get(merkle_root, current_time).await {
+            // Found cached transactions - reconstruct block
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Retrieved {} cached transactions for merkle root: {}", transactions.len(), merkle_root);
+            }
+
+            let block = Block::new(header, transactions);
+            return Ok(block);
+        }
+
+        // SECURITY CRITICAL: Block has non-zero merkle root but no cached transactions found
         // Returning an empty block would allow merkle root validation bypass
-        // This is a security vulnerability - we must reject the block
         if log::log_enabled!(log::Level::Error) {
-        error!("SECURITY: Cannot build block from header - no transaction cache available, but merkle root is non-zero: {}",
-               merkle_root);
+            error!("SECURITY: Cannot build block from header - no transaction cache found for merkle root: {}", merkle_root);
         }
         error!("This indicates either:");
-        error!("  1. A miner submitting a block without using get_block_template");
-        error!("  2. Missing transaction caching implementation");
-        error!("  3. A potential security attack attempting to bypass merkle root validation");
+        error!("  1. Cache expired (TTL=60s) - miner took too long to find nonce");
+        error!("  2. Miner submitting a block without using get_block_template");
+        error!("  3. Cache evicted (LRU capacity=100 templates)");
+        error!("  4. A potential security attack attempting to bypass merkle root validation");
 
         // Return an error instead of an empty block
         // This prevents the vulnerability where a malicious miner could submit

@@ -6,7 +6,7 @@ pub mod stats;
 pub mod stratum;
 pub mod template;
 
-pub use cache::{GhostdagCache, BlockTemplateCache, TipSelectionCache};
+pub use cache::{GhostdagCache, BlockTemplateCache, TipSelectionCache, TransactionCache};
 pub use stats::{MiningStats, MiningStatsSnapshot, BlockStatus};
 pub use stratum::{
     StratumJob, StratumNotification, StratumShare, StratumShareResponse, StratumError,

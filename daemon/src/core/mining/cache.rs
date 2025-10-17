@@ -7,6 +7,7 @@ use lru::LruCache;
 use tos_common::{
     crypto::Hash,
     tokio::sync::RwLock,
+    transaction::Transaction,
 };
 use crate::core::ghostdag::TosGhostdagData;
 
@@ -154,6 +155,86 @@ impl TipSelectionCache {
     pub async fn clear(&self) {
         let mut cache = self.cache.write().await;
         cache.clear();
+    }
+}
+
+/// Cache for block template transactions to support block reconstruction from header
+/// This cache stores the transactions selected for a block template, allowing
+/// the daemon to reconstruct the full block when a miner submits a solved header
+#[derive(Clone)]
+pub struct TransactionCache {
+    /// Cached transactions by header hash
+    cache: Arc<RwLock<LruCache<Hash, CachedTransactions>>>,
+}
+
+#[derive(Clone)]
+struct CachedTransactions {
+    /// The transactions included in the block template
+    transactions: Vec<Arc<Transaction>>,
+
+    /// Timestamp when cached (milliseconds)
+    timestamp: u64,
+
+    /// Time to live in milliseconds
+    ttl_ms: u64,
+}
+
+impl TransactionCache {
+    /// Create a new transaction cache with specified capacity
+    /// Default capacity is 100 templates (enough for multiple miners)
+    /// Note: TTL is specified per cache entry in the `put` method
+    pub fn new(capacity: usize, _ttl_ms: u64) -> Self {
+        let capacity = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(100).unwrap());
+        Self {
+            cache: Arc::new(RwLock::new(LruCache::new(capacity))),
+        }
+    }
+
+    /// Get cached transactions for a block header hash
+    /// Returns None if not found or expired
+    pub async fn get(&self, header_hash: &Hash, current_time: u64) -> Option<Vec<Arc<Transaction>>> {
+        let mut cache = self.cache.write().await;
+
+        if let Some(cached) = cache.get(header_hash) {
+            let elapsed = current_time.saturating_sub(cached.timestamp);
+            if elapsed < cached.ttl_ms {
+                // Still valid
+                return Some(cached.transactions.clone());
+            }
+            // Expired, will be removed by LRU
+        }
+
+        None
+    }
+
+    /// Cache transactions for a block header
+    /// The header_hash should be the hash of the header BEFORE nonce is found
+    /// This allows us to retrieve transactions when the miner submits the solved header
+    pub async fn put(&self, header_hash: Hash, transactions: Vec<Arc<Transaction>>, timestamp: u64, ttl_ms: u64) {
+        let mut cache = self.cache.write().await;
+        cache.put(header_hash, CachedTransactions {
+            transactions,
+            timestamp,
+            ttl_ms,
+        });
+    }
+
+    /// Clear all cached transactions
+    pub async fn clear(&self) {
+        let mut cache = self.cache.write().await;
+        cache.clear();
+    }
+
+    /// Get cache size
+    pub async fn len(&self) -> usize {
+        let cache = self.cache.read().await;
+        cache.len()
+    }
+
+    /// Check if cache is empty
+    pub async fn is_empty(&self) -> bool {
+        let cache = self.cache.read().await;
+        cache.is_empty()
     }
 }
 
