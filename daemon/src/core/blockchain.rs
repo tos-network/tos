@@ -2110,6 +2110,9 @@ impl<S: Storage> Blockchain<S> {
         // Track selected transaction hashes (since they're no longer in BlockHeader)
         let mut selected_txs = IndexSet::new();
 
+        // Also track selected Transaction objects for merkle root calculation
+        let mut selected_tx_objects: Vec<Arc<Transaction>> = Vec::new();
+
         // data used to verify txs
         let stable_topoheight = self.get_stable_topoheight();
         let stable_height = self.get_stable_blue_score();
@@ -2223,6 +2226,8 @@ impl<S: Storage> Blockchain<S> {
                 // Clone the Arc (cheap reference count increment) instead of cloning the inner Hash
                 // This is more efficient than hash.as_ref().clone() which would copy the 32-byte hash
                 selected_txs.insert(Arc::clone(hash));
+                // Also store the Transaction Arc for merkle root calculation
+                selected_tx_objects.push(Arc::clone(tx));
                 block_size += HASH_SIZE; // add the hash size
                 total_txs_size += size;
             }
@@ -2231,7 +2236,22 @@ impl<S: Storage> Blockchain<S> {
         histogram!("tos_block_header_template_txs_selection_ms").record(start.elapsed().as_millis() as f64);
         counter!("tos_block_template").increment(1);
 
-        Ok(block)
+        // Calculate merkle root from selected transactions
+        let merkle_root = if selected_tx_objects.is_empty() {
+            Hash::zero()
+        } else {
+            calculate_merkle_root(&selected_tx_objects)
+        };
+
+        // Create new header with merkle root
+        let mut updated_block = block.clone();
+        updated_block.hash_merkle_root = merkle_root.clone();
+
+        if log::log_enabled!(log::Level::Debug) {
+        debug!("Block template with {} transactions, merkle root: {}", selected_tx_objects.len(), merkle_root);
+        }
+
+        Ok(updated_block)
     }
 
     // Build a block using the header and search for TXs in mempool and storage
