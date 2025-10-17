@@ -25,6 +25,12 @@ pub struct TosGhostdagData {
     /// Used for selecting the "heaviest" chain (blue chain)
     pub blue_work: BlueWorkType,
 
+    /// DAA score: monotonic score for Difficulty Adjustment Algorithm
+    /// Unlike blue_score (which can have jumps in DAG), daa_score is sequential:
+    /// daa_score = max(parent_daa_scores) + 1
+    /// This ensures accurate difficulty adjustment calculations.
+    pub daa_score: u64,
+
     /// Selected parent: the parent with the highest blue_work
     /// This is the "main chain" parent in GHOSTDAG terminology
     pub selected_parent: Hash,
@@ -64,6 +70,7 @@ impl TosGhostdagData {
     pub fn new(
         blue_score: u64,
         blue_work: BlueWorkType,
+        daa_score: u64,
         selected_parent: Hash,
         mergeset_blues: Vec<Hash>,
         mergeset_reds: Vec<Hash>,
@@ -73,6 +80,7 @@ impl TosGhostdagData {
         Self {
             blue_score,
             blue_work,
+            daa_score,
             selected_parent,
             mergeset_blues: Arc::new(mergeset_blues),
             mergeset_reds: Arc::new(mergeset_reds),
@@ -94,6 +102,7 @@ impl TosGhostdagData {
         Self {
             blue_score: 0,
             blue_work: BlueWorkType::zero(),
+            daa_score: 0,  // Will be calculated during GHOSTDAG processing
             selected_parent,
             mergeset_blues: Arc::new(mergeset_blues),
             mergeset_reds: Arc::new(Vec::new()),
@@ -148,6 +157,13 @@ impl TosGhostdagData {
         self.blue_work = blue_work;
     }
 
+    /// Set DAA score explicitly
+    /// DAA score = max(parent_daa_scores) + 1 (monotonic, unlike blue_score)
+    /// This must be called after GHOSTDAG processing to ensure accurate difficulty adjustment
+    pub fn set_daa_score(&mut self, daa_score: u64) {
+        self.daa_score = daa_score;
+    }
+
     /// Set mergeset_non_daa blocks
     /// These are blocks in the mergeset that are outside the DAA window
     /// and should not participate in difficulty adjustment calculations.
@@ -178,6 +194,7 @@ impl Default for TosGhostdagData {
         Self {
             blue_score: 0,
             blue_work: BlueWorkType::zero(),
+            daa_score: 0,
             selected_parent: Hash::new([0u8; 32]),  // Zero hash
             mergeset_blues: Arc::new(Vec::new()),
             mergeset_reds: Arc::new(Vec::new()),

@@ -59,9 +59,8 @@ pub async fn calculate_daa_score<S: Storage>(
     // Get parent's GHOSTDAG data to get parent's DAA score
     let parent_data = storage.get_ghostdag_data(selected_parent).await?;
 
-    // For now, parent's daa_score is the same as its blue_score
-    // (we'll update this as we implement full DAA)
-    let parent_daa_score = parent_data.blue_score;
+    // Use the actual daa_score field (not blue_score)
+    let parent_daa_score = parent_data.daa_score;
 
     // Get the DAA window boundary block
     // This is the block at (parent_daa_score - DAA_WINDOW_SIZE)
@@ -271,14 +270,13 @@ async fn find_block_at_daa_score<S: Storage>(
     while let Some(current) = queue.pop_front() {
         let current_data = storage.get_ghostdag_data(&current).await?;
 
-        // For now, use blue_score as proxy for daa_score
-        // TODO: Once we store daa_score separately, use that
-        if current_data.blue_score == target_score {
+        // Use actual daa_score field (not blue_score)
+        if current_data.daa_score == target_score {
             return Ok(current);
         }
 
         // If we've gone past the target, traverse to parents
-        if current_data.blue_score > target_score {
+        if current_data.daa_score > target_score {
             let header = storage.get_block_header_by_hash(&current).await?;
 
             for parent in header.get_parents().iter() {

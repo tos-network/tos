@@ -174,6 +174,7 @@ impl TosGhostdag {
         TosGhostdagData::new(
             0,                      // blue_score
             BlueWorkType::zero(),   // blue_work
+            0,                      // daa_score (genesis has daa_score = 0)
             Hash::new([0u8; 32]),   // selected_parent (genesis has no parent - zero hash)
             Vec::new(),             // mergeset_blues
             Vec::new(),             // mergeset_reds
@@ -320,7 +321,7 @@ impl TosGhostdag {
             .cloned()
             .collect();
 
-        let (_daa_score, mergeset_non_daa) = daa::calculate_daa_score(
+        let (daa_score, mergeset_non_daa) = daa::calculate_daa_score(
             storage,
             &selected_parent,
             &mergeset_blues_without_selected,
@@ -332,6 +333,9 @@ impl TosGhostdag {
 
         // Finalize the GHOSTDAG data
         new_block_data.finalize_score_and_work(blue_score, blue_work);
+
+        // Set DAA score (monotonic, calculated from parents)
+        new_block_data.set_daa_score(daa_score);
 
         Ok(new_block_data)
     }
