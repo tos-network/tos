@@ -568,6 +568,7 @@ mod comprehensive_tests {
         let data = TosGhostdagData::new(
             10,                           // blue_score
             BlueWorkType::from(1000u64),  // blue_work
+            10,                           // daa_score: use same value as blue_score for test data
             Hash::new([1u8; 32]),         // selected_parent
             vec![Hash::new([2u8; 32])],   // mergeset_blues
             vec![Hash::new([3u8; 32])],   // mergeset_reds

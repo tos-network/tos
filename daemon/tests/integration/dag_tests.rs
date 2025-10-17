@@ -110,6 +110,8 @@ async fn test_block_validation_in_dag() {
 #[allow(dead_code)]
 fn create_test_block(parents: Vec<Hash>, timestamp: u64, difficulty: u64) -> Hash {
     // Create a deterministic hash for testing
+    use tos_common::crypto::hash;
+
     let mut hash_data = Vec::new();
     for parent in parents {
         hash_data.extend_from_slice(parent.as_bytes());
@@ -117,12 +119,8 @@ fn create_test_block(parents: Vec<Hash>, timestamp: u64, difficulty: u64) -> Has
     hash_data.extend_from_slice(&timestamp.to_le_bytes());
     hash_data.extend_from_slice(&difficulty.to_le_bytes());
 
-    // Pad to 32 bytes
-    hash_data.resize(32, 0);
-    let mut hash_bytes = [0u8; 32];
-    hash_bytes.copy_from_slice(&hash_data[..32]);
-
-    Hash::new(hash_bytes)
+    // Use actual hashing to ensure different inputs produce different hashes
+    hash(&hash_data)
 }
 
 /// Helper: Verify DAG invariants
@@ -171,7 +169,7 @@ mod unit_tests {
     fn test_create_test_block() {
         // Test helper function
         let genesis = Hash::new([0u8; 32]);
-        let block1 = create_test_block(vec![genesis], 1000, 100);
+        let block1 = create_test_block(vec![genesis.clone()], 1000, 100);
         let block2 = create_test_block(vec![genesis], 2000, 100);
 
         // Different timestamps should create different hashes

@@ -87,9 +87,10 @@ pub async fn calculate_daa_score<S: Storage>(
         }
     }
 
-    // Calculate DAA score: parent's score + blues in window
-    // Note: We always count the selected_parent itself (it's implicitly in window)
-    let daa_score = parent_daa_score + blues_in_window_count;
+    // Calculate DAA score: parent's score + 1 (current block) + blues in window
+    // The +1 accounts for the current block itself, making DAA score monotonic
+    // Formula: daa_score = max(parent_daa_scores) + 1 + blues_in_window
+    let daa_score = parent_daa_score + 1 + blues_in_window_count;
 
     Ok((daa_score, mergeset_non_daa))
 }

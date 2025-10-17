@@ -251,6 +251,7 @@ mod tests {
         let data = Arc::new(TosGhostdagData::new(
             1,
             Default::default(),
+            1,  // daa_score: use same value as blue_score for test data
             Hash::new([0u8; 32]),
             vec![],
             vec![],

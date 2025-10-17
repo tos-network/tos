@@ -563,6 +563,7 @@ mod tests {
         let genesis_data = TosGhostdagData::new(
             0,
             BlueWorkType::zero(),
+            0,  // daa_score: genesis has daa_score of 0
             Hash::new([0u8; 32]),  // Zero hash
             Vec::new(),
             Vec::new(),
@@ -842,6 +843,7 @@ mod tests {
         let data = TosGhostdagData::new(
             blue_score,
             blue_work,
+            blue_score,  // daa_score: use same value as blue_score for test data
             selected_parent.clone(),
             mergeset_blues.clone(),
             mergeset_reds.clone(),

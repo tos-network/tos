@@ -1,8 +1,6 @@
 // GHOSTDAG Integration Tests
 // Tests GHOSTDAG algorithm with real storage and complex scenarios
 
-use tos_common::crypto::Hash;
-
 /// Test 1: GHOSTDAG with multiple merging blocks
 #[tokio::test]
 #[ignore] // Requires full storage implementation

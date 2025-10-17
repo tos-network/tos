@@ -106,6 +106,7 @@ mod ghostdag_dag_tests {
         provider.add_block(a_bytes, TosGhostdagData {
             blue_score: 0,
             blue_work: BlueWorkType::from(1000u64),
+            daa_score: 0,  // daa_score: genesis has daa_score of 0
             selected_parent: Hash::zero(),
             mergeset_blues: Arc::new(vec![]),
             mergeset_reds: Arc::new(vec![]),
@@ -118,6 +119,7 @@ mod ghostdag_dag_tests {
         provider.add_block(b_bytes, TosGhostdagData {
             blue_score: 1,
             blue_work: BlueWorkType::from(2000u64),
+            daa_score: 1,  // daa_score: use same value as blue_score for test data
             selected_parent: Hash::new(a_bytes),
             mergeset_blues: Arc::new(vec![Hash::new(a_bytes)]),
             mergeset_reds: Arc::new(vec![]),
@@ -130,6 +132,7 @@ mod ghostdag_dag_tests {
         provider.add_block(c_bytes, TosGhostdagData {
             blue_score: 2,
             blue_work: BlueWorkType::from(3000u64),
+            daa_score: 2,  // daa_score: use same value as blue_score for test data
             selected_parent: Hash::new(b_bytes),
             mergeset_blues: Arc::new(vec![Hash::new(b_bytes)]),
             mergeset_reds: Arc::new(vec![]),
@@ -161,6 +164,7 @@ mod ghostdag_dag_tests {
         provider.add_block(a_bytes, TosGhostdagData {
             blue_score: 0,
             blue_work: BlueWorkType::from(1000u64),
+            daa_score: 0,  // daa_score: genesis has daa_score of 0
             selected_parent: Hash::zero(),
             mergeset_blues: Arc::new(vec![]),
             mergeset_reds: Arc::new(vec![]),
@@ -173,6 +177,7 @@ mod ghostdag_dag_tests {
         provider.add_block(b_bytes, TosGhostdagData {
             blue_score: 1,
             blue_work: BlueWorkType::from(2000u64),
+            daa_score: 1,  // daa_score: use same value as blue_score for test data
             selected_parent: Hash::new(a_bytes),
             mergeset_blues: Arc::new(vec![Hash::new(a_bytes)]),
             mergeset_reds: Arc::new(vec![]),
@@ -185,6 +190,7 @@ mod ghostdag_dag_tests {
         provider.add_block(c_bytes, TosGhostdagData {
             blue_score: 2,
             blue_work: BlueWorkType::from(3000u64),
+            daa_score: 2,  // daa_score: use same value as blue_score for test data
             selected_parent: Hash::new(b_bytes),
             mergeset_blues: Arc::new(vec![Hash::new(b_bytes)]),
             mergeset_reds: Arc::new(vec![]),
@@ -197,6 +203,7 @@ mod ghostdag_dag_tests {
         provider.add_block(d_bytes, TosGhostdagData {
             blue_score: 1,
             blue_work: BlueWorkType::from(1500u64),
+            daa_score: 1,  // daa_score: use same value as blue_score for test data
             selected_parent: Hash::new(a_bytes),
             mergeset_blues: Arc::new(vec![Hash::new(a_bytes)]),
             mergeset_reds: Arc::new(vec![]),
@@ -243,6 +250,7 @@ mod ghostdag_dag_tests {
         provider.add_block(genesis_bytes, TosGhostdagData {
             blue_score: 0,
             blue_work: BlueWorkType::from(1000u64),
+            daa_score: 0,  // daa_score: genesis has daa_score of 0
             selected_parent: Hash::zero(),
             mergeset_blues: Arc::new(vec![]),
             mergeset_reds: Arc::new(vec![]),
@@ -255,6 +263,7 @@ mod ghostdag_dag_tests {
         provider.add_block(b1_bytes, TosGhostdagData {
             blue_score: 1,
             blue_work: BlueWorkType::from(2000u64),
+            daa_score: 1,  // daa_score: use same value as blue_score for test data
             selected_parent: Hash::new(genesis_bytes),
             mergeset_blues: Arc::new(vec![Hash::new(genesis_bytes)]),
             mergeset_reds: Arc::new(vec![]),
@@ -267,6 +276,7 @@ mod ghostdag_dag_tests {
         provider.add_block(b5_bytes, TosGhostdagData {
             blue_score: 5,
             blue_work: BlueWorkType::from(6000u64),
+            daa_score: 5,  // daa_score: use same value as blue_score for test data
             selected_parent: Hash::new([4u8; 32]), // Assumes 4 is selected parent
             mergeset_blues: Arc::new(vec![
                 Hash::new([4u8; 32]),
@@ -283,6 +293,7 @@ mod ghostdag_dag_tests {
         provider.add_block(b9_bytes, TosGhostdagData {
             blue_score: 4,
             blue_work: BlueWorkType::from(2500u64),
+            daa_score: 4,  // daa_score: use same value as blue_score for test data
             selected_parent: Hash::new([8u8; 32]),
             mergeset_blues: Arc::new(vec![Hash::new([8u8; 32])]),
             mergeset_reds: Arc::new(vec![]),
@@ -326,6 +337,7 @@ mod ghostdag_dag_tests {
             provider.add_block(*hash_bytes, TosGhostdagData {
                 blue_score: *blue_score,
                 blue_work: BlueWorkType::from(*blue_work),
+                daa_score: *blue_score,  // daa_score: use same value as blue_score for test data
                 selected_parent: Hash::new([0u8; 32]),
                 mergeset_blues: Arc::new(vec![]),
                 mergeset_reds: Arc::new(vec![]),

@@ -4,3 +4,4 @@
 pub mod dag_tests;
 pub mod ghostdag_tests;
 pub mod daa_tests;
+pub mod test_helpers;

@@ -655,6 +655,7 @@ async fn create_test_ghostdag_data(
     Ok(TosGhostdagData::new(
         expected.blue_score,
         blue_work,
+        expected.blue_score,  // daa_score: use blue_score for test data
         selected_parent,
         mergeset_blues,
         mergeset_reds,
@@ -835,6 +836,7 @@ mod tests {
         let data = TosGhostdagData::new(
             1,
             BlueWorkType::from(1000u64),
+            1,  // daa_score: use same value as blue_score for test data
             Hash::new([0u8; 32]),
             vec![],
             vec![],

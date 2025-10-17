@@ -35,6 +35,7 @@ mod integration_tests {
         let genesis_data = TosGhostdagData::new(
             0,
             BlueWorkType::zero(),
+            0,  // daa_score: genesis has daa_score of 0
             genesis_hash.clone(),
             Vec::new(),
             Vec::new(),
@@ -53,6 +54,7 @@ mod integration_tests {
         let block1_data = TosGhostdagData::new(
             1, // blue_score = genesis.blue_score + 1
             work, // blue_work = genesis.blue_work + work
+            1, // daa_score: use same value as blue_score for test data
             genesis_hash.clone(), // selected_parent
             vec![genesis_hash.clone()], // mergeset_blues
             Vec::new(), // no reds in chain
@@ -70,6 +72,7 @@ mod integration_tests {
         let block2_data = TosGhostdagData::new(
             2,
             block2_work,
+            2,  // daa_score: use same value as blue_score for test data
             block1_hash.clone(),
             vec![block1_hash.clone()],
             Vec::new(),
@@ -85,6 +88,7 @@ mod integration_tests {
         let block3_data = TosGhostdagData::new(
             3,
             block3_work,
+            3,  // daa_score: use same value as blue_score for test data
             block2_hash.clone(),
             vec![block2_hash.clone()],
             Vec::new(),
@@ -122,17 +126,20 @@ mod integration_tests {
         let work_high = BlueWorkType::from(1000u64); // Should be selected
 
         let parent1_data = TosGhostdagData::new(
-            1, work_low, genesis_hash.clone(),
+            1, work_low, 1,  // daa_score
+            genesis_hash.clone(),
             vec![genesis_hash.clone()], Vec::new(), HashMap::new(), Vec::new()
         );
 
         let parent2_data = TosGhostdagData::new(
-            1, work_medium, genesis_hash.clone(),
+            1, work_medium, 1,  // daa_score
+            genesis_hash.clone(),
             vec![genesis_hash.clone()], Vec::new(), HashMap::new(), Vec::new()
         );
 
         let parent3_data = TosGhostdagData::new(
-            1, work_high, genesis_hash.clone(),
+            1, work_high, 1,  // daa_score
+            genesis_hash.clone(),
             vec![genesis_hash.clone()], Vec::new(), HashMap::new(), Vec::new()
         );
 
@@ -147,6 +154,7 @@ mod integration_tests {
         let merge_data = TosGhostdagData::new(
             2,
             merge_blue_work,
+            2,  // daa_score: use same value as blue_score for test data
             merge_block_selected_parent.clone(),
             vec![parent1_hash, parent2_hash, parent3_hash.clone()],
             Vec::new(),
@@ -357,7 +365,8 @@ mod integration_tests {
 
         // Genesis
         chain_data.push(TosGhostdagData::new(
-            0, BlueWorkType::zero(), genesis_hash.clone(),
+            0, BlueWorkType::zero(), 0,  // daa_score
+            genesis_hash.clone(),
             Vec::new(), Vec::new(), HashMap::new(), Vec::new()
         ));
 
@@ -374,6 +383,7 @@ mod integration_tests {
             let data = TosGhostdagData::new(
                 blue_score,
                 blue_work,
+                blue_score,  // daa_score: use same value as blue_score for test data
                 parent_hash.clone(),
                 vec![parent_hash],
                 Vec::new(),
@@ -416,6 +426,7 @@ mod integration_tests {
         let data = TosGhostdagData::new(
             3,
             BlueWorkType::from(3000u64),
+            3,  // daa_score: use same value as blue_score for test data
             genesis_hash.clone(),
             mergeset_blues.clone(),
             mergeset_reds.clone(),
@@ -471,7 +482,8 @@ mod integration_tests {
         let work1 = calc_work_from_difficulty(&Difficulty::from(1000u64));
 
         let block1_ghostdag = TosGhostdagData::new(
-            1, work1, genesis_hash.clone(),
+            1, work1, 1,  // daa_score
+            genesis_hash.clone(),
             vec![genesis_hash.clone()], Vec::new(), HashMap::new(), Vec::new()
         );
 
