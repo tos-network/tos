@@ -130,18 +130,17 @@ pub async fn add_tree_block<S: Storage>(
 /// # Returns
 /// Hash of the current reindex root
 async fn get_reindex_root<S: Storage>(storage: &S) -> Result<Hash, BlockchainError> {
-    // For now, use a simple implementation: return genesis
-    // TODO: Implement proper reindex root tracking and advancement
+    // Reindex root tracking is fully implemented:
+    // - Storage layer provides get/set_reindex_root() (RocksDB + Sled)
+    // - Advancement logic in try_advancing_reindex_root() maintains root ~100 blocks behind tip
+    // - Blockchain initializes root to genesis and calls hint_virtual_selected_parent() on new blocks
 
-    // Try to get stored reindex root
-    // If not set, fall back to genesis (initial state)
     match storage.get_reindex_root().await {
         Ok(root) => Ok(root),
         Err(_) => {
-            // Fall back to genesis
-            // In a real implementation, we would need to know the genesis hash
-            // For now, return an error indicating reindex root not initialized
-            log::warn!("Reindex root not initialized in storage, using genesis as fallback");
+            // Reindex root not yet initialized (only happens before first block)
+            // Blockchain will initialize it to genesis during first block processing
+            log::warn!("Reindex root not initialized in storage");
             Err(BlockchainError::InvalidReachability)
         }
     }
