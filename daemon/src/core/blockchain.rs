@@ -1205,8 +1205,9 @@ impl<S: Storage> Blockchain<S> {
         }
 
         let mut best_height = 0;
-        // first, we check the best (highest) height of all tips
-        for hash in tips.into_iter() {
+        // First pass: find the best (highest) height of all tips
+        // Use iter() instead of into_iter() to avoid consuming tips
+        for hash in tips {
             let height = provider.get_blue_score_for_block_hash(hash).await?;
             if height > best_height {
                 best_height = height;
@@ -1215,9 +1216,10 @@ impl<S: Storage> Blockchain<S> {
 
         let pruned_topoheight = provider.get_pruned_topoheight().await?.unwrap_or(0);
         let mut bases = Vec::new();
-        for hash in tips.into_iter() {
+        // Second pass: compute bases using the best_height found above
+        for hash in tips {
             if log::log_enabled!(log::Level::Trace) {
-            trace!("Searching tip base for {}", hash);
+                trace!("Searching tip base for {}", hash);
             }
             bases.push(self.find_tip_base(provider, hash, best_height, pruned_topoheight).await?);
         }

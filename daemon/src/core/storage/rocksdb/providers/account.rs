@@ -237,13 +237,16 @@ impl RocksStorage {
 
         // P2 Hot path cache: Check cache first for 20-50% query performance improvement
         if let Some(cache) = &self.account_id_cache {
-            let mut cache_guard = cache.blocking_lock();
-            if let Some(id) = cache_guard.get(key).cloned() {
-                if log::log_enabled!(log::Level::Trace) {
-                    trace!("account id cache hit for {}", key.as_address(self.is_mainnet()));
+            // Use try_lock to avoid blocking Tokio runtime
+            if let Ok(mut cache_guard) = cache.try_lock() {
+                if let Some(id) = cache_guard.get(key).cloned() {
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("account id cache hit for {}", key.as_address(self.is_mainnet()));
+                    }
+                    return Ok(Some(id));
                 }
-                return Ok(Some(id));
             }
+            // If cache lock is busy, skip cache and load from disk
         }
 
         // Cache miss: Load from disk
@@ -251,8 +254,11 @@ impl RocksStorage {
 
         // Store in cache if found
         if let (Some(cache), Some(account_id)) = (&self.account_id_cache, id) {
-            let mut cache_guard = cache.blocking_lock();
-            cache_guard.put(key.clone(), account_id);
+            // Use try_lock to avoid blocking Tokio runtime
+            if let Ok(mut cache_guard) = cache.try_lock() {
+                cache_guard.put(key.clone(), account_id);
+            }
+            // If cache lock is busy, skip cache write (data is still returned from disk)
         }
 
         Ok(id)

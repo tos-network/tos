@@ -39,13 +39,16 @@ impl BlockDagProvider for RocksStorage {
 
         // P2 Hot path cache: Check cache first for 20-50% query performance improvement
         if let Some(cache) = &self.block_reward_cache {
-            let mut cache_guard = cache.blocking_lock();
-            if let Some(reward) = cache_guard.get(&topoheight).cloned() {
-                if log::log_enabled!(log::Level::Trace) {
-                    trace!("block reward cache hit for topoheight {}", topoheight);
+            // Use try_lock to avoid blocking Tokio runtime
+            if let Ok(mut cache_guard) = cache.try_lock() {
+                if let Some(reward) = cache_guard.get(&topoheight).cloned() {
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("block reward cache hit for topoheight {}", topoheight);
+                    }
+                    return Ok(reward);
                 }
-                return Ok(reward);
             }
+            // If cache lock is busy, skip cache and load from disk
         }
 
         // Cache miss: Load from disk via metadata
@@ -53,8 +56,11 @@ impl BlockDagProvider for RocksStorage {
 
         // Store in cache
         if let Some(cache) = &self.block_reward_cache {
-            let mut cache_guard = cache.blocking_lock();
-            cache_guard.put(topoheight, reward);
+            // Use try_lock to avoid blocking Tokio runtime
+            if let Ok(mut cache_guard) = cache.try_lock() {
+                cache_guard.put(topoheight, reward);
+            }
+            // If cache lock is busy, skip cache write (data is still returned from disk)
         }
 
         Ok(reward)
