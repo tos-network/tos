@@ -73,6 +73,14 @@ pub enum DiskContext {
     DifficultyForBlockHash,
     #[error("get cumulative difficulty for block hash")]
     CumulativeDifficultyForBlockHash,
+    #[error("get blue score for block hash")]
+    BlueScoreForBlockHash,
+    #[error("get daa score for block hash")]
+    DaaScoreForBlockHash,
+    #[error("get timestamp for block hash")]
+    TimestampForBlockHash,
+    #[error("get version for block hash")]
+    VersionForBlockHash,
     #[error("get block header by hash")]
     GetBlockHeaderByHash,
     #[error("get estimated covariance for block hash")]

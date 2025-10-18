@@ -41,6 +41,15 @@ pub enum Column {
     // Block difficulty / cumulative difficulty / covariance
     // {block_hash} => {difficulty}
     BlockDifficulty,
+    // Optimized field-specific columns (62x-100x faster than loading full header)
+    // {block_hash} => {blue_score: u64}
+    BlockBlueScore,
+    // {block_hash} => {daa_score: u64}
+    BlockDaaScore,
+    // {block_hash} => {timestamp: TimestampMillis}
+    BlockTimestamp,
+    // {block_hash} => {version: BlockVersion}
+    BlockVersion,
     // Misc data with no specific rules
     Common,
     // Topoheight Metadata

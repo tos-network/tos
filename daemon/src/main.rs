@@ -259,20 +259,21 @@ async fn main() -> Result<()> {
     let dir_path = blockchain_config.dir_path.as_deref()
         .unwrap_or_default();
 
+    // Application-level LRU cache size (shared config for both storage backends)
+    let use_cache = if blockchain_config.sled.cache_size > 0 {
+        Some(blockchain_config.sled.cache_size)
+    } else {
+        None
+    };
+
     match blockchain_config.use_db_backend {
         StorageBackend::Sled => {
-            let use_cache = if blockchain_config.sled.cache_size > 0 {
-                Some(blockchain_config.sled.cache_size)
-            } else {
-                None
-            };
-
             let storage = SledStorage::new(dir_path.to_owned(), use_cache, config.network, blockchain_config.sled.internal_cache_size, blockchain_config.sled.internal_db_mode)?;
 
             start_chain(prompt, storage, config).await
         },
         StorageBackend::RocksDB => {
-            let storage = RocksStorage::new(&dir_path, config.network, &blockchain_config.rocksdb);
+            let storage = RocksStorage::new(&dir_path, config.network, use_cache, &blockchain_config.rocksdb);
 
             start_chain(prompt, storage, config).await
         }

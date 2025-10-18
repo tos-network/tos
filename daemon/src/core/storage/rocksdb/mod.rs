@@ -44,7 +44,8 @@ use crate::core::{
     error::{BlockchainError, DiskContext},
     storage::{
         BlocksAtHeightProvider,
-        TransactionProvider
+        TransactionProvider,
+        cache::StorageCache
     }
 };
 
@@ -142,11 +143,26 @@ impl<'a> IteratorMode<'a> {
 pub struct RocksStorage {
     db: Arc<InnerDB>,
     network: Network,
-    snapshot: Option<Snapshot> 
+    cache: StorageCache,
+    snapshot: Option<Snapshot>
+}
+
+impl std::ops::Deref for RocksStorage {
+    type Target = StorageCache;
+
+    fn deref(&self) -> &Self::Target {
+        &self.cache
+    }
+}
+
+impl std::ops::DerefMut for RocksStorage {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.cache
+    }
 }
 
 impl RocksStorage {
-    pub fn new(dir: &str, network: Network, config: &RocksDBConfig) -> Self {
+    pub fn new(dir: &str, network: Network, cache_size: Option<usize>, config: &RocksDBConfig) -> Self {
         let cfs = Column::iter()
             .map(|column| {
                 let name = column.to_string();
@@ -204,6 +220,7 @@ impl RocksStorage {
         Self {
             db: Arc::new(db),
             network,
+            cache: StorageCache::new(cache_size),
             snapshot: None
         }
     }
