@@ -7,6 +7,7 @@ license = "BSD-3-Clause"
 description = "TOS Network blockchain daemon"
 repository = "https://github.com/tos-network/tos"
 homepage = "https://tos.network"
+autobenches = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -60,6 +61,10 @@ futures = { workspace = true }
 [lib]
 name = "tos_daemon"
 path = "src/lib.rs"
+
+[[bin]]
+name = "tps_benchmark"
+path = "benches/transaction_throughput.rs"
 
 [dev-dependencies]
 tempdir = "*"
