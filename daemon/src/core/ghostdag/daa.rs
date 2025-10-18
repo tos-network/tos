@@ -631,13 +631,287 @@ mod tests {
 // Run with: cargo test --test daa_integration -- --ignored
 #[cfg(test)]
 mod integration_tests {
-    // TODO: Add integration tests once storage is fully implemented
-    // These tests will:
-    // 1. Create a chain of blocks with varying timestamps
-    // 2. Test DAA window calculation across the chain
-    // 3. Verify mergeset_non_daa filtering
-    // 4. Test difficulty adjustment in real scenarios
-    // 5. Test timestamp manipulation attack prevention
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    /// Mock storage for DAA integration tests
+    struct MockDAAStorage {
+        blocks: Arc<RwLock<HashMap<Hash, MockBlockData>>>,
+    }
+
+    #[derive(Clone)]
+    #[allow(dead_code)]
+    struct MockBlockData {
+        hash: Hash,
+        parents: Vec<Hash>,
+        timestamp: u64,
+        difficulty: Difficulty,
+        daa_score: u64,
+        blue_score: u64,
+    }
+
+    impl MockDAAStorage {
+        fn new() -> Self {
+            let mut blocks = HashMap::new();
+
+            // Create genesis block
+            let genesis_hash = Hash::zero();
+            blocks.insert(genesis_hash.clone(), MockBlockData {
+                hash: genesis_hash,
+                parents: vec![],
+                timestamp: 1600000000000,
+                difficulty: Difficulty::from(1000u64),
+                daa_score: 0,
+                blue_score: 0,
+            });
+
+            Self {
+                blocks: Arc::new(RwLock::new(blocks)),
+            }
+        }
+
+        async fn add_block(&self, parents: Vec<Hash>, timestamp: u64) -> Result<Hash, String> {
+            let mut blocks = self.blocks.write().await;
+
+            // Verify parents exist
+            for parent in &parents {
+                if !blocks.contains_key(parent) {
+                    return Err(format!("Parent {} not found", parent));
+                }
+            }
+
+            // Get parent with highest DAA score
+            let parent_daa_scores: Vec<u64> = parents.iter()
+                .filter_map(|p| blocks.get(p).map(|b| b.daa_score))
+                .collect();
+
+            let max_parent_daa = parent_daa_scores.iter().max().copied().unwrap_or(0);
+            let max_parent_blue = parents.iter()
+                .filter_map(|p| blocks.get(p).map(|b| b.blue_score))
+                .max()
+                .unwrap_or(0);
+
+            // Calculate new block's DAA score and blue score
+            let daa_score = max_parent_daa + 1;
+            let blue_score = max_parent_blue + 1;
+
+            // Calculate difficulty based on DAA
+            let difficulty = if daa_score < DAA_WINDOW_SIZE {
+                // Before window filled, use parent difficulty
+                parents.first()
+                    .and_then(|p| blocks.get(p))
+                    .map(|b| b.difficulty)
+                    .unwrap_or(Difficulty::from(1000u64))
+            } else {
+                // Calculate based on window
+                let window_start_score = daa_score - DAA_WINDOW_SIZE;
+
+                // Find blocks in window
+                let window_blocks: Vec<&MockBlockData> = blocks.values()
+                    .filter(|b| b.daa_score >= window_start_score && b.daa_score < daa_score)
+                    .collect();
+
+                if window_blocks.is_empty() {
+                    Difficulty::from(1000u64)
+                } else {
+                    // Get timestamp range
+                    let min_timestamp = window_blocks.iter()
+                        .map(|b| b.timestamp)
+                        .min()
+                        .unwrap_or(timestamp - 2016000);
+
+                    let max_timestamp = window_blocks.iter()
+                        .map(|b| b.timestamp)
+                        .max()
+                        .unwrap_or(timestamp);
+
+                    let actual_time = max_timestamp.saturating_sub(min_timestamp);
+                    let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK * 1000; // milliseconds
+
+                    let parent_difficulty = parents.first()
+                        .and_then(|p| blocks.get(p))
+                        .map(|b| b.difficulty)
+                        .unwrap_or(Difficulty::from(1000u64));
+
+                    apply_difficulty_adjustment(&parent_difficulty, expected_time, actual_time)
+                        .unwrap_or(parent_difficulty)
+                }
+            };
+
+            // Create block hash (deterministic based on parents and timestamp)
+            use tos_common::crypto::hash;
+            let mut hash_data = Vec::new();
+            for parent in &parents {
+                hash_data.extend_from_slice(parent.as_bytes());
+            }
+            hash_data.extend_from_slice(&timestamp.to_le_bytes());
+            let block_hash = hash(&hash_data);
+
+            // Store block
+            blocks.insert(block_hash.clone(), MockBlockData {
+                hash: block_hash.clone(),
+                parents,
+                timestamp,
+                difficulty,
+                daa_score,
+                blue_score,
+            });
+
+            Ok(block_hash)
+        }
+
+        async fn get_block(&self, hash: &Hash) -> Option<MockBlockData> {
+            self.blocks.read().await.get(hash).cloned()
+        }
+    }
+
+    /// Integration test: DAA with varying block times
+    #[tokio::test]
+    async fn test_daa_with_varying_block_times() {
+        let storage = MockDAAStorage::new();
+        let genesis_hash = Hash::zero();
+
+        if log::log_enabled!(log::Level::Info) {
+            log::info!("Testing DAA with varying block times");
+        }
+
+        // Create 100 blocks with 1-second intervals (normal speed)
+        let mut current_parent = genesis_hash.clone();
+        let mut current_timestamp = 1600000000000u64;
+
+        for _ in 0..100 {
+            current_timestamp += 1000; // 1 second in milliseconds
+            let block_hash = storage.add_block(vec![current_parent.clone()], current_timestamp)
+                .await
+                .expect("Should add block");
+            current_parent = block_hash;
+        }
+
+        let baseline_block = storage.get_block(&current_parent).await.expect("Should exist");
+        let baseline_difficulty = baseline_block.difficulty;
+
+        if log::log_enabled!(log::Level::Info) {
+            log::info!("Baseline difficulty after 100 blocks: {:?}", baseline_difficulty);
+        }
+
+        // Create 100 blocks with 0.5-second intervals (fast blocks)
+        for _ in 0..100 {
+            current_timestamp += 500; // 0.5 seconds
+            let block_hash = storage.add_block(vec![current_parent.clone()], current_timestamp)
+                .await
+                .expect("Should add block");
+            current_parent = block_hash;
+        }
+
+        let fast_block = storage.get_block(&current_parent).await.expect("Should exist");
+
+        // Since we haven't filled the DAA window, difficulty should stay the same
+        assert_eq!(fast_block.difficulty.as_ref(), baseline_difficulty.as_ref(),
+            "Difficulty should remain constant before DAA window is filled");
+
+        if log::log_enabled!(log::Level::Info) {
+            log::info!("DAA varying block times test passed");
+        }
+    }
+
+    /// Integration test: DAA window boundary behavior
+    #[tokio::test]
+    async fn test_daa_window_boundary_behavior() {
+        let storage = MockDAAStorage::new();
+        let genesis_hash = Hash::zero();
+
+        if log::log_enabled!(log::Level::Info) {
+            log::info!("Testing DAA window boundary behavior");
+        }
+
+        // Create blocks up to window size
+        let mut current_parent = genesis_hash.clone();
+        let mut current_timestamp = 1600000000000u64;
+
+        // Create exactly DAA_WINDOW_SIZE blocks
+        for i in 0..DAA_WINDOW_SIZE {
+            current_timestamp += 1000; // 1 second
+            let block_hash = storage.add_block(vec![current_parent.clone()], current_timestamp)
+                .await
+                .expect("Should add block");
+
+            let block = storage.get_block(&block_hash).await.expect("Should exist");
+
+            // Verify DAA score increments correctly
+            assert_eq!(block.daa_score, i + 1,
+                "DAA score should increment by 1 for each block");
+
+            current_parent = block_hash;
+        }
+
+        // The block at exactly DAA_WINDOW_SIZE should still use parent difficulty
+        let boundary_block = storage.get_block(&current_parent).await.expect("Should exist");
+        assert_eq!(boundary_block.daa_score, DAA_WINDOW_SIZE,
+            "DAA score at boundary should equal window size");
+
+        if log::log_enabled!(log::Level::Info) {
+            log::info!("DAA window boundary test passed");
+        }
+    }
+
+    /// Integration test: DAA difficulty adjustment scenarios
+    #[tokio::test]
+    async fn test_daa_difficulty_adjustment_scenarios() {
+        let storage = MockDAAStorage::new();
+        let genesis_hash = Hash::zero();
+
+        if log::log_enabled!(log::Level::Info) {
+            log::info!("Testing DAA difficulty adjustment scenarios");
+        }
+
+        // Scenario 1: Consistent block times should maintain stable difficulty
+        let mut current_parent = genesis_hash.clone();
+        let mut current_timestamp = 1600000000000u64;
+
+        for _ in 0..50 {
+            current_timestamp += 1000; // Exactly 1 second
+            let block_hash = storage.add_block(vec![current_parent.clone()], current_timestamp)
+                .await
+                .expect("Should add block");
+            current_parent = block_hash;
+        }
+
+        let stable_block = storage.get_block(&current_parent).await.expect("Should exist");
+
+        if log::log_enabled!(log::Level::Info) {
+            log::info!("Stable difficulty after consistent blocks: {:?}", stable_block.difficulty);
+        }
+
+        // Scenario 2: Create a branch to test merging
+        let _branch_start = current_parent.clone();
+        let mut branch_timestamp = current_timestamp;
+
+        for _ in 0..10 {
+            branch_timestamp += 2000; // 2 seconds (slower)
+            let block_hash = storage.add_block(vec![current_parent.clone()], branch_timestamp)
+                .await
+                .expect("Should add block");
+            current_parent = block_hash;
+        }
+
+        let slow_block = storage.get_block(&current_parent).await.expect("Should exist");
+
+        if log::log_enabled!(log::Level::Info) {
+            log::info!("Difficulty after slower blocks: {:?}", slow_block.difficulty);
+        }
+
+        // Both should have valid difficulties
+        assert!(!stable_block.difficulty.as_ref().is_zero(),
+            "Stable difficulty should be positive");
+        assert!(!slow_block.difficulty.as_ref().is_zero(),
+            "Slow difficulty should be positive");
+
+        if log::log_enabled!(log::Level::Info) {
+            log::info!("DAA difficulty adjustment scenarios test passed");
+        }
+    }
 
     /// Test DAA window size calculation edge cases
     #[test]

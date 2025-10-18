@@ -57,6 +57,7 @@ pub mod state_security_tests;
 pub mod storage_security_tests;
 pub mod integration_security_tests;
 pub mod block_submission_tests;
+pub mod state_transaction_integration_tests;
 pub mod test_utilities;
 
 #[cfg(test)]
