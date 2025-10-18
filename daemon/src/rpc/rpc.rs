@@ -582,15 +582,33 @@ async fn get_miner_work<S: Storage>(context: &Context, body: Value) -> Result<Va
 
 async fn submit_block<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: SubmitBlockParams = parse_params(body)?;
-    let mut header = BlockHeader::from_hex(&params.block_template)?;
-    if let Some(work) = params.miner_work {
-        let work = MinerWork::from_hex(&work)?;
-        header.apply_miner_work(work);
-    }
-
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
 
-    let block = blockchain.build_block_from_header(Immutable::Owned(header)).await?;
+    // SECURITY FIX: Support full block submission to avoid merkle cache dependency
+    // If block_hex is provided, use it directly instead of reconstructing from cache
+    let block = if let Some(block_hex) = params.block_hex {
+        // Full block provided - deserialize and apply miner work if needed
+        let mut block = Block::from_hex(&block_hex)?;
+
+        if let Some(work) = params.miner_work {
+            let work = MinerWork::from_hex(&work)?;
+            let mut header = block.get_header().clone();
+            header.apply_miner_work(work);
+            block = Block::new(Immutable::Owned(header), block.get_transactions().to_vec());
+        }
+
+        block
+    } else {
+        // Backward compatibility: reconstruct from header using cache
+        let mut header = BlockHeader::from_hex(&params.block_template)?;
+        if let Some(work) = params.miner_work {
+            let work = MinerWork::from_hex(&work)?;
+            header.apply_miner_work(work);
+        }
+
+        blockchain.build_block_from_header(Immutable::Owned(header)).await?
+    };
+
     blockchain.add_new_block(block, None, BroadcastOption::All, true).await?;
     Ok(json!(true))
 }

@@ -239,7 +239,11 @@ pub struct SubmitBlockParams {
     // hex: represent the BlockHeader (Block)
     pub block_template: String,
     // optional miner work to apply to the block template
-    pub miner_work: Option<String>
+    pub miner_work: Option<String>,
+    // optional full block hex (includes transactions) - avoids merkle cache dependency
+    // If provided, this is used instead of reconstructing from cache
+    // Format: full Block serialized as hex (header + transactions)
+    pub block_hex: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

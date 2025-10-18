@@ -2256,7 +2256,8 @@ impl<S: Storage> Blockchain<S> {
 
         // Cache transactions by merkle root so we can reconstruct block from mined header
         // Use merkle root as key since it uniquely identifies this transaction set
-        // TTL is 60s which is enough time for a miner to find a nonce and submit
+        // TTL increased to 300s (5 min) to allow slow miners and restarts
+        // Miners can also use block_hex param in submit_block to bypass cache entirely
         if !selected_tx_objects.is_empty() {
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2267,7 +2268,7 @@ impl<S: Storage> Blockchain<S> {
                 merkle_root.clone(),
                 selected_tx_objects.clone(),
                 current_time,
-                60000, // 60 second TTL
+                300000, // 300 second (5 minute) TTL - increased from 60s
             ).await;
 
             if log::log_enabled!(log::Level::Trace) {
@@ -2317,10 +2318,11 @@ impl<S: Storage> Blockchain<S> {
             error!("SECURITY: Cannot build block from header - no transaction cache found for merkle root: {}", merkle_root);
         }
         error!("This indicates either:");
-        error!("  1. Cache expired (TTL=60s) - miner took too long to find nonce");
+        error!("  1. Cache expired (TTL=300s) - miner took too long to find nonce");
         error!("  2. Miner submitting a block without using get_block_template");
         error!("  3. Cache evicted (LRU capacity=100 templates)");
         error!("  4. A potential security attack attempting to bypass merkle root validation");
+        error!("  SOLUTION: Use submit_block with block_hex param to include full block data");
 
         // Return an error instead of an empty block
         // This prevents the vulnerability where a malicious miner could submit

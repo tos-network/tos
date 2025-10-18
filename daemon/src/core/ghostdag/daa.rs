@@ -98,12 +98,16 @@ pub async fn calculate_daa_score<S: Storage>(
 /// Find all blocks within the DAA window
 ///
 /// Uses BFS to traverse backwards from the given block, collecting all blocks
-/// with blue_score >= window_boundary_score.
+/// with daa_score >= window_boundary_score.
+///
+/// CRITICAL: Must use daa_score (not blue_score) for comparison, as window_boundary_score
+/// is calculated from parent's daa_score. Using blue_score would incorrectly include/exclude
+/// blocks when GHOSTDAG mergeset jumps are large.
 ///
 /// # Arguments
 /// * `storage` - Reference to blockchain storage
 /// * `start_block` - Hash of the block to start from (usually selected_parent)
-/// * `window_boundary_score` - Minimum blue_score to be included in window
+/// * `window_boundary_score` - Minimum daa_score to be included in window
 ///
 /// # Returns
 /// Set of block hashes that are within the DAA window
@@ -124,8 +128,9 @@ async fn find_daa_window_blocks<S: Storage>(
         // Get current block's GHOSTDAG data
         let current_data = storage.get_ghostdag_data(&current).await?;
 
-        // Check if block is within window
-        if current_data.blue_score >= window_boundary_score {
+        // FIXED: Use daa_score (not blue_score) to match window_boundary_score calculation
+        // This prevents far-past blocks from distorting the DAA window during large mergesets
+        if current_data.daa_score >= window_boundary_score {
             window_blocks.insert(current.clone());
 
             // Get block header to traverse to parents
@@ -139,7 +144,7 @@ async fn find_daa_window_blocks<S: Storage>(
                 }
             }
         }
-        // If block's blue_score < window_boundary_score, don't traverse further
+        // If block's daa_score < window_boundary_score, don't traverse further
         // (blocks in its past will also be outside the window)
     }
 
