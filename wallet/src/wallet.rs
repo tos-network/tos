@@ -50,10 +50,10 @@ use tos_common::{
         },
         extra_data::{
             PlaintextExtraData,
+            Role,
             UnknownExtraDataFormat
         },
         Reference,
-        Role,
         Transaction,
         TxVersion
     }, utils::{format_coin, format_tos}

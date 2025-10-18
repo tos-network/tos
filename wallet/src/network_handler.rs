@@ -33,10 +33,9 @@ use tos_common::{
         time::sleep
     },
     transaction::{
-        extra_data::{PlaintextExtraData, PlaintextFlag},
+        extra_data::{PlaintextExtraData, PlaintextFlag, Role},
         ContractDeposit,
-        MultiSigPayload,
-        Role
+        MultiSigPayload
     },
     utils::sanitize_ws_address
 };
@@ -357,37 +356,20 @@ impl NetworkHandler {
                                     continue;
                                 }
 
-                                // Get the right handle
-                                let (role, handle) = if is_owner {
-                                    (Role::Sender, transfer.sender_handle)
+                                // Balance simplification: Amount is now plaintext
+                                // No need to decrypt commitment+handle - amount is directly available
+                                let amount = transfer.amount;
+
+                                // Determine role for extra data decryption
+                                let role = if is_owner {
+                                    Role::Sender
                                 } else {
-                                    (Role::Receiver, transfer.receiver_handle)
+                                    Role::Receiver
                                 };
-    
-                                // Decompress commitment it if possible
-                                let commitment = match transfer.commitment.decompress() {
-                                    Ok(c) => c,
-                                    Err(e) => {
-                                        if log::log_enabled!(log::Level::Error) {
-                                            error!("Error while decompressing commitment of TX {}: {}", tx.hash, e);
-                                        }
-                                        continue;
-                                    }
-                                };
-    
-                                // Same for handle
-                                let handle = match handle.decompress() {
-                                    Ok(h) => h,
-                                    Err(e) => {
-                                        if log::log_enabled!(log::Level::Error) {
-                                            error!("Error while decompressing handle of TX {}: {}", tx.hash, e);
-                                        }
-                                        continue;
-                                    }
-                                };
-    
+
+                                // Decrypt extra data if present (no handle needed for plaintext balances)
                                 let extra_data = if let Some(cipher) = transfer.extra_data.into_owned() {
-                                    match self.wallet.decrypt_extra_data(cipher,  Some(&handle), role, tx.version) {
+                                    match self.wallet.decrypt_extra_data(cipher, None, role, tx.version) {
                                         Ok(e) => Some(e),
                                         Err(e) => {
                                             if log::log_enabled!(log::Level::Warn) {
@@ -400,13 +382,6 @@ impl NetworkHandler {
                                     None
                                 };
 
-                                // TODO: With balance simplification, decrypt amount from commitment+handle
-                                // For now, decrypt using the handle and commitment
-                                // Ciphertext::new(commitment, handle) would give us the ciphertext
-                                // but we need the decryption key. This needs wallet API update.
-                                // Temporary workaround: skip transfers until proper API is implemented
-                                let amount = 0u64; // TODO: Decrypt from commitment+handle using wallet key
-    
                                 if is_owner {
                                     let transfer = TransferOut::new(destination, asset, amount, extra_data);
                                     transfers_out.push(transfer);
