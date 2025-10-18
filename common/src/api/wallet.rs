@@ -7,10 +7,9 @@ use crate::{
     serializer::Hexable,
     transaction::{
         builder::{FeeBuilder, TransactionTypeBuilder, UnsignedTransaction},
-        extra_data::{PlaintextExtraData, UnknownExtraDataFormat},
+        extra_data::{PlaintextExtraData, Role, UnknownExtraDataFormat},
         multisig::SignatureId,
         Reference,
-        Role,
         Transaction,
         TxVersion
     }

@@ -43,6 +43,15 @@ pub use unknown::UnknownExtraDataFormat;
 pub use extra_data::ExtraData;
 pub use typed::ExtraDataType;
 
+// Role enum moved from transaction module - only used for extra_data encryption
+// TODO: Balance simplification - this can be removed when extra_data encryption is fully removed
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    Sender,
+    Receiver,
+}
+
 // Key Derivation Function used to derive the shared key
 type KDF = sha3::Sha3_256;
 

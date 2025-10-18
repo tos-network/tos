@@ -1,6 +1,4 @@
 use serde::{Deserialize, Serialize};
-use merlin::Transcript;
-use log::debug;
 
 use crate::{
     account::Nonce,
@@ -14,7 +12,6 @@ use crate::{
     ai_mining::AIMiningPayload,
 };
 
-use bulletproofs::RangeProof;
 use multisig::MultiSig;
 
 pub mod builder;
@@ -23,14 +20,12 @@ pub mod extra_data;
 pub mod multisig;
 
 mod payload;
-mod source_commitment;
 mod reference;
 mod version;
 
 pub use payload::*;
 pub use reference::Reference;
 pub use version::TxVersion;
-pub use source_commitment::SourceCommitment;
 
 #[cfg(test)]
 mod tests;
@@ -47,16 +42,6 @@ pub const MAX_TRANSFER_COUNT: usize = 255;
 pub const MAX_DEPOSIT_PER_INVOKE_CALL: usize = 255;
 // Maximum number of participants in a multi signature account
 pub const MAX_MULTISIG_PARTICIPANTS: usize = 255;
-
-/// Simple enum to determine which DecryptHandle to use to craft a Ciphertext
-/// This allows us to store one time the commitment and only a decrypt handle for each.
-/// The DecryptHandle is used to decrypt the ciphertext and is selected based on the role in the transaction.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum Role {
-    Sender,
-    Receiver,
-}
 
 // this enum represent all types of transaction available on Tos Network
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -124,10 +109,6 @@ pub struct Transaction {
     /// nonce must be equal to the one on chain account
     /// used to prevent replay attacks and have ordered transactions
     nonce: Nonce,
-    /// We have one source commitment and equality proof per asset used in the tx.
-    source_commitments: Vec<SourceCommitment>,
-    /// The range proof is aggregated across all transfers and across all assets.
-    range_proof: RangeProof,
     /// At which block the TX is built
     reference: Reference,
     /// MultiSig contains the signatures of the transaction
@@ -147,8 +128,6 @@ impl Transaction {
         fee: u64,
         fee_type: FeeType,
         nonce: Nonce,
-        source_commitments: Vec<SourceCommitment>,
-        range_proof: RangeProof,
         reference: Reference,
         multisig: Option<MultiSig>,
         signature: Signature
@@ -160,8 +139,6 @@ impl Transaction {
             fee,
             fee_type,
             nonce,
-            source_commitments,
-            range_proof,
             reference,
             multisig,
             signature,
@@ -191,21 +168,6 @@ impl Transaction {
     // Get the nonce used
     pub fn get_nonce(&self) -> Nonce {
         self.nonce
-    }
-
-    // Get the source commitments
-    pub fn get_source_commitments(&self) -> &Vec<SourceCommitment> {
-        &self.source_commitments
-    }
-
-    // Get the used assets
-    pub fn get_assets(&self) -> impl Iterator<Item = &Hash> {
-        self.source_commitments.iter().map(SourceCommitment::get_asset)
-    }
-
-    // Get the range proof
-    pub fn get_range_proof(&self) -> &RangeProof {
-        &self.range_proof
     }
 
     // Get the multisig
@@ -288,11 +250,6 @@ impl Transaction {
         self.fee.write(&mut writer);
         self.fee_type.write(&mut writer); // Always include fee_type for T0
         self.nonce.write(&mut writer);
-        writer.write_u8(self.source_commitments.len() as u8);
-        for commitment in &self.source_commitments {
-            commitment.write(&mut writer);
-        }
-        self.range_proof.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig - multisig participants sign without it
         
@@ -313,53 +270,10 @@ impl Transaction {
         self.fee.write(&mut writer);
         self.fee_type.write(&mut writer); // Always include fee_type for T0
         self.nonce.write(&mut writer);
-        writer.write_u8(self.source_commitments.len() as u8);
-        for commitment in &self.source_commitments {
-            commitment.write(&mut writer);
-        }
-        self.range_proof.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig field - it should not be part of the main signature
         
         buffer
-    }
-
-    /// Append energy transaction data to transcript for proof generation
-    /// This ensures consistency between generation and verification phases
-    pub fn append_energy_transcript(transcript: &mut Transcript, payload: &EnergyPayload) {
-        match payload {
-            EnergyPayload::FreezeTos { amount, duration } => {
-                // Add energy operation parameters
-                transcript.append_u64(b"energy_amount", *amount);
-                transcript.append_u64(b"energy_is_freeze", 1);
-                transcript.append_u64(b"energy_freeze_duration", duration.duration_in_blocks());
-                
-                // Add TOS balance change information
-                // FreezeTos deducts TOS from balance and adds energy
-                transcript.append_u64(b"tos_balance_change", *amount); // Amount deducted from TOS balance
-                transcript.append_u64(b"energy_gained", (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier());
-
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!("Energy transcript - FreezeTos: amount={}, duration={}, tos_deducted={}, energy_gained={}",
-                           amount, duration.duration_in_blocks(), amount, (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier());
-                }
-            },
-            EnergyPayload::UnfreezeTos { amount } => {
-                // Add energy operation parameters
-                transcript.append_u64(b"energy_amount", *amount);
-                transcript.append_u64(b"energy_is_freeze", 0);
-                
-                // Add TOS balance change information
-                // UnfreezeTos returns TOS to balance and removes energy
-                transcript.append_u64(b"tos_balance_change", *amount); // Amount returned to TOS balance
-                transcript.append_u64(b"energy_removed", *amount); // Energy removed (1:1 ratio for unfreeze)
-
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!("Energy transcript - UnfreezeTos: amount={}, tos_returned={}, energy_removed={}",
-                           amount, amount, amount);
-                }
-            }
-        }
     }
 
     pub fn consume(self) -> (CompressedPublicKey, TransactionType) {
@@ -466,13 +380,6 @@ impl Serializer for Transaction {
         self.fee.write(writer);
         self.fee_type.write(writer);
         self.nonce.write(writer);
-
-        writer.write_u8(self.source_commitments.len() as u8);
-        for commitment in &self.source_commitments {
-            commitment.write(writer);
-        }
-
-        self.range_proof.write(writer);
         self.reference.write(writer);
 
         // Always include multisig for T0
@@ -492,20 +399,8 @@ impl Serializer for Transaction {
         let fee = reader.read_u64()?;
         let fee_type = FeeType::read(reader)?;
         let nonce = Nonce::read(reader)?;
-
-        let commitments_len = reader.read_u8()?;
-        if commitments_len == 0 || commitments_len > MAX_TRANSFER_COUNT as u8 {
-            return Err(ReaderError::InvalidSize)
-        }
-
-        let mut source_commitments = Vec::with_capacity(commitments_len as usize);
-        for _ in 0..commitments_len {
-            source_commitments.push(SourceCommitment::read(reader)?);
-        }
-
-        let range_proof = RangeProof::read(reader)?;
         let reference = Reference::read(reader)?;
-        
+
         // Always read multisig for T0
         let multisig = Option::read(reader)?;
 
@@ -518,8 +413,6 @@ impl Serializer for Transaction {
             fee,
             fee_type,
             nonce,
-            source_commitments,
-            range_proof,
             reference,
             multisig,
             signature,
@@ -534,10 +427,6 @@ impl Serializer for Transaction {
         + self.fee.size()
         + self.fee_type.size()
         + self.nonce.size()
-        // Commitments length byte
-        + 1
-        + self.source_commitments.iter().map(|c| c.size()).sum::<usize>()
-        + self.range_proof.size()
         + self.reference.size()
         + self.signature.size();
 

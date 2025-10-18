@@ -9,7 +9,7 @@ use crate::{
         PrivateKey
     },
     serializer::*,
-    transaction::{Role, TxVersion}
+    transaction::TxVersion
 };
 use super::{
     derive_shared_key_from_handle,
@@ -20,6 +20,7 @@ use super::{
     ExtraData,
     ExtraDataType,
     PlaintextExtraData,
+    Role,
     SharedKey
 };
 

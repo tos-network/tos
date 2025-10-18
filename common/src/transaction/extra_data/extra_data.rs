@@ -4,8 +4,7 @@ use crate::{
         elgamal::{CompressedHandle, PedersenOpening, PublicKey, RISTRETTO_COMPRESSED_SIZE},
         PrivateKey
     },
-    serializer::*,
-    transaction::Role
+    serializer::*
 };
 use super::{
     derive_shared_key_from_handle,
@@ -13,6 +12,7 @@ use super::{
     Cipher,
     CipherFormatError,
     PlaintextData,
+    Role,
     SharedKey,
     UnknownExtraDataFormat
 };
