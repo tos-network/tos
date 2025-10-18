@@ -158,7 +158,7 @@ impl UnsignedTransaction {
         self.range_proof.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig - this matches Transaction::get_signing_bytes
-        
+
         let signature = keypair.sign(&buffer);
 
         Transaction::new(

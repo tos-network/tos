@@ -68,8 +68,8 @@ impl<'de> serde::Deserialize<'de> for Signature {
 
 impl Serializer for Signature {
     fn write(&self, writer: &mut Writer) {
-        writer.write_bytes(&self.s.to_bytes());
-        writer.write_bytes(&self.e.to_bytes());
+        writer.write_bytes(self.s.as_bytes());
+        writer.write_bytes(self.e.as_bytes());
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {

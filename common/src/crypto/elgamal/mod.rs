@@ -253,9 +253,8 @@ impl KeyPair {
         use crate::crypto::proofs::H;
 
         let private_key = PrivateKey::new();
-        // Use inverse construction: P = s^(-1) * H (for signature compatibility)
-        let s_inv = private_key.as_scalar().invert();
-        let public_key = PublicKey::from_point((*H) * s_inv);
+        // Public key: P = H * private_key (standard Schnorr signature)
+        let public_key = PublicKey::from_point((*H) * private_key.as_scalar());
 
         Self { public_key, private_key }
     }
@@ -268,8 +267,8 @@ impl KeyPair {
             return Err(());
         }
 
-        let s_inv = private_key.as_scalar().invert();
-        let public_key = PublicKey::from_point((*H) * s_inv);
+        // Public key: P = H * private_key (standard Schnorr signature)
+        let public_key = PublicKey::from_point((*H) * private_key.as_scalar());
 
         Ok(Self { public_key, private_key })
     }
