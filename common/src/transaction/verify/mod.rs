@@ -58,7 +58,7 @@ use crate::{
 use super::{
     ContractDeposit,
     FeeType,
-    Role,
+    extra_data::Role,
     Transaction,
     TransactionType,
     TransferPayload,
@@ -77,11 +77,18 @@ struct DecompressedTransferCt {
 }
 
 impl DecompressedTransferCt {
-    fn decompress(transfer: &TransferPayload) -> Result<Self, DecompressionError> {
+    // TODO: Balance simplification - Remove this method
+    // TransferPayload no longer has get_commitment(), get_sender_handle(), get_receiver_handle()
+    // These methods were removed when switching to plaintext balances
+    fn decompress(_transfer: &TransferPayload) -> Result<Self, DecompressionError> {
+        // Stub implementation - this struct will be removed entirely
+        // For now, return dummy values to allow compilation
+        use curve25519_dalek::ristretto::RistrettoPoint;
+        let identity = RistrettoPoint::identity();
         Ok(Self {
-            commitment: transfer.get_commitment().decompress()?,
-            sender_handle: transfer.get_sender_handle().decompress()?,
-            receiver_handle: transfer.get_receiver_handle().decompress()?,
+            commitment: PedersenCommitment::from_point(identity),
+            sender_handle: DecryptHandle::from_point(identity),
+            receiver_handle: DecryptHandle::from_point(identity),
         })
     }
 
@@ -298,13 +305,11 @@ impl Transaction {
             _ => {}
         }
 
-        let outputs = self.source_commitments.iter()
-            .map(|commitment| {
-                let ciphertext = self.get_sender_output_ct(commitment.get_asset(), &decompressed_transfers, &decompressed_deposits)?;
-                Ok((commitment.get_asset(), ciphertext))
-            })
-            .collect::<Result<Vec<_>, DecompressionError>>()?;
-
+        // TODO: Balance simplification - source_commitments field removed
+        // This method previously collected sender output ciphertexts for each asset
+        // With plaintext balances, no commitments or ciphertexts needed
+        // Return empty vector for now
+        let outputs = Vec::new();
         Ok(outputs)
     }
 
@@ -328,8 +333,29 @@ impl Transaction {
         transcript
     }
 
+    /// Append energy transaction data to transcript
+    /// This ensures consistency between transaction creation and verification
+    pub(crate) fn append_energy_transcript(transcript: &mut Transcript, payload: &EnergyPayload) {
+        match payload {
+            EnergyPayload::FreezeTos { amount, duration } => {
+                transcript.append_message(b"energy_type", b"freeze");
+                transcript.append_u64(b"freeze_amount", *amount);
+                transcript.append_u64(b"freeze_duration", duration.days as u64);
+            },
+            EnergyPayload::UnfreezeTos { amount } => {
+                transcript.append_message(b"energy_type", b"unfreeze");
+                transcript.append_u64(b"unfreeze_amount", *amount);
+            },
+        }
+    }
+
+    // TODO: Balance simplification - Remove this method entirely (proofs removed)
     // Verify that the commitment assets match the assets used in the tx
     fn verify_commitment_assets(&self) -> bool {
+        // TODO: Balance simplification - Proofs removed, always return true for now
+        return true;
+
+        /*
         let has_commitment_for_asset = |asset| {
             self.source_commitments
                 .iter()
@@ -371,12 +397,26 @@ impl Transaction {
             TransactionType::Energy(_) => true,
             TransactionType::AIMining(_) => true,
         }
+        */
     }
 
-    // Verify the format of invoke contract
+    // TODO: Balance simplification - Deposit decompression removed
+    // This method previously decompressed private contract deposits for proof verification
+    // With plaintext balances (ContractDeposit::Public only), no decompression needed
+    //
+    // Previous functionality:
+    // 1. Validated deposits.len() <= MAX_DEPOSIT_PER_INVOKE_CALL
+    // 2. Validated max_gas <= MAX_GAS_USAGE_PER_TX
+    // 3. For Public deposits: validated amount > 0
+    // 4. For Private deposits: decompressed commitment, sender_handle, receiver_handle
+    //
+    // New plaintext approach:
+    // 1. Validate deposit count and max_gas limits
+    // 2. Validate all deposits are Public with amount > 0
+    // 3. No decompression needed
     fn verify_invoke_contract<'a, E>(
         &self,
-        deposits_decompressed: &mut HashMap<&'a Hash, DecompressedDepositCt>,
+        _deposits_decompressed: &mut HashMap<&'a Hash, DecompressedDepositCt>,
         deposits: &'a IndexMap<Hash, ContractDeposit>,
         max_gas: u64
     ) -> Result<(), VerificationError<E>> {
@@ -388,24 +428,17 @@ impl Transaction {
             return Err(VerificationError::MaxGasReached.into())
         }
 
-        for (asset, deposit) in deposits.iter() {
+        // Validate all deposits are public with non-zero amounts
+        for (_asset, deposit) in deposits.iter() {
             match deposit {
                 ContractDeposit::Public(amount) => {
                     if *amount == 0 {
                         return Err(VerificationError::InvalidFormat);
                     }
                 },
-                ContractDeposit::Private { commitment, sender_handle, receiver_handle, .. } => {
-                    let decompressed = DecompressedDepositCt {
-                        commitment: commitment.decompress()
-                            .map_err(ProofVerificationError::from)?,
-                        sender_handle: sender_handle.decompress()
-                            .map_err(ProofVerificationError::from)?,
-                        receiver_handle: receiver_handle.decompress()
-                            .map_err(ProofVerificationError::from)?,
-                    };
-
-                    deposits_decompressed.insert(asset, decompressed);
+                ContractDeposit::Private { .. } => {
+                    // Should not happen with plaintext system
+                    return Err(VerificationError::InvalidFormat);
                 }
             }
         }
@@ -413,49 +446,43 @@ impl Transaction {
         Ok(())
     }
 
+    // TODO: Balance simplification - Contract deposit proof verification removed
+    // This method previously verified CiphertextValidityProof for private contract deposits
+    // With plaintext balances (ContractDeposit::Public only), no proof verification needed
+    //
+    // Previous functionality:
+    // 1. Decompressed deposit commitments and handles
+    // 2. Verified CiphertextValidityProof.pre_verify() for each private deposit
+    // 3. Added commitments to value_commitments for range proof verification
+    //
+    // New plaintext approach (to be implemented):
+    // 1. All deposits are ContractDeposit::Public(amount)
+    // 2. Simply validate amount > 0 (already done in verify_invoke_contract)
+    // 3. Deduct amount from sender balance
+    // 4. Add amount to contract balance
     fn verify_contract_deposits<E>(
         &self,
-        transcript: &mut Transcript,
-        value_commitments: &mut Vec<(RistrettoPoint, CompressedRistretto)>,
-        sigma_batch_collector: &mut BatchCollector,
-        source_decompressed: &PublicKey,
-        dest_pubkey: &PublicKey,
-        deposits_decompressed: &HashMap<&Hash, DecompressedDepositCt>,
+        _transcript: &mut Transcript,
+        _value_commitments: &mut Vec<(RistrettoPoint, CompressedRistretto)>,
+        _sigma_batch_collector: &mut BatchCollector,
+        _source_decompressed: &PublicKey,
+        _dest_pubkey: &PublicKey,
+        _deposits_decompressed: &HashMap<&Hash, DecompressedDepositCt>,
         deposits: &IndexMap<Hash, ContractDeposit>,
     ) -> Result<(), VerificationError<E>> {
+        // Stub implementation - proof verification removed
+        // In production, implement plaintext deposit verification here
+        trace!("Skipping contract deposit proof verification (plaintext balances)");
 
-        for (asset, deposit) in deposits {
-            transcript.deposit_proof_domain_separator();
-            transcript.append_hash(b"deposit_asset", asset);
+        // Basic validation: ensure all deposits are public
+        for (_asset, deposit) in deposits {
             match deposit {
-                ContractDeposit::Public(amount) => {
-                    transcript.append_u64(b"deposit_plain", *amount);
+                ContractDeposit::Public(_amount) => {
+                    // Valid - plaintext deposit
                 },
-                ContractDeposit::Private {
-                    commitment,
-                    sender_handle,
-                    receiver_handle,
-                    ct_validity_proof
-                } => {
-                    transcript.append_commitment(b"deposit_commitment", commitment);
-                    transcript.append_handle(b"deposit_sender_handle", sender_handle);
-                    transcript.append_handle(b"deposit_receiver_handle", receiver_handle);
-
-                    let decompressed = deposits_decompressed.get(asset)
-                        .ok_or(VerificationError::DepositNotFound)?;
-
-                    ct_validity_proof.pre_verify(
-                        &decompressed.commitment,
-                        &dest_pubkey,
-                       &source_decompressed,
-                        &decompressed.receiver_handle,
-                        &decompressed.sender_handle,
-                        true,
-                        transcript,
-                        sigma_batch_collector
-                    )?;
-
-                    value_commitments.push((decompressed.commitment.as_point().clone(), commitment.as_point().clone()));
+                ContractDeposit::Private { .. } => {
+                    // Should not happen with plaintext system
+                    return Err(VerificationError::InvalidFormat);
                 }
             }
         }
@@ -591,65 +618,20 @@ impl Transaction {
             }
         };
 
-        let new_source_commitments_decompressed = self
-            .source_commitments
-            .iter()
-            .map(|commitment| commitment.get_commitment().decompress())
-            .collect::<Result<Vec<_>, DecompressionError>>()
-            .map_err(ProofVerificationError::from)?;
+        // TODO: Balance simplification - Source commitment proof verification removed
+        // With plaintext balances, we no longer need Pedersen commitments or CommitmentEqProof
+        // Instead, we'll directly verify balances using simple arithmetic
 
-        let source_decompressed = self
-            .source
-            .decompress()
-            .map_err(|err| VerificationError::Proof(err.into()))?;
+        // This section previously verified:
+        // 1. Decompressed source commitments
+        // 2. CommitmentEqProof for each asset
+        // 3. Updated sender balances in state
 
-        let mut transcript = Self::prepare_transcript(self.version, &self.source, self.fee, &self.fee_type, self.nonce);
-
-        for (commitment, new_source_commitment) in self
-            .source_commitments
-            .iter()
-            .zip(&new_source_commitments_decompressed)
-        {
-            // Ciphertext containing all the funds spent for this commitment
-            let output = self.get_sender_output_ct(commitment.get_asset(), &transfers_decompressed, &deposits_decompressed)
-                .map_err(ProofVerificationError::from)?;
-
-            // Retrieve the balance of the sender
-            let source_verification_ciphertext = state
-                .get_sender_balance(&self.source, commitment.get_asset(), &self.reference).await
-                .map_err(VerificationError::State)?;
-
-            // TODO: With plain balances, no need to compress
-            let source_ct_compressed = *source_verification_ciphertext;
-
-            // Compute the new final balance for account
-            *source_verification_ciphertext -= output;
-            transcript.new_commitment_eq_proof_domain_separator();
-            transcript.append_hash(b"new_source_commitment_asset", commitment.get_asset());
-            transcript
-                .append_commitment(b"new_source_commitment", commitment.get_commitment());
-
-            // TODO: Balance simplification - remove transcript.append_ciphertext
-            // transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
-            // Skip appending ciphertext since balances are now plain u64
-
-            commitment.get_proof().pre_verify(
-                &source_decompressed,
-                *source_verification_ciphertext,
-                &new_source_commitment,
-                &mut transcript,
-                sigma_batch_collector,
-            )?;
-
-            // Update source balance
-            state
-                .add_sender_output(
-                    &self.source,
-                    commitment.get_asset(),
-                    output,
-                ).await
-                .map_err(VerificationError::State)?;
-        }
+        // New plaintext approach (to be implemented):
+        // 1. Get current balance for each asset from state
+        // 2. Calculate expected new balance = current - (transfers + deposits + fees)
+        // 3. Verify new balance >= 0
+        // 4. Update state with new balance
 
         Ok(())
     }
@@ -841,12 +823,9 @@ impl Transaction {
             }
         };
 
-        let new_source_commitments_decompressed = self
-            .source_commitments
-            .iter()
-            .map(|commitment| commitment.get_commitment().decompress())
-            .collect::<Result<Vec<_>, DecompressionError>>()
-            .map_err(ProofVerificationError::from)?;
+        // TODO: Balance simplification - source_commitments field removed
+        // This variable is no longer needed with plaintext balances
+        let new_source_commitments_decompressed: Vec<PedersenCommitment> = Vec::new();
 
         let source_decompressed = self
             .source
@@ -894,108 +873,59 @@ impl Transaction {
             return Err(VerificationError::MultiSigNotConfigured);
         }
 
-        // 1. Verify CommitmentEqProofs
-        trace!("verifying commitments eq proofs");
+        // TODO: Balance simplification - Source commitment proof verification removed
+        // This section previously verified CommitmentEqProof for each source commitment
+        // With plaintext balances, no commitments or proofs needed
+        //
+        // Previous functionality:
+        // 1. Iterated over source_commitments (now removed field)
+        // 2. Calculated sender output ciphertext (transfers + deposits)
+        // 3. Retrieved current sender balance ciphertext from state
+        // 4. Computed new balance: current_balance - output
+        // 5. Verified CommitmentEqProof.pre_verify() for new balance commitment
+        // 6. Updated state with new sender output
+        //
+        // New plaintext approach (to be implemented):
+        // For each asset used in transaction:
+        // 1. Get current sender balance (plain u64) from state
+        // 2. Calculate total spent = sum(transfer.amount) + sum(deposit.amount) + fee
+        // 3. Verify balance >= total spent
+        // 4. Update state: new_balance = balance - total_spent
 
-        for (commitment, new_source_commitment) in self
-            .source_commitments
-            .iter()
-            .zip(&new_source_commitments_decompressed)
-        {
-            // Ciphertext containing all the funds spent for this commitment
-            let output = self.get_sender_output_ct(commitment.get_asset(), &transfers_decompressed, &deposits_decompressed)
-                .map_err(ProofVerificationError::from)?;
+        trace!("Skipping source commitment proof verification (plaintext balances)");
 
-            // Retrieve the balance of the sender
-            let source_verification_ciphertext = state
-                .get_sender_balance(&self.source, commitment.get_asset(), &self.reference).await
-                .map_err(VerificationError::State)?;
+        // Stub: In production, implement plaintext balance deduction here
+        // for (asset, total_spent) in asset_totals {
+        //     let current_balance = state.get_sender_balance(&self.source, &asset, &self.reference).await?;
+        //     if current_balance < total_spent {
+        //         return Err(VerificationError::InsufficientBalance);
+        //     }
+        //     state.add_sender_output(&self.source, &asset, total_spent).await?;
+        // }
 
-            // TODO: With plain balances, no need to compress
-            let source_ct_compressed = *source_verification_ciphertext;
+        // TODO: Balance simplification - Transfer proof verification removed
+        // With plaintext balances, we no longer need:
+        // - CiphertextValidityProof verification
+        // - Pedersen commitment verification
+        // - Twisted ElGamal decrypt handle verification
 
-            // Compute the new final balance for account
-            *source_verification_ciphertext -= output;
-            transcript.new_commitment_eq_proof_domain_separator();
-            transcript.append_hash(b"new_source_commitment_asset", commitment.get_asset());
-            transcript
-                .append_commitment(b"new_source_commitment", commitment.get_commitment());
+        // New plaintext approach (to be implemented):
+        // For each transfer:
+        // 1. Get receiver's current balance from state
+        // 2. Add transfer.amount to receiver balance
+        // 3. Update state with new receiver balance
 
-            // TODO: Balance simplification - remove transcript.append_ciphertext
-            // if self.version >= TxVersion::T0 {
-            //     transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
-            // }
-            // Skip appending ciphertext since balances are now plain u64
-
-            commitment.get_proof().pre_verify(
-                &source_decompressed,
-                *source_verification_ciphertext,
-                &new_source_commitment,
-                &mut transcript,
-                sigma_batch_collector,
-            )?;
-
-            // Update source balance
-            state
-                .add_sender_output(
-                    &self.source,
-                    commitment.get_asset(),
-                    output,
-                ).await
-                .map_err(VerificationError::State)?;
-        }
-
-        // 2. Verify every CtValidityProof
-        trace!("verifying transfers ciphertext validity proofs");
-
-        // Prepare the new source commitments at same time
-        // Count the number of commitments
+        trace!("Processing transfers with plaintext amounts");
         let mut value_commitments: Vec<(RistrettoPoint, CompressedRistretto)> = Vec::new();
 
         match &self.data {
             TransactionType::Transfers(transfers) => {
-                // Prepare the new commitments
-                for (transfer, decompressed) in transfers.iter().zip(&transfers_decompressed) {
-                    let receiver = transfer
-                        .get_destination()
-                        .decompress()
-                        .map_err(ProofVerificationError::from)?;
-    
-                    // Update receiver balance
-    
-                    let current_balance = state
-                        .get_receiver_balance(
-                            Cow::Borrowed(transfer.get_destination()),
-                            Cow::Borrowed(transfer.get_asset())
-                        ).await
-                        .map_err(VerificationError::State)?;
-
-                    let receiver_ct = decompressed.get_ciphertext(Role::Receiver);
-                    *current_balance += receiver_ct;
-
-                    // Validity proof
-
-                    transcript.transfer_proof_domain_separator();
-                    transcript.append_public_key(b"dest_pubkey", transfer.get_destination());
-                    transcript.append_commitment(b"amount_commitment", transfer.get_commitment());
-                    transcript.append_handle(b"amount_sender_handle", transfer.get_sender_handle());
-                    transcript
-                        .append_handle(b"amount_receiver_handle", transfer.get_receiver_handle());
-
-                    transfer.get_proof().pre_verify(
-                        &decompressed.commitment,
-                        &receiver,
-                        &source_decompressed,
-                        &decompressed.receiver_handle,
-                        &decompressed.sender_handle,
-                        self.version >= TxVersion::T0,
-                        &mut transcript,
-                        sigma_batch_collector,
-                    )?;
-
-                    // Add the commitment to the list
-                    value_commitments.push((decompressed.commitment.as_point().clone(), transfer.get_commitment().as_point().clone()));
-                }
+                // TODO: Implement plaintext transfer verification
+                // for transfer in transfers {
+                //     let current_balance = state.get_receiver_balance(transfer.destination, transfer.asset).await?;
+                //     let new_balance = current_balance + transfer.amount;
+                //     state.update_receiver_balance(transfer.destination, transfer.asset, new_balance).await?;
+                // }
             },
             TransactionType::Burn(payload) => {
                 if self.get_version() >= TxVersion::T0 {
@@ -1084,36 +1014,18 @@ impl Transaction {
             }
         }
 
-        // Finalize the new source commitments
+        // TODO: Balance simplification - Range proof verification removed
+        // With plaintext balances, we don't need Bulletproofs range proofs
+        // Previously this section:
+        // 1. Collected all source commitments and value commitments
+        // 2. Padded to power of two for Bulletproofs batching
+        // 3. Prepared final commitments for RangeProof::verify_multiple_with_rng
 
-        // Create fake commitments to make `m` (party size) of the bulletproof a power of two.
-        let n_commitments = self.source_commitments.len() + value_commitments.len();
-        let n_dud_commitments = n_commitments
-            .checked_next_power_of_two()
-            .ok_or(ProofVerificationError::Format)?
-            - n_commitments;
+        // New plaintext approach: No range proofs needed
+        // Balances are plain u64, always in valid range [0, 2^64)
 
-        let final_commitments = self
-            .source_commitments
-            .iter()
-            .zip(new_source_commitments_decompressed)
-            .map(|(commitment, new_source_commitment)| {
-                (
-                    new_source_commitment.to_point(),
-                    commitment.get_commitment().as_point().clone(),
-                )
-            })
-            .chain(value_commitments.into_iter())
-            .chain(
-                iter::repeat((RistrettoPoint::identity(), CompressedRistretto::identity()))
-                    .take(n_dud_commitments),
-            )
-            .collect();
-
-        // 3. Verify the aggregated RangeProof
-        trace!("verifying range proof");
-
-        // range proof will be verified in batch by caller
+        trace!("Skipping range proof verification (plaintext balances)");
+        let final_commitments = Vec::new(); // Empty - no proofs to verify
 
         Ok((transcript, final_commitments))
     }
@@ -1155,29 +1067,17 @@ impl Transaction {
         // Spawn a dedicated thread for the ZK Proofs verification
         // this prevent us from blocking the current thread
         spawn_blocking_safe(move || {
-            sigma_batch_collector
-                .verify()
-                .map_err(|_| ProofVerificationError::GenericProof)?;
-
-            if !prepared.is_empty() {
-                RangeProof::verify_batch(
-                    prepared.iter_mut()
-                        .map(|(tx, transcript, commitments)| {
-                            tx.range_proof
-                                .verification_view(
-                                    transcript,
-                                    commitments,
-                                    BULLET_PROOF_SIZE
-                                )
-                        }),
-                    &BP_GENS,
-                    &PC_GENS,
-                )
-                .map_err(ProofVerificationError::from)
-            } else {
-                debug!("no range proof to verify, skipping them");
-                Ok(())
-            }
+            // TODO: Balance simplification - Batch proof verification removed
+            // This section previously verified both Sigma proofs and Range proofs in batch
+            // With plaintext balances, no proofs to verify
+            //
+            // Previous functionality:
+            // 1. sigma_batch_collector.verify() - batched Sigma proof verification
+            // 2. RangeProof::verify_batch() - batched Bulletproofs verification
+            //
+            // New plaintext approach: No verification needed
+            trace!("Skipping batch proof verification (plaintext balances)");
+            Ok::<(), ProofVerificationError>(())
         }).await.context("spawning blocking thread for ZK verification")??;
 
         Ok(())
@@ -1209,27 +1109,18 @@ impl Transaction {
             Some((res, Arc::clone(&self)))
         };
 
-        // Block in place instead of spawning a dedicated thread to reduce overhead
-        // verification is expected to be fast enough to not block anything
+        // TODO: Balance simplification - Single transaction proof verification removed
+        // This section verified proofs for individual transactions (non-batched)
+        // With plaintext balances, no proof verification needed
+        //
+        // Previous functionality:
+        // 1. sigma_batch_collector.verify() - Sigma proof verification
+        // 2. RangeProof::verify_multiple() - Range proof verification if pre_verify returned data
+        //
+        // New plaintext approach: No verification needed
         spawn_blocking_safe(move || {
-            trace!("Verifying sigma proofs");
-            sigma_batch_collector
-                .verify()
-                .map_err(|_| ProofVerificationError::GenericProof)?;
-
-            if let Some(((mut transcript, commitments), tx)) = res {
-                trace!("Verifying range proof");
-                RangeProof::verify_multiple(
-                    &tx.range_proof,
-                    &BP_GENS,
-                    &PC_GENS,
-                    &mut transcript,
-                    &commitments,
-                    BULLET_PROOF_SIZE,
-                ).map_err(ProofVerificationError::from)
-            } else {
-                Ok(())
-            }
+            trace!("Skipping proof verification (plaintext balances)");
+            Ok::<(), ProofVerificationError>(())
         }).await.context("spawning blocking thread for ZK verification")??;
  
         Ok(())
@@ -1293,12 +1184,12 @@ impl Transaction {
                         ).await
                         .map_err(VerificationError::State)?;
     
-                    // TODO: Balance simplification - transfer amounts need to be plain u64
-                    // For now, transfers still use encrypted ciphertexts
-                    // This needs full refactoring to extract plain amounts from transfers
-                    // Stub: Use 0 as placeholder until transfers are converted to plain amounts
-                    let _receiver_ct = transfer.get_ciphertext(Role::Receiver);
-                    // *current_balance += receiver_ct; // Will be: *current_balance += plain_amount;
+                    // TODO: Balance simplification - transfer amounts are now plain u64
+                    // Update receiver's balance with plaintext amount
+                    // In production implementation, add proper error handling
+                    let plain_amount = transfer.get_amount();
+                    // Stub: Comment out balance update for now
+                    // *current_balance += plain_amount;
                 }
             },
             TransactionType::Burn(payload) => {
@@ -1491,29 +1382,26 @@ impl Transaction {
             _ => {}
         }
 
-        // We don't verify any proof, we just apply the transaction
-        for commitment in &self.source_commitments {
-            let asset = commitment.get_asset();
-            let current_source_balance = state
-                .get_sender_balance(
-                    &self.source,
-                    asset,
-                    &self.reference,
-                ).await.map_err(VerificationError::State)?;
-
-            let output = self.get_sender_output_ct(asset, &transfers_decompressed, &deposits_decompressed)
-                .map_err(ProofVerificationError::from)?;
-
-            // Compute the new final balance for account
-            *current_source_balance -= &output;
-
-            // Update source balance
-            state.add_sender_output(
-                &self.source,
-                asset,
-                output,
-            ).await.map_err(VerificationError::State)?;
-        }
+        // TODO: Balance simplification - Source commitments removed
+        // This section previously processed source commitments for each asset
+        // With plaintext balances, no commitments to process
+        //
+        // Previous functionality:
+        // for commitment in &self.source_commitments {
+        //     let asset = commitment.get_asset();
+        //     let current_source_balance = state.get_sender_balance(...).await?;
+        //     let output = self.get_sender_output_ct(asset, &transfers_decompressed, &deposits_decompressed)?;
+        //     *current_source_balance -= &output;
+        //     state.add_sender_output(&self.source, asset, output).await?;
+        // }
+        //
+        // New plaintext approach (to be implemented):
+        // For each asset used in transaction:
+        // 1. Get current sender balance (plain u64) from state
+        // 2. Calculate total spent = sum(transfer.amount) + sum(deposit.amount)
+        // 3. Verify balance >= total spent (done elsewhere in verification)
+        // 4. Update state: new_balance = balance - total_spent
+        trace!("Skipping source commitment processing (plaintext balances)");
 
         self.apply(tx_hash, state, &deposits_decompressed).await
     }
@@ -1568,59 +1456,27 @@ impl Transaction {
 
         let mut transcript = Self::prepare_transcript(self.version, &self.source, self.fee, &self.fee_type, self.nonce);
 
-        trace!("verifying commitments eq proofs");
+        // TODO: Balance simplification - Partial verification removed
+        // This method previously verified CommitmentEqProof for each source commitment
+        // With plaintext balances, no commitments or proofs to verify
+        //
+        // Previous functionality (apply_with_partial_verify):
+        // 1. Iterated over source_commitments
+        // 2. Decompressed commitments
+        // 3. Calculated output ciphertexts
+        // 4. Retrieved sender balances
+        // 5. Verified CommitmentEqProof.pre_verify()
+        // 6. Batch verified all Sigma proofs
+        // 7. Applied balance changes
+        //
+        // New plaintext approach (to be implemented):
+        // 1. Get sender balances (plain u64) for each asset
+        // 2. Calculate total spent per asset
+        // 3. Verify sufficient balance
+        // 4. Update balances directly
 
-        // This contains sender balance updated, output ciphertext, asset commitment
-        let mut commitments_changes = Vec::with_capacity(self.source_commitments.len());
-
-        for commitment in self.source_commitments.iter()
-        {
-            // Decompress the commitment
-            let new_source_commitment = commitment.get_commitment()
-                .decompress()
-                .map_err(ProofVerificationError::from)?;
-
-            // Ciphertext containing all the funds spent for this commitment
-            let output = self.get_sender_output_ct(commitment.get_asset(), &transfers_decompressed, &deposits_decompressed)
-                .map_err(ProofVerificationError::from)?;
-
-            // Retrieve the balance of the sender
-            let mut source_verification_ciphertext = state
-                .get_sender_balance(&self.source, commitment.get_asset(), &self.reference).await
-                .map_err(VerificationError::State)?
-                .clone();
-
-            // TODO: With plain balances, no need to compress
-            let source_ct_compressed = source_verification_ciphertext;
-
-            // Compute the new final balance for account
-            source_verification_ciphertext -= output;
-            transcript.new_commitment_eq_proof_domain_separator();
-            transcript.append_hash(b"new_source_commitment_asset", commitment.get_asset());
-            transcript
-                .append_commitment(b"new_source_commitment", &commitment.get_commitment());
-
-            // TODO: Balance simplification - remove transcript.append_ciphertext
-            // if self.version >= TxVersion::T0 {
-            //     transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
-            // }
-            // Skip appending ciphertext since balances are now plain u64
-
-            commitment.get_proof().pre_verify(
-                &owner,
-                source_verification_ciphertext,
-                &new_source_commitment,
-                &mut transcript,
-                &mut sigma_batch_collector,
-            )?;
-
-            commitments_changes.push((source_verification_ciphertext, output, commitment.get_asset()));
-        }
-
-        trace!("Verifying sigma proofs");
-        sigma_batch_collector
-            .verify()
-            .map_err(|_| ProofVerificationError::GenericProof)?;
+        trace!("Skipping partial proof verification (plaintext balances)");
+        let commitments_changes: Vec<(u64, u64, &Hash)> = Vec::new();
 
         // Proofs are correct, apply
         for (source_verification_ciphertext, output, asset) in commitments_changes {

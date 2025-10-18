@@ -27,7 +27,6 @@ use crate::{
         DeployContractPayload,
         MultiSigPayload,
         Reference,
-        SourceCommitment,
         Transaction,
         TransactionType,
         TransferPayload,
@@ -60,11 +59,8 @@ pub struct DataHash<'a, T: Clone> {
 pub struct RPCTransferPayload<'a> {
     pub asset: Cow<'a, Hash>,
     pub destination: Address,
+    pub amount: u64,  // Plaintext amount
     pub extra_data: Cow<'a, Option<UnknownExtraDataFormat>>,
-    pub commitment: Cow<'a, CompressedCommitment>,
-    pub sender_handle: Cow<'a, CompressedHandle>,
-    pub receiver_handle: Cow<'a, CompressedHandle>,
-    pub ct_validity_proof: Cow<'a, CiphertextValidityProof>,
 }
 
 impl<'a> From<RPCTransferPayload<'a>> for TransferPayload {
@@ -72,11 +68,8 @@ impl<'a> From<RPCTransferPayload<'a>> for TransferPayload {
         TransferPayload::new(
             transfer.asset.into_owned(),
             transfer.destination.to_public_key(),
+            transfer.amount,
             transfer.extra_data.into_owned(),
-            transfer.commitment.into_owned(),
-            transfer.sender_handle.into_owned(),
-            transfer.receiver_handle.into_owned(),
-            transfer.ct_validity_proof.into_owned()
         )
     }
 }
@@ -102,11 +95,8 @@ impl<'a> RPCTransactionType<'a> {
                     rpc_transfers.push(RPCTransferPayload {
                         asset: Cow::Borrowed(transfer.get_asset()),
                         destination: transfer.get_destination().as_address(mainnet),
+                        amount: transfer.get_amount(),
                         extra_data: Cow::Borrowed(transfer.get_extra_data()),
-                        commitment: Cow::Borrowed(transfer.get_commitment()),
-                        sender_handle: Cow::Borrowed(transfer.get_sender_handle()),
-                        receiver_handle: Cow::Borrowed(transfer.get_receiver_handle()),
-                        ct_validity_proof: Cow::Borrowed(transfer.get_proof()),
                     });
                 }
                 Self::Transfers(rpc_transfers)
@@ -155,10 +145,6 @@ pub struct RPCTransaction<'a> {
     /// nonce must be equal to the one on chain account
     /// used to prevent replay attacks and have ordered transactions
     pub nonce: Nonce,
-    /// We have one source commitment and equality proof per asset used in the tx.
-    pub source_commitments: Cow<'a, Vec<SourceCommitment>>,
-    /// The range proof is aggregated across all transfers and across all assets.
-    pub range_proof: Cow<'a, RangeProof>,
     /// Reference at which block the transaction was built
     pub reference: Cow<'a, Reference>,
     /// Multisig data if the transaction is a multisig transaction
@@ -178,8 +164,6 @@ impl<'a> RPCTransaction<'a> {
             data: RPCTransactionType::from_type(tx.get_data(), mainnet),
             fee: tx.get_fee(),
             nonce: tx.get_nonce(),
-            source_commitments: Cow::Borrowed(tx.get_source_commitments()),
-            range_proof: Cow::Borrowed(tx.get_range_proof()),
             reference: Cow::Borrowed(tx.get_reference()),
             multisig: Cow::Borrowed(tx.get_multisig()),
             signature: Cow::Borrowed(tx.get_signature()),
@@ -197,8 +181,6 @@ impl<'a> From<RPCTransaction<'a>> for Transaction {
             tx.fee,
             FeeType::TOS,
             tx.nonce,
-            tx.source_commitments.into_owned(),
-            tx.range_proof.into_owned(),
             tx.reference.into_owned(),
             tx.multisig.into_owned(),
             tx.signature.into_owned()
