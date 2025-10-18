@@ -201,6 +201,40 @@ impl Transaction {
         }
     }
 
+    // Get all assets used in this transaction (plaintext balance version)
+    // Returns a HashSet containing all unique assets referenced in the transaction
+    pub fn get_assets(&self) -> std::collections::HashSet<&Hash> {
+        use std::collections::HashSet;
+        let mut assets = HashSet::new();
+
+        match &self.data {
+            TransactionType::Transfers(transfers) => {
+                for transfer in transfers {
+                    assets.insert(transfer.get_asset());
+                }
+            },
+            TransactionType::Burn(payload) => {
+                assets.insert(&payload.asset);
+            },
+            TransactionType::InvokeContract(payload) => {
+                for (asset, _) in &payload.deposits {
+                    assets.insert(asset);
+                }
+            },
+            TransactionType::DeployContract(payload) => {
+                if let Some(invoke) = &payload.invoke {
+                    for (asset, _) in &invoke.deposits {
+                        assets.insert(asset);
+                    }
+                }
+            },
+            // Energy, MultiSig, and AIMining don't have explicit assets
+            _ => {}
+        }
+
+        assets
+    }
+
     // Get the total outputs count per TX
     // default is 1
     // Transfers / Deposits are their own len
