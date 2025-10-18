@@ -380,6 +380,8 @@ impl TransactionBuilder {
                 };
                 
                 match self.fee_builder {
+                    // SAFE: f64 used for client-side fee estimation only
+                    // Network only validates that fee is sufficient, not how it was calculated
                     FeeBuilder::Multiplier(multiplier) => (expected_fee as f64 * multiplier) as u64,
                     FeeBuilder::Boost(boost) => expected_fee + boost,
                     _ => expected_fee,

@@ -137,6 +137,9 @@ impl From<VarUint> for u64 {
     }
 }
 
+/// Convert VarUint to f64 for display/UI purposes
+/// SAFE: Used for display, hashrate calculation, and RPC responses only
+/// Consensus logic uses U256 arithmetic directly, not this conversion
 impl From<VarUint> for f64 {
     fn from(c: VarUint) -> f64 {
         c.0.as_u128() as f64

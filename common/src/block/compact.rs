@@ -86,6 +86,7 @@ impl CompactBlock {
     }
 
     /// Calculate expected bandwidth savings
+    /// SAFE: f64 for statistics/monitoring only, not consensus-critical
     pub fn compression_ratio(&self, full_block_size: usize) -> f64 {
         let compact_size = self.size();
         1.0 - (compact_size as f64 / full_block_size as f64)

@@ -384,6 +384,7 @@ async fn run_prompt<S: Storage>(prompt: ShareablePrompt, blockchain: Arc<Blockch
         trace!("Retrieving network hashrate");
         let version = get_version_at_height(blockchain.get_network(), blockchain.get_blue_score());
         let block_time_target = get_block_time_target_for_version(version);
+        // SAFE: f64 for display/monitoring only, not consensus-critical
         let network_hashrate: f64 = (blockchain.get_difficulty().await / (block_time_target / MILLIS_PER_SECOND)).into();
 
         trace!("Building prompt message");

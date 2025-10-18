@@ -145,6 +145,7 @@ pub struct EnergyStatus {
 
 impl EnergyStatus {
     /// Calculate energy usage percentage
+    /// SAFE: f64 for display/UI purposes only, not consensus-critical
     pub fn usage_percentage(&self) -> f64 {
         if self.total_energy == 0 {
             0.0

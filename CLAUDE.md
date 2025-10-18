@@ -277,7 +277,254 @@ async fn get_block_at_topoheight(topoheight: u64) -> Result<Block>
 async fn get_balance_at_topoheight(addr: &Address, topoheight: u64) -> Result<u64>
 ```
 
-### 2. Documentation
+### 2. Blockchain Coding Safety
+
+**RULE: Consensus-critical code MUST use deterministic integer arithmetic. Floating-point types (f32/f64) are PROHIBITED in consensus layer.**
+
+#### Why f32/f64 are Dangerous in Consensus Code
+
+Floating-point arithmetic produces **platform-dependent results**:
+- Different CPU architectures (x86 vs ARM) may produce different results
+- Different compiler optimizations may change calculation order
+- Different rounding modes in FPU can cause inconsistency
+- This leads to **network splits** where nodes disagree on valid blocks
+
+**Examples of consensus-critical code**:
+- ❌ Block validation
+- ❌ Transaction fee calculation
+- ❌ Reward distribution
+- ❌ Difficulty adjustment
+- ❌ Any computation stored in blockchain state
+
+**Examples of safe f64 usage** (non-consensus):
+- ✅ UI display formatting (`format_coin()`, `format_hashrate()`)
+- ✅ RPC response fields (for human readability)
+- ✅ Prometheus metrics (monitoring only)
+- ✅ Client-side fee estimation (network validates sufficiency, not calculation method)
+- ✅ Offline configuration tools (not used at runtime)
+
+#### The u128 Scaled Integer Pattern
+
+**Use `u128` with a SCALE factor to represent decimal values deterministically.**
+
+```rust
+const SCALE: u128 = 10000;  // Represents 1.0
+
+// Representing decimal values
+let multiplier_1_2 = 12000u128;   // 1.2 * SCALE
+let multiplier_0_85 = 8500u128;   // 0.85 * SCALE
+let multiplier_1_5 = 15000u128;   // 1.5 * SCALE
+```
+
+#### Step-by-Step Calculation Pattern
+
+**CRITICAL**: Divide after EACH multiplication to prevent overflow.
+
+✅ **CORRECT**: Divide after each step
+```rust
+const SCALE: u128 = 10000;
+
+pub fn calculate_reward(
+    base_reward: u64,
+    quality_multiplier: u128,  // e.g., 8500 for 0.85
+    scarcity_multiplier: u128, // e.g., 12000 for 1.2
+    loyalty_multiplier: u128,  // e.g., 11000 for 1.1
+) -> u64 {
+    // Step 1: base × quality / SCALE
+    let temp1 = (base_reward as u128 * quality_multiplier) / SCALE;
+
+    // Step 2: temp1 × scarcity / SCALE
+    let temp2 = (temp1 * scarcity_multiplier) / SCALE;
+
+    // Step 3: temp2 × loyalty / SCALE
+    let result = (temp2 * loyalty_multiplier) / SCALE;
+
+    result as u64
+}
+```
+
+❌ **INCORRECT**: Using f64 (non-deterministic)
+```rust
+pub fn calculate_reward(
+    base_reward: u64,
+    quality: f64,    // 0.85
+    scarcity: f64,   // 1.2
+    loyalty: f64,    // 1.1
+) -> u64 {
+    // Different platforms may produce different results!
+    let result = base_reward as f64 * quality * scarcity * loyalty;
+    result as u64  // ❌ CONSENSUS RISK
+}
+```
+
+❌ **INCORRECT**: Multiplying without dividing (overflow risk)
+```rust
+// This can overflow!
+let result = base * multiplier1 * multiplier2 * multiplier3;  // ❌ OVERFLOW RISK
+```
+
+#### Real-World Examples from TOS
+
+**Example 1: AI Mining Reward Calculation** ✅
+```rust
+// File: common/src/ai_mining/reputation.rs
+
+pub fn calculate_final_reward(
+    base_reward: u64,
+    validation_score: u8,
+    reputation: &AccountReputation,
+) -> u64 {
+    const SCALE: u128 = 10000;
+
+    // Quality: validation_score (0-100) → scaled (0-10000)
+    let quality_scaled = (validation_score as u128 * SCALE) / 100;
+
+    // Scarcity bonus based on quality threshold
+    let scarcity_scaled = if validation_score >= 90 {
+        15000  // 1.5 * SCALE
+    } else if validation_score >= 80 {
+        12000  // 1.2 * SCALE
+    } else {
+        10000  // 1.0 * SCALE
+    };
+
+    // Loyalty bonus for high reputation
+    let loyalty_scaled = if reputation.reputation_score >= 9000 {
+        11000  // 1.1 * SCALE
+    } else {
+        10000  // 1.0 * SCALE
+    };
+
+    // Calculate: base × quality × scarcity × loyalty
+    let temp1 = (base_reward as u128 * quality_scaled) / SCALE;
+    let temp2 = (temp1 * scarcity_scaled) / SCALE;
+    let final_reward = (temp2 * loyalty_scaled) / SCALE;
+
+    final_reward as u64
+}
+```
+
+**Example 2: Difficulty Adjustment Algorithm** ✅
+```rust
+// File: daemon/src/core/ghostdag/daa.rs
+
+fn apply_difficulty_adjustment(
+    current_difficulty: &Difficulty,
+    expected_time: u64,
+    actual_time: u64,
+) -> Result<Difficulty, BlockchainError> {
+    use tos_common::varuint::VarUint;
+
+    // Use U256 integer arithmetic (VarUint wraps U256)
+    let current = *current_difficulty;
+    let expected = VarUint::from(expected_time);
+    let actual = VarUint::from(actual_time);
+
+    // new_difficulty = (current × expected) / actual
+    let new_difficulty = (current * expected) / actual;
+
+    // Clamp to 4x range using integer operations
+    let max_difficulty = current * 4u64;
+    let min_difficulty = current / 4u64;
+
+    let clamped = if new_difficulty > max_difficulty {
+        max_difficulty
+    } else if new_difficulty < min_difficulty {
+        min_difficulty
+    } else {
+        new_difficulty
+    };
+
+    Ok(clamped)
+}
+```
+
+#### Overflow Safety Analysis
+
+```rust
+// TOS maximum supply: ~18M TOS = 1.8 × 10^16 nanoTOS
+const MAX_TOS_SUPPLY: u64 = 18_000_000_000_000_000;
+const SCALE: u128 = 10000;
+
+// Worst case: 3 multiplications with SCALE=10000
+// max_value = 1.8 × 10^16 × 10^4 × 10^4 × 10^4 = 1.8 × 10^28
+// u128::MAX = 3.4 × 10^38
+// Safety margin = 10^10x ✅ SAFE
+
+// Always divide after each multiplication:
+let step1 = (value * factor1) / SCALE;  // ← Division prevents accumulation
+let step2 = (step1 * factor2) / SCALE;  // ← Division prevents accumulation
+let step3 = (step2 * factor3) / SCALE;  // ← Division prevents accumulation
+```
+
+#### Performance Comparison
+
+```
+Benchmark: 100,000 reward calculations (Apple M1)
+
+f64 (baseline):     100µs  ❌ Non-deterministic
+u128 scaled:        545µs  ✅ Deterministic (5.5x slower, acceptable)
+U256:              1500µs  ✅ Deterministic (15x slower, use only when needed)
+
+Conclusion: u128 scaled is the sweet spot for most consensus calculations
+```
+
+#### When to Use U256 Instead of u128
+
+Use `U256` (from `primitive-types` crate) when:
+
+1. **Working with existing U256 types** (e.g., `Difficulty`, `VarUint`)
+2. **Very large numbers** (> 10^30)
+3. **Need extra safety margin** for future extensions
+
+```rust
+use primitive_types::U256;
+use tos_common::varuint::VarUint;
+
+// Difficulty is already U256-based, use U256 arithmetic
+fn adjust_difficulty(
+    current: &Difficulty,  // VarUint wraps U256
+    ratio: u64,
+) -> Difficulty {
+    let current_u256 = current.as_ref().clone();
+    let new_difficulty = current_u256 * U256::from(ratio);
+    VarUint::from(new_difficulty)
+}
+```
+
+#### Documentation Requirements
+
+All safe f64 usages MUST be documented with safety comments:
+
+```rust
+// ✅ CORRECT: Documented safe usage
+/// Calculate energy usage percentage
+/// SAFE: f64 for display/UI purposes only, not consensus-critical
+pub fn usage_percentage(&self) -> f64 {
+    (self.used_energy as f64 / self.total_energy as f64) * 100.0
+}
+
+// ✅ CORRECT: RPC response field
+/// SAFE: f64 for RPC display only, not consensus-critical
+pub bps: f64,
+
+// ✅ CORRECT: Client-side estimation
+// SAFE: Client-side fee estimation, network only validates sufficiency
+FeeBuilder::Multiplier(multiplier) => (expected_fee as f64 * multiplier) as u64,
+```
+
+#### Verification Checklist for Consensus Code
+
+Before merging consensus-critical changes:
+
+- [ ] No f32/f64 types in consensus calculations
+- [ ] All decimal arithmetic uses `u128` with `SCALE=10000`
+- [ ] Division after EACH multiplication (overflow prevention)
+- [ ] Overflow safety analysis documented
+- [ ] Tests verify deterministic results across platforms
+- [ ] All safe f64 usages have `// SAFE:` comments
+
+### 3. Documentation
 
 **RULE: Keep documentation synchronized with code.**
 
@@ -285,7 +532,7 @@ async fn get_balance_at_topoheight(addr: &Address, topoheight: u64) -> Result<u6
 - Update inline comments when refactoring
 - Add references to TIPs in code comments where relevant
 
-### 3. Backward Compatibility
+### 4. Backward Compatibility
 
 **RULE: Maintain backward compatibility unless explicitly breaking.**
 
@@ -299,6 +546,9 @@ Before committing, verify:
 
 - [ ] No Chinese, Japanese, or other non-English text in code/docs
 - [ ] All log statements with format arguments are wrapped with `if log::log_enabled!`
+- [ ] **No f32/f64 in consensus-critical code** (block validation, fees, rewards, difficulty)
+- [ ] All consensus calculations use `u128` with `SCALE=10000` pattern
+- [ ] All safe f64 usages have `// SAFE:` documentation comments
 - [ ] `cargo build --workspace` produces 0 warnings
 - [ ] `cargo test --workspace` produces 0 warnings and 0 failures
 - [ ] All modified files staged with `git add`

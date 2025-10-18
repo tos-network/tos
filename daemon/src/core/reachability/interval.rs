@@ -215,31 +215,35 @@ impl Interval {
             return self.split_exact(sizes);
         }
 
-        // Calculate exponential fractions for slack distribution
+        // Calculate exponential fractions for slack distribution using u128 scaled arithmetic
         let mut remaining_bias = interval_size - sizes_sum;
-        let total_bias = remaining_bias as f64;
-        let exp_fractions = exponential_fractions(sizes);
+        let total_bias = remaining_bias as u128;
+        let exp_fractions_scaled = exponential_fractions_scaled(sizes);
 
         // Add exponentially-biased slack to each size
         let mut biased_sizes = Vec::with_capacity(sizes.len());
-        for (i, &fraction) in exp_fractions.iter().enumerate() {
-            let bias: u64 = if i == exp_fractions.len() - 1 {
+        for (i, &fraction_scaled) in exp_fractions_scaled.iter().enumerate() {
+            let bias: u64 = if i == exp_fractions_scaled.len() - 1 {
                 // Last child gets all remaining bias (avoid rounding errors)
                 remaining_bias
             } else {
-                remaining_bias.min((total_bias * fraction).round() as u64)
+                // Calculate: total_bias * fraction
+                // fraction_scaled is already in range [0, SCALE], representing [0.0, 1.0]
+                const SCALE: u128 = 10000;
+                let bias_u128 = (total_bias * fraction_scaled) / SCALE;
+                remaining_bias.min(bias_u128 as u64)
             };
             biased_sizes.push(sizes[i] + bias);
-            remaining_bias -= bias;
+            remaining_bias = remaining_bias.saturating_sub(bias);
         }
 
         self.split_exact(&biased_sizes)
     }
 }
 
-/// Calculate exponential fractions for slack distribution
+/// Calculate exponential fractions for slack distribution using u128 scaled arithmetic
 ///
-/// Returns fraction[i] = 2^(size[i]) / Σ(2^(size[j]))
+/// Returns fraction[i] = 2^(size[i]) / Σ(2^(size[j])), scaled by SCALE (10000)
 ///
 /// This gives larger subtrees exponentially higher fractions,
 /// following GHOSTDAG's principle that larger subtrees dominate growth.
@@ -249,6 +253,69 @@ impl Interval {
 /// 2^size[i] / Σ(2^size[j]) = 2^(size[i] - max_size) / Σ(2^(size[j] - max_size))
 ///
 /// By subtracting max_size, all exponents become ≤ 0, preventing overflow.
+///
+/// Returns scaled fractions in range [0, SCALE] where SCALE = 10000 represents 1.0
+fn exponential_fractions_scaled(sizes: &[u64]) -> Vec<u128> {
+    const SCALE: u128 = 10000;
+
+    if sizes.is_empty() {
+        return Vec::new();
+    }
+
+    let max_size = sizes.iter().copied().max().unwrap_or(0);
+
+    // Calculate 2^(size[i] - max_size) for each size, scaled by SCALE
+    // Since size[i] - max_size ≤ 0, these are all ≤ 1, avoiding overflow
+    let exp_values: Vec<u128> = sizes
+        .iter()
+        .map(|&s| {
+            if max_size >= s {
+                let diff = max_size - s;
+                if diff >= 64 {
+                    // 2^(-64) ≈ 0, avoid overflow in shift
+                    0
+                } else {
+                    // Calculate: SCALE / 2^diff
+                    SCALE >> diff
+                }
+            } else {
+                // This should never happen since max_size is the maximum
+                let diff = s - max_size;
+                if diff >= 64 {
+                    // Overflow protection
+                    u128::MAX
+                } else {
+                    SCALE << diff
+                }
+            }
+        })
+        .collect();
+
+    // Calculate sum of all exponential values
+    let exp_sum: u128 = exp_values.iter().sum();
+
+    // Normalize to sum to SCALE (representing fractions that sum to 1.0)
+    let mut fractions_scaled: Vec<u128> = Vec::with_capacity(exp_values.len());
+    if exp_sum > 0 {
+        for &exp_val in &exp_values {
+            // Calculate: (exp_val * SCALE) / exp_sum
+            let fraction_scaled = (exp_val * SCALE) / exp_sum;
+            fractions_scaled.push(fraction_scaled);
+        }
+    } else {
+        // All zeros, return equal fractions
+        let equal_fraction = SCALE / (sizes.len() as u128);
+        fractions_scaled = vec![equal_fraction; sizes.len()];
+    }
+
+    fractions_scaled
+}
+
+/// Legacy f64-based exponential fractions calculation (deprecated)
+///
+/// This function is kept for reference but should not be used in consensus-critical code.
+/// Use `exponential_fractions_scaled` instead for deterministic results.
+#[allow(dead_code)]
 fn exponential_fractions(sizes: &[u64]) -> Vec<f64> {
     if sizes.is_empty() {
         return Vec::new();

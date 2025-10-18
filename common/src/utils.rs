@@ -41,6 +41,7 @@ macro_rules! async_handler {
 }
 
 // Format any coin value using the requested decimals count
+// SAFE: f64 used for display formatting only, not consensus-critical
 pub fn format_coin(value: u64, decimals: u8) -> String {
     format!("{:.1$}", value as f64 / 10usize.pow(decimals as u32) as f64, decimals as usize)
 }
@@ -148,6 +149,7 @@ pub fn calculate_energy_fee(tx_size: usize, output_count: usize, new_addresses: 
 const HASHRATE_FORMATS: [&str; 7] = ["H/s", "KH/s", "MH/s", "GH/s", "TH/s", "PH/s", "EH/s"];
 
 // Format a hashrate in human-readable format
+// SAFE: f64 used for display formatting only, not consensus-critical
 pub fn format_hashrate(mut hashrate: f64) -> String {
     let max = HASHRATE_FORMATS.len() - 1;
     let mut count = 0;

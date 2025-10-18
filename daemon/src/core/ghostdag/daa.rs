@@ -231,17 +231,11 @@ pub async fn calculate_target_difficulty<S: Storage>(
     // Get current difficulty
     let current_difficulty = storage.get_difficulty_for_block_hash(selected_parent).await?;
 
-    // Calculate adjustment ratio
-    // If actual_time < expected_time: blocks are too fast -> increase difficulty
-    // If actual_time > expected_time: blocks are too slow -> decrease difficulty
-    let ratio = expected_time as f64 / actual_time as f64;
-
-    // Clamp ratio to prevent extreme adjustments
-    let clamped_ratio = ratio.max(MIN_DIFFICULTY_RATIO).min(MAX_DIFFICULTY_RATIO);
-
-    // Apply adjustment
-    // new_difficulty = current_difficulty * clamped_ratio
-    let new_difficulty = apply_difficulty_adjustment(&current_difficulty, clamped_ratio)?;
+    // Apply adjustment using U256 integer arithmetic (deterministic across platforms)
+    // If actual_time < expected_time: blocks are too fast → increase difficulty
+    // If actual_time > expected_time: blocks are too slow → decrease difficulty
+    // Clamping to [0.25x, 4x] is handled inside apply_difficulty_adjustment
+    let new_difficulty = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time)?;
 
     Ok(new_difficulty)
 }
@@ -293,53 +287,58 @@ async fn find_block_at_daa_score<S: Storage>(
     Err(BlockchainError::InvalidConfig)
 }
 
-/// Apply difficulty adjustment ratio to current difficulty
+/// Apply difficulty adjustment using deterministic U256 integer arithmetic
+///
+/// SECURITY FIX: Replaced f64 floating-point arithmetic with U256 integer arithmetic
+/// to ensure deterministic consensus across all platforms (x86, ARM, etc.)
 ///
 /// # Arguments
 /// * `current_difficulty` - Current difficulty value
-/// * `ratio` - Adjustment ratio (e.g., 1.5 to increase by 50%)
+/// * `expected_time` - Expected time window (typically DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK)
+/// * `actual_time` - Actual time taken for the window
 ///
 /// # Returns
-/// New difficulty after applying the ratio
-fn apply_difficulty_adjustment(current_difficulty: &Difficulty, ratio: f64) -> Result<Difficulty, BlockchainError> {
-    // Convert difficulty to f64 for calculation
-    // TOS difficulty is stored as U256, we need to handle this carefully
-
-    // Get the U256 value (version 0.13.1 API)
-    let diff_u256 = current_difficulty.as_ref();
-
-    // Convert to f64 (this may lose precision for very large values)
-    // For now, we'll use a simple conversion
-    // TODO: Implement precise arbitrary-precision arithmetic if needed
-
-    // Convert U256 to bytes
-    // In v0.13.1, to_big_endian() returns [u8; 32] directly (no parameter)
-    let bytes = diff_u256.to_big_endian();
-
-    // Take the last 16 bytes as u128 (assuming difficulty won't exceed u128)
-    let mut u128_bytes = [0u8; 16];
-    u128_bytes.copy_from_slice(&bytes[16..32]);
-    let diff_u128 = u128::from_be_bytes(u128_bytes);
-
-    // Apply ratio
-    let new_diff_f64 = diff_u128 as f64 * ratio;
-    let new_diff_u128 = new_diff_f64 as u128;
-
-    // Convert back to U256
-    let mut new_bytes = [0u8; 32];
-    new_bytes[16..32].copy_from_slice(&new_diff_u128.to_be_bytes());
-
-    // Create new difficulty from bytes
-    // We need to use tos_common's U256 (v0.13.1) not daemon's (v0.12)
-    // because VarUint implements From<tos_common::U256>
-    //
-    // Use tos_common::difficulty directly (which re-exports the right U256 version)
+/// New difficulty after applying the adjustment, clamped to [0.25x, 4x] range
+///
+/// # Formula
+/// new_difficulty = (current_difficulty × expected_time) / actual_time
+/// Then clamp to [current/4, current×4]
+fn apply_difficulty_adjustment(
+    current_difficulty: &Difficulty,
+    expected_time: u64,
+    actual_time: u64,
+) -> Result<Difficulty, BlockchainError> {
     use tos_common::varuint::VarUint;
 
-    // Create VarUint directly from the new difficulty value (as u128)
-    let new_difficulty = VarUint::from(new_diff_u128);
+    // Work with VarUint directly (which already has all arithmetic operations)
+    let current = *current_difficulty;
 
-    Ok(new_difficulty)
+    // Convert times to VarUint for arbitrary-precision arithmetic
+    let expected = VarUint::from(expected_time);
+    let actual = VarUint::from(actual_time);
+
+    // Calculate new difficulty: (current × expected) / actual
+    // This is mathematically equivalent to: current × (expected / actual)
+    // but avoids any floating-point operations
+    let new_difficulty = (current * expected) / actual;
+
+    // Clamp to maximum 4x increase
+    let max_difficulty = current * 4u64;
+    let clamped_max = if new_difficulty > max_difficulty {
+        max_difficulty
+    } else {
+        new_difficulty
+    };
+
+    // Clamp to maximum 4x decrease (minimum 0.25x)
+    let min_difficulty = current / 4u64;
+    let clamped_both = if clamped_max < min_difficulty {
+        min_difficulty
+    } else {
+        clamped_max
+    };
+
+    Ok(clamped_both)
 }
 
 #[cfg(test)]
@@ -371,28 +370,35 @@ mod tests {
     fn test_apply_difficulty_adjustment_increase() {
         // Test difficulty increase (blocks coming too fast)
         let current_difficulty = Difficulty::from(1000u64);
-        let ratio = 2.0; // Double difficulty
 
-        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        // Simulate blocks coming 2x faster than expected (ratio = 2.0)
+        let expected_time = 2016u64; // DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK
+        let actual_time = 1008u64;   // Half the expected time → 2x difficulty
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
 
         let new_difficulty = result.unwrap();
-        // New difficulty should be approximately 2x the old one
-        // We use u64 approximation for testing
         let current_val = current_difficulty.as_ref();
         let new_val = new_difficulty.as_ref();
 
         // Check that new difficulty is greater than old difficulty
         assert!(new_val > current_val, "Difficulty should increase");
+
+        // Check that it's exactly 2x (2000)
+        assert_eq!(new_val.as_u64(), 2000u64, "Difficulty should be exactly 2x");
     }
 
     #[test]
     fn test_apply_difficulty_adjustment_decrease() {
         // Test difficulty decrease (blocks coming too slow)
         let current_difficulty = Difficulty::from(1000u64);
-        let ratio = 0.5; // Halve difficulty
 
-        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        // Simulate blocks coming 2x slower than expected (ratio = 0.5)
+        let expected_time = 1008u64; // Half of normal window
+        let actual_time = 2016u64;   // Double the expected time → 0.5x difficulty
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
 
         let new_difficulty = result.unwrap();
@@ -401,22 +407,28 @@ mod tests {
 
         // Check that new difficulty is less than old difficulty
         assert!(new_val < current_val, "Difficulty should decrease");
+
+        // Check that it's exactly 0.5x (500)
+        assert_eq!(new_val.as_u64(), 500u64, "Difficulty should be exactly 0.5x");
     }
 
     #[test]
     fn test_apply_difficulty_adjustment_no_change() {
         // Test no change (blocks at expected rate)
         let current_difficulty = Difficulty::from(1000u64);
-        let ratio = 1.0; // No change
 
-        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        // Simulate blocks at exactly expected rate (ratio = 1.0)
+        let expected_time = 2016u64; // DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK
+        let actual_time = 2016u64;   // Same as expected → no change
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
 
         let new_difficulty = result.unwrap();
         let current_val = current_difficulty.as_ref();
         let new_val = new_difficulty.as_ref();
 
-        // Check that difficulty remains approximately the same
+        // Check that difficulty remains the same (integer division is exact here)
         assert_eq!(new_val, current_val, "Difficulty should remain the same");
     }
 
@@ -424,9 +436,12 @@ mod tests {
     fn test_apply_difficulty_adjustment_max_increase() {
         // Test maximum allowed increase (4x)
         let current_difficulty = Difficulty::from(1000u64);
-        let ratio = MAX_DIFFICULTY_RATIO; // 4.0x
 
-        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        // Simulate blocks coming exactly 4x faster (should increase to exactly 4x)
+        let expected_time = 2016u64;
+        let actual_time = 504u64;  // 2016/4 = 504 → 4x difficulty
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
 
         let new_difficulty = result.unwrap();
@@ -434,15 +449,21 @@ mod tests {
         let new_val = new_difficulty.as_ref();
 
         assert!(new_val > current_val, "Difficulty should increase");
+
+        // Check that it's exactly 4x (4000)
+        assert_eq!(new_val.as_u64(), 4000u64, "Difficulty should be exactly 4x");
     }
 
     #[test]
     fn test_apply_difficulty_adjustment_max_decrease() {
         // Test maximum allowed decrease (0.25x)
         let current_difficulty = Difficulty::from(1000u64);
-        let ratio = MIN_DIFFICULTY_RATIO; // 0.25x
 
-        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        // Simulate blocks coming exactly 4x slower (should decrease to exactly 0.25x)
+        let expected_time = 504u64;  // Quarter of normal window
+        let actual_time = 2016u64;   // 4x the expected → 0.25x difficulty
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
 
         let new_difficulty = result.unwrap();
@@ -450,32 +471,43 @@ mod tests {
         let new_val = new_difficulty.as_ref();
 
         assert!(new_val < current_val, "Difficulty should decrease");
+
+        // Check that it's exactly 0.25x (250)
+        assert_eq!(new_val.as_u64(), 250u64, "Difficulty should be exactly 0.25x");
     }
 
     #[test]
     fn test_apply_difficulty_adjustment_extreme_ratio_clamped() {
-        // Test that extreme ratios get clamped
-        // In actual usage, calculate_target_difficulty() would clamp the ratio
-        // before calling apply_difficulty_adjustment()
-
+        // Test that extreme time ratios get clamped to [0.25x, 4x] by the function
         let current_difficulty = Difficulty::from(1000u64);
 
-        // Very high ratio (should be clamped to MAX_DIFFICULTY_RATIO in real usage)
-        let result_high = apply_difficulty_adjustment(&current_difficulty, 10.0);
+        // Very high ratio (10x increase attempt - should be clamped to 4x)
+        let expected_time = 2016u64;
+        let actual_time_fast = 201u64;  // 10x faster (2016/201 ≈ 10)
+        let result_high = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time_fast);
         assert!(result_high.is_ok());
+        let new_diff_high = result_high.unwrap();
+        assert_eq!(new_diff_high.as_ref().as_u64(), 4000u64, "Should be clamped to 4x");
 
-        // Very low ratio (should be clamped to MIN_DIFFICULTY_RATIO in real usage)
-        let result_low = apply_difficulty_adjustment(&current_difficulty, 0.01);
+        // Very low ratio (10x decrease attempt - should be clamped to 0.25x)
+        let expected_time_low = 201u64;
+        let actual_time_slow = 2016u64;  // 10x slower
+        let result_low = apply_difficulty_adjustment(&current_difficulty, expected_time_low, actual_time_slow);
         assert!(result_low.is_ok());
+        let new_diff_low = result_low.unwrap();
+        assert_eq!(new_diff_low.as_ref().as_u64(), 250u64, "Should be clamped to 0.25x");
     }
 
     #[test]
     fn test_difficulty_adjustment_with_large_values() {
-        // Test with larger difficulty values
+        // Test with larger difficulty values (1.5x increase)
         let current_difficulty = Difficulty::from(1_000_000_000u64);
-        let ratio = 1.5;
 
-        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        // Simulate 1.5x ratio: expected = 3, actual = 2
+        let expected_time = 3000u64;
+        let actual_time = 2000u64;  // 3000/2000 = 1.5
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
 
         let new_difficulty = result.unwrap();
@@ -483,6 +515,9 @@ mod tests {
         let new_val = new_difficulty.as_ref();
 
         assert!(new_val > current_val, "Difficulty should increase for large values");
+
+        // Check that it's 1.5x (1_000_000_000 * 3000 / 2000 = 1_500_000_000)
+        assert_eq!(new_val.as_u64(), 1_500_000_000u64, "Difficulty should be exactly 1.5x");
     }
 
     #[test]
@@ -687,11 +722,14 @@ mod daa_comprehensive_tests {
     // Test 4: Difficulty adjustment boundaries - minimum ratio
     #[test]
     fn test_difficulty_adjustment_minimum_ratio() {
-        // Test that difficulty cannot decrease beyond minimum ratio
+        // Test that difficulty cannot decrease beyond minimum ratio (0.25x)
         let current_difficulty = Difficulty::from(10000u64);
-        let min_ratio = MIN_DIFFICULTY_RATIO;
 
-        let result = apply_difficulty_adjustment(&current_difficulty, min_ratio);
+        // Simulate 4x slower blocks (should clamp to 0.25x)
+        let expected_time = 504u64;
+        let actual_time = 2016u64;  // 4x slower
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
 
         let new_difficulty = result.unwrap();
@@ -701,20 +739,21 @@ mod daa_comprehensive_tests {
         // New difficulty should be significantly less than current
         assert!(new_val < current_val, "Difficulty should decrease with minimum ratio");
 
-        // Verify it's approximately 0.25x (within some tolerance for integer arithmetic)
-        let _expected_min = current_val.as_u64() / 4; // 0.25x
-        let actual = new_val.as_u64();
-        assert!(actual <= current_val.as_u64() / 2, "Difficulty should be substantially reduced");
+        // Should be exactly 0.25x = 2500
+        assert_eq!(new_val.as_u64(), 2500u64, "Should be clamped to 0.25x");
     }
 
     // Test 5: Difficulty adjustment boundaries - maximum ratio
     #[test]
     fn test_difficulty_adjustment_maximum_ratio() {
-        // Test that difficulty cannot increase beyond maximum ratio
+        // Test that difficulty cannot increase beyond maximum ratio (4x)
         let current_difficulty = Difficulty::from(10000u64);
-        let max_ratio = MAX_DIFFICULTY_RATIO;
 
-        let result = apply_difficulty_adjustment(&current_difficulty, max_ratio);
+        // Simulate 4x faster blocks (should clamp to 4x)
+        let expected_time = 2016u64;
+        let actual_time = 504u64;  // 4x faster
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
 
         let new_difficulty = result.unwrap();
@@ -724,10 +763,8 @@ mod daa_comprehensive_tests {
         // New difficulty should be significantly greater than current
         assert!(new_val > current_val, "Difficulty should increase with maximum ratio");
 
-        // Verify it's approximately 4x (within some tolerance for integer arithmetic)
-        let _expected_max = current_val.as_u64() * 4; // 4.0x
-        let actual = new_val.as_u64();
-        assert!(actual >= current_val.as_u64() * 2, "Difficulty should be substantially increased");
+        // Should be exactly 4x = 40000
+        assert_eq!(new_val.as_u64(), 40000u64, "Should be clamped to 4x");
     }
 
     // Test 6: Timestamp manipulation resistance - backwards time
@@ -780,7 +817,7 @@ mod daa_comprehensive_tests {
 
         // Verify the clamped ratio still works with difficulty adjustment
         let current_difficulty = Difficulty::from(10000u64);
-        let result = apply_difficulty_adjustment(&current_difficulty, clamped_ratio);
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok(), "Clamped ratio should work with difficulty adjustment");
     }
 
@@ -789,9 +826,12 @@ mod daa_comprehensive_tests {
     fn test_zero_difficulty_edge_case() {
         // Test behavior with minimum possible difficulty
         let zero_difficulty = Difficulty::from(0u64);
-        let ratio = 2.0;
 
-        let result = apply_difficulty_adjustment(&zero_difficulty, ratio);
+        // Simulate 2x ratio
+        let expected_time = 2016u64;
+        let actual_time = 1008u64;
+
+        let result = apply_difficulty_adjustment(&zero_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
         // Difficulty should be valid (U256 is always non-negative and unsigned)
     }
@@ -801,9 +841,12 @@ mod daa_comprehensive_tests {
     fn test_very_large_difficulty() {
         // Test with difficulty near the practical limits
         let large_difficulty = Difficulty::from(u64::MAX / 2);
-        let ratio = 1.5;
 
-        let result = apply_difficulty_adjustment(&large_difficulty, ratio);
+        // Simulate 1.5x ratio
+        let expected_time = 3000u64;
+        let actual_time = 2000u64;
+
+        let result = apply_difficulty_adjustment(&large_difficulty, expected_time, actual_time);
         assert!(result.is_ok(), "Should handle large difficulty values");
 
         let new_difficulty = result.unwrap();
@@ -818,9 +861,12 @@ mod daa_comprehensive_tests {
     fn test_difficulty_adjustment_precision() {
         // Test that small adjustments are handled with reasonable precision
         let current_difficulty = Difficulty::from(1_000_000u64);
-        let small_ratio = 1.01; // 1% increase
 
-        let result = apply_difficulty_adjustment(&current_difficulty, small_ratio);
+        // Simulate 1.01x ratio (1% increase): 101/100
+        let expected_time = 101u64;
+        let actual_time = 100u64;
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
 
         let new_difficulty = result.unwrap();
@@ -830,6 +876,9 @@ mod daa_comprehensive_tests {
         // New value should be slightly higher than current
         assert!(new_val > current_val, "Difficulty should increase with small positive ratio");
         assert!(new_val <= current_val * 2, "Small ratio shouldn't cause dramatic change");
+
+        // Should be exactly 1.01x = 1,010,000
+        assert_eq!(new_val, 1_010_000u64, "Should be exactly 1.01x");
     }
 
     // Test 11: Window boundary calculation with overflow protection
@@ -877,7 +926,7 @@ mod daa_comprehensive_tests {
 
         // Applying this ratio should not change difficulty
         let current_difficulty = Difficulty::from(5000u64);
-        let result = apply_difficulty_adjustment(&current_difficulty, ratio);
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
 
         let new_difficulty = result.unwrap();

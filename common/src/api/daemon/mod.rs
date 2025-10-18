@@ -338,8 +338,10 @@ pub struct GetInfoResult {
     // in milliseconds
     pub average_block_time: u64,
     // Target blocks per second (from BPS configuration)
+    // SAFE: f64 for RPC display only, not consensus-critical
     pub bps: f64,
     // Actual blocks per second (calculated from average_block_time)
+    // SAFE: f64 for RPC display only, not consensus-critical
     pub actual_bps: f64,
     pub block_reward: u64,
     pub dev_reward: u64,

@@ -282,6 +282,9 @@ impl<const BPS: u64> Bps<BPS> {
 ///
 /// PHANTOM: A Scalable BlockDAG protocol
 /// https://eprint.iacr.org/2018/104.pdf
+///
+/// SAFE: f64 used for offline configuration calculation only, not runtime consensus.
+/// The K parameter is hardcoded in network configuration, not computed during operation.
 pub fn calculate_ghostdag_k(x: f64, delta: f64) -> u64 {
     assert!(x > 0.0, "Expected anticone size must be positive");
     assert!(delta > 0.0 && delta < 1.0, "Delta must be in range (0, 1)");

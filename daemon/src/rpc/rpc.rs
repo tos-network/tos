@@ -687,6 +687,7 @@ async fn get_info<S: Storage>(context: &Context, body: Value) -> Result<Value, I
     let (dev_reward, miner_reward) = get_block_rewards(blue_score, block_reward);
 
     // Calculate BPS values
+    // SAFE: f64 for RPC display only, not consensus-critical
     let bps = 1000.0 / block_time_target as f64;
     let actual_bps = if average_block_time > 0 {
         1000.0 / average_block_time as f64

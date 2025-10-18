@@ -100,15 +100,15 @@ fn test_reputation_system() {
 
     let score = reputation.calculate_reputation_score(current_time);
 
-    // Verify reputation score calculation
-    // Full age score(1.0 * 0.3) + full transaction score(1.0 * 0.4) + full stake score(1.0 * 0.3) = 1.0
-    // Validation accuracy bonus: (0.9 - 0.8) * 1.0 = 0.1
-    // Long-term participation bonus: 0.1
-    // Total: 1.0 + 0.1 + 0.1 = 1.2, but capped at 1.0
-    assert_eq!(score, 1.0);
-    assert_eq!(reputation.reputation_score, 1.0);
+    // Verify reputation score calculation (now using scaled u64 where 10000 = 1.0)
+    // Full age score(10000 * 0.3) + full transaction score(10000 * 0.4) + full stake score(10000 * 0.3) = 10000
+    // Validation accuracy bonus: (0.9 - 0.8) * 10000 = 1000
+    // Long-term participation bonus: 1000
+    // Total: 10000 + 1000 + 1000 = 12000, but capped at 10000
+    assert_eq!(score, 10000);
+    assert_eq!(reputation.reputation_score, 10000);
 
-    println!("✓ High reputation account score: {:.2}", score);
+    println!("✓ High reputation account score: {} (scaled, 10000 = 1.0)", score);
 
     // Test permission checks
     assert!(reputation.can_participate_in_difficulty(&DifficultyLevel::Beginner));
@@ -128,8 +128,9 @@ fn test_reputation_system() {
     assert!(!new_reputation.can_participate_in_difficulty(&DifficultyLevel::Beginner));
 
     println!(
-        "✓ New account correctly restricted: score = {:.3}",
-        new_score
+        "✓ New account correctly restricted: score = {} (< {} minimum)",
+        new_score,
+        MIN_REPUTATION_FOR_BASIC
     );
 
     println!("=== Reputation System Test PASSED ===\n");
