@@ -15,7 +15,7 @@ use serde::{
 };
 use tos_vm::ValueCell;
 use crate::{
-    account::{Nonce, VersionedNonce},
+    account::{Nonce, VersionedBalance, VersionedNonce},
     block::{TopoHeight, Algorithm, BlockVersion, EXTRA_NONCE_SIZE},
     crypto::{Address, Hash, BlueWorkType},
     difficulty::Difficulty,
@@ -307,6 +307,10 @@ pub struct GetBalanceResult {
     pub balance: u64,
     pub topoheight: TopoHeight
 }
+
+// Response type for get_balance_at_topoheight RPC endpoint
+// Returns the full VersionedBalance structure with version history and output balance tracking
+pub type GetBalanceAtTopoHeightResult = VersionedBalance;
 
 #[derive(Serialize, Deserialize)]
 pub struct GetStableBalanceResult {
