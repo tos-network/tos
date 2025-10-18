@@ -72,6 +72,7 @@ impl TestStorage {
     }
 
     /// Get the path to the temporary directory
+    #[allow(dead_code)]
     pub fn path(&self) -> PathBuf {
         self._temp_dir.path().to_path_buf()
     }
@@ -116,18 +117,21 @@ impl BlockBuilder {
     }
 
     /// Set block version
+    #[allow(dead_code)]
     pub fn with_version(mut self, version: BlockVersion) -> Self {
         self.version = version;
         self
     }
 
     /// Set merkle root of transactions
+    #[allow(dead_code)]
     pub fn with_merkle_root(mut self, merkle_root: Hash) -> Self {
         self.hash_merkle_root = merkle_root;
         self
     }
 
     /// Set extra nonce
+    #[allow(dead_code)]
     pub fn with_extra_nonce(mut self, extra_nonce: [u8; EXTRA_NONCE_SIZE]) -> Self {
         self.extra_nonce = extra_nonce;
         self
@@ -146,6 +150,7 @@ impl BlockBuilder {
     }
 
     /// Build a complete block with header and empty transactions
+    #[allow(dead_code)]
     pub fn build_block(self) -> Block {
         let header = self.build();
         Block::new(Immutable::Owned(header), vec![])
@@ -168,6 +173,7 @@ impl Default for BlockBuilder {
 pub struct DAATestHarness {
     storage: SledStorage,
     ghostdag: TosGhostdag,
+    #[allow(dead_code)]
     genesis_hash: Hash,
     current_tip: Hash,
     block_count: u64,
@@ -328,12 +334,14 @@ impl DAATestHarness {
     }
 
     /// Get blue score for a block
+    #[allow(dead_code)]
     pub async fn get_blue_score(&self, hash: &Hash) -> Result<u64, BlockchainError> {
         let ghostdag_data = self.storage.get_ghostdag_data(hash).await?;
         Ok(ghostdag_data.blue_score)
     }
 
     /// Get GHOSTDAG data for a block
+    #[allow(dead_code)]
     pub async fn get_ghostdag_data(&self, hash: &Hash) -> Result<Arc<TosGhostdagData>, BlockchainError> {
         self.storage.get_ghostdag_data(hash).await
     }
@@ -344,11 +352,13 @@ impl DAATestHarness {
     }
 
     /// Get the genesis hash
+    #[allow(dead_code)]
     pub fn genesis_hash(&self) -> &Hash {
         &self.genesis_hash
     }
 
     /// Get the total number of blocks
+    #[allow(dead_code)]
     pub fn block_count(&self) -> u64 {
         self.block_count
     }
