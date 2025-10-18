@@ -33,7 +33,8 @@ use super::{
     cache::StorageCache,
     providers::*,
     Storage,
-    Tips
+    Tips,
+    TransactionProvider
 };
 
 // Constant keys used for extra Tree
@@ -723,9 +724,25 @@ impl Storage for SledStorage {
             trace!("Skipping cumulative difficulty deletion (Phase 2: no longer stored)");
         }
 
-        // TODO: Headers no longer contain transaction data
-        // Transaction cleanup needs to be refactored to fetch transactions separately
-        let txs = Vec::new();
+        // TIP-2 Phase 1 fix: Load and delete transactions
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("loading transactions for block {}", hash);
+        }
+        let tx_hashes: Vec<Hash> = Self::load_optional_from_disk_internal(self.snapshot.as_ref(), &self.block_transactions, hash.as_bytes())?
+            .unwrap_or_default();
+
+        // Load each transaction to return
+        let mut txs = Vec::with_capacity(tx_hashes.len());
+        for tx_hash in tx_hashes {
+            let tx = self.get_transaction(&tx_hash).await?;
+            txs.push((tx_hash, tx));
+        }
+
+        // Delete the block → transactions mapping
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("deleting block_transactions mapping");
+        }
+        Self::remove_from_disk_without_reading(self.snapshot.as_mut(), &self.block_transactions, hash.as_bytes())?;
 
         // remove the block hash from the set, and delete the set if empty
         if self.has_blocks_at_blue_score(block.get_blue_score()).await? {

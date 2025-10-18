@@ -10,6 +10,7 @@ use crate::core::{
     error::{BlockchainError, DiskContext},
     storage::{
         sled::{TOP_HEIGHT, TOP_TOPO_HEIGHT},
+        BlockProvider,
         DagOrderProvider,
         DifficultyProvider,
         SledStorage,
@@ -66,12 +67,8 @@ impl StateProvider for SledStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get top block");
         }
-        let (header, _) = self.get_top_block_header().await?;
-        // TODO: Headers no longer contain transaction data - need to fetch from separate storage
-        // For now, return empty transactions as temporary fix
-        let transactions = Vec::new();
-
-        let block = Block::new(header, transactions);
-        Ok(block)
+        let hash = self.get_top_block_hash().await?;
+        // TIP-2 Phase 1 fix: Use already-fixed get_block_by_hash
+        self.get_block_by_hash(&hash).await
     }
 }
