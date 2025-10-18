@@ -21,8 +21,7 @@ use tos_common::{
 };
 
 use crate::config::{
-    DEFAULT_MINIMUM_HASHRATE,
-    MAINNET_MINIMUM_HASHRATE,
+    MINIMUM_HASHRATE,
     MILLIS_PER_SECOND
 };
 use super::hard_fork::get_block_time_target_for_version;
@@ -97,31 +96,28 @@ pub const fn get_difficulty_with_target(hashrate: u64, block_time_target: u64) -
 }
 
 // Get minimum difficulty based on the network
-// Mainnet has a minimum difficulty to prevent spamming the network
-// Testnet has a lower difficulty to allow faster block generation
-pub const fn get_minimum_difficulty(network: &Network, version: BlockVersion) -> Difficulty {
-    let hashrate = match network {
-        Network::Mainnet => MAINNET_MINIMUM_HASHRATE,
-        _ => DEFAULT_MINIMUM_HASHRATE,
-    };
-
+// All networks use the same minimum hashrate (200 H/s) for consistency
+// This allows solo mining on single-threaded CPUs and ensures test environments
+// match production behavior
+pub const fn get_minimum_difficulty(_network: &Network, version: BlockVersion) -> Difficulty {
     let block_time_target = get_block_time_target_for_version(version);
-    get_difficulty_with_target(hashrate, block_time_target)
+    get_difficulty_with_target(MINIMUM_HASHRATE, block_time_target)
 }
 
 // Get minimum difficulty at hard fork
+// Only mainnet has hard fork difficulty adjustments
+// All networks use the same MINIMUM_HASHRATE for consistency
 pub const fn get_difficulty_at_hard_fork(network: &Network, version: BlockVersion) -> Option<Difficulty> {
-    let hashrate = match network {
+    match network {
         Network::Mainnet => match version {
-            BlockVersion::V0 | BlockVersion::V1 => DEFAULT_MINIMUM_HASHRATE,
-            BlockVersion::V2 => DEFAULT_MINIMUM_HASHRATE,
-            BlockVersion::V3 => return None,
+            BlockVersion::V0 | BlockVersion::V1 | BlockVersion::V2 => {
+                let block_time_target = get_block_time_target_for_version(version);
+                Some(get_difficulty_with_target(MINIMUM_HASHRATE, block_time_target))
+            },
+            BlockVersion::V3 => None,
         },
-        _ => return None,
-    };
-
-    let block_time_target = get_block_time_target_for_version(version);
-    Some(get_difficulty_with_target(hashrate, block_time_target))
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -133,12 +129,12 @@ mod tests {
 
     #[test]
     fn test_difficulty_at_hard_fork() {
-        // 100 H/s for V0 with 60s target = 100 * 60,000 / 1000 = 6,000
-        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V0).unwrap(), Difficulty::from_u64(DEFAULT_MINIMUM_HASHRATE * 60));
+        // 200 H/s for V0 with 60s target = 200 * 60,000 / 1000 = 12,000
+        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V0).unwrap(), Difficulty::from_u64(MINIMUM_HASHRATE * 60));
 
         // TIP-1 deprecated: V1/V2/V3 use 1s blocks
-        // 100 H/s for V2 with 1s target = 100 * 1,000 / 1000 = 100
-        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V2).unwrap(), Difficulty::from_u64(1 * DEFAULT_MINIMUM_HASHRATE));
+        // 200 H/s for V2 with 1s target = 200 * 1,000 / 1000 = 200
+        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V2).unwrap(), Difficulty::from_u64(1 * MINIMUM_HASHRATE));
 
         // testnet returns None for all versions
         for version in [BlockVersion::V0, BlockVersion::V1, BlockVersion::V2, BlockVersion::V3] {

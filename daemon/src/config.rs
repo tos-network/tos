@@ -45,13 +45,13 @@ pub const TERA_HASH: u64 = GIGA_HASH * 1000;
 
 // Minimum difficulty is calculated the following (each difficulty point is in H/s)
 // BLOCK TIME in millis * N = minimum hashrate
-// This is to prevent spamming the network with low difficulty blocks
-// and is only active on mainnet
-// Currently set to 100 H/s (same as testnet for easier solo mining)
-pub const MAINNET_MINIMUM_HASHRATE: u64 = 100 * HASH;
-// Testnet & Devnet minimum hashrate
-// Set to 1000 H/s (1 KH/s) to achieve ~1 block per second
-pub const DEFAULT_MINIMUM_HASHRATE: u64 = 1000 * HASH;
+// Minimum hashrate for all networks
+// Set to 200 H/s to achieve ~1 block per second target
+// Single-threaded CPU hashrate: 100-300 H/s (avg ~200 H/s)
+// With difficulty=200 and hashrate=200, average block time = 200/200 = 1 second
+// DAA activates after 2016 blocks, so this value is critical for initial mining experience
+// All networks use the same value for consistency between test and production
+pub const MINIMUM_HASHRATE: u64 = 200 * HASH;
 
 // This is also used as testnet and devnet minimum difficulty
 // Reduced from 1 H/s to 0.1 H/s for easier development
