@@ -119,7 +119,7 @@ impl DaemonAPI {
         Ok(receiver)
     }
 
-    pub async fn on_block_ordered_event(&self) -> Result<EventReceiver<BlockOrderedEvent>> {
+    pub async fn on_block_ordered_event(&self) -> Result<EventReceiver<BlockOrderedEvent<'_>>> {
         trace!("on_block_ordered_event");
         let receiver = self.client.subscribe_event(NotifyEvent::BlockOrdered, self.capacity).await?;
         Ok(receiver)
@@ -149,7 +149,7 @@ impl DaemonAPI {
         Ok(receiver)
     }
 
-    pub async fn on_contract_transfer_event(&self, address: Address) -> Result<EventReceiver<ContractTransferEvent>> {
+    pub async fn on_contract_transfer_event(&self, address: Address) -> Result<EventReceiver<ContractTransferEvent<'_>>> {
         trace!("on_contract_transfer_event");
         let receiver = self.client.subscribe_event(NotifyEvent::ContractTransfer { address }, self.capacity).await?;
         Ok(receiver)
@@ -197,7 +197,7 @@ impl DaemonAPI {
         Ok(count)
     }
 
-    pub async fn get_assets(&self, skip: Option<usize>, maximum: Option<usize>, minimum_topoheight: Option<u64>, maximum_topoheight: Option<u64>) -> Result<Vec<RPCAssetData>> {
+    pub async fn get_assets(&self, skip: Option<usize>, maximum: Option<usize>, minimum_topoheight: Option<u64>, maximum_topoheight: Option<u64>) -> Result<Vec<RPCAssetData<'_>>> {
         trace!("get_assets");
         let assets = self.client.call_with("get_assets", &GetAssetsParams {
             maximum,
@@ -253,7 +253,7 @@ impl DaemonAPI {
         Ok(tx)
     }
 
-    pub async fn get_transaction_executor(&self, hash: &Hash) -> Result<GetTransactionExecutorResult> {
+    pub async fn get_transaction_executor(&self, hash: &Hash) -> Result<GetTransactionExecutorResult<'_>> {
         trace!("get_transaction_executor");
         let executor = self.client.call_with("get_transaction_executor", &GetTransactionExecutorParams {
             hash: Cow::Borrowed(hash)

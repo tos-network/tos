@@ -326,7 +326,7 @@ impl OptimizedTxSelector {
     }
 
     /// Get the next transaction with highest fee
-    pub fn next(&mut self) -> Option<&TxSelectorEntry> {
+    pub fn next(&mut self) -> Option<&TxSelectorEntry<'_>> {
         if self.index < self.entries.len() {
             let entry = &self.entries[self.index];
             self.index += 1;
