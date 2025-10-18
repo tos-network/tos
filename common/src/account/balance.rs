@@ -2,11 +2,6 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use crate::{
     block::TopoHeight,
-    crypto::elgamal::{
-        Ciphertext,
-        CompressedCiphertext,
-        DecompressionError
-    },
     serializer::{
         Serializer,
         ReaderError,
@@ -14,8 +9,6 @@ use crate::{
         Writer
     }
 };
-
-use super::CiphertextCache;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -66,16 +59,16 @@ pub struct VersionedBalance {
     // Output balance is used in case of multi TXs not in same block
     // If you build several TXs at same time but are not in the same block,
     // and a incoming tx happen we need to keep track of the output balance
-    output_balance: Option<CiphertextCache>,
+    output_balance: Option<u64>,
     // Final user balance that contains outputs and inputs balance
     // This is the balance shown to a user and used to build TXs
-    final_balance: CiphertextCache,
+    final_balance: u64,
     // Determine if there was any output made in this version
     balance_type: BalanceType,
 }
 
 impl VersionedBalance {
-    pub const fn new(final_balance: CiphertextCache, previous_topoheight: Option<TopoHeight>) -> Self {
+    pub const fn new(final_balance: u64, previous_topoheight: Option<TopoHeight>) -> Self {
         Self {
             previous_topoheight,
             output_balance: None,
@@ -85,8 +78,7 @@ impl VersionedBalance {
     }
 
     pub fn zero() -> Self {
-        let zero = Ciphertext::zero();
-        Self::new(CiphertextCache::Decompressed(zero), None)
+        Self::new(0, None)
     }
 
     pub fn prepare_new(&mut self, previous_topoheight: Option<TopoHeight>) {
@@ -95,11 +87,11 @@ impl VersionedBalance {
         self.balance_type = BalanceType::Input;
     }
 
-    pub fn get_balance(&self) -> &CiphertextCache {
-        &self.final_balance
+    pub fn get_balance(&self) -> u64 {
+        self.final_balance
     }
 
-    pub fn get_mut_balance(&mut self) -> &mut CiphertextCache {
+    pub fn get_mut_balance(&mut self) -> &mut u64 {
         &mut self.final_balance
     }
 
@@ -107,47 +99,42 @@ impl VersionedBalance {
         self.output_balance.is_some()
     }
 
-    pub fn take_balance_with(self, output: bool) -> CiphertextCache {
+    pub fn take_balance_with(self, output: bool) -> u64 {
         match self.output_balance {
             Some(balance) if output => balance,
             _ => self.final_balance
         }
     }
 
-    pub fn take_balance(self) -> CiphertextCache {
+    pub fn take_balance(self) -> u64 {
         self.final_balance
     }
 
-    pub fn take_output_balance(self) -> Option<CiphertextCache> {
+    pub fn take_output_balance(self) -> Option<u64> {
         self.output_balance
     }
 
-    pub fn set_output_balance(&mut self, value: Option<CiphertextCache>) {
+    pub fn set_output_balance(&mut self, value: Option<u64>) {
         self.output_balance = value;
     }
 
-    pub fn select_balance(&mut self, output: bool) -> (&mut CiphertextCache, bool) {
+    pub fn select_balance(&mut self, output: bool) -> (&mut u64, bool) {
         match self.output_balance {
             Some(ref mut balance) if output => (balance, true),
             _ => (&mut self.final_balance, false)
         }
     }
 
-    pub fn set_compressed_balance(&mut self, value: CompressedCiphertext) {
-        self.final_balance = CiphertextCache::Compressed(value);
-    }
-
-    pub fn set_balance(&mut self, value: CiphertextCache) {
+    pub fn set_balance(&mut self, value: u64) {
         self.final_balance = value;
     }
 
-    pub fn add_plaintext_to_balance(&mut self, value: u64) -> Result<(), DecompressionError> {
-        *self.final_balance.computable()? += value;
-        Ok(())
+    pub fn add_to_balance(&mut self, value: u64) {
+        self.final_balance += value;
     }
 
     pub fn get_previous_topoheight(&self) -> Option<TopoHeight> {
-        self.previous_topoheight        
+        self.previous_topoheight
     }
 
     pub fn set_previous_topoheight(&mut self, previous_topoheight: Option<TopoHeight>) {
@@ -170,7 +157,7 @@ impl VersionedBalance {
         self.balance_type
     }
 
-    pub fn consume(self) -> (CiphertextCache, Option<CiphertextCache>, BalanceType, Option<TopoHeight>) {
+    pub fn consume(self) -> (u64, Option<u64>, BalanceType, Option<TopoHeight>) {
         (self.final_balance, self.output_balance, self.balance_type, self.previous_topoheight)
     }
 
@@ -181,7 +168,7 @@ impl VersionedBalance {
             final_balance: self.final_balance,
             balance_type: self.balance_type
         }
-    
+
     }
 }
 
@@ -190,9 +177,9 @@ pub struct Balance {
     // At which topoheight the balance was stored
     pub topoheight: TopoHeight,
     // Output balance if we got some spendings in this version
-    pub output_balance: Option<CiphertextCache>,
+    pub output_balance: Option<u64>,
     // Final user balance that contains outputs and inputs balance
-    pub final_balance: CiphertextCache,
+    pub final_balance: u64,
     // Determine if there was any output made in this version
     pub balance_type: BalanceType,
 }
@@ -213,7 +200,7 @@ impl Serializer for Balance {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let topoheight = TopoHeight::read(reader)?;
         let output_balance = Option::read(reader)?;
-        let final_balance = CiphertextCache::read(reader)?;
+        let final_balance = u64::read(reader)?;
         let balance_type = BalanceType::read(reader)?;
 
         Ok(Self {
@@ -234,7 +221,7 @@ impl Serializer for Balance {
     fn size(&self) -> usize {
         self.topoheight.size()
         + self.output_balance.size()
-        + self.final_balance.size()
+        + 8 // u64 size
         + self.balance_type.size()
     }
 }
@@ -294,7 +281,7 @@ impl Serializer for VersionedBalance {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let previous_topoheight = Option::read(reader)?;
         let balance_type = BalanceType::read(reader)?;
-        let final_balance = CiphertextCache::read(reader)?;
+        let final_balance = u64::read(reader)?;
         let output_balance = Option::read(reader)?;
 
         Ok(Self {
@@ -306,9 +293,9 @@ impl Serializer for VersionedBalance {
     }
 
     fn size(&self) -> usize {
-        self.final_balance.size()
+        self.previous_topoheight.size()
         + self.balance_type.size()
-        + self.previous_topoheight.size()
+        + 8 // u64 size
         + self.output_balance.size()
     }
 }
@@ -348,7 +335,7 @@ mod tests {
     fn serde_versioned_balance_both() {
         let mut zero = VersionedBalance::zero();
         zero.set_balance_type(BalanceType::Both);
-        zero.set_output_balance(Some(CiphertextCache::Decompressed(Ciphertext::zero())));
+        zero.set_output_balance(Some(100));
 
         let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).unwrap();
         assert_eq!(zero, zero_bis);
@@ -358,7 +345,7 @@ mod tests {
     fn serde_versioned_balance_output_previous_topo() {
         let mut zero = VersionedBalance::zero();
         zero.set_balance_type(BalanceType::Both);
-        zero.set_output_balance(Some(CiphertextCache::Decompressed(Ciphertext::zero())));
+        zero.set_output_balance(Some(100));
         zero.set_previous_topoheight(Some(42));
 
         let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).unwrap();

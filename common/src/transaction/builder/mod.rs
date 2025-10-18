@@ -24,7 +24,6 @@ use crate::{
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     crypto::{
         elgamal::{
-            Ciphertext,
             CompressedPublicKey,
             DecryptHandle,
             KeyPair,
@@ -397,28 +396,30 @@ impl TransactionBuilder {
     // Compute the new source ciphertext
     fn get_new_source_ct(
         &self,
-        mut ct: Ciphertext,
+        mut amount: u64,
         fee: u64,
         asset: &Hash,
         transfers: &[TransferWithCommitment],
         deposits: &HashMap<Hash, DepositWithCommitment>,
-    ) -> Ciphertext {
+    ) -> u64 {
+        // TODO: This method needs full refactoring for plain balances
+        // For now, just return the amount unchanged as a stub
         if asset == &TOS_ASSET {
             // Fees are applied to the native blockchain asset only.
-            ct -= Scalar::from(fee);
+            amount -= fee;
         }
 
         match &self.data {
             TransactionTypeBuilder::Transfers(_) => {
                 for transfer in transfers {
                     if &transfer.inner.asset == asset {
-                        ct -= transfer.get_ciphertext(Role::Sender);
+                        amount -= transfer.get_ciphertext(Role::Sender);
                     }
                 }
             }
             TransactionTypeBuilder::Burn(payload) => {
                 if *asset == payload.asset {
-                    ct -= Scalar::from(payload.amount)
+                    amount -= payload.amount;
                 }
             },
             TransactionTypeBuilder::MultiSig(_) => {},
@@ -426,15 +427,15 @@ impl TransactionBuilder {
                 if let Some(deposit) = payload.deposits.get(asset) {
                     if deposit.private {
                         if let Some(deposit) = deposits.get(asset) {
-                            ct -= deposit.get_ciphertext(Role::Sender);
+                            amount -= deposit.get_ciphertext(Role::Sender);
                         }
                     } else {
-                        ct -= Scalar::from(deposit.amount);
+                        amount -= deposit.amount;
                     }
                 }
 
                 if *asset == TOS_ASSET {
-                    ct -= Scalar::from(payload.max_gas);
+                    amount -= payload.max_gas;
                 }
             },
             TransactionTypeBuilder::DeployContract(payload) => {
@@ -442,25 +443,25 @@ impl TransactionBuilder {
                     if let Some(deposit) = invoke.deposits.get(asset) {
                         if deposit.private {
                             if let Some(deposit) = deposits.get(asset) {
-                                ct -= deposit.get_ciphertext(Role::Sender);
+                                amount -= deposit.get_ciphertext(Role::Sender);
                             }
                         } else {
-                            ct -= Scalar::from(deposit.amount);
+                            amount -= deposit.amount;
                         }
                     }
 
                     if *asset == TOS_ASSET {
-                        ct -= Scalar::from(invoke.max_gas);
+                        amount -= invoke.max_gas;
                     }
                 }
 
                 if *asset == TOS_ASSET {
-                    ct -= Scalar::from(BURN_PER_CONTRACT);
+                    amount -= BURN_PER_CONTRACT;
                 }
             },
             TransactionTypeBuilder::Energy(payload) => {
                 if *asset == TOS_ASSET {
-                    ct -= Scalar::from(payload.amount);
+                    amount -= payload.amount;
                 }
             }
             TransactionTypeBuilder::AIMining(payload) => {
@@ -468,17 +469,17 @@ impl TransactionBuilder {
                 if *asset == TOS_ASSET {
                     match payload {
                         crate::ai_mining::AIMiningPayload::RegisterMiner { registration_fee, .. } => {
-                            ct -= Scalar::from(*registration_fee);
+                            amount -= *registration_fee;
                         }
                         crate::ai_mining::AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
-                            ct -= Scalar::from(*stake_amount);
+                            amount -= *stake_amount;
                             // Add answer content gas cost
-                            ct -= Scalar::from(payload.calculate_content_gas_cost());
+                            amount -= payload.calculate_content_gas_cost();
                         }
                         crate::ai_mining::AIMiningPayload::PublishTask { reward_amount, .. } => {
-                            ct -= Scalar::from(*reward_amount);
+                            amount -= *reward_amount;
                             // Add description gas cost
-                            ct -= Scalar::from(payload.calculate_description_gas_cost());
+                            amount -= payload.calculate_description_gas_cost();
                         }
                         _ => {}
                     }
@@ -486,7 +487,7 @@ impl TransactionBuilder {
             }
         }
 
-        ct
+        amount
     }
 
     /// Compute the full cost of the transaction
@@ -875,20 +876,20 @@ impl TransactionBuilder {
             .map(|((asset, new_source_opening), &source_new_balance)| {
                 let new_source_opening = PedersenOpening::from_scalar(*new_source_opening);
 
-                let source_current_ciphertext = state
-                    .get_account_ciphertext(&asset)
-                    .map_err(GenerationError::State)?
-                    .take_ciphertext()
-                    .map_err(|err| GenerationError::Proof(err.into()))?;
+                // TODO: Balance simplification - get_account_balance returns u64 now
+                let source_current_balance = state
+                    .get_account_balance(&asset)
+                    .map_err(GenerationError::State)?;
 
-                let source_ct_compressed = source_current_ciphertext.compress();
+                // For transcript compatibility (currently unused after balance simplification)
+                let _source_ct_compressed = source_current_balance;
 
                 let commitment =
                     PedersenCommitment::new_with_opening(source_new_balance, &new_source_opening)
                     .compress();
 
                 let new_source_ciphertext =
-                    self.get_new_source_ct(source_current_ciphertext, fee, &asset, &transfers_commitments, &deposits_commitments);
+                    self.get_new_source_ct(source_current_balance, fee, &asset, &transfers_commitments, &deposits_commitments);
 
                 // 1. Make the CommitmentEqProof
 
@@ -896,13 +897,15 @@ impl TransactionBuilder {
                 transcript.append_hash(b"new_source_commitment_asset", &asset);
                 transcript.append_commitment(b"new_source_commitment", &commitment);
 
-                if self.version >= TxVersion::T0 {
-                    transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
-                }
+                // TODO: Balance simplification - remove transcript.append_ciphertext
+                // if self.version >= TxVersion::T0 {
+                //     transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
+                // }
+                // Skip appending ciphertext since balances are now plain u64
 
                 let proof = CommitmentEqProof::new(
                     &source_keypair,
-                    &new_source_ciphertext,
+                    new_source_ciphertext,
                     &new_source_opening,
                     source_new_balance,
                     &mut transcript,
@@ -910,7 +913,7 @@ impl TransactionBuilder {
 
                 // Store the new balance in preparation of next transaction
                 state
-                    .update_account_balance(&asset, source_new_balance, new_source_ciphertext)
+                    .update_account_balance(&asset, source_new_balance)
                     .map_err(GenerationError::State)?;
 
                 Ok(SourceCommitment::new(commitment, proof, asset.clone()))
@@ -1217,13 +1220,8 @@ struct TransferWithCommitment {
 }
 
 impl TransferWithCommitment {
-    fn get_ciphertext(&self, role: Role) -> Ciphertext {
-        let handle = match role {
-            Role::Receiver => self.receiver_handle.clone(),
-            Role::Sender => self.sender_handle.clone(),
-        };
-
-        Ciphertext::new(self.commitment.clone(), handle)
+    fn get_ciphertext(&self, _role: Role) -> u64 {
+        self.inner.amount
     }
 }
 
@@ -1237,13 +1235,8 @@ struct DepositWithCommitment {
 }
 
 impl DepositWithCommitment {
-    fn get_ciphertext(&self, role: Role) -> Ciphertext {
-        let handle = match role {
-            Role::Receiver => self.receiver_handle.clone(),
-            Role::Sender => self.sender_handle.clone(),
-        };
-
-        Ciphertext::new(self.commitment.clone(), handle)
+    fn get_ciphertext(&self, _role: Role) -> u64 {
+        self.amount
     }
 }
 

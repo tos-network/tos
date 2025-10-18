@@ -15,7 +15,6 @@ use tos_types::{
 };
 use tos_vm::{tid, traits::JSON_REGISTRY, OpaqueWrapper};
 use crate::{
-    account::CiphertextCache,
     block::Block,
     crypto::{proofs::CiphertextValidityProof, Address, Hash, Signature},
     serializer::*,
@@ -93,7 +92,6 @@ pub fn register_opaque_types() {
     register_opaque_json!(registry, "Hash", Hash);
     register_opaque_json!(registry, "Address", Address);
     register_opaque_json!(registry, "Signature", Signature);
-    register_opaque_json!(registry, "Ciphertext", CiphertextCache);
     register_opaque_json!(registry, "CiphertextValidityProof", CiphertextValidityProof);
     register_opaque_json!(registry, "RangeProof", RangeProofWrapper);
 }
@@ -108,7 +106,6 @@ impl Serializer for OpaqueWrapper {
             HASH_OPAQUE_ID => OpaqueWrapper::new(Hash::read(reader)?),
             ADDRESS_OPAQUE_ID => OpaqueWrapper::new(Address::read(reader)?),
             SIGNATURE_OPAQUE_ID => OpaqueWrapper::new(Signature::read(reader)?),
-            CIPHERTEXT_OPAQUE_ID => OpaqueWrapper::new(CiphertextCache::read(reader)?),
             CIPHERTEXT_VALIDITY_PROOF_OPAQUE_ID => OpaqueWrapper::new(CiphertextValidityProof::read(reader)?),
             RANGE_PROOF_OPAQUE_ID => OpaqueWrapper::new(RangeProofWrapper(RangeProof::read(reader)?)),
             _ => return Err(ReaderError::InvalidValue)

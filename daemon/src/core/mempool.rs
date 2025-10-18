@@ -20,7 +20,6 @@ use tos_common::{
     block::{BlockVersion, TopoHeight},
     config::{BYTES_PER_KB, FEE_PER_KB},
     crypto::{
-        elgamal::Ciphertext,
         Hash,
         PublicKey
     },
@@ -58,7 +57,7 @@ pub struct AccountCache {
     txs: IndexSet<Arc<Hash>>,
     // Expected balances after all txs in this cache
     // This is also used to verify the validity of the TX spendings
-    balances: HashMap<Hash, Ciphertext>,
+    balances: HashMap<Hash, u64>,
     // Expected multisig after all txs in this cache
     multisig: Option<MultiSigPayload>
 }
@@ -619,12 +618,12 @@ impl AccountCache {
     }
 
     // Update balances cache
-    fn set_balances(&mut self, balances: HashMap<Hash, Ciphertext>) {
+    fn set_balances(&mut self, balances: HashMap<Hash, u64>) {
         self.balances = balances;
     }
 
     // Returns the expected balances cache after the execution of all TXs
-    pub fn get_balances(&self) -> &HashMap<Hash, Ciphertext> {
+    pub fn get_balances(&self) -> &HashMap<Hash, u64> {
         &self.balances
     }
 

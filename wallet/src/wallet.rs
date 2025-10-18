@@ -24,10 +24,7 @@ use tos_common::{
     },
     asset::RPCAssetData,
     crypto::{
-        elgamal::{
-            Ciphertext,
-            DecryptHandle
-        },
+        elgamal::DecryptHandle,
         Address,
         Hash,
         Hashable,
@@ -266,29 +263,11 @@ impl Account {
         }
     }
 
-    pub async fn decrypt_ciphertext(&self, ciphertext: Ciphertext, max_supply: u64) -> Result<Option<u64>, WalletError> {
-        let _permit = self.semaphore.acquire().await
-            .context("Error while acquiring semaphore for decryption")?;
-
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("decrypt ciphertext with max supply {}", max_supply);
-        }
-
-        let inner = Arc::clone(&self.inner);
-        let res = tokio::task::spawn_blocking(move || {
-            let point = inner.keypair.decrypt_to_point(&ciphertext);
-            let lock = inner.precomputed_tables.read()
-                .map_err(|_| WalletError::PoisonError)?;
-
-            let view = lock.view();
-            let result = inner.keypair.get_private_key()
-                .decode_point_within_range(&view, point, 0, max_supply as _);
-
-            Ok::<_, WalletError>(result)
-        }).await
-        .context("Error while waiting on decrypt thread")??;
-
-        Ok(res)
+    // TODO: Balance simplification - decryption removed (balances are now plain u64)
+    // This method is no longer needed as balances are not encrypted
+    #[allow(dead_code)]
+    pub async fn decrypt_ciphertext(&self, _max_supply: u64) -> Result<Option<u64>, WalletError> {
+        Err(WalletError::Any(anyhow::anyhow!("Ciphertext decryption is no longer supported - balances are plain u64")))
     }
 }
 
@@ -340,7 +319,8 @@ impl Wallet {
                     mnemonics::words_to_key(&words)?
                 }
             };
-            KeyPair::from_private_key(key)?
+            KeyPair::from_private_key(key)
+                .map_err(|_| WalletError::Any(anyhow::anyhow!("Invalid private key")))?
         } else {
             debug!("Generating a new keypair...");
             KeyPair::new()
@@ -433,7 +413,8 @@ impl Wallet {
         let storage = EncryptedStorage::new(storage, &master_key, salt, network)?;
         debug!("Retrieving private key from encrypted storage");
         let private_key =  storage.get_private_key()?;
-        let keypair = KeyPair::from_private_key(private_key)?;
+        let keypair = KeyPair::from_private_key(private_key)
+            .map_err(|_| WalletError::Any(anyhow::anyhow!("Invalid private key")))?;
 
         Ok(Self::new(storage, keypair, network, precomputed_tables, n_threads, concurrency))
     }
@@ -758,25 +739,16 @@ impl Wallet {
         Ok(())
     }
 
-    // Wallet has to be under a Arc to be shared to the spawn_blocking function
-    // This will read the max supply from the storage
-    pub async fn decrypt_ciphertext_of_asset(&self, ciphertext: Ciphertext, asset: &Hash) -> Result<Option<u64>, WalletError> {
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("decrypt ciphertext of asset {}", asset);
-        }
-        let max_supply = {
-            let storage = self.storage.read().await;
-            storage.get_asset(asset).await?
-                .get_max_supply()
-        };
-        self.decrypt_ciphertext_with(ciphertext, max_supply).await
+    // TODO: Balance simplification - decryption removed (balances are now plain u64)
+    // These methods are no longer needed as balances are not encrypted
+    #[allow(dead_code)]
+    pub async fn decrypt_ciphertext_of_asset(&self, _asset: &Hash) -> Result<Option<u64>, WalletError> {
+        Err(WalletError::Any(anyhow::anyhow!("Ciphertext decryption is no longer supported - balances are plain u64")))
     }
 
-    pub async fn decrypt_ciphertext_with(&self, ciphertext: Ciphertext, max_supply: Option<u64>) -> Result<Option<u64>, WalletError> {
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("decrypt ciphertext with max supply {:?}", max_supply);
-        }
-        self.account.decrypt_ciphertext(ciphertext, max_supply.unwrap_or(i64::MAX as _)).await
+    #[allow(dead_code)]
+    pub async fn decrypt_ciphertext_with(&self, _max_supply: Option<u64>) -> Result<Option<u64>, WalletError> {
+        Err(WalletError::Any(anyhow::anyhow!("Ciphertext decryption is no longer supported - balances are plain u64")))
     }
 
     // Decrypt the extra data from a transfer
@@ -909,35 +881,13 @@ impl Wallet {
                             }
                             match network_handler.get_api().get_stable_balance(&address, &asset).await {
                                 Ok(stable_point) => {
-                                    // Store the stable balance version into unconfirmed balance
-                                    // So it will be fetch later by state
-                                    let mut ciphertext = stable_point.version.take_balance();
-                                    if log::log_enabled!(log::Level::Debug) {
-                                        debug!("decrypting stable balance for asset {}", asset);
-                                    }
-                                    let decompressed = ciphertext.decompressed()
-                                        .map_err(|_| WalletError::CiphertextDecode)?;
-
-                                    // Retrieve the max supply for this asset
-                                    let max_supply = storage.get_asset(asset).await?
-                                        .get_max_supply();
-
-                                    let amount = match self.decrypt_ciphertext_with(decompressed.clone(), max_supply).await? {
-                                        Some(amount) => amount,
-                                        None => {
-                                            if log::log_enabled!(log::Level::Warn) {
-                                                warn!("Couldn't decrypt the ciphertext for asset {}: no result found, skipping this stable balance", asset);
-                                            }
-                                            continue;
-                                        }
-                                    };
-                                    let balance = Balance {
-                                        amount,
-                                        ciphertext
-                                    };
+                                    // TODO: Balance simplification - balances are now plain u64
+                                    // Stable balance is already a plain u64 from the daemon
+                                    let amount = stable_point.balance;
+                                    let balance = Balance::new(amount);
 
                                     if log::log_enabled!(log::Level::Debug) {
-                                        debug!("Using stable balance for asset {} ({}) with amount {}", asset, balance.ciphertext, balance.amount);
+                                        debug!("Using stable balance for asset {} with amount {}", asset, balance.amount);
                                     }
                                     state.add_balance((*asset).clone(), balance);
 
@@ -995,7 +945,7 @@ impl Wallet {
 
             let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(&asset).await?;
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Using balance (unconfirmed: {}) for asset {} with amount {}, ciphertext: {}", unconfirmed, asset, balance.amount, balance.ciphertext);
+                debug!("Using balance (unconfirmed: {}) for asset {} with amount {}", unconfirmed, asset, balance.amount);
             }
             state.add_balance(asset.clone(), balance);
         }
@@ -1342,7 +1292,8 @@ impl Wallet {
 
     // Get the address with integrated data and using its network used
     pub fn get_address_with(&self, data: DataElement) -> Address {
-        self.get_public_key().clone().to_address_with(self.get_network().is_mainnet(), data)
+        use tos_common::crypto::AddressType;
+        Address::new(self.get_network().is_mainnet(), AddressType::Data(data), self.get_public_key().clone())
     }
 
     // Returns the seed using the language index provided

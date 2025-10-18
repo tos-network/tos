@@ -157,7 +157,9 @@ pub fn words_to_key(words: &[&str]) -> Result<PrivateKey, MnemonicsError> {
         dest.extend_from_slice(&val.to_le_bytes());
     }
 
-    Ok(PrivateKey::from_bytes(&dest).map_err(|_| MnemonicsError::InvalidKeyFromBytes)?)
+    let key_bytes: [u8; 32] = dest.try_into()
+        .map_err(|_| MnemonicsError::InvalidKeyFromBytes)?;
+    Ok(PrivateKey::from_bytes(&key_bytes).map_err(|_| MnemonicsError::InvalidKeyFromBytes)?)
 }
 
 // Transform a Private Key to a list of words based on the language index

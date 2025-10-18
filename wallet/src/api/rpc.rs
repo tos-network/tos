@@ -72,7 +72,8 @@ pub fn register_methods(handler: &mut RPCHandler<Arc<Wallet>>) {
     handler.register_method("estimate_extra_data_size", async_handler!(estimate_extra_data_size));
     handler.register_method("network_info", async_handler!(network_info));
     handler.register_method("decrypt_extra_data", async_handler!(decrypt_extra_data));
-    handler.register_method("decrypt_ciphertext", async_handler!(decrypt_ciphertext));
+    // TODO: Balance simplification - ciphertext decryption removed
+    // handler.register_method("decrypt_ciphertext", async_handler!(decrypt_ciphertext));
 
     // These functions allow to have an encrypted DB directly in the wallet storage
     // You can retrieve keys, values, have differents trees, and store values
@@ -210,15 +211,11 @@ async fn decrypt_extra_data(context: &Context, body: Value) -> Result<Value, Int
     Ok(json!(data))
 }
 
-async fn decrypt_ciphertext(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
-    let params: DecryptCiphertextParams = parse_params(body)?;
-
-    let wallet: &Arc<Wallet> = context.get()?;
-    let decompressed = params.ciphertext.decompress().context("Error while decompressing ciphertext")?;
-    let amount = wallet.decrypt_ciphertext_with(decompressed, None).await
-        .context("Error while decrypting ciphertext")?;
-
-    Ok(json!(amount))
+// TODO: Balance simplification - ciphertext decryption removed
+// Balances are now plain u64, no decryption needed
+#[allow(dead_code)]
+async fn decrypt_ciphertext(_context: &Context, _body: Value) -> Result<Value, InternalRpcError> {
+    Err(InternalRpcError::InvalidRequestStr("Ciphertext decryption is no longer supported - balances are plain u64"))
 }
 
 // Rescan the wallet from the provided topoheight (or from the beginning if not provided)
@@ -426,7 +423,7 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
 
         for signer in params.signers {
             let keypair = KeyPair::from_private_key(signer.private_key)
-                .context("Invalid private key for multisig signer")?;
+                .map_err(|_| InternalRpcError::InvalidParams("Invalid private key for multisig signer"))?;
             unsigned.sign_multisig(&keypair, signer.id);
         }
 
@@ -474,18 +471,11 @@ async fn build_transaction_offline(context: &Context, body: Value) -> Result<Val
     let wallet: &Arc<Wallet> = context.get()?;
 
     // Create the state with the provided balances
+    // TODO: Balance simplification - balances are now plain u64
     let mut state = TransactionBuilderState::new(wallet.get_network().is_mainnet(), params.reference, params.nonce);
 
-    for (hash, mut ciphertext) in params.balances {
-        let compressed = ciphertext.decompressed()
-            .context(format!("Error decompressing ciphertext {}", hash))?;
-        let amount = wallet.decrypt_ciphertext_with(compressed.clone(), None).await?
-            .context(format!("Couldn't decrypt ciphertext for asset {}", hash))?;
-
-        state.add_balance(hash, Balance {
-            amount,
-            ciphertext
-        });
+    for (hash, amount) in params.balances {
+        state.add_balance(hash, Balance::new(amount));
     }
 
     if params.signers.len() > u8::MAX as usize {
@@ -508,7 +498,7 @@ async fn build_transaction_offline(context: &Context, body: Value) -> Result<Val
 
         for signer in params.signers {
             let keypair = KeyPair::from_private_key(signer.private_key)
-                .context("Invalid private key for multisig signer")?;
+                .map_err(|_| InternalRpcError::InvalidParams("Invalid private key for multisig signer"))?;
             unsigned.sign_multisig(&keypair, signer.id);
         }
 

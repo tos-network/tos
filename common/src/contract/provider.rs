@@ -1,7 +1,6 @@
 use tos_vm::tid;
 
 use crate::{
-    account::CiphertextCache,
     asset::AssetData,
     block::TopoHeight,
     crypto::{Hash, PublicKey}
@@ -14,7 +13,7 @@ pub trait ContractProvider: ContractStorage + 'static {
     fn get_contract_balance_for_asset(&self, contract: &Hash, asset: &Hash, topoheight: TopoHeight) -> Result<Option<(TopoHeight, u64)>, anyhow::Error>;
 
     // Get the account balance for asset
-    fn get_account_balance_for_asset(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<Option<(TopoHeight, CiphertextCache)>, anyhow::Error>;
+    fn get_account_balance_for_asset(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<Option<(TopoHeight, u64)>, anyhow::Error>;
 
     // Verify if an asset exists in the storage
     fn asset_exists(&self, asset: &Hash, topoheight: TopoHeight) -> Result<bool, anyhow::Error>;

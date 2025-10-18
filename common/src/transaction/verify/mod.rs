@@ -29,7 +29,6 @@ use crate::{
     contract::ContractProvider,
     crypto::{
         elgamal::{
-            Ciphertext,
             CompressedPublicKey,
             DecompressionError,
             DecryptHandle,
@@ -87,19 +86,18 @@ impl DecompressedTransferCt {
         })
     }
 
-    fn get_ciphertext(&self, role: Role) -> Ciphertext {
-        let handle = match role {
-            Role::Receiver => self.receiver_handle.clone(),
-            Role::Sender => self.sender_handle.clone(),
-        };
-
-        Ciphertext::new(self.commitment.clone(), handle)
+    fn get_ciphertext(&self, _role: Role) -> u64 {
+        // TODO: Extract amount from transfer payload once balance simplification is complete
+        // For now return 0 as placeholder
+        0
     }
 }
 
 // Decompressed deposit ciphertext
 // Transaction deposits are stored in a compressed format
 // We need to decompress them only one time
+// TODO: REMOVE THIS STRUCT - Part of balance simplification (Section 2.12)
+// This struct will be removed when contract deposits are changed to plain u64
 struct DecompressedDepositCt {
     commitment: PedersenCommitment,
     sender_handle: DecryptHandle,
@@ -110,13 +108,10 @@ impl DecompressedDepositCt {
     // NOTE: This method will be used when contract encrypted balance system is ready
     // Currently disabled because TransactionBuilder doesn't support contract keys yet
     #[allow(dead_code)]
-    fn get_ciphertext(&self, role: Role) -> Ciphertext {
-        let handle = match role {
-            Role::Receiver => self.receiver_handle.clone(),
-            Role::Sender => self.sender_handle.clone(),
-        };
-
-        Ciphertext::new(self.commitment.clone(), handle)
+    fn get_ciphertext(&self, _role: Role) -> u64 {
+        // TODO: Extract amount from deposit once balance simplification is complete
+        // For now return 0 as placeholder
+        0
     }
 }
 
@@ -145,12 +140,12 @@ impl Transaction {
         asset: &Hash,
         decompressed_transfers: &[DecompressedTransferCt],
         decompressed_deposits: &HashMap<&Hash, DecompressedDepositCt>,
-    ) -> Result<Ciphertext, DecompressionError> {
-        let mut output = Ciphertext::zero();
+    ) -> Result<u64, DecompressionError> {
+        let mut output = 0u64;
 
         if *asset == TOS_ASSET {
             // Fees are applied to the native blockchain asset only.
-            output += Scalar::from(self.fee);
+            output += self.fee;
         }
 
         match &self.data {
@@ -163,25 +158,27 @@ impl Transaction {
             }
             TransactionType::Burn(payload) => {
                 if *asset == payload.asset {
-                    output += Scalar::from(payload.amount)
+                    output += payload.amount
                 }
             },
             TransactionType::MultiSig(_) => {},
             TransactionType::InvokeContract(payload) => {
                 if *asset == TOS_ASSET {
-                    output += Scalar::from(payload.max_gas);
+                    output += payload.max_gas;
                 }
 
                 if let Some(deposit) = payload.deposits.get(asset) {
                     match deposit {
                         ContractDeposit::Public(amount) => {
-                            output += Scalar::from(*amount);
+                            output += *amount;
                         },
                         ContractDeposit::Private { .. } => {
-                            let decompressed = decompressed_deposits.get(asset)
+                            // TODO: Balance simplification - extract amount from deposit
+                            // For now, private deposits need to be handled differently
+                            // This represents encrypted deposit handling that needs refactoring
+                            let _decompressed = decompressed_deposits.get(asset)
                                 .ok_or(DecompressionError::InvalidPoint)?;
-
-                            output += Ciphertext::new(decompressed.commitment.clone(), decompressed.sender_handle.clone())
+                            // Stub: Cannot extract plain amount from encrypted deposit yet
                         }
                     }
                 }
@@ -189,19 +186,20 @@ impl Transaction {
             TransactionType::DeployContract(payload) => {
                 if let Some(invoke) = payload.invoke.as_ref() {
                     if *asset == TOS_ASSET {
-                        output += Scalar::from(invoke.max_gas);
+                        output += invoke.max_gas;
                     }
 
                     if let Some(deposit) = invoke.deposits.get(asset) {
                         match deposit {
                             ContractDeposit::Public(amount) => {
-                                output += Scalar::from(*amount);
+                                output += *amount;
                             },
                             ContractDeposit::Private { .. } => {
-                                let decompressed = decompressed_deposits.get(asset)
+                                // TODO: Balance simplification - extract amount from deposit
+                                // For now, private deposits need to be handled differently
+                                let _decompressed = decompressed_deposits.get(asset)
                                     .ok_or(DecompressionError::InvalidPoint)?;
-
-                                output += Ciphertext::new(decompressed.commitment.clone(), decompressed.sender_handle.clone())
+                                // Stub: Cannot extract plain amount from encrypted deposit yet
                             }
                         }
                     }
@@ -209,7 +207,7 @@ impl Transaction {
 
                 // Burn a full coin for each contract deployed
                 if *asset == TOS_ASSET {
-                    output += Scalar::from(BURN_PER_CONTRACT);
+                    output += BURN_PER_CONTRACT;
                 }
             },
             TransactionType::Energy(payload) => {
@@ -219,7 +217,7 @@ impl Transaction {
                     EnergyPayload::FreezeTos { amount, duration } => {
                         // For freeze operations, deduct the freeze amount from TOS balance
                         if *asset == TOS_ASSET {
-                            output += Scalar::from(*amount);
+                            output += *amount;
                             let _energy_gained = (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier();
                             if log::log_enabled!(log::Level::Debug) {
                                 debug!("FreezeTos operation: deducting {} TOS from balance for asset {}", amount, asset);
@@ -246,19 +244,19 @@ impl Transaction {
                     crate::ai_mining::AIMiningPayload::PublishTask { reward_amount, .. } => {
                         // For task publishing, deduct the reward amount from TOS balance
                         if *asset == TOS_ASSET {
-                            output += Scalar::from(*reward_amount);
+                            output += *reward_amount;
                         }
                     },
                     crate::ai_mining::AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
                         // For answer submission, deduct the stake amount from TOS balance
                         if *asset == TOS_ASSET {
-                            output += Scalar::from(*stake_amount);
+                            output += *stake_amount;
                         }
                     },
                     crate::ai_mining::AIMiningPayload::RegisterMiner { registration_fee, .. } => {
                         // For miner registration, deduct the registration fee from TOS balance
                         if *asset == TOS_ASSET {
-                            output += Scalar::from(*registration_fee);
+                            output += *registration_fee;
                         }
                     },
                     crate::ai_mining::AIMiningPayload::ValidateAnswer { .. } => {
@@ -272,7 +270,7 @@ impl Transaction {
     }
 
     /// Get the new output ciphertext for the sender
-    pub fn get_expected_sender_outputs<'a>(&'a self) -> Result<Vec<(&'a Hash, Ciphertext)>, DecompressionError> {
+    pub fn get_expected_sender_outputs<'a>(&'a self) -> Result<Vec<(&'a Hash, u64)>, DecompressionError> {
         let mut decompressed_transfers = Vec::new();
         let mut decompressed_deposits = HashMap::new();
         match &self.data {
@@ -622,21 +620,23 @@ impl Transaction {
                 .get_sender_balance(&self.source, commitment.get_asset(), &self.reference).await
                 .map_err(VerificationError::State)?;
 
-            let source_ct_compressed = source_verification_ciphertext.compress();
+            // TODO: With plain balances, no need to compress
+            let source_ct_compressed = *source_verification_ciphertext;
 
             // Compute the new final balance for account
-            *source_verification_ciphertext -= &output;
+            *source_verification_ciphertext -= output;
             transcript.new_commitment_eq_proof_domain_separator();
             transcript.append_hash(b"new_source_commitment_asset", commitment.get_asset());
             transcript
                 .append_commitment(b"new_source_commitment", commitment.get_commitment());
 
-            // Always include source_ct for V2
-            transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
+            // TODO: Balance simplification - remove transcript.append_ciphertext
+            // transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
+            // Skip appending ciphertext since balances are now plain u64
 
             commitment.get_proof().pre_verify(
                 &source_decompressed,
-                &source_verification_ciphertext,
+                *source_verification_ciphertext,
                 &new_source_commitment,
                 &mut transcript,
                 sigma_batch_collector,
@@ -912,22 +912,25 @@ impl Transaction {
                 .get_sender_balance(&self.source, commitment.get_asset(), &self.reference).await
                 .map_err(VerificationError::State)?;
 
-            let source_ct_compressed = source_verification_ciphertext.compress();
+            // TODO: With plain balances, no need to compress
+            let source_ct_compressed = *source_verification_ciphertext;
 
             // Compute the new final balance for account
-            *source_verification_ciphertext -= &output;
+            *source_verification_ciphertext -= output;
             transcript.new_commitment_eq_proof_domain_separator();
             transcript.append_hash(b"new_source_commitment_asset", commitment.get_asset());
             transcript
                 .append_commitment(b"new_source_commitment", commitment.get_commitment());
 
-            if self.version >= TxVersion::T0 {
-                transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
-            }
+            // TODO: Balance simplification - remove transcript.append_ciphertext
+            // if self.version >= TxVersion::T0 {
+            //     transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
+            // }
+            // Skip appending ciphertext since balances are now plain u64
 
             commitment.get_proof().pre_verify(
                 &source_decompressed,
-                &source_verification_ciphertext,
+                *source_verification_ciphertext,
                 &new_source_commitment,
                 &mut transcript,
                 sigma_batch_collector,
@@ -1291,12 +1294,12 @@ impl Transaction {
                         ).await
                         .map_err(VerificationError::State)?;
     
-                    let receiver_ct = transfer
-                        .get_ciphertext(Role::Receiver)
-                        .decompress()
-                        .map_err(ProofVerificationError::from)?;
-    
-                    *current_balance += receiver_ct;
+                    // TODO: Balance simplification - transfer amounts need to be plain u64
+                    // For now, transfers still use encrypted ciphertexts
+                    // This needs full refactoring to extract plain amounts from transfers
+                    // Stub: Use 0 as placeholder until transfers are converted to plain amounts
+                    let _receiver_ct = transfer.get_ciphertext(Role::Receiver);
+                    // *current_balance += receiver_ct; // Will be: *current_balance += plain_amount;
                 }
             },
             TransactionType::Burn(payload) => {
@@ -1588,22 +1591,25 @@ impl Transaction {
                 .map_err(VerificationError::State)?
                 .clone();
 
-            let source_ct_compressed = source_verification_ciphertext.compress();
+            // TODO: With plain balances, no need to compress
+            let source_ct_compressed = source_verification_ciphertext;
 
             // Compute the new final balance for account
-            source_verification_ciphertext -= &output;
+            source_verification_ciphertext -= output;
             transcript.new_commitment_eq_proof_domain_separator();
             transcript.append_hash(b"new_source_commitment_asset", commitment.get_asset());
             transcript
                 .append_commitment(b"new_source_commitment", &commitment.get_commitment());
 
-            if self.version >= TxVersion::T0 {
-                transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
-            }
+            // TODO: Balance simplification - remove transcript.append_ciphertext
+            // if self.version >= TxVersion::T0 {
+            //     transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
+            // }
+            // Skip appending ciphertext since balances are now plain u64
 
             commitment.get_proof().pre_verify(
                 &owner,
-                &source_verification_ciphertext,
+                source_verification_ciphertext,
                 &new_source_commitment,
                 &mut transcript,
                 &mut sigma_batch_collector,

@@ -298,14 +298,7 @@ impl tos_common::transaction::builder::AccountState for MockAccountState {
         }
     }
     
-    fn get_account_ciphertext(&self, _asset: &tos_common::crypto::Hash) -> Result<tos_common::account::CiphertextCache, Self::Error> {
-        // Return a dummy ciphertext for testing
-        let keypair = KeyPair::new();
-        let ciphertext = keypair.get_public_key().encrypt(1000 * COIN_VALUE);
-        Ok(tos_common::account::CiphertextCache::Decompressed(ciphertext))
-    }
-    
-    fn update_account_balance(&mut self, asset: &tos_common::crypto::Hash, new_balance: u64, _ciphertext: tos_common::crypto::elgamal::Ciphertext) -> Result<(), Self::Error> {
+    fn update_account_balance(&mut self, asset: &tos_common::crypto::Hash, new_balance: u64) -> Result<(), Self::Error> {
         self.balances.insert(asset.clone(), new_balance);
         Ok(())
     }

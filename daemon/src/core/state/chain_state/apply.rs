@@ -18,7 +18,7 @@ use tos_common::{
         ContractEventTracker,
         ContractOutput
     },
-    crypto::{elgamal::{Ciphertext, CompressedPublicKey}, Hash, PublicKey},
+    crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
     transaction::{
         verify::{BlockchainApplyState, BlockchainVerificationState, ContractEnvironment},
         ContractDeposit,
@@ -70,22 +70,22 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Applic
         self.inner.pre_verify_tx(tx).await
     }
 
-    /// Get the balance ciphertext for a receiver account
+    /// Get the balance for a receiver account
     async fn get_receiver_balance<'b>(
         &'b mut self,
         account: Cow<'a, PublicKey>,
         asset: Cow<'a, Hash>,
-    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+    ) -> Result<&'b mut u64, BlockchainError> {
         self.inner.get_receiver_balance(account, asset).await
     }
 
-    /// Get the balance ciphertext used for verification of funds for the sender account
+    /// Get the balance used for verification of funds for the sender account
     async fn get_sender_balance<'b>(
         &'b mut self,
         account: &'a PublicKey,
         asset: &'a Hash,
         reference: &Reference,
-    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+    ) -> Result<&'b mut u64, BlockchainError> {
         self.inner.get_sender_balance(account, asset, reference).await
     }
 
@@ -94,7 +94,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Applic
         &mut self,
         account: &'a PublicKey,
         asset: &'a Hash,
-        output: Ciphertext,
+        output: u64,
     ) -> Result<(), BlockchainError> {
         self.inner.add_sender_output(account, asset, output).await
     }
@@ -509,7 +509,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 }
                 let Echange { mut version, output_sum, output_balance_used, new_version, .. } = echange;
                 if log::log_enabled!(log::Level::Trace) {
-                    trace!("sender output sum: {:?}", output_sum.compress());
+                    trace!("sender output sum: {}", output_sum);
                 }
                 match balances.entry(Cow::Borrowed(asset)) {
                     Entry::Occupied(mut o) => {
@@ -548,7 +548,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
 
                         // Build the final balance
                         // All inputs are already added, we just need to substract the outputs
-                        let final_balance = final_version.get_mut_balance().computable()?;
+                        let final_balance = final_version.get_mut_balance();
                         *final_balance -= output_sum;
                     },
                     Entry::Vacant(e) => {
@@ -566,7 +566,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                             if log::log_enabled!(log::Level::Trace) {
                                 trace!("{} has no balance for {} at topoheight {}, substract output sum", key.as_address(self.inner.storage.is_mainnet()), asset, self.inner.topoheight);
                             }
-                            *new_version.get_mut_balance().computable()? -= output_sum;
+                            *new_version.get_mut_balance() -= output_sum;
 
                             if self.inner.block_version == BlockVersion::V0 {
                                 new_version.set_balance_type(BalanceType::Output);

@@ -15,10 +15,7 @@ use crate::{
         ContractProvider
     },
     crypto::{
-        elgamal::{
-            Ciphertext,
-            CompressedPublicKey
-        },
+        elgamal::CompressedPublicKey,
         Hash
     },
     transaction::{
@@ -50,7 +47,7 @@ pub trait BlockchainVerificationState<'a, E> {
         &'b mut self,
         account: Cow<'a, CompressedPublicKey>,
         asset: Cow<'a, Hash>,
-    ) -> Result<&'b mut Ciphertext, E>;
+    ) -> Result<&'b mut u64, E>;
 
     /// Get the balance ciphertext used for verification of funds for the sender account
     async fn get_sender_balance<'b>(
@@ -58,14 +55,14 @@ pub trait BlockchainVerificationState<'a, E> {
         account: &'a CompressedPublicKey,
         asset: &'a Hash,
         reference: &Reference,
-    ) -> Result<&'b mut Ciphertext, E>;
+    ) -> Result<&'b mut u64, E>;
 
     /// Apply new output to a sender account
     async fn add_sender_output(
         &mut self,
         account: &'a CompressedPublicKey,
         asset: &'a Hash,
-        output: Ciphertext,
+        output: u64,
     ) -> Result<(), E>;
 
     /// Get the nonce of an account

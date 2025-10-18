@@ -2,9 +2,8 @@ use std::{borrow::Cow, collections::HashMap};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use crate::{
-    account::CiphertextCache,
     block::TopoHeight,
-    crypto::{elgamal::CompressedCiphertext, Address, Hash, PrivateKey},
+    crypto::{Address, Hash, PrivateKey},
     serializer::Hexable,
     transaction::{
         builder::{FeeBuilder, TransactionTypeBuilder, UnsignedTransaction},
@@ -71,9 +70,9 @@ pub struct BuildTransactionOfflineParams {
     // Returns the TX in HEX format also
     #[serde(default = "default_false_value")]
     pub tx_as_hex: bool,
-    // Encrypted balances to use
+    // Plain balances to use
     // Assets spent in the transaction must be present
-    pub balances: HashMap<Hash, CiphertextCache>,
+    pub balances: HashMap<Hash, u64>,
     // Reference to use for the transaction
     // This must point to the most up-to-date topoheight/block hash
     pub reference: Reference,
@@ -305,12 +304,6 @@ pub struct DecryptExtraDataParams<'a> {
     // The role we have in the transaction
     // This is needed to select the correct handle
     pub role: Role,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct DecryptCiphertextParams<'a> {
-    // Ciphertext with the correct handle to use
-    pub ciphertext: Cow<'a, CompressedCiphertext>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

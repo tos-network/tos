@@ -2,7 +2,28 @@ use curve25519_dalek::{ristretto::CompressedRistretto, scalar::Scalar, traits::I
 use merlin::Transcript;
 use thiserror::Error;
 
-use super::{elgamal::{CompressedCiphertext, CompressedCommitment, CompressedHandle, CompressedPublicKey}, Hash};
+use super::{elgamal::{CompressedCommitment, CompressedHandle, CompressedPublicKey}, Hash};
+
+// Temporary stub for CompressedCiphertext removed during balance simplification
+// This allows existing code to compile while being phased out
+#[derive(Clone)]
+pub struct CompressedCiphertext {
+    commitment: CompressedCommitment,
+    handle: CompressedHandle,
+}
+
+impl CompressedCiphertext {
+    pub fn new(commitment: CompressedCommitment, handle: CompressedHandle) -> Self {
+        Self { commitment, handle }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(self.commitment.as_bytes());
+        bytes.extend_from_slice(self.handle.as_bytes());
+        bytes
+    }
+}
 
 #[derive(Error, Clone, Debug, Eq, PartialEq)]
 pub enum TranscriptError {
@@ -14,6 +35,7 @@ pub trait ProtocolTranscript {
     fn append_scalar(&mut self, label: &'static [u8], scalar: &Scalar);
     fn append_point(&mut self, label: &'static [u8], point: &CompressedRistretto);
     fn append_public_key(&mut self, label: &'static [u8], point: &CompressedPublicKey);
+    // Note: append_ciphertext deprecated - Ciphertext removed during balance simplification
     fn append_ciphertext(&mut self, label: &'static [u8], point: &CompressedCiphertext);
     fn append_commitment(&mut self, label: &'static [u8], point: &CompressedCommitment);
     fn append_handle(&mut self, label: &'static [u8], point: &CompressedHandle);

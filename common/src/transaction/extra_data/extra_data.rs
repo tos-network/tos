@@ -31,7 +31,7 @@ pub struct ExtraData {
 impl ExtraData {
     // Create a new extra data that will encrypt the message for receiver & sender keys.
     // Both will be able to decrypt it.
-    pub fn new(data: PlaintextData, sender: &PublicKey, receiver: &PublicKey) -> Self {
+    pub fn new(data: PlaintextData, _sender: &PublicKey, _receiver: &PublicKey) -> Self {
         // Generate a new opening (randomness r)
         let opening = PedersenOpening::generate_new();
         // From the randomness, derive the opening it to get the shared key
@@ -41,12 +41,12 @@ impl ExtraData {
             // Encrypt the cipher using the shared key
             cipher: data.encrypt_in_place(&k),
             // Create a handle for the sender so he can decrypt the message later
-            // SH = sender PK * r
-            // Because SK is invert of PK, we can decrypt it by doing SH * SK 
-            sender_handle: sender.decrypt_handle(&opening).compress(),
+            // TODO: Balance simplification - encryption infrastructure removed
+            // Using default handles as stubs since encryption is being removed
+            sender_handle: CompressedHandle::default(), // Stub - encryption removed
             // Same for the receiver
-            // RH = receiver PK * r
-            receiver_handle: receiver.decrypt_handle(&opening).compress(),
+            // TODO: Balance simplification - encryption infrastructure removed
+            receiver_handle: CompressedHandle::default(), // Stub - encryption removed
         }
     }
 

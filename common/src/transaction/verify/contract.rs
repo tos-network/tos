@@ -13,7 +13,7 @@ use tos_vm::{ValueCell, VM};
 use crate::{
     config::{TX_GAS_BURN_PERCENT, TOS_ASSET},
     contract::{ContractOutput, ContractProvider, ContractProviderWrapper},
-    crypto::{elgamal::Ciphertext, Hash},
+    crypto::Hash,
     tokio::block_in_place_safe,
     transaction::{ContractDeposit, Transaction}
 };
@@ -210,7 +210,7 @@ impl Transaction {
             let balance = state.get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Owned(TOS_ASSET)).await
                 .map_err(VerificationError::State)?;
 
-            *balance += Scalar::from(refund_gas);
+            *balance += refund_gas;
         }
 
         Ok(refund_gas)
@@ -225,7 +225,10 @@ impl Transaction {
     ) -> Result<(), VerificationError<E>> {
         for (asset, deposit) in deposits.iter() {
             if log::log_enabled!(log::Level::Trace) {
-                trace!("Refunding deposit {:?} for asset: {} to {}", deposit, asset, self.source.as_address(state.is_mainnet()));
+                let source_address = self.source.decompress()
+                    .map_err(|_| VerificationError::InvalidFormat)?
+                    .to_address(state.is_mainnet());
+                trace!("Refunding deposit {:?} for asset: {} to {}", deposit, asset, source_address);
             }
 
             let balance = state.get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Borrowed(asset)).await
@@ -233,13 +236,15 @@ impl Transaction {
 
             match deposit {
                 ContractDeposit::Public(amount) => {
-                    *balance += Scalar::from(*amount);
+                    *balance += *amount;
                 },
                 ContractDeposit::Private { .. } => {
-                    let ct = decompressed_deposits.get(asset)
+                    // TODO: Balance simplification - extract amount from encrypted deposit
+                    // For now, this represents encrypted contract deposit refund that needs refactoring
+                    let _ct = decompressed_deposits.get(asset)
                         .ok_or(VerificationError::DepositNotFound)?;
-
-                    *balance += Ciphertext::new(ct.commitment.clone(), ct.sender_handle.clone());
+                    // Stub: Cannot extract plain amount from encrypted deposit yet
+                    // This needs to be refactored when contract encrypted balances are converted to plain
                 }
             }
         }

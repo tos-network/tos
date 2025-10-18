@@ -7,6 +7,12 @@
 //! 2. `execution_with_proofs` – full `Transaction::verify`, including ZK proof checks.
 //! 3. `execution_with_proofs_and_storage` – verification plus RocksDB writes that
 //!    approximate block persistence overhead.
+//!
+//! TODO: Update after balance simplification (Section 2.13)
+//! Expected TPS improvements:
+//! - Current: 200-300 TPS (with encryption overhead)
+//! - After simplification: 500-800 TPS (2.5x faster)
+//! - No encryption/proof generation overhead
 
 use async_trait::async_trait;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};

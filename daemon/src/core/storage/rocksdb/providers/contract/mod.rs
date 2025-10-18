@@ -7,7 +7,6 @@ mod r#impl;
 use async_trait::async_trait;
 use log::trace;
 use tos_common::{
-    account::CiphertextCache,
     asset::AssetData,
     block::TopoHeight,
     contract::{ContractProvider as ContractAccess, ContractStorage},
@@ -61,12 +60,12 @@ impl ContractAccess for RocksStorage {
         Ok(res.map(|(topoheight, supply)| (topoheight, supply.take())))
     }
 
-    fn get_account_balance_for_asset(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<Option<(TopoHeight, CiphertextCache)>, anyhow::Error> {
+    fn get_account_balance_for_asset(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get account {} balance for asset {} at topoheight {}", key.as_address(self.is_mainnet()), asset, topoheight);
         }
         let res = try_block_on(self.get_balance_at_maximum_topoheight(key, asset, topoheight))??;
-        Ok(res.map(|(topoheight, balance)| (topoheight, balance.take_balance())))
+        Ok(res.map(|(topoheight, balance)| (topoheight, balance.get_balance())))
     }
 }
 

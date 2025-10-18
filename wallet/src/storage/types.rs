@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use tos_common::{
-    account::CiphertextCache,
     block::TopoHeight,
     crypto::Hash,
     serializer::{
@@ -16,14 +15,12 @@ use tos_common::{
 #[derive(Debug, Clone)]
 pub struct Balance {
     pub amount: u64,
-    pub ciphertext: CiphertextCache
 }
 
 impl Balance {
-    pub fn new(amount: u64, ciphertext: CiphertextCache) -> Self {
+    pub fn new(amount: u64) -> Self {
         Self {
             amount,
-            ciphertext
         }
     }
 }
@@ -31,15 +28,12 @@ impl Balance {
 impl Serializer for Balance {
     fn write(&self, writer: &mut Writer) {
         self.amount.write(writer);
-        self.ciphertext.write(writer);
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let amount = u64::read(reader)?;
-        let ciphertext = CiphertextCache::read(reader)?;
         Ok(Self {
             amount,
-            ciphertext
         })
     }
 }

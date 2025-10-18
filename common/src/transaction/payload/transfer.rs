@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use crate::{
     crypto::{
-        elgamal::{CompressedCiphertext, CompressedCommitment, CompressedHandle, CompressedPublicKey},
+        elgamal::{CompressedCommitment, CompressedHandle, CompressedPublicKey},
         proofs::CiphertextValidityProof,
+        transcript::CompressedCiphertext,
         Hash
     },
     serializer::*,

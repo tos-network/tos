@@ -5,11 +5,12 @@ use rand::rngs::OsRng;
 
 use crate::crypto::{
     proofs::{G, PC_GENS},
-    elgamal::{
-        key::PublicKey,
-        CompressedCommitment,
-        CompressedHandle
-    }
+};
+
+use super::{
+    PublicKey,
+    CompressedCommitment,
+    CompressedHandle
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -24,7 +24,6 @@ use tos_vm::{
     ValueCell
 };
 use crate::{
-    account::CiphertextCache,
     block::{Block, TopoHeight},
     config::{
         FEE_PER_ACCOUNT_CREATION,
@@ -140,7 +139,6 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
     let signature_type = Type::Opaque(env.register_opaque::<Signature>("Signature", true));
 
     // Crypto
-    let ciphertext_type = Type::Opaque(env.register_opaque::<CiphertextCache>("Ciphertext", true));
     let _ = Type::Opaque(env.register_opaque::<CiphertextValidityProof>("CiphertextValidityProof", true));
     let _ = Type::Opaque(env.register_opaque::<RangeProofWrapper>("RangeProof", true));
 
@@ -829,61 +827,6 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
         None
     );
 
-    // Ciphertext
-    {
-        env.register_native_function(
-            "add",
-            Some(ciphertext_type.clone()),
-            vec![
-                ("value", Type::U64)
-            ],
-            ciphertext_add_plaintext,
-            500,
-            None
-        );
-        env.register_native_function(
-            "sub",
-            Some(ciphertext_type.clone()),
-            vec![
-                ("value", Type::U64)
-            ],
-            ciphertext_sub_plaintext,
-            500,
-            None
-        );
-        env.register_native_function(
-            "mul",
-            Some(ciphertext_type.clone()),
-            vec![
-                ("value", Type::U64)
-            ],
-            ciphertext_mul_plaintext,
-            1000,
-            None
-        );
-        env.register_native_function(
-            "div",
-            Some(ciphertext_type.clone()),
-            vec![
-                ("value", Type::U64)
-            ],
-            ciphertext_div_plaintext,
-            5000,
-            None
-        );
-        env.register_static_function(
-            "new",
-            ciphertext_type.clone(),
-            vec![
-                ("address", address_type.clone()),
-                ("amount", Type::U64)
-            ],
-            ciphertext_new,
-            1000,
-            Some(ciphertext_type.clone())
-        );
-    }
-
     // Misc
     {
         env.register_native_function(
@@ -895,7 +838,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             ],
             get_account_balance_of::<P>,
             1000,
-            Some(Type::Optional(Box::new(Type::Tuples(vec![Type::U64, ciphertext_type.clone()]))))
+            Some(Type::Optional(Box::new(Type::Tuples(vec![Type::U64, Type::U64]))))
         );
 
         env.register_native_function(
@@ -1183,9 +1126,9 @@ fn get_account_balance_of<P: ContractProvider>(_: FnInstance, mut params: FnPara
         .into_opaque_type()?;
 
     let balance = provider.get_account_balance_for_asset(address.get_public_key(), &asset, state.topoheight)?
-        .map(|(topoheight, ciphertext)| ValueCell::Object(vec![
+        .map(|(topoheight, balance_amount)| ValueCell::Object(vec![
             Primitive::U64(topoheight).into(),
-            Primitive::Opaque(ciphertext.into()).into()
+            Primitive::U64(balance_amount).into()
         ]))
         .unwrap_or_default();
 

@@ -1,6 +1,6 @@
 mod hash;
 mod address;
-mod transcript;
+pub mod transcript;
 mod human_readable_proof;
 mod blue_work;
 

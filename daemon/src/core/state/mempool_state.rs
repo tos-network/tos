@@ -4,7 +4,7 @@ use tos_common::{
     account::Nonce,
     block::{BlockVersion, TopoHeight},
     crypto::{
-        elgamal::{Ciphertext, CompressedPublicKey},
+        elgamal::CompressedPublicKey,
         Hash,
         PublicKey
     },
@@ -27,10 +27,7 @@ struct Account<'a> {
     // Account nonce used to verify valid transaction
     nonce: u64,
     // Assets ready as source for any transfer/transaction
-    // TODO: they must store also the ciphertext change
-    // It will be added by next change at each TX
-    // This is necessary to easily build the final user balance
-    assets: HashMap<&'a Hash, Ciphertext>,
+    assets: HashMap<&'a Hash, u64>,
     // Multisig configured
     // This is used to verify the validity of the multisig setup
     multisig: Option<MultiSigPayload>
@@ -46,7 +43,7 @@ pub struct MempoolState<'a, S: Storage> {
     // Contract environment
     environment: &'a Environment,
     // Receiver balances
-    receiver_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, Ciphertext>>,
+    receiver_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, u64>>,
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
     accounts: HashMap<&'a PublicKey, Account<'a>>,
@@ -77,7 +74,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     }
 
     // Retrieve the sender cache (inclunding balances and multisig)
-    pub fn get_sender_cache(&mut self, key: &PublicKey) -> Option<(HashMap<&Hash, Ciphertext>, Option<MultiSigPayload>)> {
+    pub fn get_sender_cache(&mut self, key: &PublicKey) -> Option<(HashMap<&Hash, u64>, Option<MultiSigPayload>)> {
         let account = self.accounts.remove(key)?;
         Some((account.assets, account.multisig))
     }
@@ -85,22 +82,22 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     // Retrieve the receiver balance
     // We never store the receiver balance in mempool, only outgoing balances
     // So we just get it from our internal cache or from storage
-    async fn internal_get_receiver_balance<'b>(&'b mut self, account: Cow<'a, PublicKey>, asset: Cow<'a, Hash>) -> Result<&'b mut Ciphertext, BlockchainError> {
+    async fn internal_get_receiver_balance<'b>(&'b mut self, account: Cow<'a, PublicKey>, asset: Cow<'a, Hash>) -> Result<&'b mut u64, BlockchainError> {
         // If its borrowed, it cost nothing to clone the Cow as it's just the reference being cloned
         match self.receiver_balances.entry(account.clone()).or_insert_with(HashMap::new).entry(asset.clone()) {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
             Entry::Vacant(entry) => {
                 let (version, _) = self.storage.get_new_versioned_balance(&account, &asset, self.topoheight).await?;
-                Ok(entry.insert(version.take_balance().take_ciphertext()?))
+                Ok(entry.insert(version.take_balance()))
             }
         }
     }
 
     // Retrieve the versioned balance based on the TX reference 
-    async fn get_versioned_balance_for_reference(storage: &S, key: &PublicKey, asset: &Hash, current_topoheight: TopoHeight, reference: &Reference) -> Result<Ciphertext, BlockchainError> {
+    async fn get_versioned_balance_for_reference(storage: &S, key: &PublicKey, asset: &Hash, current_topoheight: TopoHeight, reference: &Reference) -> Result<u64, BlockchainError> {
         let (output, _, version) = super::search_versioned_balance_for_reference(storage, key, asset, current_topoheight, reference, false).await?;
 
-        Ok(version.take_balance_with(output).take_ciphertext()?)
+        Ok(version.take_balance_with(output))
     }
 
     // Retrieve the nonce & the multisig state for a sender account
@@ -137,7 +134,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     // If not found, we check in mempool cache,
     // If still not present, we check in storage and determine using reference
     // Which version to use
-    async fn internal_get_sender_balance<'b>(&'b mut self, key: &'a PublicKey, asset: &'a Hash, reference: &Reference) -> Result<&'b mut Ciphertext, BlockchainError> {
+    async fn internal_get_sender_balance<'b>(&'b mut self, key: &'a PublicKey, asset: &'a Hash, reference: &Reference) -> Result<&'b mut u64, BlockchainError> {
         match self.accounts.entry(key) {
             Entry::Occupied(o) => {
                 let account = o.into_mut();
@@ -170,7 +167,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                             return Err(BlockchainError::NoPreviousBalanceFound);
                         }
 
-                        Ok(entry.insert(version.take_balance().take_ciphertext()?))
+                        Ok(entry.insert(version.take_balance()))
                     }
                 }
             }
@@ -210,22 +207,22 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         super::pre_verify_tx(self.storage, tx, self.stable_topoheight, self.topoheight, self.get_block_version()).await
     }
 
-    /// Get the balance ciphertext for a receiver account
+    /// Get the balance for a receiver account
     async fn get_receiver_balance<'b>(
         &'b mut self,
         account: Cow<'a, PublicKey>,
         asset: Cow<'a, Hash>,
-    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+    ) -> Result<&'b mut u64, BlockchainError> {
         self.internal_get_receiver_balance(account, asset).await
     }
 
-    /// Get the balance ciphertext used for verification of funds for the sender account
+    /// Get the balance used for verification of funds for the sender account
     async fn get_sender_balance<'b>(
         &'b mut self,
         account: &'a PublicKey,
         asset: &'a Hash,
         reference: &Reference,
-    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+    ) -> Result<&'b mut u64, BlockchainError> {
         self.internal_get_sender_balance(account, asset, reference).await
     }
 
@@ -235,7 +232,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         &mut self,
         _: &'a PublicKey,
         _: &'a Hash,
-        _: Ciphertext,
+        _: u64,
     ) -> Result<(), BlockchainError> {
         Ok(())
     }

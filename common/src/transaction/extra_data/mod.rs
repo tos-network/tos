@@ -23,7 +23,6 @@ use thiserror::Error;
 use crate::{
     crypto::{
         elgamal::{
-            Ciphertext,
             DecryptHandle,
             PedersenOpening,
             PrivateKey,
@@ -81,11 +80,13 @@ pub fn derive_shared_key_from_opening(opening: &PedersenOpening) -> SharedKey {
 }
 
 /// See [`derive_shared_key`].
+/// TODO: This function needs to be updated for balance simplification
 pub fn derive_shared_key_from_ct(
-    sk: &PrivateKey,
-    ciphertext: &Ciphertext,
+    _sk: &PrivateKey,
+    _amount: u64,
 ) -> SharedKey {
-    derive_shared_key_from_handle(sk, ciphertext.handle())
+    // TODO: Implement proper key derivation for plain balances
+    SharedKey([0u8; 32])
 }
 
 /// See [`derive_shared_key`].

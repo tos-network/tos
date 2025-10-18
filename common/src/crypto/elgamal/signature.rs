@@ -10,7 +10,10 @@ use crate::{
         Writer
     }
 };
-use super::{CompressedPublicKey, PublicKey, SCALAR_SIZE};
+use super::{CompressedPublicKey, PublicKey};
+
+// SCALAR_SIZE moved to parent module
+const SCALAR_SIZE: usize = 32;
 
 pub const SIGNATURE_SIZE: usize = SCALAR_SIZE * 2;
 
@@ -65,13 +68,21 @@ impl<'de> serde::Deserialize<'de> for Signature {
 
 impl Serializer for Signature {
     fn write(&self, writer: &mut Writer) {
-        self.s.write(writer);
-        self.e.write(writer);
+        writer.write_bytes(&self.s.to_bytes());
+        writer.write_bytes(&self.e.to_bytes());
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let s = Scalar::read(reader)?;
-        let e = Scalar::read(reader)?;
+        let s_bytes = reader.read_bytes::<[u8; SCALAR_SIZE]>(SCALAR_SIZE)?;
+        let e_bytes = reader.read_bytes::<[u8; SCALAR_SIZE]>(SCALAR_SIZE)?;
+
+        use curve25519_dalek::scalar::Scalar;
+        let s = Scalar::from_canonical_bytes(s_bytes)
+            .into_option()
+            .ok_or(ReaderError::InvalidValue)?;
+        let e = Scalar::from_canonical_bytes(e_bytes)
+            .into_option()
+            .ok_or(ReaderError::InvalidValue)?;
         Ok(Signature::new(s, e))
     }
 

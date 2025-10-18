@@ -623,7 +623,7 @@ async fn get_balance<S: Storage>(context: &Context, body: Value) -> Result<Value
     let storage = blockchain.get_storage().read().await;
     let (topoheight, version) = storage.get_last_balance(params.address.get_public_key(), &params.asset).await.context("Error while retrieving last balance")?;
     Ok(json!(GetBalanceResult {
-        version,
+        balance: version.get_balance(),
         topoheight
     }))
 }
@@ -654,7 +654,7 @@ async fn get_stable_balance<S: Storage>(context: &Context, body: Value) -> Resul
     };
 
     Ok(json!(GetStableBalanceResult {
-        version,
+        balance: version.get_balance(),
         stable_topoheight,
         stable_block_hash: storage.get_hash_at_topo_height(stable_topoheight).await.context("Error while retrieving hash at topo height")?
     }))

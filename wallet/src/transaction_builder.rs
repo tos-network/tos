@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use log::{debug, trace};
 use tos_common::{
-    account::CiphertextCache,
-    crypto::{elgamal::Ciphertext, Hash, Hashable, PublicKey},
+    crypto::{Hash, Hashable, PublicKey},
     transaction::{builder::{AccountState, FeeHelper}, Reference, Transaction}
 };
 use crate::{error::WalletError, storage::{Balance, EncryptedStorage, TxCache}};
@@ -92,15 +91,13 @@ impl TransactionBuilderState {
 
     pub async fn from_tx(storage: &EncryptedStorage, transaction: &Transaction, mainnet: bool) -> Result<Self, WalletError> {
         let mut state = Self::new(mainnet, transaction.get_reference().clone(), transaction.get_nonce());
-        let ciphertexts = transaction.get_expected_sender_outputs()
+        let amounts = transaction.get_expected_sender_outputs()
             .map_err(|e| WalletError::Any(e.into()))?;
 
-        for (asset, ct) in ciphertexts {
+        for (asset, amount) in amounts {
             let (mut balance, _) = storage.get_unconfirmed_balance_for(asset).await?;
-            let balance_ct = balance.ciphertext.computable()
-                .map_err(|e| WalletError::Any(e.into()))?;
-
-            *balance_ct -= ct;
+            balance.amount = balance.amount.checked_sub(amount)
+                .ok_or_else(|| WalletError::Any(anyhow::anyhow!("Balance underflow")))?;
             state.add_balance(asset.clone(), balance);
         }
 
@@ -141,7 +138,7 @@ impl TransactionBuilderState {
 
         for (asset, balance) in self.balances.drain() {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Setting balance for asset {} to {} ({})", asset, balance.amount, balance.ciphertext);
+                debug!("Setting balance for asset {} to {}", asset, balance.amount);
             }
             storage.set_unconfirmed_balance_for(asset, balance).await?;
         }
@@ -184,14 +181,9 @@ impl AccountState for TransactionBuilderState {
         self.balances.get(asset).map(|b| b.amount).ok_or_else(|| WalletError::BalanceNotFound(asset.clone()))
     }
 
-    fn get_account_ciphertext(&self, asset: &Hash) -> Result<CiphertextCache, Self::Error> {
-        self.balances.get(asset).map(|b| b.ciphertext.clone()).ok_or_else(|| WalletError::BalanceNotFound(asset.clone()))
-    }
-
-    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64, ciphertext: Ciphertext) -> Result<(), Self::Error> {
+    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64) -> Result<(), Self::Error> {
         self.balances.insert(asset.clone(), Balance {
             amount: new_balance,
-            ciphertext: CiphertextCache::Decompressed(ciphertext)
         });
         Ok(())
     }

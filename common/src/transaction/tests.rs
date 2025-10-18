@@ -4,13 +4,13 @@ use curve25519_dalek::Scalar;
 use indexmap::IndexSet;
 use tos_vm::{Chunk, Environment, Module};
 use crate::{
-    account::{CiphertextCache, Nonce},
+    account::Nonce,
     api::{DataElement, DataValue},
     block::BlockVersion,
     config::{BURN_PER_CONTRACT, COIN_VALUE, TOS_ASSET},
     crypto::{
-        elgamal::{Ciphertext, CompressedPublicKey, PedersenOpening},
-        proofs::{G, ProofVerificationError},
+        elgamal::{CompressedPublicKey, PedersenOpening},
+        proofs::ProofVerificationError,
         Address,
         Hash,
         Hashable,
@@ -58,7 +58,7 @@ impl<'a> From<&'a str> for TestError {
 
 #[derive(Debug, Clone)]
 struct AccountChainState {
-    balances: HashMap<Hash, Ciphertext>,
+    balances: HashMap<Hash, u64>,
     nonce: Nonce,
 }
 
@@ -83,7 +83,6 @@ impl ChainState {
 
 #[derive(Clone)]
 struct Balance {
-    ciphertext: CiphertextCache,
     balance: u64,
 }
 
@@ -104,10 +103,8 @@ impl Account {
     }
 
     fn set_balance(&mut self, asset: Hash, balance: u64) {
-        let ciphertext = self.keypair.get_public_key().encrypt(balance);
         self.balances.insert(asset, Balance {
             balance,
-            ciphertext: CiphertextCache::Decompressed(ciphertext),
         });
     }
 
@@ -188,7 +185,6 @@ fn test_encrypt_decrypt_two_parties() {
     let mut alice = Account::new();
     alice.balances.insert(TOS_ASSET, Balance {
         balance: 100 * COIN_VALUE,
-        ciphertext: CiphertextCache::Decompressed(alice.keypair.get_public_key().encrypt(100 * COIN_VALUE)),
     });
 
     let bob = Account::new();
@@ -237,7 +233,7 @@ async fn test_tx_verify() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in &alice.balances {
-            balances.insert(asset.clone(), balance.ciphertext.clone().take_ciphertext().unwrap());
+            balances.insert(asset.clone(), balance.balance);
         }
         state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -248,7 +244,7 @@ async fn test_tx_verify() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in &bob.balances {
-            balances.insert(asset.clone(), balance.ciphertext.clone().take_ciphertext().unwrap());
+            balances.insert(asset.clone(), balance.balance);
         }
         state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -260,12 +256,12 @@ async fn test_tx_verify() {
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
 
     // Check Bob balance
-    let balance = bob.keypair.decrypt_to_point(&state.accounts[&bob.keypair.get_public_key().compress()].balances[&TOS_ASSET]);    
-    assert_eq!(balance, Scalar::from(50u64) * (*G));
+    let balance = state.accounts[&bob.keypair.get_public_key().compress()].balances[&TOS_ASSET];
+    assert_eq!(balance, 50u64);
 
     // Check Alice balance
-    let balance = alice.keypair.decrypt_to_point(&state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET]);
-    assert_eq!(balance, Scalar::from((100u64 * COIN_VALUE) - (50 + tx.fee)) * (*G));
+    let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
+    assert_eq!(balance, (100u64 * COIN_VALUE) - (50 + tx.fee));
 }
 
 
@@ -286,7 +282,7 @@ async fn test_tx_verify_with_zkp_cache() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in &alice.balances {
-            balances.insert(asset.clone(), balance.ciphertext.clone().take_ciphertext().unwrap());
+            balances.insert(asset.clone(), balance.balance);
         }
         state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -297,7 +293,7 @@ async fn test_tx_verify_with_zkp_cache() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in &bob.balances {
-            balances.insert(asset.clone(), balance.ciphertext.clone().take_ciphertext().unwrap());
+            balances.insert(asset.clone(), balance.balance);
         }
         state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -367,7 +363,7 @@ async fn test_burn_tx_verify() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in &alice.balances {
-            balances.insert(asset.clone(), balance.ciphertext.clone().take_ciphertext().unwrap());
+            balances.insert(asset.clone(), balance.balance);
         }
         state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -379,8 +375,8 @@ async fn test_burn_tx_verify() {
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
 
     // Check Alice balance
-    let balance = alice.keypair.decrypt_to_point(&state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET]);
-    assert_eq!(balance, Scalar::from((100u64 * COIN_VALUE) - (50 * COIN_VALUE + tx.fee)) * (*G));
+    let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
+    assert_eq!(balance, (100u64 * COIN_VALUE) - (50 * COIN_VALUE + tx.fee));
 }
 
 #[tokio::test]
@@ -430,7 +426,7 @@ async fn test_tx_invoke_contract() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in &alice.balances {
-            balances.insert(asset.clone(), balance.ciphertext.clone().take_ciphertext().unwrap());
+            balances.insert(asset.clone(), balance.balance);
         }
         state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -442,11 +438,11 @@ async fn test_tx_invoke_contract() {
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
 
     // Check Alice balance
-    let balance = alice.keypair.decrypt_to_point(&state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET]);
+    let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     // 50 coins deposit + tx fee + 1000 gas fee
     let total_spend = (50 * COIN_VALUE) + tx.fee + 1000;
 
-    assert_eq!(balance, Scalar::from((100 * COIN_VALUE) - total_spend) * (*G));
+    assert_eq!(balance, (100 * COIN_VALUE) - total_spend);
 }
 
 // Test contract deposits with multiple deposits
@@ -501,7 +497,7 @@ async fn test_tx_invoke_contract_multiple_deposits() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in &alice.balances {
-            balances.insert(asset.clone(), balance.ciphertext.clone().take_ciphertext().unwrap());
+            balances.insert(asset.clone(), balance.balance);
         }
         state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -513,11 +509,11 @@ async fn test_tx_invoke_contract_multiple_deposits() {
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
 
     // Check Alice balance (sender side - should reflect deduction)
-    let balance = alice.keypair.decrypt_to_point(&state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET]);
+    let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     // 50 coins deposit + tx fee + 1000 gas fee
     let total_spend = (50 * COIN_VALUE) + tx.fee + 1000;
 
-    assert_eq!(balance, Scalar::from((100 * COIN_VALUE) - total_spend) * (*G));
+    assert_eq!(balance, (100 * COIN_VALUE) - total_spend);
 }
 
 #[tokio::test]
@@ -557,7 +553,7 @@ async fn test_tx_deploy_contract() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in &alice.balances {
-            balances.insert(asset.clone(), balance.ciphertext.clone().take_ciphertext().unwrap());
+            balances.insert(asset.clone(), balance.balance);
         }
         state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -569,11 +565,11 @@ async fn test_tx_deploy_contract() {
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
 
     // Check Alice balance
-    let balance = alice.keypair.decrypt_to_point(&state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET]);
+    let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     // 1 TOS for contract deploy, tx fee
     let total_spend = BURN_PER_CONTRACT + tx.fee;
 
-    assert_eq!(balance, Scalar::from((100 * COIN_VALUE) - total_spend) * (*G));
+    assert_eq!(balance, (100 * COIN_VALUE) - total_spend);
 }
 
 #[tokio::test]
@@ -622,7 +618,7 @@ async fn test_max_transfers() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in alice.balances {
-            balances.insert(asset, balance.ciphertext.take_ciphertext().unwrap());
+            balances.insert(asset, balance.balance);
         }
         state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -633,7 +629,7 @@ async fn test_max_transfers() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in bob.balances {
-            balances.insert(asset, balance.ciphertext.take_ciphertext().unwrap());
+            balances.insert(asset, balance.balance);
         }
         state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -682,7 +678,7 @@ async fn test_multisig_setup() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in alice.balances {
-            balances.insert(asset, balance.ciphertext.take_ciphertext().unwrap());
+            balances.insert(asset, balance.balance);
         }
         state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -693,7 +689,7 @@ async fn test_multisig_setup() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in bob.balances {
-            balances.insert(asset, balance.ciphertext.take_ciphertext().unwrap());
+            balances.insert(asset, balance.balance);
         }
         state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -752,7 +748,7 @@ async fn test_multisig() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in alice.balances {
-            balances.insert(asset, balance.ciphertext.take_ciphertext().unwrap());
+            balances.insert(asset, balance.balance);
         }
         state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -764,7 +760,7 @@ async fn test_multisig() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in bob.balances {
-            balances.insert(asset, balance.ciphertext.take_ciphertext().unwrap());
+            balances.insert(asset, balance.balance);
         }
 
         state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
@@ -821,7 +817,7 @@ async fn test_transfer_extra_data_limits() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in &alice.balances {
-            balances.insert(asset.clone(), balance.ciphertext.clone().take_ciphertext().unwrap());
+            balances.insert(asset.clone(), balance.balance);
         }
         state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -832,7 +828,7 @@ async fn test_transfer_extra_data_limits() {
     {
         let mut balances = HashMap::new();
         for (asset, balance) in &bob.balances {
-            balances.insert(asset.clone(), balance.ciphertext.clone().take_ciphertext().unwrap());
+            balances.insert(asset.clone(), balance.balance);
         }
         state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
             balances,
@@ -927,22 +923,22 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         Ok(())
     }
 
-    /// Get the balance ciphertext for a receiver account
+    /// Get the balance for a receiver account
     async fn get_receiver_balance<'b>(
         &'b mut self,
         account: Cow<'a, PublicKey>,
         asset: Cow<'a, Hash>,
-    ) -> Result<&'b mut Ciphertext, TestError> {
+    ) -> Result<&'b mut u64, TestError> {
         self.accounts.get_mut(&account).and_then(|account| account.balances.get_mut(&asset)).ok_or(TestError(()))
     }
 
-    /// Get the balance ciphertext used for verification of funds for the sender account
+    /// Get the balance used for verification of funds for the sender account
     async fn get_sender_balance<'b>(
         &'b mut self,
         account: &'a PublicKey,
         asset: &'a Hash,
         _: &Reference,
-    ) -> Result<&'b mut Ciphertext, TestError> {
+    ) -> Result<&'b mut u64, TestError> {
         self.accounts.get_mut(account).and_then(|account| account.balances.get_mut(asset)).ok_or(TestError(()))
     }
 
@@ -951,7 +947,7 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         &mut self,
         _: &'a PublicKey,
         _: &'a Hash,
-        _: Ciphertext,
+        _: u64,
     ) -> Result<(), TestError> {
         Ok(())
     }
@@ -1057,18 +1053,13 @@ impl AccountState for AccountStateImpl {
         self.balances.get(asset).map(|balance| balance.balance).ok_or(TestError(()))
     }
 
-    fn get_account_ciphertext(&self, asset: &Hash) -> Result<CiphertextCache, TestError> { // Use TestError
-        self.balances.get(asset).map(|balance| balance.ciphertext.clone()).ok_or(TestError(()))
-    }
-
     fn get_reference(&self) -> Reference {
         self.reference.clone()
     }
 
-    fn update_account_balance(&mut self, asset: &Hash, balance: u64, ciphertext: Ciphertext) -> Result<(), TestError> { // Use TestError
+    fn update_account_balance(&mut self, asset: &Hash, balance: u64) -> Result<(), TestError> { // Use TestError
         self.balances.insert(asset.clone(), Balance {
             balance,
-            ciphertext: CiphertextCache::Decompressed(ciphertext),
         });
         Ok(())
     }

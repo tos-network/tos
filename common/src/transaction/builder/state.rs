@@ -1,6 +1,6 @@
 use crate::{
-    account::{Nonce, CiphertextCache},
-    crypto::{elgamal::Ciphertext, Hash},
+    account::Nonce,
+    crypto::Hash,
     transaction::Reference
 };
 
@@ -19,11 +19,8 @@ pub trait AccountState: FeeHelper {
     /// Block topoheight at which the transaction is being built
     fn get_reference(&self) -> Reference;
 
-    /// Get the balance ciphertext from the source
-    fn get_account_ciphertext(&self, asset: &Hash) -> Result<CiphertextCache, Self::Error>;
-
-    /// Update the balance and the ciphertext
-    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64, ciphertext: Ciphertext) -> Result<(), Self::Error>;
+    /// Update the balance
+    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64) -> Result<(), Self::Error>;
 
     /// Get the nonce of the account
     fn get_nonce(&self) -> Result<Nonce, Self::Error>;

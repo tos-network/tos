@@ -15,7 +15,7 @@ use serde::{
 };
 use tos_vm::ValueCell;
 use crate::{
-    account::{Nonce, CiphertextCache, VersionedBalance, VersionedNonce},
+    account::{Nonce, VersionedBalance, VersionedNonce},
     block::{TopoHeight, Algorithm, BlockVersion, EXTRA_NONCE_SIZE},
     crypto::{Address, Hash, BlueWorkType},
     difficulty::Difficulty,
@@ -304,15 +304,15 @@ pub struct HasNonceResult {
 
 #[derive(Serialize, Deserialize)]
 pub struct GetBalanceResult {
-    pub version: VersionedBalance,
+    pub balance: u64,
     pub topoheight: TopoHeight
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct GetStableBalanceResult {
-    pub version: VersionedBalance,
+    pub balance: u64,
     pub stable_topoheight: TopoHeight,
-    pub stable_block_hash: Hash 
+    pub stable_block_hash: Hash
 }
 
 #[derive(Serialize, Deserialize)]
@@ -595,7 +595,7 @@ pub struct GetMempoolCacheResult {
     // all txs ordered by nonce
     txs: Vec<Hash>,
     // All "final" cached balances used
-    balances: HashMap<Hash, CiphertextCache>
+    balances: HashMap<Hash, u64>
 }
 
 // This struct is used to store the fee rate estimation for the following priority levels:

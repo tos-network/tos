@@ -21,7 +21,6 @@ use tos_common::{
     block::TopoHeight,
     config::TOS_ASSET,
     crypto::{
-        elgamal::CompressedCiphertext,
         Hash,
         PrivateKey,
         PublicKey,
@@ -849,17 +848,16 @@ impl EncryptedStorage {
     }
 
     // Retrieve the unconfirmed balance decoded for this asset if present
-    pub async fn get_unconfirmed_balance_decoded_for(&self, asset: &Hash, compressed_ct: &CompressedCiphertext) -> Result<Option<u64>> {
+    // TODO: Balance simplification - ciphertext comparison removed
+    pub async fn get_unconfirmed_balance_decoded_for(&self, asset: &Hash) -> Result<Option<u64>> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get unconfirmed balance decoded for {}", asset);
         }
-        let mut cache = self.unconfirmed_balances_cache.lock().await;
-        if let Some(balances) = cache.get_mut(asset) {
-            for balance in balances.iter_mut() {
-                if *balance.ciphertext.compressed() == *compressed_ct {
-                    trace!("found unconfirmed balance");
-                    return Ok(Some(balance.amount));
-                }
+        let cache = self.unconfirmed_balances_cache.lock().await;
+        if let Some(balances) = cache.get(asset) {
+            if let Some(balance) = balances.back() {
+                trace!("found unconfirmed balance");
+                return Ok(Some(balance.amount));
             }
         }
 
@@ -915,21 +913,19 @@ impl EncryptedStorage {
     }
 
     // Set the balance for this asset
-    pub async fn set_balance_for(&mut self, asset: &Hash, mut balance: Balance) -> Result<()> {
+    pub async fn set_balance_for(&mut self, asset: &Hash, balance: Balance) -> Result<()> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set balance for {}", asset);
         }
-        // Clear the cache of all outdated balances
-        // for this, we simply go through all versions available and delete them all until we find the one we are looking for
-        // The unconfirmed balances cache may not work during front running
-        // As we only scan the final balances for each asset, if we get any incoming TX, compressed balance
-        // will be different and we will not be able to find the unconfirmed balance
+        // TODO: Balance simplification - ciphertext comparison removed
+        // Clear the unconfirmed balance cache for this asset since we're setting a new confirmed balance
         {
             let mut cache = self.unconfirmed_balances_cache.lock().await;
             let mut delete_entry = false;
             if let Some(balances) = cache.get_mut(asset) {
-                while let Some(mut b) = balances.pop_front() {
-                    if *b.ciphertext.compressed() == *balance.ciphertext.compressed() {
+                // Compare amounts instead of ciphertexts
+                while let Some(b) = balances.pop_front() {
+                    if b.amount == balance.amount {
                         if log::log_enabled!(log::Level::Debug) {
                             debug!("unconfirmed balance previously stored found for {}", asset);
                         }
@@ -956,7 +952,7 @@ impl EncryptedStorage {
                 // If we have no more unconfirmed balance, we can clean the last tx reference
                 if cache.is_empty() {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("no more unconfirmed balance cache, cleaning tx cache ({:?})", self.tx_cache);
+                        debug!("no more unconfirmed balance cache, cleaning tx cache");
                     }
                     self.tx_cache = None;
                 }

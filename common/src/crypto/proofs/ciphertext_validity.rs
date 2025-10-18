@@ -330,28 +330,37 @@ impl CiphertextValidityProof {
 #[allow(non_snake_case)]
 impl Serializer for CiphertextValidityProof {
     fn write(&self, writer: &mut Writer) {
-        self.Y_0.write(writer);
-        self.Y_1.write(writer);
+        writer.write_bytes(self.Y_0.as_bytes());
+        writer.write_bytes(self.Y_1.as_bytes());
         if let Some(Y_2) = self.Y_2 {
-            Y_2.write(writer);
+            writer.write_bytes(Y_2.as_bytes());
         }
-        self.z_r.write(writer);
-        self.z_x.write(writer);
+        writer.write_bytes(&self.z_r.to_bytes());
+        writer.write_bytes(&self.z_x.to_bytes());
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let version: TxVersion = reader.context()
             .get_copy()?;
-        let Y_0 = CompressedRistretto::read(reader)?;
-        let Y_1 = CompressedRistretto::read(reader)?;
+        let Y_0_bytes = reader.read_bytes::<[u8; 32]>(32)?;
+        let Y_0 = CompressedRistretto::from_slice(&Y_0_bytes).map_err(|_| ReaderError::InvalidValue)?;
+        let Y_1_bytes = reader.read_bytes::<[u8; 32]>(32)?;
+        let Y_1 = CompressedRistretto::from_slice(&Y_1_bytes).map_err(|_| ReaderError::InvalidValue)?;
         let Y_2 = if version >= TxVersion::T0 {
-            Some(CompressedRistretto::read(reader)?)
+            let Y_2_bytes = reader.read_bytes::<[u8; 32]>(32)?;
+            Some(CompressedRistretto::from_slice(&Y_2_bytes).map_err(|_| ReaderError::InvalidValue)?)
         } else {
             None
         };
 
-        let z_r = Scalar::read(reader)?;
-        let z_x = Scalar::read(reader)?;
+        let z_r_bytes = reader.read_bytes::<[u8; 32]>(32)?;
+        let z_r = Scalar::from_canonical_bytes(z_r_bytes)
+            .into_option()
+            .ok_or(ReaderError::InvalidValue)?;
+        let z_x_bytes = reader.read_bytes::<[u8; 32]>(32)?;
+        let z_x = Scalar::from_canonical_bytes(z_x_bytes)
+            .into_option()
+            .ok_or(ReaderError::InvalidValue)?;
 
         Ok(Self { Y_0, Y_1, Y_2, z_r, z_x })
     }
