@@ -398,7 +398,6 @@ If a security test fails:
 ## References
 
 - **Security Audit Report**: `../../../TIPs/SECURITY_AUDIT_REPORT.md`
-- **Kaspa GHOSTDAG**: https://github.com/kaspanet/rusty-kaspa
 - **GHOSTDAG Paper**: https://eprint.iacr.org/2018/104.pdf
 - **Curve25519**: https://cr.yp.to/ecdh.html
 

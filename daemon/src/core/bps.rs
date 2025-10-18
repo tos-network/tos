@@ -1,6 +1,6 @@
 // TOS BPS (Blocks Per Second) Configuration System
 //
-// This module provides a compile-time type-safe BPS configuration system inspired by Kaspa.
+// This module provides a compile-time type-safe BPS configuration system for BlockDAG consensus.
 // All BPS-dependent parameters are automatically calculated at compile time based on the
 // configured BPS value.
 //
@@ -44,14 +44,14 @@ pub struct Bps<const BPS: u64>;
 /// - Finality depth: 100 blocks (~100 seconds)
 pub type OneBps = Bps<1>;
 
-/// Ten blocks per second - Kaspa configuration
+/// Ten blocks per second - High throughput configuration
 ///
-/// This is Kaspa's standard configuration, used here for reference and future experimentation.
+/// This is a high-throughput BlockDAG configuration, used here for reference and future experimentation.
 /// Requires higher K value and more aggressive parameters.
 ///
 /// Parameters:
 /// - Target block time: 100ms
-/// - GHOSTDAG K: 124 (from Kaspa)
+/// - GHOSTDAG K: 124 (calculated for 10 BPS)
 /// - Max parents: 16 (capped)
 /// - Finality depth: 1000 blocks (~100 seconds)
 pub type TenBps = Bps<10>;
@@ -111,7 +111,7 @@ impl<const BPS: u64> Bps<BPS> {
     ///
     /// Pre-computed values (D=2s, delta=0.001):
     /// - 1 BPS: K=10 (x=4.0)
-    /// - 10 BPS: K=124 (x=40.0, Kaspa value with safety margin)
+    /// - 10 BPS: K=124 (x=40.0, with safety margin)
     ///
     /// # Panics
     ///
@@ -120,7 +120,7 @@ impl<const BPS: u64> Bps<BPS> {
     pub const fn ghostdag_k() -> u64 {
         match BPS {
             1 => 10,   // TOS: K=10 for 1 BPS (x=4.0, calculated ~9.7)
-            10 => 124, // Kaspa: K=124 for 10 BPS (x=40.0, with safety margin)
+            10 => 124, // Reference: K=124 for 10 BPS (x=40.0, with safety margin)
             _ => panic!("Unsupported BPS value - calculate K and add to lookup table"),
         }
     }

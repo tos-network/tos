@@ -409,7 +409,6 @@ async fn stress_test_scenario() {
 
 - [TOS Whitepaper](https://tos.network/whitepaper) - Protocol specification
 - [GHOSTDAG Paper](https://eprint.iacr.org/2018/104.pdf) - GHOSTDAG algorithm details
-- [Kaspa Documentation](https://github.com/kaspanet/rusty-kaspa) - Reference implementation
 - [Rust Testing Guide](https://doc.rust-lang.org/book/ch11-00-testing.html) - Rust testing best practices
 
 ## Support

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use tos_vm::ValueCell;
 use crate::{
     api::DataElement,
-    crypto::{Address, Hash},
+    crypto::{Address, Hash, elgamal::CompressedPublicKey},
     account::FreezeDuration,
 };
 
@@ -45,6 +45,12 @@ pub struct InvokeContractBuilder {
     pub parameters: Vec<ValueCell>,
     #[serde(default)]
     pub deposits: IndexMap<Hash, ContractDepositBuilder>,
+    // Contract public key for private deposits
+    // When provided, enables private deposits by encrypting deposit amounts
+    // The contract key is derived from the contract hash
+    // Stored in compressed form for serialization, decompressed when used
+    #[serde(default)]
+    pub contract_key: Option<CompressedPublicKey>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

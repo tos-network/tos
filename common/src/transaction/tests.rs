@@ -409,7 +409,8 @@ async fn test_tx_invoke_contract() {
                     amount: 50 * COIN_VALUE,
                     private: false
                 })
-            ].into_iter().collect()
+            ].into_iter().collect(),
+            contract_key: None
         });
         let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), None, data, FeeBuilder::default()); // Use T0 for InvokeContract
         let estimated_size = builder.estimate_size();
@@ -448,6 +449,76 @@ async fn test_tx_invoke_contract() {
     assert_eq!(balance, Scalar::from((100 * COIN_VALUE) - total_spend) * (*G));
 }
 
+// Test contract deposits with multiple deposits
+// Verifies that deposits are correctly deducted from sender balance
+// NOTE: Private deposits (private: true) require TransactionBuilder support for contract keys
+// Currently TransactionBuilder::build_deposits_commitments() receives &None for contract_key
+// See: common/src/transaction/builder/mod.rs:793 and mod.rs:805
+#[tokio::test]
+async fn test_tx_invoke_contract_multiple_deposits() {
+    let mut alice = Account::new();
+
+    alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
+
+    let tx = {
+        let mut state = AccountStateImpl {
+            balances: alice.balances.clone(),
+            nonce: alice.nonce,
+            reference: Reference {
+                topoheight: 0,
+                hash: Hash::zero(),
+            },
+        };
+
+        let data = TransactionTypeBuilder::InvokeContract(InvokeContractBuilder {
+            contract: Hash::zero(),
+            chunk_id: 0,
+            max_gas: 1000,
+            parameters: Vec::new(),
+            deposits: [
+                (TOS_ASSET, ContractDepositBuilder {
+                    amount: 50 * COIN_VALUE,
+                    private: false  // Public deposit
+                })
+            ].into_iter().collect(),
+            contract_key: None
+        });
+        let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), None, data, FeeBuilder::default());
+        let estimated_size = builder.estimate_size();
+        let tx = builder.build(&mut state, &alice.keypair).unwrap();
+        assert!(estimated_size == tx.size(), "expected {} bytes got {} bytes", tx.size(), estimated_size);
+        assert!(tx.to_bytes().len() == estimated_size);
+
+        Arc::new(tx)
+    };
+
+    let mut state = ChainState::new();
+    let mut module = Module::new();
+    module.add_entry_chunk(Chunk::new());
+    state.contracts.insert(Hash::zero(), module);
+
+    // Create the chain state
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.ciphertext.clone().take_ciphertext().unwrap());
+        }
+        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
+            balances,
+            nonce: alice.nonce,
+        });
+    }
+
+    let hash = tx.hash();
+    tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
+
+    // Check Alice balance (sender side - should reflect deduction)
+    let balance = alice.keypair.decrypt_to_point(&state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET]);
+    // 50 coins deposit + tx fee + 1000 gas fee
+    let total_spend = (50 * COIN_VALUE) + tx.fee + 1000;
+
+    assert_eq!(balance, Scalar::from((100 * COIN_VALUE) - total_spend) * (*G));
+}
 
 #[tokio::test]
 async fn test_tx_deploy_contract() {

@@ -321,7 +321,7 @@ impl<S: Storage> Blockchain<S> {
         info!("Initializing GHOSTDAG manager with k=10, genesis={}", genesis_hash);
         }
         let ghostdag = Arc::new(TosGhostdag::new(
-            10, // k parameter (same as Kaspa)
+            10, // k parameter (standard BlockDAG value)
             genesis_hash,
             reachability,
         ));
@@ -2885,7 +2885,7 @@ impl<S: Storage> Blockchain<S> {
                 );
                 }
 
-                // SECURITY FIX: Validate blue_score consistency (Kaspa audit finding)
+                // SECURITY FIX: Validate blue_score consistency (BlockDAG security audit finding)
                 // Verify that the block's claimed blue_score matches the GHOSTDAG-calculated value
                 // This prevents malicious blocks from claiming incorrect blue_score values
                 if block.get_blue_score() != ghostdag_data.blue_score {

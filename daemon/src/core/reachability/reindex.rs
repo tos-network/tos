@@ -17,12 +17,12 @@ pub struct ReindexContext {
     subtree_sizes: HashMap<Hash, u64>,
 
     /// Reindex depth: reindex root stays this many blocks behind tip
-    /// Default: 100 blocks (from Kaspa)
+    /// Default: 100 blocks (standard BlockDAG value)
     #[allow(dead_code)]
     depth: u64,
 
     /// Reindex slack: minimum height difference required to switch reindex root chains
-    /// Default: 16384 blocks (from Kaspa) - provides reorg protection
+    /// Default: 16384 blocks (standard BlockDAG value) - provides reorg protection
     #[allow(dead_code)]
     slack: u64,
 }
@@ -115,7 +115,7 @@ impl ReindexContext {
     /// Calculates the number of blocks in the subtree rooted at each block.
     /// Uses BFS to avoid stack overflow on deep chains.
     ///
-    /// This is the CORRECT algorithm from Kaspa:
+    /// This is the CORRECT reachability reindexing algorithm:
     /// 1. BFS traversal to reach all leaves
     /// 2. When leaf found (no children), mark subtree_size = 1
     /// 3. Walk UP parent chain from leaf to root, updating parent sizes

@@ -102,7 +102,7 @@ pub const MAX_BLOCK_SIZE: usize = (BYTES_PER_KB * BYTES_PER_KB) + (256 * BYTES_P
 
 // BlockDAG rules
 // Increased from 3 to 32 for GHOSTDAG Phase 1 (TIP-2)
-// Kaspa uses 10, but we want headroom for complex DAG scenarios
+// Standard BlockDAG protocols use 10, but we want headroom for complex DAG scenarios
 pub const TIPS_LIMIT: usize = 32; // maximum 32 TIPS per block
 
 // Maximum number of parent levels in DAG header

@@ -56,7 +56,7 @@ Each test file should follow this structure:
 - **name**: Unique identifier for the test
 - **description**: Human-readable explanation of what the test verifies
 - **config**: Test configuration
-  - **k**: K-cluster parameter (typically 10 for TOS/Kaspa)
+  - **k**: K-cluster parameter (typically 10 for BlockDAG protocols)
   - **genesis_hash**: Genesis block hash (64 hex characters)
   - **version**: Test format version
 - **metadata**: Optional metadata for organization
@@ -216,7 +216,7 @@ Recommended tags for organizing tests:
 
 These JSON tests can be used by:
 - TOS (Rust implementation)
-- Kaspa (Go implementation)
+- Other BlockDAG implementations
 - Reference implementations
 - Third-party validators
 
@@ -241,7 +241,6 @@ When adding new tests:
 - **TIP-2**: GHOSTDAG Consensus Specification
 - **GHOSTDAG Paper**: https://eprint.iacr.org/2018/104.pdf
 - **TOS Documentation**: https://docs.tos.network
-- **Kaspa GHOSTDAG**: https://github.com/kaspanet/kaspad
 
 ## License
 

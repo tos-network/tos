@@ -259,7 +259,37 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
                     }
                 },
                 ContractDeposit::Private { .. } => {
-                    // TODO: we need to add the private deposit to the balance
+                    // IMPORTANT: Private deposits are currently disabled pending full implementation
+                    //
+                    // STATUS (2025-10-18):
+                    // - TransactionBuilder support: ✅ COMPLETE (users can create private deposit transactions)
+                    // - State application: ⏭️ PENDING (awaiting implementation)
+                    //
+                    // WHY DISABLED:
+                    // 1. Contract balances must remain plaintext u64 (mathematical limitation - Twisted ElGamal
+                    //    only supports addition, but smart contracts need multiplication, division, comparison)
+                    // 2. Decryption requires PrivateKey::from_hash() which needs cryptographic review
+                    // 3. Privacy model needs clarification (deterministic contract keys = public decryption)
+                    //
+                    // NEXT STEPS:
+                    // 1. Complete cryptographic design and security review
+                    // 2. Implement PrivateKey::from_hash() after validation
+                    // 3. Add decryption logic to convert encrypted deposit to plaintext u64
+                    // 4. Conduct thorough testing and audit
+                    //
+                    // See: /Users/tomisetsu/tos-network/memo/PRIVATE_DEPOSITS_FEASIBILITY_ANALYSIS.md
+                    //      /Users/tomisetsu/tos-network/memo/PRIVATE_DEPOSITS_IMPLEMENTATION.md
+
+                    const ENABLE_PRIVATE_DEPOSITS: bool = false;
+
+                    if !ENABLE_PRIVATE_DEPOSITS {
+                        return Err(BlockchainError::InvalidTransactionFormat);
+                    }
+
+                    // Future implementation (pending completion):
+                    // 1. Derive contract private key: let contract_privkey = PrivateKey::from_hash(contract_hash);
+                    // 2. Decrypt deposit amount: let amount = decrypt(commitment, receiver_handle, contract_privkey);
+                    // 3. Add plaintext amount to contract balance (u64)
                 }
             }
         }

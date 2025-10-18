@@ -2,7 +2,7 @@
 //
 // This module provides infrastructure for loading and executing JSON-based GHOSTDAG tests.
 // It enables cross-implementation testing by allowing test cases to be defined in a
-// language-agnostic JSON format that can be shared between TOS, Kaspa, and other implementations.
+// language-agnostic JSON format that can be shared between different BlockDAG implementations.
 //
 // # Architecture
 //

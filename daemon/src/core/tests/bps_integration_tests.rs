@@ -110,7 +110,7 @@ fn test_bps_calculate_ghostdag_k_accuracy() {
 
     // For 10 BPS with D=2s, delta=0.001
     // x = 2 * D * lambda = 2 * 2 * 10 = 40.0
-    // Expected K ~63.4, Kaspa uses 124 (with safety margin)
+    // Expected K ~63.4, reference implementations use 124 (with safety margin)
     let k_ten_bps = calculate_ghostdag_k(40.0, 0.001);
     assert!(k_ten_bps >= 60 && k_ten_bps <= 65, "K for 10 BPS should be 60-65, got {}", k_ten_bps);
 }

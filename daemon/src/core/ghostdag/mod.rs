@@ -70,7 +70,7 @@ pub fn calc_work_from_difficulty(difficulty: &Difficulty) -> BlueWorkType {
     }
 
     // Calculate work: (~target / (target + 1)) + 1
-    // This formula is from Bitcoin and Kaspa
+    // This formula is from Bitcoin's difficulty calculation
     // Source: https://github.com/bitcoin/bitcoin/blob/2e34374bf3e12b37b0c66824a6c998073cdfab01/src/chain.cpp#L131
     let res = (!target / (target + BlueWorkType::one())) + BlueWorkType::one();
 
@@ -139,7 +139,7 @@ impl Ord for SortableBlock {
 ///
 /// For details, see: https://eprint.iacr.org/2018/104.pdf
 pub struct TosGhostdag {
-    /// K-cluster parameter (typically 10 for Kaspa, we start with 10)
+    /// K-cluster parameter (typically 10 for standard BlockDAG protocols)
     k: KType,
 
     /// Genesis block hash

@@ -90,6 +90,8 @@ pub enum GenerationError<T> {
     InvalidConstructorInvoke,
     #[error("No contract key provided for private deposits")]
     MissingContractKey,
+    #[error("Invalid contract key (decompression failed)")]
+    InvalidContractKey,
     #[error("Empty transfers")]
     EmptyTransfers,
     #[error("Max transfer count reached")]
@@ -787,10 +789,17 @@ impl TransactionBuilder {
                     return Err(GenerationError::MaxGasReached.into())
                 }
 
+                // Decompress contract_key if provided for private deposits
+                let decompressed_contract_key = payload.contract_key
+                    .as_ref()
+                    .map(|compressed| compressed.decompress())
+                    .transpose()
+                    .map_err(|_| GenerationError::InvalidContractKey)?;
+
                 deposits_commitments = Self::build_deposits_commitments::<B::Error>(
                     &payload.deposits,
                     source_keypair.get_public_key(),
-                    &None
+                    &decompressed_contract_key
                 )?;
             },
             TransactionTypeBuilder::DeployContract(payload) => {
@@ -799,6 +808,9 @@ impl TransactionBuilder {
                         return Err(GenerationError::MaxGasReached.into())
                     }
 
+                    // Note: DeployContractInvokeBuilder doesn't have contract_key field
+                    // because the contract hash is not known until deployment
+                    // Private deposits during deployment are not supported
                     deposits_commitments = Self::build_deposits_commitments::<B::Error>(
                         &invoke.deposits,
                         source_keypair.get_public_key(),

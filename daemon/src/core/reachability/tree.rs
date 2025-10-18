@@ -10,7 +10,7 @@ use tos_common::crypto::Hash;
 
 use super::reindex::ReindexContext;
 
-/// Reindex configuration constants (from Kaspa)
+/// Reachability reindex configuration constants
 pub const DEFAULT_REINDEX_DEPTH: u64 = 100;   // Reindex root stays ~100 blocks behind tip
 pub const DEFAULT_REINDEX_SLACK: u64 = 1 << 14; // 16384 blocks - reorg protection threshold
 

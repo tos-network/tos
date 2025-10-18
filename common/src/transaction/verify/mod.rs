@@ -106,6 +106,20 @@ struct DecompressedDepositCt {
     receiver_handle: DecryptHandle,
 }
 
+impl DecompressedDepositCt {
+    // NOTE: This method will be used when contract encrypted balance system is ready
+    // Currently disabled because TransactionBuilder doesn't support contract keys yet
+    #[allow(dead_code)]
+    fn get_ciphertext(&self, role: Role) -> Ciphertext {
+        let handle = match role {
+            Role::Receiver => self.receiver_handle.clone(),
+            Role::Sender => self.sender_handle.clone(),
+        };
+
+        Ciphertext::new(self.commitment.clone(), handle)
+    }
+}
+
 impl Transaction {
     pub fn has_valid_version_format(&self) -> bool {
         match self.version {

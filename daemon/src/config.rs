@@ -59,7 +59,7 @@ pub const GENESIS_BLOCK_DIFFICULTY: Difficulty = Difficulty::from_u64(1);
 
 // V-21 Fix: Increased from 500ms to 10 seconds (10000ms) to allow reasonable clock skew
 // Previous value (500ms) was too restrictive and caused network synchronization issues
-// Kaspa uses 132 seconds; 10 seconds provides good balance between security and reliability
+// Reference BlockDAG implementations use 132 seconds; 10 seconds provides good balance between security and reliability
 pub const TIMESTAMP_IN_FUTURE_LIMIT: TimestampSeconds = 10_000;
 
 // V-26 Fix: Maximum number of orphaned transactions to prevent unbounded memory growth
@@ -74,7 +74,7 @@ pub const PRUNE_SAFETY_LIMIT: u64 = STABLE_LIMIT * 10;
 // Maximum distance for a block to be considered "near" the main chain
 // Used in deviation checks to prevent accepting blocks too far from consensus
 //
-// Reference: Kaspa uses 86,400 blocks (24 hours @ 1 BPS) for mainnet
+// Reference: Production BlockDAG networks use 86,400 blocks (24 hours @ 1 BPS) for mainnet
 // TOS temporary setting: 1,000 blocks (~17 minutes @ 1 BPS)
 // TODO: Increase to production value (10,000-86,400) after virtual state implementation
 pub const STABLE_LIMIT: u64 = 1000;

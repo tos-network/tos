@@ -162,12 +162,12 @@ All benchmarks use [Criterion.rs](https://bheisler.github.io/criterion.rs/book/)
 2. Custom storage layout for GHOSTDAG
 3. Investigate faster ZK proof systems
 
-## Comparison with Kaspa
+## Performance Targets
 
-TOS aims to match Kaspa's GHOSTDAG performance while adding significant transaction verification speedups through batch and parallel processing:
+TOS aims to achieve high-performance GHOSTDAG consensus while adding significant transaction verification speedups through batch and parallel processing:
 
-| Metric | Kaspa | TOS Target |
-|--------|-------|------------|
+| Metric | Reference | TOS Target |
+|--------|-----------|------------|
 | Block validation | < 100 ms | < 100 ms |
 | DAG traversal | O(k), k=10 | O(k), k=10 |
 | Memory/block | ~50 KB | ~50-100 KB |
