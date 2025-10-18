@@ -15,7 +15,7 @@ use serde::{
 };
 use tos_vm::ValueCell;
 use crate::{
-    account::{Nonce, VersionedBalance, VersionedNonce},
+    account::{Nonce, VersionedNonce},
     block::{TopoHeight, Algorithm, BlockVersion, EXTRA_NONCE_SIZE},
     crypto::{Address, Hash, BlueWorkType},
     difficulty::Difficulty,

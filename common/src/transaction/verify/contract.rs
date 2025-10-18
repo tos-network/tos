@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::Context;
-use curve25519_dalek::Scalar;
 use log::{debug, trace, warn};
 use indexmap::IndexMap;
 use tos_vm::{ValueCell, VM};

@@ -15,8 +15,7 @@ use bulletproofs::RangeProof;
 use curve25519_dalek::{
     ristretto::CompressedRistretto,
     traits::Identity,
-    RistrettoPoint,
-    Scalar
+    RistrettoPoint
 };
 use indexmap::IndexMap;
 use log::{debug, trace};

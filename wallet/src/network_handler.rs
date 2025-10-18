@@ -7,7 +7,7 @@ use std::{
 use futures::{stream, StreamExt, TryStreamExt};
 use indexmap::IndexMap;
 use thiserror::Error;
-use anyhow::{Context, Error};
+use anyhow::Error;
 use log::{debug, error, info, trace, warn};
 use tos_common::{
     api::{
@@ -748,7 +748,7 @@ impl NetworkHandler {
             })
         };
 
-        while let Some((mut balance, topoheight, block)) = data_receiver.recv().await {
+        while let Some((balance, topoheight, block)) = data_receiver.recv().await {
             // add this topoheight in cache to not re-process it (blocks are independant of asset to have faster sync)
             // if its not already processed, do it
             if let Some(response) = block {

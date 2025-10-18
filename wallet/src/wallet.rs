@@ -35,15 +35,12 @@ use tos_common::{
     },
     network::Network,
     serializer::Serializer,
-    tokio::{
-        self,
-        sync::{
+    tokio::sync::{
             broadcast,
             Mutex,
             RwLock,
             Semaphore
-        }
-    },
+        },
     transaction::{
         builder::{
             FeeBuilder,
