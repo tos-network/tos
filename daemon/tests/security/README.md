@@ -15,6 +15,7 @@ This directory contains comprehensive security tests for all 27 vulnerabilities 
 | `ghostdag_security_tests.rs` | V-01 to V-07 | 17 | GHOSTDAG consensus security |
 | `state_security_tests.rs` | V-13 to V-19 | 14 | State management security |
 | `storage_security_tests.rs` | V-20 to V-27 | 12 | Storage and concurrency security |
+| `block_submission_tests.rs` | Issue #2 | 9 | Block submission path security (cache dependency fix) |
 | `integration_security_tests.rs` | All | 9 | Cross-component integration tests |
 | `test_utilities.rs` | - | - | Common test helpers and mocks |
 
@@ -65,6 +66,9 @@ cargo test --test '*' storage_security
 
 # Run integration tests
 cargo test --test '*' integration_security
+
+# Run block submission tests (Issue #2 fixes)
+cargo test --test '*' block_submission
 ```
 
 ### Run Tests by Category
