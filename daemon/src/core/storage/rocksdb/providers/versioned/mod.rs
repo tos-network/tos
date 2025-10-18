@@ -1,5 +1,5 @@
 use rocksdb::Direction;
-use log::trace;
+use log::{debug, trace};
 use tos_common::{
     block::TopoHeight,
     serializer::RawBytes,
@@ -71,43 +71,83 @@ impl RocksStorage {
     }
 
     pub fn delete_versioned_below_topoheight(&mut self, column_pointer: Column, column_versioned: Column, topoheight: TopoHeight, keep_last: bool) -> Result<(), BlockchainError> {
-        let start = topoheight.to_be_bytes();
         if keep_last {
-            for res in Self::iter_owned_internal::<RawBytes, TopoHeight>(&self.db, self.snapshot.as_ref(), IteratorMode::Start, column_pointer)? {
-                let (key, pointer) = res?;
+            // P1 Optimization Phase 2: Two-phase approach for keep_last=true
+            // Phase 1: Find all affected accounts (those with versions < topoheight)
+            use std::collections::HashSet;
+            let mut affected_accounts: HashSet<Vec<u8>> = HashSet::new();
 
-                // We fetch the last version to take its previous topoheight
-                // And we loop on it to delete them all until the end of the chained data
-                let mut prev_version = Some(pointer);
-                // If we are already below the threshold, we can directly erase without patching
-                let mut patched = pointer < topoheight;
+            // Scan versioned tree to find all entries below threshold
+            for res in Self::iter_owned_internal::<RawBytes, ()>(&self.db, self.snapshot.as_ref(), IteratorMode::Start, column_versioned)? {
+                let (key, _) = res?;
+                // Key format: [topoheight(8)][account_key...]
+                let key_topo = u64::from_be_bytes(key[0..8].try_into()
+                    .map_err(|_| BlockchainError::CorruptedData)?);
 
-                // Craft by hand the key
-                let mut versioned_key = vec![0; key.len() + 8];
-                versioned_key[8..].copy_from_slice(&key);
-                
-                while let Some(prev_topo) = prev_version {
-                    versioned_key[0..8].copy_from_slice(&prev_topo.to_be_bytes());
+                if key_topo >= topoheight {
+                    break;  // Keys are sorted, early exit optimization
+                }
 
-                    // Delete this version from DB if its below the threshold
-                    prev_version = self.load_from_disk(column_versioned, &versioned_key)?;
-                    if patched {
-                        Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &versioned_key)?;
-                    } else if prev_version.is_some_and(|v| v < topoheight) {
-                        if log::log_enabled!(log::Level::Trace) {
-                            trace!("Patching versioned data at topoheight {}", topoheight);
+                // Extract account key (without topoheight prefix)
+                let account_key = key[8..].to_vec();
+                affected_accounts.insert(account_key);
+            }
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Found {} affected accounts below topoheight {} (instead of scanning all accounts)",
+                    affected_accounts.len(), topoheight);
+            }
+
+            // Phase 2: Only walk version chains for affected accounts
+            for account_key in affected_accounts {
+                // Load the current pointer for this account
+                let pointer: Option<TopoHeight> = self.load_optional_from_disk(column_pointer, &account_key)?;
+
+                if let Some(pointer) = pointer {
+                    // We fetch the last version to take its previous topoheight
+                    // And we loop on it to delete them all until the end of the chained data
+                    let mut prev_version = Some(pointer);
+                    // If we are already below the threshold, we can directly erase without patching
+                    let mut patched = pointer < topoheight;
+
+                    // Craft by hand the key
+                    let mut versioned_key = vec![0; account_key.len() + 8];
+                    versioned_key[8..].copy_from_slice(&account_key);
+
+                    while let Some(prev_topo) = prev_version {
+                        versioned_key[0..8].copy_from_slice(&prev_topo.to_be_bytes());
+
+                        // Delete this version from DB if its below the threshold
+                        prev_version = self.load_from_disk(column_versioned, &versioned_key)?;
+                        if patched {
+                            Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &versioned_key)?;
+                        } else if prev_version.is_some_and(|v| v < topoheight) {
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("Patching versioned data at topoheight {}", topoheight);
+                            }
+                            patched = true;
+                            let mut data: Versioned<RawBytes> = self.load_from_disk(column_versioned, &versioned_key)?;
+                            data.set_previous_topoheight(None);
+
+                            Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &versioned_key, &data, false)?;
                         }
-                        patched = true;
-                        let mut data: Versioned<RawBytes> = self.load_from_disk(column_versioned, &versioned_key)?;
-                        data.set_previous_topoheight(None);
-
-                        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &versioned_key, &data, false)?;
                     }
                 }
             }
         } else {
-            for res in Self::iter_owned_internal::<RawBytes, ()>(&self.db, self.snapshot.as_ref(), IteratorMode::From(&start, Direction::Forward), column_versioned)? {
+            // P1 Optimization Phase 1: Fix BUG + early exit for keep_last=false
+            // BUG FIX: Was scanning FROM topoheight FORWARD (deleting >= topoheight)
+            // Correct: Scan from START and stop at topoheight (delete < topoheight)
+            for res in Self::iter_owned_internal::<RawBytes, ()>(&self.db, self.snapshot.as_ref(), IteratorMode::Start, column_versioned)? {
                 let (key, _) = res?;
+                // Key format: [topoheight(8)][data...]
+                let key_topo = u64::from_be_bytes(key[0..8].try_into()
+                    .map_err(|_| BlockchainError::CorruptedData)?);
+
+                if key_topo >= topoheight {
+                    break;  // Early exit: keys are sorted, stop when we reach threshold
+                }
+
                 Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &key)?;
             }
         }

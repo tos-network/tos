@@ -129,42 +129,76 @@ impl SledStorage {
             trace!("delete versioned data below topoheight {}", topoheight);
         }
         if keep_last {
-            for el in Self::iter(snapshot.as_ref(), tree_pointer) {
-                let (key, value) = el?;
-                let topo = u64::from_bytes(&value)?;
+            // P1 Optimization Phase 2: Two-phase approach for keep_last=true
+            // Phase 1: Find all affected accounts (those with versions < topoheight)
+            use std::collections::HashSet;
+            let mut affected_accounts: HashSet<Vec<u8>> = HashSet::new();
 
-                // We fetch the last version to take its previous topoheight
-                // And we loop on it to delete them all until the end of the chained data
-                let mut prev_version = Self::load_from_disk_internal::<Option<u64>>(snapshot.as_ref(), tree_versioned, &Self::get_versioned_key(&key, topo), context)?;
-                // If we are already below the threshold, we can directly erase without patching
-                let mut patched = topo < topoheight;
-                while let Some(prev_topo) = prev_version {
-                    let key = Self::get_versioned_key(&key, prev_topo);
+            // Scan versioned tree to find all entries below threshold
+            for el in Self::iter_keys(snapshot.as_ref(), tree_versioned) {
+                let key = el?;
+                // Key format: [topoheight(8)][account_key...]
+                let topo = u64::from_bytes(&key[0..8])?;
 
-                    // Delete this version from DB if its below the threshold
-                    if patched {
-                        prev_version = Self::remove_from_disk(snapshot.as_mut(), &tree_versioned, &key)?;
-                    } else {
-                        prev_version = Self::load_from_disk_internal(snapshot.as_ref(), tree_versioned, &key, context)?;
-                        if prev_version.filter(|v| *v < topoheight).is_some() {
-                            if log::log_enabled!(log::Level::Trace) {
-                                trace!("Patching versioned data at topoheight {}", topoheight);
+                if topo >= topoheight {
+                    break;  // Keys are sorted, early exit optimization
+                }
+
+                // Extract account key (without topoheight prefix)
+                let account_key = key[8..].to_vec();
+                affected_accounts.insert(account_key);
+            }
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Found {} affected accounts below topoheight {} (instead of scanning all accounts)",
+                    affected_accounts.len(), topoheight);
+            }
+
+            // Phase 2: Only walk version chains for affected accounts
+            for account_key in affected_accounts {
+                // Load the current pointer for this account
+                let value = Self::load_optional_from_disk_internal::<Vec<u8>>(snapshot.as_ref(), tree_pointer, &account_key)?;
+
+                if let Some(value) = value {
+                    let topo = u64::from_bytes(&value)?;
+
+                    // We fetch the last version to take its previous topoheight
+                    // And we loop on it to delete them all until the end of the chained data
+                    let mut prev_version = Self::load_from_disk_internal::<Option<u64>>(snapshot.as_ref(), tree_versioned, &Self::get_versioned_key(&account_key, topo), context)?;
+                    // If we are already below the threshold, we can directly erase without patching
+                    let mut patched = topo < topoheight;
+                    while let Some(prev_topo) = prev_version {
+                        let key = Self::get_versioned_key(&account_key, prev_topo);
+
+                        // Delete this version from DB if its below the threshold
+                        if patched {
+                            prev_version = Self::remove_from_disk(snapshot.as_mut(), &tree_versioned, &key)?;
+                        } else {
+                            prev_version = Self::load_from_disk_internal(snapshot.as_ref(), tree_versioned, &key, context)?;
+                            if prev_version.filter(|v| *v < topoheight).is_some() {
+                                if log::log_enabled!(log::Level::Trace) {
+                                    trace!("Patching versioned data at topoheight {}", topoheight);
+                                }
+                                patched = true;
+                                let mut data: Versioned<NoTransform> = Self::load_from_disk_internal(snapshot.as_ref(), tree_versioned, &key, context)?;
+                                data.set_previous_topoheight(None);
+                                Self::insert_into_disk(snapshot.as_mut(), tree_versioned, key, data.to_bytes())?;
                             }
-                            patched = true;
-                            let mut data: Versioned<NoTransform> = Self::load_from_disk_internal(snapshot.as_ref(), tree_versioned, &key, context)?;
-                            data.set_previous_topoheight(None);
-                            Self::insert_into_disk(snapshot.as_mut(), tree_versioned, key, data.to_bytes())?;
                         }
                     }
                 }
             }
         } else {
+            // P1 Optimization Phase 1: Early exit for keep_last=false
             for el in Self::iter_keys(snapshot.as_ref(), tree_versioned) {
                 let key = el?;
                 let topo = u64::from_bytes(&key[0..8])?;
-                if topo < topoheight {
-                    Self::remove_from_disk_without_reading(snapshot.as_mut(), tree_versioned, &key)?;
+
+                if topo >= topoheight {
+                    break;  // Early exit: keys are sorted, stop when we reach threshold
                 }
+
+                Self::remove_from_disk_without_reading(snapshot.as_mut(), tree_versioned, &key)?;
             }
         }
         Ok(())
