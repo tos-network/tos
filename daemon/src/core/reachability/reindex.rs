@@ -10,8 +10,6 @@ use tos_common::crypto::Hash;
 
 use super::Interval;
 
-/// Space multiplier for reindexing operations
-///
 /// Space multiplier for propagate_interval allocation
 ///
 /// NOTE: This is NOT used in the reindex trigger condition anymore.
