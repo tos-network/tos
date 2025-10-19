@@ -191,16 +191,32 @@ pub async fn try_advancing_reindex_root<S: Storage>(
     let hint_data = storage.get_reachability_data(&hint).await?;
 
     // Check if hint is far enough ahead to warrant advancement
-    let required_height = current_root_data.height + DEFAULT_REINDEX_DEPTH;
+    // CRITICAL FIX: Require hint to be at least (DEPTH + SLACK/2) ahead
+    // This prevents advancing every single block and reduces advancement frequency
+    //
+    // Example: DEPTH=100, SLACK=16384 → threshold = 100 + 8192 = 8292
+    // With old logic: advance every block after height 100
+    // With new logic: advance every ~8000 blocks
+    //
+    // For smaller chains (< SLACK blocks), use minimum threshold of 2*DEPTH
+    let advancement_threshold = if current_root_data.height < DEFAULT_REINDEX_SLACK {
+        // Early chain: advance every 200 blocks (2 × DEFAULT_REINDEX_DEPTH)
+        DEFAULT_REINDEX_DEPTH * 2
+    } else {
+        // Mature chain: advance every ~8000 blocks
+        DEFAULT_REINDEX_DEPTH + DEFAULT_REINDEX_SLACK / 2
+    };
+
+    let required_height = current_root_data.height + advancement_threshold;
     if hint_data.height <= required_height {
         // Not far enough ahead - no advancement needed
         if log::log_enabled!(log::Level::Trace) {
             log::trace!(
-                "Reindex root advancement skipped: hint height {} <= required {} (current {} + depth {})",
+                "Reindex root advancement skipped: hint height {} <= required {} (current {} + threshold {})",
                 hint_data.height,
                 required_height,
                 current_root_data.height,
-                DEFAULT_REINDEX_DEPTH
+                advancement_threshold
             );
         }
         return Ok(());
