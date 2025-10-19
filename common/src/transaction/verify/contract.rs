@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    collections::HashMap,
     sync::Arc
 };
 
@@ -17,7 +16,7 @@ use crate::{
     transaction::{ContractDeposit, Transaction}
 };
 
-use super::{BlockchainApplyState, BlockchainVerificationState, DecompressedDepositCt, VerificationError};
+use super::{BlockchainApplyState, BlockchainVerificationState, VerificationError};
 
 #[derive(Debug)]
 pub enum InvokeContract {
@@ -44,7 +43,6 @@ impl Transaction {
         self: &'a Arc<Self>,
         tx_hash: &'a Hash,
         state: &mut B,
-        decompressed_deposits: &HashMap<&Hash, DecompressedDepositCt>,
         contract: &'a Hash,
         deposits: &'a IndexMap<Hash, ContractDeposit>,
         parameters: impl DoubleEndedIterator<Item = ValueCell>,
@@ -154,7 +152,7 @@ impl Transaction {
     
             if !deposits.is_empty() {
                 // It was not successful, we need to refund the deposits
-                self.refund_deposits(state, deposits, decompressed_deposits).await?;
+                self.refund_deposits(state, deposits).await?;
 
                 outputs.push(ContractOutput::RefundDeposits);
             }
@@ -220,7 +218,6 @@ impl Transaction {
         &'a self,
         state: &mut B,
         deposits: &'a IndexMap<Hash, ContractDeposit>,
-        _decompressed_deposits: &HashMap<&Hash, DecompressedDepositCt>,
     ) -> Result<(), VerificationError<E>> {
         for (asset, deposit) in deposits.iter() {
             if log::log_enabled!(log::Level::Trace) {

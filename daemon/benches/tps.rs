@@ -24,11 +24,11 @@ use std::{
 };
 
 use tos_common::{
-    account::{CiphertextCache, Nonce},
+    account::Nonce,
     block::BlockVersion,
     config::{COIN_VALUE, TOS_ASSET},
     crypto::{
-        elgamal::{Ciphertext, CompressedPublicKey, KeyPair},
+        elgamal::{CompressedPublicKey, KeyPair},
         Hash, Hashable,
     },
     transaction::{
@@ -43,9 +43,9 @@ use tos_vm::{Environment, Module};
 // Transaction construction helpers
 // -------------------------------------------------------------------------------------------------
 
+// Balance simplification: Removed CiphertextCache (plaintext u64 only)
 #[derive(Clone)]
 struct BalanceEntry {
-    cache: CiphertextCache,
     amount: u64,
 }
 
@@ -62,7 +62,7 @@ impl BenchAccount {
         let mut balances = HashMap::new();
         balances.insert(
             TOS_ASSET,
-            BalanceEntry { amount, cache: CiphertextCache::Decompressed(keypair.get_public_key().encrypt(amount)) },
+            BalanceEntry { amount },
         );
         Self { keypair, balances, nonce: 0 }
     }
@@ -78,10 +78,8 @@ impl BenchAccount {
             .entry(asset.clone())
             .or_insert_with(|| BalanceEntry {
                 amount: 0,
-                cache: CiphertextCache::Decompressed(self.keypair.get_public_key().encrypt(0u64)),
             });
         entry.amount = entry.amount.saturating_add(value);
-        entry.cache = CiphertextCache::Decompressed(self.keypair.get_public_key().encrypt(entry.amount));
     }
 }
 
@@ -118,18 +116,10 @@ impl AccountState for AccountStateImpl {
 
     fn get_reference(&self) -> Reference { self.reference.clone() }
 
-    fn get_account_ciphertext(&self, asset: &Hash) -> Result<CiphertextCache, Self::Error> {
-        Ok(self
-            .balances
-            .get(asset)
-            .map(|b| b.cache.clone())
-            .unwrap_or_else(|| CiphertextCache::Decompressed(Ciphertext::zero())))
-    }
-
-    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64, ciphertext: Ciphertext) -> Result<(), Self::Error> {
+    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64) -> Result<(), Self::Error> {
         self.balances.insert(
             asset.clone(),
-            BalanceEntry { amount: new_balance, cache: CiphertextCache::Decompressed(ciphertext) },
+            BalanceEntry { amount: new_balance },
         );
         Ok(())
     }
@@ -216,9 +206,10 @@ impl ExecutionLedger {
 // Simplified verification state implementing blockchain traits
 // -------------------------------------------------------------------------------------------------
 
+// Balance simplification: Changed from HashMap<Hash, Ciphertext> to HashMap<Hash, u64>
 #[derive(Clone)]
 struct VerificationAccountState {
-    balances: HashMap<Hash, Ciphertext>,
+    balances: HashMap<Hash, u64>,
     nonce: Nonce,
 }
 
@@ -240,12 +231,10 @@ impl VerificationState {
         };
 
         for account in accounts {
-            let mut balances = HashMap::new();
-            for (asset, balance) in &account.balances {
-                let mut cache = balance.cache.clone();
-                let ciphertext = cache.computable().expect("ciphertext").clone();
-                balances.insert(asset.clone(), ciphertext);
-            }
+            let balances: HashMap<Hash, u64> = account.balances
+                .iter()
+                .map(|(asset, balance)| (asset.clone(), balance.amount))
+                .collect();
             state.accounts.insert(
                 account.keypair.get_public_key().compress(),
                 VerificationAccountState { balances, nonce: account.nonce },
@@ -266,7 +255,7 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()> fo
         &'b mut self,
         account: Cow<'a, CompressedPublicKey>,
         asset: Cow<'a, Hash>,
-    ) -> Result<&'b mut Ciphertext, ()> {
+    ) -> Result<&'b mut u64, ()> {
         self.accounts
             .get_mut(account.as_ref())
             .and_then(|account| account.balances.get_mut(asset.as_ref()))
@@ -278,14 +267,14 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()> fo
         account: &'a CompressedPublicKey,
         asset: &'a Hash,
         _reference: &Reference,
-    ) -> Result<&'b mut Ciphertext, ()> {
+    ) -> Result<&'b mut u64, ()> {
         self.accounts
             .get_mut(account)
             .and_then(|account| account.balances.get_mut(asset))
             .ok_or(())
     }
 
-    async fn add_sender_output(&mut self, _account: &'a CompressedPublicKey, _asset: &'a Hash, _output: Ciphertext) -> Result<(), ()> {
+    async fn add_sender_output(&mut self, _account: &'a CompressedPublicKey, _asset: &'a Hash, _output: u64) -> Result<(), ()> {
         Ok(())
     }
 

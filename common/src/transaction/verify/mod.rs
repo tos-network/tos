@@ -5,7 +5,6 @@ mod zkp_cache;
 
 use std::{
     borrow::Cow,
-    collections::HashMap,
     iter,
     sync::Arc
 };
@@ -13,20 +12,17 @@ use std::{
 use anyhow::anyhow;
 // Balance simplification: RangeProof removed
 // use bulletproofs::RangeProof;
-use curve25519_dalek::traits::Identity;
 use indexmap::IndexMap;
 use log::{debug, trace};
 use tos_vm::ModuleValidator;
 
 use crate::{
     account::EnergyResource,
-    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
+    config::{MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     contract::ContractProvider,
     crypto::{
         elgamal::{
             DecompressionError,
-            DecryptHandle,
-            PedersenCommitment,
             PublicKey
         },
         hash,
@@ -46,10 +42,8 @@ use crate::{
 };
 use super::{
     ContractDeposit,
-    extra_data::Role,
     Transaction,
     TransactionType,
-    TransferPayload,
     payload::EnergyPayload
 };
 use contract::InvokeContract;
@@ -58,55 +52,11 @@ pub use state::*;
 pub use error::*;
 pub use zkp_cache::*;
 
-#[allow(dead_code)]
-struct DecompressedTransferCt {
-    commitment: PedersenCommitment,
-    sender_handle: DecryptHandle,
-    receiver_handle: DecryptHandle,
-}
-
-impl DecompressedTransferCt {
-    // TransferPayload no longer has get_commitment(), get_sender_handle(), get_receiver_handle()
-    // These methods were removed when switching to plaintext balances
-    #[allow(dead_code)]
-    fn decompress(_transfer: &TransferPayload) -> Result<Self, DecompressionError> {
-        // Stub implementation - this struct will be removed entirely
-        // For now, return dummy values to allow compilation
-        use curve25519_dalek::ristretto::RistrettoPoint;
-        let identity = RistrettoPoint::identity();
-        Ok(Self {
-            commitment: PedersenCommitment::from_point(identity),
-            sender_handle: DecryptHandle::from_point(identity),
-            receiver_handle: DecryptHandle::from_point(identity),
-        })
-    }
-
-    #[allow(dead_code)]
-    fn get_ciphertext(&self, _role: Role) -> u64 {
-        // For now return 0 as placeholder
-        0
-    }
-}
 
 // Decompressed deposit ciphertext
 // Transaction deposits are stored in a compressed format
 // We need to decompress them only one time
 // This struct will be removed when contract deposits are changed to plain u64
-#[allow(dead_code)]
-struct DecompressedDepositCt {
-    commitment: PedersenCommitment,
-    sender_handle: DecryptHandle,
-    receiver_handle: DecryptHandle,
-}
-
-impl DecompressedDepositCt {
-    // Legacy: Placeholder for contract encrypted balance migration
-    #[allow(dead_code)]
-    fn get_ciphertext(&self, _role: Role) -> u64 {
-        // Balance simplification: Returns 0 until contract deposits use plain u64
-        0
-    }
-}
 
 impl Transaction {
     pub fn has_valid_version_format(&self) -> bool {
@@ -128,167 +78,13 @@ impl Transaction {
 
     /// Get the new output ciphertext
     /// This is used to substract the amount from the sender's balance
-    #[allow(dead_code)]
-    fn get_sender_output_ct(
-        &self,
-        asset: &Hash,
-        decompressed_transfers: &[DecompressedTransferCt],
-        decompressed_deposits: &HashMap<&Hash, DecompressedDepositCt>,
-    ) -> Result<u64, DecompressionError> {
-        let mut output = 0u64;
 
-        if *asset == TOS_ASSET {
-            // Fees are applied to the native blockchain asset only.
-            output += self.fee;
-        }
-
-        match &self.data {
-            TransactionType::Transfers(transfers) => {
-                for (transfer, d) in transfers.iter().zip(decompressed_transfers.iter()) {
-                    if asset == transfer.get_asset() {
-                        output += d.get_ciphertext(Role::Sender);
-                    }
-                }
-            }
-            TransactionType::Burn(payload) => {
-                if *asset == payload.asset {
-                    output += payload.amount
-                }
-            },
-            TransactionType::MultiSig(_) => {},
-            TransactionType::InvokeContract(payload) => {
-                if *asset == TOS_ASSET {
-                    output += payload.max_gas;
-                }
-
-                if let Some(deposit) = payload.deposits.get(asset) {
-                    match deposit {
-                        ContractDeposit::Public(amount) => {
-                            output += *amount;
-                        },
-                        ContractDeposit::Private { .. } => {
-                            // For now, private deposits need to be handled differently
-                            // This represents encrypted deposit handling that needs refactoring
-                            let _decompressed = decompressed_deposits.get(asset)
-                                .ok_or(DecompressionError::InvalidPoint)?;
-                            // Stub: Cannot extract plain amount from encrypted deposit yet
-                        }
-                    }
-                }
-            },
-            TransactionType::DeployContract(payload) => {
-                if let Some(invoke) = payload.invoke.as_ref() {
-                    if *asset == TOS_ASSET {
-                        output += invoke.max_gas;
-                    }
-
-                    if let Some(deposit) = invoke.deposits.get(asset) {
-                        match deposit {
-                            ContractDeposit::Public(amount) => {
-                                output += *amount;
-                            },
-                            ContractDeposit::Private { .. } => {
-                                // For now, private deposits need to be handled differently
-                                let _decompressed = decompressed_deposits.get(asset)
-                                    .ok_or(DecompressionError::InvalidPoint)?;
-                                // Stub: Cannot extract plain amount from encrypted deposit yet
-                            }
-                        }
-                    }
-                }
-
-                // Burn a full coin for each contract deployed
-                if *asset == TOS_ASSET {
-                    output += BURN_PER_CONTRACT;
-                }
-            },
-            TransactionType::Energy(payload) => {
-                // Energy operations consume TOS for freeze/unfreeze operations
-                // The amount is deducted from TOS balance and converted to energy
-                match payload {
-                    EnergyPayload::FreezeTos { amount, duration } => {
-                        // For freeze operations, deduct the freeze amount from TOS balance
-                        if *asset == TOS_ASSET {
-                            output += *amount;
-                            let _energy_gained = (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier();
-                            if log::log_enabled!(log::Level::Debug) {
-                                debug!("FreezeTos operation: deducting {} TOS from balance for asset {}", amount, asset);
-                            }
-                            if log::log_enabled!(log::Level::Debug) {
-                                debug!("  Duration: {:?}, Energy gained: {} units", duration, _energy_gained);
-                            }
-                        }
-                    },
-                    EnergyPayload::UnfreezeTos { amount } => {
-                        // For unfreeze operations, no TOS deduction (it's returned to balance)
-                        // But we still need to account for the energy removal
-                        // The amount is already handled in the energy system
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("UnfreezeTos operation: no TOS deduction for asset {} (amount: {})", asset, amount);
-                        }
-                        debug!("  Energy will be removed from energy resource during apply phase");
-                    }
-                }
-            },
-            TransactionType::AIMining(payload) => {
-                // AI Mining operations may involve TOS rewards or stakes
-                match payload {
-                    crate::ai_mining::AIMiningPayload::PublishTask { reward_amount, .. } => {
-                        // For task publishing, deduct the reward amount from TOS balance
-                        if *asset == TOS_ASSET {
-                            output += *reward_amount;
-                        }
-                    },
-                    crate::ai_mining::AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
-                        // For answer submission, deduct the stake amount from TOS balance
-                        if *asset == TOS_ASSET {
-                            output += *stake_amount;
-                        }
-                    },
-                    crate::ai_mining::AIMiningPayload::RegisterMiner { registration_fee, .. } => {
-                        // For miner registration, deduct the registration fee from TOS balance
-                        if *asset == TOS_ASSET {
-                            output += *registration_fee;
-                        }
-                    },
-                    crate::ai_mining::AIMiningPayload::ValidateAnswer { .. } => {
-                        // Validation doesn't involve direct TOS transfers
-                    }
-                }
-            }
-        }
-
-        Ok(output)
-    }
-
-    /// Get the new output ciphertext for the sender
+    /// Get the new output amounts for the sender
+    /// Balance simplification: Returns plain u64 amounts instead of ciphertexts
     pub fn get_expected_sender_outputs<'a>(&'a self) -> Result<Vec<(&'a Hash, u64)>, DecompressionError> {
-        let mut _decompressed_deposits = HashMap::new();
-        match &self.data {
-            TransactionType::Transfers(_transfers) => {
-            },
-            TransactionType::InvokeContract(payload) => {
-                for (asset, deposit) in &payload.deposits {
-                    match deposit {
-                        ContractDeposit::Private { commitment, sender_handle, receiver_handle, .. } => {
-                            let decompressed = DecompressedDepositCt {
-                                commitment: commitment.decompress()?,
-                                sender_handle: sender_handle.decompress()?,
-                                receiver_handle: receiver_handle.decompress()?,
-                            };
-
-                            _decompressed_deposits.insert(asset, decompressed);
-                        },
-                        _ => {}
-                    }
-                }
-            },
-            _ => {}
-        }
-
         // This method previously collected sender output ciphertexts for each asset
         // With plaintext balances, no commitments or ciphertexts needed
-        // Return empty vector for now
+        // Return empty vector for now (amounts are handled directly in apply())
         let outputs = Vec::new();
         Ok(outputs)
     }
@@ -298,53 +94,6 @@ impl Transaction {
     // Kept as no-ops for now to maintain call sites during refactoring
 
     // Verify that the commitment assets match the assets used in the tx
-    fn verify_commitment_assets(&self) -> bool {
-        return true;
-
-        /*
-        let has_commitment_for_asset = |asset| {
-            self.source_commitments
-                .iter()
-                .any(|c| c.get_asset() == asset)
-        };
-
-        // TOS_ASSET is always required for fees
-        if !has_commitment_for_asset(&TOS_ASSET) {
-            return false;
-        }
-
-        // Check for duplicates
-        // Don't bother with hashsets or anything, number of transfers should be constrained
-        if self
-            .source_commitments
-            .iter()
-            .enumerate()
-            .any(|(i, c)| {
-                self.source_commitments
-                    .iter()
-                    .enumerate()
-                    .any(|(i2, c2)| i != i2 && c.get_asset() == c2.get_asset())
-            })
-        {
-            return false;
-        }
-
-        match &self.data {
-            TransactionType::Transfers(transfers) => transfers
-                .iter()
-                .all(|transfer| has_commitment_for_asset(transfer.get_asset())),
-            TransactionType::Burn(payload) => has_commitment_for_asset(&payload.asset),
-            TransactionType::MultiSig(_) => true,
-            TransactionType::InvokeContract(payload) => payload
-                .deposits
-                .keys()
-                .all(|asset| has_commitment_for_asset(asset)),
-            TransactionType::DeployContract(_) => true,
-            TransactionType::Energy(_) => true,
-            TransactionType::AIMining(_) => true,
-        }
-        */
-    }
 
     // This method previously decompressed private contract deposits for proof verification
     // With plaintext balances (ContractDeposit::Public only), no decompression needed
@@ -361,7 +110,6 @@ impl Transaction {
     // 3. No decompression needed
     fn verify_invoke_contract<'a, E>(
         &self,
-        _deposits_decompressed: &mut HashMap<&'a Hash, DecompressedDepositCt>,
         deposits: &'a IndexMap<Hash, ContractDeposit>,
         max_gas: u64
     ) -> Result<(), VerificationError<E>> {
@@ -408,7 +156,6 @@ impl Transaction {
         &self,
         _source_decompressed: &PublicKey,
         _dest_pubkey: &PublicKey,
-        _deposits_decompressed: &HashMap<&Hash, DecompressedDepositCt>,
         deposits: &IndexMap<Hash, ContractDeposit>,
     ) -> Result<(), VerificationError<E>> {
         // Stub implementation - proof verification removed
@@ -436,8 +183,7 @@ impl Transaction {
         tx_hash: &'a Hash,
         state: &mut B,
     ) -> Result<(), VerificationError<E>> {
-        let mut transfers_decompressed = Vec::new();
-        let mut deposits_decompressed = HashMap::new();
+        // Balance simplification: No decompression needed for plaintext balances
 
         trace!("Pre-verifying transaction on state");
         state.pre_verify_tx(&self).await
@@ -462,13 +208,8 @@ impl Transaction {
         }
 
         match &self.data {
-            TransactionType::Transfers(transfers) => {
-                for transfer in transfers.iter() {
-                    let decompressed = DecompressedTransferCt::decompress(transfer)
-                        .map_err(ProofVerificationError::from)?;
-
-                    transfers_decompressed.push(decompressed);
-                }
+            TransactionType::Transfers(_transfers) => {
+                // Balance simplification: No decompression needed
             },
             TransactionType::Burn(_) => {},
             TransactionType::MultiSig(payload) => {
@@ -480,7 +221,6 @@ impl Transaction {
             },
             TransactionType::InvokeContract(payload) => {
                 self.verify_invoke_contract(
-                    &mut deposits_decompressed,
                     &payload.deposits,
                     payload.max_gas
                 )?;
@@ -506,7 +246,6 @@ impl Transaction {
             TransactionType::DeployContract(payload) => {
                 if let Some(invoke) = payload.invoke.as_ref() {
                     self.verify_invoke_contract(
-                        &mut deposits_decompressed,
                         &invoke.deposits,
                         invoke.max_gas
                     )?;
@@ -627,13 +366,9 @@ impl Transaction {
             ));
         }
 
-        if !self.verify_commitment_assets() {
-            debug!("Invalid commitment assets");
-            return Err(VerificationError::Commitments);
-        }
+        // Balance simplification: No commitment verification needed
+        // Balance simplification: No decompression needed for plaintext balances
 
-        let mut transfers_decompressed: Vec<_> = Vec::new();
-        let mut deposits_decompressed: HashMap<_, _> = HashMap::new();
         match &self.data {
             TransactionType::Transfers(transfers) => {
                 if transfers.len() > MAX_TRANSFER_COUNT || transfers.is_empty() {
@@ -659,12 +394,9 @@ impl Transaction {
                         extra_data_size += size;
                     }
 
-                    let decompressed = DecompressedTransferCt::decompress(transfer)
-                        .map_err(ProofVerificationError::from)?;
-
-                    transfers_decompressed.push(decompressed);
+                    // Balance simplification: No decompression needed
                 }
-    
+
                 // Check the sum of extra data size
                 if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
                     return Err(VerificationError::TransactionExtraDataSize);
@@ -714,7 +446,6 @@ impl Transaction {
             },
             TransactionType::InvokeContract(payload) => {
                 self.verify_invoke_contract(
-                    &mut deposits_decompressed,
                     &payload.deposits,
                     payload.max_gas
                 )?;
@@ -740,7 +471,6 @@ impl Transaction {
             TransactionType::DeployContract(payload) => {
                 if let Some(invoke) = payload.invoke.as_ref() {
                     self.verify_invoke_contract(
-                        &mut deposits_decompressed,
                         &invoke.deposits,
                         invoke.max_gas
                     )?;
@@ -868,7 +598,6 @@ impl Transaction {
                 self.verify_contract_deposits(
                     &source_decompressed,
                     &dest_pubkey,
-                    &deposits_decompressed,
                     &payload.deposits,
                 )?;
             },
@@ -883,7 +612,6 @@ impl Transaction {
                     self.verify_contract_deposits(
                         &source_decompressed,
                         &dest_pubkey,
-                        &deposits_decompressed,
                         &invoke.deposits,
                     )?;
                 }
@@ -983,7 +711,6 @@ impl Transaction {
         self: &'a Arc<Self>,
         tx_hash: &'a Hash,
         state: &mut B,
-        decompressed_deposits: &HashMap<&Hash, DecompressedDepositCt>,
     ) -> Result<(), VerificationError<E>> {
         trace!("Applying transaction data");
         // Update nonce
@@ -1055,7 +782,6 @@ impl Transaction {
                     self.invoke_contract(
                         tx_hash,
                         state,
-                        decompressed_deposits,
                         &payload.contract,
                         &payload.deposits,
                         payload.parameters.iter().cloned(),
@@ -1069,7 +795,7 @@ impl Transaction {
 
                     // Nothing was spent, we must refund the gas and deposits
                     self.handle_gas(state, 0, payload.max_gas).await?;
-                    self.refund_deposits(state, &payload.deposits, decompressed_deposits).await?;
+                    self.refund_deposits(state, &payload.deposits).await?;
                 }
             },
             TransactionType::DeployContract(payload) => {
@@ -1080,7 +806,6 @@ impl Transaction {
                     let is_success = self.invoke_contract(
                         tx_hash,
                         state,
-                        decompressed_deposits,
                         tx_hash,
                         &invoke.deposits,
                         iter::empty(),
@@ -1199,32 +924,8 @@ impl Transaction {
         tx_hash: &'a Hash,
         state: &mut B,
     ) -> Result<(), VerificationError<E>> {
-        let mut deposits_decompressed = HashMap::new();
-        match &self.data {
-            TransactionType::Transfers(_transfers) => {
-                // Transfer ciphertexts no longer needed with plaintext balances
-            },
-            TransactionType::InvokeContract(payload) => {
-                for (asset, deposit) in &payload.deposits {
-                    match deposit {
-                        ContractDeposit::Private { commitment, sender_handle, receiver_handle, .. } => {
-                            let decompressed = DecompressedDepositCt {
-                                commitment: commitment.decompress()
-                                    .map_err(ProofVerificationError::from)?,
-                                sender_handle: sender_handle.decompress()
-                                    .map_err(ProofVerificationError::from)?,
-                                receiver_handle: receiver_handle.decompress()
-                                    .map_err(ProofVerificationError::from)?,
-                            };
-
-                            deposits_decompressed.insert(asset, decompressed);
-                        },
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
+        // Balance simplification: No decompression needed for plaintext balances
+        // Private deposits are not supported, only Public deposits with plain u64 amounts
 
         // This section previously processed source commitments for each asset
         // With plaintext balances, no commitments to process
@@ -1238,7 +939,7 @@ impl Transaction {
         //     state.add_sender_output(&self.source, asset, output).await?;
         // }
         //
-        // New plaintext approach (to be implemented):
+        // New plaintext approach (implemented in apply()):
         // For each asset used in transaction:
         // 1. Get current sender balance (plain u64) from state
         // 2. Calculate total spent = sum(transfer.amount) + sum(deposit.amount)
@@ -1246,7 +947,7 @@ impl Transaction {
         // 4. Update state: new_balance = balance - total_spent
         trace!("Skipping source commitment processing (plaintext balances)");
 
-        self.apply(tx_hash, state, &deposits_decompressed).await
+        self.apply(tx_hash, state).await
     }
 
     /// Verify only that the final sender balance is the expected one for each commitment
@@ -1259,32 +960,8 @@ impl Transaction {
     ) -> Result<(), VerificationError<E>> {
         trace!("apply with partial verify");
 
-        let mut deposits_decompressed = HashMap::new();
-        match &self.data {
-            TransactionType::Transfers(_transfers) => {
-                // Transfer ciphertexts no longer needed with plaintext balances
-            },
-            TransactionType::InvokeContract(payload) => {
-                for (asset, deposit) in &payload.deposits {
-                    match deposit {
-                        ContractDeposit::Private { commitment, sender_handle, receiver_handle, .. } => {
-                            let decompressed = DecompressedDepositCt {
-                                commitment: commitment.decompress()
-                                    .map_err(ProofVerificationError::from)?,
-                                sender_handle: sender_handle.decompress()
-                                    .map_err(ProofVerificationError::from)?,
-                                receiver_handle: receiver_handle.decompress()
-                                    .map_err(ProofVerificationError::from)?,
-                            };
-
-                            deposits_decompressed.insert(asset, decompressed);
-                        },
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
+        // Balance simplification: No decompression needed for plaintext balances
+        // Private deposits are not supported, only Public deposits with plain u64 amounts
 
         // This method previously verified CommitmentEqProof for each source commitment
         // With plaintext balances, no commitments or proofs to verify
@@ -1326,6 +1003,6 @@ impl Transaction {
                 .map_err(VerificationError::State)?;
         }
 
-        self.apply(tx_hash, state, &deposits_decompressed).await
+        self.apply(tx_hash, state).await
     }
 }
