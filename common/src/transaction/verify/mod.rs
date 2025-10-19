@@ -18,7 +18,7 @@ use tos_vm::ModuleValidator;
 
 use crate::{
     account::EnergyResource,
-    config::{MAX_GAS_USAGE_PER_TX, TOS_ASSET},
+    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     contract::ContractProvider,
     crypto::{
         elgamal::{
@@ -281,19 +281,99 @@ impl Transaction {
             }
         };
 
-        // With plaintext balances, we no longer need Pedersen commitments or CommitmentEqProof
-        // Instead, we'll directly verify balances using simple arithmetic
+        // SECURITY FIX: Verify sender has sufficient balance for all spending
+        // Calculate total spending per asset
+        // Use references to original Hash values in transaction (they live for 'a)
+        let mut spending_per_asset: IndexMap<&'a Hash, u64> = IndexMap::new();
 
-        // This section previously verified:
-        // 1. Decompressed source commitments
-        // 2. CommitmentEqProof for each asset
-        // 3. Updated sender balances in state
+        match &self.data {
+            TransactionType::Transfers(transfers) => {
+                for transfer in transfers {
+                    let asset = transfer.get_asset(); // Returns &Hash
+                    let amount = transfer.get_amount();
+                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    *current = current.checked_add(amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            },
+            TransactionType::Burn(payload) => {
+                let current = spending_per_asset.entry(&payload.asset).or_insert(0);
+                *current = current.checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            },
+            TransactionType::InvokeContract(payload) => {
+                // Add deposits
+                for (asset, deposit) in &payload.deposits {
+                    let amount = deposit.get_amount()
+                        .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    *current = current.checked_add(amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+                // Add max_gas to TOS spending
+                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                *current = current.checked_add(payload.max_gas)
+                    .ok_or(VerificationError::Overflow)?;
+            },
+            TransactionType::DeployContract(payload) => {
+                // Add BURN_PER_CONTRACT to TOS spending
+                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                *current = current.checked_add(BURN_PER_CONTRACT)
+                    .ok_or(VerificationError::Overflow)?;
 
-        // New plaintext approach (to be implemented):
-        // 1. Get current balance for each asset from state
-        // 2. Calculate expected new balance = current - (transfers + deposits + fees)
-        // 3. Verify new balance >= 0
-        // 4. Update state with new balance
+                // If invoking constructor, add deposits and max_gas
+                if let Some(invoke) = &payload.invoke {
+                    for (asset, deposit) in &invoke.deposits {
+                        let amount = deposit.get_amount()
+                            .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+                        let current = spending_per_asset.entry(asset).or_insert(0);
+                        *current = current.checked_add(amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    // Add max_gas to TOS spending
+                    let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                    *current = current.checked_add(invoke.max_gas)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            },
+            TransactionType::Energy(payload) => {
+                match payload {
+                    EnergyPayload::FreezeTos { amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current.checked_add(*amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    },
+                    EnergyPayload::UnfreezeTos { .. } => {
+                        // Unfreeze doesn't spend, it releases frozen funds
+                    }
+                }
+            },
+            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+                // No asset spending for these types
+            }
+        };
+
+        // Add fee to TOS spending (unless using energy fee)
+        if !self.get_fee_type().is_energy() {
+            let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+            *current = current.checked_add(self.fee)
+                .ok_or(VerificationError::Overflow)?;
+        }
+
+        // Verify sender has sufficient balance for each asset
+        // The Hash references in spending_per_asset live for 'a, so they can be passed to async functions
+        for (asset_hash, total_spending) in &spending_per_asset {
+            // Use transaction's reference for balance check (pre-transaction state)
+            let current_balance = state.get_sender_balance(&self.source, asset_hash, &self.reference).await
+                .map_err(VerificationError::State)?;
+
+            if *current_balance < *total_spending {
+                return Err(VerificationError::InsufficientFunds {
+                    available: *current_balance,
+                    required: *total_spending,
+                });
+            }
+        }
 
         Ok(())
     }
@@ -595,6 +675,95 @@ impl Transaction {
         // Balances are plain u64, always in valid range [0, 2^64)
         trace!("Skipping range proof verification (plaintext balances)");
 
+        // SECURITY FIX: Check balances inline (can't call verify_dynamic_parts as it also does CAS nonce update)
+        // Calculate total spending per asset and verify sender has sufficient balance
+        let mut spending_per_asset: IndexMap<&'a Hash, u64> = IndexMap::new();
+
+        match &self.data {
+            TransactionType::Transfers(transfers) => {
+                for transfer in transfers {
+                    let asset = transfer.get_asset();
+                    let amount = transfer.get_amount();
+                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    *current = current.checked_add(amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            },
+            TransactionType::Burn(payload) => {
+                let current = spending_per_asset.entry(&payload.asset).or_insert(0);
+                *current = current.checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            },
+            TransactionType::InvokeContract(payload) => {
+                for (asset, deposit) in &payload.deposits {
+                    let amount = deposit.get_amount()
+                        .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    *current = current.checked_add(amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+                // Add max_gas to TOS spending
+                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                *current = current.checked_add(payload.max_gas)
+                    .ok_or(VerificationError::Overflow)?;
+            },
+            TransactionType::DeployContract(payload) => {
+                // Add BURN_PER_CONTRACT to TOS spending
+                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                *current = current.checked_add(BURN_PER_CONTRACT)
+                    .ok_or(VerificationError::Overflow)?;
+
+                if let Some(invoke) = &payload.invoke {
+                    for (asset, deposit) in &invoke.deposits {
+                        let amount = deposit.get_amount()
+                            .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+                        let current = spending_per_asset.entry(asset).or_insert(0);
+                        *current = current.checked_add(amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    // Add max_gas to TOS spending
+                    let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                    *current = current.checked_add(invoke.max_gas)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            },
+            TransactionType::Energy(payload) => {
+                match payload {
+                    EnergyPayload::FreezeTos { amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current.checked_add(*amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    },
+                    EnergyPayload::UnfreezeTos { .. } => {
+                        // Unfreeze doesn't spend, it releases frozen funds
+                    }
+                }
+            },
+            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+                // No asset spending for these types
+            }
+        };
+
+        // Add fee to TOS spending (unless using energy fee)
+        if !self.get_fee_type().is_energy() {
+            let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+            *current = current.checked_add(self.fee)
+                .ok_or(VerificationError::Overflow)?;
+        }
+
+        // Verify sender has sufficient balance for each asset
+        for (asset_hash, total_spending) in &spending_per_asset {
+            let current_balance = state.get_sender_balance(&self.source, asset_hash, &self.reference).await
+                .map_err(VerificationError::State)?;
+
+            if *current_balance < *total_spending {
+                return Err(VerificationError::InsufficientFunds {
+                    available: *current_balance,
+                    required: *total_spending,
+                });
+            }
+        }
+
         Ok(())
     }
 
@@ -675,30 +844,132 @@ impl Transaction {
         state.update_account_nonce(self.get_source(), self.nonce + 1).await
             .map_err(VerificationError::State)?;
 
+        // SECURITY FIX: Deduct sender balances BEFORE adding to receivers
+        // Calculate total spending per asset for sender deduction
+        // Use references to original Hash values in transaction (they live for 'a)
+        let mut spending_per_asset: IndexMap<&'a Hash, u64> = IndexMap::new();
+
+        match &self.data {
+            TransactionType::Transfers(transfers) => {
+                for transfer in transfers {
+                    let asset = transfer.get_asset(); // Returns &Hash
+                    let amount = transfer.get_amount();
+                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    *current = current.checked_add(amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            },
+            TransactionType::Burn(payload) => {
+                let current = spending_per_asset.entry(&payload.asset).or_insert(0);
+                *current = current.checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            },
+            TransactionType::InvokeContract(payload) => {
+                // Add deposits
+                for (asset, deposit) in &payload.deposits {
+                    let amount = deposit.get_amount()
+                        .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    *current = current.checked_add(amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+                // Add max_gas to TOS spending
+                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                *current = current.checked_add(payload.max_gas)
+                    .ok_or(VerificationError::Overflow)?;
+            },
+            TransactionType::DeployContract(payload) => {
+                // Add BURN_PER_CONTRACT to TOS spending
+                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                *current = current.checked_add(BURN_PER_CONTRACT)
+                    .ok_or(VerificationError::Overflow)?;
+
+                // If invoking constructor, add deposits and max_gas
+                if let Some(invoke) = &payload.invoke {
+                    for (asset, deposit) in &invoke.deposits {
+                        let amount = deposit.get_amount()
+                            .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+                        let current = spending_per_asset.entry(asset).or_insert(0);
+                        *current = current.checked_add(amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    // Add max_gas to TOS spending
+                    let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                    *current = current.checked_add(invoke.max_gas)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            },
+            TransactionType::Energy(payload) => {
+                match payload {
+                    EnergyPayload::FreezeTos { amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current.checked_add(*amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    },
+                    EnergyPayload::UnfreezeTos { .. } => {
+                        // Unfreeze doesn't spend, it releases frozen funds
+                        // Instead it will be added back to sender balance below
+                    }
+                }
+            },
+            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+                // No asset spending for these types
+            }
+        };
+
+        // Add fee to TOS spending (unless using energy fee)
+        if !self.get_fee_type().is_energy() {
+            let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+            *current = current.checked_add(self.fee)
+                .ok_or(VerificationError::Overflow)?;
+
+            // Add fee to gas fee counter
+            state.add_gas_fee(self.fee).await
+                .map_err(VerificationError::State)?;
+        }
+
+        // Deduct from sender balance for each asset
+        // The Hash references in spending_per_asset live for 'a, so they can be passed to async functions
+        for (asset_hash, total_spending) in &spending_per_asset {
+            // SECURITY FIX: Get mutable reference and actually deduct the balance
+            // This ensures subsequent transactions in the same block see the reduced balance
+            // Without this mutation, transactions can double-spend within the same block
+            let current_balance = state.get_sender_balance(&self.source, asset_hash, &self.reference).await
+                .map_err(VerificationError::State)?;
+
+            // Deduct spending from sender balance (mutates the state)
+            *current_balance = current_balance.checked_sub(*total_spending)
+                .ok_or(VerificationError::Overflow)?;
+
+            // Track the spending in output_sum for final balance calculation
+            state.add_sender_output(&self.source, asset_hash, *total_spending).await
+                .map_err(VerificationError::State)?;
+        }
+
         // Handle energy consumption if this transaction uses energy for fees
         if self.get_fee_type().is_energy() {
             // Only transfer transactions can use energy fees
             if let TransactionType::Transfers(_) = &self.data {
                 let energy_cost = self.calculate_energy_cost();
-                
+
                 // Get user's energy resource
                 let energy_resource = state.get_energy_resource(&self.source).await
                     .map_err(VerificationError::State)?;
-                
+
                 if let Some(mut energy_resource) = energy_resource {
                     // Check if user has enough energy
                     if !energy_resource.has_enough_energy(energy_cost) {
                         return Err(VerificationError::InsufficientEnergy(energy_cost));
                     }
-                    
+
                     // Consume energy
                     energy_resource.consume_energy(energy_cost)
                         .map_err(|_| VerificationError::InsufficientEnergy(energy_cost))?;
-                    
+
                     // Update energy resource in state
                     state.set_energy_resource(&self.source, energy_resource).await
                         .map_err(VerificationError::State)?;
-                    
+
                     if log::log_enabled!(log::Level::Debug) {
                         debug!("Consumed {} energy for transaction {}", energy_cost, tx_hash);
                     }
