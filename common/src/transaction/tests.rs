@@ -29,6 +29,7 @@ use crate::{
             DeployContractBuilder,
             InvokeContractBuilder,
             GenerationError,
+            EnergyBuilder,
         },
         extra_data::{
             derive_shared_key_from_opening,
@@ -961,6 +962,105 @@ async fn test_transfer_extra_data_limits() {
                    "Expected ExtraDataTooLarge or EncryptedExtraDataTooLarge error for total size");
         }
     }
+}
+
+// Test UnfreezeTos balance refund in verify phase
+// This test verifies that unfrozen TOS is returned to balance during verification
+#[tokio::test]
+async fn test_unfreeze_tos_balance_refund() {
+    let mut alice = Account::new();
+    let initial_balance = 1000 * COIN_VALUE;
+    let unfreeze_amount = 100 * COIN_VALUE;
+
+    // Set initial balance (simulating post-freeze state)
+    alice.set_balance(TOS_ASSET, initial_balance);
+
+    // Create and verify UnfreezeTos transaction
+    let unfreeze_tx = {
+        let mut state = AccountStateImpl {
+            balances: alice.balances.clone(),
+            nonce: alice.nonce,
+            reference: Reference {
+                topoheight: 0,
+                hash: Hash::zero(),
+            },
+        };
+
+        let data = TransactionTypeBuilder::Energy(EnergyBuilder {
+            amount: unfreeze_amount,
+            is_freeze: false,
+            freeze_duration: None,
+        });
+
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            alice.keypair.get_public_key().compress(),
+            None,
+            data,
+            FeeBuilder::Multiplier(1.0),
+        );
+        builder.build(&mut state, &alice.keypair).unwrap()
+    };
+
+    // Create chain state
+    let mut state = ChainState::new();
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
+            balances,
+            nonce: alice.nonce,
+        });
+    }
+
+    // Check balance before verify
+    let balance_before_verify = state.accounts.get(&alice.keypair.get_public_key().compress())
+        .unwrap()
+        .balances.get(&TOS_ASSET)
+        .unwrap();
+    println!("Balance before verify: {}", balance_before_verify);
+
+    // Verify UnfreezeTos transaction
+    let unfreeze_tx_hash = unfreeze_tx.hash();
+    let tx_fee = unfreeze_tx.fee; // Save actual fee from transaction
+    println!("Transaction fee: {}", tx_fee);
+    let unfreeze_result = Arc::new(unfreeze_tx).verify(&unfreeze_tx_hash, &mut state, &NoZKPCache).await;
+    assert!(unfreeze_result.is_ok(), "UnfreezeTos transaction should succeed");
+
+    // After UnfreezeTos verify: balance should be increased by unfreeze_amount but decreased by fee
+    // Expected: initial + unfreeze_amount - tx_fee (use actual tx fee, not hardcoded)
+    let alice_balance_after_unfreeze = state.accounts.get(&alice.keypair.get_public_key().compress())
+        .unwrap()
+        .balances.get(&TOS_ASSET)
+        .unwrap();
+    println!("Balance after verify: {}", alice_balance_after_unfreeze);
+
+    let expected_balance = initial_balance + unfreeze_amount - tx_fee;
+    println!("Expected balance: {} (initial {} + unfreeze {} - fee {})",
+        expected_balance, initial_balance, unfreeze_amount, tx_fee);
+    assert_eq!(
+        *alice_balance_after_unfreeze,
+        expected_balance,
+        "Balance should be initial + unfreeze_amount - fee (refund happens in verify phase)"
+    );
+
+    // CRITICAL CHECK: Verify balance was refunded (not just fee deducted)
+    // If refund didn't happen, balance would be: initial - tx_fee
+    let no_refund_balance = initial_balance - tx_fee;
+    assert_ne!(
+        *alice_balance_after_unfreeze,
+        no_refund_balance,
+        "Balance should show refund (if equal to this, refund logic is missing)"
+    );
+
+    println!("✅ UnfreezeTos test passed: Balance refund works correctly");
+    println!("   Initial balance:     {}", initial_balance);
+    println!("   Unfreeze amount:     {}", unfreeze_amount);
+    println!("   Transaction fee:     {}", tx_fee);
+    println!("   Final balance:       {}", expected_balance);
+    println!("   Formula verified:    {} + {} - {} = {}", initial_balance, unfreeze_amount, tx_fee, expected_balance);
 }
 
 #[async_trait]

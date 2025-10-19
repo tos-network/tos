@@ -382,6 +382,17 @@ impl Transaction {
                 .ok_or(VerificationError::Overflow)?;
         }
 
+        // Credit unfrozen TOS immediately in verification state (mempool/ChainState)
+        if let TransactionType::Energy(EnergyPayload::UnfreezeTos { amount }) = &self.data {
+            let balance = state.get_receiver_balance(
+                Cow::Borrowed(self.get_source()),
+                Cow::Borrowed(&TOS_ASSET)
+            ).await.map_err(VerificationError::State)?;
+
+            *balance = balance.checked_add(*amount)
+                .ok_or(VerificationError::Overflow)?;
+        }
+
         Ok(())
     }
 
@@ -779,6 +790,16 @@ impl Transaction {
                 .ok_or(VerificationError::Overflow)?;
         }
 
+        if let TransactionType::Energy(EnergyPayload::UnfreezeTos { amount }) = &self.data {
+            let balance = state.get_receiver_balance(
+                Cow::Borrowed(self.get_source()),
+                Cow::Borrowed(&TOS_ASSET)
+            ).await.map_err(VerificationError::State)?;
+
+            *balance = balance.checked_add(*amount)
+                .ok_or(VerificationError::Overflow)?;
+        }
+
         Ok(())
     }
 
@@ -1097,18 +1118,11 @@ impl Transaction {
                             state.set_energy_resource(&self.source, energy_resource).await
                                 .map_err(VerificationError::State)?;
 
-                            // CRITICAL FIX: Return unfrozen TOS to sender's balance
-                            // Unfreeze releases frozen funds back to the account
-                            let balance = state.get_receiver_balance(
-                                Cow::Borrowed(self.get_source()),
-                                Cow::Owned(TOS_ASSET)
-                            ).await.map_err(VerificationError::State)?;
-
-                            *balance = balance.checked_add(*amount)
-                                .ok_or(VerificationError::Overflow)?;
+                            // NOTE: Balance refund is done in verify phase (verify_dynamic_parts/pre_verify)
+                            // to keep mempool state consistent. Do NOT add balance here to avoid double-refund.
 
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("UnfreezeTos applied: {} TOS unfrozen and returned to balance", amount);
+                                debug!("UnfreezeTos applied: {} TOS unfrozen (balance already refunded in verify phase)", amount);
                             }
                         } else {
                             return Err(VerificationError::AnyError(anyhow::anyhow!("Invalid energy operation")));
