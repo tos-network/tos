@@ -122,17 +122,10 @@ impl Transaction {
         }
 
         // Validate all deposits are public with non-zero amounts
+        // Balance simplification: Validate plaintext deposits
         for (_asset, deposit) in deposits.iter() {
-            match deposit {
-                ContractDeposit::Public(amount) => {
-                    if *amount == 0 {
-                        return Err(VerificationError::InvalidFormat);
-                    }
-                },
-                ContractDeposit::Private { .. } => {
-                    // Should not happen with plaintext system
-                    return Err(VerificationError::InvalidFormat);
-                }
+            if deposit.amount() == 0 {
+                return Err(VerificationError::InvalidFormat);
             }
         }
 
@@ -162,18 +155,9 @@ impl Transaction {
         // In production, implement plaintext deposit verification here
         trace!("Skipping contract deposit proof verification (plaintext balances)");
 
-        // Basic validation: ensure all deposits are public
-        for (_asset, deposit) in deposits {
-            match deposit {
-                ContractDeposit::Public(_amount) => {
-                    // Valid - plaintext deposit
-                },
-                ContractDeposit::Private { .. } => {
-                    // Should not happen with plaintext system
-                    return Err(VerificationError::InvalidFormat);
-                }
-            }
-        }
+        // Balance simplification: All deposits are now plaintext
+        // Basic validation is performed in verify_invoke_contract
+        let _ = (deposits, _source_decompressed, _dest_pubkey);  // Suppress unused warnings
 
         Ok(())
     }

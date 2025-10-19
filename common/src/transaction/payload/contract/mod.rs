@@ -12,100 +12,62 @@ use tos_vm::{
     ValueCell,
     U256
 };
-use crate::{
-    crypto::{
-        elgamal::{CompressedCommitment, CompressedHandle},
-        proofs::CiphertextValidityProof
-    },
-    serializer::*
-};
+use crate::serializer::*;
 
 pub use deploy::*;
 pub use invoke::*;
 
+/// Contract deposit - plaintext balance system
+///
+/// Balance simplification: Only public deposits are supported.
+/// The amount is plaintext and visible to everyone.
+/// Private/encrypted deposits have been removed.
 #[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum ContractDeposit {
-    // Public deposit
-    // The amount is the amount of the asset deposited
-    // it is public and can be seen by anyone
-    Public(u64),
-    // Private deposit
-    // The ciphertext represents the amount of the asset deposited
-    Private {
-        commitment: CompressedCommitment,
-        // Sender handle is used to decrypt the commitment
-        sender_handle: CompressedHandle,
-        // Same as above, but for receiver
-        receiver_handle: CompressedHandle,
-        // The proof is a proof that the amount is a valid encryption
-        // for the smart contract to be compatible with its encrypted balance.
-        ct_validity_proof: CiphertextValidityProof,
-    }
-}
+#[serde(transparent)]
+pub struct ContractDeposit(pub u64);
 
 impl ContractDeposit {
-    /// Extract the deposit amount from a ContractDeposit
-    ///
-    /// Balance simplification: Only Public deposits are supported in plaintext balance system.
-    /// Private deposits should not be used and will return an error.
+    /// Create a new contract deposit with the specified amount
+    pub fn new(amount: u64) -> Self {
+        Self(amount)
+    }
+
+    /// Get the deposit amount
+    pub fn amount(&self) -> u64 {
+        self.0
+    }
+
+    /// Extract the deposit amount (for backward compatibility)
     pub fn get_amount(&self) -> Result<u64, &'static str> {
-        match self {
-            ContractDeposit::Public(amount) => Ok(*amount),
-            ContractDeposit::Private { .. } => {
-                Err("Private deposits are not supported in plaintext balance system")
-            }
-        }
+        Ok(self.0)
     }
 }
 
 impl Serializer for ContractDeposit {
     fn write(&self, writer: &mut Writer) {
-        match self {
-            ContractDeposit::Public(amount) => {
-                writer.write_u8(0);
-                writer.write_u64(amount);
-            },
-            ContractDeposit::Private {
-                commitment,
-                sender_handle,
-                receiver_handle,
-                ct_validity_proof
-            } => {
-                writer.write_u8(1);
-                commitment.write(writer);
-                sender_handle.write(writer);
-                receiver_handle.write(writer);
-                ct_validity_proof.write(writer);
-            }
-        }
+        // Write type tag (0 = Public) for potential future compatibility
+        writer.write_u8(0);
+        writer.write_u64(&self.0);
     }
 
     fn read(reader: &mut Reader) -> Result<ContractDeposit, ReaderError> {
-        Ok(match reader.read_u8()? {
-            0 => ContractDeposit::Public(reader.read_u64()?),
-            1 => ContractDeposit::Private {
-                commitment: CompressedCommitment::read(reader)?,
-                sender_handle: CompressedHandle::read(reader)?,
-                receiver_handle: CompressedHandle::read(reader)?,
-                ct_validity_proof: CiphertextValidityProof::read(reader)?
+        let type_tag = reader.read_u8()?;
+        match type_tag {
+            0 => {
+                // Public deposit
+                let amount = reader.read_u64()?;
+                Ok(ContractDeposit(amount))
             },
-            _ => return Err(ReaderError::InvalidValue)
-        })
+            1 => {
+                // Private deposits are no longer supported in development stage
+                Err(ReaderError::InvalidValue)
+            },
+            _ => Err(ReaderError::InvalidValue)
+        }
     }
 
     fn size(&self) -> usize {
-        1 + match self {
-            ContractDeposit::Public(amount) => amount.size(),
-            ContractDeposit::Private {
-                commitment,
-                sender_handle,
-                receiver_handle,
-                ct_validity_proof
-            } => {
-                commitment.size() + sender_handle.size() + receiver_handle.size() + ct_validity_proof.size()
-            }
-        }
+        1 + 8  // type tag (1 byte) + u64 amount (8 bytes)
     }
 }
 

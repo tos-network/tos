@@ -999,9 +999,10 @@ fn get_deposit_for_asset(_: FnInstance, params: FnParams, context: &mut Context)
 
     let chain_state: &ChainState = context.get().context("chain state not found")?;
 
+    // Balance simplification: All deposits are now plaintext
     let value = match chain_state.deposits.get(asset) {
-        Some(ContractDeposit::Public(amount)) => Primitive::U64(*amount).into(),
-        _ => Default::default()
+        Some(deposit) => Primitive::U64(deposit.amount()).into(),
+        None => Default::default()
     };
 
     Ok(Some(value))

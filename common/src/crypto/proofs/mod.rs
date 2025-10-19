@@ -57,32 +57,5 @@ pub enum ProofVerificationError {
     NotSupported,
 }
 
-// Stub proof types for backward compatibility with contract system
-// These types exist solely for serialization and will always fail validation
-
-use crate::serializer::{Reader, ReaderError, Serializer, Writer};
-use serde::{Deserialize, Serialize};
-
-/// Stub: CiphertextValidityProof (proofs removed in plaintext balance system)
-/// Used only for contract deposit serialization compatibility
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CiphertextValidityProof {
-    // Empty stub - proofs are not validated
-}
-
-impl Serializer for CiphertextValidityProof {
-    fn write(&self, writer: &mut Writer) {
-        // Write a single zero byte as placeholder
-        writer.write_u8(0);
-    }
-
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        // Read the placeholder byte
-        reader.read_u8()?;
-        Ok(CiphertextValidityProof {})
-    }
-
-    fn size(&self) -> usize {
-        1
-    }
-}
+// Balance simplification: All proof types have been removed
+// Only cryptographic constants (G, H, PC_GENS) and error types remain

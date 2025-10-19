@@ -8,6 +8,18 @@ use crate::core::storage::Storage;
 use std::collections::{HashMap, VecDeque};
 use tos_common::crypto::Hash;
 
+use super::Interval;
+
+/// Space multiplier for reindexing operations
+///
+/// When reindexing triggers, we allocate (subtree_size × MULTIPLIER) units of interval space
+/// to prevent immediate re-triggering. With MULTIPLIER=1000, a subtree of size 3 gets 3000 units,
+/// allowing ~log₂(3000) ≈ 11 generations of growth before next reindex.
+///
+/// Genesis interval: [1, u64::MAX-1] ≈ 1.8×10¹⁹ units
+/// Even with 1M blocks × 1000 multiplier = 10⁹ units consumed (0.000005% of total space)
+const REINDEX_SPACE_MULTIPLIER: u64 = 1000;
+
 /// Context for reindexing operations
 ///
 /// Maintains state during a reindex operation, including subtree size cache
@@ -78,14 +90,25 @@ impl ReindexContext {
             let subtree_size = self.subtree_sizes[&current];
 
             // Check if current has sufficient space
-            if current_interval.size() >= subtree_size {
+            // FIX: Require ancestors with generous space (subtree_size × MULTIPLIER)
+            // This ensures we find ancestors with truly sufficient interval capacity,
+            // preventing the reindex death spiral where barely-sufficient intervals
+            // cause immediate re-triggering.
+            //
+            // Example: For subtree_size=3, require interval size >= 3000 (not just >= 3)
+            // This ensures the propagate_interval function has enough space to work with.
+            let required_space = subtree_size.saturating_mul(REINDEX_SPACE_MULTIPLIER);
+            if current_interval.size() >= required_space {
                 // Found an ancestor with enough space!
-                log::info!(
-                    "Reindexing from block {} (interval: {}, subtree_size: {})",
-                    current,
-                    current_interval,
-                    subtree_size
-                );
+                if log::log_enabled!(log::Level::Info) {
+                    log::info!(
+                        "Reindexing from block {} (interval: {}, subtree_size: {}, required_space: {})",
+                        current,
+                        current_interval,
+                        subtree_size,
+                        required_space
+                    );
+                }
                 break;
             }
 
@@ -231,17 +254,51 @@ impl ReindexContext {
                     .map(|c| self.subtree_sizes[c])
                     .collect();
 
-                // Get available capacity for children
-                // Parent must strictly contain children, so decrease end by 1
-                let capacity = current_data.interval.decrease_end(1);
+                // FIX: Allocate generous space to prevent reindex death spiral
+                //
+                // PROBLEM (before fix):
+                //   capacity = parent.interval.decrease_end(1)
+                //   For [2,4] → [2,3] (size=2) → splits to [2,2] and [3,3] (size=1 each)
+                //   Next block immediately triggers reindex again!
+                //
+                // SOLUTION:
+                //   Allocate (total_subtree_size × MULTIPLIER) units of space
+                //   For subtree_size=3 × 1000 = 3000 units → supports ~11 more generations
+                let total_subtree_size: u64 = sizes.iter().sum();
+                let desired_space = total_subtree_size.saturating_mul(REINDEX_SPACE_MULTIPLIER);
 
-                if capacity.is_empty() {
-                    log::warn!(
-                        "Block {} has children but no capacity for them (interval: {})",
-                        current,
-                        current_data.interval
-                    );
+                // Parent interval must reserve 1 unit for itself (strict containment invariant)
+                let available_space = current_data.interval.size().saturating_sub(1);
+
+                // Use minimum of desired and available (won't exceed parent's interval)
+                let allocated_space = available_space.min(desired_space);
+
+                if allocated_space == 0 {
+                    if log::log_enabled!(log::Level::Warn) {
+                        log::warn!(
+                            "Block {} has children but no capacity for them (interval: {})",
+                            current,
+                            current_data.interval
+                        );
+                    }
                     continue;
+                }
+
+                // Allocate from parent's interval start
+                let capacity = Interval::new(
+                    current_data.interval.start,
+                    current_data.interval.start + allocated_space - 1
+                );
+
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!(
+                        "Reindex allocating {} units ({} subtree × {} multiplier) for {} children of block {}",
+                        allocated_space,
+                        total_subtree_size,
+                        REINDEX_SPACE_MULTIPLIER,
+                        children.len(),
+                        current
+                    );
                 }
 
                 // Split capacity exponentially among children

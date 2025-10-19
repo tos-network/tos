@@ -34,7 +34,6 @@ use tos_common::{
     },
     transaction::{
         extra_data::{PlaintextExtraData, PlaintextFlag, Role},
-        ContractDeposit,
         MultiSigPayload
     },
     utils::sanitize_ws_address
@@ -430,18 +429,8 @@ impl NetworkHandler {
                                 assets_changed.insert(asset.clone());
 
                                 if should_scan_history {
-                                    match deposit {
-                                        ContractDeposit::Public(amount) => {
-                                            deposits.insert(asset, amount);
-                                        },
-                                        ContractDeposit::Private { .. } => {
-                                            // Balance simplification: Private deposits not supported in plaintext system
-                                            // Skip private deposits - they should not be used
-                                            if log::log_enabled!(log::Level::Warn) {
-                                                warn!("Encountered private deposit in plaintext balance system - skipping");
-                                            }
-                                        }
-                                    }
+                                    // Balance simplification: Deposits are now plaintext only
+                                    deposits.insert(asset, deposit.amount());
                                 }
                             }
 
@@ -470,18 +459,8 @@ impl NetworkHandler {
                                     assets_changed.insert(asset.clone());
 
                                     if should_scan_history {
-                                        match deposit {
-                                            ContractDeposit::Public(amount) => {
-                                                deposits.insert(asset, amount);
-                                            },
-                                            ContractDeposit::Private { .. } => {
-                                                // Balance simplification: Private deposits not supported in plaintext system
-                                                // Skip private deposits - they should not be used
-                                                if log::log_enabled!(log::Level::Warn) {
-                                                    warn!("Encountered private deposit in plaintext balance system - skipping");
-                                                }
-                                            }
-                                        }
+                                        // Balance simplification: Deposits are now plaintext only
+                                        deposits.insert(asset, deposit.amount());
                                     }
                                 }
 

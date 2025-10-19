@@ -429,8 +429,8 @@ impl TransactionBuilder {
             if deposit.amount == 0 {
                 return Err(GenerationError::DepositZero);
             }
-            // All deposits are now public (plaintext)
-            result.insert(asset.clone(), ContractDeposit::Public(deposit.amount));
+            // Balance simplification: All deposits are now plaintext
+            result.insert(asset.clone(), ContractDeposit::new(deposit.amount));
         }
         Ok(result)
     }

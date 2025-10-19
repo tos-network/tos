@@ -54,8 +54,10 @@ pub const TERA_HASH: u64 = GIGA_HASH * 1000;
 pub const MINIMUM_HASHRATE: u64 = 200 * HASH;
 
 // This is also used as testnet and devnet minimum difficulty
-// Reduced from 1 H/s to 0.1 H/s for easier development
-pub const GENESIS_BLOCK_DIFFICULTY: Difficulty = Difficulty::from_u64(1);
+// Set to 200 H/s to achieve ~1 block/second target from genesis
+// Matches MINIMUM_HASHRATE (200 H/s) to ensure consistent block time before DAA activates
+// DAA (Difficulty Adjustment Algorithm) only activates after 2016 blocks
+pub const GENESIS_BLOCK_DIFFICULTY: Difficulty = Difficulty::from_u64(200);
 
 // V-21 Fix: Increased from 500ms to 10 seconds (10000ms) to allow reasonable clock skew
 // Previous value (500ms) was too restrictive and caused network synchronization issues

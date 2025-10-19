@@ -232,64 +232,30 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             .cloned()
             .unwrap_or_default();
 
-        // We need to add the deposits to the balances
+        // Balance simplification: Add plaintext deposits to contract balances
         for (asset, deposit) in deposits.iter() {
-            match deposit {
-                ContractDeposit::Public(amount) => match cache.balances.entry(asset.clone()) {
-                    Entry::Occupied(mut o) => match o.get_mut() {
-                        Some((mut state, balance)) => {
-                            state.mark_updated();
-                            *balance = balance.checked_add(*amount)
-                                .ok_or(BlockchainError::BalanceOverflow)?;
-                        },
-                        None => {
-                            // Balance was already fetched and we didn't had any balance before
-                            o.insert(Some((VersionedState::New, *amount)));
-                        }
-                    },
-                    Entry::Vacant(e) => {
-                        let (mut state, balance) = self.storage.get_contract_balance_at_maximum_topoheight(contract, asset, self.topoheight).await?
-                            .map(|(topo, balance)| (VersionedState::FetchedAt(topo), balance.take()))
-                            .unwrap_or((VersionedState::New, 0));
-
+            let amount = deposit.amount();
+            match cache.balances.entry(asset.clone()) {
+                Entry::Occupied(mut o) => match o.get_mut() {
+                    Some((mut state, balance)) => {
                         state.mark_updated();
-                        let new_balance = balance.checked_add(*amount)
+                        *balance = balance.checked_add(amount)
                             .ok_or(BlockchainError::BalanceOverflow)?;
-                        e.insert(Some((state, new_balance)));
+                    },
+                    None => {
+                        // Balance was already fetched and we didn't had any balance before
+                        o.insert(Some((VersionedState::New, amount)));
                     }
                 },
-                ContractDeposit::Private { .. } => {
-                    // IMPORTANT: Private deposits are currently disabled pending full implementation
-                    //
-                    // STATUS (2025-10-18):
-                    // - TransactionBuilder support: ✅ COMPLETE (users can create private deposit transactions)
-                    // - State application: ⏭️ PENDING (awaiting implementation)
-                    //
-                    // WHY DISABLED:
-                    // 1. Contract balances must remain plaintext u64 (mathematical limitation - Twisted ElGamal
-                    //    only supports addition, but smart contracts need multiplication, division, comparison)
-                    // 2. Decryption requires PrivateKey::from_hash() which needs cryptographic review
-                    // 3. Privacy model needs clarification (deterministic contract keys = public decryption)
-                    //
-                    // NEXT STEPS:
-                    // 1. Complete cryptographic design and security review
-                    // 2. Implement PrivateKey::from_hash() after validation
-                    // 3. Add decryption logic to convert encrypted deposit to plaintext u64
-                    // 4. Conduct thorough testing and audit
-                    //
-                    // See: /Users/tomisetsu/tos-network/memo/PRIVATE_DEPOSITS_FEASIBILITY_ANALYSIS.md
-                    //      /Users/tomisetsu/tos-network/memo/PRIVATE_DEPOSITS_IMPLEMENTATION.md
+                Entry::Vacant(e) => {
+                    let (mut state, balance) = self.storage.get_contract_balance_at_maximum_topoheight(contract, asset, self.topoheight).await?
+                        .map(|(topo, balance)| (VersionedState::FetchedAt(topo), balance.take()))
+                        .unwrap_or((VersionedState::New, 0));
 
-                    const ENABLE_PRIVATE_DEPOSITS: bool = false;
-
-                    if !ENABLE_PRIVATE_DEPOSITS {
-                        return Err(BlockchainError::InvalidTransactionFormat);
-                    }
-
-                    // Future implementation (pending completion):
-                    // 1. Derive contract private key: let contract_privkey = PrivateKey::from_hash(contract_hash);
-                    // 2. Decrypt deposit amount: let amount = decrypt(commitment, receiver_handle, contract_privkey);
-                    // 3. Add plaintext amount to contract balance (u64)
+                    state.mark_updated();
+                    let new_balance = balance.checked_add(amount)
+                        .ok_or(BlockchainError::BalanceOverflow)?;
+                    e.insert(Some((state, new_balance)));
                 }
             }
         }
