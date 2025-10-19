@@ -11,7 +11,8 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use bulletproofs::RangeProof;
+// Balance simplification: RangeProof removed
+// use bulletproofs::RangeProof;
 use curve25519_dalek::{
     ristretto::CompressedRistretto,
     traits::Identity,
@@ -19,8 +20,19 @@ use curve25519_dalek::{
 };
 use indexmap::IndexMap;
 use log::{debug, trace};
+// Balance simplification: Transcript still needed for function signatures
 use merlin::Transcript;
 use tos_vm::ModuleValidator;
+
+// Balance simplification: Stub for BatchCollector
+#[allow(dead_code)]
+struct BatchCollector;
+
+impl BatchCollector {
+    fn default() -> Self {
+        BatchCollector
+    }
+}
 use crate::{
     tokio::spawn_blocking_safe,
     account::{Nonce, EnergyResource},
@@ -36,13 +48,15 @@ use crate::{
         },
         hash,
         proofs::{
-            BatchCollector,
+            // Balance simplification: Batch verification removed
+            // BatchCollector,
             ProofVerificationError,
-            BP_GENS,
-            BULLET_PROOF_SIZE,
+            // BP_GENS,
+            // BULLET_PROOF_SIZE,
             PC_GENS
         },
         Hash,
+        // Balance simplification: ProtocolTranscript still needed for Transcript extension methods
         ProtocolTranscript,
     },
     serializer::Serializer,

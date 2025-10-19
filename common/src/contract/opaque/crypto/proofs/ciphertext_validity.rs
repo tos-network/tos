@@ -1,3 +1,6 @@
+// Balance simplification: CiphertextValidityProof removed from plaintext balance system
+#![allow(dead_code)]
+
 use std::hash::Hasher;
 
 use tos_vm::{impl_opaque, traits::{DynEq, DynHash, Serializable}};
@@ -26,17 +29,21 @@ impl DynHash for CiphertextValidityProof {
 
 impl Serializable for CiphertextValidityProof {
     fn get_size(&self) -> usize {
-        self.size()
+        // Balance simplification: CiphertextValidityProof size removed
+        // self.size()
+        0
     }
 
     fn is_serializable(&self) -> bool {
-        true
+        false // Not serializable in plaintext system
     }
 
-    fn serialize(&self, buffer: &mut Vec<u8>) -> usize {
-        let mut writer = Writer::new(buffer);
-        writer.write_u8(CIPHERTEXT_VALIDITY_PROOF_OPAQUE_ID);
-        self.write(&mut writer);
-        writer.total_write()
+    fn serialize(&self, _buffer: &mut Vec<u8>) -> usize {
+        // Balance simplification: CiphertextValidityProof serialization removed
+        // let mut writer = Writer::new(buffer);
+        // writer.write_u8(CIPHERTEXT_VALIDITY_PROOF_OPAQUE_ID);
+        // self.write(&mut writer);
+        // writer.total_write()
+        panic!("CiphertextValidityProof serialization removed in plaintext balance system")
     }
 }

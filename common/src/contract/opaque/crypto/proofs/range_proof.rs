@@ -1,3 +1,6 @@
+// Balance simplification: RangeProof removed from plaintext balance system
+#![allow(dead_code)]
+
 use std::hash::Hasher;
 
 use bulletproofs::RangeProof;
@@ -30,17 +33,21 @@ impl DynHash for RangeProofWrapper {
 
 impl Serializable for RangeProofWrapper {
     fn get_size(&self) -> usize {
-        self.0.size()
+        // Balance simplification: RangeProof size removed
+        // self.0.size()
+        0
     }
 
     fn is_serializable(&self) -> bool {
-        true
+        false // Not serializable in plaintext system
     }
 
-    fn serialize(&self, buffer: &mut Vec<u8>) -> usize {
-        let mut writer = Writer::new(buffer);
-        writer.write_u8(RANGE_PROOF_OPAQUE_ID);
-        self.0.write(&mut writer);
-        writer.total_write()
+    fn serialize(&self, _buffer: &mut Vec<u8>) -> usize {
+        // Balance simplification: RangeProof serialization removed
+        // let mut writer = Writer::new(buffer);
+        // writer.write_u8(RANGE_PROOF_OPAQUE_ID);
+        // self.0.write(&mut writer);
+        // writer.total_write()
+        panic!("RangeProof serialization removed in plaintext balance system")
     }
 }

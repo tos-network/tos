@@ -1,3 +1,6 @@
+// Balance simplification: This module is deprecated (ownership proofs removed)
+#![allow(dead_code)]
+
 use std::fmt::{self, Display, Formatter};
 use anyhow::Error;
 use serde::de::Error as SerdeError;

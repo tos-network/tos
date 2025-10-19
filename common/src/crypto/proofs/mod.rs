@@ -1,109 +1,100 @@
-mod ciphertext_validity;
-mod commitment_eq;
-mod range_proof;
-mod ownership;
+// Balance simplification: Proof implementations removed
+// This module now keeps essential cryptographic constants and error types
 
-use std::iter;
-use curve25519_dalek::{
-    traits::{Identity, MultiscalarMul},
-    RistrettoPoint,
-    Scalar
-};
-use lazy_static::lazy_static;
-use subtle::ConstantTimeEq;
 use thiserror::Error;
-use bulletproofs::{BulletproofGens, PedersenGens};
-use crate::transaction::MAX_TRANSFER_COUNT;
-use super::{elgamal::DecompressionError, TranscriptError};
+use super::elgamal::DecompressionError;
+use curve25519_dalek::{RistrettoPoint, Scalar};
+use lazy_static::lazy_static;
+use sha3::Sha3_512;
 
-// Exports
-pub use commitment_eq::CommitmentEqProof;
-pub use ciphertext_validity::CiphertextValidityProof;
-pub use ownership::OwnershipProof;
-pub use range_proof::RangeProof;
+// Essential cryptographic constants still needed for signatures and Pedersen commitments
 
-// We are using 64 bits for the bulletproofs
-pub const BULLET_PROOF_SIZE: usize = 64;
+// G: Primary generator point (Ristretto basepoint)
+pub use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT as G;
 
 lazy_static! {
-    // Bulletproof generators: party size is max transfers * 2 + 1
-    // * 2 in case each transfer use a unique asset + 1 for tos asset as fee and + 1 to be a power of 2
-    pub static ref BP_GENS: BulletproofGens = BulletproofGens::new(BULLET_PROOF_SIZE, MAX_TRANSFER_COUNT * 2 + 2);
-    pub static ref PC_GENS: PedersenGens = PedersenGens::default();
-    // Re-export the base points for convenience
-    pub static ref G: RistrettoPoint = PC_GENS.B;
-    pub static ref H: RistrettoPoint = PC_GENS.B_blinding;
+    // H: Secondary generator point for signatures (Schnorr scheme)
+    // Generated deterministically from G using hash-to-point
+    pub static ref H: RistrettoPoint = {
+        RistrettoPoint::hash_from_bytes::<Sha3_512>(b"TOS_SIGNATURE_GENERATOR_H")
+    };
 }
+
+// Pedersen commitment generators (needed for commitment arithmetic)
+pub struct PedersenGens {
+    pub g: RistrettoPoint,
+    pub h: RistrettoPoint,
+}
+
+impl PedersenGens {
+    pub fn commit(&self, value: Scalar, blinding: Scalar) -> RistrettoPoint {
+        value * self.g + blinding * self.h
+    }
+}
+
+lazy_static! {
+    // PC_GENS: Pedersen commitment generators
+    pub static ref PC_GENS: PedersenGens = {
+        PedersenGens {
+            g: G,  // G is already a RistrettoPoint value
+            h: *H, // H is a static ref, so dereference it
+        }
+    };
+}
+
+// Stub types for backward compatibility
+use crate::serializer::{Reader, ReaderError, Serializer, Writer};
+
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct OwnershipProof;
+
+impl Serializer for OwnershipProof {
+    fn write(&self, _writer: &mut Writer) {
+        // Stub implementation - should never be called
+        panic!("OwnershipProof removed in plaintext balance system");
+    }
+
+    fn read(_reader: &mut Reader) -> Result<Self, ReaderError> {
+        // Stub implementation - should never be called
+        Err(ReaderError::InvalidValue)
+    }
+
+    fn size(&self) -> usize {
+        0
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)]
+pub struct CiphertextValidityProof;
+
+impl Serializer for CiphertextValidityProof {
+    fn write(&self, _writer: &mut Writer) {
+        // Stub implementation - should never be called
+        panic!("CiphertextValidityProof removed in plaintext balance system");
+    }
+
+    fn read(_reader: &mut Reader) -> Result<Self, ReaderError> {
+        // Stub implementation - should never be called
+        Err(ReaderError::InvalidValue)
+    }
+
+    fn size(&self) -> usize {
+        0
+    }
+}
+
+// Error types kept for backward compatibility
 
 #[derive(Error, Debug, Clone, Copy, Eq, PartialEq)]
-#[error("batch multiscalar mul returned non identity point")]
-pub struct MultiscalarMulVerificationError;
-
-#[derive(Error, Clone, Debug, Eq, PartialEq)]
-pub enum ProofGenerationError {
-    #[error(transparent)]
-    Decompression(#[from] DecompressionError),
-    #[error("not enough funds in the account, required: {required}, available: {available}")]
-    InsufficientFunds {
-        required: u64,
-        available: u64,
-    },
-    #[error("range proof generation failed: {0}")]
-    RangeProof(#[from] bulletproofs::ProofError),
-    #[error("invalid format")]
-    Format,
-}
+#[error("proof generation error (proofs removed in plaintext balance system)")]
+pub struct ProofGenerationError;
 
 #[derive(Error, Clone, Debug, Eq, PartialEq)]
 pub enum ProofVerificationError {
     #[error("invalid format: {0}")]
     Decompression(#[from] DecompressionError),
-    #[error("commitment equality proof verification failed")]
-    CommitmentEqProof,
-    #[error("ciphertext validity proof verification failed")]
-    CiphertextValidityProof,
-    #[error("proof verification failed")]
-    GenericProof,
-    #[error("range proof verification failed: {0}")]
-    RangeProof(#[from] bulletproofs::ProofError),
-    #[error("transcript error: {0}")]
-    Transcript(#[from] TranscriptError),
-    #[error("invalid format")]
-    Format,
-    #[error(transparent)]
-    BatchVerificationError(#[from] MultiscalarMulVerificationError),
-}
-
-
-#[derive(Default)]
-pub struct BatchCollector {
-    dynamic_scalars: Vec<Scalar>,
-    dynamic_points: Vec<RistrettoPoint>,
-    g_scalar: Scalar,
-    h_scalar: Scalar,
-}
-
-impl BatchCollector {
-    pub fn verify(&self) -> Result<(), MultiscalarMulVerificationError> {
-        // Use constant-time multiscalar multiplication to prevent timing attacks
-        let mega_check = RistrettoPoint::multiscalar_mul(
-            self.dynamic_scalars
-                .iter()
-                .copied()
-                .chain(iter::once(self.g_scalar))
-                .chain(iter::once(self.h_scalar)),
-            self.dynamic_points
-                .iter()
-                .copied()
-                .chain(iter::once(*G))
-                .chain(iter::once(*H)),
-        );
-
-        // Use constant-time comparison to prevent timing leaks
-        if bool::from(mega_check.ct_eq(&RistrettoPoint::identity())) {
-            Ok(())
-        } else {
-            Err(MultiscalarMulVerificationError)
-        }
-    }
+    #[error("proof verification not supported (plaintext balance system)")]
+    NotSupported,
 }

@@ -92,8 +92,9 @@ pub fn register_opaque_types() {
     register_opaque_json!(registry, "Hash", Hash);
     register_opaque_json!(registry, "Address", Address);
     register_opaque_json!(registry, "Signature", Signature);
-    register_opaque_json!(registry, "CiphertextValidityProof", CiphertextValidityProof);
-    register_opaque_json!(registry, "RangeProof", RangeProofWrapper);
+    // Balance simplification: Proofs removed
+    // register_opaque_json!(registry, "CiphertextValidityProof", CiphertextValidityProof);
+    // register_opaque_json!(registry, "RangeProof", RangeProofWrapper);
 }
 
 impl Serializer for OpaqueWrapper {
@@ -106,8 +107,9 @@ impl Serializer for OpaqueWrapper {
             HASH_OPAQUE_ID => OpaqueWrapper::new(Hash::read(reader)?),
             ADDRESS_OPAQUE_ID => OpaqueWrapper::new(Address::read(reader)?),
             SIGNATURE_OPAQUE_ID => OpaqueWrapper::new(Signature::read(reader)?),
-            CIPHERTEXT_VALIDITY_PROOF_OPAQUE_ID => OpaqueWrapper::new(CiphertextValidityProof::read(reader)?),
-            RANGE_PROOF_OPAQUE_ID => OpaqueWrapper::new(RangeProofWrapper(RangeProof::read(reader)?)),
+            // Balance simplification: Proof types removed
+            // CIPHERTEXT_VALIDITY_PROOF_OPAQUE_ID => OpaqueWrapper::new(CiphertextValidityProof::read(reader)?),
+            // RANGE_PROOF_OPAQUE_ID => OpaqueWrapper::new(RangeProofWrapper(RangeProof::read(reader)?)),
             _ => return Err(ReaderError::InvalidValue)
         })
     }
