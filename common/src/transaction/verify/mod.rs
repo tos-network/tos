@@ -1047,20 +1047,18 @@ impl Transaction {
         match &self.data {
             TransactionType::Transfers(transfers) => {
                 for transfer in transfers {
-                    // Update receiver balance
-                    let _current_balance = state
+                    // Update receiver balance with plain u64 amount
+                    let current_balance = state
                         .get_receiver_balance(
                             Cow::Borrowed(transfer.get_destination()),
                             Cow::Borrowed(transfer.get_asset()),
                         ).await
                         .map_err(VerificationError::State)?;
 
-                    // TODO: Balance simplification - transfer amounts are now plain u64
-                    // Update receiver's balance with plaintext amount
-                    // In production implementation, add proper error handling
-                    let _plain_amount = transfer.get_amount();
-                    // Stub: Comment out balance update for now
-                    // *_current_balance += _plain_amount;
+                    // Balance simplification: Add plain u64 amount to receiver's balance
+                    let plain_amount = transfer.get_amount();
+                    *current_balance = current_balance.checked_add(plain_amount)
+                        .ok_or(VerificationError::Overflow)?;
                 }
             },
             TransactionType::Burn(payload) => {
