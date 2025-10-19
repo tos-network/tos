@@ -1,3 +1,8 @@
+// Balance simplification: DEPRECATED BENCHMARK
+// This benchmark is deprecated because Sigma Proofs and Bulletproofs have been removed.
+// Kept for historical reference only.
+#![allow(dead_code)]
+
 use bulletproofs::RangeProof;
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
 use merlin::Transcript;

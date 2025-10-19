@@ -1,3 +1,12 @@
+// Balance simplification: DEPRECATED BENCHMARK
+// This benchmark is deprecated because Sigma Proofs (CommitmentEqProof, CiphertextValidityProof)
+// and Bulletproofs (RangeProof) have been removed from the plaintext balance system.
+// The proof system has been replaced with plaintext u64 balances for 80-100x performance improvement.
+//
+// This file is kept for historical reference only and will not compile after bulletproofs removal.
+// Run `cargo bench` to see active benchmarks.
+#![allow(dead_code)]
+
 use bulletproofs::RangeProof;
 use criterion::{criterion_group, criterion_main, Criterion};
 use merlin::Transcript;

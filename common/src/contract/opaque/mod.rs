@@ -7,7 +7,8 @@ mod asset;
 mod crypto;
 mod memory_storage;
 
-use bulletproofs::RangeProof;
+// Balance simplification: bulletproofs removed
+// use bulletproofs::RangeProof;
 use log::debug;
 use tos_types::{
     register_opaque_json,

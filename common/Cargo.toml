@@ -16,7 +16,8 @@ tos-hash = { git = "https://github.com/tos-network/tos-hash", branch = "master" 
 tos-vm = { git = "https://github.com/tos-network/tos-vm", branch = "dev", features = ["logging"] }
 tos-types = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
 tos-builder = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
-bulletproofs = { git = "https://github.com/tos-network/bulletproofs", tag = "v5.0.2" }
+# Balance simplification: bulletproofs removed (no longer needed with plaintext balances)
+# bulletproofs = { git = "https://github.com/tos-network/bulletproofs", tag = "v5.0.2" }
 curve25519-dalek = { features = ["digest", "group", "rand_core", "serde", "ecdlp"], git = "https://github.com/tos-network/curve25519-dalek", tag = "v4.2.0" }
 blake3 = "1.5.1"
 merlin = "3.0.0"
@@ -109,22 +110,22 @@ tracing = ["dep:console-subscriber", "tokio", "tokio/tracing"]
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[[bench]]
-name = "proofs"
-harness = false
+# Balance simplification: Benchmark disabled (proofs removed)
+# [[bench]]
+# name = "proofs"
+# harness = false
 
-# TODO: Balance simplification - These benchmarks use encrypt() which was removed
-# Re-enable after updating benchmarks for plain u64 balances
+# Balance simplification: Benchmark disabled (encrypt() removed)
 # [[bench]]
 # name = "homomorphic_encryption"
 # harness = false
 
-[[bench]]
-name = "batch_1000_txs"
-harness = false
+# Balance simplification: Benchmark disabled (proofs removed)
+# [[bench]]
+# name = "batch_1000_txs"
+# harness = false
 
-# TODO: Balance simplification - This benchmark uses encrypt() which was removed
-# Re-enable after updating benchmark for plain u64 balances
+# Balance simplification: Benchmark disabled (encrypt() removed)
 # [[bench]]
 # name = "parallel_batch"
 # harness = false

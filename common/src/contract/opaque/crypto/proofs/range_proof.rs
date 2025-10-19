@@ -3,7 +3,8 @@
 
 use std::hash::Hasher;
 
-use bulletproofs::RangeProof;
+// Balance simplification: bulletproofs removed
+// use bulletproofs::RangeProof;
 use serde::{Deserialize, Serialize};
 use tos_vm::{impl_opaque, traits::{DynEq, DynHash, Serializable}};
 use crate::{
@@ -11,8 +12,9 @@ use crate::{
     serializer::*
 };
 
+// Balance simplification: Stub type for backward compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RangeProofWrapper(pub RangeProof);
+pub struct RangeProofWrapper;
 
 impl_opaque!("RangeProof", RangeProofWrapper, json);
 impl_opaque!("RangeProof", RangeProofWrapper);

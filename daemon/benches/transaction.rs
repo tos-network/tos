@@ -1,11 +1,15 @@
 // TOS Transaction Verification Performance Benchmarks
 // Phase 3: Performance Benchmarking Engineer
 //
-// Benchmarks for transaction verification including:
-// - ZK proof verification (single and batch)
-// - ElGamal encryption/decryption
-// - Bulletproofs verification
-// - Parallel verification scaling (1-8 cores)
+// Balance simplification: DEPRECATED BENCHMARK
+// This benchmark is deprecated because:
+// - ZK proof verification (removed)
+// - ElGamal encryption/decryption (removed)
+// - Bulletproofs verification (removed)
+// - Parallel verification scaling (no longer applicable)
+//
+// Kept for historical reference only.
+#![allow(dead_code)]
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, black_box};
 use bulletproofs::RangeProof;

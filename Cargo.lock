@@ -709,26 +709,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bulletproofs"
-version = "5.0.2"
-source = "git+https://github.com/tos-network/bulletproofs?tag=v5.0.2#70e335fe1a35b812a8cd5346b4545e2a9e9b42b2"
-dependencies = [
- "byteorder",
- "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?tag=v4.2.0)",
- "digest",
- "group",
- "merlin",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "serde",
- "serde_derive",
- "sha3",
- "subtle",
- "thiserror 1.0.69",
- "zeroize",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4358,7 +4338,6 @@ dependencies = [
  "aws-lc-sys",
  "better_any",
  "blake3",
- "bulletproofs",
  "cfg-if",
  "chacha20 0.9.1",
  "chacha20poly1305",

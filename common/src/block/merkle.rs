@@ -76,11 +76,14 @@ mod tests {
     };
     use crate::crypto::elgamal::CompressedPublicKey;
     use crate::serializer::Serializer;
-    use bulletproofs::RangeProof;
-    use curve25519_dalek::scalar::Scalar;
+    // Balance simplification: bulletproofs removed, using plaintext amounts
+    // use bulletproofs::RangeProof;
+    // use curve25519_dalek::scalar::Scalar;
 
     /// Create a mock transaction for testing merkle root calculation
     /// The amount parameter ensures different transactions have different hashes
+    ///
+    /// Balance simplification: Updated to use plaintext amounts (no range proofs)
     fn create_mock_transaction(amount: u64) -> Transaction {
         use crate::config::TOS_ASSET;
 
@@ -96,26 +99,6 @@ mod tests {
         let fee = 100;
         let fee_type = FeeType::TOS;
         let nonce = 0;
-        let source_commitments = vec![];
-
-        // Create minimal range proof for testing
-        // Use a simple proof generation approach
-        let range_proof = {
-            use bulletproofs::{PedersenGens, BulletproofGens};
-            let pc_gens = PedersenGens::default();
-            let bp_gens = BulletproofGens::new(64, 1);
-            let mut transcript = merlin::Transcript::new(b"test");
-            let blinding = Scalar::from_bytes_mod_order([amount as u8; 32]);
-            let (proof, _commitment) = RangeProof::prove_single(
-                &bp_gens,
-                &pc_gens,
-                &mut transcript,
-                amount,
-                &blinding,
-                64
-            ).unwrap();
-            proof
-        };
 
         let reference = Reference {
             topoheight: 0,
@@ -128,6 +111,8 @@ mod tests {
         sig_bytes[0] = amount as u8;
         let signature = crate::crypto::Signature::from_bytes(&sig_bytes).unwrap();
 
+        // Balance simplification: Transaction::new signature simplified
+        // No longer requires source_commitments or range_proof parameters
         Transaction::new(
             TxVersion::T0,
             source,
@@ -135,8 +120,6 @@ mod tests {
             fee,
             fee_type,
             nonce,
-            source_commitments,
-            range_proof,
             reference,
             multisig,
             signature,

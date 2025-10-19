@@ -6,7 +6,8 @@ pub mod query;
 use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use bulletproofs::RangeProof;
+// Balance simplification: bulletproofs removed
+// use bulletproofs::RangeProof;
 use crate::{
     account::Nonce,
     crypto::{
