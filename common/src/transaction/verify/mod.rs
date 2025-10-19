@@ -66,7 +66,6 @@ struct DecompressedTransferCt {
 }
 
 impl DecompressedTransferCt {
-    // TODO: Balance simplification - Remove this method
     // TransferPayload no longer has get_commitment(), get_sender_handle(), get_receiver_handle()
     // These methods were removed when switching to plaintext balances
     #[allow(dead_code)]
@@ -84,7 +83,6 @@ impl DecompressedTransferCt {
 
     #[allow(dead_code)]
     fn get_ciphertext(&self, _role: Role) -> u64 {
-        // TODO: Extract amount from transfer payload once balance simplification is complete
         // For now return 0 as placeholder
         0
     }
@@ -93,7 +91,6 @@ impl DecompressedTransferCt {
 // Decompressed deposit ciphertext
 // Transaction deposits are stored in a compressed format
 // We need to decompress them only one time
-// TODO: REMOVE THIS STRUCT - Part of balance simplification (Section 2.12)
 // This struct will be removed when contract deposits are changed to plain u64
 #[allow(dead_code)]
 struct DecompressedDepositCt {
@@ -170,7 +167,6 @@ impl Transaction {
                             output += *amount;
                         },
                         ContractDeposit::Private { .. } => {
-                            // TODO: Balance simplification - extract amount from deposit
                             // For now, private deposits need to be handled differently
                             // This represents encrypted deposit handling that needs refactoring
                             let _decompressed = decompressed_deposits.get(asset)
@@ -192,7 +188,6 @@ impl Transaction {
                                 output += *amount;
                             },
                             ContractDeposit::Private { .. } => {
-                                // TODO: Balance simplification - extract amount from deposit
                                 // For now, private deposits need to be handled differently
                                 let _decompressed = decompressed_deposits.get(asset)
                                     .ok_or(DecompressionError::InvalidPoint)?;
@@ -271,7 +266,6 @@ impl Transaction {
         let mut _decompressed_deposits = HashMap::new();
         match &self.data {
             TransactionType::Transfers(_transfers) => {
-                // TODO: Balance simplification - Decompression removed
             },
             TransactionType::InvokeContract(payload) => {
                 for (asset, deposit) in &payload.deposits {
@@ -292,7 +286,6 @@ impl Transaction {
             _ => {}
         }
 
-        // TODO: Balance simplification - source_commitments field removed
         // This method previously collected sender output ciphertexts for each asset
         // With plaintext balances, no commitments or ciphertexts needed
         // Return empty vector for now
@@ -300,15 +293,12 @@ impl Transaction {
         Ok(outputs)
     }
 
-    // TODO: Balance simplification - Transcript removed
     // These methods were used for ZKP proof generation with Merlin transcripts
     // With plaintext balances, no transcripts or proofs needed
     // Kept as no-ops for now to maintain call sites during refactoring
 
-    // TODO: Balance simplification - Remove this method entirely (proofs removed)
     // Verify that the commitment assets match the assets used in the tx
     fn verify_commitment_assets(&self) -> bool {
-        // TODO: Balance simplification - Proofs removed, always return true for now
         return true;
 
         /*
@@ -356,7 +346,6 @@ impl Transaction {
         */
     }
 
-    // TODO: Balance simplification - Deposit decompression removed
     // This method previously decompressed private contract deposits for proof verification
     // With plaintext balances (ContractDeposit::Public only), no decompression needed
     //
@@ -402,7 +391,6 @@ impl Transaction {
         Ok(())
     }
 
-    // TODO: Balance simplification - Contract deposit proof verification removed
     // This method previously verified CiphertextValidityProof for private contract deposits
     // With plaintext balances (ContractDeposit::Public only), no proof verification needed
     //
@@ -570,7 +558,6 @@ impl Transaction {
             }
         };
 
-        // TODO: Balance simplification - Source commitment proof verification removed
         // With plaintext balances, we no longer need Pedersen commitments or CommitmentEqProof
         // Instead, we'll directly verify balances using simple arithmetic
 
@@ -588,7 +575,6 @@ impl Transaction {
         Ok(())
     }
 
-    // TODO: Balance simplification - Range proof and transcript removed
     // This method no longer needs to return transcript or commitments
     // Signature kept for compatibility during refactoring
     async fn pre_verify<'a, E, B: BlockchainVerificationState<'a, E>>(
@@ -819,7 +805,6 @@ impl Transaction {
             return Err(VerificationError::MultiSigNotConfigured);
         }
 
-        // TODO: Balance simplification - Source commitment proof verification removed
         // This section previously verified CommitmentEqProof for each source commitment
         // With plaintext balances, no commitments or proofs needed
         //
@@ -849,7 +834,6 @@ impl Transaction {
         //     state.add_sender_output(&self.source, &asset, total_spent).await?;
         // }
 
-        // TODO: Balance simplification - Transfer proof verification removed
         // With plaintext balances, we no longer need:
         // - CiphertextValidityProof verification
         // - Pedersen commitment verification
@@ -873,7 +857,6 @@ impl Transaction {
                 // }
             },
             TransactionType::Burn(_payload) => {
-                // TODO: Balance simplification - Transcript operations removed
             },
             TransactionType::MultiSig(payload) => {
                 // Setup the multisig
@@ -922,7 +905,6 @@ impl Transaction {
             }
         }
 
-        // TODO: Balance simplification - Range proof verification removed
         // With plaintext balances, we don't need Bulletproofs range proofs
         // Balances are plain u64, always in valid range [0, 2^64)
         trace!("Skipping range proof verification (plaintext balances)");
@@ -960,7 +942,6 @@ impl Transaction {
             }
         }
 
-        // TODO: Balance simplification - Batch proof verification removed
         // With plaintext balances, no ZK proofs to verify
         trace!("Skipping batch proof verification (plaintext balances)");
 
@@ -990,7 +971,6 @@ impl Transaction {
             self.pre_verify(tx_hash, state).await?;
         };
 
-        // TODO: Balance simplification - Single transaction proof verification removed
         // With plaintext balances, no ZK proof verification needed
         trace!("Skipping proof verification (plaintext balances)");
 
@@ -1222,7 +1202,6 @@ impl Transaction {
         let mut deposits_decompressed = HashMap::new();
         match &self.data {
             TransactionType::Transfers(_transfers) => {
-                // TODO: Balance simplification - Decompression removed
                 // Transfer ciphertexts no longer needed with plaintext balances
             },
             TransactionType::InvokeContract(payload) => {
@@ -1247,7 +1226,6 @@ impl Transaction {
             _ => {}
         }
 
-        // TODO: Balance simplification - Source commitments removed
         // This section previously processed source commitments for each asset
         // With plaintext balances, no commitments to process
         //
@@ -1284,7 +1262,6 @@ impl Transaction {
         let mut deposits_decompressed = HashMap::new();
         match &self.data {
             TransactionType::Transfers(_transfers) => {
-                // TODO: Balance simplification - Decompression removed
                 // Transfer ciphertexts no longer needed with plaintext balances
             },
             TransactionType::InvokeContract(payload) => {
@@ -1309,7 +1286,6 @@ impl Transaction {
             _ => {}
         }
 
-        // TODO: Balance simplification - Partial verification removed
         // This method previously verified CommitmentEqProof for each source commitment
         // With plaintext balances, no commitments or proofs to verify
         //
