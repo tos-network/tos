@@ -30,7 +30,8 @@ use crate::{
         FEE_PER_BYTE_OF_EVENT_DATA
     },
     crypto::{
-        proofs::CiphertextValidityProof,
+        // Balance simplification: CiphertextValidityProof removed (not needed for plaintext balances)
+        // proofs::CiphertextValidityProof,
         Address,
         Hash,
         PublicKey,
@@ -138,9 +139,9 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
     let address_type = Type::Opaque(env.register_opaque::<Address>("Address", true));
     let signature_type = Type::Opaque(env.register_opaque::<Signature>("Signature", true));
 
-    // Crypto
-    let _ = Type::Opaque(env.register_opaque::<CiphertextValidityProof>("CiphertextValidityProof", true));
-    let _ = Type::Opaque(env.register_opaque::<RangeProofWrapper>("RangeProof", true));
+    // Balance simplification: Crypto proof types removed (not needed for plaintext balances)
+    // let _ = Type::Opaque(env.register_opaque::<CiphertextValidityProof>("CiphertextValidityProof", true));
+    // let _ = Type::Opaque(env.register_opaque::<RangeProofWrapper>("RangeProof", true));
 
     // Transaction
     {

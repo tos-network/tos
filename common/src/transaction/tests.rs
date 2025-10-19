@@ -146,12 +146,11 @@ fn create_tx_for(account: Account, destination: Address, amount: u64, extra_data
     let actual_size = tx.size();
     let to_bytes_size = tx.to_bytes().len();
     println!("Debug sizes: estimated={}, actual={}, to_bytes={}", estimated_size, actual_size, to_bytes_size);
-    // Balance simplification: source_commitments and range_proof removed
     println!("Debug components: version={}, source={}, data={}, fee={}, fee_type={}, nonce={}, signature={}",
              1, tx.get_source().size(), tx.get_data().size(), 8, 1, 8, tx.get_signature().size());
     println!("Debug reference size: {}", tx.get_reference().size());
 
-    // Calculate actual components (Balance simplification: proofs removed)
+    // Calculate actual components
     let actual_components = 1 + tx.get_source().size() + tx.get_data().size() + 8 + 1 + 8 +
                            tx.get_reference().size() + tx.get_signature().size();
     println!("Debug calculated actual: {}", actual_components);

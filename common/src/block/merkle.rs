@@ -111,8 +111,6 @@ mod tests {
         sig_bytes[0] = amount as u8;
         let signature = crate::crypto::Signature::from_bytes(&sig_bytes).unwrap();
 
-        // Balance simplification: Transaction::new signature simplified
-        // No longer requires source_commitments or range_proof parameters
         Transaction::new(
             TxVersion::T0,
             source,

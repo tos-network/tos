@@ -1,7 +1,8 @@
 mod hash;
 mod signature;
-mod proofs;
+// Balance simplification: proofs module removed (not needed for plaintext balances)
+// mod proofs;
 
 pub use hash::*;
 pub use signature::*;
-pub use proofs::*;
+// pub use proofs::*;

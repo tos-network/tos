@@ -1044,32 +1044,12 @@ fn test_freeze_tos_sigma_proofs_verification() {
         println!("  Hash: {}", freeze_tx.hash());
         println!("  Fee: {} TOS", freeze_tx.get_fee());
         println!("  Nonce: {}", freeze_tx.get_nonce());
-        // Balance simplification: Removed source commitments and range proofs
-        // println!("  Source commitments count: {}", freeze_tx.get_source_commitments().len());
-        // println!("  Range proof size: {} bytes", freeze_tx.get_range_proof().size());
-
-        // Balance simplification: Source commitments removed with plaintext balances
-        // // Verify that we have the expected source commitment for TOS
-        // let tos_commitment = freeze_tx.get_source_commitments()
-        //     .iter()
-        //     .find(|c| c.get_asset() == &tos_common::config::TOS_ASSET);
-        //
-        // assert!(tos_commitment.is_some(), "Should have TOS source commitment");
-        // println!("✓ TOS source commitment found");
 
         // Test 1: Verify transaction format and structure
         assert!(freeze_tx.has_valid_version_format(), "Invalid transaction format");
         assert_eq!(freeze_tx.get_nonce(), 0, "Invalid nonce");
         assert_eq!(freeze_tx.get_fee(), 20000, "Invalid fee");
-        // Balance simplification: Source commitments removed
-        // assert_eq!(freeze_tx.get_source_commitments().len(), 1, "Should have exactly 1 source commitment");
         println!("✓ Transaction format validation passed");
-
-        // Balance simplification: Source commitment validation removed
-        // // Test 2: Verify source commitment structure
-        // let commitment = tos_commitment.unwrap();
-        // assert_eq!(commitment.get_asset(), &tos_common::config::TOS_ASSET, "Wrong asset");
-        // println!("✓ Source commitment structure validation passed");
         
         // Test 3: Verify that the transaction can be serialized and deserialized
         let tx_bytes = freeze_tx.to_bytes();
@@ -1186,31 +1166,12 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         println!("  Hash: {}", unfreeze_tx.hash());
         println!("  Fee: {} TOS", unfreeze_tx.get_fee());
         println!("  Nonce: {}", unfreeze_tx.get_nonce());
-        // Balance simplification: Source commitments removed
-        // println!("  Source commitments count: {}", unfreeze_tx.get_source_commitments().len());
-
-        // Balance simplification: Source commitments removed with plaintext balances
-        // // Verify that we have the expected source commitment for TOS
-        // let tos_commitment = unfreeze_tx.get_source_commitments()
-        //     .iter()
-        //     .find(|c| c.get_asset() == &tos_common::config::TOS_ASSET);
-        //
-        // assert!(tos_commitment.is_some(), "Should have TOS source commitment");
-        // println!("✓ TOS source commitment found");
 
         // Test 1: Verify transaction format and structure
         assert!(unfreeze_tx.has_valid_version_format(), "Invalid transaction format");
         assert_eq!(unfreeze_tx.get_nonce(), 0, "Invalid nonce");
         assert_eq!(unfreeze_tx.get_fee(), 20000, "Invalid fee");
-        // Balance simplification: Source commitments removed
-        // assert_eq!(unfreeze_tx.get_source_commitments().len(), 1, "Should have exactly 1 source commitment");
         println!("✓ Transaction format validation passed");
-
-        // Balance simplification: Source commitment validation removed
-        // // Test 2: Verify source commitment structure
-        // let commitment = tos_commitment.unwrap();
-        // assert_eq!(commitment.get_asset(), &tos_common::config::TOS_ASSET, "Wrong asset");
-        // println!("✓ Source commitment structure validation passed");
         
         // Test 3: Verify that the transaction can be serialized and deserialized
         let tx_bytes = unfreeze_tx.to_bytes();

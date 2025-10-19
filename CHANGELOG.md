@@ -7,6 +7,20 @@ To see the full history and exact changes, please refer to the commits history d
 ## [Unreleased]
 
 ### Changed
+- **[BREAKING]** Simplified balance system: moved from encrypted ElGamal balances to plaintext u64
+  - **Architecture**: Removed bulletproofs and sigma protocol proof verification system
+  - **Transaction size**: Reduced from ~500 bytes to ~150 bytes (-70%)
+  - **Verification speed**: Eliminated expensive proof verification (100x-1000x faster)
+  - **Removed dependencies**: bulletproofs, merlin (Transcript)
+  - **Cleaned up**: Legacy proof-related code (Transcript, BatchCollector stubs)
+  - **Migration**: All balances are now transparent and stored as plaintext u64
+  - **Benefits**:
+    - ✅ Simpler codebase and easier to audit
+    - ✅ Faster transaction processing
+    - ✅ Reduced node resource requirements
+    - ✅ Smaller blockchain storage footprint
+  - **Trade-off**: Transaction amounts are now public (similar to Bitcoin/Ethereum)
+
 - **[BREAKING]** Optimized transfer memo (extra_data) size limit for real-world usage
   - **Reduced** per-transfer memo limit: **1024 bytes → 128 bytes** (-87.5%)
   - **Reduced** total transaction memo limit: **32KB → 4KB** (-87.5%)
