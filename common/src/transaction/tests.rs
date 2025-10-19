@@ -254,18 +254,16 @@ async fn test_tx_verify() {
     let hash = tx.hash();
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
 
-    // Balance simplification: verify() only validates, doesn't apply state changes
-    // Manually apply balance changes to simulate what apply() does in production
+    // NOTE: verify() now mutates sender balance (like old encrypted balance code)
+    // But receiver balance is still only updated in apply(), so we need to manually
+    // add it here for this test (since we're not calling apply())
     {
-        // Deduct amount + fee from Alice's balance
-        let alice_balance = state.accounts.get_mut(&alice.keypair.get_public_key().compress()).unwrap()
-            .balances.get_mut(&TOS_ASSET).unwrap();
-        *alice_balance = alice_balance.checked_sub(50 + tx.fee).unwrap();
-
-        // Add amount to Bob's balance (auto-create if missing)
+        // Add amount to Bob's balance (receiver - only updated in apply())
         let bob_balance = state.accounts.get_mut(&bob.keypair.get_public_key().compress()).unwrap()
             .balances.entry(TOS_ASSET).or_insert(0);
         *bob_balance = bob_balance.checked_add(50).unwrap();
+
+        // Sender balance (Alice) was already mutated by verify(), no need to deduct again
     }
 
     // Check Bob balance
@@ -392,14 +390,8 @@ async fn test_burn_tx_verify() {
     let hash = tx.hash();
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
 
-    // Balance simplification: verify() only validates, doesn't apply state changes
-    // Manually deduct burned amount + fee from Alice's balance
-    {
-        let burn_amount = 50 * COIN_VALUE;
-        let alice_balance = state.accounts.get_mut(&alice.keypair.get_public_key().compress()).unwrap()
-            .balances.get_mut(&TOS_ASSET).unwrap();
-        *alice_balance = alice_balance.checked_sub(burn_amount + tx.fee).unwrap();
-    }
+    // NOTE: verify() now mutates sender balance (like old encrypted balance code)
+    // Sender balance (Alice) was already mutated by verify(), no need to deduct again
 
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
@@ -465,14 +457,8 @@ async fn test_tx_invoke_contract() {
     let hash = tx.hash();
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
 
-    // Balance simplification: verify() only validates, doesn't apply state changes
-    // Manually deduct deposit amount + tx fee + gas from Alice's balance
-    {
-        let total_spend = (50 * COIN_VALUE) + tx.fee + 1000;
-        let alice_balance = state.accounts.get_mut(&alice.keypair.get_public_key().compress()).unwrap()
-            .balances.get_mut(&TOS_ASSET).unwrap();
-        *alice_balance = alice_balance.checked_sub(total_spend).unwrap();
-    }
+    // NOTE: verify() now mutates sender balance (like old encrypted balance code)
+    // Sender balance (Alice) was already mutated by verify(), no need to deduct again
 
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
@@ -546,14 +532,8 @@ async fn test_tx_invoke_contract_multiple_deposits() {
     let hash = tx.hash();
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
 
-    // Balance simplification: verify() only validates, doesn't apply state changes
-    // Manually deduct deposit amount + tx fee + gas from Alice's balance
-    {
-        let total_spend = (50 * COIN_VALUE) + tx.fee + 1000;
-        let alice_balance = state.accounts.get_mut(&alice.keypair.get_public_key().compress()).unwrap()
-            .balances.get_mut(&TOS_ASSET).unwrap();
-        *alice_balance = alice_balance.checked_sub(total_spend).unwrap();
-    }
+    // NOTE: verify() now mutates sender balance (like old encrypted balance code)
+    // Sender balance (Alice) was already mutated by verify(), no need to deduct again
 
     // Check Alice balance (sender side - should reflect deduction)
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
@@ -612,14 +592,8 @@ async fn test_tx_deploy_contract() {
     let hash = tx.hash();
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
 
-    // Balance simplification: verify() only validates, doesn't apply state changes
-    // Manually deduct contract deployment cost + tx fee from Alice's balance
-    {
-        let total_spend = BURN_PER_CONTRACT + tx.fee;
-        let alice_balance = state.accounts.get_mut(&alice.keypair.get_public_key().compress()).unwrap()
-            .balances.get_mut(&TOS_ASSET).unwrap();
-        *alice_balance = alice_balance.checked_sub(total_spend).unwrap();
-    }
+    // NOTE: verify() now mutates sender balance (like old encrypted balance code)
+    // Sender balance (Alice) was already mutated by verify(), no need to deduct again
 
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];

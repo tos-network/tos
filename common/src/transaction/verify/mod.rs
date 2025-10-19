@@ -361,7 +361,9 @@ impl Transaction {
         }
 
         // Verify sender has sufficient balance for each asset
-        // The Hash references in spending_per_asset live for 'a, so they can be passed to async functions
+        // CRITICAL: Mutate balance during verification (like old encrypted balance code)
+        // This ensures mempool verification reduces cached balances, preventing
+        // users from submitting sequential transactions that total more than their funds
         for (asset_hash, total_spending) in &spending_per_asset {
             // Use transaction's reference for balance check (pre-transaction state)
             let current_balance = state.get_sender_balance(&self.source, asset_hash, &self.reference).await
@@ -373,6 +375,11 @@ impl Transaction {
                     required: *total_spending,
                 });
             }
+
+            // Deduct spending from balance immediately (matches old behavior)
+            // This mutation updates mempool cached balances so subsequent txs see reduced funds
+            *current_balance = current_balance.checked_sub(*total_spending)
+                .ok_or(VerificationError::Overflow)?;
         }
 
         Ok(())
@@ -752,6 +759,9 @@ impl Transaction {
         }
 
         // Verify sender has sufficient balance for each asset
+        // CRITICAL: Mutate balance during verification (like old encrypted balance code)
+        // This ensures mempool verification reduces cached balances, preventing
+        // users from submitting sequential transactions that total more than their funds
         for (asset_hash, total_spending) in &spending_per_asset {
             let current_balance = state.get_sender_balance(&self.source, asset_hash, &self.reference).await
                 .map_err(VerificationError::State)?;
@@ -762,6 +772,11 @@ impl Transaction {
                     required: *total_spending,
                 });
             }
+
+            // Deduct spending from balance immediately (matches old behavior)
+            // This mutation updates mempool cached balances so subsequent txs see reduced funds
+            *current_balance = current_balance.checked_sub(*total_spending)
+                .ok_or(VerificationError::Overflow)?;
         }
 
         Ok(())
@@ -928,19 +943,10 @@ impl Transaction {
                 .map_err(VerificationError::State)?;
         }
 
-        // Deduct from sender balance for each asset
-        // The Hash references in spending_per_asset live for 'a, so they can be passed to async functions
+        // Track sender outputs for final balance calculation
+        // Note: Sender balance was already mutated during verification (pre_verify/verify_dynamic_parts)
+        // so we only need to track outputs here, not mutate balance again (would cause double-subtract)
         for (asset_hash, total_spending) in &spending_per_asset {
-            // SECURITY FIX: Get mutable reference and actually deduct the balance
-            // This ensures subsequent transactions in the same block see the reduced balance
-            // Without this mutation, transactions can double-spend within the same block
-            let current_balance = state.get_sender_balance(&self.source, asset_hash, &self.reference).await
-                .map_err(VerificationError::State)?;
-
-            // Deduct spending from sender balance (mutates the state)
-            *current_balance = current_balance.checked_sub(*total_spending)
-                .ok_or(VerificationError::Overflow)?;
-
             // Track the spending in output_sum for final balance calculation
             state.add_sender_output(&self.source, asset_hash, *total_spending).await
                 .map_err(VerificationError::State)?;
