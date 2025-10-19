@@ -14,6 +14,12 @@ pub enum ReaderError {
     InvalidHex,
     #[error("Error on try into")]
     ErrorTryInto,
+    #[error("ValueCell nesting depth {actual} exceeds maximum allowed depth {max}")]
+    ExceedsMaxDepth { max: usize, actual: usize },
+    #[error("Array size {actual} exceeds maximum allowed size {max}")]
+    ExceedsMaxArraySize { max: usize, actual: usize },
+    #[error("Map size {actual} exceeds maximum allowed size {max}")]
+    ExceedsMaxMapSize { max: usize, actual: usize },
     #[error(transparent)]
     TryFromSliceError(#[from] TryFromSliceError),
     #[error(transparent)]

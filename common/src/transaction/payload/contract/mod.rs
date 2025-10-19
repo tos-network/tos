@@ -17,6 +17,18 @@ use crate::serializer::*;
 pub use deploy::*;
 pub use invoke::*;
 
+/// Maximum nesting depth for ValueCell structures to prevent stack overflow DoS attacks
+/// Example attack: Object([Object([Object([... 10000 levels ...])])])
+const MAX_VALUE_CELL_DEPTH: usize = 64;
+
+/// Maximum array size for ValueCell::Object to prevent memory exhaustion DoS attacks
+/// Example attack: Object with 10M elements → gigabytes of memory allocation
+const MAX_ARRAY_SIZE: usize = 10000;
+
+/// Maximum map size for ValueCell::Map to prevent memory exhaustion DoS attacks
+/// Example attack: Map with 10M key-value pairs → gigabytes of memory allocation
+const MAX_MAP_SIZE: usize = 10000;
+
 /// Contract deposit - plaintext balance system
 ///
 /// Balance simplification: Only public deposits are supported.
@@ -190,6 +202,23 @@ impl Serializer for Primitive {
     }
 }
 
+/// Helper enum for iterative ValueCell deserialization
+/// Tracks the state of containers being built during deserialization
+enum BuildState {
+    /// Building an Object array, need to read `remaining` more ValueCells
+    Object {
+        values: Vec<ValueCell>,
+        remaining: usize
+    },
+    /// Building a Map, need to read `remaining` more key-value pairs
+    /// `pending_key` holds a key waiting for its value to be read
+    Map {
+        map: IndexMap<ValueCell, ValueCell>,
+        remaining: usize,
+        pending_key: Option<ValueCell>
+    },
+}
+
 impl Serializer for ValueCell {
     // Serialize a value cell
     // ValueCell with more than one value are serialized in reverse order
@@ -226,35 +255,165 @@ impl Serializer for ValueCell {
         };
     }
 
-    // No deserialization can occurs here as we're missing context
+    /// Iterative deserialization with depth and size limits to prevent DoS attacks
+    ///
+    /// SECURITY FIX (CVE-TOS-2025-001): Replaced recursive implementation with iterative
+    /// to prevent stack overflow attacks via deeply nested ValueCell structures.
+    ///
+    /// Enforces limits:
+    /// - MAX_VALUE_CELL_DEPTH (64): Maximum nesting depth
+    /// - MAX_ARRAY_SIZE (10000): Maximum Object array size
+    /// - MAX_MAP_SIZE (10000): Maximum Map size
     fn read(reader: &mut Reader) -> Result<ValueCell, ReaderError> {
-        // TODO: make it iterative and not recursive to prevent stack overflow attacks!!!!
-        Ok(match reader.read_u8()? {
-            0 => ValueCell::Default(Primitive::read(reader)?),
-            1 => {
-                let len = reader.read_u32()? as usize;
-                ValueCell::Bytes(reader.read_bytes(len)?)
-            },
-            2 => {
-                let len = reader.read_u32()? as usize;
-                let mut values = Vec::new();
-                for _ in 0..len {
-                    values.push(ValueCell::read(reader)?);
+        // Stack of containers being built (Objects and Maps)
+        let mut build_stack: Vec<BuildState> = Vec::new();
+
+        // Current nesting depth (incremented when entering Object/Map, decremented when exiting)
+        let mut depth = 0usize;
+
+        // The most recently completed value (None initially, waiting to read first value)
+        let mut current_value: Option<ValueCell> = None;
+
+        loop {
+            // Check depth limit before reading
+            if depth > MAX_VALUE_CELL_DEPTH {
+                return Err(ReaderError::ExceedsMaxDepth {
+                    max: MAX_VALUE_CELL_DEPTH,
+                    actual: depth
+                });
+            }
+
+            // If we have a completed value, try to incorporate it into parent container
+            if let Some(value) = current_value.take() {
+                match build_stack.pop() {
+                    None => {
+                        // No parent container → this is the final result
+                        return Ok(value);
+                    }
+                    Some(BuildState::Object { mut values, remaining }) => {
+                        // Add value to Object array
+                        values.push(value);
+
+                        if remaining == 1 {
+                            // Object is now complete
+                            current_value = Some(ValueCell::Object(values));
+                            depth -= 1;
+                            // Loop back to State 2 (have completed value)
+                            continue;
+                        } else {
+                            // Need to read more items for this Object
+                            build_stack.push(BuildState::Object {
+                                values,
+                                remaining: remaining - 1,
+                            });
+                            // Fall through to State 1 (read next value)
+                        }
+                    }
+                    Some(BuildState::Map { mut map, remaining, pending_key }) => {
+                        match pending_key {
+                            None => {
+                                // This value is a key, now wait for its value
+                                build_stack.push(BuildState::Map {
+                                    map,
+                                    remaining,
+                                    pending_key: Some(value),
+                                });
+                                // Fall through to State 1 (read the value part)
+                            }
+                            Some(key) => {
+                                // This value completes a key-value pair
+                                map.insert(key, value);
+
+                                if remaining == 1 {
+                                    // Map is now complete
+                                    current_value = Some(ValueCell::Map(Box::new(map)));
+                                    depth -= 1;
+                                    // Loop back to State 2 (have completed value)
+                                    continue;
+                                } else {
+                                    // Need to read more key-value pairs
+                                    build_stack.push(BuildState::Map {
+                                        map,
+                                        remaining: remaining - 1,
+                                        pending_key: None,
+                                    });
+                                    // Fall through to State 1 (read next key)
+                                }
+                            }
+                        }
+                    }
                 }
-                ValueCell::Object(values)
-            },
-            3 => {
-                let len = reader.read_u32()? as usize;
-                let mut map = IndexMap::new();
-                for _ in 0..len {
-                    let key = ValueCell::read(reader)?;
-                    let value = ValueCell::read(reader)?;
-                    map.insert(key, value);
+            }
+
+            // State 1: Read the next ValueCell
+            match reader.read_u8()? {
+                0 => {
+                    // Default: Primitive value
+                    current_value = Some(ValueCell::Default(Primitive::read(reader)?));
+                    // Loop back to State 2 (have completed value)
                 }
-                ValueCell::Map(Box::new(map))
-            },
-            _ => return Err(ReaderError::InvalidValue)
-        })
+                1 => {
+                    // Bytes: Read length and byte array
+                    let len = reader.read_u32()? as usize;
+                    current_value = Some(ValueCell::Bytes(reader.read_bytes(len)?));
+                    // Loop back to State 2 (have completed value)
+                }
+                2 => {
+                    // Object: Read array of ValueCells
+                    let len = reader.read_u32()? as usize;
+
+                    // Enforce array size limit
+                    if len > MAX_ARRAY_SIZE {
+                        return Err(ReaderError::ExceedsMaxArraySize {
+                            max: MAX_ARRAY_SIZE,
+                            actual: len,
+                        });
+                    }
+
+                    if len == 0 {
+                        // Empty Object
+                        current_value = Some(ValueCell::Object(Vec::new()));
+                        // Loop back to State 2 (have completed value)
+                    } else {
+                        // Push work to read `len` ValueCells
+                        depth += 1;
+                        build_stack.push(BuildState::Object {
+                            values: Vec::with_capacity(len),
+                            remaining: len,
+                        });
+                        // Loop back to State 1 (read first element)
+                    }
+                }
+                3 => {
+                    // Map: Read key-value pairs
+                    let len = reader.read_u32()? as usize;
+
+                    // Enforce map size limit
+                    if len > MAX_MAP_SIZE {
+                        return Err(ReaderError::ExceedsMaxMapSize {
+                            max: MAX_MAP_SIZE,
+                            actual: len,
+                        });
+                    }
+
+                    if len == 0 {
+                        // Empty Map
+                        current_value = Some(ValueCell::Map(Box::new(IndexMap::new())));
+                        // Loop back to State 2 (have completed value)
+                    } else {
+                        // Push work to read `len` key-value pairs
+                        depth += 1;
+                        build_stack.push(BuildState::Map {
+                            map: IndexMap::with_capacity(len),
+                            remaining: len,
+                            pending_key: None,
+                        });
+                        // Loop back to State 1 (read first key)
+                    }
+                }
+                _ => return Err(ReaderError::InvalidValue)
+            }
+        }
     }
 
     fn size(&self) -> usize {
@@ -434,5 +593,174 @@ mod tests {
         test_serde_cell(ValueCell::Map(Box::new([
             (ValueCell::Default(Primitive::U64(42)), ValueCell::Default(Primitive::String("Hello World!".to_owned())),)
         ].into_iter().collect())));
+    }
+
+    /// Test that depth limit is enforced to prevent stack overflow DoS
+    /// CVE-TOS-2025-001: Security fix for recursive deserialization
+    #[test]
+    fn test_value_cell_depth_limit() {
+        // Create a deeply nested structure: Object([Object([Object([...])])])
+        // Depth exceeds MAX_VALUE_CELL_DEPTH (64 levels)
+        let mut buffer = Vec::new();
+        let mut writer = Writer::new(&mut buffer);
+
+        // Write 65 nested Objects (exceeds limit of 64)
+        for _ in 0..65 {
+            writer.write_u8(2); // Object tag
+            writer.write_u32(&1); // len = 1 (single nested element)
+        }
+        // Write innermost value (primitive)
+        writer.write_u8(0); // Default tag
+        writer.write_u8(0); // Primitive::Null tag
+
+        let bytes = writer.as_bytes();
+        let mut reader = Reader::new(bytes);
+
+        // Should fail with ExceedsMaxDepth error
+        let result = ValueCell::read(&mut reader);
+        assert!(result.is_err());
+        match result {
+            Err(ReaderError::ExceedsMaxDepth { max, actual }) => {
+                assert_eq!(max, MAX_VALUE_CELL_DEPTH);
+                assert_eq!(actual, 65);
+            }
+            _ => panic!("Expected ExceedsMaxDepth error, got {:?}", result),
+        }
+    }
+
+    /// Test that depth limit allows structures exactly at the limit
+    #[test]
+    fn test_value_cell_depth_at_limit() {
+        // Create structure at exactly MAX_VALUE_CELL_DEPTH (64 levels)
+        let mut buffer = Vec::new();
+        let mut writer = Writer::new(&mut buffer);
+
+        // Write 64 nested Objects (exactly at limit)
+        for _ in 0..64 {
+            writer.write_u8(2); // Object tag
+            writer.write_u32(&1); // len = 1
+        }
+        // Write innermost value
+        writer.write_u8(0); // Default tag
+        writer.write_u8(4); // Primitive::U64 tag
+        writer.write_u64(&42u64);
+
+        let bytes = writer.as_bytes();
+        let mut reader = Reader::new(bytes);
+
+        // Should succeed
+        let result = ValueCell::read(&mut reader);
+        assert!(result.is_ok(), "Depth at limit should be allowed");
+    }
+
+    /// Test that array size limit is enforced to prevent memory exhaustion DoS
+    #[test]
+    fn test_value_cell_array_size_limit() {
+        // Create Object with size exceeding MAX_ARRAY_SIZE (10000 elements)
+        let mut buffer = Vec::new();
+        let mut writer = Writer::new(&mut buffer);
+        writer.write_u8(2); // Object tag
+        writer.write_u32(&10001); // len = 10001 (exceeds limit)
+
+        let bytes = writer.as_bytes();
+        let mut reader = Reader::new(bytes);
+
+        // Should fail with ExceedsMaxArraySize error
+        let result = ValueCell::read(&mut reader);
+        assert!(result.is_err());
+        match result {
+            Err(ReaderError::ExceedsMaxArraySize { max, actual }) => {
+                assert_eq!(max, MAX_ARRAY_SIZE);
+                assert_eq!(actual, 10001);
+            }
+            _ => panic!("Expected ExceedsMaxArraySize error, got {:?}", result),
+        }
+    }
+
+    /// Test that map size limit is enforced to prevent memory exhaustion DoS
+    #[test]
+    fn test_value_cell_map_size_limit() {
+        // Create Map with size exceeding MAX_MAP_SIZE (10000 elements)
+        let mut buffer = Vec::new();
+        let mut writer = Writer::new(&mut buffer);
+        writer.write_u8(3); // Map tag
+        writer.write_u32(&10001); // len = 10001 (exceeds limit)
+
+        let bytes = writer.as_bytes();
+        let mut reader = Reader::new(bytes);
+
+        // Should fail with ExceedsMaxMapSize error
+        let result = ValueCell::read(&mut reader);
+        assert!(result.is_err());
+        match result {
+            Err(ReaderError::ExceedsMaxMapSize { max, actual }) => {
+                assert_eq!(max, MAX_MAP_SIZE);
+                assert_eq!(actual, 10001);
+            }
+            _ => panic!("Expected ExceedsMaxMapSize error, got {:?}", result),
+        }
+    }
+
+    /// Test that empty containers are handled correctly
+    #[test]
+    fn test_value_cell_empty_containers() {
+        // Empty Object
+        let mut buffer = Vec::new();
+        let mut writer = Writer::new(&mut buffer);
+        writer.write_u8(2); // Object tag
+        writer.write_u32(&0); // len = 0
+
+        let bytes = writer.as_bytes();
+        let mut reader = Reader::new(bytes);
+        let result = ValueCell::read(&mut reader).unwrap();
+
+        match result {
+            ValueCell::Object(values) => assert_eq!(values.len(), 0),
+            _ => panic!("Expected empty Object"),
+        }
+
+        // Empty Map
+        let mut buffer2 = Vec::new();
+        let mut writer2 = Writer::new(&mut buffer2);
+        writer2.write_u8(3); // Map tag
+        writer2.write_u32(&0); // len = 0
+
+        let bytes2 = writer2.as_bytes();
+        let mut reader2 = Reader::new(bytes2);
+        let result2 = ValueCell::read(&mut reader2).unwrap();
+
+        match result2 {
+            ValueCell::Map(map) => assert_eq!(map.len(), 0),
+            _ => panic!("Expected empty Map"),
+        }
+    }
+
+    /// Test complex nested structure within limits
+    #[test]
+    fn test_value_cell_complex_nested() {
+        // Create: Map{ "data" => Object([ U64(1), U64(2), Object([ U64(3) ]) ]) }
+        let inner = ValueCell::Object(vec![
+            ValueCell::Default(Primitive::U64(3)),
+        ]);
+
+        let outer = ValueCell::Object(vec![
+            ValueCell::Default(Primitive::U64(1)),
+            ValueCell::Default(Primitive::U64(2)),
+            inner,
+        ]);
+
+        let mut map = IndexMap::new();
+        map.insert(
+            ValueCell::Default(Primitive::String("data".to_owned())),
+            outer,
+        );
+
+        let cell = ValueCell::Map(Box::new(map));
+
+        // Serialize and deserialize
+        let bytes = cell.to_bytes();
+        let result = ValueCell::from_bytes(&bytes).unwrap();
+
+        assert_eq!(result, cell);
     }
 }

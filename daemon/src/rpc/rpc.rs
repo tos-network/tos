@@ -846,9 +846,25 @@ async fn get_assets<S: Storage>(context: &Context, body: Value) -> Result<Value,
     let skip = params.skip.unwrap_or(0);
     let storage = blockchain.get_storage().read().await;
 
-    // TODO: verify params
+    // Validate topoheight range parameters
     let min = params.minimum_topoheight;
-    let max =  params.maximum_topoheight;
+    let max = params.maximum_topoheight;
+
+    // Prevent invalid range (min > max)
+    if let (Some(min_val), Some(max_val)) = (min, max) {
+        if min_val > max_val {
+            return Err(InternalRpcError::InvalidJSONRequest)
+                .context(format!("Invalid topoheight range: minimum ({}) > maximum ({})", min_val, max_val))?;
+        }
+
+        // Prevent excessively large ranges that could cause DoS
+        const MAX_TOPOHEIGHT_RANGE: u64 = 1_000_000;
+        let range_size = max_val - min_val;
+        if range_size > MAX_TOPOHEIGHT_RANGE {
+            return Err(InternalRpcError::InvalidJSONRequest)
+                .context(format!("Topoheight range ({}) exceeds maximum allowed range ({})", range_size, MAX_TOPOHEIGHT_RANGE))?;
+        }
+    }
 
     let assets = storage.get_assets_with_data_in_range(min, max).await?
         .skip(skip)

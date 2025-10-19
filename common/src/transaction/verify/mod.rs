@@ -633,14 +633,11 @@ impl Transaction {
 
         trace!("Processing transfers with plaintext amounts");
 
+        // NOTE: Transfer verification is implemented below in the spending_per_asset logic (lines 700-709)
+        // where all transfer amounts are accumulated and verified against sender balances.
         match &self.data {
             TransactionType::Transfers(_transfers) => {
-                // TODO: Implement plaintext transfer verification
-                // for transfer in transfers {
-                //     let current_balance = state.get_receiver_balance(transfer.destination, transfer.asset).await?;
-                //     let new_balance = current_balance + transfer.amount;
-                //     state.update_receiver_balance(transfer.destination, transfer.asset, new_balance).await?;
-                // }
+                // Transfer verification happens in spending_per_asset accumulation below
             },
             TransactionType::Burn(_payload) => {
             },
