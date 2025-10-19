@@ -2596,9 +2596,10 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // verify PoW and get difficulty for this block based on tips
-        let skip_pow = self.skip_pow_verification();
+        // Genesis blocks (no parents) skip PoW verification as they are trusted by design
+        let skip_pow = self.skip_pow_verification() || tips_count == 0;
         let pow_hash = if skip_pow {
-            // Simulator is enabled, we don't need to compute the PoW hash
+            // Simulator is enabled or genesis block, we don't need to compute the PoW hash
             Hash::zero()
         } else {
             let start = Instant::now();
@@ -2609,7 +2610,7 @@ impl<S: Storage> Blockchain<S> {
             hash
         };
         if log::log_enabled!(log::Level::Debug) {
-        debug!("POW hash: {}, skipped: {}", pow_hash, skip_pow);
+        debug!("POW hash: {}, skipped: {} (genesis: {})", pow_hash, skip_pow, tips_count == 0);
         }
         let (difficulty, p) = self.verify_proof_of_work(&*storage, &pow_hash, block.get_parents().iter()).await?;
         if log::log_enabled!(log::Level::Debug) {
