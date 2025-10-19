@@ -222,36 +222,22 @@ pub async fn try_advancing_reindex_root<S: Storage>(
         return Ok(());
     }
 
-    if log::log_enabled!(log::Level::Debug) {
-        log::debug!(
-            "Attempting reindex root advancement: hint at height {}, current root at height {}",
-            hint_data.height,
-            current_root_data.height
-        );
-    }
-
     // Find ancestor of hint at depth DEFAULT_REINDEX_DEPTH from hint
     let new_root = find_ancestor_at_depth(storage, hint, DEFAULT_REINDEX_DEPTH).await?;
 
     // Check if new root is actually ahead of current root
     let new_root_data = storage.get_reachability_data(&new_root).await?;
     if new_root_data.height > current_root_data.height {
-        log::info!(
-            "Advancing reindex root from {} (height {}) to {} (height {})",
-            current_root,
-            current_root_data.height,
-            new_root,
-            new_root_data.height
-        );
-        storage.set_reindex_root(new_root).await?;
-    } else {
-        if log::log_enabled!(log::Level::Warn) {
-            log::warn!(
-                "Reindex root advancement failed: new_root height {} not > current_root height {}",
-                new_root_data.height,
-                current_root_data.height
+        if log::log_enabled!(log::Level::Info) {
+            log::info!(
+                "Advancing reindex root from {} (height {}) to {} (height {})",
+                current_root,
+                current_root_data.height,
+                new_root,
+                new_root_data.height
             );
         }
+        storage.set_reindex_root(new_root).await?;
     }
 
     Ok(())
@@ -273,37 +259,17 @@ async fn find_ancestor_at_depth<S: Storage>(
     block: Hash,
     depth: u64,
 ) -> Result<Hash, BlockchainError> {
-    let start_data = storage.get_reachability_data(&block).await?;
     let mut current = block;
 
-    for i in 0..depth {
+    for _ in 0..depth {
         let current_data = storage.get_reachability_data(&current).await?;
 
         // Check if we've reached genesis (parent == self)
         if current_data.parent == current {
-            if log::log_enabled!(log::Level::Warn) {
-                log::warn!(
-                    "find_ancestor_at_depth: Reached genesis at iteration {}/{} (started at height {}, current height {})",
-                    i,
-                    depth,
-                    start_data.height,
-                    current_data.height
-                );
-            }
             return Ok(current);
         }
 
         current = current_data.parent;
-    }
-
-    let final_data = storage.get_reachability_data(&current).await?;
-    if log::log_enabled!(log::Level::Debug) {
-        log::debug!(
-            "find_ancestor_at_depth: Completed {} steps from height {} to height {}",
-            depth,
-            start_data.height,
-            final_data.height
-        );
     }
 
     Ok(current)
