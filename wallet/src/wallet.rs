@@ -34,7 +34,6 @@ use tos_common::{
         Signature
     },
     network::Network,
-    serializer::Serializer,
     tokio::sync::{
             broadcast,
             Mutex,
@@ -243,6 +242,7 @@ struct Account {
     inner: Arc<InnerAccount>,
     // Compressed public key
     public_key: PublicKey,
+    #[allow(dead_code)]
     semaphore: Semaphore,
 }
 
@@ -260,8 +260,7 @@ impl Account {
         }
     }
 
-    // TODO: Balance simplification - decryption removed (balances are now plain u64)
-    // This method is no longer needed as balances are not encrypted
+    // Balance simplification: Decryption no longer supported - balances are plain u64
     #[allow(dead_code)]
     pub async fn decrypt_ciphertext(&self, _max_supply: u64) -> Result<Option<u64>, WalletError> {
         Err(WalletError::Any(anyhow::anyhow!("Ciphertext decryption is no longer supported - balances are plain u64")))
@@ -736,8 +735,7 @@ impl Wallet {
         Ok(())
     }
 
-    // TODO: Balance simplification - decryption removed (balances are now plain u64)
-    // These methods are no longer needed as balances are not encrypted
+    // Balance simplification: Decryption no longer supported - balances are plain u64
     #[allow(dead_code)]
     pub async fn decrypt_ciphertext_of_asset(&self, _asset: &Hash) -> Result<Option<u64>, WalletError> {
         Err(WalletError::Any(anyhow::anyhow!("Ciphertext decryption is no longer supported - balances are plain u64")))
@@ -878,8 +876,7 @@ impl Wallet {
                             }
                             match network_handler.get_api().get_stable_balance(&address, &asset).await {
                                 Ok(stable_point) => {
-                                    // TODO: Balance simplification - balances are now plain u64
-                                    // Stable balance is already a plain u64 from the daemon
+                                    // Balance simplification: Stable balance is plain u64 from daemon
                                     let amount = stable_point.balance;
                                     let balance = Balance::new(amount);
 

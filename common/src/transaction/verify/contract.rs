@@ -220,7 +220,7 @@ impl Transaction {
         &'a self,
         state: &mut B,
         deposits: &'a IndexMap<Hash, ContractDeposit>,
-        decompressed_deposits: &HashMap<&Hash, DecompressedDepositCt>,
+        _decompressed_deposits: &HashMap<&Hash, DecompressedDepositCt>,
     ) -> Result<(), VerificationError<E>> {
         for (asset, deposit) in deposits.iter() {
             if log::log_enabled!(log::Level::Trace) {
@@ -233,19 +233,13 @@ impl Transaction {
             let balance = state.get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Borrowed(asset)).await
                 .map_err(VerificationError::State)?;
 
-            match deposit {
-                ContractDeposit::Public(amount) => {
-                    *balance += *amount;
-                },
-                ContractDeposit::Private { .. } => {
-                    // TODO: Balance simplification - extract amount from encrypted deposit
-                    // For now, this represents encrypted contract deposit refund that needs refactoring
-                    let _ct = decompressed_deposits.get(asset)
-                        .ok_or(VerificationError::DepositNotFound)?;
-                    // Stub: Cannot extract plain amount from encrypted deposit yet
-                    // This needs to be refactored when contract encrypted balances are converted to plain
-                }
-            }
+            // Balance simplification: Extract amount from deposit
+            // Private deposits are not supported in plaintext balance system
+            let amount = deposit.get_amount()
+                .map_err(|e| VerificationError::ModuleError(e.to_string()))?;
+
+            *balance = balance.checked_add(amount)
+                .ok_or(VerificationError::Overflow)?;
         }
 
         Ok(())

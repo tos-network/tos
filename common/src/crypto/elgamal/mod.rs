@@ -211,6 +211,7 @@ impl PrivateKey {
     }
 
     // Generate signature using inverse construction (for compatibility)
+    #[allow(non_snake_case)]
     pub fn sign(&self, message: &[u8], public_key: &PublicKey) -> Signature {
         use crate::crypto::proofs::H;
 

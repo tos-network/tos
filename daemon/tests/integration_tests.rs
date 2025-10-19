@@ -29,7 +29,6 @@ fn create_transfer_transaction(
         amount,
         asset: TOS_ASSET,
         extra_data: None,
-        encrypt_extra_data: true,
     };
     
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
@@ -505,7 +504,6 @@ async fn test_invalid_energy_fee_for_new_address() {
         amount: 100 * COIN_VALUE,
         asset: TOS_ASSET,
         extra_data: None,
-        encrypt_extra_data: true,
     };
     
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
@@ -959,7 +957,8 @@ fn test_freeze_tos_integration() {
     println!("Bob energy: used_energy: {}, total_energy: {}", chain.get_energy(&bob_pubkey).0, chain.get_energy(&bob_pubkey).1);
     
     // Assert state changes after freeze transaction
-    assert_eq!(chain.get_balance(&alice_pubkey), 1000 * COIN_VALUE - freeze_amount - 20000);
+    // Balance simplification: Default fee is FEE_PER_KB (10000) with Boost(0)
+    assert_eq!(chain.get_balance(&alice_pubkey), 1000 * COIN_VALUE - freeze_amount - 10000);
     let (used, total) = chain.get_energy(&alice_pubkey);
     assert_eq!(used, 0);
     assert_eq!(total, energy_gain); // Should be 200 * 14 = 2800 transfers
@@ -1045,28 +1044,32 @@ fn test_freeze_tos_sigma_proofs_verification() {
         println!("  Hash: {}", freeze_tx.hash());
         println!("  Fee: {} TOS", freeze_tx.get_fee());
         println!("  Nonce: {}", freeze_tx.get_nonce());
-        println!("  Source commitments count: {}", freeze_tx.get_source_commitments().len());
-        println!("  Range proof size: {} bytes", freeze_tx.get_range_proof().size());
-        
-        // Verify that we have the expected source commitment for TOS
-        let tos_commitment = freeze_tx.get_source_commitments()
-            .iter()
-            .find(|c| c.get_asset() == &tos_common::config::TOS_ASSET);
-        
-        assert!(tos_commitment.is_some(), "Should have TOS source commitment");
-        println!("✓ TOS source commitment found");
-        
+        // Balance simplification: Removed source commitments and range proofs
+        // println!("  Source commitments count: {}", freeze_tx.get_source_commitments().len());
+        // println!("  Range proof size: {} bytes", freeze_tx.get_range_proof().size());
+
+        // Balance simplification: Source commitments removed with plaintext balances
+        // // Verify that we have the expected source commitment for TOS
+        // let tos_commitment = freeze_tx.get_source_commitments()
+        //     .iter()
+        //     .find(|c| c.get_asset() == &tos_common::config::TOS_ASSET);
+        //
+        // assert!(tos_commitment.is_some(), "Should have TOS source commitment");
+        // println!("✓ TOS source commitment found");
+
         // Test 1: Verify transaction format and structure
         assert!(freeze_tx.has_valid_version_format(), "Invalid transaction format");
         assert_eq!(freeze_tx.get_nonce(), 0, "Invalid nonce");
         assert_eq!(freeze_tx.get_fee(), 20000, "Invalid fee");
-        assert_eq!(freeze_tx.get_source_commitments().len(), 1, "Should have exactly 1 source commitment");
+        // Balance simplification: Source commitments removed
+        // assert_eq!(freeze_tx.get_source_commitments().len(), 1, "Should have exactly 1 source commitment");
         println!("✓ Transaction format validation passed");
-        
-        // Test 2: Verify source commitment structure
-        let commitment = tos_commitment.unwrap();
-        assert_eq!(commitment.get_asset(), &tos_common::config::TOS_ASSET, "Wrong asset");
-        println!("✓ Source commitment structure validation passed");
+
+        // Balance simplification: Source commitment validation removed
+        // // Test 2: Verify source commitment structure
+        // let commitment = tos_commitment.unwrap();
+        // assert_eq!(commitment.get_asset(), &tos_common::config::TOS_ASSET, "Wrong asset");
+        // println!("✓ Source commitment structure validation passed");
         
         // Test 3: Verify that the transaction can be serialized and deserialized
         let tx_bytes = freeze_tx.to_bytes();
@@ -1183,27 +1186,31 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         println!("  Hash: {}", unfreeze_tx.hash());
         println!("  Fee: {} TOS", unfreeze_tx.get_fee());
         println!("  Nonce: {}", unfreeze_tx.get_nonce());
-        println!("  Source commitments count: {}", unfreeze_tx.get_source_commitments().len());
-        
-        // Verify that we have the expected source commitment for TOS
-        let tos_commitment = unfreeze_tx.get_source_commitments()
-            .iter()
-            .find(|c| c.get_asset() == &tos_common::config::TOS_ASSET);
-        
-        assert!(tos_commitment.is_some(), "Should have TOS source commitment");
-        println!("✓ TOS source commitment found");
-        
+        // Balance simplification: Source commitments removed
+        // println!("  Source commitments count: {}", unfreeze_tx.get_source_commitments().len());
+
+        // Balance simplification: Source commitments removed with plaintext balances
+        // // Verify that we have the expected source commitment for TOS
+        // let tos_commitment = unfreeze_tx.get_source_commitments()
+        //     .iter()
+        //     .find(|c| c.get_asset() == &tos_common::config::TOS_ASSET);
+        //
+        // assert!(tos_commitment.is_some(), "Should have TOS source commitment");
+        // println!("✓ TOS source commitment found");
+
         // Test 1: Verify transaction format and structure
         assert!(unfreeze_tx.has_valid_version_format(), "Invalid transaction format");
         assert_eq!(unfreeze_tx.get_nonce(), 0, "Invalid nonce");
         assert_eq!(unfreeze_tx.get_fee(), 20000, "Invalid fee");
-        assert_eq!(unfreeze_tx.get_source_commitments().len(), 1, "Should have exactly 1 source commitment");
+        // Balance simplification: Source commitments removed
+        // assert_eq!(unfreeze_tx.get_source_commitments().len(), 1, "Should have exactly 1 source commitment");
         println!("✓ Transaction format validation passed");
-        
-        // Test 2: Verify source commitment structure
-        let commitment = tos_commitment.unwrap();
-        assert_eq!(commitment.get_asset(), &tos_common::config::TOS_ASSET, "Wrong asset");
-        println!("✓ Source commitment structure validation passed");
+
+        // Balance simplification: Source commitment validation removed
+        // // Test 2: Verify source commitment structure
+        // let commitment = tos_commitment.unwrap();
+        // assert_eq!(commitment.get_asset(), &tos_common::config::TOS_ASSET, "Wrong asset");
+        // println!("✓ Source commitment structure validation passed");
         
         // Test 3: Verify that the transaction can be serialized and deserialized
         let tx_bytes = unfreeze_tx.to_bytes();
@@ -1336,15 +1343,16 @@ fn test_unfreeze_tos_integration() {
     println!("Alice nonce: {}", chain.get_nonce(&alice_pubkey));
     
     // Assert state changes after freeze transaction
+    // This test explicitly uses FeeBuilder::Value(20000) (see line 1309)
     assert_eq!(chain.get_balance(&alice_pubkey), 1000 * COIN_VALUE - freeze_amount - 20000);
     let (used, total) = chain.get_energy(&alice_pubkey);
     assert_eq!(used, 0);
     assert_eq!(total, energy_gain); // Should be 200 * 6 = 1200 transfers
     assert_eq!(chain.get_nonce(&alice_pubkey), 1);
-    
+
     // Step 2: Now unfreeze some TOS
     let unfreeze_amount = 100 * COIN_VALUE; // 100 TOS (half of what was frozen)
-    
+
     // Create unfreeze transaction
     let energy_builder = tos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
     let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);

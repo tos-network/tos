@@ -11,8 +11,6 @@ use serde_json::Value;
 use crate::{
     account::Nonce,
     crypto::{
-        elgamal::{CompressedCommitment, CompressedHandle},
-        proofs::CiphertextValidityProof,
         Address,
         Hash,
         Signature

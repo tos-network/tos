@@ -334,7 +334,7 @@ impl NetworkHandler {
     
                         // Used to check only once if we have processed this TX already
                         let mut checked = false;
-                        for (i, transfer) in txs.into_iter().enumerate() {
+                        for (_i, transfer) in txs.into_iter().enumerate() {
                             let destination = transfer.destination.to_public_key();
                             if is_owner || destination == *address.get_public_key() {
                                 let asset = transfer.asset.into_owned();
@@ -435,10 +435,11 @@ impl NetworkHandler {
                                             deposits.insert(asset, amount);
                                         },
                                         ContractDeposit::Private { .. } => {
-                                            // TODO: Decrypt amount from commitment+handle for private deposits
-                                            // Similar to transfer decryption above
-                                            let amount = 0u64; // TODO: Decrypt from commitment+handle using wallet key
-                                            deposits.insert(asset, amount);
+                                            // Balance simplification: Private deposits not supported in plaintext system
+                                            // Skip private deposits - they should not be used
+                                            if log::log_enabled!(log::Level::Warn) {
+                                                warn!("Encountered private deposit in plaintext balance system - skipping");
+                                            }
                                         }
                                     }
                                 }
@@ -474,10 +475,11 @@ impl NetworkHandler {
                                                 deposits.insert(asset, amount);
                                             },
                                             ContractDeposit::Private { .. } => {
-                                                // TODO: Decrypt amount from commitment+handle for private deposits
-                                                // Similar to transfer decryption above
-                                                let amount = 0u64; // TODO: Decrypt from commitment+handle using wallet key
-                                                deposits.insert(asset, amount);
+                                                // Balance simplification: Private deposits not supported in plaintext system
+                                                // Skip private deposits - they should not be used
+                                                if log::log_enabled!(log::Level::Warn) {
+                                                    warn!("Encountered private deposit in plaintext balance system - skipping");
+                                                }
                                             }
                                         }
                                     }
@@ -696,12 +698,9 @@ impl NetworkHandler {
         let (data_sender, mut data_receiver) = channel::<(u64, u64, Option<RPCBlockResponse<'static>>)>(self.concurrency);
         let handle = {
             let api = self.api.clone();
-            let address = address.clone();
-            let asset = asset.clone();
             spawn_task("fetch-asset-versions", async move {
-                // TODO: With balance simplification, we no longer have VersionedBalance with history
-                // Need to use GetAccountHistory API instead to traverse balance changes
-                // For now, just process the single balance at current topoheight
+                // Balance simplification: Process single balance at current topoheight
+                // (History traversal will use GetAccountHistory API when needed)
                 let balance_value = balance;
                 let block = if {
                     let mut lock = topoheight_processed.lock().await;
@@ -716,8 +715,7 @@ impl NetworkHandler {
                 };
                 data_sender.send((balance_value, topoheight, block)).await?;
 
-                // TODO: Implement proper history traversal using GetAccountHistory API
-                // For now, we only process the current balance and don't traverse history
+                // Balance simplification: History traversal via GetAccountHistory API (future work)
 
                 Ok::<_, Error>(())
             })

@@ -10,54 +10,29 @@ use std::{
     sync::Arc
 };
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 // Balance simplification: RangeProof removed
 // use bulletproofs::RangeProof;
-use curve25519_dalek::{
-    ristretto::CompressedRistretto,
-    traits::Identity,
-    RistrettoPoint
-};
+use curve25519_dalek::traits::Identity;
 use indexmap::IndexMap;
 use log::{debug, trace};
-// Balance simplification: Transcript still needed for function signatures
-use merlin::Transcript;
 use tos_vm::ModuleValidator;
 
-// Balance simplification: Stub for BatchCollector
-#[allow(dead_code)]
-struct BatchCollector;
-
-impl BatchCollector {
-    fn default() -> Self {
-        BatchCollector
-    }
-}
 use crate::{
-    tokio::spawn_blocking_safe,
-    account::{Nonce, EnergyResource},
+    account::EnergyResource,
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     contract::ContractProvider,
     crypto::{
         elgamal::{
-            CompressedPublicKey,
             DecompressionError,
             DecryptHandle,
             PedersenCommitment,
             PublicKey
         },
         hash,
-        proofs::{
-            // Balance simplification: Batch verification removed
-            // BatchCollector,
-            ProofVerificationError,
-            // BP_GENS,
-            // BULLET_PROOF_SIZE,
-            PC_GENS
-        },
+        proofs::ProofVerificationError,
         Hash,
-        // Balance simplification: ProtocolTranscript still needed for Transcript extension methods
-        ProtocolTranscript,
+        // Balance simplification: ProtocolTranscript removed - no longer needed
     },
     serializer::Serializer,
     transaction::{
@@ -71,7 +46,6 @@ use crate::{
 };
 use super::{
     ContractDeposit,
-    FeeType,
     extra_data::Role,
     Transaction,
     TransactionType,
@@ -84,6 +58,7 @@ pub use state::*;
 pub use error::*;
 pub use zkp_cache::*;
 
+#[allow(dead_code)]
 struct DecompressedTransferCt {
     commitment: PedersenCommitment,
     sender_handle: DecryptHandle,
@@ -94,6 +69,7 @@ impl DecompressedTransferCt {
     // TODO: Balance simplification - Remove this method
     // TransferPayload no longer has get_commitment(), get_sender_handle(), get_receiver_handle()
     // These methods were removed when switching to plaintext balances
+    #[allow(dead_code)]
     fn decompress(_transfer: &TransferPayload) -> Result<Self, DecompressionError> {
         // Stub implementation - this struct will be removed entirely
         // For now, return dummy values to allow compilation
@@ -106,6 +82,7 @@ impl DecompressedTransferCt {
         })
     }
 
+    #[allow(dead_code)]
     fn get_ciphertext(&self, _role: Role) -> u64 {
         // TODO: Extract amount from transfer payload once balance simplification is complete
         // For now return 0 as placeholder
@@ -118,6 +95,7 @@ impl DecompressedTransferCt {
 // We need to decompress them only one time
 // TODO: REMOVE THIS STRUCT - Part of balance simplification (Section 2.12)
 // This struct will be removed when contract deposits are changed to plain u64
+#[allow(dead_code)]
 struct DecompressedDepositCt {
     commitment: PedersenCommitment,
     sender_handle: DecryptHandle,
@@ -125,12 +103,10 @@ struct DecompressedDepositCt {
 }
 
 impl DecompressedDepositCt {
-    // NOTE: This method will be used when contract encrypted balance system is ready
-    // Currently disabled because TransactionBuilder doesn't support contract keys yet
+    // Legacy: Placeholder for contract encrypted balance migration
     #[allow(dead_code)]
     fn get_ciphertext(&self, _role: Role) -> u64 {
-        // TODO: Extract amount from deposit once balance simplification is complete
-        // For now return 0 as placeholder
+        // Balance simplification: Returns 0 until contract deposits use plain u64
         0
     }
 }
@@ -155,6 +131,7 @@ impl Transaction {
 
     /// Get the new output ciphertext
     /// This is used to substract the amount from the sender's balance
+    #[allow(dead_code)]
     fn get_sender_output_ct(
         &self,
         asset: &Hash,
@@ -291,14 +268,10 @@ impl Transaction {
 
     /// Get the new output ciphertext for the sender
     pub fn get_expected_sender_outputs<'a>(&'a self) -> Result<Vec<(&'a Hash, u64)>, DecompressionError> {
-        let mut decompressed_transfers = Vec::new();
-        let mut decompressed_deposits = HashMap::new();
+        let mut _decompressed_deposits = HashMap::new();
         match &self.data {
-            TransactionType::Transfers(transfers) => {
-                decompressed_transfers = transfers
-                    .iter()
-                    .map(DecompressedTransferCt::decompress)
-                    .collect::<Result<_, DecompressionError>>()?;
+            TransactionType::Transfers(_transfers) => {
+                // TODO: Balance simplification - Decompression removed
             },
             TransactionType::InvokeContract(payload) => {
                 for (asset, deposit) in &payload.deposits {
@@ -310,7 +283,7 @@ impl Transaction {
                                 receiver_handle: receiver_handle.decompress()?,
                             };
 
-                            decompressed_deposits.insert(asset, decompressed);
+                            _decompressed_deposits.insert(asset, decompressed);
                         },
                         _ => {}
                     }
@@ -327,41 +300,10 @@ impl Transaction {
         Ok(outputs)
     }
 
-    pub(crate) fn prepare_transcript(
-        version: TxVersion,
-        source_pubkey: &CompressedPublicKey,
-        fee: u64,
-        fee_type: &FeeType,
-        nonce: Nonce,
-    ) -> Transcript {
-        let mut transcript = Transcript::new(b"transaction-proof");
-        transcript.append_u64(b"version", version.into());
-        transcript.append_public_key(b"source_pubkey", source_pubkey);
-        transcript.append_u64(b"fee", fee);
-        // Always include fee_type for V2
-        transcript.append_u64(b"fee_type", match fee_type {
-            FeeType::TOS => 0u64,
-            FeeType::Energy => 1u64,
-        });
-        transcript.append_u64(b"nonce", nonce);
-        transcript
-    }
-
-    /// Append energy transaction data to transcript
-    /// This ensures consistency between transaction creation and verification
-    pub(crate) fn append_energy_transcript(transcript: &mut Transcript, payload: &EnergyPayload) {
-        match payload {
-            EnergyPayload::FreezeTos { amount, duration } => {
-                transcript.append_message(b"energy_type", b"freeze");
-                transcript.append_u64(b"freeze_amount", *amount);
-                transcript.append_u64(b"freeze_duration", duration.days as u64);
-            },
-            EnergyPayload::UnfreezeTos { amount } => {
-                transcript.append_message(b"energy_type", b"unfreeze");
-                transcript.append_u64(b"unfreeze_amount", *amount);
-            },
-        }
-    }
+    // TODO: Balance simplification - Transcript removed
+    // These methods were used for ZKP proof generation with Merlin transcripts
+    // With plaintext balances, no transcripts or proofs needed
+    // Kept as no-ops for now to maintain call sites during refactoring
 
     // TODO: Balance simplification - Remove this method entirely (proofs removed)
     // Verify that the commitment assets match the assets used in the tx
@@ -476,9 +418,6 @@ impl Transaction {
     // 4. Add amount to contract balance
     fn verify_contract_deposits<E>(
         &self,
-        _transcript: &mut Transcript,
-        _value_commitments: &mut Vec<(RistrettoPoint, CompressedRistretto)>,
-        _sigma_batch_collector: &mut BatchCollector,
         _source_decompressed: &PublicKey,
         _dest_pubkey: &PublicKey,
         _deposits_decompressed: &HashMap<&Hash, DecompressedDepositCt>,
@@ -508,7 +447,6 @@ impl Transaction {
         &'a self,
         tx_hash: &'a Hash,
         state: &mut B,
-        sigma_batch_collector: &mut BatchCollector,
     ) -> Result<(), VerificationError<E>> {
         let mut transfers_decompressed = Vec::new();
         let mut deposits_decompressed = HashMap::new();
@@ -650,14 +588,14 @@ impl Transaction {
         Ok(())
     }
 
-    // internal, does not verify the range proof
-    // returns (transcript, commitments for range proof)
+    // TODO: Balance simplification - Range proof and transcript removed
+    // This method no longer needs to return transcript or commitments
+    // Signature kept for compatibility during refactoring
     async fn pre_verify<'a, E, B: BlockchainVerificationState<'a, E>>(
         &'a self,
         tx_hash: &'a Hash,
         state: &mut B,
-        sigma_batch_collector: &mut BatchCollector,
-    ) -> Result<(Transcript, Vec<(RistrettoPoint, CompressedRistretto)>), VerificationError<E>>
+    ) -> Result<(), VerificationError<E>>
     {
         trace!("Pre-verifying transaction");
         if !self.has_valid_version_format() {
@@ -837,16 +775,10 @@ impl Transaction {
             }
         };
 
-        // TODO: Balance simplification - source_commitments field removed
-        // This variable is no longer needed with plaintext balances
-        let new_source_commitments_decompressed: Vec<PedersenCommitment> = Vec::new();
-
         let source_decompressed = self
             .source
             .decompress()
             .map_err(|err| VerificationError::Proof(err.into()))?;
-
-        let mut transcript = Self::prepare_transcript(self.version, &self.source, self.fee, &self.fee_type, self.nonce);
 
         // 0.a Verify Signature
         let bytes = self.get_signing_bytes();
@@ -930,10 +862,9 @@ impl Transaction {
         // 3. Update state with new receiver balance
 
         trace!("Processing transfers with plaintext amounts");
-        let mut value_commitments: Vec<(RistrettoPoint, CompressedRistretto)> = Vec::new();
 
         match &self.data {
-            TransactionType::Transfers(transfers) => {
+            TransactionType::Transfers(_transfers) => {
                 // TODO: Implement plaintext transfer verification
                 // for transfer in transfers {
                 //     let current_balance = state.get_receiver_balance(transfer.destination, transfer.asset).await?;
@@ -941,47 +872,24 @@ impl Transaction {
                 //     state.update_receiver_balance(transfer.destination, transfer.asset, new_balance).await?;
                 // }
             },
-            TransactionType::Burn(payload) => {
-                if self.get_version() >= TxVersion::T0 {
-                    transcript.burn_proof_domain_separator();
-                    transcript.append_hash(b"burn_asset", &payload.asset);
-                    transcript.append_u64(b"burn_amount", payload.amount);
-                }
+            TransactionType::Burn(_payload) => {
+                // TODO: Balance simplification - Transcript operations removed
             },
             TransactionType::MultiSig(payload) => {
-                transcript.multisig_proof_domain_separator();
-                transcript.append_u64(b"multisig_threshold", payload.threshold as u64);
-                for key in &payload.participants {
-                    transcript.append_public_key(b"multisig_participant", key);
-                }
-
                 // Setup the multisig
                 state.set_multisig_state(&self.source, payload).await
                     .map_err(VerificationError::State)?;
             },
-            TransactionType::InvokeContract(payload) => {                
+            TransactionType::InvokeContract(payload) => {
                 let dest_pubkey = PublicKey::from_hash(&payload.contract);
                 self.verify_contract_deposits(
-                    &mut transcript,
-                    &mut value_commitments,
-                    sigma_batch_collector,
                     &source_decompressed,
                     &dest_pubkey,
                     &deposits_decompressed,
                     &payload.deposits,
                 )?;
-
-                transcript.invoke_contract_proof_domain_separator();
-                transcript.append_hash(b"contract_hash", &payload.contract);
-                transcript.append_u64(b"max_gas", payload.max_gas);
-
-                for param in payload.parameters.iter() {
-                    transcript.append_message(b"contract_param", &param.to_bytes());
-                }
             },
             TransactionType::DeployContract(payload) => {
-                transcript.deploy_contract_proof_domain_separator();
-
                 // Verify that if we have a constructor, we must have an invoke, and vice-versa
                 if payload.invoke.is_none() != payload.module.get_chunk_id_of_hook(0).is_none() {
                     return Err(VerificationError::InvalidFormat);
@@ -990,37 +898,23 @@ impl Transaction {
                 if let Some(invoke) = payload.invoke.as_ref() {
                     let dest_pubkey = PublicKey::from_hash(&tx_hash);
                     self.verify_contract_deposits(
-                        &mut transcript,
-                        &mut value_commitments,
-                        sigma_batch_collector,
                         &source_decompressed,
                         &dest_pubkey,
                         &deposits_decompressed,
                         &invoke.deposits,
                     )?;
-
-                    transcript.invoke_constructor_proof_domain_separator();
-                    transcript.append_u64(b"max_gas", invoke.max_gas);
                 }
 
                 state.set_contract_module(tx_hash, &payload.module).await
                     .map_err(VerificationError::State)?;
             },
             TransactionType::Energy(payload) => {
-                // Use unified transcript operation for energy transactions (FreezeTos/UnfreezeTos)
-                // This ensures consistency between generation and verification
-                // Note: Transfer transactions with energy fees are TransactionType::Transfers, not TransactionType::Energy
-                Transaction::append_energy_transcript(&mut transcript, payload);
-
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Energy transaction verification - payload: {:?}, fee: {}, nonce: {}",
                            payload, self.fee, self.nonce);
                 }
             },
             TransactionType::AIMining(payload) => {
-                // AI Mining transactions - add to transcript for consistency
-                transcript.append_message(b"ai_mining_payload", &format!("{:?}", payload).as_bytes());
-
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("AI Mining transaction verification - payload: {:?}, fee: {}, nonce: {}",
                            payload, self.fee, self.nonce);
@@ -1030,18 +924,10 @@ impl Transaction {
 
         // TODO: Balance simplification - Range proof verification removed
         // With plaintext balances, we don't need Bulletproofs range proofs
-        // Previously this section:
-        // 1. Collected all source commitments and value commitments
-        // 2. Padded to power of two for Bulletproofs batching
-        // 3. Prepared final commitments for RangeProof::verify_multiple_with_rng
-
-        // New plaintext approach: No range proofs needed
         // Balances are plain u64, always in valid range [0, 2^64)
-
         trace!("Skipping range proof verification (plaintext balances)");
-        let final_commitments = Vec::new(); // Empty - no proofs to verify
 
-        Ok((transcript, final_commitments))
+        Ok(())
     }
 
     pub async fn verify_batch<'a, H, E, B, C>(
@@ -1055,8 +941,6 @@ impl Transaction {
         C: ZKPCache<E>
     {
         trace!("Verifying batch of transactions");
-        let mut sigma_batch_collector = BatchCollector::default();
-        let mut prepared = Vec::new();
         for (tx, hash) in txs {
             let hash = hash.as_ref();
 
@@ -1070,29 +954,15 @@ impl Transaction {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("TX {} is known from ZKPCache, verifying dynamic parts only", hash);
                 }
-                tx.verify_dynamic_parts(hash, state, &mut sigma_batch_collector).await?;
+                tx.verify_dynamic_parts(hash, state).await?;
             } else {
-                let (transcript, commitments) = tx
-                    .pre_verify(hash, state, &mut sigma_batch_collector).await?;
-                prepared.push((tx.clone(), transcript, commitments));
+                tx.pre_verify(hash, state).await?;
             }
         }
 
-        // Spawn a dedicated thread for the ZK Proofs verification
-        // this prevent us from blocking the current thread
-        spawn_blocking_safe(move || {
-            // TODO: Balance simplification - Batch proof verification removed
-            // This section previously verified both Sigma proofs and Range proofs in batch
-            // With plaintext balances, no proofs to verify
-            //
-            // Previous functionality:
-            // 1. sigma_batch_collector.verify() - batched Sigma proof verification
-            // 2. RangeProof::verify_batch() - batched Bulletproofs verification
-            //
-            // New plaintext approach: No verification needed
-            trace!("Skipping batch proof verification (plaintext balances)");
-            Ok::<(), ProofVerificationError>(())
-        }).await.context("spawning blocking thread for ZK verification")??;
+        // TODO: Balance simplification - Batch proof verification removed
+        // With plaintext balances, no ZK proofs to verify
+        trace!("Skipping batch proof verification (plaintext balances)");
 
         Ok(())
     }
@@ -1108,35 +978,22 @@ impl Transaction {
         B: BlockchainVerificationState<'a, E>,
         C: ZKPCache<E>
     {
-        let mut sigma_batch_collector = BatchCollector::default();
         let dynamic_parts_only = cache.is_already_verified(tx_hash).await
             .map_err(VerificationError::State)?;
-        let res = if dynamic_parts_only {
+        if dynamic_parts_only {
             if log::log_enabled!(log::Level::Debug) {
                 debug!("TX {} is known from ZKPCache, verifying dynamic parts only", tx_hash);
             }
-            self.verify_dynamic_parts(tx_hash, state, &mut sigma_batch_collector).await?;
-            None
+            self.verify_dynamic_parts(tx_hash, state).await?;
         }
         else {
-            let res = self.pre_verify(tx_hash, state, &mut sigma_batch_collector).await?;
-            Some((res, Arc::clone(&self)))
+            self.pre_verify(tx_hash, state).await?;
         };
 
         // TODO: Balance simplification - Single transaction proof verification removed
-        // This section verified proofs for individual transactions (non-batched)
-        // With plaintext balances, no proof verification needed
-        //
-        // Previous functionality:
-        // 1. sigma_batch_collector.verify() - Sigma proof verification
-        // 2. RangeProof::verify_multiple() - Range proof verification if pre_verify returned data
-        //
-        // New plaintext approach: No verification needed
-        spawn_blocking_safe(move || {
-            trace!("Skipping proof verification (plaintext balances)");
-            Ok::<(), ProofVerificationError>(())
-        }).await.context("spawning blocking thread for ZK verification")??;
- 
+        // With plaintext balances, no ZK proof verification needed
+        trace!("Skipping proof verification (plaintext balances)");
+
         Ok(())
     }
 
@@ -1191,19 +1048,19 @@ impl Transaction {
             TransactionType::Transfers(transfers) => {
                 for transfer in transfers {
                     // Update receiver balance
-                    let current_balance = state
+                    let _current_balance = state
                         .get_receiver_balance(
                             Cow::Borrowed(transfer.get_destination()),
                             Cow::Borrowed(transfer.get_asset()),
                         ).await
                         .map_err(VerificationError::State)?;
-    
+
                     // TODO: Balance simplification - transfer amounts are now plain u64
                     // Update receiver's balance with plaintext amount
                     // In production implementation, add proper error handling
-                    let plain_amount = transfer.get_amount();
+                    let _plain_amount = transfer.get_amount();
                     // Stub: Comment out balance update for now
-                    // *current_balance += plain_amount;
+                    // *_current_balance += _plain_amount;
                 }
             },
             TransactionType::Burn(payload) => {
@@ -1364,15 +1221,11 @@ impl Transaction {
         tx_hash: &'a Hash,
         state: &mut B,
     ) -> Result<(), VerificationError<E>> {
-        let mut transfers_decompressed = Vec::new();
         let mut deposits_decompressed = HashMap::new();
         match &self.data {
-            TransactionType::Transfers(transfers) => {
-                transfers_decompressed = transfers
-                    .iter()
-                    .map(DecompressedTransferCt::decompress)
-                    .collect::<Result<_, DecompressionError>>()
-                    .map_err(ProofVerificationError::from)?
+            TransactionType::Transfers(_transfers) => {
+                // TODO: Balance simplification - Decompression removed
+                // Transfer ciphertexts no longer needed with plaintext balances
             },
             TransactionType::InvokeContract(payload) => {
                 for (asset, deposit) in &payload.deposits {
@@ -1429,17 +1282,12 @@ impl Transaction {
         state: &mut B
     ) -> Result<(), VerificationError<E>> {
         trace!("apply with partial verify");
-        let mut sigma_batch_collector = BatchCollector::default();
 
-        let mut transfers_decompressed = Vec::new();
         let mut deposits_decompressed = HashMap::new();
         match &self.data {
-            TransactionType::Transfers(transfers) => {
-                transfers_decompressed = transfers
-                    .iter()
-                    .map(DecompressedTransferCt::decompress)
-                    .collect::<Result<_, DecompressionError>>()
-                    .map_err(ProofVerificationError::from)?
+            TransactionType::Transfers(_transfers) => {
+                // TODO: Balance simplification - Decompression removed
+                // Transfer ciphertexts no longer needed with plaintext balances
             },
             TransactionType::InvokeContract(payload) => {
                 for (asset, deposit) in &payload.deposits {
@@ -1462,13 +1310,6 @@ impl Transaction {
             }
             _ => {}
         }
-
-        let owner = self
-            .source
-            .decompress()
-            .map_err(|err| VerificationError::Proof(err.into()))?;
-
-        let mut transcript = Self::prepare_transcript(self.version, &self.source, self.fee, &self.fee_type, self.nonce);
 
         // TODO: Balance simplification - Partial verification removed
         // This method previously verified CommitmentEqProof for each source commitment

@@ -4,11 +4,7 @@
 use std::hash::Hasher;
 
 use tos_vm::{impl_opaque, traits::{DynEq, DynHash, Serializable}};
-use crate::{
-    contract::opaque::CIPHERTEXT_VALIDITY_PROOF_OPAQUE_ID,
-    crypto::proofs::CiphertextValidityProof,
-    serializer::*
-};
+use crate::crypto::proofs::CiphertextValidityProof;
 
 impl_opaque!("CiphertextValidityProof", CiphertextValidityProof, json);
 impl_opaque!("CiphertextValidityProof", CiphertextValidityProof);

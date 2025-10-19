@@ -3,11 +3,8 @@
 //! This benchmark measures the actual serialized size of different transaction types
 //! to determine realistic block capacity.
 //!
-//! TODO: Update after balance simplification (Section 2.13)
-//! Expected changes:
-//! - Transaction size will reduce by 60-75% (from ~500-800 bytes to ~200-300 bytes)
-//! - No ciphertext or proof overhead
-//! - Update size expectations in assertions
+//! Note: After balance simplification, transaction sizes are reduced significantly
+//! due to removal of ciphertext and proof overhead.
 
 use tos_common::{
     account::Nonce,

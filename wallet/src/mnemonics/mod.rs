@@ -3,8 +3,7 @@ pub mod languages;
 use thiserror::Error;
 use log::debug;
 use tos_common::{
-    crypto::PrivateKey,
-    serializer::Serializer
+    crypto::PrivateKey
 };
 use languages::*;
 

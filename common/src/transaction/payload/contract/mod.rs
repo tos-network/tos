@@ -44,6 +44,21 @@ pub enum ContractDeposit {
     }
 }
 
+impl ContractDeposit {
+    /// Extract the deposit amount from a ContractDeposit
+    ///
+    /// Balance simplification: Only Public deposits are supported in plaintext balance system.
+    /// Private deposits should not be used and will return an error.
+    pub fn get_amount(&self) -> Result<u64, &'static str> {
+        match self {
+            ContractDeposit::Public(amount) => Ok(*amount),
+            ContractDeposit::Private { .. } => {
+                Err("Private deposits are not supported in plaintext balance system")
+            }
+        }
+    }
+}
+
 impl Serializer for ContractDeposit {
     fn write(&self, writer: &mut Writer) {
         match self {

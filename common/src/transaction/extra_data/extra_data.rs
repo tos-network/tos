@@ -40,13 +40,9 @@ impl ExtraData {
         Self {
             // Encrypt the cipher using the shared key
             cipher: data.encrypt_in_place(&k),
-            // Create a handle for the sender so he can decrypt the message later
-            // TODO: Balance simplification - encryption infrastructure removed
-            // Using default handles as stubs since encryption is being removed
-            sender_handle: CompressedHandle::default(), // Stub - encryption removed
-            // Same for the receiver
-            // TODO: Balance simplification - encryption infrastructure removed
-            receiver_handle: CompressedHandle::default(), // Stub - encryption removed
+            // Balance simplification: Using default handles (encryption being phased out)
+            sender_handle: CompressedHandle::default(),
+            receiver_handle: CompressedHandle::default(),
         }
     }
 

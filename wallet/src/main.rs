@@ -1536,7 +1536,6 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         amount,
         asset,
         extra_data: None,
-        encrypt_extra_data: true
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
     
@@ -1667,7 +1666,6 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
         amount,
         asset: asset.clone(),
         extra_data: None,
-        encrypt_extra_data: true
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
     
@@ -1709,7 +1707,6 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
         amount,
         asset,
         extra_data: None,
-        encrypt_extra_data: true
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
     let tx = if let Some(multisig) = multisig {

@@ -57,4 +57,11 @@ pub enum VerificationError<T> {
     ContractNotFound,
     #[error("Insufficient energy: required {0}")]
     InsufficientEnergy(u64),
+    #[error("Insufficient funds: available {available}, required {required}")]
+    InsufficientFunds {
+        available: u64,
+        required: u64,
+    },
+    #[error("Arithmetic overflow during balance calculation")]
+    Overflow,
 }

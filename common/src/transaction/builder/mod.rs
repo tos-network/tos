@@ -1,6 +1,7 @@
 //! This file represents the transactions without the proofs
 //! Not really a 'builder' per say
 //! Intended to be used when creating a transaction before making the associated proofs and signature
+
 mod state;
 mod fee;
 mod unsigned;
@@ -32,7 +33,6 @@ use crate::{
 use thiserror::Error;
 use super::{
     extra_data::{
-        ExtraData,
         ExtraDataType,
         PlaintextData,
         UnknownExtraDataFormat
@@ -79,6 +79,8 @@ pub enum GenerationError<T> {
     ExtraDataTooLarge,
     #[error("Encrypted extra data is too large, we got {0} bytes, limit is {1} bytes")]
     EncryptedExtraDataTooLarge(usize, usize),
+    #[error("Insufficient funds for asset {0}: required {1}, available {2}")]
+    InsufficientFunds(Hash, u64, u64),
     #[error("Address is not on the same network as us")]
     InvalidNetwork,
     #[error("Extra data was provied with an integrated address")]
@@ -162,7 +164,7 @@ impl TransactionBuilder {
     /// Estimate by hand the bytes size of a final TX
     // Returns bytes size and transfers count
     pub fn estimate_size(&self) -> usize {
-        let assets_used = self.data.used_assets().len();
+        let _assets_used = self.data.used_assets().len();
         // Version byte
         let mut size = 1
         // Source Public Key
@@ -201,8 +203,8 @@ impl TransactionBuilder {
                     + 1;
 
                     if let Some(extra_data) = transfer.extra_data.as_ref().or(transfer.destination.get_extra_data()) {
-                        // Always use ExtraDataType for T0
-                        size += ExtraDataType::estimate_size(extra_data, transfer.encrypt_extra_data);
+                        // Balance simplification: Extra data is now always plaintext
+                        size += ExtraDataType::estimate_size(extra_data, false);
                     }
                 }
             }
@@ -445,7 +447,7 @@ impl TransactionBuilder {
     pub fn build_unsigned<B: AccountState>(
         mut self,
         state: &mut B,
-        source_keypair: &KeyPair,
+        _source_keypair: &KeyPair,
     ) -> Result<UnsignedTransaction, GenerationError<B::Error>> where <B as FeeHelper>::Error: for<'a> std::convert::From<&'a str> {
         // Validate that Energy fee type can only be used with Transfer transactions
         if let Some(fee_type) = &self.fee_type {
@@ -478,15 +480,13 @@ impl TransactionBuilder {
         // Update balances for used assets
         let used_assets = self.data.used_assets();
         for asset in used_assets.iter() {
-            let cost = self.get_transaction_cost(fee, &asset);
-            let current_balance = state.get_account_balance(&asset).map_err(GenerationError::State)?;
+            let cost = self.get_transaction_cost(fee, asset);
+            let current_balance = state.get_account_balance(asset).map_err(GenerationError::State)?;
 
-            // TODO: Balance simplification - Add proper InsufficientFunds error
-            // For now, use unwrap_or_else to panic with clear message
             let new_balance = current_balance.checked_sub(cost)
-                .unwrap_or_else(|| panic!("Insufficient funds: required {}, available {}", cost, current_balance));
+                .ok_or_else(|| GenerationError::InsufficientFunds((*asset).clone(), cost, current_balance))?;
 
-            state.update_account_balance(&asset, new_balance).map_err(GenerationError::State)?;
+            state.update_account_balance(asset, new_balance).map_err(GenerationError::State)?;
         }
 
         // Determine fee type
@@ -538,22 +538,14 @@ impl TransactionBuilder {
                 let transfer_payloads: Vec<TransferPayload> = transfers
                     .iter()
                     .map(|transfer| {
-                        let destination_pubkey = transfer.destination.get_public_key()
+                        let _destination_pubkey = transfer.destination.get_public_key()
                             .decompress()
                             .map_err(|_| GenerationError::State("Invalid destination public key".into()))?;
 
-                        // Encrypt extra data if it exists
+                        // Balance simplification: Extra data is now always plaintext (no encryption)
                         let extra_data = if let Some(ref extra_data) = transfer.extra_data {
                             let bytes = extra_data.to_bytes();
-                            let cipher: UnknownExtraDataFormat = if transfer.encrypt_extra_data {
-                                ExtraDataType::Private(ExtraData::new(
-                                    PlaintextData(bytes),
-                                    source_keypair.get_public_key(),
-                                    &destination_pubkey
-                                )).into()
-                            } else {
-                                ExtraDataType::Public(PlaintextData(bytes)).into()
-                            };
+                            let cipher: UnknownExtraDataFormat = ExtraDataType::Public(PlaintextData(bytes)).into();
 
                             let cipher_size = cipher.size();
                             if cipher_size > EXTRA_DATA_LIMIT_SIZE {

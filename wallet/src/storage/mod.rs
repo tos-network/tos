@@ -848,7 +848,6 @@ impl EncryptedStorage {
     }
 
     // Retrieve the unconfirmed balance decoded for this asset if present
-    // TODO: Balance simplification - ciphertext comparison removed
     pub async fn get_unconfirmed_balance_decoded_for(&self, asset: &Hash) -> Result<Option<u64>> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get unconfirmed balance decoded for {}", asset);
@@ -917,8 +916,7 @@ impl EncryptedStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set balance for {}", asset);
         }
-        // TODO: Balance simplification - ciphertext comparison removed
-        // Clear the unconfirmed balance cache for this asset since we're setting a new confirmed balance
+        // Clear unconfirmed balance cache when setting new confirmed balance
         {
             let mut cache = self.unconfirmed_balances_cache.lock().await;
             let mut delete_entry = false;

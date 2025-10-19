@@ -7,10 +7,6 @@ use std::hash::Hasher;
 // use bulletproofs::RangeProof;
 use serde::{Deserialize, Serialize};
 use tos_vm::{impl_opaque, traits::{DynEq, DynHash, Serializable}};
-use crate::{
-    contract::opaque::RANGE_PROOF_OPAQUE_ID,
-    serializer::*
-};
 
 // Balance simplification: Stub type for backward compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]

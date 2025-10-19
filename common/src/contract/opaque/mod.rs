@@ -17,7 +17,7 @@ use tos_types::{
 use tos_vm::{tid, traits::JSON_REGISTRY, OpaqueWrapper};
 use crate::{
     block::Block,
-    crypto::{proofs::CiphertextValidityProof, Address, Hash, Signature},
+    crypto::{Address, Hash, Signature},
     serializer::*,
     transaction::Transaction
 };
