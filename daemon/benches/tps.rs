@@ -367,7 +367,6 @@ fn generate_block(tx_count: usize, amount: u64, fee: u64) -> GeneratedBlock {
             amount,
             destination: receiver.keypair.get_public_key().compress().to_address(false),
             extra_data: None,
-            encrypt_extra_data: true,
         };
 
         let tx = TransactionBuilder::new(

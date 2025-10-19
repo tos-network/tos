@@ -99,7 +99,6 @@ fn main() {
         amount: 50 * COIN_VALUE,
         destination: receiver.get_public_key().compress().to_address(false),
         extra_data: None,
-        encrypt_extra_data: true,
     };
 
     let tx = TransactionBuilder::new(
@@ -126,7 +125,6 @@ fn main() {
             amount: 10 * COIN_VALUE,
             destination: receiver.get_public_key().compress().to_address(false),
             extra_data: None,
-            encrypt_extra_data: true,
         });
     }
 
@@ -153,7 +151,6 @@ fn main() {
         amount: 50 * COIN_VALUE,
         destination: receiver.get_public_key().compress().to_address(false),
         extra_data: Some(extra_data),
-        encrypt_extra_data: true,
     };
 
     let tx = TransactionBuilder::new(
