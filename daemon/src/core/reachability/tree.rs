@@ -46,9 +46,16 @@ pub async fn add_tree_block<S: Storage>(
     let mut parent_data = storage.get_reachability_data(&parent).await?;
 
     // Calculate remaining interval capacity after the last child
-    let remaining = if let Some(last_child) = parent_data.children.last() {
-        let last_child_data = storage.get_reachability_data(last_child).await?;
-        Interval::new(last_child_data.interval.end + 1, parent_data.interval.end)
+    // CRITICAL FIX: After reindex, children's intervals may be reordered by subtree_size
+    // We must find the child with the MAXIMUM interval.end, not just children.last()
+    let remaining = if !parent_data.children.is_empty() {
+        // Find the child with maximum interval.end
+        let mut max_end = 0u64;
+        for child_hash in &parent_data.children {
+            let child_data = storage.get_reachability_data(child_hash).await?;
+            max_end = max_end.max(child_data.interval.end);
+        }
+        Interval::new(max_end + 1, parent_data.interval.end)
     } else {
         // No children yet - full parent interval available (minus 1 for strict containment)
         parent_data.interval.decrease_end(1)
