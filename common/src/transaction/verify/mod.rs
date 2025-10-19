@@ -1086,19 +1086,29 @@ impl Transaction {
                         // Get current energy resource for the account
                         let energy_resource = state.get_energy_resource(&self.source).await
                             .map_err(VerificationError::State)?;
-                        
+
                         if let Some(mut energy_resource) = energy_resource {
                             // Unfreeze TOS - get topoheight from the blockchain state
                             let topoheight = state.get_block().get_blue_score() as u64; // Use blue_score for consensus
                             energy_resource.unfreeze_tos(*amount, topoheight)
                                 .map_err(|_| VerificationError::AnyError(anyhow::anyhow!("Invalid energy operation")))?;
-                            
+
                             // Update energy resource in state
                             state.set_energy_resource(&self.source, energy_resource).await
                                 .map_err(VerificationError::State)?;
-                            
+
+                            // CRITICAL FIX: Return unfrozen TOS to sender's balance
+                            // Unfreeze releases frozen funds back to the account
+                            let balance = state.get_receiver_balance(
+                                Cow::Borrowed(self.get_source()),
+                                Cow::Owned(TOS_ASSET)
+                            ).await.map_err(VerificationError::State)?;
+
+                            *balance = balance.checked_add(*amount)
+                                .ok_or(VerificationError::Overflow)?;
+
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("UnfreezeTos applied: {} TOS unfrozen, energy removed: {} units", amount, amount);
+                                debug!("UnfreezeTos applied: {} TOS unfrozen and returned to balance", amount);
                             }
                         } else {
                             return Err(VerificationError::AnyError(anyhow::anyhow!("Invalid energy operation")));
