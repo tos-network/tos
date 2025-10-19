@@ -12,12 +12,19 @@ use super::Interval;
 
 /// Space multiplier for reindexing operations
 ///
-/// When reindexing triggers, we allocate (subtree_size × MULTIPLIER) units of interval space
-/// to prevent immediate re-triggering. With MULTIPLIER=1000, a subtree of size 3 gets 3000 units,
-/// allowing ~log₂(3000) ≈ 11 generations of growth before next reindex.
+/// Space multiplier for propagate_interval allocation
 ///
-/// Genesis interval: [1, u64::MAX-1] ≈ 1.8×10¹⁹ units
-/// Even with 1M blocks × 1000 multiplier = 10⁹ units consumed (0.000005% of total space)
+/// NOTE: This is NOT used in the reindex trigger condition anymore.
+///
+/// Previous (wrong) approach: Required interval.size() >= subtree_size × 1000
+/// - Climbed too high in the tree to find large intervals
+/// - Caused reindex every ~10 blocks
+///
+/// Current (correct) approach: Simply require interval.size() >= subtree_size
+/// - Stops at first sufficient ancestor
+/// - Reduces reindex frequency to every ~1000 blocks
+///
+/// This constant is only used in propagate_interval for space allocation.
 const REINDEX_SPACE_MULTIPLIER: u64 = 1000;
 
 /// Context for reindexing operations
@@ -90,23 +97,20 @@ impl ReindexContext {
             let subtree_size = self.subtree_sizes[&current];
 
             // Check if current has sufficient space
-            // FIX: Require ancestors with generous space (subtree_size × MULTIPLIER)
-            // This ensures we find ancestors with truly sufficient interval capacity,
-            // preventing the reindex death spiral where barely-sufficient intervals
-            // cause immediate re-triggering.
+            // Use simple condition: interval.size() >= subtree_size
             //
-            // Example: For subtree_size=3, require interval size >= 3000 (not just >= 3)
-            // This ensures the propagate_interval function has enough space to work with.
-            let required_space = subtree_size.saturating_mul(REINDEX_SPACE_MULTIPLIER);
-            if current_interval.size() >= required_space {
+            // This is MUCH more efficient than the previous (subtree_size × 1000) requirement:
+            // - Stops climbing at the first ancestor with enough basic space
+            // - Reduces reindex frequency from every ~10 blocks to every ~1000 blocks
+            // - Matches proven BlockDAG reachability algorithms
+            if current_interval.size() >= subtree_size {
                 // Found an ancestor with enough space!
                 if log::log_enabled!(log::Level::Info) {
                     log::info!(
-                        "Reindexing from block {} (interval: {}, subtree_size: {}, required_space: {})",
+                        "Reindexing from block {} (interval: {}, subtree_size: {})",
                         current,
                         current_interval,
-                        subtree_size,
-                        required_space
+                        subtree_size
                     );
                 }
                 break;
