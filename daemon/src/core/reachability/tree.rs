@@ -62,23 +62,22 @@ pub async fn add_tree_block<S: Storage>(
     };
 
     // Check if we need reindexing
-    if remaining.size() <= 1 {
+    // ALIGNED WITH KASPA: Trigger ONLY when completely exhausted (size == 0)
+    // This ensures new_block always gets an empty interval, allowing simple
+    // reindex algorithm to work correctly (check fails, climbs to parent automatically)
+    if remaining.is_empty() {
         // CRITICAL PATH: Interval exhaustion detected - trigger reindexing
-        log::warn!(
-            "Interval exhaustion detected for parent {} (remaining: {}). Triggering reindexing...",
-            parent,
-            remaining.size()
-        );
+        if log::log_enabled!(log::Level::Warn) {
+            log::warn!(
+                "Interval exhaustion detected for parent {} (remaining: empty). Triggering reindexing...",
+                parent
+            );
+        }
 
-        // Step 1: Initialize new block with an empty interval temporarily
-        // The reindexing process will assign a proper interval
-        let empty_interval = if remaining.is_empty() {
-            // Completely exhausted - use parent's end as both start and end
-            Interval::new(parent_data.interval.end, parent_data.interval.end - 1)
-        } else {
-            // One slot remaining - use it
-            remaining
-        };
+        // Step 1: Initialize new block with the empty interval
+        // Note: internal logic relies on interval being this specific interval
+        //       which comes exactly at the end of current capacity (like Kaspa)
+        let empty_interval = remaining;
 
         let new_block_data = ReachabilityData {
             parent: parent.clone(),
@@ -237,6 +236,31 @@ pub async fn try_advancing_reindex_root<S: Storage>(
                 new_root_data.height
             );
         }
+
+        // Perform interval concentration to reclaim slack from finalized blocks
+        // Walk from current_root to new_root, concentrating intervals at each step
+        let mut ancestor = current_root.clone();
+        let mut ctx = ReindexContext::new(DEFAULT_REINDEX_DEPTH, DEFAULT_REINDEX_SLACK);
+
+        while ancestor != new_root {
+            // Find the child of ancestor that is on the path to new_root
+            let child = get_next_chain_ancestor_for_concentration(storage, &new_root, &ancestor).await?;
+
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "Concentrating intervals: parent {} → child {}, is_final={}",
+                    ancestor,
+                    child,
+                    child == new_root
+                );
+            }
+
+            // Concentrate intervals: tighten siblings, expand chosen child
+            ctx.concentrate_interval(storage, ancestor.clone(), child.clone(), child == new_root).await?;
+
+            ancestor = child;
+        }
+
         storage.set_reindex_root(new_root).await?;
     }
 
@@ -273,6 +297,40 @@ async fn find_ancestor_at_depth<S: Storage>(
     }
 
     Ok(current)
+}
+
+/// Get the next chain ancestor for interval concentration
+///
+/// Given an ancestor block and a descendant block, finds which child of the ancestor
+/// is on the path to the descendant. This is used during interval concentration when
+/// advancing the reindex root.
+///
+/// # Arguments
+/// * `storage` - Storage reference
+/// * `descendant` - The descendant block (new reindex root)
+/// * `ancestor` - The ancestor block whose child we want to find
+///
+/// # Returns
+/// The child of ancestor that is on the chain path to descendant
+async fn get_next_chain_ancestor_for_concentration<S: Storage>(
+    storage: &S,
+    descendant: &Hash,
+    ancestor: &Hash,
+) -> Result<Hash, BlockchainError> {
+    let descendant_data = storage.get_reachability_data(descendant).await?;
+    let ancestor_data = storage.get_reachability_data(ancestor).await?;
+
+    // Check each child of ancestor to find which one contains descendant in its interval
+    for child in &ancestor_data.children {
+        let child_data = storage.get_reachability_data(child).await?;
+        // Check if child's interval contains descendant's interval
+        if child_data.interval.contains(descendant_data.interval) {
+            return Ok(child.clone());
+        }
+    }
+
+    // If no child found, this is an error - descendant is not actually a descendant of ancestor
+    Err(BlockchainError::InvalidReachability)
 }
 
 #[cfg(test)]
