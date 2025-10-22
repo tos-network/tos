@@ -7,6 +7,7 @@ use rand::{rngs::OsRng, RngCore};
 use log::{
     debug,
     error,
+    info,
     trace
 };
 use anyhow::{Error, Context};
@@ -810,24 +811,70 @@ impl Wallet {
     // Warning: this is locking the network handler to access to the daemon api
     pub async fn create_transaction_state_with_storage(&self, storage: &EncryptedStorage, transaction_type: &TransactionTypeBuilder, fee: &FeeBuilder, nonce: Option<u64>) -> Result<TransactionBuilderState, WalletError> {
         trace!("create transaction with storage");
-        let nonce = match nonce {
-            Some(n) => n,
-            None => storage.get_unconfirmed_nonce()?
+
+        // Light mode: Query nonce and reference on-demand from daemon
+        #[cfg(feature = "network_handler")]
+        let (nonce, reference, mut generated) = if self.is_light_mode() {
+            let light_api = self.get_light_api().await?;
+            let address = self.get_address();
+
+            // Query nonce on-demand (ignore provided nonce in light mode)
+            let queried_nonce = light_api.get_nonce(&address).await
+                .map_err(|e| WalletError::Any(anyhow::anyhow!("Failed to query nonce from daemon in light mode: {}", e)))?;
+
+            // Query reference on-demand
+            let queried_reference = light_api.get_reference_block().await
+                .map_err(|e| WalletError::Any(anyhow::anyhow!("Failed to query reference from daemon in light mode: {}", e)))?;
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Light mode: queried nonce={}, reference.topoheight={}", queried_nonce, queried_reference.topoheight);
+            }
+
+            (queried_nonce, queried_reference, true)
+        } else {
+            // Normal mode: Use local storage
+            let nonce = match nonce {
+                Some(n) => n,
+                None => storage.get_unconfirmed_nonce()?
+            };
+
+            let mut generated = false;
+            let reference = if let Some(cache) = storage.get_tx_cache() {
+                cache.reference.clone()
+            } else {
+                generated = true;
+                Reference {
+                    topoheight: storage.get_synced_topoheight()?,
+                    hash: storage.get_top_block_hash()?
+                }
+            };
+
+            (nonce, reference, generated)
+        };
+
+        #[cfg(not(feature = "network_handler"))]
+        let (nonce, reference, mut generated) = {
+            let nonce = match nonce {
+                Some(n) => n,
+                None => storage.get_unconfirmed_nonce()?
+            };
+
+            let mut generated = false;
+            let reference = if let Some(cache) = storage.get_tx_cache() {
+                cache.reference.clone()
+            } else {
+                generated = true;
+                Reference {
+                    topoheight: storage.get_synced_topoheight()?,
+                    hash: storage.get_top_block_hash()?
+                }
+            };
+
+            (nonce, reference, generated)
         };
 
         // Build the state for the builder
         let used_assets = transaction_type.used_assets();
-
-        let mut generated = false;
-        let reference = if let Some(cache) = storage.get_tx_cache() {
-            cache.reference.clone()
-        } else {
-            generated = true;
-            Reference {
-                topoheight: storage.get_synced_topoheight()?,
-                hash: storage.get_top_block_hash()?
-            }
-        };
 
         // state used to build the transaction
         let mut state = TransactionBuilderState::new(
@@ -1170,8 +1217,24 @@ impl Wallet {
             return Err(WalletError::AlreadyOnlineMode)
         }
 
-        // create the network handler
-        let network_handler = NetworkHandler::new(Arc::clone(&self), daemon_address, self.concurrency).await?;
+        // Create DaemonAPI first so we can share it between NetworkHandler and LightAPI
+        use crate::daemon_api::DaemonAPI;
+        use tos_common::utils::sanitize_ws_address;
+        let daemon_api = Arc::new(DaemonAPI::new(format!("{}/json_rpc", sanitize_ws_address(daemon_address.as_str()))).await?);
+
+        // create the network handler with the shared DaemonAPI
+        let network_handler = NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone(), self.concurrency).await?;
+
+        // Initialize LightAPI if in light mode
+        if self.is_light_mode() {
+            let light_api = Arc::new(crate::light_api::LightAPI::new(daemon_api));
+            self.set_light_api(light_api).await;
+
+            if log::log_enabled!(log::Level::Info) {
+                info!("Light mode: LightAPI initialized for on-demand queries");
+            }
+        }
+
         // start the task
         network_handler.start(auto_reconnect).await?;
         *self.network_handler.lock().await = Some(network_handler);
@@ -1191,7 +1254,18 @@ impl Wallet {
         }
 
         // create the network handler
-        let network_handler = NetworkHandler::with_api(Arc::clone(&self), daemon_api, self.concurrency).await?;
+        let network_handler = NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone(), self.concurrency).await?;
+
+        // Initialize LightAPI if in light mode
+        if self.is_light_mode() {
+            let light_api = Arc::new(crate::light_api::LightAPI::new(daemon_api));
+            self.set_light_api(light_api).await;
+
+            if log::log_enabled!(log::Level::Info) {
+                info!("Light mode: LightAPI initialized for on-demand queries (shared daemon API)");
+            }
+        }
+
         // start the task
         network_handler.start(auto_reconnect).await?;
         *self.network_handler.lock().await = Some(network_handler);
