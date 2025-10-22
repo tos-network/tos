@@ -34,7 +34,16 @@ pub enum CommandError {
     #[error("Missing required argument '{}' in batch mode. Use --{} <value>", _0, _0)]
     MissingArgument(String),
     #[error("Batch mode error: {}", _0)]
-    BatchModeError(String)
+    BatchModeError(String),
+    #[error("Missing required argument '{arg}' in command mode.\nUsage: {usage}\nUse --interactive to enable prompts.")]
+    MissingRequiredArgument {
+        arg: String,
+        usage: String,
+    },
+    #[error("Missing confirmation for destructive operation.\nAdd '--confirm true' to proceed or '--confirm false' to cancel explicitly.")]
+    MissingConfirmation,
+    #[error("Password required in command mode.\nUse: --password <pwd> OR --password-file <path> OR --password-from-env OR set TOS_WALLET_PASSWORD environment variable.")]
+    PasswordRequired
 }
 
 impl<T> From<PoisonError<T>> for CommandError {

@@ -96,6 +96,124 @@ use {
 
 const ELEMENTS_PER_PAGE: usize = 10;
 
+// ========== Helper Functions for Command Mode ==========
+
+/// Get a required argument from CLI or prompt in interactive mode
+async fn get_required_arg<F, Fut>(
+    args: &mut ArgumentManager,
+    name: &str,
+    manager: &CommandManager,
+    usage: &str,
+    interactive_fn: F
+) -> Result<String, CommandError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<String, PromptError>>,
+{
+    if args.has_argument(name) {
+        return Ok(args.get_value(name)?.to_string_value()?);
+    }
+
+    if manager.is_batch_mode() {
+        return Err(CommandError::MissingRequiredArgument {
+            arg: name.to_string(),
+            usage: usage.to_string(),
+        });
+    }
+
+    interactive_fn().await.map_err(|e| e.into())
+}
+
+/// Get an optional argument from CLI or prompt in interactive mode
+async fn get_optional_arg<F, Fut>(
+    args: &mut ArgumentManager,
+    name: &str,
+    manager: &CommandManager,
+    interactive_fn: F
+) -> Result<Option<String>, CommandError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<String, PromptError>>,
+{
+    if args.has_argument(name) {
+        return Ok(Some(args.get_value(name)?.to_string_value()?));
+    }
+
+    if manager.is_batch_mode() {
+        return Ok(None);
+    }
+
+    match interactive_fn().await {
+        Ok(val) if val.is_empty() => Ok(None),
+        Ok(val) => Ok(Some(val)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Get confirmation from CLI or prompt in interactive mode
+async fn get_confirmation<F, Fut>(
+    args: &mut ArgumentManager,
+    manager: &CommandManager,
+    interactive_fn: F
+) -> Result<bool, CommandError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<bool, PromptError>>,
+{
+    if args.has_argument("confirm") {
+        return Ok(args.get_value("confirm")?.to_bool()?);
+    }
+
+    if manager.is_batch_mode() {
+        return Err(CommandError::MissingConfirmation);
+    }
+
+    interactive_fn().await.map_err(|e| e.into())
+}
+
+/// Get password from config with priority: CLI > File > Env > Interactive > Error
+async fn get_password(config: &Config, prompt: &Prompt) -> Result<String> {
+    // Priority 1: CLI argument (least secure, warn in production)
+    if let Some(pwd) = config.password.as_ref() {
+        #[cfg(not(debug_assertions))]
+        {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Using --password in production is not secure. Consider --password-file or --password-from-env");
+            }
+        }
+        return Ok(pwd.clone());
+    }
+
+    // Priority 2: Password file (recommended for automation)
+    if let Some(file) = config.password_file.as_ref() {
+        let pwd = std::fs::read_to_string(file)
+            .with_context(|| format!("Failed to read password file: {}", file))?;
+
+        // Trim trailing newline (like geth)
+        let pwd = pwd.trim_end_matches('\n').to_string();
+
+        if pwd.is_empty() {
+            return Err(anyhow::anyhow!("Password file is empty: {}", file));
+        }
+
+        return Ok(pwd);
+    }
+
+    // Priority 3: Environment variable
+    if config.password_from_env {
+        return std::env::var("TOS_WALLET_PASSWORD")
+            .context("Environment variable TOS_WALLET_PASSWORD not set");
+    }
+
+    // Priority 4: Interactive prompt
+    if config.is_interactive_mode() {
+        return Ok(prompt.read_input("Password: ", true).await?);
+    }
+
+    // Priority 5: Error
+    Err(CommandError::PasswordRequired.into())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init();
@@ -123,6 +241,10 @@ async fn main() -> Result<()> {
     }
 
     let log_config = &config.log;
+    // Determine if we should enable interactive mode
+    // Interactive mode is ONLY enabled if --interactive flag is set AND we're not in exec mode
+    let is_interactive = config.is_interactive_mode();
+
     let prompt = Prompt::new(
         log_config.log_level,
         &log_config.logs_path,
@@ -131,7 +253,7 @@ async fn main() -> Result<()> {
         log_config.disable_file_log_date_based,
         log_config.disable_log_color,
         log_config.auto_compress_logs,
-        !log_config.disable_interactive_mode,
+        is_interactive,  // Changed: use is_interactive instead of !disable_interactive_mode
         log_config.logs_modules.clone(),
         log_config.file_log_level.unwrap_or(log_config.log_level),
         !log_config.disable_ascii_art,
@@ -160,19 +282,15 @@ async fn main() -> Result<()> {
         }
     }
 
-    let command_manager = CommandManager::new_with_batch_mode(prompt.clone(), config.is_exec_mode());
+    // Set batch mode based on command mode (not just exec mode)
+    let command_manager = CommandManager::new_with_batch_mode(prompt.clone(), config.is_command_mode());
     command_manager.store_in_context(config.network)?;
 
     if let Some(path) = config.wallet_path.as_ref() {
-        // read password from option or ask him
-        let password = if let Some(password) = config.password.as_ref() {
-            password.clone()
-        } else if config.is_exec_mode() {
-            error!("Exec mode enabled but no password specified. Use --password to specify the password.");
-            return Ok(());
-        } else {
-            prompt.read_input(format!("Enter Password for '{}': ", path), true).await?
-        };
+        // Get password using our new helper function
+        // Priority: CLI > File > Env > Interactive > Error
+        let password = get_password(&config, &prompt).await
+            .context("Failed to get wallet password")?;
 
         let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(config.precomputed_tables.precomputed_tables_path.as_deref(), config.precomputed_tables.precomputed_tables_l1, LogProgressTableGenerationReportFunction, true).await?;
         let p = Path::new(path);
@@ -193,10 +311,13 @@ async fn main() -> Result<()> {
         apply_config(config.clone(), &wallet, #[cfg(feature = "xswd")] &prompt).await;
         setup_wallet_command_manager(wallet, &command_manager).await?;
         
-        // Handle exec mode
-        if config.is_exec_mode() {
+        // Execute based on mode
+        if config.is_command_mode() {
+            // Command mode: execute and exit
             if let Some(json_str) = config.json.as_ref() {
-                info!("Executing batch command from JSON string");
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Executing batch command from JSON string");
+                }
                 execute_json_batch(&command_manager, json_str, &config).await?;
             } else if let Some(json_file) = config.json_file.as_ref() {
                 if log::log_enabled!(log::Level::Info) {
@@ -211,21 +332,26 @@ async fn main() -> Result<()> {
                 }
                 match command_manager.handle_command(cmd.clone()).await {
                     Ok(_) => {
-                        info!("Batch command executed successfully");
+                        if log::log_enabled!(log::Level::Info) {
+                            info!("Command executed successfully");
+                        }
                     }
                     Err(e) => {
                         if log::log_enabled!(log::Level::Error) {
-                            error!("Error executing batch command: {:#}", e);
+                            error!("Error executing command: {:#}", e);
                         }
                         return Err(e.into());
                     }
                 }
             } else {
-                error!("Exec mode enabled but no command specified. Use --exec, --json, or --json-file to specify the command.");
-                return Ok(());
+                // Command mode but no command specified
+                return Err(anyhow::anyhow!(
+                    "Command mode requires one of: --exec, --json, or --json-file\n\
+                     Use --interactive to enable interactive mode"
+                ));
             }
         } else {
-            // Normal interactive mode
+            // Interactive mode: start prompt loop
             if let Err(e) = prompt.start(Duration::from_millis(1000), Box::new(async_handler!(prompt_message_builder)), Some(&command_manager)).await {
                 if log::log_enabled!(log::Level::Error) {
                     error!("Error while running prompt: {:#}", e);
@@ -233,31 +359,31 @@ async fn main() -> Result<()> {
             }
         }
     } else {
+        // No wallet path provided
         register_default_commands(&command_manager).await?;
 
-        // Handle exec mode without wallet
-        if config.is_exec_mode() {
+        if config.is_command_mode() {
+            // Command mode without wallet: only allow certain commands (help, version, etc.)
             if let Some(cmd) = config.get_exec_command() {
-                if log::log_enabled!(log::Level::Info) {
-                    info!("Executing command: {}", cmd);
-                }
-                match command_manager.handle_command(cmd.clone()).await {
-                    Ok(_) => {
-                        info!("Batch command executed successfully");
+                // Allow a few commands without wallet
+                if cmd.starts_with("help") || cmd.starts_with("version") {
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Executing command: {}", cmd);
                     }
-                    Err(e) => {
-                        if log::log_enabled!(log::Level::Error) {
-                            error!("Error executing batch command: {:#}", e);
-                        }
-                        return Err(e.into());
-                    }
+                    command_manager.handle_command(cmd.clone()).await?;
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Wallet path required for this command. Use --wallet-path <path>"
+                    ));
                 }
             } else {
-                error!("Exec mode enabled but no command specified. Use --exec to specify the command.");
-                return Ok(());
+                return Err(anyhow::anyhow!(
+                    "Command mode requires --wallet-path and one of: --exec, --json, or --json-file\n\
+                     Use --interactive to enable interactive mode without wallet"
+                ));
             }
         } else {
-            // Normal interactive mode
+            // Interactive mode: allow create/open commands
             if let Err(e) = prompt.start(Duration::from_millis(1000), Box::new(async_handler!(prompt_message_builder)), Some(&command_manager)).await {
                 if log::log_enabled!(log::Level::Error) {
                     error!("Error while running prompt: {:#}", e);
@@ -478,37 +604,43 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         ],
         CommandHandler::Async(async_handler!(change_password))
     ))?;
-    command_manager.add_command(Command::with_optional_arguments(
+    command_manager.add_command(Command::with_arguments(
         "transfer",
         "Send asset to a specified address",
         vec![
-            Arg::new("asset", ArgType::Hash),
+            Arg::new("asset", ArgType::String),
             Arg::new("address", ArgType::String),
             Arg::new("amount", ArgType::String),
+        ],
+        vec![
             Arg::new("fee_type", ArgType::String),
-            Arg::new("confirm", ArgType::String)
+            Arg::new("confirm", ArgType::Bool)
         ],
         CommandHandler::Async(async_handler!(transfer))
     ))?;
-    command_manager.add_command(Command::with_optional_arguments(
+    command_manager.add_command(Command::with_arguments(
         "transfer_all",
         "Send all your asset balance to a specified address",
         vec![
-            Arg::new("asset", ArgType::Hash),
+            Arg::new("asset", ArgType::String),
             Arg::new("address", ArgType::String),
+        ],
+        vec![
             Arg::new("fee_type", ArgType::String),
             Arg::new("confirm", ArgType::Bool)
         ],
         CommandHandler::Async(async_handler!(transfer_all))
     ))?;
-    command_manager.add_command(Command::with_optional_arguments(
+    command_manager.add_command(Command::with_arguments(
         "burn",
         "Burn amount of asset",
         vec![
-            Arg::new("asset", ArgType::Hash),
+            Arg::new("asset", ArgType::String),
             Arg::new("amount", ArgType::String),
+        ],
+        vec![
             Arg::new("confirm", ArgType::Bool)
-        ],    
+        ],
         CommandHandler::Async(async_handler!(burn))
     ))?;
     command_manager.add_command(Command::new(
@@ -548,10 +680,10 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "Show current nonce",
         CommandHandler::Async(async_handler!(nonce))
     ))?;
-    command_manager.add_command(Command::with_optional_arguments(
+    command_manager.add_command(Command::with_required_arguments(
         "set_nonce",
         "Set new nonce",
-        vec![Arg::new("nonce", ArgType::Number)],
+        vec![Arg::new("nonce", ArgType::String)],
         CommandHandler::Async(async_handler!(set_nonce))
     ))?;
     command_manager.add_command(Command::new(
@@ -570,22 +702,26 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         vec![Arg::new("filename", ArgType::String)],
         CommandHandler::Async(async_handler!(export_transactions_csv))
     ))?;
-    command_manager.add_command(Command::with_required_arguments(
+    command_manager.add_command(Command::with_arguments(
         "freeze_tos",
         "Freeze TOS to get energy with duration-based rewards (3/7/14 days)",
         vec![
             Arg::new("amount", ArgType::String),
             Arg::new("duration", ArgType::Number),
-            Arg::new("confirm", ArgType::String)
+        ],
+        vec![
+            Arg::new("confirm", ArgType::Bool)
         ],
         CommandHandler::Async(async_handler!(freeze_tos))
     ))?;
-    command_manager.add_command(Command::with_required_arguments(
+    command_manager.add_command(Command::with_arguments(
         "unfreeze_tos",
         "Unfreeze TOS (release frozen TOS after lock period)",
         vec![
             Arg::new("amount", ArgType::String),
-            Arg::new("confirm", ArgType::String)
+        ],
+        vec![
+            Arg::new("confirm", ArgType::Bool)
         ],
         CommandHandler::Async(async_handler!(unfreeze_tos))
     ))?;
@@ -621,16 +757,16 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         vec![Arg::new("page", ArgType::Number)],
         CommandHandler::Async(async_handler!(list_tracked_assets))
     ))?;
-    command_manager.add_command(Command::with_optional_arguments(
+    command_manager.add_command(Command::with_required_arguments(
         "track_asset",
         "Mark an asset hash as tracked",
-        vec![Arg::new("asset", ArgType::Hash)],
+        vec![Arg::new("asset", ArgType::String)],
         CommandHandler::Async(async_handler!(track_asset))
     ))?;
-    command_manager.add_command(Command::with_optional_arguments(
+    command_manager.add_command(Command::with_required_arguments(
         "untrack_asset",
         "Remove an asset hash from being tracked",
-        vec![Arg::new("asset", ArgType::Hash)],
+        vec![Arg::new("asset", ArgType::String)],
         CommandHandler::Async(async_handler!(untrack_asset))
     ))?;
 
@@ -1127,15 +1263,27 @@ async fn set_asset_name(manager: &CommandManager, mut args: ArgumentManager) -> 
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    let asset = args.get_value("asset")?.to_hash()?;
-    let name = if args.has_argument("name") {
-        args.get_value("name")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("name".to_string()));
-    } else {
-        prompt.read_input("Asset name: ", false)
-            .await.context("Error while reading asset name")?
-    };
+    let asset_str = get_required_arg(
+        &mut args,
+        "asset",
+        manager,
+        "set_asset_name <asset> <name>",
+        || async {
+            prompt.read_input("Asset ID: ", false).await
+        }
+    ).await?;
+
+    let asset = Hash::from_hex(&asset_str).context("Invalid asset hash")?;
+
+    let name = get_required_arg(
+        &mut args,
+        "name",
+        manager,
+        "set_asset_name <asset> <name>",
+        || async {
+            prompt.read_input("Asset name: ", false).await
+        }
+    ).await.context("Error while reading asset name")?;
 
     let mut storage = wallet.get_storage().write().await;
     storage.set_asset_name(&asset, name).await?;
@@ -1268,13 +1416,20 @@ async fn track_asset(manager: &CommandManager, mut args: ArgumentManager) -> Res
     let wallet: &Arc<Wallet> = context.get()?;
     let prompt = manager.get_prompt();
 
-    let asset = if args.has_argument("asset") {
-        args.get_value("asset")?.to_hash()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
-    } else {
-        prompt.read_hash(prompt.colorize_string(Color::BrightGreen, "Asset ID: ")).await?
-    };
+    let asset_str = get_required_arg(
+        &mut args,
+        "asset",
+        manager,
+        "track_asset <asset>",
+        || async {
+            prompt.read_input(
+                prompt.colorize_string(Color::BrightGreen, "Asset ID: "),
+                false
+            ).await
+        }
+    ).await?;
+
+    let asset = Hash::from_hex(&asset_str).context("Invalid asset hash")?;
 
     if wallet.track_asset(asset).await.context("Error while tracking asset")? {
         manager.message("Asset ID is already tracked!");
@@ -1292,13 +1447,20 @@ async fn untrack_asset(manager: &CommandManager, mut args: ArgumentManager) -> R
     let wallet: &Arc<Wallet> = context.get()?;
     let prompt = manager.get_prompt();
 
-    let asset = if args.has_argument("asset") {
-        args.get_value("asset")?.to_hash()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
-    } else {
-        prompt.read_hash(prompt.colorize_string(Color::BrightGreen, "Asset ID: ")).await?
-    };
+    let asset_str = get_required_arg(
+        &mut args,
+        "asset",
+        manager,
+        "untrack_asset <asset>",
+        || async {
+            prompt.read_input(
+                prompt.colorize_string(Color::BrightGreen, "Asset ID: "),
+                false
+            ).await
+        }
+    ).await?;
+
+    let asset = Hash::from_hex(&asset_str).context("Invalid asset hash")?;
 
     if asset == TOS_ASSET {
         manager.message("TOS asset cannot be untracked");
@@ -1421,34 +1583,41 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     let wallet: &Arc<Wallet> = context.get()?;
 
     // read address
-    let str_address = if args.has_argument("address") {
-        args.get_value("address")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("address".to_string()));
-    } else {
-        prompt.read_input(
-            prompt.colorize_string(Color::Green, "Address: "),
-            false
-        ).await.context("Error while reading address")?
-    };
+    let str_address = get_required_arg(
+        &mut args,
+        "address",
+        manager,
+        "transfer <asset> <address> <amount> [fee_type] [confirm]",
+        || async {
+            prompt.read_input(
+                prompt.colorize_string(Color::Green, "Address: "),
+                false
+            ).await
+        }
+    ).await.context("Error while reading address")?;
     let address = Address::from_string(&str_address).context("Invalid address")?;
 
-    let asset = if args.has_argument("asset") {
-        args.get_value("asset")?.to_hash()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
-    } else {
-        let asset_name = prompt.read_input(
-            prompt.colorize_string(Color::Green, "Asset (default TOS): "),
-            false
+    let asset = {
+        let asset_str = get_required_arg(
+            &mut args,
+            "asset",
+            manager,
+            "transfer <asset> <address> <amount> [fee_type] [confirm]",
+            || async {
+                prompt.read_input(
+                    prompt.colorize_string(Color::Green, "Asset (default TOS): "),
+                    false
+                ).await
+            }
         ).await?;
-        if asset_name.is_empty() {
+
+        if asset_str.is_empty() {
             TOS_ASSET
-        } else if asset_name.len() == HASH_SIZE * 2 {
-            Hash::from_hex(&asset_name).context("Error while reading hash from hex")?
+        } else if asset_str.len() == HASH_SIZE * 2 {
+            Hash::from_hex(&asset_str).context("Error while reading hash from hex")?
         } else {
             let storage = wallet.get_storage().read().await;
-            storage.get_asset_by_name(&asset_name).await?
+            storage.get_asset_by_name(&asset_str).await?
                 .context("No asset registered with given name")?
         }
     };
@@ -1462,21 +1631,32 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     };
 
     // read amount
-    let amount = if args.has_argument("amount") {
-        args.get_value("amount")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("amount".to_string()));
-    } else {
-        prompt.read(
-            prompt.colorize_string(Color::Green, &format!("Amount (max: {}): ", format_coin(max_balance, asset_data.get_decimals())))
-        ).await.context("Error while reading amount")?
-    };
+    let amount_str = get_required_arg(
+        &mut args,
+        "amount",
+        manager,
+        "transfer <asset> <address> <amount> [fee_type] [confirm]",
+        || async {
+            prompt.read(
+                prompt.colorize_string(Color::Green, &format!("Amount (max: {}): ", format_coin(max_balance, asset_data.get_decimals())))
+            ).await
+        }
+    ).await.context("Error while reading amount")?;
 
-    let amount = from_coin(amount, asset_data.get_decimals()).context("Invalid amount")?;
-    
+    let amount = from_coin(amount_str, asset_data.get_decimals()).context("Invalid amount")?;
+
     // Read fee_type parameter
-    let fee_type = if args.has_argument("fee_type") {
-        let fee_type_str = args.get_value("fee_type")?.to_string_value()?;
+    let fee_type = if let Some(fee_type_str) = get_optional_arg(
+        &mut args,
+        "fee_type",
+        manager,
+        || async {
+            prompt.read_input(
+                prompt.colorize_string(Color::Green, "Fee type (tos/energy, optional): "),
+                false
+            ).await
+        }
+    ).await? {
         match fee_type_str.to_lowercase().as_str() {
             "tos" => Some(tos_common::transaction::FeeType::TOS),
             "energy" => Some(tos_common::transaction::FeeType::Energy),
@@ -1499,31 +1679,25 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
 
     manager.message(format!("Sending {} of {} ({}) to {}", format_coin(amount, asset_data.get_decimals()), asset_data.get_name(), asset, address.to_string()));
 
-    // Parse confirmation
-    let confirmed = if args.has_argument("confirm") {
-        let confirm_str = args.get_value("confirm")?.to_string_value()?;
-        match confirm_str.to_lowercase().as_str() {
-            "yes" | "y" | "true" => true,
-            "no" | "n" | "false" => false,
-            _ => {
-                let message = format!(
-                    "Send {} of {} ({}) to {}?\n(Y/N): ",
-                    format_coin(amount, asset_data.get_decimals()),
-                    asset_data.get_name(),
-                    asset,
-                    address.to_string()
-                );
-                prompt.read_valid_str_value(
-                    prompt.colorize_string(Color::Yellow, &message),
-                    vec!["y", "n"]
-                ).await.context("Error while reading confirmation")? == "y"
-            }
+    // Get confirmation (required in command mode, prompts in interactive mode)
+    let confirmed = get_confirmation(
+        &mut args,
+        manager,
+        || async {
+            let message = format!(
+                "Send {} of {} ({}) to {}?\n(Y/N): ",
+                format_coin(amount, asset_data.get_decimals()),
+                asset_data.get_name(),
+                asset,
+                address.to_string()
+            );
+            let result = prompt.read_valid_str_value(
+                prompt.colorize_string(Color::Yellow, &message),
+                vec!["y", "n"]
+            ).await.context("Error while reading confirmation")?;
+            Ok(result == "y")
         }
-    } else if manager.is_batch_mode() {
-        true  // Auto-confirm in batch mode when no explicit confirmation parameter
-    } else {
-        prompt.ask_confirmation().await.context("Error while confirming action")?
-    };
+    ).await?;
 
     if !confirmed {
         manager.message("Transaction has been aborted");
@@ -1606,32 +1780,57 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
     let wallet: &Arc<Wallet> = context.get()?;
 
     // read address
-    let str_address = if args.has_argument("address") {
-        args.get_value("address")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("address".to_string()));
-    } else {
-        prompt.read_input(
-            prompt.colorize_string(Color::Green, "Address: "),
-            false
-        ).await.context("Error while reading address")?
-    };
+    let str_address = get_required_arg(
+        &mut args,
+        "address",
+        manager,
+        "transfer_all <asset> <address> [fee_type] [confirm]",
+        || async {
+            prompt.read_input(
+                prompt.colorize_string(Color::Green, "Address: "),
+                false
+            ).await
+        }
+    ).await.context("Error while reading address")?;
     let address = Address::from_string(&str_address).context("Invalid address")?;
 
-    let asset = if args.has_argument("asset") {
-        args.get_value("asset")?.to_hash()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
-    } else {
-        let asset_opt = prompt.read_hash(
-            prompt.colorize_string(Color::Green, "Asset (default TOS): ")
-        ).await.ok();
-        asset_opt.unwrap_or(TOS_ASSET)
+    let asset = {
+        let asset_str = get_required_arg(
+            &mut args,
+            "asset",
+            manager,
+            "transfer_all <asset> <address> [fee_type] [confirm]",
+            || async {
+                prompt.read_input(
+                    prompt.colorize_string(Color::Green, "Asset (default TOS): "),
+                    false
+                ).await
+            }
+        ).await?;
+
+        if asset_str.is_empty() {
+            TOS_ASSET
+        } else if asset_str.len() == HASH_SIZE * 2 {
+            Hash::from_hex(&asset_str).context("Error while reading hash from hex")?
+        } else {
+            let storage = wallet.get_storage().read().await;
+            storage.get_asset_by_name(&asset_str).await?
+                .context("No asset registered with given name")?
+        }
     };
     
     // Read fee_type parameter
-    let fee_type = if args.has_argument("fee_type") {
-        let fee_type_str = args.get_value("fee_type")?.to_string_value()?;
+    let fee_type = if let Some(fee_type_str) = get_optional_arg(
+        &mut args,
+        "fee_type",
+        manager,
+        || async {
+            prompt.read_input(
+                prompt.colorize_string(Color::Green, "Fee type (tos/energy, optional): "),
+                false
+            ).await
+        }
+    ).await? {
         match fee_type_str.to_lowercase().as_str() {
             "tos" => Some(tos_common::transaction::FeeType::TOS),
             "energy" => Some(tos_common::transaction::FeeType::Energy),
@@ -1696,7 +1895,15 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
     
     manager.message(format!("Sending {} of {} ({}) to {} ({})", format_coin(amount, asset_data.get_decimals()), asset_data.get_name(), asset, address, fee_display));
 
-    if !args.get_flag("confirm")? && !manager.is_batch_mode() && !prompt.ask_confirmation().await.context("Error while confirming action")? {
+    let confirmed = get_confirmation(
+        &mut args,
+        manager,
+        || async {
+            prompt.ask_confirmation().await
+        }
+    ).await.context("Error while confirming action")?;
+
+    if !confirmed {
         manager.message("Transaction has been aborted");
         return Ok(())
     }
@@ -1772,14 +1979,29 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    let asset = if args.has_argument("asset") {
-        args.get_value("asset")?.to_hash()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
-    } else {
-        prompt.read_hash(
-            prompt.colorize_string(Color::Green, "Asset (default TOS): ")
-        ).await.unwrap_or(TOS_ASSET)
+    let asset = {
+        let asset_str = get_required_arg(
+            &mut args,
+            "asset",
+            manager,
+            "burn <asset> <amount> [confirm]",
+            || async {
+                prompt.read_input(
+                    prompt.colorize_string(Color::Green, "Asset (default TOS): "),
+                    false
+                ).await
+            }
+        ).await?;
+
+        if asset_str.is_empty() {
+            TOS_ASSET
+        } else if asset_str.len() == HASH_SIZE * 2 {
+            Hash::from_hex(&asset_str).context("Error while reading hash from hex")?
+        } else {
+            let storage = wallet.get_storage().read().await;
+            storage.get_asset_by_name(&asset_str).await?
+                .context("No asset registered with given name")?
+        }
     };
 
     let (max_balance, asset_data, multisig) = {
@@ -1792,19 +2014,31 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
     };
 
     // read amount
-    let amount = if args.has_argument("amount") {
-        args.get_value("amount")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("amount".to_string()));
-    } else {
-        prompt.read(
-            prompt.colorize_string(Color::Green, &format!("Amount (max: {}): ", format_coin(max_balance, asset_data.get_decimals())))
-        ).await.context("Error while reading amount")?
-    };
+    let amount_str = get_required_arg(
+        &mut args,
+        "amount",
+        manager,
+        "burn <asset> <amount> [confirm]",
+        || async {
+            prompt.read_input(
+                prompt.colorize_string(Color::Green, &format!("Amount (max: {}): ", format_coin(max_balance, asset_data.get_decimals()))),
+                false
+            ).await
+        }
+    ).await.context("Error while reading amount")?;
 
-    let amount = from_coin(amount, asset_data.get_decimals()).context("Invalid amount")?;
+    let amount = from_coin(amount_str, asset_data.get_decimals()).context("Invalid amount")?;
     manager.message(format!("Burning {} of {} ({})", format_coin(amount, asset_data.get_decimals()), asset_data.get_name(), asset));
-    if !args.get_flag("confirm")? && !manager.is_batch_mode() && !prompt.ask_confirmation().await.context("Error while confirming action")? {
+
+    let confirmed = get_confirmation(
+        &mut args,
+        manager,
+        || async {
+            prompt.ask_confirmation().await
+        }
+    ).await.context("Error while confirming action")?;
+
+    if !confirmed {
         manager.message("Transaction has been aborted");
         return Ok(())
     }
@@ -2056,14 +2290,18 @@ async fn nonce(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comma
 async fn set_nonce(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
     manager.validate_batch_params("set_nonce", &args)?;
 
-    let value = if args.has_argument("nonce") {
-        args.get_value("nonce")?.to_number()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("nonce".to_string()));
-    } else {
-        manager.get_prompt().read("New Nonce: ".to_string()).await
-            .context("Error while reading new nonce to set")?
-    };
+    let value_str = get_required_arg(
+        &mut args,
+        "nonce",
+        manager,
+        "set_nonce <nonce>",
+        || async {
+            manager.get_prompt().read_input("New Nonce: ", false).await
+        }
+    ).await.context("Error while reading new nonce to set")?;
+
+    let value = value_str.parse::<u64>()
+        .context("Invalid nonce number")?;
 
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
@@ -3090,37 +3328,34 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
     let wallet: &Arc<Wallet> = context.get()?;
 
     // Get amount, duration, and confirm from arguments
-    let amount_str = if args.has_argument("amount") {
-        args.get_value("amount")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("amount".to_string()));
-    } else {
-        prompt.read_input(
-            prompt.colorize_string(Color::Green, "Amount (TOS): "),
-            false
-        ).await.context("Error while reading amount")?
-    };
+    let amount_str = get_required_arg(
+        &mut args,
+        "amount",
+        manager,
+        "freeze_tos <amount> <duration> [confirm]",
+        || async {
+            prompt.read_input(
+                prompt.colorize_string(Color::Green, "Amount (TOS): "),
+                false
+            ).await
+        }
+    ).await.context("Error while reading amount")?;
 
-    let duration_num = if args.has_argument("duration") {
-        args.get_value("duration")?.to_number()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("duration".to_string()));
-    } else {
-        prompt.read(
-            prompt.colorize_string(Color::Green, "Duration (3/7/14 days): ")
-        ).await.context("Error while reading duration")?
-    };
+    let duration_str = get_required_arg(
+        &mut args,
+        "duration",
+        manager,
+        "freeze_tos <amount> <duration> [confirm]",
+        || async {
+            prompt.read_input(
+                prompt.colorize_string(Color::Green, "Duration (3/7/14 days): "),
+                false
+            ).await
+        }
+    ).await.context("Error while reading duration")?;
 
-    let confirm_str = if args.has_argument("confirm") {
-        args.get_value("confirm")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("confirm".to_string()));
-    } else {
-        prompt.read_input(
-            prompt.colorize_string(Color::Green, "Confirm (yes/no): "),
-            false
-        ).await.context("Error while reading confirmation")?
-    };
+    let duration_num = duration_str.parse::<u64>()
+        .context("Invalid duration number")?;
 
     // Parse amount
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
@@ -3133,23 +3368,24 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
         return Err(CommandError::InvalidArgument("Duration must be between 3 and 90 days".to_string()));
     };
 
-    // Parse confirmation
-    let confirmed = match confirm_str.to_lowercase().as_str() {
-        "yes" | "y" | "true" => true,
-        "no" | "n" | "false" => false,
-        _ => {
+    // Get confirmation
+    let confirmed = get_confirmation(
+        &mut args,
+        manager,
+        || async {
             let message = format!(
                 "Freeze {} TOS for {:?} to get energy?\nReward multiplier: {}x\n(Y/N): ",
                 format_coin(amount, 8),
                 duration,
                 duration.reward_multiplier()
             );
-            prompt.read_valid_str_value(
+            let result = prompt.read_valid_str_value(
                 prompt.colorize_string(Color::Yellow, &message),
                 vec!["y", "n"]
-            ).await.context("Error while reading confirmation")? == "y"
+            ).await.context("Error while reading confirmation")?;
+            Ok(result == "y")
         }
-    };
+    ).await?;
 
     if !confirmed {
         manager.message("Freeze operation cancelled");
@@ -3234,45 +3470,37 @@ async fn unfreeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Re
     let wallet: &Arc<Wallet> = context.get()?;
 
     // Get amount and confirm from arguments
-    let amount_str = if args.has_argument("amount") {
-        args.get_value("amount")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("amount".to_string()));
-    } else {
-        prompt.read_input(
-            prompt.colorize_string(Color::Green, "Amount (TOS): "),
-            false
-        ).await.context("Error while reading amount")?
-    };
-
-    let confirm_str = if args.has_argument("confirm") {
-        args.get_value("confirm")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("confirm".to_string()));
-    } else {
-        prompt.read_input(
-            prompt.colorize_string(Color::Green, "Confirm (yes/no): "),
-            false
-        ).await.context("Error while reading confirmation")?
-    };
+    let amount_str = get_required_arg(
+        &mut args,
+        "amount",
+        manager,
+        "unfreeze_tos <amount> [confirm]",
+        || async {
+            prompt.read_input(
+                prompt.colorize_string(Color::Green, "Amount (TOS): "),
+                false
+            ).await
+        }
+    ).await.context("Error while reading amount")?;
 
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
 
-    // Parse confirmation
-    let confirmed = match confirm_str.to_lowercase().as_str() {
-        "yes" | "y" | "true" => true,
-        "no" | "n" | "false" => false,
-        _ => {
+    // Get confirmation
+    let confirmed = get_confirmation(
+        &mut args,
+        manager,
+        || async {
             let message = format!(
                 "Unfreeze {} TOS?\nThis will remove the corresponding energy.\n(Y/N): ",
                 format_coin(amount, 8)
             );
-            prompt.read_valid_str_value(
+            let result = prompt.read_valid_str_value(
                 prompt.colorize_string(Color::Yellow, &message),
                 vec!["y", "n"]
-            ).await.context("Error while reading confirmation")? == "y"
+            ).await.context("Error while reading confirmation")?;
+            Ok(result == "y")
         }
-    };
+    ).await?;
 
     if !confirmed {
         manager.message("Unfreeze operation cancelled");
@@ -3413,19 +3641,31 @@ async fn execute_json_batch(command_manager: &CommandManager, json_content: &str
         info!("Executing JSON batch command: {}", json_config.command);
     }
 
-    // Override wallet_path and password from JSON if provided
-    // but CLI parameters take precedence
+    // Verify wallet_path is provided (from CLI or JSON)
     let _wallet_path = config.wallet_path.as_ref()
         .or(json_config.wallet_path.as_ref())
         .ok_or_else(|| anyhow::anyhow!("No wallet path specified. Use --wallet-path or provide wallet_path in JSON"))?;
 
-    let _password = config.password.as_ref()
-        .or(json_config.password.as_ref())
-        .ok_or_else(|| anyhow::anyhow!("No password specified. Use --password or provide password in JSON"))?;
+    // Verify password is provided through any supported method
+    // Priority: CLI > File > Env > JSON
+    let _has_password = config.password.is_some()
+        || config.password_file.is_some()
+        || config.password_from_env
+        || std::env::var("TOS_WALLET_PASSWORD").is_ok()
+        || json_config.password.is_some();
 
-    // Store wallet info in command manager context if needed
-    // This would require additional setup for wallet loading in JSON mode
-    // For now, we assume the wallet is already loaded
+    if !_has_password {
+        return Err(anyhow::anyhow!(
+            "No password specified. Use one of:\n\
+             - --password <pwd>\n\
+             - --password-file <path>\n\
+             - --password-from-env (with TOS_WALLET_PASSWORD env var)\n\
+             - Provide password in JSON"
+        ));
+    }
+
+    // Note: The wallet is already loaded in main() using get_password()
+    // This check only validates that password source was provided
 
     match command_manager.handle_json_command(&json_config.command, &json_config.params).await {
         Ok(_) => {

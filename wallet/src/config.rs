@@ -255,7 +255,19 @@ pub struct Config {
     #[clap(long)]
     #[serde(skip)]
     #[serde(default)]
-    pub json_file: Option<String>
+    pub json_file: Option<String>,
+    /// Enable interactive mode (prompt for missing arguments)
+    /// Default: false (pure command mode)
+    #[clap(long)]
+    #[serde(default)]
+    pub interactive: bool,
+    /// Read password from environment variable TOS_WALLET_PASSWORD
+    #[clap(long)]
+    #[serde(default)]
+    pub password_from_env: bool,
+    /// Read password from file (more secure than --password)
+    #[clap(long)]
+    pub password_file: Option<String>
 }
 
 #[cfg(feature = "cli")]
@@ -263,6 +275,16 @@ impl Config {
     /// Check if we're in exec mode (--exec, --json, or --json-file)
     pub fn is_exec_mode(&self) -> bool {
         self.exec.is_some() || self.json.is_some() || self.json_file.is_some()
+    }
+
+    /// Check if we're in interactive mode
+    pub fn is_interactive_mode(&self) -> bool {
+        self.interactive && !self.is_exec_mode()
+    }
+
+    /// Check if we're in command mode (default)
+    pub fn is_command_mode(&self) -> bool {
+        !self.is_interactive_mode()
     }
 
     /// Get the command to execute (from --exec)

@@ -844,6 +844,7 @@ async fn is_strict_chain_ancestor_of<S: Storage>(
 }
 
 /// Search result for binary search in ordered children
+#[allow(dead_code)]
 enum SearchOutput {
     NotFound(usize),       // Position to insert at
     Found(Hash, usize),    // Found hash and its index
