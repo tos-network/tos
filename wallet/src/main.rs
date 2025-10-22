@@ -151,6 +151,9 @@ where
 }
 
 /// Get confirmation from CLI or prompt in interactive mode
+///
+/// In batch/exec mode: auto-confirms (returns true) if --confirm not provided
+/// In interactive mode: prompts user if --confirm not provided
 async fn get_confirmation<F, Fut>(
     args: &mut ArgumentManager,
     manager: &CommandManager,
@@ -160,14 +163,17 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<bool, PromptError>>,
 {
+    // If explicit --confirm flag provided, use its value
     if args.has_argument("confirm") {
         return Ok(args.get_value("confirm")?.to_bool()?);
     }
 
+    // In batch/exec mode: auto-confirm (executing command implies confirmation)
     if manager.is_batch_mode() {
-        return Err(CommandError::MissingConfirmation);
+        return Ok(true);
     }
 
+    // In interactive mode: prompt user
     interactive_fn().await.map_err(|e| e.into())
 }
 
