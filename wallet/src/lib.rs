@@ -15,4 +15,7 @@ pub mod daemon_api;
 #[cfg(feature = "network_handler")]
 pub mod network_handler;
 
+#[cfg(feature = "network_handler")]
+pub mod light_api;
+
 pub mod api;

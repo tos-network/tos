@@ -229,6 +229,9 @@ pub struct Wallet {
     force_stable_balance: AtomicBool,
     // Light wallet mode flag (no blockchain sync, query on-demand)
     light_mode: AtomicBool,
+    // Light API for querying on-demand from daemon (light mode only)
+    #[cfg(feature = "network_handler")]
+    light_api: Mutex<Option<Arc<crate::light_api::LightAPI>>>,
     // Concurrency to use across the wallet
     concurrency: usize,
 }
@@ -293,6 +296,8 @@ impl Wallet {
             history_scan: AtomicBool::new(true),
             force_stable_balance: AtomicBool::new(false),
             light_mode: AtomicBool::new(light_mode),
+            #[cfg(feature = "network_handler")]
+            light_api: Mutex::new(None),
             account: Account::new(precomputed_tables, keypair, n_threads),
             concurrency,
         };
@@ -504,6 +509,19 @@ impl Wallet {
     // Check if wallet is in light mode (no blockchain sync, query on-demand)
     pub fn is_light_mode(&self) -> bool {
         self.light_mode.load(Ordering::SeqCst)
+    }
+
+    // Get the light API client for querying on-demand (light mode only)
+    #[cfg(feature = "network_handler")]
+    pub async fn get_light_api(&self) -> Result<Arc<crate::light_api::LightAPI>, WalletError> {
+        let lock = self.light_api.lock().await;
+        lock.clone().ok_or(WalletError::Any(anyhow::anyhow!("Light API not initialized")))
+    }
+
+    // Set the light API client
+    #[cfg(feature = "network_handler")]
+    pub async fn set_light_api(&self, api: Arc<crate::light_api::LightAPI>) {
+        *self.light_api.lock().await = Some(api);
     }
 
     // Propagate a new event to registered listeners
