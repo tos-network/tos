@@ -430,10 +430,68 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         let arg_value = args.get_value("command")?.to_string_value()?;
         let commands = manager.get_commands().lock()?;
         let cmd = commands.iter().find(|command| *command.get_name() == *arg_value).ok_or(CommandError::CommandNotFound)?;
-        manager.message(&format!("Usage: {}", cmd.get_usage()));
+
+        // Display command name and description
+        manager.message(&format!("Command: {}", cmd.get_name()));
+        manager.message(&format!("Description: {}", cmd.get_description()));
+        manager.message(&format!("\nUsage: {}", cmd.get_usage()));
+
+        // Display required arguments with types
+        if !cmd.get_required_args().is_empty() {
+            manager.message("\nRequired arguments:");
+            for arg in cmd.get_required_args() {
+                let type_str = match arg.get_type() {
+                    ArgType::Bool => "boolean (true/false/yes/no)",
+                    ArgType::Number => "number",
+                    ArgType::String => "string",
+                    ArgType::Hash => "hash (hex string)",
+                    ArgType::Array(_) => "array (comma-separated)",
+                };
+                manager.message(&format!("  <{}> - {}", arg.get_name(), type_str));
+            }
+        }
+
+        // Display optional arguments with types
+        if !cmd.get_optional_args().is_empty() {
+            manager.message("\nOptional arguments:");
+            for arg in cmd.get_optional_args() {
+                let type_str = match arg.get_type() {
+                    ArgType::Bool => "boolean (true/false/yes/no)",
+                    ArgType::Number => "number",
+                    ArgType::String => "string",
+                    ArgType::Hash => "hash (hex string)",
+                    ArgType::Array(_) => "array (comma-separated)",
+                };
+                manager.message(&format!("  [{}] - {}", arg.get_name(), type_str));
+            }
+        }
+
+        // Add usage examples for common commands
+        match arg_value.as_str() {
+            "transfer" => {
+                manager.message("\nExamples:");
+                manager.message("  Interactive mode:");
+                manager.message("    transfer");
+                manager.message("  Command mode:");
+                manager.message("    --exec \"transfer TOS recipient_address 1000\"");
+                manager.message("    --exec \"transfer TOS recipient_address 1000 energy\"");
+                manager.message("  Note: In command mode, confirmation is automatic unless --confirm false is specified");
+            },
+            "freeze_tos" => {
+                manager.message("\nExamples:");
+                manager.message("  --exec \"freeze_tos 5000 30\"  # Freeze 5000 TOS for 30 days");
+                manager.message("  Duration options: 3, 7, 14, 30 days (longer = higher rewards)");
+            },
+            "burn" => {
+                manager.message("\nExamples:");
+                manager.message("  --exec \"burn TOS 100\"  # Burn 100 TOS (auto-confirms in command mode)");
+            },
+            _ => {}
+        }
     } else {
         manager.display_commands()?;
         manager.message("See how to use a command using help <command>");
+        manager.message("\nTip: Use --exec \"help <command>\" to get detailed usage information");
     }
     Ok(())
 }
