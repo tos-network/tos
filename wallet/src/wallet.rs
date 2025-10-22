@@ -1006,14 +1006,43 @@ impl Wallet {
                 return Err(WalletError::AssetNotTracked(asset.clone()))
             }
 
-            if !storage.has_balance_for(&asset).await? {
-                return Err(WalletError::BalanceNotFound(asset.clone()));
-            }
+            // Light mode: Query balance on-demand from daemon
+            #[cfg(feature = "network_handler")]
+            let balance = if self.is_light_mode() {
+                let light_api = self.get_light_api().await?;
+                let address = self.get_address();
+                let balance_amount = light_api.get_balance(&address, &asset).await
+                    .map_err(|e| WalletError::Any(anyhow::anyhow!("Failed to query balance from daemon in light mode: {}", e)))?;
 
-            let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(&asset).await?;
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("Using balance (unconfirmed: {}) for asset {} with amount {}", unconfirmed, asset, balance.amount);
-            }
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Light mode: queried balance for asset {} = {}", asset, balance_amount);
+                }
+
+                Balance::new(balance_amount)
+            } else {
+                // Normal mode: Use local storage
+                if !storage.has_balance_for(&asset).await? {
+                    return Err(WalletError::BalanceNotFound(asset.clone()));
+                }
+                let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(&asset).await?;
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Using balance (unconfirmed: {}) for asset {} with amount {}", unconfirmed, asset, balance.amount);
+                }
+                balance
+            };
+
+            #[cfg(not(feature = "network_handler"))]
+            let balance = {
+                if !storage.has_balance_for(&asset).await? {
+                    return Err(WalletError::BalanceNotFound(asset.clone()));
+                }
+                let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(&asset).await?;
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Using balance (unconfirmed: {}) for asset {} with amount {}", unconfirmed, asset, balance.amount);
+                }
+                balance
+            };
+
             state.add_balance(asset.clone(), balance);
         }
 
