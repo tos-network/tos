@@ -336,8 +336,8 @@ async fn register_ai_mining_commands(manager: &CommandManager, config: Validated
         "register_miner",
         "Register as an AI miner",
         vec![
-            Arg::new("address", ArgType::String),
-            Arg::new("fee", ArgType::Number),
+            Arg::new("address", ArgType::String, "Miner wallet address for rewards"),
+            Arg::new("fee", ArgType::Number, "Registration fee amount"),
         ],
         CommandHandler::Async(async_handler!(register_miner))
     ))?;
@@ -347,10 +347,10 @@ async fn register_ai_mining_commands(manager: &CommandManager, config: Validated
         "publish_task",
         "Publish a new AI mining task",
         vec![
-            Arg::new("reward", ArgType::Number),
-            Arg::new("difficulty", ArgType::String),
-            Arg::new("deadline", ArgType::Number),
-            Arg::new("description", ArgType::String),
+            Arg::new("reward", ArgType::Number, "Task reward amount"),
+            Arg::new("difficulty", ArgType::String, "Task difficulty level"),
+            Arg::new("deadline", ArgType::Number, "Task deadline timestamp"),
+            Arg::new("description", ArgType::String, "Task description or requirements"),
         ],
         CommandHandler::Async(async_handler!(publish_task))
     ))?;
@@ -360,9 +360,9 @@ async fn register_ai_mining_commands(manager: &CommandManager, config: Validated
         "submit_answer",
         "Submit an answer to a task",
         vec![
-            Arg::new("task_id", ArgType::String),
-            Arg::new("answer", ArgType::String),
-            Arg::new("stake", ArgType::Number),
+            Arg::new("task_id", ArgType::String, "Unique task identifier"),
+            Arg::new("answer", ArgType::String, "Answer submission content"),
+            Arg::new("stake", ArgType::Number, "Staking amount for answer validation"),
         ],
         CommandHandler::Async(async_handler!(submit_answer))
     ))?;
@@ -372,9 +372,9 @@ async fn register_ai_mining_commands(manager: &CommandManager, config: Validated
         "validate_answer",
         "Validate a submitted answer",
         vec![
-            Arg::new("task_id", ArgType::String),
-            Arg::new("answer_id", ArgType::String),
-            Arg::new("score", ArgType::Number),
+            Arg::new("task_id", ArgType::String, "Unique task identifier"),
+            Arg::new("answer_id", ArgType::String, "Answer identifier to validate"),
+            Arg::new("score", ArgType::Number, "Validation score (0-100)"),
         ],
         CommandHandler::Async(async_handler!(validate_answer))
     ))?;
@@ -398,7 +398,7 @@ async fn register_ai_mining_commands(manager: &CommandManager, config: Validated
         "reputation",
         "Show miner reputation",
         vec![
-            Arg::new("address", ArgType::String),
+            Arg::new("address", ArgType::String, "Miner wallet address for rewards"),
         ],
         CommandHandler::Async(async_handler!(show_reputation))
     ))?;
@@ -433,7 +433,7 @@ async fn register_ai_mining_commands(manager: &CommandManager, config: Validated
         "clear_storage",
         "Clear all storage data (use with caution)",
         vec![
-            Arg::new("confirm", ArgType::String),
+            Arg::new("confirm", ArgType::String, "Confirm action (yes/no)"),
         ],
         CommandHandler::Async(async_handler!(clear_storage))
     ))?;
@@ -443,7 +443,7 @@ async fn register_ai_mining_commands(manager: &CommandManager, config: Validated
         "run_integration_tests",
         "Run comprehensive AI mining workflow tests",
         vec![
-            Arg::new("mock_mode", ArgType::String),
+            Arg::new("mock_mode", ArgType::String, "Enable mock mode for testing"),
         ],
         CommandHandler::Async(async_handler!(run_integration_tests))
     ))?;

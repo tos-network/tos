@@ -192,6 +192,15 @@ async fn get_password(config: &Config, prompt: &Prompt) -> Result<String> {
 
     // Priority 2: Password file (recommended for automation)
     if let Some(file) = config.password_file.as_ref() {
+        // Validate file exists and is readable
+        let path = std::path::Path::new(file);
+        if !path.exists() {
+            return Err(anyhow::anyhow!("Password file not found: {}", file));
+        }
+        if !path.is_file() {
+            return Err(anyhow::anyhow!("Password file path is not a file: {}", file));
+        }
+
         let pwd = std::fs::read_to_string(file)
             .with_context(|| format!("Failed to read password file: {}", file))?;
 
@@ -200,6 +209,11 @@ async fn get_password(config: &Config, prompt: &Prompt) -> Result<String> {
 
         if pwd.is_empty() {
             return Err(anyhow::anyhow!("Password file is empty: {}", file));
+        }
+
+        // Validate password is not just whitespace
+        if pwd.trim().is_empty() {
+            return Err(anyhow::anyhow!("Password file contains only whitespace: {}", file));
         }
 
         return Ok(pwd);
@@ -543,9 +557,13 @@ async fn apply_config(config: Config, wallet: &Arc<Wallet>, #[cfg(feature = "xsw
             if log::log_enabled!(log::Level::Error) {
                 error!("Couldn't connect to daemon: {:#}", e);
             }
-            info!("You can activate online mode using 'online_mode [daemon_address]'");
+            if log::log_enabled!(log::Level::Info) {
+                info!("You can activate online mode using 'online_mode [daemon_address]'");
+            }
         } else {
-            info!("Online mode enabled");
+            if log::log_enabled!(log::Level::Info) {
+                info!("Online mode enabled");
+            }
         }
     }
 
@@ -586,7 +604,11 @@ async fn apply_config(config: Config, wallet: &Arc<Wallet>, #[cfg(feature = "xsw
                         spawn_task("xswd-handler", xswd_handler(receiver, prompt));
                     }
                 },
-                Err(e) => error!("Error while enabling XSWD Server: {}", e)
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while enabling XSWD Server: {}", e);
+                    }
+                }
             };
         }
     }
@@ -3675,7 +3697,9 @@ async fn execute_json_batch(command_manager: &CommandManager, json_content: &str
 
     match command_manager.handle_json_command(&json_config.command, &json_config.params).await {
         Ok(_) => {
-            info!("JSON batch command executed successfully");
+            if log::log_enabled!(log::Level::Info) {
+                info!("JSON batch command executed successfully");
+            }
             Ok(())
         }
         Err(e) => {
