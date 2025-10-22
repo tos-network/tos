@@ -199,10 +199,10 @@ impl CommandManager {
     // - exit
     // - set_log_level
     pub fn register_default_commands(&self) -> Result<(), CommandError> {
-        self.add_command(Command::with_optional_arguments("help", "Show this help", vec![Arg::new("command", ArgType::String)], CommandHandler::Async(async_handler!(help))))?;
+        self.add_command(Command::with_optional_arguments("help", "Show this help", vec![Arg::new("command", ArgType::String, "Command name to get help for")], CommandHandler::Async(async_handler!(help))))?;
         self.add_command(Command::new("version", "Show the current version", CommandHandler::Sync(version)))?;
         self.add_command(Command::new("exit", "Shutdown the application", CommandHandler::Sync(exit)))?;
-        self.add_command(Command::with_required_arguments("set_log_level", "Set the log level", vec![Arg::new("level", ArgType::String)], CommandHandler::Sync(set_log_level)))?;
+        self.add_command(Command::with_required_arguments("set_log_level", "Set the log level", vec![Arg::new("level", ArgType::String, "Log level (off/error/warn/info/debug/trace)")], CommandHandler::Sync(set_log_level)))?;
 
         Ok(())
     }
@@ -436,33 +436,59 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         manager.message(&format!("Description: {}", cmd.get_description()));
         manager.message(&format!("\nUsage: {}", cmd.get_usage()));
 
-        // Display required arguments with types
+        // Display required arguments with types and descriptions
         if !cmd.get_required_args().is_empty() {
             manager.message("\nRequired arguments:");
             for arg in cmd.get_required_args() {
                 let type_str = match arg.get_type() {
-                    ArgType::Bool => "boolean (true/false/yes/no)",
+                    ArgType::Bool => "boolean",
                     ArgType::Number => "number",
                     ArgType::String => "string",
-                    ArgType::Hash => "hash (hex string)",
-                    ArgType::Array(_) => "array (comma-separated)",
+                    ArgType::Hash => "hash",
+                    ArgType::Array(_) => "array",
                 };
-                manager.message(&format!("  <{}> - {}", arg.get_name(), type_str));
+
+                // If description exists, show it; otherwise show type hints
+                if !arg.get_description().is_empty() {
+                    manager.message(&format!("  <{}> ({}) - {}", arg.get_name(), type_str, arg.get_description()));
+                } else {
+                    let type_hint = match arg.get_type() {
+                        ArgType::Bool => "boolean (true/false/yes/no)",
+                        ArgType::Number => "number",
+                        ArgType::String => "string",
+                        ArgType::Hash => "hash (hex string)",
+                        ArgType::Array(_) => "array (comma-separated)",
+                    };
+                    manager.message(&format!("  <{}> - {}", arg.get_name(), type_hint));
+                }
             }
         }
 
-        // Display optional arguments with types
+        // Display optional arguments with types and descriptions
         if !cmd.get_optional_args().is_empty() {
             manager.message("\nOptional arguments:");
             for arg in cmd.get_optional_args() {
                 let type_str = match arg.get_type() {
-                    ArgType::Bool => "boolean (true/false/yes/no)",
+                    ArgType::Bool => "boolean",
                     ArgType::Number => "number",
                     ArgType::String => "string",
-                    ArgType::Hash => "hash (hex string)",
-                    ArgType::Array(_) => "array (comma-separated)",
+                    ArgType::Hash => "hash",
+                    ArgType::Array(_) => "array",
                 };
-                manager.message(&format!("  [{}] - {}", arg.get_name(), type_str));
+
+                // If description exists, show it; otherwise show type hints
+                if !arg.get_description().is_empty() {
+                    manager.message(&format!("  [{}] ({}) - {}", arg.get_name(), type_str, arg.get_description()));
+                } else {
+                    let type_hint = match arg.get_type() {
+                        ArgType::Bool => "boolean (true/false/yes/no)",
+                        ArgType::Number => "number",
+                        ArgType::String => "string",
+                        ArgType::Hash => "hash (hex string)",
+                        ArgType::Array(_) => "array (comma-separated)",
+                    };
+                    manager.message(&format!("  [{}] - {}", arg.get_name(), type_hint));
+                }
             }
         }
 

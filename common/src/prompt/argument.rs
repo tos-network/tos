@@ -96,14 +96,27 @@ impl ArgType {
 
 pub struct Arg {
     name: String,
-    arg_type: ArgType
+    arg_type: ArgType,
+    description: String,
 }
 
 impl Arg {
-    pub fn new(name: &str, arg_type: ArgType) -> Self {
+    /// Create a new argument with name, type, and description
+    pub fn new(name: &str, arg_type: ArgType, description: &str) -> Self {
         Self {
             name: name.to_owned(),
-            arg_type
+            arg_type,
+            description: description.to_owned(),
+        }
+    }
+
+    /// Create a new argument without description (for backward compatibility)
+    #[allow(dead_code)]
+    pub fn new_simple(name: &str, arg_type: ArgType) -> Self {
+        Self {
+            name: name.to_owned(),
+            arg_type,
+            description: String::new(),
         }
     }
 
@@ -113,6 +126,10 @@ impl Arg {
 
     pub fn get_type(&self) -> &ArgType {
         &self.arg_type
+    }
+
+    pub fn get_description(&self) -> &String {
+        &self.description
     }
 }
 

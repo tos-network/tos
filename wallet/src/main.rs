@@ -412,8 +412,8 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
         "open",
         "Open a wallet",
         vec![
-            Arg::new("name", ArgType::String),
-            Arg::new("password", ArgType::String)
+            Arg::new("name", ArgType::String, "Wallet name to open"),
+            Arg::new("password", ArgType::String, "Password to unlock the wallet")
         ],
         CommandHandler::Async(async_handler!(open_wallet))
     ))?;
@@ -422,9 +422,9 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
         "create",
         "Create a new wallet",
         vec![
-            Arg::new("name", ArgType::String),
-            Arg::new("password", ArgType::String),
-            Arg::new("confirm_password", ArgType::String)
+            Arg::new("name", ArgType::String, "Name for the new wallet"),
+            Arg::new("password", ArgType::String, "Password to protect the wallet"),
+            Arg::new("confirm_password", ArgType::String, "Confirm the password")
         ],
         CommandHandler::Async(async_handler!(create_wallet))
     ))?;
@@ -433,9 +433,9 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
         "recover_seed",
         "Recover a wallet using a seed",
         vec![
-            Arg::new("name", ArgType::String),
-            Arg::new("password", ArgType::String),
-            Arg::new("seed", ArgType::String)
+            Arg::new("name", ArgType::String, "Name for the recovered wallet"),
+            Arg::new("password", ArgType::String, "Password to protect the wallet"),
+            Arg::new("seed", ArgType::String, "Recovery seed phrase")
         ],
         CommandHandler::Async(async_handler!(recover_seed))
     ))?;
@@ -444,9 +444,9 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
         "recover_private_key",
         "Recover a wallet using a private key",
         vec![
-            Arg::new("name", ArgType::String),
-            Arg::new("password", ArgType::String),
-            Arg::new("private_key", ArgType::String)
+            Arg::new("name", ArgType::String, "Name for the recovered wallet"),
+            Arg::new("password", ArgType::String, "Password to protect the wallet"),
+            Arg::new("private_key", ArgType::String, "Private key for recovery")
         ],
         CommandHandler::Async(async_handler!(recover_private_key))
     ))?;
@@ -605,8 +605,8 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "change_password",
         "Set a new password to open your wallet",
         vec![
-            Arg::new("old_password", ArgType::String),
-            Arg::new("new_password", ArgType::String)
+            Arg::new("old_password", ArgType::String, "Current password"),
+            Arg::new("new_password", ArgType::String, "New password to set")
         ],
         CommandHandler::Async(async_handler!(change_password))
     ))?;
@@ -614,13 +614,13 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "transfer",
         "Send asset to a specified address",
         vec![
-            Arg::new("asset", ArgType::String),
-            Arg::new("address", ArgType::String),
-            Arg::new("amount", ArgType::String),
+            Arg::new("asset", ArgType::String, "Asset name or hash (e.g., TOS)"),
+            Arg::new("address", ArgType::String, "Recipient wallet address"),
+            Arg::new("amount", ArgType::String, "Amount to transfer (in atomic units)"),
         ],
         vec![
-            Arg::new("fee_type", ArgType::String),
-            Arg::new("confirm", ArgType::Bool)
+            Arg::new("fee_type", ArgType::String, "Fee payment type: 'tos' or 'energy'"),
+            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
         ],
         CommandHandler::Async(async_handler!(transfer))
     ))?;
@@ -628,12 +628,12 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "transfer_all",
         "Send all your asset balance to a specified address",
         vec![
-            Arg::new("asset", ArgType::String),
-            Arg::new("address", ArgType::String),
+            Arg::new("asset", ArgType::String, "Asset name or hash to transfer"),
+            Arg::new("address", ArgType::String, "Recipient wallet address"),
         ],
         vec![
-            Arg::new("fee_type", ArgType::String),
-            Arg::new("confirm", ArgType::Bool)
+            Arg::new("fee_type", ArgType::String, "Fee payment type: 'tos' or 'energy'"),
+            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
         ],
         CommandHandler::Async(async_handler!(transfer_all))
     ))?;
@@ -641,11 +641,11 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "burn",
         "Burn amount of asset",
         vec![
-            Arg::new("asset", ArgType::String),
-            Arg::new("amount", ArgType::String),
+            Arg::new("asset", ArgType::String, "Asset name or hash to burn"),
+            Arg::new("amount", ArgType::String, "Amount to burn (permanently destroyed)"),
         ],
         vec![
-            Arg::new("confirm", ArgType::Bool)
+            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
         ],
         CommandHandler::Async(async_handler!(burn))
     ))?;
@@ -657,27 +657,27 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
     command_manager.add_command(Command::with_optional_arguments(
         "balance",
         "Show the balance of requested asset; Asset must be tracked",
-        vec![Arg::new("asset", ArgType::Hash)],
+        vec![Arg::new("asset", ArgType::Hash, "Asset hash to check balance (default: TOS)")],
         CommandHandler::Async(async_handler!(balance))
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "history",
         "Show all your transactions",
-        vec![Arg::new("page", ArgType::Number)],
+        vec![Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)")],
         CommandHandler::Async(async_handler!(history))
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "transaction",
         "Show a specific transaction",
-        vec![Arg::new("hash", ArgType::Hash)],
+        vec![Arg::new("hash", ArgType::Hash, "Transaction hash to display")],
         CommandHandler::Async(async_handler!(transaction))
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "seed",
         "Show seed of selected language",
         vec![
-            Arg::new("language", ArgType::Number),
-            Arg::new("password", ArgType::String)
+            Arg::new("language", ArgType::Number, "Language ID for seed phrase display"),
+            Arg::new("password", ArgType::String, "Password to unlock seed phrase")
         ],
         CommandHandler::Async(async_handler!(seed))
     ))?;
@@ -689,7 +689,7 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
     command_manager.add_command(Command::with_required_arguments(
         "set_nonce",
         "Set new nonce",
-        vec![Arg::new("nonce", ArgType::String)],
+        vec![Arg::new("nonce", ArgType::String, "Transaction nonce (for manual ordering)")],
         CommandHandler::Async(async_handler!(set_nonce))
     ))?;
     command_manager.add_command(Command::new(
@@ -705,18 +705,18 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
     command_manager.add_command(Command::with_required_arguments(
         "export_transactions",
         "Export all your transactions in a CSV file",
-        vec![Arg::new("filename", ArgType::String)],
+        vec![Arg::new("filename", ArgType::String, "Output filename for CSV export")],
         CommandHandler::Async(async_handler!(export_transactions_csv))
     ))?;
     command_manager.add_command(Command::with_arguments(
         "freeze_tos",
         "Freeze TOS to get energy with duration-based rewards (3/7/14 days)",
         vec![
-            Arg::new("amount", ArgType::String),
-            Arg::new("duration", ArgType::Number),
+            Arg::new("amount", ArgType::String, "Amount of TOS to freeze"),
+            Arg::new("duration", ArgType::Number, "Freeze duration in days (3/7/14/30, longer = higher rewards)"),
         ],
         vec![
-            Arg::new("confirm", ArgType::Bool)
+            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
         ],
         CommandHandler::Async(async_handler!(freeze_tos))
     ))?;
@@ -724,10 +724,10 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "unfreeze_tos",
         "Unfreeze TOS (release frozen TOS after lock period)",
         vec![
-            Arg::new("amount", ArgType::String),
+            Arg::new("amount", ArgType::String, "Amount of TOS to unfreeze"),
         ],
         vec![
-            Arg::new("confirm", ArgType::Bool)
+            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
         ],
         CommandHandler::Async(async_handler!(unfreeze_tos))
     ))?;
@@ -740,39 +740,39 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "set_asset_name",
         "Set the name of an asset",
         vec![
-            Arg::new("asset", ArgType::Hash),
-            Arg::new("name", ArgType::String)
+            Arg::new("asset", ArgType::Hash, "Asset hash to name"),
+            Arg::new("name", ArgType::String, "Display name for the asset")
         ],
         CommandHandler::Async(async_handler!(set_asset_name))
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "list_assets",
         "List all detected assets",
-        vec![Arg::new("page", ArgType::Number)],
+        vec![Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)")],
         CommandHandler::Async(async_handler!(list_assets))
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "list_balances",
         "List all balances tracked",
-        vec![Arg::new("page", ArgType::Number)],
+        vec![Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)")],
         CommandHandler::Async(async_handler!(list_balances))
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "list_tracked_assets",
         "List all assets marked as tracked",
-        vec![Arg::new("page", ArgType::Number)],
+        vec![Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)")],
         CommandHandler::Async(async_handler!(list_tracked_assets))
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "track_asset",
         "Mark an asset hash as tracked",
-        vec![Arg::new("asset", ArgType::String)],
+        vec![Arg::new("asset", ArgType::String, "Asset name or hash to track")],
         CommandHandler::Async(async_handler!(track_asset))
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "untrack_asset",
         "Remove an asset hash from being tracked",
-        vec![Arg::new("asset", ArgType::String)],
+        vec![Arg::new("asset", ArgType::String, "Asset name or hash to untrack")],
         CommandHandler::Async(async_handler!(untrack_asset))
     ))?;
 
@@ -781,7 +781,7 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         command_manager.add_command(Command::with_optional_arguments(
             "online_mode",
             "Set your wallet in online mode",
-            vec![Arg::new("daemon_address", ArgType::String)],
+            vec![Arg::new("daemon_address", ArgType::String, "Daemon RPC address (e.g., 127.0.0.1:8080)")],
             CommandHandler::Async(async_handler!(online_mode))
         ))?;
         command_manager.add_command(Command::new(
@@ -792,7 +792,7 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         command_manager.add_command(Command::with_optional_arguments(
             "rescan",
             "Rescan balance and transactions",
-            vec![Arg::new("topoheight", ArgType::Number)],
+            vec![Arg::new("topoheight", ArgType::Number, "Starting topoheight for rescan (default: 0)")],
             CommandHandler::Async(async_handler!(rescan))
         ))?;
     }
@@ -804,9 +804,9 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
             "start_rpc_server",
             "Start the RPC Server",
             vec![
-                Arg::new("bind_address", ArgType::String),
-                Arg::new("username", ArgType::String),
-                Arg::new("password", ArgType::String)
+                Arg::new("bind_address", ArgType::String, "Bind address for RPC server (e.g., 127.0.0.1:3000)"),
+                Arg::new("username", ArgType::String, "RPC authentication username"),
+                Arg::new("password", ArgType::String, "RPC authentication password")
             ], CommandHandler::Async(async_handler!(start_rpc_server))))?;
 
         command_manager.add_command(Command::new(
@@ -828,7 +828,7 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         command_manager.add_command(Command::with_optional_arguments(
             "add_xswd_relayer",
             "Add a XSWD relayer to the wallet",
-            vec![Arg::new("app_data", ArgType::String)],
+            vec![Arg::new("app_data", ArgType::String, "Application data for XSWD relayer")],
             CommandHandler::Async(async_handler!(add_xswd_relayer))
         ))?;
     }
@@ -838,9 +838,9 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "multisig_setup",
         "Setup a multisig",
         vec![
-            Arg::new("participants", ArgType::Number),
-            Arg::new("threshold", ArgType::Number),
-            Arg::new("confirm", ArgType::Bool)
+            Arg::new("participants", ArgType::Number, "Total number of participants"),
+            Arg::new("threshold", ArgType::Number, "Required signatures (M-of-N threshold)"),
+            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
         ],
         CommandHandler::Async(async_handler!(multisig_setup))
     ))?;
@@ -848,7 +848,7 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "multisig_sign",
         "Sign a multisig transaction",
         vec![
-            Arg::new("tx_hash", ArgType::Hash)
+            Arg::new("tx_hash", ArgType::Hash, "Transaction hash to sign")
         ],
         CommandHandler::Async(async_handler!(multisig_sign))
     ))?;
@@ -866,7 +866,7 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
     command_manager.add_command(Command::with_optional_arguments(
         "set_tx_version",
         "Set the transaction version",
-        vec![Arg::new("version", ArgType::Number)],
+        vec![Arg::new("version", ArgType::Number, "Transaction version number to use")],
         CommandHandler::Async(async_handler!(set_tx_version))
     ))?;
     command_manager.add_command(Command::new(
@@ -880,9 +880,9 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "ai_mining_history",
         "Show AI mining transaction history",
         vec![
-            Arg::new("page", ArgType::Number),
-            Arg::new("limit", ArgType::Number),
-            Arg::new("type", ArgType::String)
+            Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)"),
+            Arg::new("limit", ArgType::Number, "Number of entries per page (default: 10)"),
+            Arg::new("type", ArgType::String, "Transaction type filter")
         ],
         CommandHandler::Async(async_handler!(ai_mining_history))
     ))?;
@@ -895,15 +895,15 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "ai_mining_tasks",
         "Show AI mining tasks you've published or participated in",
         vec![
-            Arg::new("page", ArgType::Number),
-            Arg::new("status", ArgType::String)
+            Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)"),
+            Arg::new("status", ArgType::String, "Task status filter (e.g., active, completed)")
         ],
         CommandHandler::Async(async_handler!(ai_mining_tasks))
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "ai_mining_rewards",
         "Show AI mining rewards earned",
-        vec![Arg::new("page", ArgType::Number)],
+        vec![Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)")],
         CommandHandler::Async(async_handler!(ai_mining_rewards))
     ))?;
 
@@ -912,10 +912,10 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "publish_task",
         "Publish a new AI mining task",
         vec![
-            Arg::new("description", ArgType::String),
-            Arg::new("reward", ArgType::Number),
-            Arg::new("difficulty", ArgType::String),
-            Arg::new("deadline", ArgType::Number)
+            Arg::new("description", ArgType::String, "Task description or requirements"),
+            Arg::new("reward", ArgType::Number, "Reward amount for task completion"),
+            Arg::new("difficulty", ArgType::String, "Difficulty level (e.g., easy, medium, hard)"),
+            Arg::new("deadline", ArgType::Number, "Deadline timestamp or duration")
         ],
         CommandHandler::Async(async_handler!(publish_task))
     ))?;
@@ -923,10 +923,10 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "submit_answer",
         "Submit answer to an AI mining task",
         vec![
-            Arg::new("task_id", ArgType::String),
-            Arg::new("answer_content", ArgType::String),
-            Arg::new("answer_hash", ArgType::String),
-            Arg::new("stake", ArgType::Number)
+            Arg::new("task_id", ArgType::String, "Task ID to submit answer for"),
+            Arg::new("answer_content", ArgType::String, "Answer content or solution"),
+            Arg::new("answer_hash", ArgType::String, "Hash of the answer for verification"),
+            Arg::new("stake", ArgType::Number, "Stake amount for answer submission")
         ],
         CommandHandler::Async(async_handler!(submit_answer))
     ))?;
@@ -934,16 +934,16 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "validate_answer",
         "Validate a submitted answer",
         vec![
-            Arg::new("task_id", ArgType::String),
-            Arg::new("answer_id", ArgType::String),
-            Arg::new("score", ArgType::Number)
+            Arg::new("task_id", ArgType::String, "Task ID of the answer to validate"),
+            Arg::new("answer_id", ArgType::String, "Answer ID to validate"),
+            Arg::new("score", ArgType::Number, "Validation score (0-100)")
         ],
         CommandHandler::Async(async_handler!(validate_answer))
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "register_miner",
         "Register as an AI miner",
-        vec![Arg::new("fee", ArgType::Number)],
+        vec![Arg::new("fee", ArgType::Number, "Registration fee amount")],
         CommandHandler::Async(async_handler!(register_miner))
     ))?;
 
