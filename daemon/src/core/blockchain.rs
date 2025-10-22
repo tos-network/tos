@@ -3575,6 +3575,16 @@ impl<S: Storage> Blockchain<S> {
             let txs_hashes: IndexSet<Hash> = txs.iter().map(|tx| tx.hash()).collect();
             for tx_hash in txs_hashes.iter() {
                 storage.add_block_linked_to_tx_if_not_present(tx_hash, &block_hash)?;
+
+                // FIX: Add transactions from never-ordered blocks to orphaned_transactions
+                // so they can be re-added to mempool and get executed in a future block
+                if !storage.is_tx_executed_in_a_block(tx_hash)? {
+                    orphaned_transactions.put(tx_hash.clone(), ());
+                    if log::log_enabled!(log::Level::Debug) {
+                    debug!("Transaction {} from never-ordered block {} added to orphaned set (total: {})",
+                           tx_hash, block_hash, orphaned_transactions.len());
+                    }
+                }
             }
         }
 
