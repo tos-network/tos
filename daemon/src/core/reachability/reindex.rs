@@ -105,8 +105,8 @@ impl ReindexContext {
             let subtree_size = self.subtree_sizes[&current];
 
             // DEBUG: Log each ancestor being checked
-            if log::log_enabled!(log::Level::Info) {
-                log::info!(
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
                     "  Checking ancestor {} (height {}): interval={}, size={}, subtree_size={}",
                     current,
                     current_data.height,
@@ -122,8 +122,8 @@ impl ReindexContext {
             // For parent with decent space: size >= subtree_size → passes, stops here
             if current_interval.size() >= subtree_size {
                 // Found an ancestor with enough space!
-                if log::log_enabled!(log::Level::Info) {
-                    log::info!(
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!(
                         "  ✓ Found sufficient space at height {}: size {} >= subtree_size {}",
                         current_data.height,
                         current_interval.size(),
@@ -150,8 +150,8 @@ impl ReindexContext {
 
             // DEBUG: Log before slack reclaim check
             let parent_data = storage.get_reachability_data(&parent_hash).await?;
-            if log::log_enabled!(log::Level::Info) {
-                log::info!(
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
                     "  Checking slack reclaim: parent {} (height {}), reindex_root {} (height {})",
                     parent_hash,
                     parent_data.height,
@@ -162,8 +162,8 @@ impl ReindexContext {
 
             // FIX: Correct parameter order - check if parent is ancestor of reindex_root (climbed above root)
             if is_strict_chain_ancestor_of(storage, &parent_hash, &reindex_root).await? {
-                if log::log_enabled!(log::Level::Info) {
-                    log::info!(
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!(
                         "  ✓✓✓ SLACK RECLAIM TRIGGERED: parent {} is above reindex root {}",
                         parent_hash,
                         reindex_root
