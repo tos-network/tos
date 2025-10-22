@@ -227,6 +227,8 @@ pub struct Wallet {
     history_scan: AtomicBool,
     // flag to prioritize the usage of stable balance version when its online
     force_stable_balance: AtomicBool,
+    // Light wallet mode flag (no blockchain sync, query on-demand)
+    light_mode: AtomicBool,
     // Concurrency to use across the wallet
     concurrency: usize,
 }
@@ -275,7 +277,7 @@ pub fn hash_password(password: &str, salt: &[u8]) -> Result<[u8; PASSWORD_HASH_S
 
 impl Wallet {
     // Create a new wallet with the specificed storage, keypair and its network
-    fn new(storage: EncryptedStorage, keypair: KeyPair, network: Network, precomputed_tables: PrecomputedTablesShared, n_threads: usize, concurrency: usize) -> Arc<Self> {
+    fn new(storage: EncryptedStorage, keypair: KeyPair, network: Network, precomputed_tables: PrecomputedTablesShared, n_threads: usize, concurrency: usize, light_mode: bool) -> Arc<Self> {
         let zelf = Self {
             storage: RwLock::new(storage),
             #[cfg(feature = "network_handler")]
@@ -290,6 +292,7 @@ impl Wallet {
             event_broadcaster: Mutex::new(None),
             history_scan: AtomicBool::new(true),
             force_stable_balance: AtomicBool::new(false),
+            light_mode: AtomicBool::new(light_mode),
             account: Account::new(precomputed_tables, keypair, n_threads),
             concurrency,
         };
@@ -298,7 +301,7 @@ impl Wallet {
     }
 
     // Create a new wallet on disk
-    pub async fn create<'a>(name: &'a str, password: &'a str, seed: Option<RecoverOption<'a>>, network: Network, precomputed_tables: PrecomputedTablesShared, n_threads: usize, concurrency: usize) -> Result<Arc<Self>, Error> {
+    pub async fn create<'a>(name: &'a str, password: &'a str, seed: Option<RecoverOption<'a>>, network: Network, precomputed_tables: PrecomputedTablesShared, n_threads: usize, concurrency: usize, light_mode: bool) -> Result<Arc<Self>, Error> {
         if name.is_empty() {
             return Err(WalletError::EmptyName.into())
         }
@@ -364,11 +367,11 @@ impl Wallet {
         // Flush the storage to be sure its written on disk
         storage.flush().await?;
 
-        Ok(Self::new(storage, keypair, network, precomputed_tables, n_threads, concurrency))
+        Ok(Self::new(storage, keypair, network, precomputed_tables, n_threads, concurrency, light_mode))
     }
 
     // Open an existing wallet on disk
-    pub fn open(name: &str, password: &str, network: Network, precomputed_tables: PrecomputedTablesShared, n_threads: usize, concurrency: usize) -> Result<Arc<Self>, Error> {
+    pub fn open(name: &str, password: &str, network: Network, precomputed_tables: PrecomputedTablesShared, n_threads: usize, concurrency: usize, light_mode: bool) -> Result<Arc<Self>, Error> {
         if name.is_empty() {
             return Err(WalletError::EmptyName.into())
         }
@@ -412,7 +415,7 @@ impl Wallet {
         let keypair = KeyPair::from_private_key(private_key)
             .map_err(|_| WalletError::Any(anyhow::anyhow!("Invalid private key")))?;
 
-        Ok(Self::new(storage, keypair, network, precomputed_tables, n_threads, concurrency))
+        Ok(Self::new(storage, keypair, network, precomputed_tables, n_threads, concurrency, light_mode))
     }
 
     // Close the wallet
@@ -496,6 +499,11 @@ impl Wallet {
     // Get the stable balance flag
     pub fn should_force_stable_balance(&self) -> bool {
         self.force_stable_balance.load(Ordering::SeqCst)
+    }
+
+    // Check if wallet is in light mode (no blockchain sync, query on-demand)
+    pub fn is_light_mode(&self) -> bool {
+        self.light_mode.load(Ordering::SeqCst)
     }
 
     // Propagate a new event to registered listeners

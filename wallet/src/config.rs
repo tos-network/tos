@@ -225,6 +225,12 @@ pub struct Config {
     #[clap(long)]
     #[serde(default)]
     pub disable_history_scan: bool,
+    /// Enable light wallet mode (no blockchain synchronization)
+    /// Light mode queries nonce/balance/reference on-demand from daemon, enabling instant startup
+    /// Trade-off: Transaction history is not available locally
+    #[clap(long)]
+    #[serde(default)]
+    pub light_mode: bool,
     /// Force the wallet to use a stable balance only during transactions creation.
     /// This will prevent the wallet to use unstable balance and prevent any orphaned transaction due to DAG reorg.
     /// This is only working if the wallet is in online mode.
