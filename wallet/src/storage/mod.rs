@@ -19,7 +19,7 @@ use tos_common::{
     },
     asset::AssetData,
     block::TopoHeight,
-    config::TOS_ASSET,
+    config::{COIN_DECIMALS, MAXIMUM_SUPPLY, TOS_ASSET},
     crypto::{
         Hash,
         PrivateKey,
@@ -700,7 +700,19 @@ impl EncryptedStorage {
             return Ok(asset.clone());
         }
 
-        let data: AssetData = self.load_from_disk_with_encrypted_key(&self.assets, asset.as_bytes())?;
+        // Try to load from disk, but provide default for TOS if not found
+        let data: AssetData = match self.load_from_disk_optional_with_encrypted_key(&self.assets, asset.as_bytes())? {
+            Some(data) => data,
+            None => {
+                // If asset data doesn't exist yet, provide default for TOS
+                if asset == &TOS_ASSET {
+                    AssetData::new(COIN_DECIMALS, "TOS".to_string(), "TOS".to_string(), Some(MAXIMUM_SUPPLY), None)
+                } else {
+                    // For non-TOS assets, return error as before
+                    return Err(anyhow::anyhow!("Error while loading data with encrypted key {} from disk", String::from_utf8_lossy(asset.as_bytes())));
+                }
+            }
+        };
         cache.put(asset.clone(), data.clone());
 
         Ok(data)

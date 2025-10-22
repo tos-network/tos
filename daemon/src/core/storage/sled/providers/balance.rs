@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use log::trace;
+use log::{trace, warn};
 use tos_common::{
     account::{
         AccountSummary,
@@ -140,12 +140,65 @@ impl BalanceProvider for SledStorage {
         }
 
         let topo = if self.has_balance_at_exact_topoheight(key, asset, topoheight).await? {
-            topoheight
+            Some(topoheight)
         } else {
-            self.get_last_topoheight_for_balance(key, asset).await?
+            // FIX: Defensive check - verify pointer points to existing data
+            let pointer_topo = self.get_last_topoheight_for_balance(key, asset).await?;
+
+            // Verify the pointer points to valid data
+            let pointer_key = self.get_versioned_balance_key(key, asset, pointer_topo);
+            if self.contains_data(&self.versioned_balances, &pointer_key)? {
+                Some(pointer_topo)
+            } else {
+                // Corrupted pointer, fallback to scanning
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "Corrupted balance pointer for account {} asset {}: points to non-existent topoheight {}, falling back to scan",
+                        key.as_address(self.is_mainnet()),
+                        asset,
+                        pointer_topo
+                    );
+                }
+
+                // Use reverse iterator to scan backwards from topoheight
+                // This checks EVERY topoheight without gaps
+                let mut found_topo = None;
+                let start_key = self.get_versioned_balance_key(key, asset, topoheight);
+
+                // Iterate backwards to find the first valid balance
+                for res in self.versioned_balances.range(..=&start_key[..]).rev() {
+                    let (iter_key, _) = res?;
+
+                    // Key format: [topoheight(8)][account_id(32)][asset_id(32)]
+                    // Check if this key matches our account+asset
+                    if iter_key.len() >= 72
+                        && &iter_key[8..40] == key.as_bytes()
+                        && &iter_key[40..72] == asset.as_bytes() {
+                        // Extract topoheight from key
+                        let iter_topo = u64::from_be_bytes(iter_key[0..8].try_into()
+                            .map_err(|_| BlockchainError::CorruptedData)?);
+
+                        // Must be <= topoheight
+                        if iter_topo <= topoheight {
+                            // Found valid balance, no need to log in hot path
+                            found_topo = Some(iter_topo);
+                            break;
+                        }
+                        // Continue searching backwards for earlier versions
+                    } else {
+                        // Key doesn't match our account+asset, skip this entry
+                        // Don't break - there may be earlier versions of our account/asset
+                        continue;
+                    }
+                }
+
+                // Return found_topo directly (may be None)
+                // Don't fall back to pointer_topo - it's already corrupted!
+                found_topo
+            }
         };
 
-        let mut previous_topoheight = Some(topo);
+        let mut previous_topoheight = topo;
         // otherwise, we have to go through the whole chain
         while let Some(topo) = previous_topoheight {
             if topo <= topoheight {
@@ -193,12 +246,63 @@ impl BalanceProvider for SledStorage {
         }
 
         let topo = if self.has_balance_at_exact_topoheight(key, asset, topoheight).await? {
-            topoheight
+            Some(topoheight)
         } else {
-            self.get_last_topoheight_for_balance(key, asset).await?
+            // FIX: Same defensive check as get_balance_at_maximum_topoheight
+            let pointer_topo = self.get_last_topoheight_for_balance(key, asset).await?;
+
+            // Verify the pointer points to valid data
+            let pointer_key = self.get_versioned_balance_key(key, asset, pointer_topo);
+            if self.contains_data(&self.versioned_balances, &pointer_key)? {
+                Some(pointer_topo)
+            } else {
+                // Corrupted pointer, fallback to scanning
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "Corrupted output balance pointer for account {} asset {}: points to non-existent topoheight {}, falling back to scan",
+                        key.as_address(self.is_mainnet()),
+                        asset,
+                        pointer_topo
+                    );
+                }
+
+                // Use reverse iterator to scan backwards from topoheight
+                // This checks EVERY topoheight without gaps
+                let mut found_topo = None;
+                let start_key = self.get_versioned_balance_key(key, asset, topoheight);
+
+                // Iterate backwards to find the first valid balance
+                for res in self.versioned_balances.range(..=&start_key[..]).rev() {
+                    let (iter_key, _) = res?;
+
+                    // Key format: [topoheight(8)][account_id(32)][asset_id(32)]
+                    // Check if this key matches our account+asset
+                    if iter_key.len() >= 72
+                        && &iter_key[8..40] == key.as_bytes()
+                        && &iter_key[40..72] == asset.as_bytes() {
+                        // Extract topoheight from key
+                        let iter_topo = u64::from_be_bytes(iter_key[0..8].try_into()
+                            .map_err(|_| BlockchainError::CorruptedData)?);
+
+                        // Must be <= topoheight
+                        if iter_topo <= topoheight {
+                            // Found valid output balance, no need to log in hot path
+                            found_topo = Some(iter_topo);
+                            break;
+                        }
+                        // Continue searching backwards for earlier versions
+                    } else {
+                        // Key doesn't match our account+asset, skip this entry
+                        // Don't break - there may be earlier versions of our account/asset
+                        continue;
+                    }
+                }
+
+                found_topo
+            }
         };
 
-        let mut next = Some(topo);
+        let mut next = topo;
         while let Some(topo) = next {
             // We read the next topoheight (previous topo of the versioned balance) and its current balance type
             let (prev_topo, balance_type): (Option<u64>, BalanceType) = self.load_from_disk(&self.versioned_balances, &self.get_versioned_balance_key(key, asset, topo), DiskContext::BalanceAtTopoHeight(topo))?;

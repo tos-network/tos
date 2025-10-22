@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use log::trace;
+use log::{trace, warn};
+use rocksdb::Direction;
 use tos_common::{
     account::{
         AccountSummary,
@@ -12,6 +13,7 @@ use tos_common::{
         Hash,
         PublicKey
     },
+    serializer::RawBytes,
 };
 use crate::core::{
     error::BlockchainError,
@@ -19,7 +21,8 @@ use crate::core::{
         rocksdb::{
             AccountId,
             AssetId,
-            Column
+            Column,
+            IteratorMode
         },
         BalanceProvider,
         NetworkProvider,
@@ -88,7 +91,64 @@ impl BalanceProvider for RocksStorage {
         } else  {
             trace!("load latest version available");
             // skip the topoheight from the key, load the last topoheight
-            self.load_optional_from_disk(Column::Balances, &versioned_key[8..24])?
+            match self.load_optional_from_disk::<[u8], TopoHeight>(Column::Balances, &versioned_key[8..24])? {
+                Some(pointer_topo) => {
+                    // FIX: Defensive check - verify pointer points to existing data
+                    let pointer_key = Self::get_versioned_account_balance_key(account_id, asset_id, pointer_topo);
+                    if self.contains_data(Column::VersionedBalances, &pointer_key)? {
+                        Some(pointer_topo)
+                    } else {
+                        // Corrupted pointer, fallback to scanning
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!(
+                                "Corrupted balance pointer for account {} asset {}: points to non-existent topoheight {}, falling back to scan",
+                                key.as_address(self.is_mainnet()),
+                                asset,
+                                pointer_topo
+                            );
+                        }
+
+                        // Use reverse iterator to scan backwards from maximum_topoheight
+                        // This checks EVERY topoheight without gaps
+                        let mut found_topo = None;
+                        let start_key = Self::get_versioned_account_balance_key(account_id, asset_id, maximum_topoheight);
+
+                        for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(
+                            &self.db,
+                            self.snapshot.as_ref(),
+                            IteratorMode::From(&start_key, Direction::Reverse),
+                            Column::VersionedBalances
+                        )? {
+                            let (iter_key, _) = res?;
+
+                            // Key format: [topoheight(8)][account_id(8)][asset_id(8)] = 24 bytes total
+                            // Check if this key matches our account+asset
+                            if iter_key.len() >= 24
+                                && &iter_key[8..16] == &account_id.to_be_bytes()
+                                && &iter_key[16..24] == &asset_id.to_be_bytes() {
+                                // Extract topoheight from key
+                                let iter_topo = u64::from_be_bytes(iter_key[0..8].try_into()
+                                    .map_err(|_| BlockchainError::CorruptedData)?);
+
+                                // Must be <= maximum_topoheight
+                                if iter_topo <= maximum_topoheight {
+                                    // Found valid balance, no need to log in hot path
+                                    found_topo = Some(iter_topo);
+                                    break;
+                                }
+                                // Continue searching backwards for earlier versions
+                            } else {
+                                // Key doesn't match our account+asset, skip this entry
+                                // Don't break - there may be earlier versions of our account/asset
+                                continue;
+                            }
+                        }
+
+                        found_topo
+                    }
+                }
+                None => None
+            }
         };
 
         // Iterate over our linked list of versions

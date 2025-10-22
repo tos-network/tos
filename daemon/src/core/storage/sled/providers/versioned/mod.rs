@@ -7,7 +7,7 @@ mod asset;
 mod cache;
 mod dag_order;
 
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use sled::Tree;
 use tos_common::{
     block::TopoHeight,
@@ -50,8 +50,50 @@ impl SledStorage {
                     if let Some(prev_topo) = prev_topo {
                         Self::insert_into_disk(snapshot.as_mut(), tree_pointer, key, &prev_topo.to_be_bytes())?;
                     } else {
-                        // No previous topoheight, we can delete the balance
-                        Self::remove_from_disk_without_reading(snapshot.as_mut(), tree_pointer, key)?;
+                        // FIX: Don't immediately delete pointer, search for earlier versions first
+                        // Use reverse iterator from Sled to scan backwards efficiently
+                        let mut found_earlier_version = None;
+
+                        // Build starting key: [topoheight-1][account_asset_key]
+                        let start_topo = topoheight.saturating_sub(1);
+                        let mut start_key = Vec::with_capacity(prefixed_key.len());
+                        start_key.extend_from_slice(&start_topo.to_be_bytes());
+                        start_key.extend_from_slice(key);
+
+                        // Iterate backwards from start_key to find the first (most recent) earlier version
+                        // Sled's range() with .rev() iterates in reverse order
+                        for res in tree_versioned.range(..=&start_key[..]).rev() {
+                            let (iter_key, _) = res?;
+
+                            // Check if this key matches our account+asset (skip topoheight prefix)
+                            if iter_key.len() >= 8 && &iter_key[8..] == key {
+                                // Extract topoheight from key
+                                let iter_topo = u64::from_be_bytes(iter_key[0..8].try_into()
+                                    .map_err(|_| BlockchainError::CorruptedData)?);
+
+                                // Must be strictly less than the deleted topoheight
+                                if iter_topo < topoheight {
+                                    found_earlier_version = Some(iter_topo);
+                                    break;
+                                }
+                                // Continue searching backwards for earlier versions
+                            } else {
+                                // Key doesn't match our account+asset, skip this entry
+                                // Don't break - there may be earlier versions of our account/asset
+                                continue;
+                            }
+                        }
+
+                        if let Some(earlier_topo) = found_earlier_version {
+                            // Found earlier version, update pointer
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Balance pointer recovery: updated to topoheight {} after deleting {}", earlier_topo, topoheight);
+                            }
+                            Self::insert_into_disk(snapshot.as_mut(), tree_pointer, key, &earlier_topo.to_be_bytes())?;
+                        } else {
+                            // No earlier version found, safe to delete pointer
+                            Self::remove_from_disk_without_reading(snapshot.as_mut(), tree_pointer, key)?;
+                        }
                     }
                 }
             }
@@ -107,8 +149,44 @@ impl SledStorage {
                         Self::insert_into_disk(snapshot.as_mut(), tree_pointer, key, topo.to_bytes())?;
                     },
                     None => {
-                        trace!("no new topo pointer to set, deleting the pointer from tree");
-                        Self::remove_from_disk_internal(snapshot.as_mut(), tree_pointer, &key)?;
+                        // FIX: Same as delete_versioned_tree_at_topoheight - use reverse iterator
+                        let mut found_earlier_version = None;
+
+                        // Build starting key: [topoheight][account_asset_key]
+                        let start_key = Self::get_versioned_key(&key, topoheight);
+
+                        // Iterate backwards from start_key to find the first (most recent) earlier version
+                        for res in tree_versioned.range(..=&start_key[..]).rev() {
+                            let (iter_key, _) = res?;
+
+                            // Check if this key matches our account+asset (skip topoheight prefix)
+                            if iter_key.len() >= 8 && &iter_key[8..] == key.as_ref() {
+                                // Extract topoheight from key
+                                let iter_topo = u64::from_be_bytes(iter_key[0..8].try_into()
+                                    .map_err(|_| BlockchainError::CorruptedData)?);
+
+                                // Must be less than or equal to threshold
+                                if iter_topo <= topoheight {
+                                    found_earlier_version = Some(iter_topo);
+                                    break;
+                                }
+                                // Continue searching backwards for earlier versions
+                            } else {
+                                // Key doesn't match our account+asset, skip this entry
+                                // Don't break - there may be earlier versions of our account/asset
+                                continue;
+                            }
+                        }
+
+                        if let Some(earlier_topo) = found_earlier_version {
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Balance pointer recovery (delete_above): updated to topoheight {} after deleting above {}", earlier_topo, topoheight);
+                            }
+                            Self::insert_into_disk(snapshot.as_mut(), tree_pointer, key, earlier_topo.to_bytes())?;
+                        } else {
+                            trace!("no new topo pointer to set, deleting the pointer from tree");
+                            Self::remove_from_disk_internal(snapshot.as_mut(), tree_pointer, &key)?;
+                        }
                     }
                 };
             }

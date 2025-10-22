@@ -1233,11 +1233,19 @@ impl Wallet {
             if log::log_enabled!(log::Level::Info) {
                 info!("Light mode: LightAPI initialized for on-demand queries");
             }
-        }
 
-        // start the task
-        network_handler.start(auto_reconnect).await?;
-        *self.network_handler.lock().await = Some(network_handler);
+            // In light mode, we don't start NetworkHandler sync loop
+            // We only keep the network_handler for the DaemonAPI connection
+            *self.network_handler.lock().await = Some(network_handler);
+
+            if log::log_enabled!(log::Level::Info) {
+                info!("Light mode: Skipping blockchain sync, queries will be on-demand");
+            }
+        } else {
+            // Normal mode: start the sync task
+            network_handler.start(auto_reconnect).await?;
+            *self.network_handler.lock().await = Some(network_handler);
+        }
         Ok(())
     }
 
@@ -1264,11 +1272,19 @@ impl Wallet {
             if log::log_enabled!(log::Level::Info) {
                 info!("Light mode: LightAPI initialized for on-demand queries (shared daemon API)");
             }
-        }
 
-        // start the task
-        network_handler.start(auto_reconnect).await?;
-        *self.network_handler.lock().await = Some(network_handler);
+            // In light mode, we don't start NetworkHandler sync loop
+            // We only keep the network_handler for the DaemonAPI connection
+            *self.network_handler.lock().await = Some(network_handler);
+
+            if log::log_enabled!(log::Level::Info) {
+                info!("Light mode: Skipping blockchain sync, queries will be on-demand");
+            }
+        } else {
+            // Normal mode: start the sync task
+            network_handler.start(auto_reconnect).await?;
+            *self.network_handler.lock().await = Some(network_handler);
+        }
         Ok(())
     }
 

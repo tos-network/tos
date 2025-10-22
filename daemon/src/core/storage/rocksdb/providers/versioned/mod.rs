@@ -1,5 +1,5 @@
 use rocksdb::Direction;
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use tos_common::{
     block::TopoHeight,
     serializer::RawBytes,
@@ -39,7 +39,56 @@ impl RocksStorage {
                     if let Some(prev_topo) = prev_topo {
                         Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &prev_topo.to_be_bytes(), false)?;
                     } else {
-                        Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..])?;
+                        // FIX: Don't immediately delete pointer, search for earlier versions first
+                        // Use database iterator to scan backwards efficiently
+                        let account_asset_key = &key[8..];
+                        let mut found_earlier_version = None;
+
+                        // Build starting key for reverse iteration: [topoheight-1][account_id][asset_id]
+                        let start_topo = topoheight.saturating_sub(1);
+                        let mut start_key = Vec::with_capacity(key.len());
+                        start_key.extend_from_slice(&start_topo.to_be_bytes());
+                        start_key.extend_from_slice(account_asset_key);
+
+                        // Iterate backwards from start_key to find the first (most recent) earlier version
+                        // This checks EVERY topoheight <= start_topo with the same account+asset
+                        for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(
+                            &self.db,
+                            self.snapshot.as_ref(),
+                            IteratorMode::From(&start_key, Direction::Reverse),
+                            column_versioned
+                        )? {
+                            let (iter_key, _) = res?;
+
+                            // Check if this key matches our account+asset (skip topoheight prefix)
+                            if iter_key.len() >= 8 && &iter_key[8..] == account_asset_key {
+                                // Extract topoheight from key
+                                let iter_topo = u64::from_be_bytes(iter_key[0..8].try_into()
+                                    .map_err(|_| BlockchainError::CorruptedData)?);
+
+                                // Must be strictly less than the deleted topoheight
+                                if iter_topo < topoheight {
+                                    found_earlier_version = Some(iter_topo);
+                                    break;
+                                }
+                                // Continue searching backwards for earlier versions
+                            } else {
+                                // Key doesn't match our account+asset, skip this entry
+                                // Don't break - there may be earlier versions of our account/asset
+                                continue;
+                            }
+                        }
+
+                        if let Some(earlier_topo) = found_earlier_version {
+                            // Found earlier version, update pointer
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Balance pointer recovery: updated to topoheight {} after deleting {}", earlier_topo, topoheight);
+                            }
+                            Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &earlier_topo.to_be_bytes(), false)?;
+                        } else {
+                            // No earlier version found, safe to delete pointer
+                            Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..])?;
+                        }
                     }
                 }
             }
@@ -61,7 +110,51 @@ impl RocksStorage {
                     if let Some(pointer) = filtered {
                         Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &pointer.to_be_bytes(), false)?;
                     } else {
-                        Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..])?;
+                        // FIX: Same as delete_versioned_at_topoheight - use iterator to search for earlier versions
+                        let account_asset_key = &key[8..];
+                        let mut found_earlier_version = None;
+
+                        // Build starting key for reverse iteration: [topoheight][account_id][asset_id]
+                        let mut start_key = Vec::with_capacity(key.len());
+                        start_key.extend_from_slice(&topoheight.to_be_bytes());
+                        start_key.extend_from_slice(account_asset_key);
+
+                        // Iterate backwards from start_key to find the first (most recent) earlier version
+                        for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(
+                            &self.db,
+                            self.snapshot.as_ref(),
+                            IteratorMode::From(&start_key, Direction::Reverse),
+                            column_versioned
+                        )? {
+                            let (iter_key, _) = res?;
+
+                            // Check if this key matches our account+asset (skip topoheight prefix)
+                            if iter_key.len() >= 8 && &iter_key[8..] == account_asset_key {
+                                // Extract topoheight from key
+                                let iter_topo = u64::from_be_bytes(iter_key[0..8].try_into()
+                                    .map_err(|_| BlockchainError::CorruptedData)?);
+
+                                // Must be less than or equal to threshold
+                                if iter_topo <= topoheight {
+                                    found_earlier_version = Some(iter_topo);
+                                    break;
+                                }
+                                // Continue searching backwards for earlier versions
+                            } else {
+                                // Key doesn't match our account+asset, skip this entry
+                                // Don't break - there may be earlier versions of our account/asset
+                                continue;
+                            }
+                        }
+
+                        if let Some(earlier_topo) = found_earlier_version {
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Balance pointer recovery (delete_above): updated to topoheight {} after deleting above {}", earlier_topo, topoheight);
+                            }
+                            Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &earlier_topo.to_be_bytes(), false)?;
+                        } else {
+                            Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..])?;
+                        }
                     }
                 }
             }

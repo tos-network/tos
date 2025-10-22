@@ -176,6 +176,64 @@ error!("Failed to verify transaction {}: {}", tx_hash, err);
 - ✅ **REQUIRED**: Debug and trace logs (frequently disabled in production)
 - ⚠️ **OPTIONAL**: Simple string logs without arguments (minimal overhead)
 
+#### CRITICAL: Avoid High-Frequency Logs in Hot Paths
+
+**RULE: NEVER use `info!` or higher level logs inside loops, iterators, or frequently-called functions.**
+
+High-frequency logging can cause severe performance degradation, especially in production environments where INFO level is often enabled.
+
+❌ **PROHIBITED**: Logging inside loops or hot paths
+```rust
+// DO NOT do this - will be called thousands of times per second
+for item in database_iterator {
+    info!("Processing item {}", item.id);  // ❌ SEVERE PERFORMANCE ISSUE
+    process(item);
+}
+
+// DO NOT do this - called on every balance query
+fn get_balance(&self) -> Balance {
+    info!("Fetching balance");  // ❌ HIGH FREQUENCY
+    self.balance
+}
+```
+
+✅ **CORRECT**: Log only at boundaries or use debug/trace
+```rust
+// Log once before/after the loop
+info!("Starting batch processing of {} items", items.len());
+for item in database_iterator {
+    // Use debug/trace for per-item logging (disabled in production)
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("Processing item {}", item.id);  // ✅ OK, disabled by default
+    }
+    process(item);
+}
+info!("Completed batch processing");
+
+// Or log only exceptional cases
+fn get_balance(&self) -> Balance {
+    if self.balance.is_corrupted() {
+        warn!("Corrupted balance detected, recovering");  // ✅ OK, rare event
+    }
+    self.balance
+}
+```
+
+**Hot Path Examples**:
+- Database iteration loops (`for item in iterator`)
+- Per-transaction processing
+- Per-block validation
+- Network packet handling
+- Balance queries
+- Any function called more than 10 times per second
+
+**Safe Logging Levels in Hot Paths**:
+- `error!`: Only for actual errors (rare)
+- `warn!`: Only for exceptional conditions (rare)
+- ~~`info!`~~: ❌ **NEVER** in hot paths
+- `debug!`: ✅ OK (disabled in production)
+- `trace!`: ✅ OK (disabled in production)
+
 #### Examples by Log Level
 
 ```rust
@@ -233,6 +291,13 @@ rg '^\s*(error|warn|info|debug|trace)!\(.*\{' --type rust
 
 # Count optimized logs
 rg 'if log::log_enabled!\(log::Level::' --type rust | wc -l
+
+# CRITICAL: Check for info! logs inside loops (potential performance issues)
+# Look for info! within 5 lines of 'for', 'while', or 'loop'
+rg -A 5 '(for|while|loop)' --type rust | rg 'info!'
+
+# Check for warn! logs inside loops (usually OK if rare, but review)
+rg -A 5 '(for|while|loop)' --type rust | rg 'warn!'
 ```
 
 ## Project-Specific Rules
