@@ -449,12 +449,12 @@ pub async fn try_advancing_reindex_root<S: Storage>(
         return Ok(());
     }
 
-    // Log the advancement
+    // Log the advancement at DEBUG level (called every block, so shouldn't be INFO)
     let current_data = storage.get_reachability_data(&current).await?;
     let next_data = storage.get_reachability_data(&next).await?;
 
-    if log::log_enabled!(log::Level::Info) {
-        log::info!(
+    if log::log_enabled!(log::Level::Debug) {
+        log::debug!(
             "Advancing reindex root from {} (height {}) to {} (height {})",
             current,
             current_data.height,
