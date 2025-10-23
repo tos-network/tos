@@ -33,11 +33,22 @@ impl AccountEntry {
         if log::log_enabled!(log::Level::Trace) {
             trace!("insert nonce {} at topoheight {}, (expected: {})", nonce, topoheight, self.expected_nonce);
         }
-        if self.contains_nonce(&nonce) || nonce != self.expected_nonce {
+
+        // Check if nonce was already used
+        if self.contains_nonce(&nonce) {
             return false;
         }
 
-        self.expected_nonce = nonce + 1;
+        // Check that nonce is not below the initial nonce (prevent rollback attacks)
+        if nonce < self.initial_nonce {
+            return false;
+        }
+
+        // Allow nonce jumps in case of DAG reorg, but update expected_nonce to the highest seen + 1
+        if nonce >= self.expected_nonce {
+            self.expected_nonce = nonce + 1;
+        }
+
         self.used_nonces.insert(nonce, topoheight);
 
         true
