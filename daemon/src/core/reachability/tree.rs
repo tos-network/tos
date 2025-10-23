@@ -126,7 +126,7 @@ pub async fn add_tree_block<S: Storage>(
 
 /// Get the current reindex root from storage
 ///
-/// The reindex root is a stable point in the chain that stays approximately
+/// The reindex root is a stable point in the chain that stays exactly
 /// DEFAULT_REINDEX_DEPTH blocks behind the current tip. It provides a stable
 /// reference point for reindexing operations.
 ///
@@ -138,7 +138,7 @@ pub async fn add_tree_block<S: Storage>(
 async fn get_reindex_root<S: Storage>(storage: &S) -> Result<Hash, BlockchainError> {
     // Reindex root tracking is fully implemented:
     // - Storage layer provides get/set_reindex_root() (RocksDB + Sled)
-    // - Advancement logic in try_advancing_reindex_root() maintains root ~100 blocks behind tip
+    // - Advancement logic in try_advancing_reindex_root() maintains root exactly 100 blocks behind tip
     // - Blockchain initializes root to genesis and calls hint_virtual_selected_parent() on new blocks
 
     match storage.get_reindex_root().await {
@@ -152,21 +152,197 @@ async fn get_reindex_root<S: Storage>(storage: &S) -> Result<Hash, BlockchainErr
     }
 }
 
-/// Try advancing the reindex root towards the tip
+/// Find the next reindex root based on current root and hint (selected tip)
 ///
-/// Called periodically (e.g., when virtual selected parent changes) to move
-/// the reindex root forward as the chain grows. The reindex root should stay
-/// approximately DEFAULT_REINDEX_DEPTH blocks behind the tip.
+/// This implements rusty-kaspa's algorithm which keeps the reindex root
+/// exactly `reindex_depth` blocks behind the tip.
 ///
-/// # Algorithm
-/// 1. Get current reindex root
-/// 2. Check if we can advance (new tip is far enough ahead)
-/// 3. Find appropriate ancestor of new tip at depth DEFAULT_REINDEX_DEPTH
-/// 4. Update reindex root if conditions met
+/// # Algorithm (from rusty-kaspa)
+/// 1. Check if current root is ancestor of hint (tip)
+/// 2. If NOT (reorg case):
+///    - Use reindex_slack as minimum height difference to switch chains
+///    - Find common ancestor
+/// 3. Walk from current/common toward hint
+/// 4. Stop when (hint_height - child_height) < reindex_depth
+/// 5. Return (ancestor, next) where next is the new reindex root
+///
+/// # Arguments
+/// * `storage` - Storage reference
+/// * `current` - Current reindex root
+/// * `hint` - Selected tip (VSP)
+/// * `reindex_depth` - Target depth behind tip (typically 100)
+/// * `reindex_slack` - Reorg protection threshold (typically 16384)
+///
+/// # Returns
+/// (ancestor, next) where ancestor is the starting point for concentration,
+/// and next is the new reindex root
+async fn find_next_reindex_root<S: Storage>(
+    storage: &S,
+    current: Hash,
+    hint: Hash,
+    reindex_depth: u64,
+    reindex_slack: u64,
+) -> Result<(Hash, Hash), BlockchainError> {
+    let mut ancestor = current.clone();
+    let mut next = current.clone();
+
+    let hint_data = storage.get_reachability_data(&hint).await?;
+    let hint_height = hint_data.height;
+
+    // Test if current root is ancestor of selected tip (hint)
+    // If not, this is a reorg case
+    let current_data = storage.get_reachability_data(&current).await?;
+    let current_interval = current_data.interval;
+    let hint_interval = hint_data.interval;
+
+    // Check if current is chain ancestor of hint using interval containment
+    let is_ancestor = current_interval.contains(hint_interval);
+
+    if !is_ancestor {
+        let current_height = current_data.height;
+
+        // Reorg protection: only switch chains if new chain is reindex_slack blocks ahead
+        // This prevents oscillating between chains during reorg attacks
+        if hint_height < current_height || hint_height - current_height < reindex_slack {
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "Reindex root unchanged due to reorg protection: hint {} (height {}), current {} (height {}), slack required {}",
+                    hint, hint_height, current, current_height, reindex_slack
+                );
+            }
+            return Ok((current.clone(), current));
+        }
+
+        // Find common ancestor
+        if log::log_enabled!(log::Level::Info) {
+            log::info!(
+                "Reorg detected: finding common ancestor between hint {} and current root {}",
+                hint, current
+            );
+        }
+
+        let common = find_common_tree_ancestor(storage, hint.clone(), current.clone()).await?;
+        ancestor = common.clone();
+        next = common;
+    }
+
+    // Walk from ancestor toward the selected tip (hint) until we reach
+    // a point that is exactly reindex_depth blocks behind the tip
+    loop {
+        let child = get_next_chain_ancestor_unchecked_internal(storage, &hint, &next).await?;
+        let child_data = storage.get_reachability_data(&child).await?;
+        let child_height = child_data.height;
+
+        if hint_height < child_height {
+            return Err(BlockchainError::InvalidReachability);
+        }
+
+        // Stop when we're within reindex_depth blocks of the tip
+        if hint_height - child_height < reindex_depth {
+            break;
+        }
+
+        next = child;
+    }
+
+    Ok((ancestor, next))
+}
+
+/// Find the most recent tree ancestor common to both block and reindex_root
+///
+/// Note: We assume that almost always the chain between the reindex root and
+/// the common ancestor is longer than the chain between block and the common
+/// ancestor, hence we iterate from block.
+///
+/// # Arguments
+/// * `storage` - Storage reference
+/// * `block` - Block to find ancestor for
+/// * `reindex_root` - Current reindex root
+///
+/// # Returns
+/// Hash of the common ancestor
+async fn find_common_tree_ancestor<S: Storage>(
+    storage: &S,
+    block: Hash,
+    reindex_root: Hash,
+) -> Result<Hash, BlockchainError> {
+    let mut current = block;
+
+    loop {
+        let current_data = storage.get_reachability_data(&current).await?;
+        let current_interval = current_data.interval;
+
+        let root_data = storage.get_reachability_data(&reindex_root).await?;
+        let root_interval = root_data.interval;
+
+        // Check if current is chain ancestor of reindex_root using interval containment
+        if current_interval.contains(root_interval) {
+            return Ok(current);
+        }
+
+        let parent = current_data.parent.clone();
+
+        // Check for genesis (self-loop)
+        if parent == current {
+            return Ok(current);
+        }
+
+        current = parent;
+    }
+}
+
+/// Get the next chain ancestor of descendant that is a child of ancestor (unchecked)
+///
+/// This function doesn't validate that ancestor is actually a chain ancestor - use with care.
+/// Used internally for walking the chain during reindex root advancement.
+///
+/// # Arguments
+/// * `storage` - Storage reference
+/// * `descendant` - The descendant block
+/// * `ancestor` - The ancestor block whose child we want to find
+///
+/// # Returns
+/// The child of ancestor that is on the chain path to descendant
+async fn get_next_chain_ancestor_unchecked_internal<S: Storage>(
+    storage: &S,
+    descendant: &Hash,
+    ancestor: &Hash,
+) -> Result<Hash, BlockchainError> {
+    let ancestor_data = storage.get_reachability_data(ancestor).await?;
+    let descendant_data = storage.get_reachability_data(descendant).await?;
+
+    // Find which child of ancestor contains descendant in its interval
+    for child in &ancestor_data.children {
+        let child_data = storage.get_reachability_data(child).await?;
+        if child_data.interval.contains(descendant_data.interval) {
+            return Ok(child.clone());
+        }
+    }
+
+    Err(BlockchainError::InvalidReachability)
+}
+
+/// Attempts to advance the reindex root according to the provided hint (VSP)
+///
+/// This implements rusty-kaspa's algorithm: the reindex root stays exactly
+/// DEFAULT_REINDEX_DEPTH blocks behind the tip on the selected chain.
+///
+/// It is important for the reindex root point to follow the consensus-agreed chain
+/// since this way it can benefit from chain-robustness which is implied by the security
+/// of the ordering protocol. That is, it enjoys from the fact that all future blocks are
+/// expected to elect the root subtree (by converging to the agreement to have it on the
+/// selected chain).
+///
+/// # Algorithm (from rusty-kaspa)
+/// 1. Get current root from storage
+/// 2. Call find_next_reindex_root to find the new root position
+/// 3. If no change needed, return early
+/// 4. Perform interval concentration along the path from ancestor to new root
+/// 5. Update reindex root in storage
 ///
 /// # Arguments
 /// * `storage` - Mutable storage reference
-/// * `hint` - Hash of the new tip (hint for where to advance)
+/// * `hint` - Hash of the new virtual selected parent (tip)
 ///
 /// # Returns
 /// Ok(()) if successful (whether or not advancement occurred)
@@ -174,10 +350,11 @@ pub async fn try_advancing_reindex_root<S: Storage>(
     storage: &mut S,
     hint: Hash,
 ) -> Result<(), BlockchainError> {
-    let current_root = match storage.get_reindex_root().await {
+    // Get current root from storage
+    let current = match storage.get_reindex_root().await {
         Ok(root) => root,
         Err(_) => {
-            // Reindex root not initialized - initialize with the hint
+            // Reindex root not initialized - initialize with the hint (genesis)
             if log::log_enabled!(log::Level::Info) {
                 log::info!("Initializing reindex root to {}", hint);
             }
@@ -186,83 +363,66 @@ pub async fn try_advancing_reindex_root<S: Storage>(
         }
     };
 
-    let current_root_data = storage.get_reachability_data(&current_root).await?;
-    let hint_data = storage.get_reachability_data(&hint).await?;
+    // Find the possible new root using rusty-kaspa's algorithm
+    let (mut ancestor, next) = find_next_reindex_root(
+        storage,
+        current.clone(),
+        hint,
+        DEFAULT_REINDEX_DEPTH,
+        DEFAULT_REINDEX_SLACK,
+    ).await?;
 
-    // Check if hint is far enough ahead to warrant advancement
-    // CRITICAL FIX: Require hint to be at least (DEPTH + SLACK/2) ahead
-    // This prevents advancing every single block and reduces advancement frequency
-    //
-    // Example: DEPTH=100, SLACK=16384 → threshold = 100 + 8192 = 8292
-    // With old logic: advance every block after height 100
-    // With new logic: advance every ~8000 blocks
-    //
-    // For smaller chains (< SLACK blocks), use minimum threshold of 2*DEPTH
-    let advancement_threshold = if current_root_data.height < DEFAULT_REINDEX_SLACK {
-        // Early chain: advance every 200 blocks (2 × DEFAULT_REINDEX_DEPTH)
-        DEFAULT_REINDEX_DEPTH * 2
-    } else {
-        // Mature chain: advance every ~8000 blocks
-        DEFAULT_REINDEX_DEPTH + DEFAULT_REINDEX_SLACK / 2
-    };
-
-    let required_height = current_root_data.height + advancement_threshold;
-    if hint_data.height <= required_height {
-        // Not far enough ahead - no advancement needed
+    // No update to root, return early
+    if current == next {
         if log::log_enabled!(log::Level::Trace) {
+            let current_data = storage.get_reachability_data(&current).await?;
             log::trace!(
-                "Reindex root advancement skipped: hint height {} <= required {} (current {} + threshold {})",
-                hint_data.height,
-                required_height,
-                current_root_data.height,
-                advancement_threshold
+                "Reindex root unchanged: current {} at height {}",
+                current,
+                current_data.height
             );
         }
         return Ok(());
     }
 
-    // Find ancestor of hint at depth DEFAULT_REINDEX_DEPTH from hint
-    let new_root = find_ancestor_at_depth(storage, hint, DEFAULT_REINDEX_DEPTH).await?;
+    // Log the advancement
+    let current_data = storage.get_reachability_data(&current).await?;
+    let next_data = storage.get_reachability_data(&next).await?;
 
-    // Check if new root is actually ahead of current root
-    let new_root_data = storage.get_reachability_data(&new_root).await?;
-    if new_root_data.height > current_root_data.height {
-        if log::log_enabled!(log::Level::Info) {
-            log::info!(
-                "Advancing reindex root from {} (height {}) to {} (height {})",
-                current_root,
-                current_root_data.height,
-                new_root,
-                new_root_data.height
+    if log::log_enabled!(log::Level::Info) {
+        log::info!(
+            "Advancing reindex root from {} (height {}) to {} (height {})",
+            current,
+            current_data.height,
+            next,
+            next_data.height
+        );
+    }
+
+    // Perform interval concentration along the path from ancestor to next
+    // This reclaims slack from finalized blocks and gives it to the chosen child
+    while ancestor != next {
+        let child = get_next_chain_ancestor_for_concentration(storage, &next, &ancestor).await?;
+
+        if log::log_enabled!(log::Level::Debug) {
+            let child_data = storage.get_reachability_data(&child).await?;
+            log::debug!(
+                "Concentrating intervals: parent {} → child {} (height {}), is_final={}",
+                ancestor,
+                child,
+                child_data.height,
+                child == next
             );
         }
 
-        // Perform interval concentration to reclaim slack from finalized blocks
-        // Walk from current_root to new_root, concentrating intervals at each step
-        let mut ancestor = current_root.clone();
         let mut ctx = ReindexContext::new(DEFAULT_REINDEX_DEPTH, DEFAULT_REINDEX_SLACK);
+        ctx.concentrate_interval(storage, ancestor.clone(), child.clone(), child == next).await?;
 
-        while ancestor != new_root {
-            // Find the child of ancestor that is on the path to new_root
-            let child = get_next_chain_ancestor_for_concentration(storage, &new_root, &ancestor).await?;
-
-            if log::log_enabled!(log::Level::Debug) {
-                log::debug!(
-                    "Concentrating intervals: parent {} → child {}, is_final={}",
-                    ancestor,
-                    child,
-                    child == new_root
-                );
-            }
-
-            // Concentrate intervals: tighten siblings, expand chosen child
-            ctx.concentrate_interval(storage, ancestor.clone(), child.clone(), child == new_root).await?;
-
-            ancestor = child;
-        }
-
-        storage.set_reindex_root(new_root).await?;
+        ancestor = child;
     }
+
+    // Update reindex root in storage
+    storage.set_reindex_root(next).await?;
 
     Ok(())
 }
@@ -270,6 +430,8 @@ pub async fn try_advancing_reindex_root<S: Storage>(
 /// Find ancestor at a specific depth from a given block
 ///
 /// Traverses up the selected parent chain by the specified depth.
+/// Note: This function is kept for potential future use but is not currently
+/// used by the rusty-kaspa-based advancement algorithm.
 ///
 /// # Arguments
 /// * `storage` - Storage reference
@@ -278,6 +440,7 @@ pub async fn try_advancing_reindex_root<S: Storage>(
 ///
 /// # Returns
 /// Hash of the ancestor at the specified depth
+#[allow(dead_code)]
 async fn find_ancestor_at_depth<S: Storage>(
     storage: &S,
     block: Hash,
