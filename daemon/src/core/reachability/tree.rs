@@ -228,21 +228,59 @@ async fn find_next_reindex_root<S: Storage>(
 
     // Walk from ancestor toward the selected tip (hint) until we reach
     // a point that is exactly reindex_depth blocks behind the tip
+    let mut loop_count = 0u64;
+    if log::log_enabled!(log::Level::Debug) {
+        log::debug!(
+            "find_next_reindex_root: starting loop from next={} (height {}), hint={} (height {}), target gap={}",
+            next, storage.get_reachability_data(&next).await?.height, hint, hint_height, reindex_depth
+        );
+    }
+
     loop {
+        loop_count += 1;
         let child = get_next_chain_ancestor_unchecked_internal(storage, &hint, &next).await?;
         let child_data = storage.get_reachability_data(&child).await?;
         let child_height = child_data.height;
 
+        if log::log_enabled!(log::Level::Trace) {
+            log::trace!(
+                "  loop[{}]: next={} (height {}), child={} (height {}), gap_before={}",
+                loop_count, next, storage.get_reachability_data(&next).await?.height,
+                child, child_height, hint_height - child_height
+            );
+        }
+
         if hint_height < child_height {
+            log::error!("find_next_reindex_root: child_height > hint_height! child={} child_height={} hint_height={}",
+                       child, child_height, hint_height);
             return Err(BlockchainError::InvalidReachability);
         }
 
-        // Stop when we're within reindex_depth blocks of the tip
-        if hint_height - child_height < reindex_depth {
+        // Calculate gap BEFORE advancing
+        let gap = hint_height - child_height;
+
+        // Stop when child would be within reindex_depth blocks of the tip
+        // This ensures 'next' stays ~reindex_depth blocks behind hint
+        if gap < reindex_depth {
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "find_next_reindex_root: loop terminated after {} iterations, gap {} < depth {}, final next={} (height {})",
+                    loop_count, gap, reindex_depth, next, storage.get_reachability_data(&next).await?.height
+                );
+            }
             break;
         }
 
+        // Advance to the child
         next = child;
+    }
+
+    if log::log_enabled!(log::Level::Debug) {
+        log::debug!(
+            "find_next_reindex_root: returning (ancestor={} height {}, next={} height {})",
+            ancestor, storage.get_reachability_data(&ancestor).await?.height,
+            next, storage.get_reachability_data(&next).await?.height
+        );
     }
 
     Ok((ancestor, next))
@@ -311,14 +349,40 @@ async fn get_next_chain_ancestor_unchecked_internal<S: Storage>(
     let ancestor_data = storage.get_reachability_data(ancestor).await?;
     let descendant_data = storage.get_reachability_data(descendant).await?;
 
+    if log::log_enabled!(log::Level::Trace) {
+        log::trace!(
+            "get_next_chain_ancestor: ancestor {} (height {}), descendant {} (height {}), children: {}",
+            ancestor, ancestor_data.height, descendant, descendant_data.height, ancestor_data.children.len()
+        );
+    }
+
     // Find which child of ancestor contains descendant in its interval
-    for child in &ancestor_data.children {
+    for (idx, child) in ancestor_data.children.iter().enumerate() {
         let child_data = storage.get_reachability_data(child).await?;
-        if child_data.interval.contains(descendant_data.interval) {
+        let contains = child_data.interval.contains(descendant_data.interval);
+
+        if log::log_enabled!(log::Level::Trace) {
+            log::trace!(
+                "  child[{}] {} (height {}) interval [{}, {}) vs descendant [{}, {}): contains={}",
+                idx, child, child_data.height,
+                child_data.interval.start, child_data.interval.end,
+                descendant_data.interval.start, descendant_data.interval.end,
+                contains
+            );
+        }
+
+        if contains {
+            if log::log_enabled!(log::Level::Trace) {
+                log::trace!("  -> Found! Returning child {}", child);
+            }
             return Ok(child.clone());
         }
     }
 
+    log::error!(
+        "get_next_chain_ancestor FAILED: no child of {} (height {}) contains {} (height {})",
+        ancestor, ancestor_data.height, descendant, descendant_data.height
+    );
     Err(BlockchainError::InvalidReachability)
 }
 
