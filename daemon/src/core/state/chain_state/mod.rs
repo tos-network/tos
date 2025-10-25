@@ -177,7 +177,12 @@ impl<'a, S: Storage> ChainState<'a, S> {
 
     // Create a sender account by fetching its nonce and create a empty HashMap for balances,
     // those will be fetched lazily
-    async fn create_sender_account(key: &PublicKey, storage: &S, topoheight: TopoHeight) -> Result<Account<'a>, BlockchainError> {
+    async fn create_sender_account(
+        key: &PublicKey,
+        storage: &S,
+        topoheight: TopoHeight,
+        receiver_balances: &HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, VersionedBalance>>
+    ) -> Result<Account<'a>, BlockchainError> {
         // Try to get nonce at maximum topoheight
         if let Some((topo, mut version)) = storage.get_nonce_at_maximum_topoheight(key, topoheight).await? {
             version.set_previous_topoheight(Some(topo));
@@ -193,8 +198,24 @@ impl<'a, S: Storage> ChainState<'a, S> {
             });
         }
 
-        // If nonce not found, check if account is registered but has default nonce (0)
-        // This handles DAG concurrency where registration might be visible but nonce update is not
+        // If nonce not found, check if account is being registered in this block's receiver_balances
+        // This handles DAG concurrency where registration is pending but not yet in storage
+        if receiver_balances.contains_key(key) {
+            use tos_common::account::VersionedNonce;
+
+            let multisig = storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
+                .map(|(topo, multisig)| multisig.take().map(|m| (VersionedState::FetchedAt(topo), Some(m.into_owned()))))
+                .flatten();
+
+            return Ok(Account {
+                nonce: VersionedNonce::new(0, None),  // Default nonce = 0, no previous topoheight
+                assets: HashMap::new(),
+                multisig
+            });
+        }
+
+        // If nonce not found, check if account is registered in storage but has default nonce (0)
+        // This handles cases where account was registered in a previous block but hasn't sent any tx yet
         if storage.is_account_registered_for_topoheight(key, topoheight).await? {
             use tos_common::account::VersionedNonce;
 
@@ -245,7 +266,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             },
             Entry::Vacant(e) => {
                 // Create a new account for the sender
-                let account = Self::create_sender_account(key, &self.storage, self.topoheight).await?;
+                let account = Self::create_sender_account(key, &self.storage, self.topoheight, &self.receiver_balances).await?;
 
                 // Create a new echange for the asset
                 let echange = Self::create_sender_echange(&self.storage, key, asset, self.topoheight, reference).await?;
@@ -276,7 +297,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
         match self.accounts.entry(key) {
             Entry::Occupied(o) => Ok(o.into_mut()),
             Entry::Vacant(e) => {
-                let account = Self::create_sender_account(key, &self.storage, self.topoheight).await?;
+                let account = Self::create_sender_account(key, &self.storage, self.topoheight, &self.receiver_balances).await?;
                 Ok(e.insert(account))
             }
         }
