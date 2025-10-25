@@ -178,20 +178,39 @@ impl<'a, S: Storage> ChainState<'a, S> {
     // Create a sender account by fetching its nonce and create a empty HashMap for balances,
     // those will be fetched lazily
     async fn create_sender_account(key: &PublicKey, storage: &S, topoheight: TopoHeight) -> Result<Account<'a>, BlockchainError> {
-        let (topo, mut version) = storage
-            .get_nonce_at_maximum_topoheight(key, topoheight).await?
-            .ok_or_else(|| BlockchainError::AccountNotFound(key.as_address(storage.is_mainnet())))?;
-        version.set_previous_topoheight(Some(topo));
+        // Try to get nonce at maximum topoheight
+        if let Some((topo, mut version)) = storage.get_nonce_at_maximum_topoheight(key, topoheight).await? {
+            version.set_previous_topoheight(Some(topo));
 
-        let multisig = storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
-            .map(|(topo, multisig)| multisig.take().map(|m| (VersionedState::FetchedAt(topo), Some(m.into_owned()))))
-            .flatten();
+            let multisig = storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
+                .map(|(topo, multisig)| multisig.take().map(|m| (VersionedState::FetchedAt(topo), Some(m.into_owned()))))
+                .flatten();
 
-        Ok(Account {
-            nonce: version,
-            assets: HashMap::new(),
-            multisig
-        })
+            return Ok(Account {
+                nonce: version,
+                assets: HashMap::new(),
+                multisig
+            });
+        }
+
+        // If nonce not found, check if account is registered but has default nonce (0)
+        // This handles DAG concurrency where registration might be visible but nonce update is not
+        if storage.is_account_registered_for_topoheight(key, topoheight).await? {
+            use tos_common::account::VersionedNonce;
+
+            let multisig = storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
+                .map(|(topo, multisig)| multisig.take().map(|m| (VersionedState::FetchedAt(topo), Some(m.into_owned()))))
+                .flatten();
+
+            return Ok(Account {
+                nonce: VersionedNonce::new(0, None),  // Default nonce = 0, no previous topoheight
+                assets: HashMap::new(),
+                multisig
+            });
+        }
+
+        // Account truly does not exist
+        Err(BlockchainError::AccountNotFound(key.as_address(storage.is_mainnet())))
     }
 
     // Retrieve the receiver balance of an account
