@@ -966,7 +966,7 @@ impl Transaction {
         // so we only need to track outputs here, not mutate balance again (would cause double-subtract)
         for (asset_hash, total_spending) in &spending_per_asset {
             // IMPORTANT: Must call get_sender_balance first to ensure the asset echange is loaded
-            // This is similar to XELIS line 1303-1306 in apply_with_partial_verify
+            // Apply transaction changes to account state
             // Without this, internal_update_sender_echange will fail with "account not found" error
             // because the account was created with empty assets HashMap
             let _ = state.get_sender_balance(&self.source, asset_hash, &self.reference).await

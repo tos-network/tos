@@ -48,7 +48,7 @@ impl ReindexContext {
     /// Called when adding a new block with an empty interval (interval exhaustion detected).
     /// Finds an ancestor with sufficient space and redistributes intervals.
     ///
-    /// # Algorithm (ALIGNED WITH KASPA + SLACK RECLAIM)
+    /// # Algorithm (WITH SLACK RECLAIM)
     /// 1. Start from new_child (which has empty interval, size=0)
     /// 2. Ascend from new_child towards root
     /// 3. For each ancestor, count its subtree size
@@ -89,7 +89,7 @@ impl ReindexContext {
             );
         }
 
-        // ALIGNED WITH KASPA: Start from new_child itself
+        // Start from new_child itself
         // Because new_child has empty interval (size=0), the simple check will fail,
         // causing automatic climb to parent (which has better space)
         let mut current = new_child;
@@ -116,7 +116,7 @@ impl ReindexContext {
                 );
             }
 
-            // ALIGNED WITH KASPA: Simple condition
+            // Simple condition
             // Check if current has sufficient space to hold its subtree
             // For new_child with empty interval (size=0): 0 >= 1 → fails, climbs to parent
             // For parent with decent space: size >= subtree_size → passes, stops here
@@ -325,7 +325,7 @@ impl ReindexContext {
                     .map(|c| self.subtree_sizes[c])
                     .collect();
 
-                // ALIGNED WITH KASPA: Use entire parent capacity for children
+                // Use entire parent capacity for children
                 // The interval of a block should *strictly* contain the intervals of its
                 // tree children, hence we subtract 1 from the end of the range.
                 let capacity = current_data.interval.decrease_end(1);

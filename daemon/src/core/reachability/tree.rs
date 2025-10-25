@@ -62,7 +62,7 @@ pub async fn add_tree_block<S: Storage>(
     };
 
     // Check if we need reindexing
-    // ALIGNED WITH KASPA: Trigger ONLY when completely exhausted (size == 0)
+    // Trigger ONLY when completely exhausted (size == 0)
     // This ensures new_block always gets an empty interval, allowing simple
     // reindex algorithm to work correctly (check fails, climbs to parent automatically)
     if remaining.is_empty() {
@@ -76,7 +76,7 @@ pub async fn add_tree_block<S: Storage>(
 
         // Step 1: Initialize new block with the empty interval
         // Note: internal logic relies on interval being this specific interval
-        //       which comes exactly at the end of current capacity (like Kaspa)
+        //       which comes exactly at the end of current capacity
         let empty_interval = remaining;
 
         let new_block_data = ReachabilityData {
@@ -154,10 +154,10 @@ async fn get_reindex_root<S: Storage>(storage: &S) -> Result<Hash, BlockchainErr
 
 /// Find the next reindex root based on current root and hint (selected tip)
 ///
-/// This implements rusty-kaspa's algorithm which keeps the reindex root
+/// This implements the algorithm which keeps the reindex root
 /// exactly `reindex_depth` blocks behind the tip.
 ///
-/// # Algorithm (from rusty-kaspa)
+/// # Algorithm
 /// 1. Check if current root is ancestor of hint (tip)
 /// 2. If NOT (reorg case):
 ///    - Use reindex_slack as minimum height difference to switch chains
@@ -388,7 +388,7 @@ async fn get_next_chain_ancestor_unchecked_internal<S: Storage>(
 
 /// Attempts to advance the reindex root according to the provided hint (VSP)
 ///
-/// This implements rusty-kaspa's algorithm: the reindex root stays exactly
+/// This implements the reindex root advancement algorithm: the reindex root stays exactly
 /// DEFAULT_REINDEX_DEPTH blocks behind the tip on the selected chain.
 ///
 /// It is important for the reindex root point to follow the consensus-agreed chain
@@ -397,7 +397,7 @@ async fn get_next_chain_ancestor_unchecked_internal<S: Storage>(
 /// expected to elect the root subtree (by converging to the agreement to have it on the
 /// selected chain).
 ///
-/// # Algorithm (from rusty-kaspa)
+/// # Algorithm
 /// 1. Get current root from storage
 /// 2. Call find_next_reindex_root to find the new root position
 /// 3. If no change needed, return early
@@ -427,7 +427,7 @@ pub async fn try_advancing_reindex_root<S: Storage>(
         }
     };
 
-    // Find the possible new root using rusty-kaspa's algorithm
+    // Find the possible new root using the advancement algorithm
     let (mut ancestor, next) = find_next_reindex_root(
         storage,
         current.clone(),
@@ -495,7 +495,7 @@ pub async fn try_advancing_reindex_root<S: Storage>(
 ///
 /// Traverses up the selected parent chain by the specified depth.
 /// Note: This function is kept for potential future use but is not currently
-/// used by the rusty-kaspa-based advancement algorithm.
+/// used by the reindex root advancement algorithm.
 ///
 /// # Arguments
 /// * `storage` - Storage reference
