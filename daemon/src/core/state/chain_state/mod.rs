@@ -236,44 +236,35 @@ impl<'a, S: Storage> ChainState<'a, S> {
             });
         }
 
-        // Step 3: Check if account has nonce (snapshot-independent lookup)
+        // Step 3: Scan backwards from current topoheight to find any existing nonce (bypass snapshot)
         // This handles the case where storage snapshot (at base_topo_height) is older than when account nonce was set
-        // The snapshot might have account.nonce_pointer = None, but storage actually has the nonce
-        if storage.has_nonce(key).await? {
-            if log::log_enabled!(log::Level::Trace) {
-                trace!("Step 3: account has nonce in storage (attempting snapshot-independent lookup)");
-            }
+        // Snapshot might have account.nonce_pointer = None, but RocksDB VersionedNonces column has the data
+        // We scan backwards from topoheight to find the most recent nonce for this account
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Step 3: Scanning backwards from topoheight {} to find nonce (bypass snapshot)", topoheight);
+        }
 
-            // Try to get the latest nonce without topoheight restriction
-            if let Ok((topo, mut version)) = storage.get_last_nonce(key).await {
-                if log::log_enabled!(log::Level::Trace) {
-                    trace!("Found latest nonce for {} at topoheight {} (current block: {})",
-                           key.as_address(storage.is_mainnet()), topo, topoheight);
+        // Scan backwards from topoheight to 0 to find most recent nonce
+        // Limit scan to last 1000 topoheights for performance (in practice nonce should be found quickly)
+        let scan_start = topoheight.saturating_sub(1000);
+        for scan_topo in (scan_start..=topoheight).rev() {
+            if storage.has_nonce_at_exact_topoheight(key, scan_topo).await? {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Step 3: Found nonce at topoheight {} (bypass snapshot, current block: {})", scan_topo, topoheight);
                 }
 
-                // Only use if nonce topoheight <= current block topoheight
-                // This ensures we don't use "future" nonces from DAG reordering
-                if topo <= topoheight {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Using nonce from snapshot-independent lookup: topoheight {} <= current {}", topo, topoheight);
-                    }
-                    version.set_previous_topoheight(Some(topo));
+                let mut version = storage.get_nonce_at_exact_topoheight(key, scan_topo).await?;
+                version.set_previous_topoheight(Some(scan_topo));
 
-                    let multisig = storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
-                        .map(|(topo, multisig)| multisig.take().map(|m| (VersionedState::FetchedAt(topo), Some(m.into_owned()))))
-                        .flatten();
+                let multisig = storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
+                    .map(|(topo, multisig)| multisig.take().map(|m| (VersionedState::FetchedAt(topo), Some(m.into_owned()))))
+                    .flatten();
 
-                    return Ok(Account {
-                        nonce: version,
-                        assets: HashMap::new(),
-                        multisig
-                    });
-                } else {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Found nonce at topoheight {} but current block is {}, cannot use future nonce",
-                               topo, topoheight);
-                    }
-                }
+                return Ok(Account {
+                    nonce: version,
+                    assets: HashMap::new(),
+                    multisig
+                });
             }
         }
 
