@@ -375,6 +375,18 @@ impl<'a, S: Storage> ChainState<'a, S> {
 
         Ok(())
     }
+
+    /// Add balance to a receiver account
+    /// Used to add additional rewards (fees and gas_fee) to the miner after transaction execution
+    pub async fn add_receiver_balance(&mut self, key: &'a PublicKey, asset: &'a Hash, amount: u64) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Adding {} to receiver {} for asset {} at topoheight {}", amount, key.as_address(self.storage.is_mainnet()), asset, self.topoheight);
+        }
+        let balance = self.internal_get_receiver_balance(Cow::Borrowed(key), Cow::Borrowed(asset)).await?;
+        *balance = balance.checked_add(amount)
+            .ok_or(BlockchainError::Overflow)?;
+        Ok(())
+    }
 }
 
 #[async_trait]

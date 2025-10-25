@@ -3268,6 +3268,24 @@ impl<S: Storage> Blockchain<S> {
                     &block,
                 );
 
+                // DAG FIX: Add miner rewards BEFORE executing transactions
+                // This ensures that the miner account exists in receiver_balances
+                // when the miner sends a transaction in the same block they mine
+                let dev_fee_percentage = get_block_dev_fee(block.get_blue_score());
+                let mut miner_reward = block_reward;
+                if dev_fee_percentage != 0 {
+                    let dev_fee_part = block_reward * dev_fee_percentage / 100;
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Adding dev fee {} to {} before TX execution", format_tos(dev_fee_part), DEV_PUBLIC_KEY.as_address(self.network.is_mainnet()));
+                    }
+                    chain_state.reward_miner(&DEV_PUBLIC_KEY, dev_fee_part).await?;
+                    miner_reward -= dev_fee_part;
+                }
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Adding base miner reward {} to {} before TX execution", format_tos(miner_reward), block.get_miner().as_address(self.network.is_mainnet()));
+                }
+                chain_state.reward_miner(block.get_miner(), miner_reward).await?;
+
                 total_txs_executed += block.get_transactions().len();
 
                 // compute rewards & execute txs
@@ -3392,23 +3410,20 @@ impl<S: Storage> Blockchain<S> {
                     }
                 }
 
-                let dev_fee_percentage = get_block_dev_fee(block.get_blue_score());
-                // Dev fee are only applied on block reward
-                // Transaction fees are not affected by dev fee
-                let mut miner_reward = block_reward;
-                if dev_fee_percentage != 0 {
-                    let dev_fee_part = block_reward * dev_fee_percentage / 100;
-                    chain_state.reward_miner(&DEV_PUBLIC_KEY, dev_fee_part).await?;
-                    miner_reward -= dev_fee_part;    
-                }
-
-                // reward the miner
-                // Miner gets the block reward + total fees + gas fee
+                // DAG FIX: Add fees and gas_fee to miner after transaction execution
+                // Base reward was already added before TX execution
                 let gas_fee = chain_state.get_gas_fee();
-                let total_miner_reward = miner_reward.checked_add(total_fees)
-                    .and_then(|r| r.checked_add(gas_fee))
+                let additional_reward = total_fees.checked_add(gas_fee)
                     .ok_or(BlockchainError::BalanceOverflow)?;
-                chain_state.reward_miner(block.get_miner(), total_miner_reward).await?;
+
+                if additional_reward > 0 {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Adding fees {} + gas_fee {} = {} to miner {} after TX execution",
+                            format_tos(total_fees), format_tos(gas_fee), format_tos(additional_reward),
+                            block.get_miner().as_address(self.network.is_mainnet()));
+                    }
+                    chain_state.add_receiver_balance(block.get_miner(), &TOS_ASSET, additional_reward).await?;
+                }
 
                 // Fire all the contract events
                 {
