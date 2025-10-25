@@ -285,16 +285,6 @@ impl RocksStorage {
         self.load_optional_from_disk(Column::Account, key.as_bytes())
     }
 
-    /// Get optional account type directly from disk, bypassing snapshot
-    /// This is used to avoid snapshot timing issues where base_topo_height < account creation topoheight
-    pub(super) fn get_optional_account_type_from_disk(&self, key: &PublicKey) -> Result<Option<Account>, BlockchainError> {
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("get optional account from disk (bypass snapshot) {}", key.as_address(self.is_mainnet()));
-        }
-        // Directly load from RocksDB without using snapshot
-        Self::load_optional_from_disk_internal(&self.db, None, Column::Account, key.as_bytes())
-    }
-
     // Get or create an account type
     // You must store the account type in case its created!
     pub(super) fn get_or_create_account_type(&mut self, key: &PublicKey) -> Result<Account, BlockchainError> {
