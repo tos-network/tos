@@ -183,8 +183,22 @@ impl<'a, S: Storage> ChainState<'a, S> {
         topoheight: TopoHeight,
         receiver_balances: &HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, VersionedBalance>>
     ) -> Result<Account<'a>, BlockchainError> {
+        use log::{debug, trace};
+
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("create_sender_account for {} at topoheight {}", key.as_address(storage.is_mainnet()), topoheight);
+        }
+
         // Try to get nonce at maximum topoheight
-        if let Some((topo, mut version)) = storage.get_nonce_at_maximum_topoheight(key, topoheight).await? {
+        let nonce_result = storage.get_nonce_at_maximum_topoheight(key, topoheight).await?;
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Step 1: get_nonce_at_maximum_topoheight returned: {:?}", nonce_result.as_ref().map(|(topo, _)| topo));
+        }
+
+        if let Some((topo, mut version)) = nonce_result {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Found nonce for {} at topoheight {} (current: {})", key.as_address(storage.is_mainnet()), topo, topoheight);
+            }
             version.set_previous_topoheight(Some(topo));
 
             let multisig = storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
@@ -200,8 +214,16 @@ impl<'a, S: Storage> ChainState<'a, S> {
 
         // If nonce not found, check if account is being registered in this block's receiver_balances
         // This handles DAG concurrency where registration is pending but not yet in storage
-        if receiver_balances.contains_key(key) {
+        let in_receiver_balances = receiver_balances.contains_key(key);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Step 2: receiver_balances contains key: {}", in_receiver_balances);
+        }
+
+        if in_receiver_balances {
             use tos_common::account::VersionedNonce;
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Account {} found in receiver_balances, creating with nonce=0", key.as_address(storage.is_mainnet()));
+            }
 
             let multisig = storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
                 .map(|(topo, multisig)| multisig.take().map(|m| (VersionedState::FetchedAt(topo), Some(m.into_owned()))))
@@ -214,10 +236,59 @@ impl<'a, S: Storage> ChainState<'a, S> {
             });
         }
 
-        // If nonce not found, check if account is registered in storage but has default nonce (0)
+        // Step 3: Check if account has nonce (snapshot-independent lookup)
+        // This handles the case where storage snapshot (at base_topo_height) is older than when account nonce was set
+        // The snapshot might have account.nonce_pointer = None, but storage actually has the nonce
+        if storage.has_nonce(key).await? {
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Step 3: account has nonce in storage (attempting snapshot-independent lookup)");
+            }
+
+            // Try to get the latest nonce without topoheight restriction
+            if let Ok((topo, mut version)) = storage.get_last_nonce(key).await {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Found latest nonce for {} at topoheight {} (current block: {})",
+                           key.as_address(storage.is_mainnet()), topo, topoheight);
+                }
+
+                // Only use if nonce topoheight <= current block topoheight
+                // This ensures we don't use "future" nonces from DAG reordering
+                if topo <= topoheight {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Using nonce from snapshot-independent lookup: topoheight {} <= current {}", topo, topoheight);
+                    }
+                    version.set_previous_topoheight(Some(topo));
+
+                    let multisig = storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
+                        .map(|(topo, multisig)| multisig.take().map(|m| (VersionedState::FetchedAt(topo), Some(m.into_owned()))))
+                        .flatten();
+
+                    return Ok(Account {
+                        nonce: version,
+                        assets: HashMap::new(),
+                        multisig
+                    });
+                } else {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Found nonce at topoheight {} but current block is {}, cannot use future nonce",
+                               topo, topoheight);
+                    }
+                }
+            }
+        }
+
+        // Step 4: If nonce not found, check if account is registered in storage but has default nonce (0)
         // This handles cases where account was registered in a previous block but hasn't sent any tx yet
-        if storage.is_account_registered_for_topoheight(key, topoheight).await? {
+        let is_registered = storage.is_account_registered_for_topoheight(key, topoheight).await?;
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Step 4: is_account_registered_for_topoheight returned: {}", is_registered);
+        }
+
+        if is_registered {
             use tos_common::account::VersionedNonce;
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Account {} is registered but no nonce, creating with nonce=0", key.as_address(storage.is_mainnet()));
+            }
 
             let multisig = storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
                 .map(|(topo, multisig)| multisig.take().map(|m| (VersionedState::FetchedAt(topo), Some(m.into_owned()))))
@@ -231,6 +302,10 @@ impl<'a, S: Storage> ChainState<'a, S> {
         }
 
         // Account truly does not exist
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Account {} not found: all checks failed (nonce query, receiver_balances, registration)",
+                   key.as_address(storage.is_mainnet()));
+        }
         Err(BlockchainError::AccountNotFound(key.as_address(storage.is_mainnet())))
     }
 
