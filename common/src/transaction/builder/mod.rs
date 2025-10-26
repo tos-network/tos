@@ -14,7 +14,7 @@ pub use unsigned::UnsignedTransaction;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use tos_vm::Module;
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
 use crate::{
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     crypto::{
@@ -584,11 +584,17 @@ impl TransactionBuilder {
         accounts
     }
 
-    /// Merge duplicate account declarations using HashMap
+    /// Merge duplicate account declarations using IndexMap for deterministic ordering
     /// Combines permissions: is_signer = any true, is_writable = any true
+    ///
+    /// CRITICAL: Uses IndexMap instead of HashMap to ensure deterministic account_keys ordering.
+    /// Transaction signatures depend on the exact byte representation, which includes the order
+    /// of account_keys. HashMap iteration order is randomized, causing the same transaction to
+    /// produce different signatures across runs, breaking signature verification and consensus.
     fn merge_account_permissions(accounts: Vec<AccountMeta>) -> Vec<AccountMeta> {
-        // Use HashMap for deduplication (CompressedPublicKey lacks Ord)
-        let mut map: HashMap<(CompressedPublicKey, Hash), AccountMeta> = HashMap::new();
+        // Use IndexMap for deterministic ordering (insertion order preserved)
+        // CompressedPublicKey lacks Ord, so we cannot use BTreeMap
+        let mut map: IndexMap<(CompressedPublicKey, Hash), AccountMeta> = IndexMap::new();
 
         for account in accounts {
             let key = (account.pubkey.clone(), account.asset.clone());
