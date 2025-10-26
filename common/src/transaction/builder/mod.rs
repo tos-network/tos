@@ -165,7 +165,25 @@ impl TransactionBuilder {
     /// Enable parallel execution for this transaction (upgrades to V2)
     /// This allows the transaction to be executed in parallel with other V2 transactions
     /// by pre-declaring account dependencies
+    ///
+    /// SAFETY: InvokeContract transactions are NOT ALLOWED to use parallel execution
+    /// because contract identifiers cannot be represented as CompressedPublicKey in account_keys.
+    /// Without the contract ID in account_keys, two calls to the same contract would appear
+    /// conflict-free to the scheduler and could be batched together, corrupting contract state.
+    ///
+    /// # Panics
+    /// Panics if called on an InvokeContract transaction (this is a safety violation)
     pub fn with_parallel_execution(mut self) -> Self {
+        // CRITICAL SAFETY CHECK: Prevent parallel execution for contract calls
+        if matches!(self.data, TransactionTypeBuilder::InvokeContract(_)) {
+            panic!(
+                "SAFETY VIOLATION: InvokeContract transactions cannot use parallel execution. \
+                 Contract identifiers cannot be added to account_keys (not valid CompressedPublicKey), \
+                 which would allow concurrent calls to the same contract to race and corrupt state. \
+                 InvokeContract must execute sequentially (T0)."
+            );
+        }
+
         self.version = TxVersion::V2;
         self
     }
