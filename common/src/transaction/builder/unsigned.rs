@@ -15,6 +15,7 @@ use crate::{
     },
     transaction::{
         multisig::{MultiSig, SignatureId},
+        AccountMeta,
         FeeType,
         Reference,
         Transaction,
@@ -36,6 +37,10 @@ pub struct UnsignedTransaction {
     nonce: Nonce,
     reference: Reference,
     multisig: Option<MultiSig>,
+    /// Pre-declared account dependencies for parallel execution (V2+ only)
+    /// Empty for T0 transactions
+    #[serde(default)]
+    account_keys: Vec<AccountMeta>,
 }
 
 impl UnsignedTransaction {
@@ -56,6 +61,7 @@ impl UnsignedTransaction {
             nonce,
             reference,
             multisig: None,
+            account_keys: Vec::new(),
         }
     }
     pub fn new_with_fee_type(
@@ -76,6 +82,31 @@ impl UnsignedTransaction {
             nonce,
             reference,
             multisig: None,
+            account_keys: Vec::new(),
+        }
+    }
+
+    /// Create unsigned transaction with account keys for V2 parallel execution
+    pub fn new_with_account_keys(
+        version: TxVersion,
+        source: CompressedPublicKey,
+        data: TransactionType,
+        fee: u64,
+        fee_type: FeeType,
+        nonce: Nonce,
+        reference: Reference,
+        account_keys: Vec<AccountMeta>,
+    ) -> Self {
+        Self {
+            version,
+            source,
+            data,
+            fee,
+            fee_type,
+            nonce,
+            reference,
+            multisig: None,
+            account_keys,
         }
     }
 
@@ -146,6 +177,7 @@ impl UnsignedTransaction {
             self.nonce,
             self.reference,
             self.multisig,
+            self.account_keys, // V2: populated by builder, empty for T0
             signature,
         )
     }
@@ -180,6 +212,7 @@ impl Serializer for UnsignedTransaction {
             nonce,
             reference,
             multisig: None,
+            account_keys: Vec::new(),
         })
     }
 

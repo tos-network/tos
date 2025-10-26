@@ -5,7 +5,9 @@ use core::fmt;
 #[repr(u8)]
 pub enum TxVersion {
     // All operations: Burn, Transfer, Multisig, Deploy Contract, Invoke Contract, Energy
-    T0 = 0
+    T0 = 0,
+    // Parallel execution support: Pre-declared account dependencies
+    V2 = 2
 }
 
 impl Default for TxVersion {
@@ -20,6 +22,7 @@ impl TryFrom<u8> for TxVersion {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(TxVersion::T0),
+            2 => Ok(TxVersion::V2),
             _ => Err(()),
         }
     }
@@ -29,6 +32,7 @@ impl Into<u8> for TxVersion {
     fn into(self) -> u8 {
         match self {
             TxVersion::T0 => 0,
+            TxVersion::V2 => 2,
         }
     }
 }
@@ -44,6 +48,7 @@ impl Serializer for TxVersion {
     fn write(&self, writer: &mut Writer) {
         match self {
             TxVersion::T0 => writer.write_u8(0),
+            TxVersion::V2 => writer.write_u8(2),
         }
     }
 
@@ -62,6 +67,7 @@ impl fmt::Display for TxVersion {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             TxVersion::T0 => write!(f, "T0"),
+            TxVersion::V2 => write!(f, "V2"),
         }
     }
 }

@@ -18,6 +18,7 @@ pub mod builder;
 pub mod verify;
 pub mod extra_data;
 pub mod multisig;
+pub mod parallel;
 
 mod payload;
 mod reference;
@@ -93,6 +94,20 @@ impl Serializer for FeeType {
     fn size(&self) -> usize { 1 }
 }
 
+/// Account metadata for parallel execution (V2+ transactions)
+/// Declares which accounts a transaction will read/write and whether signing is required
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AccountMeta {
+    /// The account public key
+    pub pubkey: CompressedPublicKey,
+    /// The asset being accessed in this account
+    pub asset: Hash,
+    /// Whether this account must sign the transaction
+    pub is_signer: bool,
+    /// Whether this account will be modified (balance changes)
+    pub is_writable: bool,
+}
+
 // Transaction to be sent over the network
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Transaction {
@@ -114,6 +129,10 @@ pub struct Transaction {
     /// MultiSig contains the signatures of the transaction
     /// Only available since V1
     multisig: Option<MultiSig>,
+    /// Pre-declared account dependencies for parallel execution (V2+ only)
+    /// Empty for T0 transactions (auto-extracted from payload at runtime)
+    #[serde(default)]
+    account_keys: Vec<AccountMeta>,
     /// The signature of the source key
     signature: Signature,
 }
@@ -130,6 +149,7 @@ impl Transaction {
         nonce: Nonce,
         reference: Reference,
         multisig: Option<MultiSig>,
+        account_keys: Vec<AccountMeta>,
         signature: Signature
     ) -> Self {
         Self {
@@ -141,6 +161,7 @@ impl Transaction {
             nonce,
             reference,
             multisig,
+            account_keys,
             signature,
         }
     }
@@ -249,6 +270,11 @@ impl Transaction {
     // Get the fee type
     pub fn get_fee_type(&self) -> &FeeType {
         &self.fee_type
+    }
+
+    // Get the account keys (for V2 parallel execution)
+    pub fn get_account_keys(&self) -> &[AccountMeta] {
+        &self.account_keys
     }
 
     /// Calculate energy cost for this transaction
@@ -419,6 +445,17 @@ impl Serializer for Transaction {
         // Always include multisig for T0
         self.multisig.write(writer);
 
+        // Serialize account_keys (only for V2+)
+        if self.version >= TxVersion::V2 {
+            writer.write_u8(self.account_keys.len() as u8);
+            for meta in &self.account_keys {
+                meta.pubkey.write(writer);
+                meta.asset.write(writer);
+                writer.write_bool(meta.is_signer);
+                writer.write_bool(meta.is_writable);
+            }
+        }
+
         self.signature.write(writer);
     }
 
@@ -438,6 +475,27 @@ impl Serializer for Transaction {
         // Always read multisig for T0
         let multisig = Option::read(reader)?;
 
+        // Read account_keys (only for V2+)
+        let account_keys = if version >= TxVersion::V2 {
+            let len = reader.read_u8()? as usize;
+            let mut keys = Vec::with_capacity(len);
+            for _ in 0..len {
+                let pubkey = CompressedPublicKey::read(reader)?;
+                let asset = Hash::read(reader)?;
+                let is_signer = reader.read_bool()?;
+                let is_writable = reader.read_bool()?;
+                keys.push(AccountMeta {
+                    pubkey,
+                    asset,
+                    is_signer,
+                    is_writable,
+                });
+            }
+            keys
+        } else {
+            Vec::new() // T0: empty
+        };
+
         let signature = Signature::read(reader)?;
 
         Ok(Transaction::new(
@@ -449,6 +507,7 @@ impl Serializer for Transaction {
             nonce,
             reference,
             multisig,
+            account_keys,
             signature,
         ))
     }
@@ -466,6 +525,17 @@ impl Serializer for Transaction {
 
         // Always include multisig size for T0
         size += self.multisig.size();
+
+        // Account keys size (only for V2+)
+        if self.version >= TxVersion::V2 {
+            size += 1; // length byte
+            for meta in &self.account_keys {
+                size += meta.pubkey.size()
+                    + meta.asset.size()
+                    + 1  // is_signer
+                    + 1; // is_writable
+            }
+        }
 
         size
     }

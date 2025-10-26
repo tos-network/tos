@@ -14,7 +14,7 @@ pub use unsigned::UnsignedTransaction;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use tos_vm::Module;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use crate::{
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     crypto::{
@@ -37,6 +37,7 @@ use super::{
         PlaintextData,
         UnknownExtraDataFormat
     },
+    AccountMeta,
     BurnPayload,
     ContractDeposit,
     DeployContractPayload,
@@ -158,6 +159,14 @@ impl TransactionBuilder {
     pub fn with_tos_fees(mut self, fee: u64) -> Self {
         self.fee_builder = FeeBuilder::Value(fee);
         self.fee_type = Some(FeeType::TOS);
+        self
+    }
+
+    /// Enable parallel execution for this transaction (upgrades to V2)
+    /// This allows the transaction to be executed in parallel with other V2 transactions
+    /// by pre-declaring account dependencies
+    pub fn with_parallel_execution(mut self) -> Self {
+        self.version = TxVersion::V2;
         self
     }
 
@@ -435,6 +444,162 @@ impl TransactionBuilder {
         Ok(result)
     }
 
+    /// Extract account dependencies from transaction payload
+    /// Returns Vec<AccountMeta> with all accounts this transaction will access
+    fn auto_declare_accounts(&self) -> Vec<AccountMeta> {
+        let mut accounts = Vec::new();
+
+        // Source account is always a signer and writable (pays fees, sends assets)
+        accounts.push(AccountMeta {
+            pubkey: self.source.clone(),
+            asset: TOS_ASSET,
+            is_signer: true,
+            is_writable: true,
+        });
+
+        match &self.data {
+            TransactionTypeBuilder::Transfers(transfers) => {
+                for transfer in transfers {
+                    // Source is writable for each asset being sent
+                    accounts.push(AccountMeta {
+                        pubkey: self.source.clone(),
+                        asset: transfer.asset.clone(),
+                        is_signer: true,
+                        is_writable: true,
+                    });
+
+                    // Destination is writable (receives assets)
+                    accounts.push(AccountMeta {
+                        pubkey: transfer.destination.get_public_key().clone(),
+                        asset: transfer.asset.clone(),
+                        is_signer: false,
+                        is_writable: true,
+                    });
+                }
+            }
+            TransactionTypeBuilder::Burn(payload) => {
+                // Source burns the asset
+                accounts.push(AccountMeta {
+                    pubkey: self.source.clone(),
+                    asset: payload.asset.clone(),
+                    is_signer: true,
+                    is_writable: true,
+                });
+            }
+            TransactionTypeBuilder::InvokeContract(payload) => {
+                // Contract is writable (state changes)
+                accounts.push(AccountMeta {
+                    pubkey: CompressedPublicKey::from_bytes(payload.contract.as_bytes()).unwrap(),
+                    asset: TOS_ASSET,
+                    is_signer: false,
+                    is_writable: true,
+                });
+
+                // Source deposits assets to contract
+                for (asset, _) in &payload.deposits {
+                    accounts.push(AccountMeta {
+                        pubkey: self.source.clone(),
+                        asset: asset.clone(),
+                        is_signer: true,
+                        is_writable: true,
+                    });
+                }
+
+                // Source pays gas
+                accounts.push(AccountMeta {
+                    pubkey: self.source.clone(),
+                    asset: TOS_ASSET,
+                    is_signer: true,
+                    is_writable: true,
+                });
+            }
+            TransactionTypeBuilder::DeployContract(payload) => {
+                // Source pays deployment burn
+                accounts.push(AccountMeta {
+                    pubkey: self.source.clone(),
+                    asset: TOS_ASSET,
+                    is_signer: true,
+                    is_writable: true,
+                });
+
+                if let Some(invoke) = &payload.invoke {
+                    // Source deposits assets to constructor
+                    for (asset, _) in &invoke.deposits {
+                        accounts.push(AccountMeta {
+                            pubkey: self.source.clone(),
+                            asset: asset.clone(),
+                            is_signer: true,
+                            is_writable: true,
+                        });
+                    }
+                }
+            }
+            TransactionTypeBuilder::Energy(_payload) => {
+                // Source freezes/unfreezes TOS for energy
+                accounts.push(AccountMeta {
+                    pubkey: self.source.clone(),
+                    asset: TOS_ASSET,
+                    is_signer: true,
+                    is_writable: true,
+                });
+            }
+            TransactionTypeBuilder::MultiSig(_) => {
+                // Source creates multisig account
+                accounts.push(AccountMeta {
+                    pubkey: self.source.clone(),
+                    asset: TOS_ASSET,
+                    is_signer: true,
+                    is_writable: true,
+                });
+            }
+            TransactionTypeBuilder::AIMining(payload) => {
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { miner_address, .. } => {
+                        accounts.push(AccountMeta {
+                            pubkey: miner_address.clone(),
+                            asset: TOS_ASSET,
+                            is_signer: true,
+                            is_writable: true,
+                        });
+                    }
+                    AIMiningPayload::SubmitAnswer { .. } |
+                    AIMiningPayload::PublishTask { .. } => {
+                        accounts.push(AccountMeta {
+                            pubkey: self.source.clone(),
+                            asset: TOS_ASSET,
+                            is_signer: true,
+                            is_writable: true,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        accounts
+    }
+
+    /// Merge duplicate account declarations using HashMap
+    /// Combines permissions: is_signer = any true, is_writable = any true
+    fn merge_account_permissions(accounts: Vec<AccountMeta>) -> Vec<AccountMeta> {
+        // Use HashMap for deduplication (CompressedPublicKey lacks Ord)
+        let mut map: HashMap<(CompressedPublicKey, Hash), AccountMeta> = HashMap::new();
+
+        for account in accounts {
+            let key = (account.pubkey.clone(), account.asset.clone());
+            map.entry(key)
+                .and_modify(|existing| {
+                    // Merge permissions: OR logic (if any requires signer/writable, keep it)
+                    existing.is_signer |= account.is_signer;
+                    existing.is_writable |= account.is_writable;
+                })
+                .or_insert(account);
+        }
+
+        map.into_values().collect()
+    }
+
     pub fn build<B: AccountState>(
         self,
         state: &mut B,
@@ -658,7 +823,15 @@ impl TransactionBuilder {
             },
         };
 
-        let unsigned_tx = UnsignedTransaction::new_with_fee_type(
+        // For V2 transactions, automatically declare account dependencies
+        let account_keys = if self.version >= TxVersion::V2 {
+            let declared_accounts = self.auto_declare_accounts();
+            Self::merge_account_permissions(declared_accounts)
+        } else {
+            Vec::new()
+        };
+
+        let unsigned_tx = UnsignedTransaction::new_with_account_keys(
             self.version,
             self.source,
             data,
@@ -666,6 +839,7 @@ impl TransactionBuilder {
             fee_type,
             nonce,
             reference,
+            account_keys,
         );
 
         Ok(unsigned_tx)
