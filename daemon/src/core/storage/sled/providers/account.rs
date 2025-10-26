@@ -120,13 +120,15 @@ impl AccountProvider for SledStorage {
                         // Skip if not in range
                         if minimum_topoheight.is_some_and(|v| topo < v) || maximum_topoheight.is_some_and(|v| topo > v) {
                             if log::log_enabled!(log::Level::Trace) {
-                                trace!("skipping {} at {}: {:?} {:?}", PublicKey::from_bytes(&key[8..40])?.as_address(self.is_mainnet()), topo, minimum_topoheight, maximum_topoheight);
+                                let key_bytes: [u8; 32] = key[8..40].try_into().map_err(|_| BlockchainError::CorruptedData)?;
+                                trace!("skipping {} at {}: {:?} {:?}", PublicKey::from_bytes(&key_bytes).map_err(|_| BlockchainError::CorruptedData)?.as_address(self.is_mainnet()), topo, minimum_topoheight, maximum_topoheight);
                             }
                             return Ok(None);
                         }
                     }
 
-                    let key = PublicKey::from_bytes(&key[8..40])?;
+                    let key_bytes: [u8; 32] = key[8..40].try_into().map_err(|_| BlockchainError::CorruptedData)?;
+                    let key = PublicKey::from_bytes(&key_bytes).map_err(|_| BlockchainError::CorruptedData)?;
                     Ok(Some(key))
                 })
                 .filter_map(Result::transpose)

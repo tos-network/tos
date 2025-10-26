@@ -1,0 +1,20 @@
+[package]
+name = "tos-perf-monitor"
+version = "0.1.1"
+edition = "2021"
+rust-version = "1.75"
+authors = ["TOS Development Team"]
+description = "TOS process performance monitoring tools"
+license = "MIT"
+
+[dependencies]
+log = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+sysinfo = "0.32.0"
+parking_lot = "0.12"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+env_logger = "0.11"
+tempfile = "3.12"

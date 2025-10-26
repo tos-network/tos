@@ -1,3 +1,6 @@
+// Integration test modules
+mod integration;
+
 use tos_common::{
     config::{COIN_VALUE, TOS_ASSET},
     crypto::KeyPair,

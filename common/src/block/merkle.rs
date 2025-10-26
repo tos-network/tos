@@ -120,6 +120,7 @@ mod tests {
             nonce,
             reference,
             multisig,
+            Vec::new(), // account_keys: empty for test
             signature,
         )
     }

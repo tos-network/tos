@@ -1,0 +1,22 @@
+[package]
+name = "tos-stat-recorder"
+version = "0.1.1"
+edition = "2021"
+rust-version = "1.75"
+authors = ["TOS Development Team"]
+description = "Statistics recorder for TOS performance metrics"
+license = "MIT"
+
+[dependencies]
+tos-perf-monitor = { path = "../perf_monitor" }
+log = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "fs"] }
+csv = "1.3"
+chrono = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+env_logger = "0.11"
+tempfile = "3.12"

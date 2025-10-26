@@ -486,17 +486,21 @@ impl TransactionBuilder {
                     is_writable: true,
                 });
             }
-            TransactionTypeBuilder::InvokeContract(payload) => {
-                // Contract is writable (state changes)
-                accounts.push(AccountMeta {
-                    pubkey: CompressedPublicKey::from_bytes(payload.contract.as_bytes()).unwrap(),
-                    asset: TOS_ASSET,
-                    is_signer: false,
-                    is_writable: true,
-                });
+            TransactionTypeBuilder::InvokeContract(_payload) => {
+                // LIMITATION: Smart contract transactions cannot use parallel execution
+                // because contracts can access arbitrary accounts dynamically at runtime.
+                // Contract hashes are not valid Ristretto curve points (CompressedPublicKey),
+                // so we cannot add them to account_keys. Additionally, contract execution
+                // may touch accounts not known at transaction build time.
+                //
+                // Solution: InvokeContract transactions must be manually annotated with
+                // account_keys if parallel execution is desired, or execute sequentially (T0).
+                // For V2 parallel execution, users must explicitly call
+                // .with_parallel_execution(vec![...]) with known account dependencies.
 
+                // Do not auto-declare any accounts for contracts
                 // Source deposits assets to contract
-                for (asset, _) in &payload.deposits {
+                for (asset, _) in &_payload.deposits {
                     accounts.push(AccountMeta {
                         pubkey: self.source.clone(),
                         asset: asset.clone(),

@@ -327,7 +327,6 @@ mod tests {
     #[test]
     fn test_payload_size_estimation() {
         use tos_common::crypto::PublicKey;
-        use tos_common::serializer::Serializer;
 
         let payload = AIMiningPayload::RegisterMiner {
             miner_address: PublicKey::from_bytes(&[0u8; 32]).unwrap(),

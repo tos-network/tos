@@ -1,0 +1,63 @@
+//! Variable Network Conditions Test
+//!
+//! Tests TPS under varying network quality
+//!
+//! Run with:
+//! ```bash
+//! cargo test --package tos_integration_tests --test variable_network
+//! ```
+
+use tos_integration::*;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    env_logger::init();
+
+    println!("\n{}", "=".repeat(80));
+    println!("TOS Variable Network Conditions Test");
+    println!("{}", "=".repeat(80));
+
+    // Test configuration
+    let num_nodes = 3;
+    let network_config = NETWORK_CONFIG_MEDIUM; // Starting condition
+
+    println!("\nTest Configuration:");
+    println!("  Nodes: {}", num_nodes);
+    println!("  Network: Variable (LAN → Internet → Poor)");
+
+    // Create scenario runner
+    let daemon_path = std::env::var("TOS_DAEMON_PATH")
+        .unwrap_or_else(|_| "./target/debug/tos_daemon".to_string());
+
+    let runner = ScenarioRunner::new(daemon_path);
+
+    // Run variable network conditions test
+    let scenario = scenarios::VariableNetworkConditions::new(30, 500);
+
+    println!("\nRunning scenario: {}", scenario.name());
+    println!("  Duration per condition: {} seconds", scenario.duration_per_condition_secs);
+    println!("  Transactions per condition: {}", scenario.transactions_per_condition);
+
+    match runner
+        .run_scenario(&scenario, num_nodes, network_config)
+        .await
+    {
+        Ok(report) => {
+            report.print_summary();
+
+            // Export results
+            let _ = report.export_json("variable_network_report.json");
+            let _ = report.export_csv("variable_network_report.csv");
+
+            println!("\n{}", "=".repeat(80));
+            println!("Test completed successfully!");
+            println!("{}", "=".repeat(80));
+
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\nTest failed: {:?}", e);
+            Err(e)
+        }
+    }
+}

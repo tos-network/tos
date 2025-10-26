@@ -5,3 +5,4 @@ pub mod dag_tests;
 pub mod ghostdag_tests;
 pub mod daa_tests;
 pub mod test_helpers;
+pub mod parallel_execution_tests;

@@ -1,0 +1,36 @@
+{
+  "test_name": "Basic Consensus TPS",
+  "duration_secs": 67.759563791,
+  "num_nodes": 3,
+  "network": {
+    "avg_tx_propagation_ms": 50.0,
+    "tx_propagation_p50_ms": 50.0,
+    "tx_propagation_p90_ms": 50.0,
+    "tx_propagation_p99_ms": 50.0,
+    "avg_block_propagation_ms": 0.0,
+    "block_propagation_p50_ms": 0.0,
+    "block_propagation_p90_ms": 0.0,
+    "block_propagation_p99_ms": 0.0,
+    "total_bytes_sent": 0,
+    "total_bytes_received": 0,
+    "network_overhead_percent": 0.0,
+    "packet_retransmissions": 0,
+    "packets_lost": 0,
+    "avg_rtt_ms": 0.0
+  },
+  "consensus": {
+    "consensus_tps": 14.020161093867333,
+    "transactions_submitted": 1000,
+    "transactions_confirmed": 950,
+    "avg_confirmation_time_ms": 59463.22736842105,
+    "blocks_produced": 0,
+    "avg_block_time_sec": 0.0,
+    "orphaned_blocks": 0,
+    "orphan_rate_percent": 0.0,
+    "chain_reorgs": 0,
+    "avg_blue_score": 0,
+    "blue_score_stddev": 0.0
+  },
+  "start_time": "2025-10-26T11:36:26.898176+00:00",
+  "end_time": "2025-10-26T11:36:26.898909+00:00"
+}

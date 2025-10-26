@@ -72,6 +72,14 @@ criterion = "0.6.0"
 rayon = "1.8"
 sysinfo = "0.32"
 
+[[bin]]
+name = "mempool_stress"
+path = "benches/mempool_stress.rs"
+
 [[bench]]
 name = "tps"
+harness = false
+
+[[bench]]
+name = "e2e_tps"
 harness = false

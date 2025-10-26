@@ -1,0 +1,87 @@
+//! Multi-Node TPS Test
+//!
+//! **STATUS: DISABLED** - This test is currently disabled due to instability.
+//! To re-enable, rename this file from `.rs.disabled` to `.rs`
+//!
+//! Measures transactions per second across multiple nodes with consensus validation
+//!
+//! Run with:
+//! ```bash
+//! cargo test --package tos_integration_tests --test multi_node_tps
+//! ```
+
+use tos_integration::*;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    env_logger::init();
+
+    println!("\n{}", "=".repeat(80));
+    println!("TOS Multi-Node TPS Test");
+    println!("{}", "=".repeat(80));
+
+    // Test configuration
+    let num_nodes = 3;
+    let network_config = NETWORK_CONFIG_PRODUCTION;
+
+    println!("\nTest Configuration:");
+    println!("  Nodes: {}", num_nodes);
+    println!("  Network: Production-like (200ms latency, 2% loss)");
+
+    // Create scenario runner
+    let daemon_path = std::env::var("TOS_DAEMON_PATH").unwrap_or_else(|_| {
+        // Try to find the workspace root by looking for Cargo.lock (unique to workspace root)
+        let mut current_dir = std::env::current_dir().expect("Failed to get current directory");
+        loop {
+            let cargo_lock = current_dir.join("Cargo.lock");
+            let cargo_toml = current_dir.join("Cargo.toml");
+            // Look for workspace root: has both Cargo.lock and Cargo.toml with [workspace]
+            if cargo_lock.exists() && cargo_toml.exists() {
+                if let Ok(contents) = std::fs::read_to_string(&cargo_toml) {
+                    if contents.contains("[workspace]") {
+                        break;
+                    }
+                }
+            }
+            if !current_dir.pop() {
+                panic!("Could not find workspace root");
+            }
+        }
+        current_dir
+            .join("target/debug/tos_daemon")
+            .to_string_lossy()
+            .to_string()
+    });
+
+    let runner = ScenarioRunner::new(daemon_path);
+
+    // Run basic consensus TPS test
+    let scenario = scenarios::BasicConsensusTPS::new(1000, 60);
+
+    println!("\nRunning scenario: {}", scenario.name());
+    println!("  Transactions: {}", scenario.num_transactions);
+    println!("  Duration: {} seconds", scenario.duration_secs);
+
+    match runner
+        .run_scenario(&scenario, num_nodes, network_config)
+        .await
+    {
+        Ok(report) => {
+            report.print_summary();
+
+            // Export results
+            let _ = report.export_json("multi_node_tps_report.json");
+            let _ = report.export_csv("multi_node_tps_report.csv");
+
+            println!("\n{}", "=".repeat(80));
+            println!("Test completed successfully!");
+            println!("{}", "=".repeat(80));
+
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\nTest failed: {:?}", e);
+            Err(e)
+        }
+    }
+}

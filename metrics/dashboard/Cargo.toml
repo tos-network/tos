@@ -1,0 +1,20 @@
+[package]
+name = "tos-metrics-dashboard"
+version = "0.1.1"
+edition = "2021"
+rust-version = "1.75"
+authors = ["TOS Development Team"]
+description = "Real-time performance monitoring dashboard for TOS"
+license = "MIT"
+
+[[bin]]
+name = "tos-metrics-dashboard"
+path = "src/main.rs"
+
+[dependencies]
+tos-perf-monitor = { path = "../perf_monitor" }
+log = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "macros"] }
+ratatui = "0.29"
+crossterm = "0.28"
+chrono = { workspace = true }

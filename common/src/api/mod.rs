@@ -182,6 +182,7 @@ impl<'a> From<RPCTransaction<'a>> for Transaction {
             tx.nonce,
             tx.reference.into_owned(),
             tx.multisig.into_owned(),
+            Vec::new(), // account_keys: empty, RPC transactions use T0 format
             tx.signature.into_owned()
         )
     }

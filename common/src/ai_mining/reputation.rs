@@ -408,7 +408,6 @@ pub fn calculate_final_reward(
 mod tests {
     use super::*;
     use crate::crypto::elgamal::CompressedPublicKey;
-    use crate::serializer::Serializer;
 
     #[test]
     fn test_reputation_calculation() {

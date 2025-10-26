@@ -1,0 +1,53 @@
+[package]
+name = "tos_integration_tests"
+version = "0.1.0"
+edition = "2021"
+authors = ["TOS Network Team <info@tos.network>"]
+license = "BSD-3-Clause"
+description = "TOS Network multi-node integration testing framework"
+
+[dependencies]
+tos_common = { path = "../../common", features = ["tokio"] }
+tos_daemon = { path = "../../daemon" }
+
+tokio = { workspace = true, features = ["rt-multi-thread", "process", "time", "macros", "sync", "net"] }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+rand = { workspace = true }
+chrono = { workspace = true }
+
+# Metrics and monitoring
+metrics = { workspace = true }
+sysinfo = "0.32"
+
+# HTTP client for RPC calls
+reqwest = { version = "0.12", features = ["json"] }
+
+# Unix process management
+nix = { version = "0.29", features = ["signal"] }
+
+# Testing utilities
+tempdir = "0.3"
+criterion = "0.6.0"
+
+[dev-dependencies]
+env_logger = "0.11"
+
+[lib]
+name = "tos_integration"
+path = "src/lib.rs"
+
+[[test]]
+name = "network_partition"
+path = "tests/network_partition.rs"
+harness = false
+
+[[test]]
+name = "variable_network"
+path = "tests/variable_network.rs"
+harness = false

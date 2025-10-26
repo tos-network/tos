@@ -73,6 +73,18 @@ impl Transaction {
                     | TransactionType::AIMining(_) => true,
                 }
             }
+            TxVersion::V2 => {
+                // V2 supports all transaction types with parallel execution
+                match &self.data {
+                    TransactionType::Transfers(_)
+                    | TransactionType::Burn(_)
+                    | TransactionType::MultiSig(_)
+                    | TransactionType::InvokeContract(_)
+                    | TransactionType::DeployContract(_)
+                    | TransactionType::Energy(_)
+                    | TransactionType::AIMining(_) => true,
+                }
+            }
         }
     }
 

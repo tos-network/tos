@@ -116,6 +116,13 @@ impl CompressedPublicKey {
         self.0.as_bytes()
     }
 
+    /// Create CompressedPublicKey from 32 bytes
+    pub fn from_bytes(bytes: &[u8; 32]) -> Result<Self, ()> {
+        let compressed = CompressedRistretto::from_slice(bytes)
+            .map_err(|_| ())?;
+        Ok(Self(compressed))
+    }
+
     pub fn decompress(&self) -> Result<PublicKey, DecompressionError> {
         let point = self.0.decompress().ok_or(DecompressionError::InvalidPoint)?;
         if point.is_identity() {

@@ -137,10 +137,20 @@ impl UnsignedTransaction {
         self.source.write(writer);
         self.data.write(writer);
         self.fee.write(writer);
-        // Always include fee_type for T0
         self.fee_type.write(writer);
         self.nonce.write(writer);
         self.reference.write(writer);
+
+        // SECURITY: Include account_keys for V2+ to prevent malicious rewriting
+        if self.version >= TxVersion::V2 {
+            writer.write_u8(self.account_keys.len() as u8);
+            for meta in &self.account_keys {
+                meta.pubkey.write(writer);
+                meta.asset.write(writer);
+                writer.write_bool(meta.is_signer);
+                writer.write_bool(meta.is_writable);
+            }
+        }
     }
 
     // Get the hash of the transaction for the multi-signature
@@ -165,6 +175,17 @@ impl UnsignedTransaction {
         self.nonce.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig - this matches Transaction::get_signing_bytes
+
+        // SECURITY: Include account_keys for V2+ to prevent malicious rewriting
+        if self.version >= TxVersion::V2 {
+            writer.write_u8(self.account_keys.len() as u8);
+            for meta in &self.account_keys {
+                meta.pubkey.write(&mut writer);
+                meta.asset.write(&mut writer);
+                writer.write_bool(meta.is_signer);
+                writer.write_bool(meta.is_writable);
+            }
+        }
 
         let signature = keypair.sign(&buffer);
 
@@ -192,16 +213,54 @@ impl Serializer for UnsignedTransaction {
         self.fee_type.write(writer);
         self.nonce.write(writer);
         self.reference.write(writer);
+        self.multisig.write(writer);
+
+        // Serialize account_keys for V2+ (must match Transaction serialization)
+        if self.version >= TxVersion::V2 {
+            writer.write_u8(self.account_keys.len() as u8);
+            for meta in &self.account_keys {
+                meta.pubkey.write(writer);
+                meta.asset.write(writer);
+                writer.write_bool(meta.is_signer);
+                writer.write_bool(meta.is_writable);
+            }
+        }
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let version = TxVersion::read(reader)?;
+
+        reader.context_mut()
+            .store(version);
+
         let source = CompressedPublicKey::read(reader)?;
         let data = TransactionType::read(reader)?;
         let fee = reader.read_u64()?;
         let fee_type = FeeType::read(reader)?;
         let nonce = Nonce::read(reader)?;
         let reference = Reference::read(reader)?;
+        let multisig = Option::read(reader)?;
+
+        // Read account_keys for V2+ (must match Transaction deserialization)
+        let account_keys = if version >= TxVersion::V2 {
+            let len = reader.read_u8()? as usize;
+            let mut keys = Vec::with_capacity(len);
+            for _ in 0..len {
+                let pubkey = CompressedPublicKey::read(reader)?;
+                let asset = Hash::read(reader)?;
+                let is_signer = reader.read_bool()?;
+                let is_writable = reader.read_bool()?;
+                keys.push(AccountMeta {
+                    pubkey,
+                    asset,
+                    is_signer,
+                    is_writable,
+                });
+            }
+            keys
+        } else {
+            Vec::new()
+        };
 
         Ok(Self {
             version,
@@ -211,18 +270,32 @@ impl Serializer for UnsignedTransaction {
             fee_type,
             nonce,
             reference,
-            multisig: None,
-            account_keys: Vec::new(),
+            multisig,
+            account_keys,
         })
     }
 
     fn size(&self) -> usize {
-        self.version.size()
-        + self.source.size()
-        + self.data.size()
-        + self.fee.size()
-        + self.fee_type.size()
-        + self.nonce.size()
-        + self.reference.size()
+        let mut size = self.version.size()
+            + self.source.size()
+            + self.data.size()
+            + self.fee.size()
+            + self.fee_type.size()
+            + self.nonce.size()
+            + self.reference.size()
+            + self.multisig.size();
+
+        // Account keys size (only for V2+)
+        if self.version >= TxVersion::V2 {
+            size += 1; // length byte
+            for meta in &self.account_keys {
+                size += meta.pubkey.size()
+                    + meta.asset.size()
+                    + 1  // is_signer
+                    + 1; // is_writable
+            }
+        }
+
+        size
     }
 }

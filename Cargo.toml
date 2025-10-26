@@ -7,7 +7,11 @@ members = [
     "miner",
     "daemon",
     "genesis",
-    "ai_miner"
+    "ai_miner",
+    "testing/integration",
+    "metrics/perf_monitor",
+    "metrics/stat_recorder",
+    "metrics/dashboard"
     ]
 
 [workspace.dependencies]

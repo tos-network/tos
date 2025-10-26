@@ -449,7 +449,7 @@ async fn test_workflow_with_security_model() -> Result<()> {
     let base_reward = INTERMEDIATE_TASK_BASE_REWARD;
 
     // Simulate final reward for high reputation user
-    let account = CompressedPublicKey::from_bytes(&[0u8; 32])?;
+    let account = CompressedPublicKey::from_bytes(&[0u8; 32]).expect("valid test key");
     let base_time = 10_000_000u64;
     let mut reputation = AccountReputation::new(account, base_time - 60 * 24 * 3600); // 60 days history
     reputation.transaction_count = 150;

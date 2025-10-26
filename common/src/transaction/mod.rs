@@ -302,17 +302,29 @@ impl Transaction {
     pub fn get_signing_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         let mut writer = Writer::new(&mut buffer);
-        
-        // T0 format: always include fee_type but NOT multisig (multisig participants sign without multisig field)
+
+        // Include all fields except multisig and signature
         self.version.write(&mut writer);
         self.source.write(&mut writer);
         self.data.write(&mut writer);
         self.fee.write(&mut writer);
-        self.fee_type.write(&mut writer); // Always include fee_type for T0
+        self.fee_type.write(&mut writer);
         self.nonce.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig - multisig participants sign without it
-        
+
+        // SECURITY: Include account_keys for V2+ to prevent malicious rewriting
+        // Without this, a relay could clear conflicts or inject extra locks
+        if self.version >= TxVersion::V2 {
+            writer.write_u8(self.account_keys.len() as u8);
+            for meta in &self.account_keys {
+                meta.pubkey.write(&mut writer);
+                meta.asset.write(&mut writer);
+                writer.write_bool(meta.is_signer);
+                writer.write_bool(meta.is_writable);
+            }
+        }
+
         buffer
     }
 
@@ -321,18 +333,29 @@ impl Transaction {
     pub fn get_multisig_signing_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         let mut writer = Writer::new(&mut buffer);
-        
+
         // Multisig participants sign the transaction data without the multisig field
         // This matches the logic in UnsignedTransaction::write_no_signature
         self.version.write(&mut writer);
         self.source.write(&mut writer);
         self.data.write(&mut writer);
         self.fee.write(&mut writer);
-        self.fee_type.write(&mut writer); // Always include fee_type for T0
+        self.fee_type.write(&mut writer);
         self.nonce.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig field - it should not be part of the main signature
-        
+
+        // SECURITY: Include account_keys for V2+ to prevent malicious rewriting
+        if self.version >= TxVersion::V2 {
+            writer.write_u8(self.account_keys.len() as u8);
+            for meta in &self.account_keys {
+                meta.pubkey.write(&mut writer);
+                meta.asset.write(&mut writer);
+                writer.write_bool(meta.is_signer);
+                writer.write_bool(meta.is_writable);
+            }
+        }
+
         buffer
     }
 
