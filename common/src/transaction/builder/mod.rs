@@ -104,6 +104,8 @@ pub enum GenerationError<T> {
     InvalidEnergyFeeType,
     #[error("Energy fee type cannot be used for transfers to new addresses")]
     InvalidEnergyFeeForNewAddress,
+    #[error("InvokeContract transactions cannot use parallel execution (V2). Contract identifiers cannot be added to account_keys, which would allow concurrent calls to the same contract to race and corrupt state. Use T0 (sequential) execution instead.")]
+    InvokeContractParallelExecution,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -171,21 +173,16 @@ impl TransactionBuilder {
     /// Without the contract ID in account_keys, two calls to the same contract would appear
     /// conflict-free to the scheduler and could be batched together, corrupting contract state.
     ///
-    /// # Panics
-    /// Panics if called on an InvokeContract transaction (this is a safety violation)
-    pub fn with_parallel_execution(mut self) -> Self {
+    /// # Errors
+    /// Returns [`GenerationError::InvokeContractParallelExecution`] if called on an InvokeContract transaction
+    pub fn with_parallel_execution(mut self) -> Result<Self, GenerationError<TransactionTypeBuilder>> {
         // CRITICAL SAFETY CHECK: Prevent parallel execution for contract calls
         if matches!(self.data, TransactionTypeBuilder::InvokeContract(_)) {
-            panic!(
-                "SAFETY VIOLATION: InvokeContract transactions cannot use parallel execution. \
-                 Contract identifiers cannot be added to account_keys (not valid CompressedPublicKey), \
-                 which would allow concurrent calls to the same contract to race and corrupt state. \
-                 InvokeContract must execute sequentially (T0)."
-            );
+            return Err(GenerationError::InvokeContractParallelExecution);
         }
 
         self.version = TxVersion::V2;
-        self
+        Ok(self)
     }
 
     /// Estimate by hand the bytes size of a final TX
