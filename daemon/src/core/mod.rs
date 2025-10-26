@@ -19,6 +19,7 @@ pub mod ghostdag; // TIP-2 Phase 1: GHOSTDAG implementation
 pub mod reachability; // TIP-2 Phase 2: Reachability service
 pub mod compact_block_reconstructor; // TIP-2 Phase 2B: Compact blocks
 pub mod mining; // TIP-2 Phase 3: Mining optimizations
+pub mod executor; // TIP-PE: Parallel Execution Engine
 
 #[cfg(test)]
 mod tests; // Test modules (performance, integration tests, etc.)

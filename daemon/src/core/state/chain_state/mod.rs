@@ -164,6 +164,179 @@ impl<'a, S: Storage> ChainState<'a, S> {
         self.storage.as_ref()
     }
 
+    // ========================================================================
+    // Parallel Execution Support (TIP-PE)
+    // ========================================================================
+
+    /// Create a lightweight fork for parallel execution
+    ///
+    /// This is a static method that creates an isolated ChainState for a single thread
+    /// to execute transactions in parallel. Each thread gets its own state
+    /// that starts empty and accumulates changes independently.
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - Storage reference (will be used as Immutable for thread safety)
+    /// * `environment` - Environment reference
+    /// * `stable_topoheight` - Current stable topoheight
+    /// * `topoheight` - Current topoheight
+    /// * `block_version` - Block version
+    ///
+    /// # Memory Overhead
+    ///
+    /// Each fork has minimal overhead (~10KB) as it starts with empty HashMaps.
+    /// Memory grows only as transactions modify accounts/balances.
+    ///
+    /// # Thread Safety
+    ///
+    /// Forks are NOT thread-safe and should be used by a single thread.
+    /// Synchronization happens at merge time (sequential).
+    ///
+    /// # Usage Pattern
+    ///
+    /// ```ignore
+    /// // 1. Fork for each thread
+    /// let storage = chain_state.get_storage();
+    /// let thread_states: Vec<ChainState> = (0..num_threads)
+    ///     .map(|_| ChainState::fork_for_parallel_execution(
+    ///         storage,
+    ///         environment,
+    ///         stable_topoheight,
+    ///         topoheight,
+    ///         block_version
+    ///     ))
+    ///     .collect();
+    ///
+    /// // 2. Execute in parallel (each thread modifies its own state)
+    /// for result in scheduled_transactions {
+    ///     let state = &mut thread_states[result.thread_id];
+    ///     tx.apply_with_partial_verify(tx_hash, state).await?;
+    /// }
+    ///
+    /// // 3. Merge sequentially
+    /// for state in thread_states {
+    ///     chain_state.merge(state)?;
+    /// }
+    /// ```
+    ///
+    /// # Reference
+    ///
+    /// See: ~/tos-network/memo/PARALLEL_EXECUTION_INTEGRATION_ANALYSIS.md
+    pub fn fork_for_parallel_execution(
+        storage: &'a S,
+        environment: &'a Environment,
+        stable_topoheight: TopoHeight,
+        topoheight: TopoHeight,
+        block_version: BlockVersion,
+    ) -> Self {
+        Self {
+            // Always use Immutable storage reference for fork safety
+            storage: StorageReference::Immutable(storage),
+            environment,
+            // Start with empty state (populated during execution)
+            receiver_balances: HashMap::new(),
+            accounts: HashMap::new(),
+            contracts: HashMap::new(),
+            // Copy scalar values
+            stable_topoheight,
+            topoheight,
+            block_version,
+            // Start with zero gas fee (accumulated separately)
+            gas_fee: 0,
+        }
+    }
+
+    /// Merge a forked ChainState back into the main state
+    ///
+    /// This method merges changes from a parallel execution thread back into
+    /// the main ChainState. Merging MUST be done sequentially to maintain
+    /// deterministic ordering.
+    ///
+    /// # Conflict Detection
+    ///
+    /// This method does NOT check for conflicts - the ParallelScheduler
+    /// guarantees that merged transactions do not conflict. If conflicts exist,
+    /// the merge will succeed but may produce incorrect results.
+    ///
+    /// # Merge Strategy
+    ///
+    /// - Receiver balances: Insert all (no conflicts expected)
+    /// - Sender accounts: Insert all (no conflicts expected)
+    /// - Contracts: Insert all (no conflicts expected)
+    /// - Gas fees: Accumulate (sum of all threads)
+    ///
+    /// # Panics
+    ///
+    /// Panics if the forked state has incompatible metadata:
+    /// - Different stable_topoheight
+    /// - Different topoheight
+    /// - Different block_version
+    ///
+    /// # Usage
+    ///
+    /// ```ignore
+    /// // After parallel execution, merge sequentially
+    /// for thread_state in thread_states {
+    ///     main_state.merge(thread_state)?;
+    /// }
+    /// ```
+    pub fn merge(&mut self, forked: ChainState<'a, S>) -> Result<(), BlockchainError> {
+        // Validate metadata consistency
+        // These should never fail - they're programming errors not user errors
+        assert_eq!(
+            forked.stable_topoheight, self.stable_topoheight,
+            "Cannot merge ChainState with different stable_topoheight: {} vs {}",
+            forked.stable_topoheight, self.stable_topoheight
+        );
+
+        assert_eq!(
+            forked.topoheight, self.topoheight,
+            "Cannot merge ChainState with different topoheight: {} vs {}",
+            forked.topoheight, self.topoheight
+        );
+
+        assert_eq!(
+            forked.block_version, self.block_version,
+            "Cannot merge ChainState with different block_version: {:?} vs {:?}",
+            forked.block_version, self.block_version
+        );
+
+        // Merge receiver balances
+        // No conflicts expected - scheduler guarantees this
+        for (key, assets) in forked.receiver_balances {
+            match self.receiver_balances.entry(key) {
+                Entry::Occupied(mut entry) => {
+                    // Merge asset balances for this receiver
+                    let existing_assets = entry.get_mut();
+                    for (asset, balance) in assets {
+                        existing_assets.insert(asset, balance);
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    // New receiver - insert all assets
+                    entry.insert(assets);
+                }
+            }
+        }
+
+        // Merge sender accounts
+        // No conflicts expected - scheduler guarantees this
+        for (key, account) in forked.accounts {
+            self.accounts.insert(key, account);
+        }
+
+        // Merge contracts
+        // No conflicts expected - scheduler guarantees this
+        for (hash, contract) in forked.contracts {
+            self.contracts.insert(hash, contract);
+        }
+
+        // Accumulate gas fees
+        self.gas_fee = self.gas_fee.saturating_add(forked.gas_fee);
+
+        Ok(())
+    }
+
     pub fn get_sender_balances<'b>(&'b self, key: &'b PublicKey) -> Option<HashMap<&'b Hash, &'b VersionedBalance>> {
         let account = self.accounts.get(key)?;
         Some(account.assets.iter().map(|(k, v)| (*k, &v.version)).collect())

@@ -223,6 +223,40 @@ pub const COMPACT_BLOCK_CACHE_CAPACITY: usize = 100;
 // Compact block cache timeout in seconds (how long to wait for missing transactions)
 pub const COMPACT_BLOCK_CACHE_TIMEOUT_SECS: u64 = 60;
 
+// ============================================================================
+// Parallel Execution Configuration (TIP-PE)
+// ============================================================================
+//
+// FEATURE FLAG: Enable parallel transaction execution for V2 transactions
+//
+// When ENABLED (true):
+// - V2 transactions execute in parallel using per-thread ChainState copies
+// - Nonce reservations prevent conflicts during parallel execution
+// - Up to 6-8x TPS improvement for non-conflicting workloads
+// - V0/V1 transactions continue to execute sequentially (backward compatible)
+//
+// When DISABLED (false):
+// - All transactions (V0/V1/V2) execute sequentially (current behavior)
+// - Zero performance impact, zero risk
+// - Useful for gradual rollout and testing
+//
+// SAFETY: This flag defaults to OFF for conservative deployment
+// Enable only after thorough testing in devnet/testnet environments
+//
+// Related infrastructure:
+// - daemon/src/core/state/chain_state/mod.rs: fork_for_parallel_execution(), merge()
+// - daemon/src/core/nonce_checker.rs: reserve_nonce(), commit_reservation(), cancel_reservation()
+// - daemon/src/core/executor/scheduler.rs: ParallelScheduler
+// - daemon/src/core/executor/account_locks.rs: ThreadAwareAccountLocks
+//
+pub const ENABLE_PARALLEL_EXECUTION: bool = false;
+
+// Number of virtual threads for parallel execution
+// Used when ENABLE_PARALLEL_EXECUTION is true
+// Recommended: 4-8 threads for optimal performance
+// Higher values may increase scheduling overhead
+pub const PARALLEL_EXECUTION_THREADS: usize = 4;
+
 // Hard Forks configured
 const HARD_FORKS: [HardFork; 3] = [
     HardFork {

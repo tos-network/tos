@@ -564,6 +564,145 @@ impl Serializer for Transaction {
     }
 }
 
+// ============================================================================
+// Transaction Parallel Execution Helper Methods (V2+)
+// ============================================================================
+
+impl Transaction {
+    /// Get all writable accounts for parallel scheduler conflict detection
+    ///
+    /// For V2+ transactions with pre-declared account_keys, returns accounts marked as writable.
+    /// For V0/V1 transactions, extracts writable accounts from payload as fallback.
+    ///
+    /// # Returns
+    /// Vector of (pubkey, asset) tuples representing accounts that will be modified
+    pub fn writable_accounts(&self) -> Vec<(CompressedPublicKey, Hash)> {
+        if self.account_keys.is_empty() {
+            // Fallback for V0/V1 transactions - extract from payload
+            self.extract_writable_from_payload()
+        } else {
+            // V2+ transactions with explicit account_keys
+            self.account_keys
+                .iter()
+                .filter(|meta| meta.is_writable)
+                .map(|meta| (meta.pubkey.clone(), meta.asset.clone()))
+                .collect()
+        }
+    }
+
+    /// Get all readonly accounts for parallel scheduler dependency tracking
+    ///
+    /// For V2+ transactions with pre-declared account_keys, returns accounts marked as readonly.
+    /// For V0/V1 transactions, extracts readonly accounts from payload as fallback.
+    ///
+    /// # Returns
+    /// Vector of (pubkey, asset) tuples representing accounts that will only be read
+    pub fn readonly_accounts(&self) -> Vec<(CompressedPublicKey, Hash)> {
+        if self.account_keys.is_empty() {
+            // Fallback for V0/V1 transactions - extract from payload
+            self.extract_readonly_from_payload()
+        } else {
+            // V2+ transactions with explicit account_keys
+            self.account_keys
+                .iter()
+                .filter(|meta| !meta.is_writable)
+                .map(|meta| (meta.pubkey.clone(), meta.asset.clone()))
+                .collect()
+        }
+    }
+
+    /// Check if transaction supports parallel execution
+    ///
+    /// Parallel execution requires:
+    /// - Transaction version V2 or later
+    /// - Non-empty account_keys (pre-declared dependencies)
+    ///
+    /// # Returns
+    /// true if this transaction can be executed in parallel with other V2 transactions
+    pub fn supports_parallel_execution(&self) -> bool {
+        self.version >= TxVersion::V2 && !self.account_keys.is_empty()
+    }
+
+    /// Extract writable accounts from transaction payload (backward compatibility fallback)
+    ///
+    /// This method provides backward compatibility for V0/V1 transactions that don't have
+    /// pre-declared account_keys. The scheduler can extract dependencies at runtime.
+    ///
+    /// # Returns
+    /// Vector of (pubkey, asset) tuples for accounts that will be modified
+    fn extract_writable_from_payload(&self) -> Vec<(CompressedPublicKey, Hash)> {
+        let mut writable = Vec::new();
+
+        // Source account is always writable (fee payment)
+        // Note: We need to know which asset for the fee - default to native TOS
+        // This is a simplification; in reality we'd need to track the fee asset
+        writable.push((self.source.clone(), Hash::zero()));
+
+        match &self.data {
+            TransactionType::Transfers(transfers) => {
+                // Source and all destinations are writable (balance changes)
+                for transfer in transfers {
+                    writable.push((self.source.clone(), transfer.get_asset().clone()));
+                    writable.push((transfer.get_destination().clone(), transfer.get_asset().clone()));
+                }
+            },
+            TransactionType::Burn(burn) => {
+                // Source account is writable (burning tokens)
+                writable.push((self.source.clone(), burn.asset.clone()));
+            },
+            TransactionType::InvokeContract(_) => {
+                // InvokeContract cannot declare writable accounts properly
+                // because contract identifiers aren't public keys
+                writable.push((self.source.clone(), Hash::zero()));
+            },
+            TransactionType::DeployContract(_) => {
+                // Source is writable (paying for deployment)
+                writable.push((self.source.clone(), Hash::zero()));
+            },
+            TransactionType::MultiSig(_) | TransactionType::Energy(_) | TransactionType::AIMining(_) => {
+                // These transaction types involve source account modifications
+                writable.push((self.source.clone(), Hash::zero()));
+            },
+        }
+
+        writable
+    }
+
+    /// Extract readonly accounts from transaction payload (backward compatibility fallback)
+    ///
+    /// This method provides backward compatibility for V0/V1 transactions that don't have
+    /// pre-declared account_keys. Most transaction types don't have pure read-only dependencies.
+    ///
+    /// # Returns
+    /// Vector of (pubkey, asset) tuples for accounts that will only be read
+    fn extract_readonly_from_payload(&self) -> Vec<(CompressedPublicKey, Hash)> {
+        let readonly = Vec::new();
+
+        // Most TOS transaction types don't have explicit read-only dependencies
+        // Read-only access is typically for:
+        // - Checking balances without modification
+        // - Reading contract state without calling state-changing methods
+        // - Signature verification (implicit)
+
+        // For V0/V1 transactions, we conservatively assume no pure read-only accounts
+        // All involved accounts are treated as writable to ensure safety
+
+        match &self.data {
+            TransactionType::InvokeContract(_) => {
+                // Contract calls might have read-only state access
+                // but we can't determine this without executing the contract
+                // Conservative approach: treat as empty
+            },
+            _ => {
+                // Transfers, Burn, DeployContract, MultiSig, Energy, AIMining
+                // don't have explicit read-only dependencies
+            }
+        }
+
+        readonly
+    }
+}
+
 impl Hashable for Transaction {}
 
 impl AsRef<Transaction> for Transaction {
@@ -571,3 +710,10 @@ impl AsRef<Transaction> for Transaction {
         self
     }
 }
+
+// TODO: Add comprehensive unit tests for parallel execution helper methods
+// Tests should cover:
+// - supports_parallel_execution() for V0/V1/V2 transactions
+// - writable_accounts() and readonly_accounts() for V2 transactions
+// - extract_writable_from_payload() fallback for V0/V1 transactions
+// - Filtering logic (writable vs readonly accounts)

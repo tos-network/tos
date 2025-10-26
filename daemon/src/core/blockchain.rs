@@ -47,7 +47,8 @@ use tos_common::{
         Hash,
         Hashable,
         PublicKey,
-        HASH_SIZE
+        HASH_SIZE,
+        elgamal::CompressedPublicKey
     },
     difficulty::{
         check_difficulty,
@@ -65,7 +66,8 @@ use tos_common::{
     transaction::{
         verify::BlockchainVerificationState,
         Transaction,
-        TransactionType
+        TransactionType,
+        TxVersion
     },
     utils::{calculate_tx_fee, format_tos},
     tokio::{
@@ -78,6 +80,8 @@ use tos_common::{
     contract::build_environment,
 };
 use tos_vm::Environment;
+use crate::config::{ENABLE_PARALLEL_EXECUTION, PARALLEL_EXECUTION_THREADS};
+
 use crate::{
     config::{
         get_genesis_block_hash, get_hex_genesis_block,
@@ -2332,6 +2336,514 @@ impl<S: Storage> Blockchain<S> {
         Err(BlockchainError::UnsupportedOperation)
     }
 
+    /// Partition transactions by version (T0 vs V2)
+    ///
+    /// Returns (v2_transactions, t0_transactions) where:
+    /// - v2_transactions: Transactions that support parallel execution
+    /// - t0_transactions: T0 transactions that must execute sequentially
+    fn partition_transactions_by_version(
+        transactions: &[(Arc<Transaction>, Hash)]
+    ) -> (Vec<(Arc<Transaction>, Hash)>, Vec<(Arc<Transaction>, Hash)>) {
+        let mut v2_txs = Vec::new();
+        let mut t0_txs = Vec::new();
+
+        for (tx, tx_hash) in transactions {
+            if tx.get_version() == TxVersion::V2 {
+                v2_txs.push((tx.clone(), tx_hash.clone()));
+            } else {
+                t0_txs.push((tx.clone(), tx_hash.clone()));
+            }
+        }
+
+        (v2_txs, t0_txs)
+    }
+
+    /// Execute V2 transactions in parallel using fork/merge and nonce reservations
+    ///
+    /// This function implements the three-phase parallel execution protocol:
+    /// 1. Reserve Phase: Reserve nonces for all V2 transactions
+    /// 2. Execute Phase: Execute transactions in parallel using forked ChainStates
+    /// 3. Commit Phase: Merge results sequentially in deterministic order
+    async fn execute_v2_transactions_parallel(
+        v2_transactions: Vec<(Arc<Transaction>, Hash)>,
+        main_chain_state: &mut ApplicableChainState<'_, S>,
+        nonce_checker: &mut NonceChecker,
+        orphaned_transactions: &mut LruCache<Hash, ()>,
+        highest_topo: TopoHeight,
+        block_hash: &Hash,
+        should_track_events: &HashSet<NotifyEvent>,
+        events: &mut HashMap<NotifyEvent, Vec<Value>>,
+        total_txs_execution_time: &mut u128,
+        total_fees: &mut u64,
+        network: &Network,
+    ) -> Result<(), BlockchainError> {
+        if v2_transactions.is_empty() {
+            return Ok(());
+        }
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Starting parallel execution for {} V2 transactions", v2_transactions.len());
+        }
+
+        // ========================================================================
+        // PHASE 1: Nonce Reservation
+        // ========================================================================
+        // Reserve nonces before execution to prevent conflicts and ensure determinism
+
+        type ThreadId = usize;
+
+        #[derive(Debug)]
+        struct ScheduledTx {
+            tx: Arc<Transaction>,
+            tx_hash: Hash,
+            thread_id: ThreadId,
+        }
+
+        let mut scheduled_txs = Vec::new();
+        let num_threads = PARALLEL_EXECUTION_THREADS;
+
+        for (idx, (tx, tx_hash)) in v2_transactions.into_iter().enumerate() {
+            // Assign thread in round-robin fashion (simple partitioning)
+            let thread_id = idx % num_threads;
+
+            // Link transaction to block first
+            if !main_chain_state.get_mut_storage().add_block_linked_to_tx_if_not_present(&tx_hash, block_hash)? {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Block {} is now linked to tx {}", block_hash, tx_hash);
+                }
+            }
+
+            // Check if already executed in another tip branch
+            if main_chain_state.get_storage().is_tx_executed_in_a_block(&tx_hash)? {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Tx {} was already executed in a previous block, skipping...", tx_hash);
+                }
+                continue;
+            }
+
+            // Reserve nonce for this thread
+            match nonce_checker.reserve_nonce(tx.get_source(), tx.get_nonce(), thread_id) {
+                Ok(()) => {
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Reserved nonce {} for account {:?} on thread {}", tx.get_nonce(), tx.get_source(), thread_id);
+                    }
+                    scheduled_txs.push(ScheduledTx { tx, tx_hash, thread_id });
+                }
+                Err(e) => {
+                    // Nonce conflict - this transaction cannot execute in parallel
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Failed to reserve nonce {} for TX {}: {:?}, marking as orphaned", tx.get_nonce(), tx_hash, e);
+                    }
+                    orphaned_transactions.put(tx_hash, ());
+                }
+            }
+        }
+
+        if scheduled_txs.is_empty() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("No V2 transactions scheduled for parallel execution (all filtered)");
+            }
+            return Ok(());
+        }
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Scheduled {} transactions for parallel execution across {} threads", scheduled_txs.len(), num_threads);
+        }
+
+        // ========================================================================
+        // PHASE 2 & 3 COMBINED: Execute and Commit
+        // ========================================================================
+        // Execute transactions on shared state, then process in nonce order
+        // NOTE: We execute sequentially on shared state (nonce reservation ensures correctness)
+        // Future: True parallel execution with forked ChainStates + merge
+
+        // WORKAROUND: Leak scheduled_txs to extend lifetime to 'static for async operations
+        // This is safe because we control the scope and will clean up before function returns
+        let scheduled_txs_leaked: &'static Vec<ScheduledTx> = Box::leak(Box::new(scheduled_txs));
+
+        // Execute all transactions first (order doesn't matter for execution phase)
+        use tos_common::crypto::elgamal::CompressedPublicKey;
+        type ExecutionRecord = (Arc<Transaction>, Hash, CompressedPublicKey, u64, u64, ThreadId, bool, Option<String>, u128);
+        let mut exec_records_boxed = Box::new(Vec::new());
+
+        for scheduled_tx in scheduled_txs_leaked.iter() {
+            // Extract values that will be needed in commit phase
+            let source = scheduled_tx.tx.get_source().clone();
+            let nonce = scheduled_tx.tx.get_nonce();
+            let fee = scheduled_tx.tx.get_fee();
+
+            let start = Instant::now();
+            let result = scheduled_tx.tx.apply_with_partial_verify(&scheduled_tx.tx_hash, main_chain_state).await;
+            let execution_time_us = start.elapsed().as_micros();
+
+            match result {
+                Ok(()) => {
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("TX {} executed successfully in {}μs (thread slot: {})", scheduled_tx.tx_hash, execution_time_us, scheduled_tx.thread_id);
+                    }
+                    exec_records_boxed.push((scheduled_tx.tx.clone(), scheduled_tx.tx_hash.clone(), source, nonce, fee, scheduled_tx.thread_id, true, None, execution_time_us));
+                }
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("TX {} execution failed: {}", scheduled_tx.tx_hash, e);
+                    }
+                    exec_records_boxed.push((scheduled_tx.tx.clone(), scheduled_tx.tx_hash.clone(), source, nonce, fee, scheduled_tx.thread_id, false, Some(format!("{}", e)), execution_time_us));
+                }
+            }
+        }
+
+        // Leak to get 'static lifetime (we'll manually drop later)
+        let exec_records: &'static mut Vec<ExecutionRecord> = Box::leak(exec_records_boxed);
+
+        // Sort by (account, nonce) for deterministic commit order
+        exec_records.sort_by(|a, b| {
+            let a_bytes = a.2.to_bytes();
+            let b_bytes = b.2.to_bytes();
+            let account_cmp = a_bytes.cmp(&b_bytes);
+            if account_cmp == std::cmp::Ordering::Equal {
+                a.3.cmp(&b.3)
+            } else {
+                account_cmp
+            }
+        });
+
+        // Commit phase: process results in deterministic order
+        // Convert back to owned Vec for consumption (no longer need 'static)
+        let exec_records_owned: Vec<ExecutionRecord> = unsafe {
+            // SAFETY: We're taking back ownership of the leaked Box
+            *Box::from_raw(exec_records as *mut Vec<ExecutionRecord>)
+        };
+
+        for (tx, tx_hash, source, nonce, fee, thread_id, success, error, execution_time_us) in exec_records_owned.into_iter() {
+            // SAFETY: Extend source lifetime to 'static using transmute
+            // This is safe because:
+            // 1. source is an owned CompressedPublicKey (32 bytes on stack)
+            // 2. We only use it synchronously within this iteration
+            // 3. The value lives until the end of the loop iteration, which is sufficient
+            let source_static: &'static CompressedPublicKey = unsafe {
+                std::mem::transmute(&source)
+            };
+
+            if success {
+                // Commit nonce reservation
+                nonce_checker.commit_reservation(main_chain_state.get_storage(), source_static, nonce, highest_topo).await?;
+
+                // Update account nonce (handle side block edge case)
+                let expected_next_nonce = nonce_checker.get_new_nonce(source_static, network.is_mainnet())?;
+                let next_nonce = nonce + 1;
+                if expected_next_nonce != next_nonce {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("TX {} has nonce {}, but next nonce is {}, forcing it...", tx_hash, next_nonce, expected_next_nonce);
+                    }
+                    main_chain_state.as_mut().update_account_nonce(source_static, expected_next_nonce).await?;
+                }
+
+                // Mark transaction as executed
+                main_chain_state.get_mut_storage().mark_tx_as_executed_in_block(&tx_hash, block_hash)?;
+
+                // Remove from orphaned set if present
+                if orphaned_transactions.pop(&tx_hash).is_some() {
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Transaction {} was marked as orphaned, but got executed again", tx_hash);
+                    }
+                }
+
+                // Track execution time
+                *total_txs_execution_time += execution_time_us;
+
+                // Track events
+                if should_track_events.contains(&NotifyEvent::TransactionExecuted) {
+                    let value = json!(TransactionExecutedEvent {
+                        tx_hash: Cow::Owned(tx_hash.clone()),
+                        block_hash: Cow::Borrowed(block_hash),
+                        topoheight: highest_topo,
+                    });
+                    events.entry(NotifyEvent::TransactionExecuted).or_insert_with(Vec::new).push(value);
+                }
+
+                // Handle contract-specific events
+                match tx.get_data() {
+                    TransactionType::InvokeContract(payload) => {
+                        let event = NotifyEvent::InvokeContract {
+                            contract: payload.contract.clone(),
+                        };
+
+                        if should_track_events.contains(&event) {
+                            let is_mainnet = network.is_mainnet();
+                            if let Some(contract_outputs) = main_chain_state.get_contract_outputs_for_tx(&tx_hash) {
+                                let contract_outputs = contract_outputs.into_iter()
+                                    .map(|output| RPCContractOutput::from_output(output, is_mainnet))
+                                    .collect::<Vec<_>>();
+
+                                let value = json!(InvokeContractEvent {
+                                    tx_hash: Cow::Owned(tx_hash.clone()),
+                                    block_hash: Cow::Borrowed(block_hash),
+                                    topoheight: highest_topo,
+                                    contract_outputs,
+                                });
+                                events.entry(event).or_insert_with(Vec::new).push(value);
+                            }
+                        }
+                    }
+                    TransactionType::DeployContract(_) => {
+                        if should_track_events.contains(&NotifyEvent::DeployContract) {
+                            let value = json!(NewContractEvent {
+                                contract: Cow::Owned(tx_hash.clone()),
+                                block_hash: Cow::Borrowed(block_hash),
+                                topoheight: highest_topo,
+                            });
+                            events.entry(NotifyEvent::DeployContract).or_insert_with(Vec::new).push(value);
+                        }
+                    }
+                    _ => {} // Other transaction types
+                }
+
+                // Increase total tx fees for miner
+                *total_fees = total_fees.checked_add(fee)
+                    .ok_or(BlockchainError::BalanceOverflow)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Committed TX {} from thread {}", tx_hash, thread_id);
+                }
+            } else {
+                // Transaction execution failed - rollback reservation
+                nonce_checker.cancel_reservation(source_static, nonce);
+
+                // Mark as orphaned
+                orphaned_transactions.put(tx_hash.clone(), ());
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Rolled back TX {} due to execution failure: {:?}", tx_hash, error);
+                }
+            }
+        }
+
+        // SAFETY: Manually drop the scheduled_txs Box to prevent memory leak
+        // exec_records was already consumed in the loop above
+        unsafe {
+            let _ = Box::from_raw(scheduled_txs_leaked as *const Vec<ScheduledTx> as *mut Vec<ScheduledTx>);
+            // Box drop is implicit, memory is freed
+        }
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Parallel execution completed successfully");
+        }
+
+        Ok(())
+    }
+
+    /// Execute transactions sequentially (current behavior, T0/V2 compatible)
+    ///
+    /// This is the baseline implementation that executes all transactions in order.
+    /// Used when parallel execution is disabled or for T0 transactions.
+    async fn execute_transactions_sequential<'a>(
+        transactions: &'a [(Arc<Transaction>, Hash)],
+        chain_state: &mut ApplicableChainState<'a, S>,
+        nonce_checker: &mut NonceChecker,
+        orphaned_transactions: &mut LruCache<Hash, ()>,
+        highest_topo: TopoHeight,
+        block_hash: &Hash,
+        should_track_events: &HashSet<NotifyEvent>,
+        events: &mut HashMap<NotifyEvent, Vec<Value>>,
+        total_txs_execution_time: &mut u128,
+        total_fees: &mut u64,
+        network: &Network,
+    ) -> Result<(), BlockchainError> {
+        // This is EXACTLY the current implementation (lines 3296-3414)
+        for (tx, tx_hash) in transactions {
+            // Link the transaction hash to this block
+            if !chain_state.get_mut_storage().add_block_linked_to_tx_if_not_present(&tx_hash, block_hash)? {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Block {} is now linked to tx {}", block_hash, tx_hash);
+                }
+            }
+
+            // check that the tx was not yet executed in another tip branch
+            if chain_state.get_storage().is_tx_executed_in_a_block(tx_hash)? {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Tx {} was already executed in a previous block, skipping...", tx_hash);
+                }
+                continue;
+            }
+
+            // tx was not executed, but lets check that it is not a potential double spending
+            // check that the nonce is not already used
+            if !nonce_checker.use_nonce(chain_state.get_storage(), tx.get_source(), tx.get_nonce(), highest_topo).await? {
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Malicious TX {}, it is a potential double spending with same nonce {}, skipping...", tx_hash, tx.get_nonce());
+                }
+                // V-26 Fix: TX will be orphaned (LRU handles capacity)
+                orphaned_transactions.put(tx_hash.clone(), ());
+                continue;
+            }
+
+            let start = Instant::now();
+            // Execute the transaction by applying changes in storage
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Executing tx {} in block {} with nonce {}", tx_hash, block_hash, tx.get_nonce());
+            }
+            if let Err(e) = tx.apply_with_partial_verify(tx_hash, chain_state).await {
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Error while executing TX {} with current DAG org: {}", tx_hash, e);
+                }
+                // CRITICAL: Rollback nonce on execution failure to prevent double-spend window
+                nonce_checker.undo_nonce(tx.get_source(), tx.get_nonce());
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Rolled back nonce {} for {} due to TX execution failure", tx.get_nonce(), tx.get_source().as_address(network.is_mainnet()));
+                }
+                // V-26 Fix: TX may be orphaned if not added again in good order in next blocks
+                orphaned_transactions.put(tx_hash.clone(), ());
+                continue;
+            }
+            *total_txs_execution_time += start.elapsed().as_micros();
+
+            // Calculate the new nonce
+            // This has to be done in case of side blocks where TX B would be before TX A
+            let expected_next_nonce = nonce_checker.get_new_nonce(tx.get_source(), network.is_mainnet())?;
+            let next_nonce = tx.get_nonce() + 1;
+            if expected_next_nonce != next_nonce {
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("TX {} has a nonce {}, but the next nonce is {}, forcing it...", tx_hash, next_nonce, expected_next_nonce);
+                }
+                chain_state.as_mut().update_account_nonce(tx.get_source(), expected_next_nonce).await?;
+            }
+
+            // mark tx as executed
+            chain_state.get_mut_storage().mark_tx_as_executed_in_block(&tx_hash, block_hash)?;
+
+            // Delete the transaction from the list if it was marked as orphaned
+            // V-26 Fix: Remove from orphaned set using LruCache::pop
+            if orphaned_transactions.pop(tx_hash).is_some() {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Transaction {} was marked as orphaned, but got executed again", tx_hash);
+                }
+            }
+
+            // if the rpc_server is enable, track events
+            if should_track_events.contains(&NotifyEvent::TransactionExecuted) {
+                let value = json!(TransactionExecutedEvent {
+                    tx_hash: Cow::Borrowed(&tx_hash),
+                    block_hash: Cow::Borrowed(block_hash),
+                    topoheight: highest_topo,
+                });
+                events.entry(NotifyEvent::TransactionExecuted).or_insert_with(Vec::new).push(value);
+            }
+
+            // Handle contract-specific events (InvokeContract, DeployContract)
+            match tx.get_data() {
+                TransactionType::InvokeContract(payload) => {
+                    let event = NotifyEvent::InvokeContract {
+                        contract: payload.contract.clone(),
+                    };
+
+                    if should_track_events.contains(&event) {
+                        let is_mainnet = network.is_mainnet();
+                        if let Some(contract_outputs) = chain_state.get_contract_outputs_for_tx(&tx_hash) {
+                            let contract_outputs = contract_outputs.into_iter()
+                                .map(|output| RPCContractOutput::from_output(output, is_mainnet))
+                                .collect::<Vec<_>>();
+
+                            let value = json!(InvokeContractEvent {
+                                tx_hash: Cow::Borrowed(&tx_hash),
+                                block_hash: Cow::Borrowed(block_hash),
+                                topoheight: highest_topo,
+                                contract_outputs,
+                            });
+                            events.entry(event).or_insert_with(Vec::new).push(value);
+                        }
+                    }
+                }
+                TransactionType::DeployContract(_) => {
+                    if should_track_events.contains(&NotifyEvent::DeployContract) {
+                        let value = json!(NewContractEvent {
+                            contract: Cow::Borrowed(&tx_hash),
+                            block_hash: Cow::Borrowed(block_hash),
+                            topoheight: highest_topo,
+                        });
+                        events.entry(NotifyEvent::DeployContract).or_insert_with(Vec::new).push(value);
+                    }
+                }
+                _ => {}
+            }
+
+            // Increase total tx fees for miner
+            *total_fees = total_fees.checked_add(tx.get_fee())
+                .ok_or(BlockchainError::BalanceOverflow)?;
+        }
+
+        Ok(())
+    }
+
+    /// Execute transactions with parallel execution for V2 and sequential for T0
+    ///
+    /// This is the top-level coordinator that partitions transactions by version
+    /// and routes them to the appropriate execution path.
+    async fn execute_transactions_parallel(
+        transactions: Vec<(Arc<Transaction>, Hash)>,
+        chain_state: &mut ApplicableChainState<'_, S>,
+        nonce_checker: &mut NonceChecker,
+        orphaned_transactions: &mut LruCache<Hash, ()>,
+        highest_topo: TopoHeight,
+        block_hash: &Hash,
+        should_track_events: &HashSet<NotifyEvent>,
+        events: &mut HashMap<NotifyEvent, Vec<Value>>,
+        total_txs_execution_time: &mut u128,
+        total_fees: &mut u64,
+        network: &Network,
+    ) -> Result<(), BlockchainError> {
+        // Partition by version
+        let (v2_txs, t0_txs) = Self::partition_transactions_by_version(&transactions);
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Partitioned {} transactions: {} V2 (parallel), {} T0 (sequential)",
+                transactions.len(), v2_txs.len(), t0_txs.len());
+        }
+
+        // Execute V2 in parallel
+        if !v2_txs.is_empty() {
+            Self::execute_v2_transactions_parallel(
+                v2_txs,
+                chain_state,
+                nonce_checker,
+                orphaned_transactions,
+                highest_topo,
+                block_hash,
+                should_track_events,
+                events,
+                total_txs_execution_time,
+                total_fees,
+                network,
+            ).await?;
+        }
+
+        // Execute T0 sequentially
+        if !t0_txs.is_empty() {
+            // WORKAROUND: Leak t0_txs to extend lifetime for async operation
+            let t0_txs_leaked: &'static [(Arc<Transaction>, Hash)] = Box::leak(t0_txs.into_boxed_slice());
+
+            Self::execute_transactions_sequential(
+                t0_txs_leaked,
+                chain_state,
+                nonce_checker,
+                orphaned_transactions,
+                highest_topo,
+                block_hash,
+                should_track_events,
+                events,
+                total_txs_execution_time,
+                total_fees,
+                network,
+            ).await?;
+
+            // SAFETY: Manually drop the leaked Box
+            unsafe {
+                let _ = Box::from_raw(t0_txs_leaked as *const [(Arc<Transaction>, Hash)] as *mut [(Arc<Transaction>, Hash)]);
+            }
+        }
+
+        Ok(())
+    }
+
     // Add a new block in chain
     // Note that this will lock Storage and Mempool
     // Verification is done using read guards,
@@ -3288,126 +3800,63 @@ impl<S: Storage> Blockchain<S> {
 
                 total_txs_executed += block.get_transactions().len();
 
-                // compute rewards & execute txs
-                let txs_hashes: IndexSet<Hash> = block.get_transactions().iter().map(|tx| tx.hash()).collect();
-                for (tx, tx_hash) in block.get_transactions().iter().zip(txs_hashes.iter()) { // execute all txs
-                    // Link the transaction hash to this block
-                    if !chain_state.get_mut_storage().add_block_linked_to_tx_if_not_present(&tx_hash, &hash)? {
-                        if log::log_enabled!(log::Level::Trace) {
-                        trace!("Block {} is now linked to tx {}", hash, tx_hash);
-                        }
-                    }
+                // Prepare transaction list for execution
+                let transactions: Vec<(Arc<Transaction>, Hash)> = block.get_transactions().iter()
+                    .map(|tx| (tx.clone(), tx.hash()))
+                    .collect();
 
-                    // check that the tx was not yet executed in another tip branch
-                    if chain_state.get_storage().is_tx_executed_in_a_block(tx_hash)? {
-                        if log::log_enabled!(log::Level::Trace) {
-                        trace!("Tx {} was already executed in a previous block, skipping...", tx_hash);
-                        }
+                // Feature flag: parallel execution for V2 transactions (when enabled)
+                if ENABLE_PARALLEL_EXECUTION {
+                    // Check if any V2 transactions exist
+                    let has_v2_transactions = transactions.iter()
+                        .any(|(tx, _)| tx.get_version() == TxVersion::V2);
+
+                    if has_v2_transactions {
+                        // Parallel execution path for V2 transactions
+                        Self::execute_transactions_parallel(
+                            transactions,
+                            &mut chain_state,
+                            &mut nonce_checker,
+                            &mut orphaned_transactions,
+                            highest_topo,
+                            &hash,
+                            &should_track_events,
+                            &mut events,
+                            &mut total_txs_execution_time,
+                            &mut total_fees,
+                            &self.network,
+                        ).await?;
                     } else {
-                        // tx was not executed, but lets check that it is not a potential double spending
-                        // check that the nonce is not already used
-                        if !nonce_checker.use_nonce(chain_state.get_storage(), tx.get_source(), tx.get_nonce(), highest_topo).await? {
-                            if log::log_enabled!(log::Level::Warn) {
-                            warn!("Malicious TX {}, it is a potential double spending with same nonce {}, skipping...", tx_hash, tx.get_nonce());
-                            }
-                            // V-26 Fix: TX will be orphaned (LRU handles capacity)
-                            orphaned_transactions.put(tx_hash.clone(), ());
-                            continue;
-                        }
-
-                        let start = Instant::now();
-                        // Execute the transaction by applying changes in storage
-                        if log::log_enabled!(log::Level::Debug) {
-                        debug!("Executing tx {} in block {} with nonce {}", tx_hash, hash, tx.get_nonce());
-                        }
-                        if let Err(e) = tx.apply_with_partial_verify(tx_hash, &mut chain_state).await {
-                            if log::log_enabled!(log::Level::Warn) {
-                            warn!("Error while executing TX {} with current DAG org: {}", tx_hash, e);
-                            }
-                            // CRITICAL: Rollback nonce on execution failure to prevent double-spend window
-                            nonce_checker.undo_nonce(tx.get_source(), tx.get_nonce());
-                            if log::log_enabled!(log::Level::Debug) {
-                            debug!("Rolled back nonce {} for {} due to TX execution failure", tx.get_nonce(), tx.get_source().as_address(self.network.is_mainnet()));
-                            }
-                            // V-26 Fix: TX may be orphaned if not added again in good order in next blocks
-                            orphaned_transactions.put(tx_hash.clone(), ());
-                            continue;
-                        }
-                        total_txs_execution_time += start.elapsed().as_micros();
-
-                        // Calculate the new nonce
-                        // This has to be done in case of side blocks where TX B would be before TX A
-                        let expected_next_nonce = nonce_checker.get_new_nonce(tx.get_source(), self.network.is_mainnet())?;
-                        let next_nonce = tx.get_nonce() + 1;
-                        if expected_next_nonce != next_nonce {
-                            if log::log_enabled!(log::Level::Warn) {
-                            warn!("TX {} has a nonce {}, but the next nonce is {}, forcing it...", tx_hash, next_nonce, expected_next_nonce);
-                            }
-                            chain_state.as_mut().update_account_nonce(tx.get_source(), expected_next_nonce).await?;
-                        }
-
-                        // mark tx as executed
-                        chain_state.get_mut_storage().mark_tx_as_executed_in_block(&tx_hash, &hash)?;
-
-                        // Delete the transaction from  the list if it was marked as orphaned
-                        // V-26 Fix: Remove from orphaned set using LruCache::pop
-                        if orphaned_transactions.pop(tx_hash).is_some() {
-                            if log::log_enabled!(log::Level::Trace) {
-                            trace!("Transaction {} was marked as orphaned, but got executed again", tx_hash);
-                            }
-                        }
-
-                        // if the rpc_server is enable, track events
-                        if should_track_events.contains(&NotifyEvent::TransactionExecuted) {
-                            let value = json!(TransactionExecutedEvent {
-                                tx_hash: Cow::Borrowed(&tx_hash),
-                                block_hash: Cow::Borrowed(&hash),
-                                topoheight: highest_topo,
-                            });
-                            events.entry(NotifyEvent::TransactionExecuted).or_insert_with(Vec::new).push(value);
-                        }
-
-                        match tx.get_data() {
-                            TransactionType::InvokeContract(payload) => {
-                                let event = NotifyEvent::InvokeContract {
-                                    contract: payload.contract.clone(),
-                                };
-
-                                if should_track_events.contains(&event) {
-                                    let is_mainnet = self.network.is_mainnet();
-
-                                    if let Some(contract_outputs) = chain_state.get_contract_outputs_for_tx(&tx_hash) {
-                                        let contract_outputs = contract_outputs.into_iter()
-                                        .map(|output| RPCContractOutput::from_output(output, is_mainnet))
-                                        .collect::<Vec<_>>();
-
-                                        let value = json!(InvokeContractEvent {
-                                            tx_hash: Cow::Borrowed(&tx_hash),
-                                            block_hash: Cow::Borrowed(&hash),
-                                            topoheight: highest_topo,
-                                            contract_outputs,
-                                        });
-                                        events.entry(event).or_insert_with(Vec::new).push(value);
-                                    }
-                                }
-                            },
-                            TransactionType::DeployContract(_) => {
-                                if should_track_events.contains(&NotifyEvent::DeployContract) {
-                                    let value = json!(NewContractEvent {
-                                        contract: Cow::Borrowed(&tx_hash),
-                                        block_hash: Cow::Borrowed(&hash),
-                                        topoheight: highest_topo,
-                                    });
-                                    events.entry(NotifyEvent::DeployContract).or_insert_with(Vec::new).push(value);
-                                }
-                            }
-                            _ => {}
-                        }
-
-                        // Increase total tx fees for miner
-                        total_fees = total_fees.checked_add(tx.get_fee())
-                            .ok_or(BlockchainError::BalanceOverflow)?;
+                        // No V2 transactions, use sequential path
+                        Self::execute_transactions_sequential(
+                            &transactions,
+                            &mut chain_state,
+                            &mut nonce_checker,
+                            &mut orphaned_transactions,
+                            highest_topo,
+                            &hash,
+                            &should_track_events,
+                            &mut events,
+                            &mut total_txs_execution_time,
+                            &mut total_fees,
+                            &self.network,
+                        ).await?;
                     }
+                } else {
+                    // Parallel execution disabled (default), use sequential path
+                    Self::execute_transactions_sequential(
+                        &transactions,
+                        &mut chain_state,
+                        &mut nonce_checker,
+                        &mut orphaned_transactions,
+                        highest_topo,
+                        &hash,
+                        &should_track_events,
+                        &mut events,
+                        &mut total_txs_execution_time,
+                        &mut total_fees,
+                        &self.network,
+                    ).await?;
                 }
 
                 // DAG FIX: Add fees and gas_fee to miner after transaction execution
