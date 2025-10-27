@@ -68,6 +68,14 @@ pub const TIMESTAMP_IN_FUTURE_LIMIT: TimestampSeconds = 10_000;
 // Using LRU eviction, oldest transactions are dropped when limit is reached
 pub const MAX_ORPHANED_TRANSACTIONS: usize = 10_000;
 
+// Parallel Execution Configuration
+// Enable parallel transaction execution (V3 implementation)
+pub const PARALLEL_EXECUTION_ENABLED: bool = false; // Default: disabled for safety
+// Enable parallel testing mode (run parallel alongside sequential, compare results)
+pub const PARALLEL_EXECUTION_TEST_MODE: bool = false; // Default: disabled
+// Minimum transactions required to trigger parallel execution (avoid overhead on small blocks)
+pub const MIN_TXS_FOR_PARALLEL: usize = 20; // Parallel execution only benefits large batches
+
 // keep at least last N blocks until top topoheight when pruning the chain
 // WARNING: This must be at least 50 blocks for difficulty adjustement
 pub const PRUNE_SAFETY_LIMIT: u64 = STABLE_LIMIT * 10;

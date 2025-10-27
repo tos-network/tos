@@ -527,6 +527,53 @@ impl<S: Storage> ParallelChainState<S> {
 
         Ok(())
     }
+
+    // Getter methods for merging parallel execution results
+
+    /// Get all modified account nonces
+    /// Returns iterator of (PublicKey, new_nonce)
+    pub fn get_modified_nonces(&self) -> Vec<(PublicKey, u64)> {
+        self.accounts.iter()
+            .map(|entry| (entry.key().clone(), entry.value().nonce))
+            .collect()
+    }
+
+    /// Get all modified balances
+    /// Returns iterator of ((PublicKey, Asset), new_balance)
+    pub fn get_modified_balances(&self) -> Vec<((PublicKey, Hash), u64)> {
+        let mut result = Vec::new();
+
+        // Collect from accounts cache
+        for entry in self.accounts.iter() {
+            let account = entry.key();
+            for (asset, balance) in &entry.value().balances {
+                result.push(((account.clone(), asset.clone()), *balance));
+            }
+        }
+
+        // Collect from balances cache
+        for entry in self.balances.iter() {
+            let account = entry.key();
+            for (asset, balance) in entry.value().iter() {
+                result.push(((account.clone(), asset.clone()), *balance));
+            }
+        }
+
+        result
+    }
+
+    /// Get multisig configurations that were modified
+    pub fn get_modified_multisigs(&self) -> Vec<(PublicKey, Option<MultiSigPayload>)> {
+        self.accounts.iter()
+            .filter_map(|entry| {
+                if entry.value().multisig.is_some() {
+                    Some((entry.key().clone(), entry.value().multisig.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
