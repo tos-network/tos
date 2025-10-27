@@ -9,6 +9,7 @@ use std::{
     },
     marker::PhantomData,
 };
+use tokio::sync::RwLock;
 use dashmap::DashMap;
 use tos_common::{
     block::{BlockVersion, TopoHeight},
@@ -70,8 +71,9 @@ pub struct TransactionResult {
 /// Uses DashMap for automatic per-account locking and Arc for easy cloning
 /// Generic over Storage type to avoid dyn compatibility issues
 pub struct ParallelChainState<S: Storage> {
-    // Storage reference (owned Arc)
-    storage: Arc<S>,
+    // Storage reference with RwLock for interior mutability (Solana pattern)
+    // Arc<RwLock<S>> enables sharing storage across parallel executors
+    storage: Arc<RwLock<S>>,
 
     // PhantomData to ensure S is used
     _phantom: PhantomData<S>,
@@ -96,6 +98,9 @@ pub struct ParallelChainState<S: Storage> {
     #[allow(dead_code)]
     block_version: BlockVersion,
 
+    // Cached network info (to avoid repeated lock acquisition)
+    is_mainnet: bool,
+
     // Accumulated results (atomic for thread-safety)
     burned_supply: AtomicU64,
     gas_fee: AtomicU64,
@@ -104,12 +109,15 @@ pub struct ParallelChainState<S: Storage> {
 impl<S: Storage> ParallelChainState<S> {
     /// Create new state for parallel execution
     pub async fn new(
-        storage: Arc<S>,
+        storage: Arc<RwLock<S>>,
         environment: Arc<Environment>,
         stable_topoheight: TopoHeight,
         topoheight: TopoHeight,
         block_version: BlockVersion,
     ) -> Arc<Self> {
+        // Cache network info to avoid repeated lock acquisition
+        let is_mainnet = storage.read().await.is_mainnet();
+
         Arc::new(Self {
             storage,
             _phantom: PhantomData,
@@ -120,6 +128,7 @@ impl<S: Storage> ParallelChainState<S> {
             stable_topoheight,
             topoheight,
             block_version,
+            is_mainnet,
             burned_supply: AtomicU64::new(0),
             gas_fee: AtomicU64::new(0),
         })
@@ -145,17 +154,18 @@ impl<S: Storage> ParallelChainState<S> {
         }
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Loading account state from storage for {}", key.as_address(self.storage.is_mainnet()));
+            trace!("Loading account state from storage for {}", key.as_address(self.is_mainnet));
         }
 
-        // Load nonce from storage (at or before current topoheight)
-        let nonce = match self.storage.get_nonce_at_maximum_topoheight(key, self.topoheight).await? {
+        // Acquire read lock and load nonce from storage
+        let storage = self.storage.read().await;
+        let nonce = match storage.get_nonce_at_maximum_topoheight(key, self.topoheight).await? {
             Some((_, versioned_nonce)) => versioned_nonce.get_nonce(),
             None => 0, // New account
         };
 
-        // Load multisig state from storage
-        let multisig = match self.storage.get_multisig_at_maximum_topoheight_for(key, self.topoheight).await? {
+        // Load multisig state from storage (reuse the same lock)
+        let multisig = match storage.get_multisig_at_maximum_topoheight_for(key, self.topoheight).await? {
             Some((_, versioned_multisig)) => {
                 // Extract the inner Option<MultiSigPayload> from VersionedMultiSig
                 // VersionedMultiSig is Versioned<Option<Cow<'a, MultiSigPayload>>>
@@ -163,6 +173,8 @@ impl<S: Storage> ParallelChainState<S> {
             }
             None => None,
         };
+        // Drop lock before inserting into cache
+        drop(storage);
 
         // Insert into cache
         self.accounts.insert(key.clone(), AccountState {
@@ -194,14 +206,17 @@ impl<S: Storage> ParallelChainState<S> {
 
         if log::log_enabled!(log::Level::Trace) {
             trace!("Loading balance from storage for {} asset {}",
-                   account.as_address(self.storage.is_mainnet()), asset);
+                   account.as_address(self.is_mainnet), asset);
         }
 
-        // Load balance from storage (at or before current topoheight)
-        let balance = match self.storage.get_balance_at_maximum_topoheight(account, asset, self.topoheight).await? {
+        // Acquire read lock and load balance from storage
+        let storage = self.storage.read().await;
+        let balance = match storage.get_balance_at_maximum_topoheight(account, asset, self.topoheight).await? {
             Some((_, versioned_balance)) => versioned_balance.get_balance(),
             None => 0, // No balance for this asset
         };
+        // Drop lock before modifying cache
+        drop(storage);
 
         // Insert balance into account's balance map
         if let Some(mut account_entry) = self.accounts.get_mut(account) {
@@ -223,7 +238,7 @@ impl<S: Storage> ParallelChainState<S> {
 
         if log::log_enabled!(log::Level::Debug) {
             debug!("Applying transaction {} from {} at topoheight {}",
-                   tx_hash, source.as_address(self.storage.is_mainnet()), self.topoheight);
+                   tx_hash, source.as_address(self.is_mainnet), self.topoheight);
         }
 
         // Load account state from storage if not cached
@@ -316,7 +331,7 @@ impl<S: Storage> ParallelChainState<S> {
         use log::{debug, trace};
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Applying {} transfers from {}", transfers.len(), source.as_address(self.storage.is_mainnet()));
+            trace!("Applying {} transfers from {}", transfers.len(), source.as_address(self.is_mainnet));
         }
 
         for transfer in transfers {
@@ -333,17 +348,17 @@ impl<S: Storage> ParallelChainState<S> {
                 let src_balance = account.balances.get_mut(asset)
                     .ok_or_else(|| {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("Source {} has no balance for asset {}", source.as_address(self.storage.is_mainnet()), asset);
+                            debug!("Source {} has no balance for asset {}", source.as_address(self.is_mainnet), asset);
                         }
-                        BlockchainError::NoBalance(source.as_address(self.storage.is_mainnet()))
+                        BlockchainError::NoBalance(source.as_address(self.is_mainnet))
                     })?;
 
                 if *src_balance < amount {
                     if log::log_enabled!(log::Level::Debug) {
                         debug!("Insufficient funds: source {} has {} but needs {} for asset {}",
-                               source.as_address(self.storage.is_mainnet()), src_balance, amount, asset);
+                               source.as_address(self.is_mainnet), src_balance, amount, asset);
                     }
-                    return Err(BlockchainError::NoBalance(source.as_address(self.storage.is_mainnet())));
+                    return Err(BlockchainError::NoBalance(source.as_address(self.is_mainnet)));
                 }
 
                 *src_balance -= amount;
@@ -358,8 +373,8 @@ impl<S: Storage> ParallelChainState<S> {
 
             if log::log_enabled!(log::Level::Trace) {
                 trace!("Transferred {} of asset {} from {} to {}",
-                       amount, asset, source.as_address(self.storage.is_mainnet()),
-                       destination.as_address(self.storage.is_mainnet()));
+                       amount, asset, source.as_address(self.is_mainnet),
+                       destination.as_address(self.is_mainnet));
             }
         }
 
@@ -378,7 +393,7 @@ impl<S: Storage> ParallelChainState<S> {
         let amount = payload.amount;
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Burning {} of asset {} from {}", amount, asset, source.as_address(self.storage.is_mainnet()));
+            trace!("Burning {} of asset {} from {}", amount, asset, source.as_address(self.is_mainnet));
         }
 
         // Load source balance from storage if not cached
@@ -388,14 +403,14 @@ impl<S: Storage> ParallelChainState<S> {
         {
             let mut account = self.accounts.get_mut(source).unwrap();
             let src_balance = account.balances.get_mut(asset)
-                .ok_or_else(|| BlockchainError::NoBalance(source.as_address(self.storage.is_mainnet())))?;
+                .ok_or_else(|| BlockchainError::NoBalance(source.as_address(self.is_mainnet)))?;
 
             if *src_balance < amount {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Insufficient funds for burn: source {} has {} but needs {}",
-                           source.as_address(self.storage.is_mainnet()), src_balance, amount);
+                           source.as_address(self.is_mainnet), src_balance, amount);
                 }
-                return Err(BlockchainError::NoBalance(source.as_address(self.storage.is_mainnet())));
+                return Err(BlockchainError::NoBalance(source.as_address(self.is_mainnet)));
             }
 
             *src_balance -= amount;
@@ -405,7 +420,7 @@ impl<S: Storage> ParallelChainState<S> {
         self.burned_supply.fetch_add(amount, Ordering::Relaxed);
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Burned {} of asset {} from {}", amount, asset, source.as_address(self.storage.is_mainnet()));
+            debug!("Burned {} of asset {} from {}", amount, asset, source.as_address(self.is_mainnet));
         }
 
         Ok(())
@@ -514,7 +529,7 @@ impl<S: Storage> ParallelChainState<S> {
 
         if log::log_enabled!(log::Level::Debug) {
             debug!("Rewarding miner {} with {} TOS at topoheight {}",
-                   miner.as_address(self.storage.is_mainnet()),
+                   miner.as_address(self.is_mainnet),
                    tos_common::utils::format_tos(reward),
                    self.topoheight);
         }
