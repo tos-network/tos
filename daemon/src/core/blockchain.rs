@@ -85,7 +85,7 @@ use crate::{
         MILLIS_PER_SECOND, SIDE_BLOCK_REWARD_MAX_BLOCKS, PRUNE_SAFETY_LIMIT,
         SIDE_BLOCK_REWARD_PERCENT, SIDE_BLOCK_REWARD_MIN_PERCENT, STABLE_LIMIT,
         TIMESTAMP_IN_FUTURE_LIMIT, DEFAULT_CACHE_SIZE, MAX_ORPHANED_TRANSACTIONS,
-        PARALLEL_EXECUTION_ENABLED, MIN_TXS_FOR_PARALLEL,
+        PARALLEL_EXECUTION_ENABLED, get_min_txs_for_parallel,
     },
     core::{
         config::Config,
@@ -3295,18 +3295,22 @@ impl<S: Storage> Blockchain<S> {
                 // PARALLEL EXECUTION INTEGRATION POINT (Phase 3)
                 // ============================================================================
                 // Hybrid execution: Use parallel execution for large batches, sequential for small batches
-                // Controlled by PARALLEL_EXECUTION_ENABLED flag and MIN_TXS_FOR_PARALLEL threshold
+                // Controlled by PARALLEL_EXECUTION_ENABLED flag and network-specific threshold
+                // Thresholds: Mainnet=20, Testnet=10, Devnet=4
                 // ============================================================================
 
                 // Collect transaction hashes first (needed for both paths)
                 let txs_hashes: IndexSet<Hash> = block.get_transactions().iter().map(|tx| tx.hash()).collect();
 
                 // Decide execution path based on batch size and feature flag
-                if self.should_use_parallel_execution(block.get_transactions().len()) {
+                let tx_count = block.get_transactions().len();
+                let min_txs_threshold = get_min_txs_for_parallel(&self.network);
+
+                if self.should_use_parallel_execution(tx_count) {
                     // ===== PARALLEL EXECUTION PATH =====
                     if log::log_enabled!(log::Level::Info) {
-                        info!("Using parallel execution for {} transactions in block {}",
-                              block.get_transactions().len(), hash);
+                        info!("Using parallel execution for {} transactions in block {} (threshold: {})",
+                              tx_count, hash, min_txs_threshold);
                     }
 
                     // Execute transactions in parallel
@@ -4339,12 +4343,13 @@ impl<S: Storage> Blockchain<S> {
     ///
     /// Criteria:
     /// 1. Feature flag enabled (PARALLEL_EXECUTION_ENABLED)
-    /// 2. Batch size >= MIN_TXS_FOR_PARALLEL
+    /// 2. Batch size >= network-specific threshold (Mainnet: 20, Testnet: 10, Devnet: 4)
     ///
     /// Returns true if parallel execution should be used, false for sequential execution
     #[allow(dead_code)]
     fn should_use_parallel_execution(&self, tx_count: usize) -> bool {
-        PARALLEL_EXECUTION_ENABLED && tx_count >= MIN_TXS_FOR_PARALLEL
+        let min_txs = get_min_txs_for_parallel(&self.network);
+        PARALLEL_EXECUTION_ENABLED && tx_count >= min_txs
     }
 
     /// Execute transactions in parallel using V3 architecture

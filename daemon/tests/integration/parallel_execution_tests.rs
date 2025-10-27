@@ -139,30 +139,57 @@ async fn test_parallel_executor_with_custom_parallelism() {
 
 #[tokio::test]
 async fn test_should_use_parallel_execution_threshold() {
-    // Test threshold logic for parallel execution
-    use tos_daemon::config::{PARALLEL_EXECUTION_ENABLED, MIN_TXS_FOR_PARALLEL};
-
-    // Simulate should_use_parallel_execution logic
-    let should_use = |tx_count: usize| -> bool {
-        PARALLEL_EXECUTION_ENABLED && tx_count >= MIN_TXS_FOR_PARALLEL
+    // Test threshold logic for parallel execution with network-specific thresholds
+    use tos_common::network::Network;
+    use tos_daemon::config::{
+        PARALLEL_EXECUTION_ENABLED,
+        get_min_txs_for_parallel,
+        MIN_TXS_FOR_PARALLEL_MAINNET,
+        MIN_TXS_FOR_PARALLEL_TESTNET,
+        MIN_TXS_FOR_PARALLEL_DEVNET,
     };
 
-    // Test below threshold (should be false regardless of flag)
-    assert_eq!(should_use(0), false, "Empty batch should not use parallel");
-    assert_eq!(should_use(1), false, "Single tx should not use parallel");
-    assert_eq!(should_use(10), false, "10 txs should not use parallel");
-    assert_eq!(should_use(19), false, "19 txs (below threshold) should not use parallel");
+    // Test network-specific thresholds
+    assert_eq!(get_min_txs_for_parallel(&Network::Mainnet), MIN_TXS_FOR_PARALLEL_MAINNET);
+    assert_eq!(get_min_txs_for_parallel(&Network::Testnet), MIN_TXS_FOR_PARALLEL_TESTNET);
+    assert_eq!(get_min_txs_for_parallel(&Network::Devnet), MIN_TXS_FOR_PARALLEL_DEVNET);
 
-    // Test at threshold (MIN_TXS_FOR_PARALLEL = 20)
-    // Result depends on PARALLEL_EXECUTION_ENABLED flag
-    let expected_at_threshold = PARALLEL_EXECUTION_ENABLED;
-    assert_eq!(should_use(20), expected_at_threshold, "20 txs (at threshold) behavior");
-    assert_eq!(should_use(50), expected_at_threshold, "50 txs (above threshold) behavior");
-    assert_eq!(should_use(100), expected_at_threshold, "100 txs (above threshold) behavior");
+    // Test devnet threshold (lowest, for easier testing)
+    let devnet_threshold = get_min_txs_for_parallel(&Network::Devnet);
+    let should_use_devnet = |tx_count: usize| -> bool {
+        PARALLEL_EXECUTION_ENABLED && tx_count >= devnet_threshold
+    };
 
-    // Verify threshold constant is reasonable
-    assert!(MIN_TXS_FOR_PARALLEL >= 10, "Threshold should be >= 10 to avoid overhead");
-    assert!(MIN_TXS_FOR_PARALLEL <= 100, "Threshold should be <= 100 for practical benefit");
+    assert_eq!(should_use_devnet(0), false, "Empty batch should not use parallel");
+    assert_eq!(should_use_devnet(1), false, "Single tx should not use parallel");
+    assert_eq!(should_use_devnet(3), false, "Below devnet threshold should not use parallel");
+
+    let expected = PARALLEL_EXECUTION_ENABLED;
+    assert_eq!(should_use_devnet(4), expected, "At devnet threshold (4)");
+    assert_eq!(should_use_devnet(10), expected, "Above devnet threshold");
+
+    // Test mainnet threshold (highest, for production)
+    let mainnet_threshold = get_min_txs_for_parallel(&Network::Mainnet);
+    let should_use_mainnet = |tx_count: usize| -> bool {
+        PARALLEL_EXECUTION_ENABLED && tx_count >= mainnet_threshold
+    };
+
+    assert_eq!(should_use_mainnet(10), false, "Below mainnet threshold");
+    assert_eq!(should_use_mainnet(19), false, "Below mainnet threshold");
+    assert_eq!(should_use_mainnet(20), expected, "At mainnet threshold (20)");
+    assert_eq!(should_use_mainnet(100), expected, "Above mainnet threshold");
+
+    // Verify threshold constants are reasonable
+    assert!(MIN_TXS_FOR_PARALLEL_DEVNET >= 2, "Devnet threshold should be >= 2");
+    assert!(MIN_TXS_FOR_PARALLEL_DEVNET <= 10, "Devnet threshold should be <= 10 for testing");
+    assert!(MIN_TXS_FOR_PARALLEL_TESTNET >= 5, "Testnet threshold should be >= 5");
+    assert!(MIN_TXS_FOR_PARALLEL_TESTNET <= 20, "Testnet threshold should be <= 20");
+    assert!(MIN_TXS_FOR_PARALLEL_MAINNET >= 10, "Mainnet threshold should be >= 10 to avoid overhead");
+    assert!(MIN_TXS_FOR_PARALLEL_MAINNET <= 100, "Mainnet threshold should be <= 100 for practical benefit");
+
+    // Verify ordering: devnet < testnet < mainnet
+    assert!(MIN_TXS_FOR_PARALLEL_DEVNET < MIN_TXS_FOR_PARALLEL_TESTNET, "Devnet < Testnet");
+    assert!(MIN_TXS_FOR_PARALLEL_TESTNET < MIN_TXS_FOR_PARALLEL_MAINNET, "Testnet < Mainnet");
 }
 
 #[tokio::test]

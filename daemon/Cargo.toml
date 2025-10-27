@@ -34,6 +34,8 @@ humantime = "2.1.0"
 human_bytes = "0.4.2"
 tokio-socks = "0.5.2"
 num_cpus = "1.16"
+reqwest = { version = "0.12", features = ["json"] }
+env_logger = "0.11"
 
 # GHOSTDAG dependencies (TIP-2 Phase 1)
 primitive-types = { version = "0.12", features = ["serde"] }
@@ -67,6 +69,18 @@ path = "src/lib.rs"
 name = "tps_benchmark"
 path = "benches/transaction_throughput.rs"
 
+[[bin]]
+name = "tx_generator"
+path = "tests/tools/tx_generator.rs"
+
+[[bin]]
+name = "setup_test_accounts"
+path = "tests/tools/setup_test_accounts.rs"
+
+[[bin]]
+name = "distribute_funds"
+path = "tests/tools/distribute_funds.rs"
+
 [dev-dependencies]
 tempdir = "*"
 criterion = "0.6.0"
@@ -75,4 +89,8 @@ sysinfo = "0.32"
 
 [[bench]]
 name = "tps"
+harness = false
+
+[[bench]]
+name = "parallel_execution"
 harness = false

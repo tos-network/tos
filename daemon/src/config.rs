@@ -70,11 +70,31 @@ pub const MAX_ORPHANED_TRANSACTIONS: usize = 10_000;
 
 // Parallel Execution Configuration
 // Enable parallel transaction execution (V3 implementation)
-pub const PARALLEL_EXECUTION_ENABLED: bool = false; // Default: disabled for safety
+pub const PARALLEL_EXECUTION_ENABLED: bool = true; // DEVNET TESTING: Enabled for performance validation
 // Enable parallel testing mode (run parallel alongside sequential, compare results)
 pub const PARALLEL_EXECUTION_TEST_MODE: bool = false; // Default: disabled
+
 // Minimum transactions required to trigger parallel execution (avoid overhead on small blocks)
-pub const MIN_TXS_FOR_PARALLEL: usize = 20; // Parallel execution only benefits large batches
+// Network-specific thresholds for different use cases:
+pub const MIN_TXS_FOR_PARALLEL_MAINNET: usize = 20;  // Production: Higher threshold for proven performance
+pub const MIN_TXS_FOR_PARALLEL_TESTNET: usize = 10;  // Testing: Medium threshold for realistic testing
+pub const MIN_TXS_FOR_PARALLEL_DEVNET: usize = 4;    // Development: Lower threshold for easier testing
+
+/// Get minimum transaction count for parallel execution based on network type
+///
+/// # Arguments
+/// * `network` - The network type (Mainnet, Testnet, Devnet, Stagenet)
+///
+/// # Returns
+/// Minimum number of transactions required to trigger parallel execution
+pub fn get_min_txs_for_parallel(network: &Network) -> usize {
+    match network {
+        Network::Mainnet => MIN_TXS_FOR_PARALLEL_MAINNET,
+        Network::Testnet => MIN_TXS_FOR_PARALLEL_TESTNET,
+        Network::Devnet => MIN_TXS_FOR_PARALLEL_DEVNET,
+        Network::Stagenet => MIN_TXS_FOR_PARALLEL_TESTNET, // Use testnet threshold for stagenet
+    }
+}
 
 // keep at least last N blocks until top topoheight when pruning the chain
 // WARNING: This must be at least 50 blocks for difficulty adjustement
