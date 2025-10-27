@@ -172,30 +172,26 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
 
     /// Get the balance for a sender account (used for spending verification)
     ///
-    /// PHASE 1 LIMITATION: This implementation does NOT perform full reference validation
-    /// that search_versioned_balance_for_reference() provides in sequential execution.
+    /// PHASE 2 COMPLETE: Full reference validation with anti-front-running logic.
     ///
-    /// Why: Full reference validation requires mutable storage access to:
-    /// - Query DAG topology (is_block_topological_ordered, get_topo_height_for_hash)
-    /// - Check pruned state (get_pruned_topoheight)
-    /// - Implement anti-front-running scenarios A-D
+    /// This implementation uses read-only storage queries to perform the same validation
+    /// as sequential execution's search_versioned_balance_for_reference():
+    /// - Scenario A: TX references previous block → use final balance
+    /// - Scenario B: TX references old block, received funds after → use reference balance
+    /// - Scenario C: TX references old block, sent TX after → use output balance if available
+    /// - Scenario D: Multiple TXs after reference → use output balance
     ///
-    /// Doing this from parallel tasks creates race conditions on storage.
-    ///
-    /// SAFE USAGE: Phase 1 parallel execution should ONLY process transactions where:
-    /// - All transactions reference the same parent block (reference.hash == block.parent)
-    /// - No complex output balance dependencies across parallel transactions
-    ///
-    /// For transactions requiring complex reference validation, the executor must
-    /// fall back to sequential execution.
+    /// SAFETY: Read-only queries (via RwLock::read()) are safe in parallel execution.
+    /// Multiple tasks can hold read locks simultaneously without race conditions.
     async fn get_sender_balance<'b>(
         &'b mut self,
         account: &'a PublicKey,
         asset: &'a Hash,
         reference: &Reference,
     ) -> Result<&'b mut u64, BlockchainError> {
-        // PHASE 1: Simple validation - check reference matches current block topoheight
-        // This catches obvious stale references while avoiding storage queries
+        use log::trace;
+
+        // Basic validation first
         let current_topo = self.parallel_state.get_topoheight();
         if reference.topoheight > current_topo {
             return Err(BlockchainError::InvalidReferenceTopoheight(
@@ -204,10 +200,43 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
             ));
         }
 
-        // For Phase 1, we use current balance without output balance logic
-        // This is safe for same-block references but may allow front-running for old references
-        // TODO Phase 2: Implement read-only storage snapshot for full reference validation
-        self.get_receiver_balance(Cow::Borrowed(account), Cow::Borrowed(asset)).await
+        // Acquire read lock for reference validation queries
+        let storage_guard = self.storage.read().await;
+
+        // Call the shared reference validation helper (same as sequential path)
+        // This performs anti-front-running scenarios A-D
+        let (use_output_balance, new_version, versioned_balance) =
+            super::search_versioned_balance_for_reference(
+                &*storage_guard,
+                account,
+                asset,
+                current_topo,
+                reference,
+                false,  // no_new = false (we may create new versions)
+            ).await?;
+
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Reference validation for {}: use_output={}, new_version={}, balance={}",
+                   account.as_address(storage_guard.is_mainnet()),
+                   use_output_balance,
+                   new_version,
+                   versioned_balance.get_balance());
+        }
+
+        // Release storage lock before modifying balance cache
+        drop(storage_guard);
+
+        // Extract the validated balance using the correct VersionedBalance API
+        // take_balance_with(use_output_balance) returns output_balance if use_output_balance=true and output exists,
+        // otherwise returns final_balance
+        let validated_balance = versioned_balance.take_balance_with(use_output_balance);
+
+        // Cache the validated balance
+        let key = (account.clone(), asset.clone());
+        self.balance_reads.insert(key.clone(), validated_balance);
+
+        // Return mutable reference to cached value
+        Ok(self.balance_reads.get_mut(&key).unwrap())
     }
 
     /// Track sender output (spending) for final balance verification
