@@ -668,15 +668,11 @@ impl<S: Storage> ParallelChainState<S> {
     }
 
     /// Get multisig configurations that were modified
+    /// SECURITY FIX #7: Return ALL accounts including None (deletions)
+    /// Previously filtered out None, causing multisig deletions to be lost
     pub fn get_modified_multisigs(&self) -> Vec<(PublicKey, Option<MultiSigPayload>)> {
         self.accounts.iter()
-            .filter_map(|entry| {
-                if entry.value().multisig.is_some() {
-                    Some((entry.key().clone(), entry.value().multisig.clone()))
-                } else {
-                    None
-                }
-            })
+            .map(|entry| (entry.key().clone(), entry.value().multisig.clone()))
             .collect()
     }
 }
