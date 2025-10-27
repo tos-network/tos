@@ -124,6 +124,34 @@ where
     interactive_fn().await.map_err(|e| e.into())
 }
 
+/// Get a required argument with usage example for better error messages
+async fn get_required_arg_with_example<F, Fut>(
+    args: &mut ArgumentManager,
+    name: &str,
+    manager: &CommandManager,
+    usage: &str,
+    example: &str,
+    interactive_fn: F
+) -> Result<String, CommandError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<String, PromptError>>,
+{
+    if args.has_argument(name) {
+        return Ok(args.get_value(name)?.to_string_value()?);
+    }
+
+    if manager.is_batch_mode() {
+        return Err(CommandError::MissingRequiredArgumentWithExample {
+            arg: name.to_string(),
+            usage: usage.to_string(),
+            example: example.to_string(),
+        });
+    }
+
+    interactive_fn().await.map_err(|e| e.into())
+}
+
 /// Get an optional argument from CLI or prompt in interactive mode
 async fn get_optional_arg<F, Fut>(
     args: &mut ArgumentManager,
@@ -817,6 +845,11 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
             vec![Arg::new("topoheight", ArgType::Number, "Starting topoheight for rescan (default: 0)")],
             CommandHandler::Async(async_handler!(rescan))
         ))?;
+        command_manager.add_command(Command::new(
+            "sync_status",
+            "Show wallet synchronization status with daemon",
+            CommandHandler::Async(async_handler!(sync_status))
+        ))?;
     }
 
     #[cfg(feature = "api_server")]
@@ -967,6 +1000,14 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "Register as an AI miner",
         vec![Arg::new("fee", ArgType::Number, "Registration fee amount")],
         CommandHandler::Async(async_handler!(register_miner))
+    ))?;
+
+    // Help command for detailed command information
+    command_manager.add_command(Command::with_optional_arguments(
+        "help",
+        "Show detailed help for a specific command",
+        vec![Arg::new("command", ArgType::String, "Command name to get help for")],
+        CommandHandler::Async(async_handler!(show_command_help))
     ))?;
 
     let mut context = command_manager.get_context().lock()?;
@@ -1610,12 +1651,29 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // read address
-    let str_address = get_required_arg(
+    // Wait for wallet to sync before creating transaction (Issue 3: Option 2)
+    #[cfg(feature = "network_handler")]
+    {
+        if wallet.is_online().await {
+            if !wallet.is_synced().await.unwrap_or(false) {
+                manager.message("⏳ Waiting for wallet to synchronize...");
+                if let Err(e) = wallet.wait_for_sync(30).await {
+                    manager.error(format!("Sync timeout: {:#}", e));
+                    manager.message("Tip: Check sync status with 'sync_status' command");
+                    return Ok(());
+                }
+                manager.message("✓ Wallet synchronized");
+            }
+        }
+    }
+
+    // read address (with example for better error messages)
+    let str_address = get_required_arg_with_example(
         &mut args,
         "address",
         manager,
-        "transfer <asset> <address> <amount> [fee_type] [confirm]",
+        "transfer <address> <asset> <amount> [fee_type] [confirm]",
+        "transfer tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk TOS 1.0 tos y",
         || async {
             prompt.read_input(
                 prompt.colorize_string(Color::Green, "Address: "),
@@ -1623,14 +1681,23 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
             ).await
         }
     ).await.context("Error while reading address")?;
-    let address = Address::from_string(&str_address).context("Invalid address")?;
+
+    let address = Address::from_string(&str_address).map_err(|_| {
+        CommandError::InvalidParameterWithExample {
+            param: "address".to_string(),
+            message: format!("'{}' is not a valid TOS address", str_address),
+            usage: "transfer <address> <asset> <amount> [fee_type] [confirm]".to_string(),
+            example: "transfer tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk TOS 1.0 tos y".to_string(),
+        }
+    })?;
 
     let asset = {
-        let asset_str = get_required_arg(
+        let asset_str = get_required_arg_with_example(
             &mut args,
             "asset",
             manager,
-            "transfer <asset> <address> <amount> [fee_type] [confirm]",
+            "transfer <address> <asset> <amount> [fee_type] [confirm]",
+            "transfer tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk TOS 1.0 tos y",
             || async {
                 prompt.read_input(
                     prompt.colorize_string(Color::Green, "Asset (default TOS): "),
@@ -1639,14 +1706,21 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
             }
         ).await?;
 
-        if asset_str.is_empty() {
+        // Handle empty or whitespace-only string as TOS default (Issue 2: Option 2)
+        if asset_str.is_empty() || asset_str.trim().is_empty() {
+            TOS_ASSET
+        } else if asset_str.to_uppercase() == "TOS" {
+            // Handle "TOS" as asset name without requiring track_asset
             TOS_ASSET
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while reading hash from hex")?
         } else {
             let storage = wallet.get_storage().read().await;
             storage.get_asset_by_name(&asset_str).await?
-                .context("No asset registered with given name")?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or run 'track_asset <hash>' first. For TOS, you can use \"TOS\" or the full hash.",
+                    asset_str
+                ))?
         }
     };
 
@@ -1658,12 +1732,13 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         (balance, asset, multisig.cloned())
     };
 
-    // read amount
-    let amount_str = get_required_arg(
+    // read amount (with example for better error messages)
+    let amount_str = get_required_arg_with_example(
         &mut args,
         "amount",
         manager,
-        "transfer <asset> <address> <amount> [fee_type] [confirm]",
+        "transfer <address> <asset> <amount> [fee_type] [confirm]",
+        "transfer tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk TOS 1.0 tos y",
         || async {
             prompt.read(
                 prompt.colorize_string(Color::Green, &format!("Amount (max: {}): ", format_coin(max_balance, asset_data.get_decimals())))
@@ -1671,7 +1746,14 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         }
     ).await.context("Error while reading amount")?;
 
-    let amount = from_coin(amount_str, asset_data.get_decimals()).context("Invalid amount")?;
+    let amount = from_coin(amount_str.clone(), asset_data.get_decimals()).ok_or_else(|| {
+        CommandError::InvalidParameterWithExample {
+            param: "amount".to_string(),
+            message: format!("'{}' is not a valid amount (use decimal format like 1.0, 0.5, etc.)", amount_str),
+            usage: "transfer <address> <asset> <amount> [fee_type] [confirm]".to_string(),
+            example: "transfer tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk TOS 1.0 tos y".to_string(),
+        }
+    })?;
 
     // Read fee_type parameter
     let fee_type = if let Some(fee_type_str) = get_optional_arg(
@@ -1807,12 +1889,13 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // read address
-    let str_address = get_required_arg(
+    // read address (with example for better error messages)
+    let str_address = get_required_arg_with_example(
         &mut args,
         "address",
         manager,
         "transfer_all <asset> <address> [fee_type] [confirm]",
+        "transfer_all TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk tos y",
         || async {
             prompt.read_input(
                 prompt.colorize_string(Color::Green, "Address: "),
@@ -1820,14 +1903,23 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
             ).await
         }
     ).await.context("Error while reading address")?;
-    let address = Address::from_string(&str_address).context("Invalid address")?;
+
+    let address = Address::from_string(&str_address).map_err(|_| {
+        CommandError::InvalidParameterWithExample {
+            param: "address".to_string(),
+            message: format!("'{}' is not a valid TOS address", str_address),
+            usage: "transfer_all <asset> <address> [fee_type] [confirm]".to_string(),
+            example: "transfer_all TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk tos y".to_string(),
+        }
+    })?;
 
     let asset = {
-        let asset_str = get_required_arg(
+        let asset_str = get_required_arg_with_example(
             &mut args,
             "asset",
             manager,
             "transfer_all <asset> <address> [fee_type] [confirm]",
+            "transfer_all TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk tos y",
             || async {
                 prompt.read_input(
                     prompt.colorize_string(Color::Green, "Asset (default TOS): "),
@@ -1836,14 +1928,19 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
             }
         ).await?;
 
-        if asset_str.is_empty() {
+        if asset_str.is_empty() || asset_str.trim().is_empty() {
+            TOS_ASSET
+        } else if asset_str.to_uppercase() == "TOS" {
             TOS_ASSET
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while reading hash from hex")?
         } else {
             let storage = wallet.get_storage().read().await;
             storage.get_asset_by_name(&asset_str).await?
-                .context("No asset registered with given name")?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or run 'track_asset <hash>' first. For TOS, you can use \"TOS\" or the full hash.",
+                    asset_str
+                ))?
         }
     };
     
@@ -2008,11 +2105,12 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
     let wallet: &Arc<Wallet> = context.get()?;
 
     let asset = {
-        let asset_str = get_required_arg(
+        let asset_str = get_required_arg_with_example(
             &mut args,
             "asset",
             manager,
             "burn <asset> <amount> [confirm]",
+            "burn TOS 10.0 y",
             || async {
                 prompt.read_input(
                     prompt.colorize_string(Color::Green, "Asset (default TOS): "),
@@ -2021,14 +2119,19 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
             }
         ).await?;
 
-        if asset_str.is_empty() {
+        if asset_str.is_empty() || asset_str.trim().is_empty() {
+            TOS_ASSET
+        } else if asset_str.to_uppercase() == "TOS" {
             TOS_ASSET
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while reading hash from hex")?
         } else {
             let storage = wallet.get_storage().read().await;
             storage.get_asset_by_name(&asset_str).await?
-                .context("No asset registered with given name")?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or run 'track_asset <hash>' first. For TOS, you can use \"TOS\" or the full hash.",
+                    asset_str
+                ))?
         }
     };
 
@@ -2041,12 +2144,13 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         (balance, data, multisig.cloned())
     };
 
-    // read amount
-    let amount_str = get_required_arg(
+    // read amount (with example for better error messages)
+    let amount_str = get_required_arg_with_example(
         &mut args,
         "amount",
         manager,
         "burn <asset> <amount> [confirm]",
+        "burn TOS 10.0 y",
         || async {
             prompt.read_input(
                 prompt.colorize_string(Color::Green, &format!("Amount (max: {}): ", format_coin(max_balance, asset_data.get_decimals()))),
@@ -2055,7 +2159,14 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         }
     ).await.context("Error while reading amount")?;
 
-    let amount = from_coin(amount_str, asset_data.get_decimals()).context("Invalid amount")?;
+    let amount = from_coin(amount_str.clone(), asset_data.get_decimals()).ok_or_else(|| {
+        CommandError::InvalidParameterWithExample {
+            param: "amount".to_string(),
+            message: format!("'{}' is not a valid amount (use decimal format like 10.0, 0.5, etc.)", amount_str),
+            usage: "burn <asset> <amount> [confirm]".to_string(),
+            example: "burn TOS 10.0 y".to_string(),
+        }
+    })?;
     manager.message(format!("Burning {} of {} ({})", format_coin(amount, asset_data.get_decimals()), asset_data.get_name(), asset));
 
     let confirmed = get_confirmation(
@@ -2264,6 +2375,33 @@ async fn rescan(manager: &CommandManager, mut arguments: ArgumentManager) -> Res
     Ok(())
 }
 
+#[cfg(feature = "network_handler")]
+async fn sync_status(manager: &CommandManager, _arguments: ArgumentManager) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    match wallet.get_sync_progress().await {
+        Ok((wallet_topo, daemon_topo, percentage)) => {
+            if wallet_topo >= daemon_topo {
+                manager.message(format!(
+                    "✓ Wallet fully synchronized\n  Topoheight: {} / {} (100.0%)",
+                    wallet_topo, daemon_topo
+                ));
+            } else {
+                manager.message(format!(
+                    "⏳ Syncing in progress\n  Topoheight: {} / {} ({:.1}%)\n  Blocks remaining: {}",
+                    wallet_topo, daemon_topo, percentage, daemon_topo - wallet_topo
+                ));
+            }
+        }
+        Err(e) => {
+            manager.error(format!("Error checking sync status: {:#}", e));
+        }
+    }
+
+    Ok(())
+}
+
 async fn seed(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
     manager.validate_batch_params("seed", &arguments)?;
 
@@ -2428,6 +2566,39 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
     manager.message(format!("Synced topoheight: {}", storage.get_synced_topoheight()?));
     manager.message(format!("Network: {}", network));
     manager.message(format!("Wallet address: {}", wallet.get_address()));
+
+    Ok(())
+}
+
+// Show detailed help for a specific command
+async fn show_command_help(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+    let command_name = if arguments.has_argument("command") {
+        arguments.get_value("command")?.to_string_value()?
+    } else {
+        // If no command specified, show list of all commands
+        manager.message("Available commands:");
+        manager.message("Use 'help <command>' to get detailed help for a specific command.\n");
+
+        let commands = manager.get_commands().lock()?;
+        for command in commands.iter() {
+            manager.message(format!("  {} - {}", command.get_name(), command.get_description()));
+        }
+        return Ok(());
+    };
+
+    // Get and display detailed help for the specified command
+    match manager.get_command_help(&command_name) {
+        Ok(help_text) => {
+            manager.message(help_text);
+        }
+        Err(CommandError::CommandNotFound) => {
+            manager.error(format!("Command '{}' not found.", command_name));
+            manager.message("Use 'help' without arguments to see all available commands.");
+        }
+        Err(e) => {
+            manager.error(format!("Error getting help: {:#}", e));
+        }
+    }
 
     Ok(())
 }
@@ -3355,12 +3526,13 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // Get amount, duration, and confirm from arguments
-    let amount_str = get_required_arg(
+    // Get amount, duration, and confirm from arguments (with examples for better error messages)
+    let amount_str = get_required_arg_with_example(
         &mut args,
         "amount",
         manager,
         "freeze_tos <amount> <duration> [confirm]",
+        "freeze_tos 100.0 14 y",
         || async {
             prompt.read_input(
                 prompt.colorize_string(Color::Green, "Amount (TOS): "),
@@ -3369,24 +3541,38 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
         }
     ).await.context("Error while reading amount")?;
 
-    let duration_str = get_required_arg(
+    let duration_str = get_required_arg_with_example(
         &mut args,
         "duration",
         manager,
         "freeze_tos <amount> <duration> [confirm]",
+        "freeze_tos 100.0 14 y",
         || async {
             prompt.read_input(
-                prompt.colorize_string(Color::Green, "Duration (3/7/14 days): "),
+                prompt.colorize_string(Color::Green, "Duration (3/7/14/30 days): "),
                 false
             ).await
         }
     ).await.context("Error while reading duration")?;
 
-    let duration_num = duration_str.parse::<u64>()
-        .context("Invalid duration number")?;
+    let duration_num = duration_str.parse::<u64>().map_err(|_| {
+        CommandError::InvalidParameterWithExample {
+            param: "duration".to_string(),
+            message: format!("'{}' is not a valid duration (must be a number: 3, 7, 14, or 30)", duration_str),
+            usage: "freeze_tos <amount> <duration> [confirm]".to_string(),
+            example: "freeze_tos 100.0 14 y".to_string(),
+        }
+    })?;
 
     // Parse amount
-    let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
+    let amount = from_coin(&amount_str, 8).ok_or_else(|| {
+        CommandError::InvalidParameterWithExample {
+            param: "amount".to_string(),
+            message: format!("'{}' is not a valid amount (use decimal format like 100.0, 50.5, etc.)", amount_str),
+            usage: "freeze_tos <amount> <duration> [confirm]".to_string(),
+            example: "freeze_tos 100.0 14 y".to_string(),
+        }
+    })?;
 
     // Parse duration (3-90 days)
     let duration = if duration_num >= 3 && duration_num <= 90 {
@@ -3497,12 +3683,13 @@ async fn unfreeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Re
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // Get amount and confirm from arguments
-    let amount_str = get_required_arg(
+    // Get amount and confirm from arguments (with example for better error messages)
+    let amount_str = get_required_arg_with_example(
         &mut args,
         "amount",
         manager,
         "unfreeze_tos <amount> [confirm]",
+        "unfreeze_tos 50.0 y",
         || async {
             prompt.read_input(
                 prompt.colorize_string(Color::Green, "Amount (TOS): "),
@@ -3511,7 +3698,14 @@ async fn unfreeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Re
         }
     ).await.context("Error while reading amount")?;
 
-    let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
+    let amount = from_coin(&amount_str, 8).ok_or_else(|| {
+        CommandError::InvalidParameterWithExample {
+            param: "amount".to_string(),
+            message: format!("'{}' is not a valid amount (use decimal format like 50.0, 25.5, etc.)", amount_str),
+            usage: "unfreeze_tos <amount> [confirm]".to_string(),
+            example: "unfreeze_tos 50.0 y".to_string(),
+        }
+    })?;
 
     // Get confirmation
     let confirmed = get_confirmation(

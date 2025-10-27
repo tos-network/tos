@@ -8,7 +8,7 @@ members = [
     "daemon",
     "genesis",
     "ai_miner"
-    ]
+    , "tx_sender"]
 
 [workspace.dependencies]
 metrics = "0.24.2"

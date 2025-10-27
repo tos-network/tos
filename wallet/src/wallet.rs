@@ -23,7 +23,7 @@ use tos_common::{
         },
         DataElement
     },
-    asset::RPCAssetData,
+    asset::{AssetData, RPCAssetData},
     crypto::{
         elgamal::DecryptHandle,
         Address,
@@ -369,6 +369,21 @@ impl Wallet {
 
         // Store the private key
         storage.set_private_key(&keypair.get_private_key())?;
+
+        // Auto-track TOS asset for convenience (Issue 2: Option 1)
+        // This allows users to immediately use "TOS" or the asset hash without manual tracking
+        debug!("Auto-tracking TOS asset");
+        storage.add_asset(
+            &TOS_ASSET,
+            AssetData::new(
+                tos_common::config::COIN_DECIMALS,
+                "TOS".to_string(),
+                "TOS".to_string(),
+                None, // No max supply
+                None  // No owner
+            )
+        ).await?;
+        storage.set_asset_name(&TOS_ASSET, "TOS".to_string()).await?;
 
         // Flush the storage to be sure its written on disk
         storage.flush().await?;
@@ -1407,6 +1422,87 @@ impl Wallet {
     #[cfg(feature = "network_handler")]
     pub fn get_network_handler(&self) -> &Mutex<Option<Arc<NetworkHandler>>> {
         &self.network_handler
+    }
+
+    // Check if wallet is synchronized with daemon
+    // Returns true if wallet_topoheight >= daemon_topoheight
+    #[cfg(feature = "network_handler")]
+    pub async fn is_synced(&self) -> Result<bool, Error> {
+        // Get daemon topoheight
+        let network_handler = self.network_handler.lock().await;
+        let handler = network_handler.as_ref()
+            .ok_or_else(|| Error::msg("Network handler not available"))?;
+
+        let daemon_info = handler.get_api().get_info().await?;
+        let daemon_topoheight = daemon_info.topoheight;
+
+        // Get wallet synced topoheight
+        let storage = self.storage.read().await;
+        let wallet_topoheight = storage.get_synced_topoheight()?;
+
+        Ok(wallet_topoheight >= daemon_topoheight)
+    }
+
+    // Wait for wallet to synchronize with daemon
+    // Polls until wallet_topoheight >= daemon_topoheight
+    // Returns error if timeout is reached
+    #[cfg(feature = "network_handler")]
+    pub async fn wait_for_sync(&self, timeout_secs: u64) -> Result<(), Error> {
+        use tos_common::tokio::time::{sleep, Duration, Instant};
+
+        let start = Instant::now();
+        let timeout = Duration::from_secs(timeout_secs);
+        let poll_interval = Duration::from_millis(500);
+
+        loop {
+            // Check if synced
+            if self.is_synced().await? {
+                return Ok(());
+            }
+
+            // Check timeout
+            if start.elapsed() >= timeout {
+                let storage = self.storage.read().await;
+                let wallet_topoheight = storage.get_synced_topoheight()?;
+
+                let network_handler = self.network_handler.lock().await;
+                let handler = network_handler.as_ref()
+                    .ok_or_else(|| Error::msg("Network handler not available"))?;
+                let daemon_info = handler.get_api().get_info().await?;
+                let daemon_topoheight = daemon_info.topoheight;
+
+                return Err(Error::msg(format!(
+                    "Sync timeout after {} seconds. Wallet at topoheight {}, daemon at {}",
+                    timeout_secs, wallet_topoheight, daemon_topoheight
+                )));
+            }
+
+            // Wait before next poll
+            sleep(poll_interval).await;
+        }
+    }
+
+    // Get sync progress information
+    // Returns (wallet_topoheight, daemon_topoheight, percentage)
+    #[cfg(feature = "network_handler")]
+    pub async fn get_sync_progress(&self) -> Result<(u64, u64, f64), Error> {
+        let network_handler = self.network_handler.lock().await;
+        let handler = network_handler.as_ref()
+            .ok_or_else(|| Error::msg("Network handler not available"))?;
+
+        let daemon_info = handler.get_api().get_info().await?;
+        let daemon_topoheight = daemon_info.topoheight;
+
+        let storage = self.storage.read().await;
+        let wallet_topoheight = storage.get_synced_topoheight()?;
+
+        let percentage = if daemon_topoheight > 0 {
+            (wallet_topoheight as f64 / daemon_topoheight as f64) * 100.0
+        } else {
+            100.0
+        };
+
+        Ok((wallet_topoheight, daemon_topoheight, percentage))
     }
 
     // Create a signature of the given data

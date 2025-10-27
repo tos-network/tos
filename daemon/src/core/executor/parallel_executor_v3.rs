@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::task::JoinSet;
 use tos_common::{
-    crypto::{Hash, PublicKey},
+    crypto::{Hash, Hashable, PublicKey},
     transaction::Transaction,
 };
 use crate::core::{
@@ -41,28 +41,40 @@ impl ParallelExecutor {
     ) -> Vec<TransactionResult> {
         use log::{debug, info};
 
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] execute_batch ENTRY: {} transactions", transactions.len());
+        }
+
         if transactions.is_empty() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("[PARALLEL] execute_batch EXIT: empty batch");
+            }
             return Vec::new();
         }
 
         if log::log_enabled!(log::Level::Info) {
-            info!("Executing batch of {} transactions with max parallelism {}",
+            info!("[PARALLEL] Executing batch of {} transactions with max parallelism {}",
                   transactions.len(), self.max_parallelism);
         }
 
         // Group transactions by conflict-free batches
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] Calling group_by_conflicts...");
+        }
         let batches = self.group_by_conflicts(&transactions);
+        let batch_count = batches.len();  // Store length before moving
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Grouped {} transactions into {} conflict-free batches",
-                   transactions.len(), batches.len());
+            debug!("[PARALLEL] Grouped {} transactions into {} conflict-free batches",
+                   transactions.len(), batch_count);
         }
 
         let mut results = Vec::with_capacity(transactions.len());
 
         for (batch_idx, batch) in batches.into_iter().enumerate() {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Executing batch {} with {} transactions", batch_idx, batch.len());
+                debug!("[PARALLEL] Processing batch {}/{} with {} transactions",
+                       batch_idx + 1, batch_count, batch.len());
             }
 
             // Execute batch in parallel
@@ -71,7 +83,16 @@ impl ParallelExecutor {
                 batch,
             ).await;
 
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("[PARALLEL] Batch {} completed with {} results",
+                       batch_idx, batch_results.len());
+            }
+
             results.extend(batch_results);
+        }
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] execute_batch EXIT: {} total results", results.len());
         }
 
         results
@@ -83,37 +104,63 @@ impl ParallelExecutor {
         state: Arc<ParallelChainState<S>>,
         batch: Vec<(usize, Transaction)>,
     ) -> Vec<TransactionResult> {
-        use log::{debug, trace};
+        use log::debug;
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] execute_parallel_batch ENTRY: {} transactions", batch.len());
+        }
 
         let mut join_set = JoinSet::new();
 
         // Spawn tasks for each transaction
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] Spawning {} async tasks...", batch.len());
+        }
+
         for (index, tx) in batch {
             let state_clone = Arc::clone(&state);
+            let tx_hash = tx.hash();
 
-            if log::log_enabled!(log::Level::Trace) {
-                trace!("Spawning task for transaction index {}", index);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("[PARALLEL] Spawning task for index {} (tx: {})", index, tx_hash);
             }
 
             join_set.spawn(async move {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("[PARALLEL] Task {} START: applying transaction {}", index, tx_hash);
+                }
                 let result = state_clone.apply_transaction(&tx).await;
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("[PARALLEL] Task {} END: result = {:?}", index,
+                           result.as_ref().map(|r| &r.success).unwrap_or(&false));
+                }
                 (index, result)
             });
         }
 
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] All tasks spawned, waiting for completion...");
+        }
+
         // Collect results
         let mut indexed_results = Vec::with_capacity(join_set.len());
+        let mut completed = 0;
         while let Some(result) = join_set.join_next().await {
+            completed += 1;
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("[PARALLEL] Task completed {}/{}", completed, indexed_results.capacity());
+            }
+
             match result {
                 Ok((index, tx_result)) => {
-                    if log::log_enabled!(log::Level::Trace) {
-                        trace!("Task for index {} completed", index);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("[PARALLEL] Task {} join OK", index);
                     }
                     indexed_results.push((index, tx_result));
                 }
                 Err(e) => {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Task join error: {:?}", e);
+                        debug!("[PARALLEL] Task join ERROR: {:?}", e);
                     }
                     // Task panic - create error result directly as TransactionResult
                     let error_result = Ok(TransactionResult {
@@ -127,11 +174,19 @@ impl ParallelExecutor {
             }
         }
 
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] All tasks joined, sorting {} results...", indexed_results.len());
+        }
+
         // Sort by original index to maintain order
         indexed_results.sort_by_key(|(idx, _)| *idx);
 
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] Results sorted, extracting final results...");
+        }
+
         // Extract results, converting Result to TransactionResult
-        indexed_results.into_iter()
+        let final_results = indexed_results.into_iter()
             .map(|(_, result)| match result {
                 Ok(tx_result) => tx_result,
                 Err(e) => TransactionResult {
@@ -141,7 +196,13 @@ impl ParallelExecutor {
                     gas_used: 0,
                 }
             })
-            .collect()
+            .collect();
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] execute_parallel_batch EXIT");
+        }
+
+        final_results
     }
 
     /// Group transactions into conflict-free batches

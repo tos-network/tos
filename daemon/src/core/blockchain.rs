@@ -3313,10 +3313,39 @@ impl<S: Storage> Blockchain<S> {
                               tx_count, hash, min_txs_threshold);
                     }
 
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("[PARALLEL] Preparing to execute {} transactions in parallel...", tx_count);
+                    }
+
                     // Execute transactions in parallel
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("[PARALLEL] Cloning transactions...");
+                    }
                     let transactions: Vec<Transaction> = block.get_transactions().iter()
                         .map(|arc_tx| (**arc_tx).clone())
                         .collect();
+
+                    // DEADLOCK FIX (Complete): Release both chain_state borrow AND storage write lock
+                    //
+                    // Problem: execute_transactions_parallel() needs to acquire storage.read() lock
+                    // in ParallelChainState::new(), but we're holding storage.write() lock here.
+                    // RwLock doesn't allow acquiring read lock while write lock is held → deadlock!
+                    //
+                    // Solution: Temporarily release write lock during parallel execution, then re-acquire
+                    // This is safe because:
+                    // 1. Semaphore at function entry ensures only one add_new_block runs at a time
+                    // 2. No other code can modify blockchain state during this window
+                    // 3. We re-acquire the same write lock immediately after parallel execution
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("[PARALLEL] Dropping chain_state and storage write lock before parallel execution");
+                    }
+                    drop(chain_state);  // Release &mut storage borrow
+                    drop(storage);      // Release write lock (CRITICAL FIX!)
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("[PARALLEL] Calling execute_transactions_parallel...");
+                    }
                     let (parallel_results, parallel_state) = self.execute_transactions_parallel(
                         transactions,
                         base_topo_height,
@@ -3324,12 +3353,53 @@ impl<S: Storage> Blockchain<S> {
                         version,
                     ).await?;
 
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("[PARALLEL] Parallel execution complete, got {} results. Re-acquiring write lock...",
+                               parallel_results.len());
+                    }
+
+                    // Re-acquire write lock for result merging and subsequent operations
+                    storage = self.storage.write().await;
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("[PARALLEL] Write lock re-acquired. Recreating chain_state for merge...");
+                    }
+
+                    // Recreate chain_state to merge parallel execution results
+                    // We need to recreate it because we dropped it above to avoid deadlock
+                    // IMPORTANT: This reassigns the outer chain_state variable (not shadowing in inner scope)
+                    chain_state = ApplicableChainState::new(
+                        &mut *storage,
+                        &self.environment,
+                        base_topo_height,
+                        highest_topo,
+                        version,
+                        past_burned_supply,
+                        &hash,
+                        &block,
+                    );
+
+                    // Re-apply miner rewards (these were already applied before parallel execution)
+                    if dev_fee_percentage != 0 {
+                        let dev_fee_part = block_reward * dev_fee_percentage / 100;
+                        chain_state.reward_miner(&DEV_PUBLIC_KEY, dev_fee_part).await?;
+                    }
+                    chain_state.reward_miner(block.get_miner(), miner_reward).await?;
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("[PARALLEL] Merging parallel state into chain state...");
+                    }
+
                     // Merge parallel state into applicable state (nonces, balances, gas, burned supply)
                     self.merge_parallel_results(
                         &parallel_state,
                         &mut chain_state,
                         &parallel_results,
                     ).await?;
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("[PARALLEL] State merge complete");
+                    }
 
                     // Process results: link transactions to block, handle failures, track events
                     for (tx, tx_hash, result) in block.get_transactions().iter()
@@ -4366,10 +4436,23 @@ impl<S: Storage> Blockchain<S> {
         topoheight: u64,
         version: BlockVersion,
     ) -> Result<(Vec<super::state::parallel_chain_state::TransactionResult>, Arc<ParallelChainState<S>>), BlockchainError> {
+        use log::debug;
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] execute_transactions_parallel ENTRY: {} txs", transactions.len());
+        }
+
         // Step 1: Clone storage Arc (cheap - just increments reference count)
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] Cloning storage Arc...");
+        }
         let storage_arc = Arc::clone(&self.storage);
 
         // Step 2: Create parallel state
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] Creating ParallelChainState (stable={}, topo={})...",
+                   stable_topoheight, topoheight);
+        }
         let parallel_state = ParallelChainState::new(
             storage_arc,
             Arc::new(self.environment.clone()),
@@ -4378,11 +4461,29 @@ impl<S: Storage> Blockchain<S> {
             version,
         ).await;
 
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] ParallelChainState created");
+        }
+
         // Step 3: Execute transactions in parallel
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] Creating ParallelExecutor...");
+        }
         let executor = ParallelExecutor::default();
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] Calling executor.execute_batch...");
+        }
         let results = executor.execute_batch(Arc::clone(&parallel_state), transactions).await;
 
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] executor.execute_batch returned {} results", results.len());
+        }
+
         // Step 4: Return results and state (merging happens in caller)
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("[PARALLEL] execute_transactions_parallel EXIT");
+        }
         Ok((results, parallel_state))
     }
 
@@ -4406,6 +4507,7 @@ impl<S: Storage> Blockchain<S> {
         use log::{info, debug, trace};
         use tos_common::account::{VersionedNonce, VersionedBalance};
         use tos_common::transaction::verify::BlockchainApplyState;
+        use std::collections::HashSet;
 
         // Get topoheight from blockchain (current chain height)
         let topoheight = self.get_topo_height();
@@ -4439,6 +4541,9 @@ impl<S: Storage> Blockchain<S> {
             debug!("Merging {} modified balances", modified_balances.len());
         }
 
+        // Track accounts that received balance (for registration)
+        let mut accounts_with_balance = HashSet::new();
+
         for ((account, asset), new_balance) in modified_balances {
             if log::log_enabled!(log::Level::Trace) {
                 trace!("Setting balance {} for account {} asset {} at topoheight {}",
@@ -4447,6 +4552,32 @@ impl<S: Storage> Blockchain<S> {
 
             let versioned_balance = VersionedBalance::new(new_balance, Some(topoheight));
             storage.set_last_balance_to(&account, &asset, topoheight, &versioned_balance).await?;
+
+            // Track this account for registration
+            accounts_with_balance.insert(account);
+        }
+
+        // Step 2.5: Register new accounts (accounts that received balance but don't have a nonce)
+        // This matches the logic in ApplicableChainState::apply_changes() (apply.rs:648-659)
+        for account in accounts_with_balance {
+            // Check if account has a nonce registered
+            if !storage.has_nonce(&account).await? {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("{} has now a balance but without any nonce registered, set default (0) nonce",
+                           account.as_address(storage.is_mainnet()));
+                }
+                // Register account with default nonce 0
+                storage.set_last_nonce_to(&account, topoheight, &VersionedNonce::new(0, None)).await?;
+            }
+
+            // Mark account as registered at this topoheight
+            if !storage.is_account_registered_for_topoheight(&account, topoheight).await? {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Registering account {} at topoheight {}",
+                           account.as_address(storage.is_mainnet()), topoheight);
+                }
+                storage.set_account_registration_topoheight(&account, topoheight).await?;
+            }
         }
 
         // Step 3: Merge gas fees

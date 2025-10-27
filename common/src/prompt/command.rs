@@ -40,6 +40,19 @@ pub enum CommandError {
         arg: String,
         usage: String,
     },
+    #[error("Missing required argument '{arg}' in command mode.\n\nUsage: {usage}\n\nExample:\n  {example}\n\nUse --interactive to enable prompts.")]
+    MissingRequiredArgumentWithExample {
+        arg: String,
+        usage: String,
+        example: String,
+    },
+    #[error("Invalid {param}: {message}\n\nUsage: {usage}\n\nExample:\n  {example}")]
+    InvalidParameterWithExample {
+        param: String,
+        message: String,
+        usage: String,
+        example: String,
+    },
     #[error("Missing confirmation for destructive operation.\nAdd '--confirm true' to proceed or '--confirm false' to cancel explicitly.")]
     MissingConfirmation,
     #[error("Password required in command mode.\nUse: --password <pwd> OR --password-file <path> OR --password-from-env OR set TOS_WALLET_PASSWORD environment variable.")]
@@ -149,6 +162,39 @@ impl Command {
 
         format!("{} {}{}", self.get_name(), required_args.join(" "), optional_args.join(" "))
     }
+
+    /// Get detailed help information for this command
+    pub fn get_detailed_help(&self) -> String {
+        let mut help = String::new();
+
+        // Command name and description
+        help.push_str(&format!("{}\n", self.name));
+        help.push_str(&format!("{}\n\n", self.description));
+
+        // Usage
+        help.push_str("USAGE:\n");
+        help.push_str(&format!("  {}\n\n", self.get_usage()));
+
+        // Required arguments
+        if !self.required_args.is_empty() {
+            help.push_str("REQUIRED ARGUMENTS:\n");
+            for arg in &self.required_args {
+                help.push_str(&format!("  <{}>  {}\n", arg.get_name(), arg.get_description()));
+            }
+            help.push_str("\n");
+        }
+
+        // Optional arguments
+        if !self.optional_args.is_empty() {
+            help.push_str("OPTIONAL ARGUMENTS:\n");
+            for arg in &self.optional_args {
+                help.push_str(&format!("  [{}]  {}\n", arg.get_name(), arg.get_description()));
+            }
+            help.push_str("\n");
+        }
+
+        help
+    }
 }
 
 // We use Mutex from std instead of tokio so we can use it in sync code too
@@ -251,6 +297,16 @@ impl CommandManager {
 
     pub fn get_commands(&self) -> &Mutex<Vec<Rc<Command>>> {
         &self.commands
+    }
+
+    /// Get detailed help for a specific command
+    pub fn get_command_help(&self, command_name: &str) -> Result<String, CommandError> {
+        let commands = self.commands.lock()?;
+        let command = commands.iter()
+            .find(|cmd| cmd.get_name() == command_name)
+            .ok_or(CommandError::CommandNotFound)?;
+
+        Ok(command.get_detailed_help())
     }
 
     /// Handle command from JSON parameters

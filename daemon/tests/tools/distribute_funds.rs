@@ -9,9 +9,9 @@ use std::fs;
 use std::path::PathBuf;
 use clap::Parser;
 use anyhow::{Result, Context, bail};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
-use log::{info, error};
+use log::info;
 
 use tos_common::{
     config::TOS_ASSET,
@@ -58,6 +58,7 @@ struct TestAccount {
 
 #[derive(Deserialize)]
 struct TestAccounts {
+    #[allow(dead_code)]
     network: String,
     accounts: Vec<TestAccount>,
 }
@@ -65,6 +66,7 @@ struct TestAccounts {
 #[derive(Deserialize)]
 struct GetInfoResult {
     topoheight: u64,
+    #[allow(dead_code)]
     stable_blue_score: u64,
     top_block_hash: String,
 }
@@ -72,6 +74,7 @@ struct GetInfoResult {
 #[derive(Deserialize)]
 struct BalanceResult {
     balance: u64,
+    #[allow(dead_code)]
     topoheight: u64,
 }
 

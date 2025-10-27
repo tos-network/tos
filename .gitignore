@@ -10,9 +10,15 @@ peerlist-*.json
 build/
 data/
 logs/
+demo_ai_wallet/
+parallel_test_sender/
 test_*/
+wallet_receiver/
+wallet_sender/
 miner_wallet.db/
 publisher_wallet.db/
+memo/
+final_test_wallet/
 
 
 # ignore all profiling files
