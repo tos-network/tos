@@ -12,12 +12,11 @@ use std::{
 use tokio::sync::RwLock;
 use dashmap::DashMap;
 use tos_common::{
-    block::{BlockVersion, TopoHeight},
+    block::{Block, BlockVersion, TopoHeight},
     config::TOS_ASSET,
     crypto::{Hash, PublicKey, Hashable},
     transaction::{
         Transaction,
-        TransactionType,
         TransferPayload,
         BurnPayload,
         InvokeContractPayload,
@@ -97,6 +96,8 @@ pub struct ParallelChainState<S: Storage> {
     topoheight: TopoHeight,
     #[allow(dead_code)]
     block_version: BlockVersion,
+    block: Block,
+    block_hash: Hash,
 
     // Cached network info (to avoid repeated lock acquisition)
     is_mainnet: bool,
@@ -114,6 +115,8 @@ impl<S: Storage> ParallelChainState<S> {
         stable_topoheight: TopoHeight,
         topoheight: TopoHeight,
         block_version: BlockVersion,
+        block: Block,
+        block_hash: Hash,
     ) -> Arc<Self> {
         // Cache network info to avoid repeated lock acquisition
         let is_mainnet = storage.read().await.is_mainnet();
@@ -128,6 +131,8 @@ impl<S: Storage> ParallelChainState<S> {
             stable_topoheight,
             topoheight,
             block_version,
+            block,
+            block_hash,
             is_mainnet,
             burned_supply: AtomicU64::new(0),
             gas_fee: AtomicU64::new(0),
@@ -145,7 +150,7 @@ impl<S: Storage> ParallelChainState<S> {
     }
 
     /// Load account state from storage if not already cached
-    async fn ensure_account_loaded(&self, key: &PublicKey) -> Result<(), BlockchainError> {
+    pub async fn ensure_account_loaded(&self, key: &PublicKey) -> Result<(), BlockchainError> {
         use log::trace;
 
         // Check if already loaded
@@ -187,7 +192,7 @@ impl<S: Storage> ParallelChainState<S> {
     }
 
     /// Load balance from storage if not already cached
-    async fn ensure_balance_loaded(
+    pub async fn ensure_balance_loaded(
         &self,
         account: &PublicKey,
         asset: &Hash,
@@ -226,158 +231,56 @@ impl<S: Storage> ParallelChainState<S> {
         Ok(())
     }
 
-    /// Apply single transaction (thread-safe via DashMap)
+    /// Apply single transaction using adapter pattern for full validation
+    ///
+    /// SECURITY FIX #8: This method now uses ParallelApplyAdapter to ensure validation parity
+    /// with sequential execution path. All 20+ consensus-critical validations are performed:
+    /// - Signature verification (via Transaction::verify())
+    /// - Nonce verification and CAS update
+    /// - Fee deduction and balance checks
+    /// - Transaction format validation (version, fee type, transfer count, etc.)
+    /// - Self-transfer prevention
+    /// - Extra data size limits
+    /// - Burn amount constraints
+    /// - Multisig threshold validation
+    /// - And all other validations in Transaction::apply_with_partial_verify()
+    ///
+    /// Reference: PARALLEL_EXECUTION_ADAPTER_DESIGN.md
     pub async fn apply_transaction(
-        &self,
-        tx: &Transaction,
+        self: Arc<Self>,
+        tx: Arc<Transaction>,
     ) -> Result<TransactionResult, BlockchainError> {
         use log::debug;
+        use crate::core::state::ParallelApplyAdapter;
 
-        let source = tx.get_source();
         let tx_hash = tx.hash();
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Applying transaction {} from {} at topoheight {}",
-                   tx_hash, source.as_address(self.is_mainnet), self.topoheight);
+            debug!("Applying transaction {} at topoheight {} (adapter-based validation)",
+                   tx_hash, self.topoheight);
         }
 
-        // Load account state from storage if not cached
-        self.ensure_account_loaded(source).await?;
+        // Create adapter for this transaction execution
+        let mut adapter = ParallelApplyAdapter::new(
+            Arc::clone(&self),
+            &self.block,
+            &self.block_hash,
+        );
 
-        // SECURITY FIX #1: Verify transaction signature
-        // This prevents invalid/unsigned transactions from being accepted in parallel path
-        // Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Vulnerability #1
-        {
-            let signing_bytes = tx.get_signing_bytes();
-            let source_decompressed = match source.decompress() {
-                Ok(key) => key,
-                Err(_) => {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Failed to decompress source key for transaction {}", tx_hash);
-                    }
-                    return Ok(TransactionResult {
-                        tx_hash,
-                        success: false,
-                        error: Some("Invalid source public key".to_string()),
-                        gas_used: 0,
-                    });
-                }
-            };
-
-            if !tx.get_signature().verify(&signing_bytes, &source_decompressed) {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!("Invalid signature for transaction {}", tx_hash);
-                }
-                return Ok(TransactionResult {
-                    tx_hash,
-                    success: false,
-                    error: Some("Invalid signature".to_string()),
-                    gas_used: 0,
-                });
-            }
-        }
-
-        // Verify nonce
-        let current_nonce = {
-            let account = self.accounts.get(source).unwrap();
-            account.nonce
-        };
-
-        if tx.get_nonce() != current_nonce {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("Invalid nonce for transaction {}: expected {}, got {}",
-                       tx_hash, current_nonce, tx.get_nonce());
-            }
-            return Ok(TransactionResult {
-                tx_hash,
-                success: false,
-                error: Some(format!("Invalid nonce: expected {}, got {}", current_nonce, tx.get_nonce())),
-                gas_used: 0,
-            });
-        }
-
-        // SECURITY FIX #3: Deduct transaction fee from sender balance (unless using energy fee)
-        // This prevents token inflation - fees must be deducted before applying transactions
-        // Reference: common/src/transaction/verify/mod.rs:953-962
-        if !tx.get_fee_type().is_energy() {
-            let fee = tx.get_fee();
-            if fee > 0 {
-                // CRITICAL: Load TOS balance from storage BEFORE deducting fee
-                // Otherwise or_insert(0) will default to 0 for accounts not yet touched in this batch
-                self.ensure_balance_loaded(source, &TOS_ASSET).await?;
-
-                // Debit fee from sender's TOS balance
-                {
-                    let mut account = self.accounts.get_mut(source).unwrap();
-                    let tos_balance = account.balances.get_mut(&TOS_ASSET)
-                        .ok_or_else(|| {
-                            if log::log_enabled!(log::Level::Debug) {
-                                use log::debug;
-                                debug!("Source {} has no TOS balance for fee", source.as_address(self.is_mainnet));
-                            }
-                            BlockchainError::NoBalance(source.as_address(self.is_mainnet))
-                        })?;
-
-                    if *tos_balance < fee {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("Insufficient balance for fee: source {} has {} but needs {} TOS",
-                                   source.as_address(self.is_mainnet), tos_balance, fee);
-                        }
-                        return Ok(TransactionResult {
-                            tx_hash,
-                            success: false,
-                            error: Some(format!("Insufficient balance for fee: has {}, needs {}", tos_balance, fee)),
-                            gas_used: 0,
-                        });
-                    }
-
-                    *tos_balance -= fee;
-
-                    if log::log_enabled!(log::Level::Trace) {
-                        use log::trace;
-                        trace!("Deducted fee {} from source {} (new balance: {})",
-                               fee, source.as_address(self.is_mainnet), *tos_balance);
-                    }
-                }
-            }
-        }
-
-        // Apply transaction based on type
-        let result = match tx.get_data() {
-            TransactionType::Transfers(transfers) => {
-                self.apply_transfers(source, transfers).await
-            }
-            TransactionType::Burn(payload) => {
-                self.apply_burn(source, payload).await
-            }
-            TransactionType::InvokeContract(payload) => {
-                self.apply_invoke_contract(source, payload).await
-            }
-            TransactionType::DeployContract(payload) => {
-                self.apply_deploy_contract(source, payload).await
-            }
-            TransactionType::Energy(payload) => {
-                self.apply_energy(source, payload).await
-            }
-            TransactionType::MultiSig(payload) => {
-                self.apply_multisig(source, payload).await
-            }
-            TransactionType::AIMining(_) => {
-                // AI Mining transactions are handled separately
-                Ok(())
-            }
-        };
-
-        match result {
-            Ok(_) => {
-                // Increment nonce
-                self.accounts.get_mut(source).unwrap().nonce += 1;
-
-                // Accumulate fees
-                self.gas_fee.fetch_add(tx.get_fee(), Ordering::Relaxed);
+        // Call Transaction::apply_with_partial_verify() which performs:
+        // 1. All format validations (pre_verify)
+        // 2. Signature verification
+        // 3. Nonce CAS update
+        // 4. Balance operations
+        // 5. Fee deduction
+        // 6. Type-specific application logic
+        match tx.apply_with_partial_verify(&tx_hash, &mut adapter).await {
+            Ok(()) => {
+                // Commit cached balance changes back to ParallelChainState
+                adapter.commit_balances();
 
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Transaction {} applied successfully", tx_hash);
+                    debug!("Transaction {} applied successfully (adapter)", tx_hash);
                 }
 
                 Ok(TransactionResult {
@@ -389,8 +292,9 @@ impl<S: Storage> ParallelChainState<S> {
             }
             Err(e) => {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Transaction {} failed: {:?}", tx_hash, e);
+                    debug!("Transaction {} validation failed (adapter): {:?}", tx_hash, e);
                 }
+
                 Ok(TransactionResult {
                     tx_hash,
                     success: false,
@@ -401,7 +305,8 @@ impl<S: Storage> ParallelChainState<S> {
         }
     }
 
-    /// Apply transfer transactions
+    /// Legacy helper method - no longer used (replaced by adapter pattern)
+    #[allow(dead_code)]
     async fn apply_transfers(
         &self,
         source: &PublicKey,
@@ -471,7 +376,8 @@ impl<S: Storage> ParallelChainState<S> {
         Ok(())
     }
 
-    /// Apply burn transaction
+    /// Legacy helper method - no longer used (replaced by adapter pattern)
+    #[allow(dead_code)]
     async fn apply_burn(
         &self,
         source: &PublicKey,
@@ -516,7 +422,8 @@ impl<S: Storage> ParallelChainState<S> {
         Ok(())
     }
 
-    /// Apply contract invocation
+    /// Legacy helper method - no longer used (replaced by adapter pattern)
+    #[allow(dead_code)]
     async fn apply_invoke_contract(
         &self,
         _source: &PublicKey,
@@ -531,7 +438,8 @@ impl<S: Storage> ParallelChainState<S> {
         Ok(())
     }
 
-    /// Apply contract deployment
+    /// Legacy helper method - no longer used (replaced by adapter pattern)
+    #[allow(dead_code)]
     async fn apply_deploy_contract(
         &self,
         _source: &PublicKey,
@@ -541,7 +449,8 @@ impl<S: Storage> ParallelChainState<S> {
         Ok(())
     }
 
-    /// Apply energy transaction
+    /// Legacy helper method - no longer used (replaced by adapter pattern)
+    #[allow(dead_code)]
     async fn apply_energy(
         &self,
         _source: &PublicKey,
@@ -551,7 +460,8 @@ impl<S: Storage> ParallelChainState<S> {
         Ok(())
     }
 
-    /// Apply multisig transaction
+    /// Legacy helper method - no longer used (replaced by adapter pattern)
+    #[allow(dead_code)]
     async fn apply_multisig(
         &self,
         _source: &PublicKey,
@@ -674,6 +584,94 @@ impl<S: Storage> ParallelChainState<S> {
         self.accounts.iter()
             .map(|entry| (entry.key().clone(), entry.value().multisig.clone()))
             .collect()
+    }
+
+    // Helper methods for ParallelApplyAdapter
+
+    /// Get nonce for an account (must be loaded first)
+    pub fn get_nonce(&self, account: &PublicKey) -> u64 {
+        self.accounts.get(account)
+            .map(|entry| entry.nonce)
+            .unwrap_or(0)
+    }
+
+    /// Set nonce for an account (must be loaded first)
+    pub fn set_nonce(&self, account: &PublicKey, nonce: u64) {
+        if let Some(mut entry) = self.accounts.get_mut(account) {
+            entry.nonce = nonce;
+        }
+    }
+
+    /// Get balance for an account and asset (must be loaded first)
+    /// Returns 0 if balance not loaded
+    pub fn get_balance(&self, account: &PublicKey, asset: &Hash) -> u64 {
+        self.accounts.get(account)
+            .and_then(|entry| entry.balances.get(asset).copied())
+            .unwrap_or(0)
+    }
+
+    /// Get mutable reference to balance (must be loaded first)
+    /// SAFETY: This returns a mutable reference through DashMap's RefMut
+    /// The reference is valid as long as the RefMut guard is held
+    pub fn get_balance_mut(&self, account: &PublicKey, asset: &Hash) -> Result<u64, BlockchainError> {
+        // This is a workaround for lifetime issues with DashMap
+        // We return the value, not a reference, to avoid borrow checker issues
+        Ok(self.get_balance(account, asset))
+    }
+
+    /// Update balance for an account and asset
+    pub fn set_balance(&self, account: &PublicKey, asset: &Hash, balance: u64) {
+        if let Some(mut entry) = self.accounts.get_mut(account) {
+            entry.balances.insert(asset.clone(), balance);
+        }
+    }
+
+    /// Get multisig configuration for an account (must be loaded first)
+    pub fn get_multisig(&self, account: &PublicKey) -> Option<MultiSigPayload> {
+        self.accounts.get(account)
+            .and_then(|entry| entry.multisig.clone())
+    }
+
+    /// Set multisig configuration for an account (must be loaded first)
+    pub fn set_multisig(&self, account: &PublicKey, multisig: Option<MultiSigPayload>) {
+        if let Some(mut entry) = self.accounts.get_mut(account) {
+            entry.multisig = multisig;
+        }
+    }
+
+    /// Add to burned supply (atomic)
+    pub fn add_burned_supply(&self, amount: u64) {
+        self.burned_supply.fetch_add(amount, Ordering::Relaxed);
+    }
+
+    /// Add to gas fee (atomic)
+    pub fn add_gas_fee(&self, amount: u64) {
+        self.gas_fee.fetch_add(amount, Ordering::Relaxed);
+    }
+
+    /// Get topoheight
+    pub fn get_topoheight(&self) -> TopoHeight {
+        self.topoheight
+    }
+
+    /// Get block version
+    pub fn get_block_version(&self) -> BlockVersion {
+        self.block_version
+    }
+
+    /// Check if mainnet
+    pub fn is_mainnet(&self) -> bool {
+        self.is_mainnet
+    }
+
+    /// Get storage reference (for adapter)
+    pub fn get_storage(&self) -> &Arc<RwLock<S>> {
+        &self.storage
+    }
+
+    /// Get environment reference (for adapter)
+    pub fn get_environment(&self) -> &Arc<Environment> {
+        &self.environment
     }
 }
 

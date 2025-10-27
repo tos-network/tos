@@ -138,7 +138,9 @@ impl ParallelExecutor {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("[PARALLEL] Task {} START: applying transaction {}", index, tx_hash);
                 }
-                let result = state_clone.apply_transaction(&tx).await;
+                // Wrap transaction in Arc for apply_with_partial_verify compatibility
+                let tx_arc = Arc::new(tx);
+                let result = state_clone.apply_transaction(tx_arc).await;
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("[PARALLEL] Task {} END: result = {:?}", index,
                            result.as_ref().map(|r| &r.success).unwrap_or(&false));

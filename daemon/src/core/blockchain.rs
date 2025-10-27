@@ -3379,6 +3379,8 @@ impl<S: Storage> Blockchain<S> {
                         base_topo_height,
                         highest_topo,
                         version,
+                        block.clone(),
+                        hash.clone(),
                     ).await?;
 
                     if log::log_enabled!(log::Level::Debug) {
@@ -4463,6 +4465,8 @@ impl<S: Storage> Blockchain<S> {
         stable_topoheight: u64,
         topoheight: u64,
         version: BlockVersion,
+        block: Block,
+        block_hash: Hash,
     ) -> Result<(Vec<super::state::parallel_chain_state::TransactionResult>, Arc<ParallelChainState<S>>), BlockchainError> {
         use log::debug;
 
@@ -4487,6 +4491,8 @@ impl<S: Storage> Blockchain<S> {
             stable_topoheight,
             topoheight,
             version,
+            block,
+            block_hash,
         ).await;
 
         if log::log_enabled!(log::Level::Debug) {
