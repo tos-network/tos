@@ -531,11 +531,8 @@ impl<S: Storage> ParallelChainState<S> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    // TODO: Add unit tests for ParallelChainState
-    // - Test concurrent transaction application
-    // - Test nonce verification
-    // - Test balance updates
+    // Note: Integration tests for ParallelChainState are in
+    // daemon/tests/integration/parallel_execution_tests.rs
+    // because they require real Storage implementation and Transaction objects
     // - Test commit to storage
 }

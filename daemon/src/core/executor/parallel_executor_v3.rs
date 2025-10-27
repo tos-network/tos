@@ -243,19 +243,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_accounts() {
-        // TODO: Add tests for account extraction
+    fn test_optimal_parallelism() {
+        let parallelism = get_optimal_parallelism();
+        assert!(parallelism > 0);
+        assert!(parallelism <= 1024); // Sanity check
     }
 
     #[test]
-    fn test_conflict_detection() {
-        // TODO: Add tests for conflict detection
-        // - Non-conflicting transactions should be in same batch
-        // - Conflicting transactions should be in different batches
+    fn test_executor_default() {
+        let executor = ParallelExecutor::default();
+        assert_eq!(executor.max_parallelism, num_cpus::get());
     }
 
-    #[tokio::test]
-    async fn test_parallel_execution() {
-        // TODO: Add integration test for parallel execution
+    #[test]
+    fn test_executor_custom_parallelism() {
+        let executor = ParallelExecutor::with_parallelism(4);
+        assert_eq!(executor.max_parallelism, 4);
     }
+
+    // Note: Integration tests for extract_accounts, conflict_detection,
+    // and parallel_execution are in daemon/tests/integration/parallel_execution_tests.rs
+    // because they require creating real Transaction objects with proper signatures,
+    // which is complex and better suited for integration testing.
 }
