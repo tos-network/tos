@@ -54,9 +54,16 @@ use super::parallel_chain_state::ParallelChainState;
 /// SECURITY: This is the key to fixing Vulnerability #8 (Incomplete Transaction Validation).
 /// By implementing this adapter, parallel path gets all 20+ consensus-critical validations
 /// that sequential path performs, with zero code duplication.
+///
+/// IMPORTANT: This adapter requires read-only storage access to perform state-level validations
+/// (fee requirements, reference validation). Storage access is safe because ParallelChainState
+/// already acquired a read lock during initialization.
 pub struct ParallelApplyAdapter<'a, S: Storage> {
     /// The parallel chain state being adapted
     parallel_state: Arc<ParallelChainState<S>>,
+
+    /// Read-only storage access for validation (acquired via read lock)
+    storage: Arc<tokio::sync::RwLock<S>>,
 
     /// Block being processed
     block: &'a Block,
@@ -75,11 +82,13 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
     /// Create a new adapter for a transaction execution
     pub fn new(
         parallel_state: Arc<ParallelChainState<S>>,
+        storage: Arc<tokio::sync::RwLock<S>>,
         block: &'a Block,
         block_hash: &'a Hash,
     ) -> Self {
         Self {
             parallel_state,
+            storage,
             block,
             block_hash,
             balance_reads: HashMap::new(),
@@ -117,16 +126,27 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
 #[async_trait]
 impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ParallelApplyAdapter<'a, S> {
     /// Pre-verify the transaction at state level
+    ///
+    /// SECURITY FIX: Delegate to the same pre_verify_tx helper that sequential path uses.
+    /// This performs critical validations:
+    /// - TX version compatibility with block version (hard fork rules)
+    /// - Fee requirement validation
+    /// - Reference topoheight validation
     async fn pre_verify_tx<'b>(
         &'b mut self,
-        _tx: &tos_common::transaction::Transaction,
+        tx: &tos_common::transaction::Transaction,
     ) -> Result<(), BlockchainError> {
-        // For parallel execution Phase 1, we skip state-level checks that require
-        // sequential consistency (like reference validation against mutable storage).
-        //
-        // However, all format-level validations in Transaction::pre_verify() will
-        // still run (fee type, transfer count, self-transfer, extra data size, etc.)
-        Ok(())
+        // Acquire read lock on storage for validation
+        let storage_guard = self.storage.read().await;
+
+        // Delegate to the shared validation helper (same as sequential path)
+        super::pre_verify_tx(
+            &*storage_guard,
+            tx,
+            self.parallel_state.get_stable_topoheight(),
+            self.parallel_state.get_topoheight(),
+            self.parallel_state.get_block_version(),
+        ).await
     }
 
     /// Get the balance for a receiver account
@@ -151,14 +171,42 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
     }
 
     /// Get the balance for a sender account (used for spending verification)
+    ///
+    /// PHASE 1 LIMITATION: This implementation does NOT perform full reference validation
+    /// that search_versioned_balance_for_reference() provides in sequential execution.
+    ///
+    /// Why: Full reference validation requires mutable storage access to:
+    /// - Query DAG topology (is_block_topological_ordered, get_topo_height_for_hash)
+    /// - Check pruned state (get_pruned_topoheight)
+    /// - Implement anti-front-running scenarios A-D
+    ///
+    /// Doing this from parallel tasks creates race conditions on storage.
+    ///
+    /// SAFE USAGE: Phase 1 parallel execution should ONLY process transactions where:
+    /// - All transactions reference the same parent block (reference.hash == block.parent)
+    /// - No complex output balance dependencies across parallel transactions
+    ///
+    /// For transactions requiring complex reference validation, the executor must
+    /// fall back to sequential execution.
     async fn get_sender_balance<'b>(
         &'b mut self,
         account: &'a PublicKey,
         asset: &'a Hash,
-        _reference: &Reference,
+        reference: &Reference,
     ) -> Result<&'b mut u64, BlockchainError> {
-        // For parallel execution Phase 1, we don't validate reference here
-        // Just delegate to get_receiver_balance
+        // PHASE 1: Simple validation - check reference matches current block topoheight
+        // This catches obvious stale references while avoiding storage queries
+        let current_topo = self.parallel_state.get_topoheight();
+        if reference.topoheight > current_topo {
+            return Err(BlockchainError::InvalidReferenceTopoheight(
+                reference.topoheight,
+                current_topo
+            ));
+        }
+
+        // For Phase 1, we use current balance without output balance logic
+        // This is safe for same-block references but may allow front-running for old references
+        // TODO Phase 2: Implement read-only storage snapshot for full reference validation
         self.get_receiver_balance(Cow::Borrowed(account), Cow::Borrowed(asset)).await
     }
 

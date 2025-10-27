@@ -261,8 +261,10 @@ impl<S: Storage> ParallelChainState<S> {
         }
 
         // Create adapter for this transaction execution
+        // Pass storage for validation (safe read-only access)
         let mut adapter = ParallelApplyAdapter::new(
             Arc::clone(&self),
+            Arc::clone(&self.storage),
             &self.block,
             &self.block_hash,
         );
@@ -652,6 +654,11 @@ impl<S: Storage> ParallelChainState<S> {
     /// Get topoheight
     pub fn get_topoheight(&self) -> TopoHeight {
         self.topoheight
+    }
+
+    /// Get stable topoheight (for validation)
+    pub fn get_stable_topoheight(&self) -> TopoHeight {
+        self.stable_topoheight
     }
 
     /// Get block version
