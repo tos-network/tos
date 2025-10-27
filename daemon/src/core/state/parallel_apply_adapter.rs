@@ -392,8 +392,6 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // TODO: Add unit tests for adapter methods
     // - Test balance operations (get/update)
     // - Test nonce operations (get/update/CAS)
