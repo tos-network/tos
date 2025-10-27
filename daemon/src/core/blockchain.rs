@@ -85,6 +85,7 @@ use crate::{
         MILLIS_PER_SECOND, SIDE_BLOCK_REWARD_MAX_BLOCKS, PRUNE_SAFETY_LIMIT,
         SIDE_BLOCK_REWARD_PERCENT, SIDE_BLOCK_REWARD_MIN_PERCENT, STABLE_LIMIT,
         TIMESTAMP_IN_FUTURE_LIMIT, DEFAULT_CACHE_SIZE, MAX_ORPHANED_TRANSACTIONS,
+        PARALLEL_EXECUTION_ENABLED, MIN_TXS_FOR_PARALLEL,
     },
     core::{
         config::Config,
@@ -97,7 +98,8 @@ use crate::{
         simulator::Simulator,
         storage::{DagOrderProvider, DifficultyProvider, Storage},
         tx_selector::{TxSelector, TxSelectorEntry},
-        state::{ChainState, ApplicableChainState},
+        state::{ChainState, ApplicableChainState, ParallelChainState},
+        executor::ParallelExecutor,
         hard_fork::*,
         TxCache,
     },
@@ -3289,6 +3291,49 @@ impl<S: Storage> Blockchain<S> {
 
                 total_txs_executed += block.get_transactions().len();
 
+                // ============================================================================
+                // PARALLEL EXECUTION INTEGRATION POINT (Phase 2)
+                // ============================================================================
+                // TODO(Phase 1 Complete): When ParallelChainState.apply_changes() is ready:
+                //
+                // if self.should_use_parallel_execution(block.get_transactions().len()) {
+                //     if log::log_enabled!(log::Level::Info) {
+                //         info!("Using parallel execution for {} transactions in block {}",
+                //               block.get_transactions().len(), hash);
+                //     }
+                //
+                //     // Execute transactions in parallel
+                //     let transactions: Vec<Transaction> = block.get_transactions().iter()
+                //         .cloned().collect();
+                //     let (parallel_results, parallel_state) = self.execute_transactions_parallel(
+                //         transactions,
+                //         base_topo_height,
+                //         highest_topo,
+                //         version,
+                //     ).await?;
+                //
+                //     // Merge parallel state into applicable state
+                //     self.merge_parallel_results(
+                //         &parallel_state,
+                //         &mut chain_state,
+                //         &parallel_results,
+                //     ).await?;
+                //
+                //     // Process results and mark transactions as executed
+                //     for (tx, tx_hash, result) in parallel_results {
+                //         if result.is_ok() {
+                //             chain_state.get_mut_storage().mark_tx_as_executed_in_block(&tx_hash, &hash)?;
+                //             // TODO: Handle nonce_checker, orphaned_transactions, events
+                //         }
+                //     }
+                // } else {
+                //     // Sequential execution (current path)
+                //     // ... existing loop code ...
+                // }
+                //
+                // For now, PARALLEL_EXECUTION_ENABLED = false, so always use sequential path
+                // ============================================================================
+
                 // compute rewards & execute txs
                 let txs_hashes: IndexSet<Hash> = block.get_transactions().iter().map(|tx| tx.hash()).collect();
                 for (tx, tx_hash) in block.get_transactions().iter().zip(txs_hashes.iter()) { // execute all txs
@@ -4190,6 +4235,142 @@ impl<S: Storage> Blockchain<S> {
 
         let diff = now_timestamp - count_timestamp;
         Ok(diff / count)
+    }
+
+    // Parallel Execution Methods (V3 Implementation)
+
+    /// Determine if parallel execution should be used based on batch size
+    ///
+    /// Criteria:
+    /// 1. Feature flag enabled (PARALLEL_EXECUTION_ENABLED)
+    /// 2. Batch size >= MIN_TXS_FOR_PARALLEL
+    ///
+    /// Returns true if parallel execution should be used, false for sequential execution
+    #[allow(dead_code)]
+    fn should_use_parallel_execution(&self, tx_count: usize) -> bool {
+        PARALLEL_EXECUTION_ENABLED && tx_count >= MIN_TXS_FOR_PARALLEL
+    }
+
+    /// Execute transactions in parallel using V3 architecture
+    ///
+    /// This method creates a parallel state cache, executes transactions
+    /// concurrently, and returns both results and the parallel state for merging.
+    ///
+    /// Returns: (Vec<TransactionResult>, Arc<ParallelChainState<S>>)
+    #[allow(dead_code)]
+    pub async fn execute_transactions_parallel(
+        &self,
+        transactions: Vec<Transaction>,
+        stable_topoheight: u64,
+        topoheight: u64,
+        version: BlockVersion,
+    ) -> Result<(Vec<super::state::parallel_chain_state::TransactionResult>, Arc<ParallelChainState<S>>), BlockchainError> {
+        // Step 1: Clone storage Arc (cheap - just increments reference count)
+        let storage_arc = Arc::clone(&self.storage);
+
+        // Step 2: Create parallel state
+        let parallel_state = ParallelChainState::new(
+            storage_arc,
+            Arc::new(self.environment.clone()),
+            stable_topoheight,
+            topoheight,
+            version,
+        ).await;
+
+        // Step 3: Execute transactions in parallel
+        let executor = ParallelExecutor::default();
+        let results = executor.execute_batch(Arc::clone(&parallel_state), transactions).await;
+
+        // Step 4: Return results and state (merging happens in caller)
+        Ok((results, parallel_state))
+    }
+
+    /// Merge parallel execution results into main state
+    ///
+    /// Takes the modified state from ParallelChainState and applies
+    /// changes to ApplicableChainState for final commitment.
+    ///
+    /// Merges:
+    /// - Account nonces from parallel state to storage
+    /// - Balance changes from parallel state to storage
+    /// - Gas fees accumulated during parallel execution
+    /// - Burned supply accumulated during parallel execution
+    #[allow(dead_code)]
+    async fn merge_parallel_results(
+        &self,
+        parallel_state: &ParallelChainState<S>,
+        applicable_state: &mut ApplicableChainState<'_, S>,
+        _results: &[super::state::parallel_chain_state::TransactionResult],
+    ) -> Result<(), BlockchainError> {
+        use log::{info, debug, trace};
+        use tos_common::account::{VersionedNonce, VersionedBalance};
+        use tos_common::transaction::verify::BlockchainApplyState;
+
+        // Get topoheight from blockchain (current chain height)
+        let topoheight = self.get_topo_height();
+
+        if log::log_enabled!(log::Level::Info) {
+            info!("Starting merge of parallel execution results at topoheight {}", topoheight);
+        }
+
+        // Get storage for writing
+        let storage = applicable_state.get_mut_storage();
+
+        // Step 1: Merge account nonces
+        let modified_nonces = parallel_state.get_modified_nonces();
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Merging {} modified account nonces", modified_nonces.len());
+        }
+
+        for (account, new_nonce) in modified_nonces {
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Setting nonce {} for account {} at topoheight {}",
+                       new_nonce, account.as_address(storage.is_mainnet()), topoheight);
+            }
+
+            let versioned_nonce = VersionedNonce::new(new_nonce, Some(topoheight));
+            storage.set_last_nonce_to(&account, topoheight, &versioned_nonce).await?;
+        }
+
+        // Step 2: Merge balance changes
+        let modified_balances = parallel_state.get_modified_balances();
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Merging {} modified balances", modified_balances.len());
+        }
+
+        for ((account, asset), new_balance) in modified_balances {
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Setting balance {} for account {} asset {} at topoheight {}",
+                       new_balance, account.as_address(storage.is_mainnet()), asset, topoheight);
+            }
+
+            let versioned_balance = VersionedBalance::new(new_balance, Some(topoheight));
+            storage.set_last_balance_to(&account, &asset, topoheight, &versioned_balance).await?;
+        }
+
+        // Step 3: Merge gas fees
+        let total_gas = parallel_state.get_gas_fee();
+        if total_gas > 0 {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Adding gas fee {} from parallel execution", total_gas);
+            }
+            applicable_state.add_gas_fee(total_gas).await?;
+        }
+
+        // Step 4: Merge burned supply
+        let total_burned = parallel_state.get_burned_supply();
+        if total_burned > 0 {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Adding burned supply {} from parallel execution", total_burned);
+            }
+            applicable_state.add_burned_coins(total_burned).await?;
+        }
+
+        if log::log_enabled!(log::Level::Info) {
+            info!("Parallel execution merge completed successfully");
+        }
+
+        Ok(())
     }
 }
 
