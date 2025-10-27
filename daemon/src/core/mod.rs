@@ -12,6 +12,7 @@ pub mod nonce_checker;
 pub mod tx_selector;
 pub mod state;
 pub mod merkle;
+pub mod executor;
 
 pub mod hard_fork;
 pub mod bps; // TIP-BPS: Blocks Per Second configuration system

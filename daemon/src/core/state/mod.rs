@@ -1,5 +1,6 @@
 mod mempool_state;
 mod chain_state;
+pub mod parallel_chain_state;
 
 pub use mempool_state::MempoolState;
 pub use chain_state::{
@@ -7,6 +8,7 @@ pub use chain_state::{
     ApplicableChainState,
     StorageReference
 };
+pub use parallel_chain_state::ParallelChainState;
 
 use log::{trace, debug};
 use tos_common::{

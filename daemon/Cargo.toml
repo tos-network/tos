@@ -33,6 +33,7 @@ bytes = "1"
 humantime = "2.1.0"
 human_bytes = "0.4.2"
 tokio-socks = "0.5.2"
+num_cpus = "1.16"
 
 # GHOSTDAG dependencies (TIP-2 Phase 1)
 primitive-types = { version = "0.12", features = ["serde"] }
