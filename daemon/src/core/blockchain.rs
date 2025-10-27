@@ -172,7 +172,8 @@ pub struct Blockchain<S: Storage> {
     // mempool to retrieve/add all txs
     mempool: RwLock<Mempool>,
     // storage to retrieve/add blocks
-    storage: RwLock<S>,
+    // Arc wrapper enables parallel execution (Solana pattern)
+    storage: Arc<RwLock<S>>,
     // Current semaphore used to prevent
     // verifying more than one block at a time
     add_block_semaphore: Semaphore,
@@ -333,7 +334,7 @@ impl<S: Storage> Blockchain<S> {
             stable_blue_score: AtomicU64::new(0),
             stable_topoheight: AtomicU64::new(0),
             mempool: RwLock::new(Mempool::new(network, config.disable_zkp_cache)),
-            storage: RwLock::new(storage),
+            storage: Arc::new(RwLock::new(storage)),
             add_block_semaphore: Semaphore::new(1),
             environment,
             p2p: RwLock::new(None),
