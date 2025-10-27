@@ -263,6 +263,41 @@ impl<S: Storage> ParallelChainState<S> {
             });
         }
 
+        // SECURITY FIX #3: Deduct transaction fee from sender balance (unless using energy fee)
+        // This prevents token inflation - fees must be deducted before applying transactions
+        // Reference: common/src/transaction/verify/mod.rs:953-962
+        if !tx.get_fee_type().is_energy() {
+            let fee = tx.get_fee();
+            if fee > 0 {
+                // Debit fee from sender's TOS balance
+                {
+                    let mut account = self.accounts.get_mut(source).unwrap();
+                    let tos_balance = account.balances.entry(TOS_ASSET.clone()).or_insert(0);
+
+                    if *tos_balance < fee {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Insufficient balance for fee: source {} has {} but needs {} TOS",
+                                   source.as_address(self.is_mainnet), tos_balance, fee);
+                        }
+                        return Ok(TransactionResult {
+                            tx_hash,
+                            success: false,
+                            error: Some(format!("Insufficient balance for fee: has {}, needs {}", tos_balance, fee)),
+                            gas_used: 0,
+                        });
+                    }
+
+                    *tos_balance -= fee;
+
+                    if log::log_enabled!(log::Level::Trace) {
+                        use log::trace;
+                        trace!("Deducted fee {} from source {} (new balance: {})",
+                               fee, source.as_address(self.is_mainnet), *tos_balance);
+                    }
+                }
+            }
+        }
+
         // Apply transaction based on type
         let result = match tx.get_data() {
             TransactionType::Transfers(transfers) => {
@@ -364,7 +399,13 @@ impl<S: Storage> ParallelChainState<S> {
                 *src_balance -= amount;
             }
 
+            // SECURITY FIX #2: Load existing receiver balance before applying delta
+            // This prevents balance corruption when receiver has existing balance not in cache
+            // Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Vulnerability #2
+            self.ensure_balance_loaded(destination, asset).await?;
+
             // Credit destination (DashMap auto-locks different key, no deadlock)
+            // Now safe: existing balance is loaded, .and_modify will always trigger
             self.balances.entry(destination.clone())
                 .or_insert_with(HashMap::new)
                 .entry(asset.clone())

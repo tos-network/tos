@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::task::JoinSet;
+use tokio::sync::Semaphore;
 use tos_common::{
     crypto::{Hash, Hashable, PublicKey},
     transaction::Transaction,
@@ -112,12 +113,20 @@ impl ParallelExecutor {
 
         let mut join_set = JoinSet::new();
 
+        // SECURITY FIX #4: Use semaphore to limit concurrent tasks
+        // This prevents DoS attacks via unbounded parallelism
+        // Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Vulnerability #4
+        let semaphore = Arc::new(Semaphore::new(self.max_parallelism));
+
         // Spawn tasks for each transaction
         if log::log_enabled!(log::Level::Debug) {
-            debug!("[PARALLEL] Spawning {} async tasks...", batch.len());
+            debug!("[PARALLEL] Spawning {} async tasks (max concurrency: {})...",
+                   batch.len(), self.max_parallelism);
         }
 
         for (index, tx) in batch {
+            // Acquire permit before spawning - blocks if max_parallelism limit reached
+            let permit = semaphore.clone().acquire_owned().await.expect("Semaphore acquire failed");
             let state_clone = Arc::clone(&state);
             let tx_hash = tx.hash();
 
@@ -134,6 +143,8 @@ impl ParallelExecutor {
                     debug!("[PARALLEL] Task {} END: result = {:?}", index,
                            result.as_ref().map(|r| &r.success).unwrap_or(&false));
                 }
+                // Release permit when task completes
+                drop(permit);
                 (index, result)
             });
         }
