@@ -244,6 +244,39 @@ impl<S: Storage> ParallelChainState<S> {
         // Load account state from storage if not cached
         self.ensure_account_loaded(source).await?;
 
+        // SECURITY FIX #1: Verify transaction signature
+        // This prevents invalid/unsigned transactions from being accepted in parallel path
+        // Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Vulnerability #1
+        {
+            let signing_bytes = tx.get_signing_bytes();
+            let source_decompressed = match source.decompress() {
+                Ok(key) => key,
+                Err(_) => {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Failed to decompress source key for transaction {}", tx_hash);
+                    }
+                    return Ok(TransactionResult {
+                        tx_hash,
+                        success: false,
+                        error: Some("Invalid source public key".to_string()),
+                        gas_used: 0,
+                    });
+                }
+            };
+
+            if !tx.get_signature().verify(&signing_bytes, &source_decompressed) {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Invalid signature for transaction {}", tx_hash);
+                }
+                return Ok(TransactionResult {
+                    tx_hash,
+                    success: false,
+                    error: Some("Invalid signature".to_string()),
+                    gas_used: 0,
+                });
+            }
+        }
+
         // Verify nonce
         let current_nonce = {
             let account = self.accounts.get(source).unwrap();
@@ -269,10 +302,21 @@ impl<S: Storage> ParallelChainState<S> {
         if !tx.get_fee_type().is_energy() {
             let fee = tx.get_fee();
             if fee > 0 {
+                // CRITICAL: Load TOS balance from storage BEFORE deducting fee
+                // Otherwise or_insert(0) will default to 0 for accounts not yet touched in this batch
+                self.ensure_balance_loaded(source, &TOS_ASSET).await?;
+
                 // Debit fee from sender's TOS balance
                 {
                     let mut account = self.accounts.get_mut(source).unwrap();
-                    let tos_balance = account.balances.entry(TOS_ASSET.clone()).or_insert(0);
+                    let tos_balance = account.balances.get_mut(&TOS_ASSET)
+                        .ok_or_else(|| {
+                            if log::log_enabled!(log::Level::Debug) {
+                                use log::debug;
+                                debug!("Source {} has no TOS balance for fee", source.as_address(self.is_mainnet));
+                            }
+                            BlockchainError::NoBalance(source.as_address(self.is_mainnet))
+                        })?;
 
                     if *tos_balance < fee {
                         if log::log_enabled!(log::Level::Debug) {
@@ -404,13 +448,18 @@ impl<S: Storage> ParallelChainState<S> {
             // Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Vulnerability #2
             self.ensure_balance_loaded(destination, asset).await?;
 
-            // Credit destination (DashMap auto-locks different key, no deadlock)
-            // Now safe: existing balance is loaded, .and_modify will always trigger
-            self.balances.entry(destination.clone())
-                .or_insert_with(HashMap::new)
-                .entry(asset.clone())
-                .and_modify(|b| *b = b.saturating_add(amount))
-                .or_insert(amount);
+            // Credit destination - MUST update self.accounts (not self.balances DashMap)
+            // The loaded balance is in self.accounts, so we must increment it there
+            {
+                let mut dest_account = self.accounts.get_mut(destination).unwrap();
+                let dest_balance = dest_account.balances.get_mut(asset).unwrap();
+                *dest_balance = dest_balance.saturating_add(amount);
+
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Credited {} of asset {} to {} (new balance: {})",
+                           amount, asset, destination.as_address(self.is_mainnet), *dest_balance);
+                }
+            }
 
             if log::log_enabled!(log::Level::Trace) {
                 trace!("Transferred {} of asset {} from {} to {}",
