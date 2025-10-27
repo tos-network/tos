@@ -3306,7 +3306,27 @@ impl<S: Storage> Blockchain<S> {
                 let tx_count = block.get_transactions().len();
                 let min_txs_threshold = get_min_txs_for_parallel(&self.network);
 
-                if self.should_use_parallel_execution(tx_count) {
+                // SECURITY FIX #6: Check for unsupported transaction types
+                // Contract invocations, deployments, energy, and AI mining are not yet implemented
+                // in parallel execution - they return Ok(()) without doing anything.
+                // Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Issue #6
+                let has_unsupported_types = block.get_transactions().iter().any(|tx| {
+                    use tos_common::transaction::TransactionType;
+                    matches!(tx.get_data(),
+                        TransactionType::InvokeContract(_) |
+                        TransactionType::DeployContract(_) |
+                        TransactionType::Energy(_) |
+                        TransactionType::AIMining(_)
+                    )
+                });
+
+                if has_unsupported_types {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Block contains unsupported transaction types for parallel execution, using sequential path");
+                    }
+                }
+
+                if self.should_use_parallel_execution(tx_count) && !has_unsupported_types {
                     // ===== PARALLEL EXECUTION PATH =====
                     // SECURITY NOTE (Fix #1): Transaction signatures and basic validation
                     // are assumed to be correct at this point because:
@@ -4587,6 +4607,36 @@ impl<S: Storage> Blockchain<S> {
                 storage.set_account_registration_topoheight(&account, topoheight).await?;
             }
         }
+
+        // SECURITY FIX #5: Merge multisig configurations (Step 2.5)
+        // This prevents multisig updates from being lost when using parallel execution
+        // Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Issue #5
+        // NOTE: Done here while we still have storage borrowed, before gas/burned steps
+        let modified_multisigs = parallel_state.get_modified_multisigs();
+        if !modified_multisigs.is_empty() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Merging {} modified multisig configurations", modified_multisigs.len());
+            }
+
+            for (account, multisig_config) in modified_multisigs {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Setting multisig config for account {} at topoheight {}",
+                           account.as_address(storage.is_mainnet()), topoheight);
+                }
+
+                // Create versioned multisig with current topoheight
+                use std::borrow::Cow;
+                use tos_common::versioned_type::Versioned;
+                let versioned_multisig = Versioned::new(
+                    multisig_config.as_ref().map(|m| Cow::Borrowed(m)),
+                    Some(topoheight)
+                );
+
+                storage.set_last_multisig_to(&account, topoheight, versioned_multisig).await?;
+            }
+        }
+
+        // Storage borrow ends here, allowing us to use applicable_state for gas/burned
 
         // Step 3: Merge gas fees
         let total_gas = parallel_state.get_gas_fee();

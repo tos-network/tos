@@ -1,18 +1,28 @@
 # SECURITY AUDIT: Parallel Transaction Execution
 
-**Date**: 2025-10-27
-**Branch**: `feature/parallel-transaction-execution-v3`
-**Status**: 🔴 **CRITICAL VULNERABILITIES FOUND - DO NOT MERGE TO PRODUCTION**
+**Date**: 2025-10-27 (Updated: 2025-10-27)
+**Branch**: `feature/parallel-transaction-execution`
+**Status**: 🟡 **FIXES IN PROGRESS - 6 VULNERABILITIES IDENTIFIED**
 
 ## Executive Summary
 
-Four critical security vulnerabilities have been identified in the parallel transaction execution implementation. These vulnerabilities would allow:
-- Execution of transactions with invalid signatures
-- Corruption of account balances
-- Inflation of token supply
-- Denial of service via unbounded parallelism
+Six critical security vulnerabilities were identified in the parallel transaction execution implementation:
 
-**All 4 vulnerabilities MUST be fixed before this feature can be deployed.**
+**FIXED** ✅:
+1. Missing Transaction Validation (Vulnerability #1) - FIXED
+2. Balance Corruption (Vulnerability #2) - FIXED
+3. Fee Inflation (Vulnerability #3) - FIXED
+4. Unbounded Parallelism (Vulnerability #4) - FIXED
+5. Multisig Not Persisted (Vulnerability #5) - FIXED (2025-10-27)
+6. Unsupported Transaction Types (Vulnerability #6) - FIXED (2025-10-27)
+
+**All 6 vulnerabilities have been addressed.** The parallel execution feature now:
+- ✅ Validates transaction signatures
+- ✅ Correctly increments receiver balances
+- ✅ Properly deducts transaction fees
+- ✅ Respects max_parallelism limit
+- ✅ Persists multisig configurations to storage
+- ✅ Falls back to sequential execution for unsupported transaction types
 
 ---
 
@@ -338,6 +348,167 @@ for (index, tx) in batch {
 
 ---
 
+## Vulnerability #5: Multisig Not Persisted (CRITICAL) - FIXED ✅
+
+### Severity: 🔴 CRITICAL
+
+### Description
+Multisig configuration updates were applied to the parallel execution cache but never persisted to storage during the merge step.
+
+### Affected Code
+- **File**: `daemon/src/core/blockchain.rs`
+- **Lines**: 4509-4613 (merge_parallel_results function)
+- **File**: `daemon/src/core/state/parallel_chain_state.rs`
+- **Line**: 517 (apply_multisig function)
+
+### The Bug
+The `merge_parallel_results()` function had 4 steps:
+1. ✅ Merge account nonces → `storage.set_last_nonce_to()`
+2. ✅ Merge balance changes → `storage.set_last_balance_to()`
+3. ✅ Merge gas fees → `applicable_state.add_gas_fee()`
+4. ✅ Merge burned supply → `applicable_state.add_burned_coins()`
+5. ❌ **MISSING**: Merge multisig configurations
+
+The `ParallelChainState::get_modified_multisigs()` method existed but was never called.
+
+### Attack Scenario
+**Setup**:
+- Alice creates a multisig configuration requiring 2-of-3 signatures
+- Transaction is executed via parallel path
+
+**Bug Behavior**:
+1. `apply_multisig()` updates `self.accounts[alice].multisig` cache
+2. Transaction returns success
+3. `merge_parallel_results()` merges nonces, balances, gas, burned supply
+4. **Multisig configuration is NEVER written to storage**
+5. Next block reads from storage → multisig config is None
+6. Alice's multisig requirement is lost forever
+
+### Impact
+- **Consensus breaking**: Nodes using sequential path would have correct multisig, parallel path loses it
+- **Network split**: Different nodes have different account states
+- **Security bypass**: Multisig protections silently disappear
+
+### Fix Applied (2025-10-27)
+Added Step 2.5 to `merge_parallel_results()` to persist multisig configurations:
+
+```rust
+// SECURITY FIX #5: Merge multisig configurations (Step 2.5)
+// This prevents multisig updates from being lost when using parallel execution
+// Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Issue #5
+let modified_multisigs = parallel_state.get_modified_multisigs();
+if !modified_multisigs.is_empty() {
+    for (account, multisig_config) in modified_multisigs {
+        use std::borrow::Cow;
+        use tos_common::versioned_type::Versioned;
+        let versioned_multisig = Versioned::new(
+            multisig_config.as_ref().map(|m| Cow::Borrowed(m)),
+            Some(topoheight)
+        );
+        storage.set_last_multisig_to(&account, topoheight, versioned_multisig).await?;
+    }
+}
+```
+
+**Location**: `daemon/src/core/blockchain.rs:4611-4637`
+
+---
+
+## Vulnerability #6: Unsupported Transaction Types (CRITICAL) - FIXED ✅
+
+### Severity: 🔴 CRITICAL
+
+### Description
+Multiple transaction types returned `Ok(())` without performing any actual execution in the parallel path, silently succeeding while doing nothing.
+
+### Affected Code
+- **File**: `daemon/src/core/state/parallel_chain_state.rs`
+- **Lines**: 520-551
+
+### The Bug
+Four transaction types were implemented as no-ops:
+
+```rust
+/// Apply contract invocation
+async fn apply_invoke_contract(...) -> Result<(), BlockchainError> {
+    // TODO: Implement contract invocation logic
+    Ok(())  // ❌ NO-OP!
+}
+
+/// Apply contract deployment
+async fn apply_deploy_contract(...) -> Result<(), BlockchainError> {
+    // TODO: Implement contract deployment logic
+    Ok(())  // ❌ NO-OP!
+}
+
+/// Apply energy transaction
+async fn apply_energy(...) -> Result<(), BlockchainError> {
+    // TODO: Implement energy transaction logic
+    Ok(())  // ❌ NO-OP!
+}
+```
+
+Additionally, the AI mining branch also just returned `Ok(())`.
+
+### Attack Scenario
+**Setup**:
+- Block contains 10 transactions: 4 transfers + 1 contract invocation
+- Transaction count ≥ threshold → parallel execution chosen
+
+**Bug Behavior**:
+1. 4 transfers execute correctly via parallel path
+2. Contract invocation returns success but **does nothing**
+3. Block is accepted with all transactions marked as successful
+4. **Contract state is NEVER updated**
+5. Sequential execution nodes reject the block (contract state mismatch)
+6. **Network split**
+
+### Impact
+- **Consensus breaking**: Parallel vs sequential nodes have different states
+- **Network partition**: Nodes disagree on valid blocks
+- **Silent failures**: Transactions appear successful but are ignored
+- **Data loss**: Contract deployments, energy transactions lost
+
+### Fix Applied (2025-10-27)
+Added check to disable parallel execution when unsupported transaction types are present:
+
+```rust
+// SECURITY FIX #6: Check for unsupported transaction types
+// Contract invocations, deployments, energy, and AI mining are not yet implemented
+// in parallel execution - they return Ok(()) without doing anything.
+// Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Issue #6
+let has_unsupported_types = block.get_transactions().iter().any(|tx| {
+    use tos_common::transaction::TransactionType;
+    matches!(tx.get_data(),
+        TransactionType::InvokeContract(_) |
+        TransactionType::DeployContract(_) |
+        TransactionType::Energy(_) |
+        TransactionType::AIMining(_)
+    )
+});
+
+if has_unsupported_types {
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("Block contains unsupported transaction types for parallel execution, using sequential path");
+    }
+}
+
+if self.should_use_parallel_execution(tx_count) && !has_unsupported_types {
+    // Use parallel execution
+} else {
+    // Use sequential execution
+}
+```
+
+**Location**: `daemon/src/core/blockchain.rs:3309-3329`
+
+**Behavior After Fix**:
+- Blocks containing **only** Transfers, Burns, and MultiSig → Parallel execution (fast)
+- Blocks containing InvokeContract, DeployContract, Energy, or AIMining → Sequential execution (safe)
+- Ensures correctness while still benefiting from parallelism for simple transfers
+
+---
+
 ## Testing Requirements
 
 Before this feature can be deployed, the following tests MUST pass:
@@ -408,7 +579,13 @@ async fn test_parallel_respects_max_parallelism() {
 
 ## Deployment Checklist
 
-- [ ] All 4 vulnerabilities fixed
+- [x] All 6 vulnerabilities fixed (2025-10-27)
+  - [x] Vulnerability #1: Signature verification added
+  - [x] Vulnerability #2: Balance increment fixed (cache layer corrected)
+  - [x] Vulnerability #3: Fee deduction implemented with storage load
+  - [x] Vulnerability #4: Semaphore-based parallelism control added
+  - [x] Vulnerability #5: Multisig persistence added to merge step
+  - [x] Vulnerability #6: Unsupported transaction types trigger sequential fallback
 - [ ] All security tests passing
 - [ ] Integration tests updated
 - [ ] Code review by security team
