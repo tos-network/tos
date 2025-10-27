@@ -3292,50 +3292,145 @@ impl<S: Storage> Blockchain<S> {
                 total_txs_executed += block.get_transactions().len();
 
                 // ============================================================================
-                // PARALLEL EXECUTION INTEGRATION POINT (Phase 2)
+                // PARALLEL EXECUTION INTEGRATION POINT (Phase 3)
                 // ============================================================================
-                // TODO(Phase 1 Complete): When ParallelChainState.apply_changes() is ready:
-                //
-                // if self.should_use_parallel_execution(block.get_transactions().len()) {
-                //     if log::log_enabled!(log::Level::Info) {
-                //         info!("Using parallel execution for {} transactions in block {}",
-                //               block.get_transactions().len(), hash);
-                //     }
-                //
-                //     // Execute transactions in parallel
-                //     let transactions: Vec<Transaction> = block.get_transactions().iter()
-                //         .cloned().collect();
-                //     let (parallel_results, parallel_state) = self.execute_transactions_parallel(
-                //         transactions,
-                //         base_topo_height,
-                //         highest_topo,
-                //         version,
-                //     ).await?;
-                //
-                //     // Merge parallel state into applicable state
-                //     self.merge_parallel_results(
-                //         &parallel_state,
-                //         &mut chain_state,
-                //         &parallel_results,
-                //     ).await?;
-                //
-                //     // Process results and mark transactions as executed
-                //     for (tx, tx_hash, result) in parallel_results {
-                //         if result.is_ok() {
-                //             chain_state.get_mut_storage().mark_tx_as_executed_in_block(&tx_hash, &hash)?;
-                //             // TODO: Handle nonce_checker, orphaned_transactions, events
-                //         }
-                //     }
-                // } else {
-                //     // Sequential execution (current path)
-                //     // ... existing loop code ...
-                // }
-                //
-                // For now, PARALLEL_EXECUTION_ENABLED = false, so always use sequential path
+                // Hybrid execution: Use parallel execution for large batches, sequential for small batches
+                // Controlled by PARALLEL_EXECUTION_ENABLED flag and MIN_TXS_FOR_PARALLEL threshold
                 // ============================================================================
 
-                // compute rewards & execute txs
+                // Collect transaction hashes first (needed for both paths)
                 let txs_hashes: IndexSet<Hash> = block.get_transactions().iter().map(|tx| tx.hash()).collect();
+
+                // Decide execution path based on batch size and feature flag
+                if self.should_use_parallel_execution(block.get_transactions().len()) {
+                    // ===== PARALLEL EXECUTION PATH =====
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Using parallel execution for {} transactions in block {}",
+                              block.get_transactions().len(), hash);
+                    }
+
+                    // Execute transactions in parallel
+                    let transactions: Vec<Transaction> = block.get_transactions().iter()
+                        .map(|arc_tx| (**arc_tx).clone())
+                        .collect();
+                    let (parallel_results, parallel_state) = self.execute_transactions_parallel(
+                        transactions,
+                        base_topo_height,
+                        highest_topo,
+                        version,
+                    ).await?;
+
+                    // Merge parallel state into applicable state (nonces, balances, gas, burned supply)
+                    self.merge_parallel_results(
+                        &parallel_state,
+                        &mut chain_state,
+                        &parallel_results,
+                    ).await?;
+
+                    // Process results: link transactions to block, handle failures, track events
+                    for (tx, tx_hash, result) in block.get_transactions().iter()
+                        .zip(txs_hashes.iter())
+                        .zip(parallel_results.iter())
+                        .map(|((tx, tx_hash), result)| (tx, tx_hash, result))
+                    {
+                        // Link transaction to this block
+                        if !chain_state.get_mut_storage().add_block_linked_to_tx_if_not_present(tx_hash, &hash)? {
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("Block {} is now linked to tx {}", hash, tx_hash);
+                            }
+                        }
+
+                        // Check if transaction was already executed in another branch
+                        if chain_state.get_storage().is_tx_executed_in_a_block(tx_hash)? {
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("Tx {} was already executed in a previous block, skipping...", tx_hash);
+                            }
+                            continue;
+                        }
+
+                        // Process execution result
+                        if result.success {
+                            // Transaction executed successfully
+                            let start = Instant::now();
+
+                            // Mark transaction as executed
+                            chain_state.get_mut_storage().mark_tx_as_executed_in_block(tx_hash, &hash)?;
+
+                            // Remove from orphaned transactions if present
+                            if orphaned_transactions.pop(tx_hash).is_some() {
+                                if log::log_enabled!(log::Level::Trace) {
+                                    trace!("Transaction {} was marked as orphaned, but got executed again", tx_hash);
+                                }
+                            }
+
+                            // Track transaction execution event
+                            if should_track_events.contains(&NotifyEvent::TransactionExecuted) {
+                                let value = json!(TransactionExecutedEvent {
+                                    tx_hash: Cow::Borrowed(tx_hash),
+                                    block_hash: Cow::Borrowed(&hash),
+                                    topoheight: highest_topo,
+                                });
+                                events.entry(NotifyEvent::TransactionExecuted).or_insert_with(Vec::new).push(value);
+                            }
+
+                            // Track contract-specific events
+                            match tx.get_data() {
+                                TransactionType::InvokeContract(payload) => {
+                                    let event = NotifyEvent::InvokeContract {
+                                        contract: payload.contract.clone(),
+                                    };
+
+                                    if should_track_events.contains(&event) {
+                                        let is_mainnet = self.network.is_mainnet();
+
+                                        if let Some(contract_outputs) = chain_state.get_contract_outputs_for_tx(tx_hash) {
+                                            let contract_outputs = contract_outputs.into_iter()
+                                                .map(|output| RPCContractOutput::from_output(output, is_mainnet))
+                                                .collect::<Vec<_>>();
+
+                                            let value = json!(InvokeContractEvent {
+                                                tx_hash: Cow::Borrowed(tx_hash),
+                                                block_hash: Cow::Borrowed(&hash),
+                                                topoheight: highest_topo,
+                                                contract_outputs,
+                                            });
+                                            events.entry(event).or_insert_with(Vec::new).push(value);
+                                        }
+                                    }
+                                },
+                                TransactionType::DeployContract(_) => {
+                                    if should_track_events.contains(&NotifyEvent::DeployContract) {
+                                        let value = json!(NewContractEvent {
+                                            contract: Cow::Borrowed(tx_hash),
+                                            block_hash: Cow::Borrowed(&hash),
+                                            topoheight: highest_topo,
+                                        });
+                                        events.entry(NotifyEvent::DeployContract).or_insert_with(Vec::new).push(value);
+                                    }
+                                }
+                                _ => {}
+                            }
+
+                            // Accumulate transaction fees
+                            total_fees = total_fees.checked_add(tx.get_fee())
+                                .ok_or(BlockchainError::BalanceOverflow)?;
+
+                            total_txs_execution_time += start.elapsed().as_micros();
+                        } else {
+                            // Transaction execution failed in parallel execution
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Error while executing TX {} with parallel execution: {}",
+                                      tx_hash, result.error.as_ref().unwrap_or(&"Unknown error".to_string()));
+                            }
+                            // Mark as orphaned
+                            orphaned_transactions.put(tx_hash.clone(), ());
+                        }
+                    }
+                } else {
+                    // ===== SEQUENTIAL EXECUTION PATH (ORIGINAL) =====
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Using sequential execution for {} transactions", block.get_transactions().len());
+                    }
                 for (tx, tx_hash) in block.get_transactions().iter().zip(txs_hashes.iter()) { // execute all txs
                     // Link the transaction hash to this block
                     if !chain_state.get_mut_storage().add_block_linked_to_tx_if_not_present(&tx_hash, &hash)? {
@@ -3455,6 +3550,7 @@ impl<S: Storage> Blockchain<S> {
                             .ok_or(BlockchainError::BalanceOverflow)?;
                     }
                 }
+                } // End of else block (sequential execution)
 
                 // DAG FIX: Add fees and gas_fee to miner after transaction execution
                 // Base reward was already added before TX execution
