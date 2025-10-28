@@ -76,6 +76,13 @@ pub struct ParallelApplyAdapter<'a, S: Storage> {
     /// need to return &'b mut u64, but we can't directly return mutable references from DashMap.
     /// Instead, we track all balance reads and modifications, then commit them all at once.
     balance_reads: HashMap<(PublicKey, Hash), u64>,
+
+    /// Output sum tracking (spending amounts)
+    /// CRITICAL SECURITY: This tracks the total amount spent per account/asset during TX execution.
+    /// Sequential path uses Echange::output_sum which is subtracted in apply_changes().
+    /// Parallel path must do the same: track outputs here, subtract when committing.
+    /// Without this, balances are never debited → consensus-breaking inflation bug.
+    output_sums: HashMap<(PublicKey, Hash), u64>,
 }
 
 impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
@@ -92,14 +99,30 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
             block,
             block_hash,
             balance_reads: HashMap::new(),
+            output_sums: HashMap::new(),
         }
     }
 
     /// Commit cached balance changes back to ParallelChainState
     /// Call this after transaction application succeeds
+    ///
+    /// CRITICAL SECURITY: This method must subtract output_sums from balances to prevent inflation.
+    /// Sequential path subtracts output_sum in apply_changes() (daemon/src/core/state/chain_state/apply.rs:518, 535).
+    /// Parallel path does it here after all TX mutations are complete.
     pub fn commit_balances(&self) {
-        for ((account, asset), balance) in &self.balance_reads {
-            self.parallel_state.set_balance(account, asset, *balance);
+        use log::trace;
+
+        for ((account, asset), mut balance) in self.balance_reads.clone() {
+            // Subtract outputs AFTER all balance mutations (same as sequential apply_changes)
+            if let Some(&output_sum) = self.output_sums.get(&(account.clone(), asset.clone())) {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Subtracting output_sum {} from balance {} for account {} asset {}",
+                           output_sum, balance, account.as_address(self.parallel_state.is_mainnet()), asset);
+                }
+                balance = balance.saturating_sub(output_sum);
+            }
+
+            self.parallel_state.set_balance(&account, &asset, balance);
         }
     }
 
@@ -240,14 +263,35 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
     }
 
     /// Track sender output (spending) for final balance verification
+    ///
+    /// CRITICAL SECURITY FIX: This method tracks spending amounts to prevent consensus-breaking inflation.
+    ///
+    /// Sequential path calls internal_update_sender_echange() which adds to output_sum,
+    /// then apply_changes() subtracts output_sum from balance (daemon/src/core/state/chain_state/apply.rs:518, 535).
+    ///
+    /// Parallel path accumulates outputs here, then commit_balances() subtracts them.
+    /// Without this, balances are never debited when block is merged → inflation bug.
     async fn add_sender_output(
         &mut self,
-        _account: &'a PublicKey,
-        _asset: &'a Hash,
-        _output: u64,
+        account: &'a PublicKey,
+        asset: &'a Hash,
+        output: u64,
     ) -> Result<(), BlockchainError> {
-        // For parallel execution, balance is already mutated by get_sender_balance(),
-        // so we don't need to track outputs separately
+        use log::trace;
+
+        let key = (account.clone(), asset.clone());
+
+        // Accumulate output_sum (same as Echange::add_output_to_sum at line 85)
+        let current_sum = self.output_sums.get(&key).copied().unwrap_or(0);
+        let new_sum = current_sum.saturating_add(output);
+
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("add_sender_output: account {} asset {} output {} (sum {} -> {})",
+                   account.as_address(self.parallel_state.is_mainnet()),
+                   asset, output, current_sum, new_sum);
+        }
+
+        self.output_sums.insert(key, new_sum);
         Ok(())
     }
 
