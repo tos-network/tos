@@ -1737,8 +1737,8 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         &mut args,
         "amount",
         manager,
-        "transfer <address> <asset> <amount> [fee_type] [confirm]",
-        "transfer tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk TOS 1.0 tos y",
+        "transfer <asset> <address> <amount> [fee_type] [confirm]",
+        "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.0 tos y",
         || async {
             prompt.read(
                 prompt.colorize_string(Color::Green, &format!("Amount (max: {}): ", format_coin(max_balance, asset_data.get_decimals())))
@@ -1750,8 +1750,8 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         CommandError::InvalidParameterWithExample {
             param: "amount".to_string(),
             message: format!("'{}' is not a valid amount (use decimal format like 1.0, 0.5, etc.)", amount_str),
-            usage: "transfer <address> <asset> <amount> [fee_type] [confirm]".to_string(),
-            example: "transfer tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk TOS 1.0 tos y".to_string(),
+            usage: "transfer <asset> <address> <amount> [fee_type] [confirm]".to_string(),
+            example: "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.0 tos y".to_string(),
         }
     })?;
 
