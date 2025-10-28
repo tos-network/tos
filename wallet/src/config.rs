@@ -210,12 +210,12 @@ QUICK START GUIDE - NON-INTERACTIVE MODE
 4. SEND TRANSACTION (non-interactive):
    ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
        --wallet-path my_wallet --password mypass123 \
-       --exec "transfer <recipient_address> <amount>"
+       --exec "transfer <asset> <recipient_address> <amount>"
 
    Example:
    ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
        --wallet-path my_wallet --password mypass123 \
-       --exec "transfer tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.5"
+       --exec "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.5"
 
 5. RESTORE WALLET FROM SEED:
    ./tos_wallet --network devnet --wallet-path restored_wallet --password newpass456 \
@@ -250,8 +250,7 @@ Wallet Management:
   balance                   - Show wallet balance (requires --daemon-address)
 
 Transactions:
-  transfer <address> <amount>              - Send TOS to address
-  transfer <address> <amount> <asset_hash> - Send specific asset
+  transfer <asset> <address> <amount>      - Send asset to address (asset can be 'TOS' or asset hash)
   history                                  - Show transaction history
   nonce                                    - Show current nonce
 
@@ -295,7 +294,7 @@ EXAMPLES FOR AI TOOLS:
 for i in {1..4}; do
     ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
         --wallet-path sender_wallet --password pass123 \
-        --exec "transfer tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.0"
+        --exec "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.0"
     sleep 0.3
 done
 
@@ -311,6 +310,7 @@ Create a JSON file (transfer.json):
 {
   "command": "transfer",
   "params": {
+    "asset": "TOS",
     "address": "tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk",
     "amount": "1.0"
   }
