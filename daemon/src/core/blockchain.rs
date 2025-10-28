@@ -3307,16 +3307,18 @@ impl<S: Storage> Blockchain<S> {
                 let min_txs_threshold = get_min_txs_for_parallel(&self.network);
 
                 // SECURITY FIX #6: Check for unsupported transaction types
-                // Contract invocations, deployments, energy, and AI mining are not yet implemented
-                // in parallel execution - they return Ok(()) without doing anything.
+                // Contract invocations, deployments, energy, AI mining, and MultiSig are not yet implemented
+                // in parallel execution. MultiSig added because get_multisig_state returns None (phase 1 limitation).
                 // Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Issue #6
+                // Reference: High priority bug - MultiSig transactions fail in parallel mode
                 let has_unsupported_types = block.get_transactions().iter().any(|tx| {
                     use tos_common::transaction::TransactionType;
                     matches!(tx.get_data(),
                         TransactionType::InvokeContract(_) |
                         TransactionType::DeployContract(_) |
                         TransactionType::Energy(_) |
-                        TransactionType::AIMining(_)
+                        TransactionType::AIMining(_) |
+                        TransactionType::MultiSig(_)
                     )
                 });
 
@@ -3374,6 +3376,12 @@ impl<S: Storage> Blockchain<S> {
                     if log::log_enabled!(log::Level::Debug) {
                         debug!("[PARALLEL] Calling execute_transactions_parallel...");
                     }
+                    // Pass miner rewards for parallel execution to apply before transactions
+                    let dev_fee_reward_opt = if dev_fee_percentage != 0 {
+                        Some(block_reward * dev_fee_percentage / 100)
+                    } else {
+                        None
+                    };
                     let (parallel_results, parallel_state) = self.execute_transactions_parallel(
                         transactions,
                         base_topo_height,
@@ -3381,6 +3389,8 @@ impl<S: Storage> Blockchain<S> {
                         version,
                         block.clone(),
                         hash.clone(),
+                        miner_reward,
+                        dev_fee_reward_opt,
                     ).await?;
 
                     if log::log_enabled!(log::Level::Debug) {
@@ -4467,6 +4477,8 @@ impl<S: Storage> Blockchain<S> {
         version: BlockVersion,
         block: Block,
         block_hash: Hash,
+        miner_reward: u64,
+        dev_fee_reward: Option<u64>,
     ) -> Result<(Vec<super::state::parallel_chain_state::TransactionResult>, Arc<ParallelChainState<S>>), BlockchainError> {
         use log::debug;
 
@@ -4491,13 +4503,35 @@ impl<S: Storage> Blockchain<S> {
             stable_topoheight,
             topoheight,
             version,
-            block,
+            block.clone(),
             block_hash,
         ).await;
 
         if log::log_enabled!(log::Level::Debug) {
             debug!("[PARALLEL] ParallelChainState created");
         }
+
+        // Step 2.5: CONSENSUS FIX - Add miner rewards BEFORE executing transactions
+        // This ensures that miners can immediately spend their coinbase in the same block.
+        // Without this, parallel execution would reject such blocks while sequential mode accepts them.
+        // Reference: High priority bug reported - miner spending coinbase regression
+        if let Some(dev_fee) = dev_fee_reward {
+            if log::log_enabled!(log::Level::Debug) {
+                use tos_common::utils::format_tos;
+                debug!("[PARALLEL] Adding dev fee {} to {} before TX execution",
+                       format_tos(dev_fee),
+                       DEV_PUBLIC_KEY.as_address(parallel_state.is_mainnet()));
+            }
+            parallel_state.reward_miner(&DEV_PUBLIC_KEY, dev_fee).await?;
+        }
+
+        if log::log_enabled!(log::Level::Debug) {
+            use tos_common::utils::format_tos;
+            debug!("[PARALLEL] Adding miner reward {} to {} before TX execution",
+                   format_tos(miner_reward),
+                   block.get_miner().as_address(parallel_state.is_mainnet()));
+        }
+        parallel_state.reward_miner(block.get_miner(), miner_reward).await?;
 
         // Step 3: Execute transactions in parallel
         if log::log_enabled!(log::Level::Debug) {
