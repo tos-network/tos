@@ -106,23 +106,15 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
     /// Commit cached balance changes back to ParallelChainState
     /// Call this after transaction application succeeds
     ///
-    /// CRITICAL SECURITY: This method must subtract output_sums from balances to prevent inflation.
-    /// Sequential path subtracts output_sum in apply_changes() (daemon/src/core/state/chain_state/apply.rs:518, 535).
-    /// Parallel path does it here after all TX mutations are complete.
+    /// IMPORTANT: Transaction::apply_with_partial_verify() already mutated balances via get_sender_balance().
+    /// Sequential path also mutates Echange::version during TX, then discards it and recomputes in apply_changes().
+    /// Parallel path keeps the mutations because we can't recompute (no receiver_balances separation).
+    ///
+    /// The balance_reads cache contains the FINAL mutated balances after TX execution.
+    /// We just commit them directly - NO additional output_sum subtraction needed!
     pub fn commit_balances(&self) {
-        use log::trace;
-
-        for ((account, asset), mut balance) in self.balance_reads.clone() {
-            // Subtract outputs AFTER all balance mutations (same as sequential apply_changes)
-            if let Some(&output_sum) = self.output_sums.get(&(account.clone(), asset.clone())) {
-                if log::log_enabled!(log::Level::Trace) {
-                    trace!("Subtracting output_sum {} from balance {} for account {} asset {}",
-                           output_sum, balance, account.as_address(self.parallel_state.is_mainnet()), asset);
-                }
-                balance = balance.saturating_sub(output_sum);
-            }
-
-            self.parallel_state.set_balance(&account, &asset, balance);
+        for ((account, asset), balance) in &self.balance_reads {
+            self.parallel_state.set_balance(account, asset, *balance);
         }
     }
 
@@ -264,13 +256,21 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
 
     /// Track sender output (spending) for final balance verification
     ///
-    /// CRITICAL SECURITY FIX: This method tracks spending amounts to prevent consensus-breaking inflation.
+    /// PHASE 1 IMPLEMENTATION: Tracks output_sum for protocol compatibility.
     ///
-    /// Sequential path calls internal_update_sender_echange() which adds to output_sum,
-    /// then apply_changes() subtracts output_sum from balance (daemon/src/core/state/chain_state/apply.rs:518, 535).
+    /// Sequential execution separates sender balances (accounts HashMap) from receiver balances
+    /// (receiver_balances HashMap). When an account both receives and sends in same block,
+    /// apply_changes() merges them: receiver_balance - output_sum.
     ///
-    /// Parallel path accumulates outputs here, then commit_balances() subtracts them.
-    /// Without this, balances are never debited when block is merged → inflation bug.
+    /// Parallel execution uses a single DashMap without sender/receiver separation.
+    /// When an account receives AND sends:
+    /// 1. Receive: balance 50 → 80 (via get_receiver_balance mutation)
+    /// 2. Send: balance 80 → 60 (via get_sender_balance mutation)
+    /// Final balance 60 is correct - already reflects both operations.
+    ///
+    /// Therefore output_sum is tracked here for protocol compatibility but NOT used in
+    /// commit_balances() for Phase 1 simple transfers. Future phases may need it for
+    /// complex sender/receiver merging logic.
     async fn add_sender_output(
         &mut self,
         account: &'a PublicKey,
@@ -281,7 +281,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
 
         let key = (account.clone(), asset.clone());
 
-        // Accumulate output_sum (same as Echange::add_output_to_sum at line 85)
+        // Accumulate output_sum (for protocol compatibility, not used in Phase 1)
         let current_sum = self.output_sums.get(&key).copied().unwrap_or(0);
         let new_sum = current_sum.saturating_add(output);
 
