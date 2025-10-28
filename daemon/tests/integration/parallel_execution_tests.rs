@@ -6,14 +6,41 @@
 use std::sync::Arc;
 use tempdir::TempDir;
 use tos_common::{
-    block::BlockVersion,
+    block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
+    crypto::{elgamal::CompressedPublicKey, Hash, Hashable},
+    immutable::Immutable,
     network::Network,
+    serializer::{Reader, Serializer, Writer},
 };
 use tos_daemon::core::{
     executor::{ParallelExecutor, get_optimal_parallelism},
     storage::{sled::{SledStorage, StorageMode}, NetworkProvider},
 };
 use tos_environment::Environment;
+
+/// Helper function to create a dummy block for testing
+fn create_dummy_block() -> (Block, Hash) {
+    let mut buffer = Vec::new();
+    let mut writer = Writer::new(&mut buffer);
+    writer.write_bytes(&[0u8; 32]);
+    let data = writer.as_bytes();
+
+    let mut reader = Reader::new(data);
+    let miner = CompressedPublicKey::read(&mut reader).expect("Failed to create test pubkey");
+
+    let header = BlockHeader::new_simple(
+        BlockVersion::V0,
+        vec![],
+        0,
+        [0u8; EXTRA_NONCE_SIZE],
+        miner,
+        Hash::zero(),
+    );
+
+    let block = Block::new(Immutable::Owned(header), vec![]);
+    let hash = block.hash();
+    (block, hash)
+}
 
 #[tokio::test]
 async fn test_optimal_parallelism_sanity() {
@@ -40,12 +67,15 @@ async fn test_parallel_chain_state_initialization() {
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
+    let (block, block_hash) = create_dummy_block();
     let parallel_state = tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
         storage_arc,
         environment,
         0,  // stable_topoheight
         1,  // topoheight
         BlockVersion::V0,
+        block,
+        block_hash,
     ).await;
 
     // Verify state initialization
@@ -70,12 +100,15 @@ async fn test_parallel_executor_empty_batch() {
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
+    let (block, block_hash) = create_dummy_block();
     let parallel_state = tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
         storage_arc,
         environment,
         0,
         1,
         BlockVersion::V0,
+        block,
+        block_hash,
     ).await;
 
     // Execute empty batch
@@ -101,12 +134,15 @@ async fn test_parallel_state_getters() {
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
+    let (block, block_hash) = create_dummy_block();
     let parallel_state = tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
         storage_arc,
         environment,
         0,
         1,
         BlockVersion::V0,
+        block,
+        block_hash,
     ).await;
 
     // Test getter methods
@@ -210,12 +246,15 @@ async fn test_parallel_state_modification_simulation() {
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
+    let (block, block_hash) = create_dummy_block();
     let parallel_state = tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
         storage_arc,
         environment,
         0,
         1,
         BlockVersion::V0,
+        block,
+        block_hash,
     ).await;
 
     // Verify initial state is empty
@@ -249,12 +288,15 @@ async fn test_parallel_executor_batch_size_verification() {
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
+    let (block, block_hash) = create_dummy_block();
     let parallel_state = tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
         storage_arc,
         environment,
         0,
         1,
         BlockVersion::V0,
+        block,
+        block_hash,
     ).await;
 
     // Test empty batch (already tested in test_parallel_executor_empty_batch)
@@ -286,12 +328,15 @@ async fn test_parallel_state_network_caching() {
     let storage_arc_dev = Arc::new(tokio::sync::RwLock::new(storage_dev));
     let environment = Arc::new(Environment::new());
 
+    let (block, block_hash) = create_dummy_block();
     let parallel_state_dev = tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
         storage_arc_dev.clone(),
         environment.clone(),
         0,
         1,
         BlockVersion::V0,
+        block,
+        block_hash,
     ).await;
 
     // Verify devnet is not mainnet (field is cached)
@@ -316,12 +361,15 @@ async fn test_parallel_state_network_caching() {
 
     let storage_arc_main = Arc::new(tokio::sync::RwLock::new(storage_main));
 
+    let (block2, block_hash2) = create_dummy_block();
     let parallel_state_main = tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
         storage_arc_main.clone(),
         environment,
         0,
         1,
         BlockVersion::V0,
+        block2,
+        block_hash2,
     ).await;
 
     // Verify mainnet state initialized
@@ -367,12 +415,15 @@ async fn test_parallel_executor_parallelism_configuration() {
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
+    let (block, block_hash) = create_dummy_block();
     let parallel_state = tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
         storage_arc,
         environment,
         0,
         1,
         BlockVersion::V0,
+        block,
+        block_hash,
     ).await;
 
     // Execute with default executor

@@ -2,7 +2,9 @@
 // Uses tokio JoinSet for concurrency and simple conflict detection
 
 use std::collections::HashSet;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
+use futures::FutureExt;
 use tokio::task::JoinSet;
 use tokio::sync::Semaphore;
 use tos_common::{
@@ -135,19 +137,64 @@ impl ParallelExecutor {
             }
 
             join_set.spawn(async move {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!("[PARALLEL] Task {} START: applying transaction {}", index, tx_hash);
+                let task_future = async {
+                    // Hold permit for the lifetime of this task
+                    let _permit = permit;
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("[PARALLEL] Task {} START: applying transaction {}", index, tx_hash);
+                    }
+
+                    // Wrap transaction in Arc for apply_with_partial_verify compatibility
+                    let tx_arc = Arc::new(tx);
+                    let result = state_clone.apply_transaction(tx_arc).await;
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("[PARALLEL] Task {} END: result = {:?}", index,
+                               result.as_ref().map(|r| &r.success).unwrap_or(&false));
+                    }
+
+                    result
+                };
+
+                match AssertUnwindSafe(task_future).catch_unwind().await {
+                    Ok(result) => {
+                        let tx_result = match result {
+                            Ok(tx_res) => tx_res,
+                            Err(e) => TransactionResult {
+                                tx_hash: tx_hash.clone(),
+                                success: false,
+                                error: Some(format!("Transaction failed: {:?}", e)),
+                                gas_used: 0,
+                            }
+                        };
+
+                        (index, tx_hash, tx_result)
+                    }
+                    Err(payload) => {
+                        let panic_message = if let Some(&message) = payload.downcast_ref::<&str>() {
+                            message.to_string()
+                        } else if let Some(message) = payload.downcast_ref::<String>() {
+                            message.clone()
+                        } else {
+                            "Unknown panic payload".to_string()
+                        };
+
+                        if log::log_enabled!(log::Level::Error) {
+                            log::error!("[PARALLEL] Task {} panicked while executing tx {}: {}",
+                                        index, tx_hash, panic_message);
+                        }
+
+                        let panic_result = TransactionResult {
+                            tx_hash: tx_hash.clone(),
+                            success: false,
+                            error: Some(format!("Transaction panicked during parallel execution: {}", panic_message)),
+                            gas_used: 0,
+                        };
+
+                        (index, tx_hash, panic_result)
+                    }
                 }
-                // Wrap transaction in Arc for apply_with_partial_verify compatibility
-                let tx_arc = Arc::new(tx);
-                let result = state_clone.apply_transaction(tx_arc).await;
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!("[PARALLEL] Task {} END: result = {:?}", index,
-                           result.as_ref().map(|r| &r.success).unwrap_or(&false));
-                }
-                // Release permit when task completes
-                drop(permit);
-                (index, result)
             });
         }
 
@@ -165,23 +212,24 @@ impl ParallelExecutor {
             }
 
             match result {
-                Ok((index, tx_result)) => {
+                Ok((index, tx_hash, tx_result)) => {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("[PARALLEL] Task {} join OK", index);
+                        debug!("[PARALLEL] Task {} join OK (tx: {}, success: {})",
+                               index, tx_hash, tx_result.success);
                     }
                     indexed_results.push((index, tx_result));
                 }
                 Err(e) => {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("[PARALLEL] Task join ERROR: {:?}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        log::error!("[PARALLEL] Task join ERROR (unrecoverable panic): {:?}", e);
                     }
-                    // Task panic - create error result directly as TransactionResult
-                    let error_result = Ok(TransactionResult {
+
+                    let error_result = TransactionResult {
                         tx_hash: Hash::zero(),
                         success: false,
-                        error: Some(format!("Task panic: {}", e)),
+                        error: Some(format!("Unrecoverable panic in parallel execution: {}", e)),
                         gas_used: 0,
-                    });
+                    };
                     indexed_results.push((usize::MAX, error_result));
                 }
             }
@@ -198,17 +246,9 @@ impl ParallelExecutor {
             debug!("[PARALLEL] Results sorted, extracting final results...");
         }
 
-        // Extract results, converting Result to TransactionResult
+        // Extract results - tasks already returned TransactionResult objects
         let final_results = indexed_results.into_iter()
-            .map(|(_, result)| match result {
-                Ok(tx_result) => tx_result,
-                Err(e) => TransactionResult {
-                    tx_hash: Hash::zero(),
-                    success: false,
-                    error: Some(format!("{:?}", e)),
-                    gas_used: 0,
-                }
-            })
+            .map(|(_, result)| result)
             .collect();
 
         if log::log_enabled!(log::Level::Debug) {

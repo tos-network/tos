@@ -9,7 +9,7 @@ use std::{
     },
     marker::PhantomData,
 };
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use dashmap::DashMap;
 use tos_common::{
     block::{Block, BlockVersion, TopoHeight},
@@ -105,6 +105,10 @@ pub struct ParallelChainState<S: Storage> {
     // Accumulated results (atomic for thread-safety)
     burned_supply: AtomicU64,
     gas_fee: AtomicU64,
+
+    // DEADLOCK FIX: Semaphore to serialize storage access during parallel execution
+    // This prevents concurrent storage.read() calls that trigger sled internal deadlocks
+    storage_semaphore: Arc<Semaphore>,
 }
 
 impl<S: Storage> ParallelChainState<S> {
@@ -136,6 +140,8 @@ impl<S: Storage> ParallelChainState<S> {
             is_mainnet,
             burned_supply: AtomicU64::new(0),
             gas_fee: AtomicU64::new(0),
+            // DEADLOCK FIX: Permit only 1 concurrent storage access during parallel execution
+            storage_semaphore: Arc::new(Semaphore::new(1)),
         })
     }
 
@@ -163,6 +169,7 @@ impl<S: Storage> ParallelChainState<S> {
         }
 
         // Acquire read lock and load nonce from storage
+        // IMPORTANT: Semaphore must be acquired by CALLER before calling this method
         let storage = self.storage.read().await;
         let nonce = match storage.get_nonce_at_maximum_topoheight(key, self.topoheight).await? {
             Some((_, versioned_nonce)) => versioned_nonce.get_nonce(),
@@ -215,6 +222,7 @@ impl<S: Storage> ParallelChainState<S> {
         }
 
         // Acquire read lock and load balance from storage
+        // IMPORTANT: Semaphore must be acquired by CALLER before calling this method
         let storage = self.storage.read().await;
         let balance = match storage.get_balance_at_maximum_topoheight(account, asset, self.topoheight).await? {
             Some((_, versioned_balance)) => versioned_balance.get_balance(),
@@ -262,9 +270,11 @@ impl<S: Storage> ParallelChainState<S> {
 
         // Create adapter for this transaction execution
         // Pass storage for validation (safe read-only access)
+        // DEADLOCK FIX: Also pass storage_semaphore to serialize storage access
         let mut adapter = ParallelApplyAdapter::new(
             Arc::clone(&self),
             Arc::clone(&self.storage),
+            Arc::clone(&self.storage_semaphore),
             &self.block,
             &self.block_hash,
         );

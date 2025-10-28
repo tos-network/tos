@@ -18,6 +18,7 @@ use std::{
 use anyhow::anyhow;
 use async_trait::async_trait;
 use indexmap::IndexMap;
+use tokio::sync::Semaphore;
 use tos_common::{
     account::{Nonce, EnergyResource},
     ai_mining::AIMiningState,
@@ -65,6 +66,12 @@ pub struct ParallelApplyAdapter<'a, S: Storage> {
     /// Read-only storage access for validation (acquired via read lock)
     storage: Arc<tokio::sync::RwLock<S>>,
 
+    /// Semaphore to prevent concurrent storage access (DEADLOCK FIX)
+    /// This ensures only one task accesses storage at a time, preventing sled internal deadlocks.
+    /// Sled's internal locking mechanism + LRU cache Mutex causes deadlocks when multiple
+    /// async tasks call storage.read() concurrently.
+    storage_semaphore: Arc<Semaphore>,
+
     /// Block being processed
     block: &'a Block,
 
@@ -90,12 +97,14 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
     pub fn new(
         parallel_state: Arc<ParallelChainState<S>>,
         storage: Arc<tokio::sync::RwLock<S>>,
+        storage_semaphore: Arc<Semaphore>,
         block: &'a Block,
         block_hash: &'a Hash,
     ) -> Self {
         Self {
             parallel_state,
             storage,
+            storage_semaphore,
             block,
             block_hash,
             balance_reads: HashMap::new(),
@@ -126,6 +135,10 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
             return Ok(balance);
         }
 
+        // DEADLOCK FIX: Acquire semaphore permit before calling ensure_*_loaded()
+        // These methods will call storage.read() internally
+        let _permit = self.storage_semaphore.acquire().await.unwrap();
+
         // Load from ParallelChainState
         self.parallel_state.ensure_account_loaded(account).await?;
         self.parallel_state.ensure_balance_loaded(account, asset).await?;
@@ -151,6 +164,10 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
         &'b mut self,
         tx: &tos_common::transaction::Transaction,
     ) -> Result<(), BlockchainError> {
+        // DEADLOCK FIX: Acquire semaphore permit before storage access
+        // This prevents concurrent storage.read() calls that trigger sled internal deadlocks
+        let _permit = self.storage_semaphore.acquire().await.unwrap();
+
         // Acquire read lock on storage for validation
         let storage_guard = self.storage.read().await;
 
@@ -214,6 +231,9 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
                 current_topo
             ));
         }
+
+        // DEADLOCK FIX: Acquire semaphore permit before storage access
+        let _permit = self.storage_semaphore.acquire().await.unwrap();
 
         // Acquire read lock for reference validation queries
         let storage_guard = self.storage.read().await;
