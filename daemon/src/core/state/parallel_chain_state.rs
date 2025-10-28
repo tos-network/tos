@@ -288,8 +288,10 @@ impl<S: Storage> ParallelChainState<S> {
         // 6. Type-specific application logic
         match tx.apply_with_partial_verify(&tx_hash, &mut adapter).await {
             Ok(()) => {
-                // Commit cached balance changes back to ParallelChainState
-                adapter.commit_balances();
+                // SECURITY FIX: Commit ALL mutations atomically (balances, nonces, multisig, gas, burns)
+                // This fixes the premature state mutation vulnerability where failed transactions
+                // were leaving behind permanent state changes.
+                adapter.commit_all();
 
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Transaction {} applied successfully (adapter)", tx_hash);
@@ -303,6 +305,8 @@ impl<S: Storage> ParallelChainState<S> {
                 })
             }
             Err(e) => {
+                // SECURITY FIX: All staged mutations automatically discarded on failure
+                // (nonces, multisig, gas, burns stay unchanged when TX fails)
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Transaction {} validation failed (adapter): {:?}", tx_hash, e);
                 }

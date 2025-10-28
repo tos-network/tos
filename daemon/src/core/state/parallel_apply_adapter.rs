@@ -90,6 +90,22 @@ pub struct ParallelApplyAdapter<'a, S: Storage> {
     /// Parallel path must do the same: track outputs here, subtract when committing.
     /// Without this, balances are never debited → consensus-breaking inflation bug.
     output_sums: HashMap<(PublicKey, Hash), u64>,
+
+    /// SECURITY FIX: Staged nonces (not committed until success)
+    /// Prevents nonce poisoning attack where failed TX increments nonce
+    staged_nonces: HashMap<PublicKey, Nonce>,
+
+    /// SECURITY FIX: Staged multisig configs (not committed until success)
+    /// Prevents multisig hijacking attack where failed TX changes config
+    staged_multisig: HashMap<PublicKey, Option<MultiSigPayload>>,
+
+    /// SECURITY FIX: Staged gas fees (not committed until success)
+    /// Prevents gas manipulation where failed TX still counts toward block gas
+    staged_gas_fees: u64,
+
+    /// SECURITY FIX: Staged burned supply (not committed until success)
+    /// Prevents burn manipulation where failed TX still counts toward total burns
+    staged_burned_supply: u64,
 }
 
 impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
@@ -109,6 +125,10 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
             block_hash,
             balance_reads: HashMap::new(),
             output_sums: HashMap::new(),
+            staged_nonces: HashMap::new(),
+            staged_multisig: HashMap::new(),
+            staged_gas_fees: 0,
+            staged_burned_supply: 0,
         }
     }
 
@@ -124,6 +144,42 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
     pub fn commit_balances(&self) {
         for ((account, asset), balance) in &self.balance_reads {
             self.parallel_state.set_balance(account, asset, *balance);
+        }
+    }
+
+    /// SECURITY FIX: Commit all staged mutations to ParallelChainState atomically
+    ///
+    /// This method is ONLY called when transaction validation succeeds.
+    /// It commits all staged mutations (nonces, multisig, gas, burns, balances) atomically.
+    ///
+    /// CRITICAL: If transaction fails, this method is never called, and all staged mutations
+    /// are automatically discarded when the adapter is dropped.
+    ///
+    /// This fixes the premature state mutation vulnerability where failed transactions
+    /// were leaving behind permanent state changes (nonce increments, multisig config changes,
+    /// gas/burn accumulations).
+    pub fn commit_all(&self) {
+        // Commit balances (already implemented)
+        self.commit_balances();
+
+        // SECURITY FIX: Commit nonces
+        for (account, nonce) in &self.staged_nonces {
+            self.parallel_state.set_nonce(account, *nonce);
+        }
+
+        // SECURITY FIX: Commit multisig configs
+        for (account, config) in &self.staged_multisig {
+            self.parallel_state.set_multisig(account, config.clone());
+        }
+
+        // SECURITY FIX: Commit gas fees
+        if self.staged_gas_fees > 0 {
+            self.parallel_state.add_gas_fee(self.staged_gas_fees);
+        }
+
+        // SECURITY FIX: Commit burned supply
+        if self.staged_burned_supply > 0 {
+            self.parallel_state.add_burned_supply(self.staged_burned_supply);
         }
     }
 
@@ -325,12 +381,15 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
     }
 
     /// Update account nonce
+    /// SECURITY FIX: Stage nonce update instead of immediate write
+    /// This prevents nonce poisoning attack where failed TX increments nonce
     async fn update_account_nonce(
         &mut self,
         account: &'a PublicKey,
         new_nonce: Nonce
     ) -> Result<(), BlockchainError> {
-        self.parallel_state.set_nonce(account, new_nonce);
+        // Stage the nonce update - will only be committed if TX succeeds
+        self.staged_nonces.insert(account.clone(), new_nonce);
         Ok(())
     }
 
@@ -356,13 +415,16 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
     }
 
     /// Set multisig configuration for an account
+    /// SECURITY FIX: Stage multisig config update instead of immediate write
+    /// This prevents multisig hijacking attack where failed TX changes account config
     async fn set_multisig_state(
         &mut self,
         account: &'a PublicKey,
         config: &MultiSigPayload
     ) -> Result<(), BlockchainError> {
         self.parallel_state.ensure_account_loaded(account).await?;
-        self.parallel_state.set_multisig(account, Some(config.clone()));
+        // Stage the multisig config update - will only be committed if TX succeeds
+        self.staged_multisig.insert(account.clone(), Some(config.clone()));
         Ok(())
     }
 
@@ -420,14 +482,22 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
 #[async_trait]
 impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelApplyAdapter<'a, S> {
     /// Track burned supply
+    /// SECURITY FIX: Stage burned supply instead of immediate write
+    /// This prevents burn manipulation where failed TX still counts toward total burns
     async fn add_burned_coins(&mut self, amount: u64) -> Result<(), BlockchainError> {
-        self.parallel_state.add_burned_supply(amount);
+        // Stage the burned supply - will only be committed if TX succeeds
+        self.staged_burned_supply = self.staged_burned_supply.checked_add(amount)
+            .ok_or(BlockchainError::Overflow)?;
         Ok(())
     }
 
     /// Track miner fees
+    /// SECURITY FIX: Stage gas fees instead of immediate write
+    /// This prevents gas manipulation where failed TX still counts toward block gas
     async fn add_gas_fee(&mut self, amount: u64) -> Result<(), BlockchainError> {
-        self.parallel_state.add_gas_fee(amount);
+        // Stage the gas fee - will only be committed if TX succeeds
+        self.staged_gas_fees = self.staged_gas_fees.checked_add(amount)
+            .ok_or(BlockchainError::Overflow)?;
         Ok(())
     }
 
