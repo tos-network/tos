@@ -8,9 +8,13 @@
 
 ## Executive Summary
 
-TOS currently has a custom VM implementation in the `tos-vm` repository. To support Solana-compatible smart contracts, we need to integrate a TBPF (TOS Berkeley Packet Filter) execution engine based on Solana's sBPF.
+**UPDATED STRATEGY**: Complete VM Replacement (No Backward Compatibility)
 
-This document outlines the integration strategy, implementation steps, and technical considerations.
+TOS is still in active development, so we will **completely replace** the current TOS VM with TBPF (TOS Berkeley Packet Filter) based on Solana's sBPF. This simplifies implementation by removing backward compatibility concerns.
+
+**Key Decision**: Since TOS has no production contracts yet, we can adopt a clean-slate approach and build TBPF as the only execution engine.
+
+This document outlines the complete replacement strategy, implementation steps, and technical considerations.
 
 ---
 
@@ -102,137 +106,132 @@ This document outlines the integration strategy, implementation steps, and techn
 
 ---
 
-## Integration Strategy
+## Integration Strategy: Complete VM Replacement
 
-### Option 1: Replace Current VM (High Risk, High Reward)
+**Selected Approach**: ✅ **Complete replacement of TOS VM with TBPF**
 
-**Approach**: Completely replace `tos-vm` with TBPF engine
+Since TOS is still in development with no production contracts, we adopt a clean-slate approach.
 
-**Pros**:
-- Native Solana compatibility
-- Battle-tested VM (sBPF is production-proven)
-- Better performance (register-based VM)
+### Architecture Overview
 
-**Cons**:
-- Breaking change for existing TOS contracts
-- Requires rewriting all contract stdlib
-- High migration risk
-
-**Recommendation**: ❌ **Not recommended** for existing production network
-
----
-
-### Option 2: Dual-VM Support (Recommended)
-
-**Approach**: Support both current VM and TBPF side-by-side
-
-**Architecture**:
+**Simplified Contract Module**:
 ```rust
 // File: common/src/transaction/payload/contract/deploy.rs
 
-pub enum ContractModule {
-    // Current TOS VM bytecode
-    TosVM(tos_vm::Module),
-
-    // New TBPF bytecode
-    TBPF(Vec<u8>),  // ELF binary
-}
-
 pub struct DeployContractPayload {
-    pub module: ContractModule,
+    /// TBPF ELF bytecode (only format supported)
+    pub elf: Vec<u8>,
+
+    /// Optional entry point function name (default: "entrypoint")
+    pub entry_point: Option<String>,
+
+    /// Optional constructor invocation
     pub invoke: Option<InvokeConstructorPayload>,
 }
 ```
 
-**Execution Dispatch**:
+**Simplified Execution Flow**:
 ```rust
 // File: common/src/transaction/verify/contract.rs
 
-match contract_module {
-    ContractModule::TosVM(module) => {
-        // Current execution path
-        let mut vm = VM::new(environment);
-        vm.append_module(module)?;
-        vm.run()
-    }
-    ContractModule::TBPF(elf_bytes) => {
-        // New TBPF execution path
-        let vm = TbpfVM::new(elf_bytes)?;
-        vm.execute(entry_point, syscalls, gas_limit)
-    }
+pub async fn invoke_contract(...) -> Result<bool, VerificationError<E>> {
+    // Load TBPF ELF bytecode
+    let elf = state.get_contract_elf(contract).await?;
+
+    // Create TBPF VM
+    let vm = TbpfVM::new(elf)?;
+
+    // Prepare syscalls with TOS blockchain context
+    let syscalls = TbpfSyscalls::new(chain_state, provider);
+
+    // Execute contract
+    let result = vm.execute("entrypoint", syscalls, max_gas, &input_data)?;
+
+    // Process results
+    Ok(result.exit_code == 0)
 }
 ```
 
-**Pros**:
-- Backward compatible
-- Gradual migration path
-- Can deprecate old VM later
+### Benefits of Complete Replacement
 
-**Cons**:
-- Increased code complexity
-- Two VM implementations to maintain
-- Larger binary size
+✅ **Simpler Architecture**:
+- Single VM implementation to maintain
+- No version branching logic
+- Smaller binary size
 
-**Recommendation**: ✅ **Recommended** for production migration
+✅ **Better Performance**:
+- Register-based VM (faster than stack-based)
+- Optional JIT compilation (10-50x speedup)
+- Battle-tested in Solana production
+
+✅ **Solana Compatibility**:
+- Can run Solana contracts with minimal modifications
+- Easier to port existing Solana tooling
+- Access to Solana's developer ecosystem
+
+✅ **Clean Codebase**:
+- Remove old `tos-vm` VM engine completely
+- Keep only `tos-builder` for syscall infrastructure
+- Simplified contract storage (just ELF bytes)
+
+### What Gets Replaced
+
+| Component | Current | After Replacement |
+|-----------|---------|-------------------|
+| VM Engine | Custom stack-based VM | TBPF (eBPF register-based) |
+| Bytecode Format | `tos_vm::Module` | ELF binary with sBPF |
+| Execution | `VM::new()` → `vm.run()` | `TbpfVM::execute()` |
+| Entry Points | Chunks + hooks | Single `entrypoint()` function |
+| Gas Metering | Custom gas units | Compute units (CU) |
+
+### What Gets Preserved
+
+✅ **Keep existing TOS blockchain features**:
+- Contract storage via `ContractProvider` trait
+- Gas refunds and burning (TX_GAS_BURN_PERCENT)
+- Deposits and transfers
+- Event tracking (fire_event)
+- Asset management
+
+✅ **Keep TOS-specific syscalls**:
+- All functions in `common/src/contract/mod.rs` become syscalls
+- TOS account model (simpler than Solana's account model)
+- Direct storage access (no account passing required)
 
 ---
 
-### Option 3: TBPF-Only for New Contracts (Hybrid)
+## Implementation Phases (Simplified for Complete Replacement)
 
-**Approach**: Freeze current VM, only allow TBPF for new deployments
+### Phase 1: TBPF VM Core Implementation (3-4 weeks)
 
-**Implementation**:
-```rust
-// At certain block height, enforce TBPF-only
-if block_height >= TBPF_ACTIVATION_HEIGHT {
-    match contract_module {
-        ContractModule::TosVM(_) => {
-            return Err("TosVM contracts no longer supported");
-        }
-        ContractModule::TBPF(elf) => {
-            // Execute TBPF
-        }
-    }
-}
-```
-
-**Pros**:
-- Clean cutover
-- Simpler long-term maintenance
-
-**Cons**:
-- Existing contracts become read-only
-- Requires migration tooling
-
-**Recommendation**: ⚠️ **Consider** for testnets first
-
----
-
-## Implementation Phases
-
-### Phase 1: TBPF VM Core Integration (4-6 weeks)
-
-**Goal**: Get basic TBPF execution working
+**Goal**: Replace `tos-vm` VM engine with TBPF
 
 #### 1.1 Repository Structure
 
-Create `tbpf` directory in `tos-vm` repository:
+**Replace** the existing VM implementation in `tos-vm` repository:
 
 ```
 tos-vm/
-├── vm/              # Current VM (keep as-is)
-├── tbpf/            # NEW: TBPF implementation
+├── vm/              # REMOVE: Delete old VM engine
+├── tbpf/            # NEW: TBPF implementation (becomes main VM)
 │   ├── src/
 │   │   ├── vm.rs           # Core TBPF VM (adapted from Solana rbpf)
 │   │   ├── jit.rs          # JIT compiler (optional, for performance)
 │   │   ├── verifier.rs     # Bytecode verifier
 │   │   ├── syscalls.rs     # Syscall interface
+│   │   ├── error.rs        # Error types
 │   │   └── lib.rs
 │   ├── Cargo.toml
 │   └── tests/
-├── builder/         # Environment builder
-└── types/           # Shared types
+├── builder/         # KEEP: Refactor for TBPF syscalls
+└── types/           # KEEP: Shared types
 ```
+
+**Migration Strategy**:
+1. Create `tos-vm/tbpf/` with TBPF implementation
+2. Update `tos-vm/Cargo.toml` to use `tbpf` as default
+3. Remove old `vm/` directory after TBPF is working
+4. Update `tos-builder` to work with TBPF syscalls
 
 #### 1.2 Dependencies
 
@@ -444,84 +443,81 @@ impl SyscallObject<ChainContext> for TosGetBalance {
 
 ---
 
-### Phase 2: TOS Integration (3-4 weeks)
+### Phase 2: TOS Blockchain Integration (2-3 weeks)
 
-**Goal**: Integrate TBPF VM into TOS blockchain execution
+**Goal**: Replace contract execution with TBPF VM
 
-#### 2.1 Update Transaction Types
+#### 2.1 Update Transaction Types (Simplified)
 
 **File**: `common/src/transaction/payload/contract/deploy.rs`
 
+**REMOVE** the old `Module` type, replace with simple ELF bytecode:
+
 ```rust
 use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum ContractModule {
-    /// Current TOS VM bytecode
-    #[serde(rename = "tos_vm")]
-    TosVM(tos_vm::Module),
-
-    /// TBPF ELF bytecode
-    #[serde(rename = "tbpf")]
-    TBPF {
-        /// ELF binary
-        elf: Vec<u8>,
-
-        /// Entry point function name (default: "entrypoint")
-        entry_point: Option<String>,
-    },
-}
+use crate::serializer::*;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DeployContractPayload {
-    pub module: ContractModule,
+    /// TBPF ELF bytecode (replaces tos_vm::Module)
+    pub elf: Vec<u8>,
+
+    /// Optional entry point function name (default: "entrypoint")
+    #[serde(default)]
+    pub entry_point: Option<String>,
+
+    /// Optional constructor invocation
     pub invoke: Option<InvokeConstructorPayload>,
 }
 
-impl Serializer for ContractModule {
+impl Serializer for DeployContractPayload {
     fn write(&self, writer: &mut Writer) {
-        match self {
-            ContractModule::TosVM(module) => {
-                writer.write_u8(0);  // Discriminator
-                module.write(writer);
-            }
-            ContractModule::TBPF { elf, entry_point } => {
-                writer.write_u8(1);  // Discriminator
-                writer.write_bytes(elf);
-                entry_point.write(writer);
-            }
-        }
+        // Write ELF bytes with length prefix
+        writer.write_u32(self.elf.len() as u32);
+        writer.write_bytes(&self.elf);
+
+        // Write optional entry point
+        self.entry_point.write(writer);
+
+        // Write optional constructor invocation
+        self.invoke.write(writer);
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        match reader.read_u8()? {
-            0 => Ok(ContractModule::TosVM(Module::read(reader)?)),
-            1 => Ok(ContractModule::TBPF {
-                elf: reader.read_bytes()?,
-                entry_point: Option::read(reader)?,
-            }),
-            _ => Err(ReaderError::InvalidValue),
+        // Read ELF bytes
+        let elf_len = reader.read_u32()? as usize;
+
+        // Enforce max contract size (1 MB)
+        const MAX_CONTRACT_SIZE: usize = 1_024 * 1024;
+        if elf_len > MAX_CONTRACT_SIZE {
+            return Err(ReaderError::InvalidSize);
         }
+
+        let mut elf = vec![0u8; elf_len];
+        reader.read_bytes_into(&mut elf)?;
+
+        Ok(Self {
+            elf,
+            entry_point: Option::read(reader)?,
+            invoke: Option::read(reader)?,
+        })
     }
 
     fn size(&self) -> usize {
-        1 + match self {
-            ContractModule::TosVM(m) => m.size(),
-            ContractModule::TBPF { elf, entry_point } => {
-                8 + elf.len() + entry_point.size()
-            }
-        }
+        4 + self.elf.len() + self.entry_point.size() + self.invoke.size()
     }
 }
 ```
 
-#### 2.2 Update Contract Execution
+#### 2.2 Update Contract Execution (TBPF Only)
 
 **File**: `common/src/transaction/verify/contract.rs`
 
+**REPLACE** the entire execution logic with TBPF-only:
+
 ```rust
-use tos_vm::{ValueCell, VM};
-use tos_tbpf::{TbpfVM, TbpfSyscalls, ChainContext};
+use tos_tbpf::{TbpfVM, TbpfSyscalls, TbpfContext, TbpfResult};
+use crate::tokio::block_in_place_safe;
 
 pub(super) async fn invoke_contract<'a, P: ContractProvider, E, B: BlockchainApplyState<'a, P, E>>(
     self: &'a Arc<Self>,
@@ -529,118 +525,151 @@ pub(super) async fn invoke_contract<'a, P: ContractProvider, E, B: BlockchainApp
     state: &mut B,
     contract: &'a Hash,
     deposits: &'a IndexMap<Hash, ContractDeposit>,
-    parameters: impl DoubleEndedIterator<Item = ValueCell>,
+    parameters: Vec<u8>,  // Simplified: pre-serialized parameters
     max_gas: u64,
-    invoke: InvokeContract,
 ) -> Result<bool, VerificationError<E>> {
-    // Get contract environment and module
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("Invoking TBPF contract {} from TX {}", contract, tx_hash);
+    }
+
+    // Get contract environment (provider + chain state)
     let (contract_environment, mut chain_state) = state
         .get_contract_environment_for(contract, deposits, tx_hash)
         .await
         .map_err(VerificationError::State)?;
 
-    // Load module (cached in state)
-    let contract_module = state.get_contract_module(contract).await
+    // Load ELF bytecode from storage
+    let contract_data = state.load_contract_elf(contract).await
         .map_err(VerificationError::State)?;
 
-    // Execute based on module type
-    let (used_gas, exit_code) = match contract_module {
-        // ===== Current TOS VM =====
-        ContractModule::TosVM(module) => {
-            block_in_place_safe::<_, Result<_, anyhow::Error>>(|| {
-                let mut vm = VM::new(contract_environment.environment);
-                vm.append_module(module)?;
+    // Execute in blocking thread (CPU-intensive work)
+    let (used_gas, exit_code) = block_in_place_safe::<_, Result<_, anyhow::Error>>(|| {
+        // Create TBPF VM from ELF
+        let mut vm = TbpfVM::new(&contract_data.elf)?;
 
-                // ... existing TOS VM execution logic ...
+        // Create execution context with blockchain state
+        let mut context = TbpfContext {
+            contract_hash: contract.clone(),
+            block_hash: state.get_block_hash().clone(),
+            block: state.get_block().clone(),
+            tx_hash: tx_hash.clone(),
+            topoheight: chain_state.topoheight,
+            debug_mode: chain_state.debug_mode,
+            mainnet: chain_state.mainnet,
+            deposits: deposits.clone(),
+            chain_state: &mut chain_state,
+            provider: contract_environment.provider,
+        };
 
-                Ok((gas_usage, exit_code))
-            })?
+        // Register TOS syscalls
+        let syscalls = TbpfSyscalls::new();
+        vm.bind_syscalls(syscalls);
+
+        // Set compute budget (gas limit)
+        vm.set_compute_budget(max_gas);
+
+        // Execute entry point
+        let entry_fn = contract_data.entry_point
+            .as_deref()
+            .unwrap_or("entrypoint");
+
+        let result: TbpfResult = vm.execute(entry_fn, &parameters, &mut context)?;
+
+        // Extract gas usage and exit code
+        Ok((result.compute_units_consumed, Some(result.return_value)))
+    })?;
+
+    // Check if execution was successful
+    let is_success = exit_code == Some(0);
+    let mut outputs = chain_state.outputs;
+
+    if is_success {
+        // Merge contract state changes
+        let cache = chain_state.cache;
+        let tracker = chain_state.tracker;
+        let assets = chain_state.assets;
+
+        state.merge_contract_changes(&contract, cache, tracker, assets)
+            .await
+            .map_err(VerificationError::State)?;
+    } else {
+        // Execution failed, refund deposits
+        outputs.clear();
+
+        if !deposits.is_empty() {
+            self.refund_deposits(state, deposits).await?;
+            outputs.push(ContractOutput::RefundDeposits);
         }
-
-        // ===== NEW: TBPF VM =====
-        ContractModule::TBPF { elf, entry_point } => {
-            block_in_place_safe::<_, Result<_, anyhow::Error>>(|| {
-                // Create TBPF VM
-                let vm = TbpfVM::new(elf.clone())?;
-
-                // Prepare syscalls with chain context
-                let syscalls = TbpfSyscalls {
-                    chain_context: ChainContext {
-                        contract_hash: contract.clone(),
-                        block_hash: state.get_block_hash().clone(),
-                        topoheight: chain_state.topoheight,
-                        debug_mode: chain_state.debug_mode,
-                        mainnet: chain_state.mainnet,
-                        tx_hash: tx_hash.clone(),
-                        deposits: deposits.clone(),
-                    },
-                    state_provider: contract_environment.provider,
-                };
-
-                // Serialize parameters to input buffer
-                let input_data = serialize_parameters(parameters)?;
-
-                // Execute contract
-                let entry_fn = entry_point.as_deref().unwrap_or("entrypoint");
-                let result = vm.execute(
-                    entry_fn,
-                    syscalls,
-                    max_gas,  // Compute budget
-                    &input_data,
-                )?;
-
-                // Extract results
-                let compute_units_used = result.compute_units_consumed;
-                let exit_code = result.return_value;
-
-                Ok((compute_units_used, Some(exit_code)))
-            })?
-        }
-    };
-
-    // ... rest of the execution logic (gas refunds, state merging) ...
-
-    Ok(exit_code == Some(0))
-}
-
-/// Serialize parameters for TBPF input
-fn serialize_parameters(
-    params: impl DoubleEndedIterator<Item = ValueCell>
-) -> Result<Vec<u8>, anyhow::Error> {
-    // Convert ValueCell parameters to borsh-serialized bytes
-    // This matches Solana's instruction_data format
-    let mut buf = Vec::new();
-    for param in params {
-        // Serialize each parameter using borsh or bincode
-        borsh::to_writer(&mut buf, &param)?;
     }
-    Ok(buf)
+
+    // Add exit code to outputs
+    outputs.push(ContractOutput::ExitCode(exit_code));
+
+    // Handle gas refunds
+    let refund_gas = self.handle_gas(state, used_gas, max_gas).await?;
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("Used gas: {}, refund gas: {}", used_gas, refund_gas);
+    }
+    if refund_gas > 0 {
+        outputs.push(ContractOutput::RefundGas { amount: refund_gas });
+    }
+
+    // Track outputs
+    state.set_contract_outputs(tx_hash, outputs).await
+        .map_err(VerificationError::State)?;
+
+    Ok(is_success)
 }
 ```
 
-#### 2.3 Update Storage Interface
+**Key Changes**:
+- ❌ Remove `tos_vm::VM` import
+- ✅ Use `tos_tbpf::TbpfVM` only
+- ❌ Remove `ContractModule` enum
+- ✅ Load ELF bytes directly
+- ✅ Simplified parameter passing (pre-serialized bytes)
+
+#### 2.3 Update Storage Interface (Simplified)
 
 **File**: `daemon/src/core/storage/providers/contract/mod.rs`
 
+**REPLACE** contract storage to use ELF bytes instead of `Module`:
+
 ```rust
+#[derive(Clone, Debug)]
+pub struct ContractData {
+    /// ELF bytecode
+    pub elf: Vec<u8>,
+
+    /// Entry point function name
+    pub entry_point: Option<String>,
+}
+
 #[async_trait]
 pub trait ContractStorageProvider {
     // ... existing methods ...
 
-    /// Store contract module (supports both TosVM and TBPF)
-    async fn store_contract_module(
+    /// Store contract ELF bytecode
+    async fn store_contract_elf(
         &mut self,
         hash: &Hash,
-        module: &ContractModule,  // Changed from &Module
+        data: &ContractData,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError>;
 
-    /// Load contract module
-    async fn load_contract_module(
+    /// Load contract ELF bytecode
+    async fn load_contract_elf(
         &self,
         hash: &Hash,
         topoheight: TopoHeight,
-    ) -> Result<Option<ContractModule>, BlockchainError>;
+    ) -> Result<Option<ContractData>, BlockchainError>;
+
+    /// Check if contract exists (no need to load full ELF)
+    async fn contract_exists(
+        &self,
+        hash: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError>;
 }
 ```
 
@@ -894,32 +923,24 @@ fn tos_storage_store(key_ptr: u64, value_ptr: u64, value_len: u64) -> Result<u64
 
 ---
 
-## Migration Path for Existing Contracts
-
-### Option A: Recompile to TBPF
-
-If existing TOS contracts are written in a high-level language:
-1. Recompile source code to TBPF target
-2. Deploy new TBPF version
-3. Migrate state if needed
-
-### Option B: Keep TosVM Forever
-
-If migration is too complex:
-- Keep both VMs running
-- Mark TosVM contracts as "legacy"
-- New contracts MUST use TBPF
-
----
-
 ## Performance Benchmarks (Target)
 
-| Metric | Current TOS VM | TBPF (Target) |
-|--------|---------------|---------------|
-| Execution Speed | Baseline | 2-5x faster |
-| JIT Compilation | N/A | 10-50x faster |
-| Gas Metering Overhead | ~10% | ~5% |
-| Contract Size Limit | 512 KB | 1 MB |
+**TBPF Performance Goals**:
+
+| Metric | Target Value | Notes |
+|--------|--------------|-------|
+| Execution Speed (Interpreter) | 50-100M instructions/sec | Baseline eBPF performance |
+| Execution Speed (JIT) | 500M-1B instructions/sec | 10-20x faster with JIT |
+| Gas Metering Overhead | ~5% | Minimal overhead per instruction |
+| Contract Size Limit | 1 MB | Same as Solana (v1.15+) |
+| Max Compute Units | 1.4M CU | Solana's upper limit |
+| Default Compute Budget | 200k CU | Solana's default |
+
+**Comparison with Solana**:
+- ✅ Same bytecode format (eBPF/ELF)
+- ✅ Similar performance characteristics
+- ✅ Can use Solana's JIT compiler
+- ⚠️ Different syscalls (TOS-specific)
 
 ---
 
@@ -980,36 +1001,45 @@ async fn test_tbpf_deploy_and_invoke() {
 
 1. **TBPF Quick Start Guide**
    - How to write TBPF contracts in C/Rust
-   - Syscall reference
-   - Deployment tutorial
+   - Complete syscall reference
+   - Deployment tutorial with examples
 
-2. **Migration Guide**
-   - TosVM → TBPF migration checklist
-   - Code examples (before/after)
-   - Common pitfalls
-
-3. **SDK Documentation**
+2. **SDK Documentation**
    - `tos-tbpf-sdk` API reference
-   - Example contracts (token, NFT, AMM)
+   - Example contracts (token, NFT, DeFi, DAO)
+   - Best practices for TBPF on TOS
+
+3. **Comparison with Solana**
+   - Differences between TOS TBPF and Solana sBPF
+   - Account model vs TOS storage model
+   - Porting guide for Solana contracts
 
 ### For Node Operators
 
-1. **Upgrade Guide**
-   - How to upgrade daemon to support TBPF
-   - Backward compatibility notes
-   - Performance tuning
+1. **Deployment Guide**
+   - How to deploy TOS daemon with TBPF support
+   - Configuration options
+   - Performance tuning and monitoring
 
 ---
 
-## Timeline Summary
+## Timeline Summary (Complete Replacement)
+
+**Faster timeline** due to simplified architecture (no dual-VM complexity):
 
 | Phase | Duration | Deliverables |
 |-------|----------|--------------|
-| Phase 1: TBPF VM Core | 4-6 weeks | VM engine, verifier, basic syscalls |
-| Phase 2: TOS Integration | 3-4 weeks | Transaction types, execution dispatch, storage |
-| Phase 3: Syscall Implementation | 4-6 weeks | All TOS syscalls, state management |
-| Phase 4: Testing & Tooling | 3-4 weeks | SDK, test contracts, integration tests |
-| **Total** | **14-20 weeks** | Production-ready TBPF support |
+| Phase 1: TBPF VM Core | 3-4 weeks | TBPF engine, verifier, syscall framework |
+| Phase 2: TOS Integration | 2-3 weeks | Transaction types, execution, storage |
+| Phase 3: Syscall Implementation | 3-4 weeks | All TOS syscalls, state management |
+| Phase 4: Testing & Tooling | 2-3 weeks | SDK, test contracts, integration tests |
+| **Total** | **10-14 weeks** | Production-ready TBPF (complete replacement) |
+
+**Time savings**: 4-6 weeks faster than dual-VM approach due to:
+- ✅ No backward compatibility code
+- ✅ Simpler transaction types (no enum dispatch)
+- ✅ Single VM to test and debug
+- ✅ Cleaner codebase
 
 ---
 
