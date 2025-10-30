@@ -547,3 +547,109 @@ async fn test_block_creation_with_transactions() {
 //
 // For full end-to-end testing, use the running devnet daemon and submit transactions
 // via RPC or wallet CLI as documented in memo/FINAL_TEST_REPORT.md
+
+// ===========================================================================
+// RECOMMENDED TEST: Miner Spending Reward in Same Block (Parallel vs Sequential)
+// ===========================================================================
+//
+// This test would verify that parallel execution matches sequential execution
+// for the critical scenario where a miner spends their block reward within the same block.
+//
+// Test Scenario:
+// 1. Create block with miner M receiving reward R (e.g., 50 TOS)
+// 2. Include transaction from M transferring amount A (where A <= R)
+// 3. Execute with parallel path (>= 4 txs total in block)
+// 4. Execute with sequential path (< 4 txs in block)
+// 5. Verify both paths produce identical results:
+//    - Same final balances for all accounts
+//    - Same transaction acceptance/rejection
+//    - Same nonce values
+//    - No consensus divergence
+//
+// Implementation Requirements:
+// 1. Full Blockchain instance (not just ParallelChainState)
+// 2. Proper genesis block with initial funds for test accounts
+// 3. Block with sufficient pre-funded transactions to trigger parallel path
+// 4. Miner transaction spending reward must be included in same block
+// 5. Compare storage state after both execution methods
+//
+// Expected Behavior (CONSENSUS FIX):
+// - Parallel path: reward_miner() loads existing balance → adds reward → transaction can spend
+// - Sequential path: reward_miner() loads existing balance → adds reward → transaction can spend
+// - Both paths: miner balance = initial_balance + reward - spent - fee
+// - Both paths: transaction succeeds (not rejected for insufficient funds)
+//
+// Previous Bug (Now Fixed):
+// - Old parallel path wrote reward to separate `balances` DashMap (invisible to transactions)
+// - Old parallel path didn't load existing balance (overwrote on merge)
+// - Result: Miner couldn't spend reward in same block (consensus divergence)
+//
+// Test Implementation Outline:
+// ```rust
+// #[tokio::test]
+// async fn test_miner_spends_reward_same_block_parallel_vs_sequential() {
+//     // Setup: Create blockchain with proper storage
+//     let blockchain = create_test_blockchain().await;
+//     let miner = KeyPair::new();
+//
+//     // Fund miner with initial balance
+//     let initial_balance = 10 * COIN_VALUE;
+//     blockchain.fund_account(miner.get_public_key(), initial_balance).await;
+//
+//     // Create block with miner reward and miner spending transaction
+//     let reward = 50 * COIN_VALUE;
+//     let spend_amount = 20 * COIN_VALUE;
+//     let fee = 1 * COIN_VALUE;
+//
+//     // For parallel path: Create 4+ transactions (including miner's spend)
+//     let mut parallel_txs = vec![
+//         create_miner_spend_tx(&miner, spend_amount, fee, 0),
+//         create_dummy_tx(), // 3 more to reach threshold
+//         create_dummy_tx(),
+//         create_dummy_tx(),
+//     ];
+//
+//     // Execute with parallel path
+//     let parallel_block = create_block(miner.get_public_key(), parallel_txs, reward);
+//     blockchain.add_new_block(parallel_block).await?;
+//     let parallel_balance = blockchain.get_balance(miner.get_public_key(), &TOS_ASSET).await?;
+//
+//     // Reset state
+//     blockchain.reset_to_genesis().await;
+//     blockchain.fund_account(miner.get_public_key(), initial_balance).await;
+//
+//     // For sequential path: Create <4 transactions (same miner spend, fewer dummies)
+//     let mut sequential_txs = vec![
+//         create_miner_spend_tx(&miner, spend_amount, fee, 0),
+//         create_dummy_tx(), // Only 2 dummies (total 3 txs)
+//         create_dummy_tx(),
+//     ];
+//
+//     // Execute with sequential path
+//     let sequential_block = create_block(miner.get_public_key(), sequential_txs, reward);
+//     blockchain.add_new_block(sequential_block).await?;
+//     let sequential_balance = blockchain.get_balance(miner.get_public_key(), &TOS_ASSET).await?;
+//
+//     // Verify consensus parity
+//     assert_eq!(parallel_balance, sequential_balance,
+//                "Parallel and sequential paths must produce same miner balance");
+//
+//     let expected_balance = initial_balance + reward - spend_amount - fee;
+//     assert_eq!(parallel_balance, expected_balance,
+//                "Miner balance should be: initial + reward - spent - fee");
+//
+//     println!("✓ Parallel path: miner balance = {}", parallel_balance);
+//     println!("✓ Sequential path: miner balance = {}", sequential_balance);
+//     println!("✓ Expected balance: {}", expected_balance);
+//     println!("✓ Consensus parity verified!");
+// }
+// ```
+//
+// File Location: daemon/tests/integration/miner_reward_consensus_test.rs (new file)
+//
+// Related Code:
+// - daemon/src/core/state/parallel_chain_state.rs:567-594 (reward_miner fix)
+// - daemon/src/core/blockchain.rs:4615-4623 (merge_parallel_results)
+// - CONSENSUS_FIX_MINER_REWARD_HANDLING.md (detailed fix documentation)
+//
+// ===========================================================================

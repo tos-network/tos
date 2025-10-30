@@ -141,6 +141,7 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
     ///
     /// The balance_reads cache contains the FINAL mutated balances after TX execution.
     /// We just commit them directly - NO additional output_sum subtraction needed!
+    #[allow(deprecated)] // We're the abstraction layer, allowed to use set_balance internally
     pub fn commit_balances(&self) {
         for ((account, asset), balance) in &self.balance_reads {
             self.parallel_state.set_balance(account, asset, *balance);

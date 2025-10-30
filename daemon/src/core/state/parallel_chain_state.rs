@@ -34,10 +34,16 @@ use crate::core::{
 /// Account state cached in memory for parallel execution
 #[derive(Debug, Clone)]
 struct AccountState {
+    /// Original nonce from storage (for modification tracking)
+    original_nonce: u64,
     /// Current nonce
     nonce: u64,
     /// Balances per asset
     balances: HashMap<Hash, u64>,
+    /// Original balances from storage (for modification tracking)
+    original_balances: HashMap<Hash, u64>,
+    /// Original multisig configuration from storage
+    original_multisig: Option<MultiSigPayload>,
     /// Multisig configuration
     multisig: Option<MultiSigPayload>,
 }
@@ -84,9 +90,6 @@ pub struct ParallelChainState<S: Storage> {
     // Concurrent account state (automatic locking via DashMap)
     accounts: DashMap<PublicKey, AccountState>,
 
-    // Concurrent balance tracking (PublicKey -> Asset -> Balance)
-    balances: DashMap<PublicKey, HashMap<Hash, u64>>,
-
     // Concurrent contract state
     contracts: DashMap<Hash, ContractState>,
 
@@ -130,7 +133,6 @@ impl<S: Storage> ParallelChainState<S> {
             _phantom: PhantomData,
             environment,
             accounts: DashMap::new(),
-            balances: DashMap::new(),
             contracts: DashMap::new(),
             stable_topoheight,
             topoheight,
@@ -188,10 +190,13 @@ impl<S: Storage> ParallelChainState<S> {
         // Drop lock before inserting into cache
         drop(storage);
 
-        // Insert into cache
+        // Insert into cache with original values for modification tracking
         self.accounts.insert(key.clone(), AccountState {
+            original_nonce: nonce,
             nonce,
             balances: HashMap::new(), // Balances loaded on-demand
+            original_balances: HashMap::new(),
+            original_multisig: multisig.clone(),
             multisig,
         });
 
@@ -231,9 +236,10 @@ impl<S: Storage> ParallelChainState<S> {
         // Drop lock before modifying cache
         drop(storage);
 
-        // Insert balance into account's balance map
+        // Insert balance into account's balance map and track original value
         if let Some(mut account_entry) = self.accounts.get_mut(account) {
             account_entry.balances.insert(asset.clone(), balance);
+            account_entry.original_balances.insert(asset.clone(), balance);
         }
 
         Ok(())
@@ -494,8 +500,9 @@ impl<S: Storage> ParallelChainState<S> {
         Ok(())
     }
 
-    /// Commit all changes to storage (single-threaded finalization)
-    /// Takes a mutable storage reference to write changes
+    /// Legacy commit method - no longer used
+    /// State is now merged via merge_parallel_results() in blockchain.rs
+    #[allow(dead_code)]
     pub async fn commit(&self, storage: &mut S) -> Result<(), BlockchainError> {
         use log::{debug, info};
 
@@ -503,24 +510,31 @@ impl<S: Storage> ParallelChainState<S> {
             info!("Committing parallel chain state changes to storage at topoheight {}", self.topoheight);
         }
 
-        // Write all account nonces
+        // Write all account nonces (only modified ones)
         let mut nonce_count = 0;
         for entry in self.accounts.iter() {
-            use tos_common::account::VersionedNonce;
-            let versioned_nonce = VersionedNonce::new(entry.value().nonce, Some(self.topoheight));
-            storage.set_last_nonce_to(entry.key(), self.topoheight, &versioned_nonce).await?;
-            nonce_count += 1;
+            // Only write if nonce was actually modified
+            if entry.value().nonce != entry.value().original_nonce {
+                use tos_common::account::VersionedNonce;
+                let versioned_nonce = VersionedNonce::new(entry.value().nonce, Some(self.topoheight));
+                storage.set_last_nonce_to(entry.key(), self.topoheight, &versioned_nonce).await?;
+                nonce_count += 1;
+            }
         }
 
-        // Write all balances
+        // Write all balances (only modified ones)
         let mut balance_count = 0;
-        for entry in self.balances.iter() {
+        for entry in self.accounts.iter() {
             let account = entry.key();
-            for (asset, balance) in entry.value().iter() {
-                use tos_common::account::VersionedBalance;
-                let versioned_balance = VersionedBalance::new(*balance, Some(self.topoheight));
-                storage.set_last_balance_to(account, asset, self.topoheight, &versioned_balance).await?;
-                balance_count += 1;
+            for (asset, balance) in &entry.value().balances {
+                // Only write if balance was actually modified
+                let original_balance = entry.value().original_balances.get(asset).copied().unwrap_or(0);
+                if *balance != original_balance {
+                    use tos_common::account::VersionedBalance;
+                    let versioned_balance = VersionedBalance::new(*balance, Some(self.topoheight));
+                    storage.set_last_balance_to(account, asset, self.topoheight, &versioned_balance).await?;
+                    balance_count += 1;
+                }
             }
         }
 
@@ -597,8 +611,10 @@ impl<S: Storage> ParallelChainState<S> {
 
     /// Get all modified account nonces
     /// Returns iterator of (PublicKey, new_nonce)
+    /// FIX: Only returns nonces that were actually modified (not just loaded)
     pub fn get_modified_nonces(&self) -> Vec<(PublicKey, u64)> {
         self.accounts.iter()
+            .filter(|entry| entry.value().nonce != entry.value().original_nonce)
             .map(|entry| (entry.key().clone(), entry.value().nonce))
             .collect()
     }
@@ -606,33 +622,51 @@ impl<S: Storage> ParallelChainState<S> {
     /// Get all modified balances
     /// Returns iterator of ((PublicKey, Asset), new_balance)
     ///
-    /// CONSENSUS FIX: Only collect from `accounts` cache (not `balances` DashMap).
+    /// CONSENSUS FIX: Only collect from `accounts` cache and only return actually modified balances.
     /// All balance modifications (including miner rewards) are now tracked in `accounts`.
-    /// The `balances` DashMap is now deprecated and should be removed in future cleanup.
+    /// FIX: Only returns balances that were actually modified (not just loaded).
     pub fn get_modified_balances(&self) -> Vec<((PublicKey, Hash), u64)> {
         let mut result = Vec::new();
 
-        // CONSENSUS FIX: Only collect from accounts cache
+        // CONSENSUS FIX: Only collect modified balances from accounts cache
         // All balance changes (transactions + rewards) are tracked here
         for entry in self.accounts.iter() {
             let account = entry.key();
             for (asset, balance) in &entry.value().balances {
-                result.push(((account.clone(), asset.clone()), *balance));
+                // Only include if balance was actually modified
+                let original_balance = entry.value().original_balances.get(asset).copied().unwrap_or(0);
+                if *balance != original_balance {
+                    result.push(((account.clone(), asset.clone()), *balance));
+                }
             }
         }
-
-        // REMOVED: Collection from balances DashMap
-        // Old code collected from self.balances, which caused the overwrite bug
-        // because rewards were stored there as absolute values (not deltas)
 
         result
     }
 
     /// Get multisig configurations that were modified
-    /// SECURITY FIX #7: Return ALL accounts including None (deletions)
-    /// Previously filtered out None, causing multisig deletions to be lost
+    /// SECURITY FIX #7: Return ALL accounts with modified multisig including None (deletions)
+    /// FIX: Only returns multisig configurations that were actually modified (not just loaded)
     pub fn get_modified_multisigs(&self) -> Vec<(PublicKey, Option<MultiSigPayload>)> {
         self.accounts.iter()
+            .filter(|entry| {
+                // Check if multisig was actually modified
+                // Compare using serialization since MultiSigPayload doesn't implement PartialEq
+                let current_multisig = &entry.value().multisig;
+                let original_multisig = &entry.value().original_multisig;
+
+                match (current_multisig, original_multisig) {
+                    (None, None) => false, // Both None, not modified
+                    (Some(_), None) | (None, Some(_)) => true, // Changed from Some to None or vice versa
+                    (Some(current), Some(original)) => {
+                        // Compare by serializing both (since MultiSigPayload doesn't impl PartialEq)
+                        use tos_common::serializer::Serializer;
+                        let current_bytes = current.to_bytes();
+                        let original_bytes = original.to_bytes();
+                        current_bytes != original_bytes
+                    }
+                }
+            })
             .map(|entry| (entry.key().clone(), entry.value().multisig.clone()))
             .collect()
     }
@@ -671,6 +705,17 @@ impl<S: Storage> ParallelChainState<S> {
     }
 
     /// Update balance for an account and asset
+    ///
+    /// # DEPRECATED - Use adapter pattern instead
+    ///
+    /// # Safety
+    /// This method bypasses proper balance loading and modification tracking.
+    /// Only call this after `ensure_balance_loaded()` and understand that
+    /// it may cause incorrect modification tracking.
+    ///
+    /// Prefer using `Transaction::apply_with_partial_verify()` with `ParallelApplyAdapter`
+    /// which ensures proper validation and state tracking.
+    #[deprecated(note = "Use ParallelApplyAdapter pattern instead")]
     pub fn set_balance(&self, account: &PublicKey, asset: &Hash, balance: u64) {
         if let Some(mut entry) = self.accounts.get_mut(account) {
             entry.balances.insert(asset.clone(), balance);

@@ -152,6 +152,22 @@ fn create_dummy_block() -> (Block, Hash) {
     (block, hash)
 }
 
+/// Create a block whose miner field matches the provided key.
+fn create_block_for_miner(miner: &CompressedPublicKey) -> (Block, Hash) {
+    let header = BlockHeader::new_simple(
+        BlockVersion::V0,
+        vec![],
+        0,
+        [0u8; EXTRA_NONCE_SIZE],
+        miner.clone(),
+        Hash::zero(),
+    );
+
+    let block = Block::new(Immutable::Owned(header), vec![]);
+    let hash = block.hash();
+    (block, hash)
+}
+
 /// Convenience wrapper around creating a signed transfer transaction.
 fn create_transfer_transaction(
     sender: &KeyPair,
@@ -298,6 +314,87 @@ async fn execute_parallel(
         block_hash,
     )
     .await;
+
+    let executor = ParallelExecutor::with_parallelism(get_optimal_parallelism());
+    let tx_clones: Vec<Transaction> = transactions.iter().map(|tx| (**tx).clone()).collect();
+    let results = executor
+        .execute_batch(Arc::clone(&parallel_state), tx_clones)
+        .await;
+
+    for result in &results {
+        assert!(
+            result.success,
+            "Parallel execution failed: {:?}",
+            result.error
+        );
+    }
+
+    let mut guard = storage.write().await;
+    parallel_state.commit(&mut *guard).await.unwrap();
+}
+
+/// Apply transactions sequentially while crediting the miner before execution.
+async fn execute_sequential_with_reward(
+    storage: &Arc<RwLock<SledStorage>>,
+    environment: &Environment,
+    block: &Block,
+    block_hash: &Hash,
+    topoheight: TopoHeight,
+    miner: &CompressedPublicKey,
+    reward: u64,
+    transactions: &[Arc<Transaction>],
+) {
+    let mut guard = storage.write().await;
+    let mut chain_state = ApplicableChainState::new(
+        &mut *guard,
+        environment,
+        topoheight.saturating_sub(1),
+        topoheight,
+        BlockVersion::V0,
+        0,
+        block_hash,
+        block,
+    );
+
+    chain_state.reward_miner(miner, reward).await.unwrap();
+
+    let txs_with_hash: Vec<(Arc<Transaction>, Hash)> = transactions
+        .iter()
+        .map(|tx| (Arc::clone(tx), tx.hash()))
+        .collect();
+
+    for (tx, tx_hash) in txs_with_hash.iter() {
+        tx.apply_with_partial_verify(tx_hash, &mut chain_state)
+            .await
+            .unwrap();
+    }
+
+    chain_state.apply_changes().await.unwrap();
+}
+
+/// Apply transactions in parallel while crediting the miner before execution.
+async fn execute_parallel_with_reward(
+    storage: &Arc<RwLock<SledStorage>>,
+    environment: Arc<Environment>,
+    block: Block,
+    block_hash: Hash,
+    topoheight: TopoHeight,
+    miner: &CompressedPublicKey,
+    reward: u64,
+    transactions: &[Arc<Transaction>],
+) {
+    let parallel_state = ParallelChainState::new(
+        Arc::clone(storage),
+        environment,
+        topoheight.saturating_sub(1),
+        topoheight,
+        BlockVersion::V0,
+        block,
+        block_hash,
+    )
+    .await;
+
+    parallel_state.reward_miner(miner, reward).await.unwrap();
 
     let executor = ParallelExecutor::with_parallelism(get_optimal_parallelism());
     let tx_clones: Vec<Transaction> = transactions.iter().map(|tx| (**tx).clone()).collect();
@@ -548,4 +645,173 @@ async fn test_parallel_matches_sequential_multiple_spends() {
     );
     assert_eq!(seq_snapshot["bob"].0, 80 * COIN_VALUE);
     assert_eq!(seq_snapshot["charlie"].0, 40 * COIN_VALUE);
+}
+
+#[tokio::test]
+async fn test_parallel_miner_reward_spend_matches_sequential() {
+    let (storage_seq, storage_par, environment) = prepare_test_environment().await;
+
+    let miner = KeyPair::new();
+    let receiver = KeyPair::new();
+
+    let miner_compressed = miner.get_public_key().compress();
+    let receiver_compressed = receiver.get_public_key().compress();
+
+    // Initial balances: miner has 2 TOS, receiver 0.
+    setup_account(
+        &storage_seq,
+        &miner_compressed,
+        2 * COIN_VALUE,
+        0,
+    )
+    .await;
+    setup_account(&storage_seq, &receiver_compressed, 0, 0).await;
+
+    setup_account(
+        &storage_par,
+        &miner_compressed,
+        2 * COIN_VALUE,
+        0,
+    )
+    .await;
+    setup_account(&storage_par, &receiver_compressed, 0, 0).await;
+
+    let reward = 5 * COIN_VALUE;
+    let transfer_amount = 6 * COIN_VALUE;
+    let fee = 1 * COIN_VALUE;
+
+    let tx = Arc::new(create_transfer_transaction(
+        &miner,
+        &receiver_compressed,
+        transfer_amount,
+        fee,
+        0,
+    ));
+    let transactions = vec![Arc::clone(&tx)];
+
+    let (block, block_hash) = create_block_for_miner(&miner_compressed);
+
+    execute_sequential_with_reward(
+        &storage_seq,
+        &environment,
+        &block,
+        &block_hash,
+        1,
+        &miner_compressed,
+        reward,
+        &transactions,
+    )
+    .await;
+
+    execute_parallel_with_reward(
+        &storage_par,
+        Arc::clone(&environment),
+        block.clone(),
+        block_hash,
+        1,
+        &miner_compressed,
+        reward,
+        &transactions,
+    )
+    .await;
+
+    let accounts = [
+        ("miner", &miner_compressed),
+        ("receiver", &receiver_compressed),
+    ];
+
+    let seq_snapshot = snapshot_accounts(&storage_seq, &accounts).await;
+    let par_snapshot = snapshot_accounts(&storage_par, &accounts).await;
+
+    assert_eq!(
+        seq_snapshot, par_snapshot,
+        "Sequential and parallel states diverged"
+    );
+
+    assert_eq!(
+        seq_snapshot["miner"].0,
+        0,
+        "Miner should spend entire balance (initial + reward - transfer - fee)"
+    );
+    assert_eq!(
+        seq_snapshot["miner"].1, 1,
+        "Miner nonce should increment after sending transaction"
+    );
+    assert_eq!(
+        seq_snapshot["receiver"].0,
+        transfer_amount,
+        "Receiver should obtain transferred amount"
+    );
+}
+
+#[tokio::test]
+async fn test_parallel_miner_reward_preserves_existing_balance() {
+    let (storage_seq, storage_par, environment) = prepare_test_environment().await;
+
+    let miner = KeyPair::new();
+    let miner_compressed = miner.get_public_key().compress();
+
+    setup_account(
+        &storage_seq,
+        &miner_compressed,
+        10 * COIN_VALUE,
+        0,
+    )
+    .await;
+
+    setup_account(
+        &storage_par,
+        &miner_compressed,
+        10 * COIN_VALUE,
+        0,
+    )
+    .await;
+
+    let reward = 7 * COIN_VALUE;
+
+    let (block, block_hash) = create_block_for_miner(&miner_compressed);
+
+    execute_sequential_with_reward(
+        &storage_seq,
+        &environment,
+        &block,
+        &block_hash,
+        1,
+        &miner_compressed,
+        reward,
+        &[],
+    )
+    .await;
+
+    execute_parallel_with_reward(
+        &storage_par,
+        Arc::clone(&environment),
+        block.clone(),
+        block_hash,
+        1,
+        &miner_compressed,
+        reward,
+        &[],
+    )
+    .await;
+
+    let accounts = [("miner", &miner_compressed)];
+
+    let seq_snapshot = snapshot_accounts(&storage_seq, &accounts).await;
+    let par_snapshot = snapshot_accounts(&storage_par, &accounts).await;
+
+    assert_eq!(
+        seq_snapshot, par_snapshot,
+        "Sequential and parallel balances should match after rewards only"
+    );
+
+    assert_eq!(
+        seq_snapshot["miner"].0,
+        17 * COIN_VALUE,
+        "Miner balance should equal original balance plus reward"
+    );
+    assert_eq!(
+        seq_snapshot["miner"].1, 0,
+        "Miner nonce should remain unchanged when only receiving rewards"
+    );
 }

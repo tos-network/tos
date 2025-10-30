@@ -17,7 +17,6 @@ wallet_receiver/
 wallet_sender/
 miner_wallet.db/
 publisher_wallet.db/
-memo/
 final_test_wallet/
 
 
