@@ -4448,7 +4448,7 @@ dependencies = [
 
 [[package]]
 name = "tos-testing-integration"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4497,7 +4497,7 @@ dependencies = [
 
 [[package]]
 name = "tos_ai_miner"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -4518,7 +4518,7 @@ dependencies = [
 
 [[package]]
 name = "tos_common"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "actix-rt",
  "actix-web",
@@ -4626,7 +4626,7 @@ dependencies = [
 
 [[package]]
 name = "tos_genesis"
-version = "1.0.0"
+version = "0.1.1"
 dependencies = [
  "hex",
  "indexmap 2.10.0",
@@ -4635,7 +4635,7 @@ dependencies = [
 
 [[package]]
 name = "tos_miner"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -4652,7 +4652,7 @@ dependencies = [
 
 [[package]]
 name = "tos_wallet"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "actix-web",
  "actix-web-httpauth",

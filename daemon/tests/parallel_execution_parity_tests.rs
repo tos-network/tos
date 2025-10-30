@@ -31,9 +31,11 @@ use tos_common::{
 };
 
 use tos_daemon::core::{
+    config::RocksDBConfig,
     executor::{get_optimal_parallelism, ParallelExecutor},
     state::{parallel_chain_state::ParallelChainState, ApplicableChainState},
     storage::{
+        rocksdb::RocksStorage,
         sled::{SledStorage, StorageMode},
         AccountProvider, AssetProvider, BalanceProvider, NonceProvider,
     },
@@ -115,7 +117,20 @@ impl FeeHelper for MockAccountState {
 }
 
 /// Register the native TOS asset in storage (needed before balances can be set).
-async fn register_tos_asset(storage: &mut SledStorage) {
+async fn register_tos_asset_sled(storage: &mut SledStorage) {
+    let asset_data = AssetData::new(
+        COIN_DECIMALS,
+        "TOS".to_string(),
+        "TOS".to_string(),
+        None,
+        None,
+    );
+    let versioned: VersionedAssetData = Versioned::new(asset_data, Some(0));
+    storage.add_asset(&TOS_ASSET, 0, versioned).await.unwrap();
+}
+
+/// Register the native TOS asset in RocksDB storage
+async fn register_tos_asset_rocksdb(storage: &mut RocksStorage) {
     let asset_data = AssetData::new(
         COIN_DECIMALS,
         "TOS".to_string(),
@@ -230,6 +245,34 @@ async fn setup_account(
         .unwrap();
 }
 
+/// Setup account in RocksDB storage (NO deadlock risk, NO delays needed!)
+async fn setup_account_rocksdb(
+    storage: &Arc<RwLock<RocksStorage>>,
+    pubkey: &CompressedPublicKey,
+    balance: u64,
+    nonce: u64,
+) {
+    let mut guard = storage.write().await;
+    guard
+        .set_last_nonce_to(pubkey, 0, &VersionedNonce::new(nonce, Some(0)))
+        .await
+        .unwrap();
+    guard
+        .set_account_registration_topoheight(pubkey, 0)
+        .await
+        .unwrap();
+    guard
+        .set_last_balance_to(
+            pubkey,
+            &TOS_ASSET,
+            0,
+            &VersionedBalance::new(balance, Some(0)),
+        )
+        .await
+        .unwrap();
+    // RocksDB handles concurrency correctly - no delays needed!
+}
+
 /// Snapshot balances and nonces from storage for the provided accounts.
 async fn snapshot_accounts(
     storage: &Arc<RwLock<SledStorage>>,
@@ -259,7 +302,37 @@ async fn snapshot_accounts(
     result
 }
 
+/// Snapshot balances and nonces from RocksDB storage
+async fn snapshot_accounts_rocksdb(
+    storage: &Arc<RwLock<RocksStorage>>,
+    accounts: &[(&'static str, &CompressedPublicKey)],
+) -> HashMap<&'static str, (u64, u64)> {
+    let guard = storage.read().await;
+    let mut result = HashMap::new();
+
+    for (label, key) in accounts {
+        let nonce = guard
+            .get_nonce_at_maximum_topoheight(key, TopoHeight::MAX)
+            .await
+            .unwrap()
+            .map(|(_, versioned)| versioned.get_nonce())
+            .unwrap_or(0);
+
+        let balance = guard
+            .get_balance_at_maximum_topoheight(key, &TOS_ASSET, TopoHeight::MAX)
+            .await
+            .unwrap()
+            .map(|(_, versioned)| versioned.get_balance())
+            .unwrap_or(0);
+
+        result.insert(*label, (balance, nonce));
+    }
+
+    result
+}
+
 /// Apply transactions sequentially using ApplicableChainState (canonical path).
+#[allow(dead_code)] // Still used by Sled-based tests
 async fn execute_sequential(
     storage: &Arc<RwLock<SledStorage>>,
     environment: &Environment,
@@ -296,6 +369,7 @@ async fn execute_sequential(
 
 /// Apply transactions in parallel using the ParallelExecutor and commit the
 /// resulting state to storage.
+#[allow(dead_code)] // Still used by Sled-based tests
 async fn execute_parallel(
     storage: &Arc<RwLock<SledStorage>>,
     environment: Arc<Environment>,
@@ -437,61 +511,169 @@ async fn prepare_test_environment() -> (
 
     {
         let mut guard = storage_seq.write().await;
-        register_tos_asset(&mut *guard).await;
+        register_tos_asset_sled(&mut *guard).await;
     }
     {
         let mut guard = storage_par.write().await;
-        register_tos_asset(&mut *guard).await;
+        register_tos_asset_sled(&mut *guard).await;
     }
 
     (storage_seq, storage_par, Arc::new(Environment::new()))
 }
 
-// FIXME: This test times out due to test infrastructure issues with versioned balance storage setup.
-// The test creates two separate storage instances and manually writes versioned balances, which
-// triggers sled deadlocks. Production code works correctly - other parallel execution tests pass.
-// TODO: Refactor test to use shared storage or simpler state setup to avoid sled concurrency issues.
-#[ignore]
+/// Helper to create independent RocksDB storages with identical initial state (no deadlocks!)
+async fn prepare_test_environment_rocksdb() -> (
+    Arc<RwLock<RocksStorage>>,
+    Arc<RwLock<RocksStorage>>,
+    Arc<Environment>,
+) {
+    let create_storage = || {
+        let temp_dir = TempDir::new("tos_parallel_parity_rocksdb").unwrap();
+        let dir_path = temp_dir.path().to_string_lossy().to_string();
+        let config = RocksDBConfig::default();
+
+        let storage = RocksStorage::new(
+            &dir_path,
+            Network::Devnet,
+            Some(1024 * 1024),
+            &config,
+        );
+
+        // Keep temp_dir alive
+        std::mem::forget(temp_dir);
+        storage
+    };
+
+    let storage_seq = Arc::new(RwLock::new(create_storage()));
+    let storage_par = Arc::new(RwLock::new(create_storage()));
+
+    {
+        let mut guard = storage_seq.write().await;
+        register_tos_asset_rocksdb(&mut *guard).await;
+    }
+    {
+        let mut guard = storage_par.write().await;
+        register_tos_asset_rocksdb(&mut *guard).await;
+    }
+
+    (storage_seq, storage_par, Arc::new(Environment::new()))
+}
+
+/// Execute transactions sequentially using RocksDB storage
+async fn execute_sequential_rocksdb(
+    storage: &Arc<RwLock<RocksStorage>>,
+    environment: &Environment,
+    block: &Block,
+    block_hash: &Hash,
+    topoheight: TopoHeight,
+    transactions: &[Arc<Transaction>],
+) {
+    let mut guard = storage.write().await;
+    let mut chain_state = ApplicableChainState::new(
+        &mut *guard,
+        environment,
+        topoheight.saturating_sub(1),
+        topoheight,
+        BlockVersion::V0,
+        0,
+        block_hash,
+        block,
+    );
+
+    let txs_with_hash: Vec<(Arc<Transaction>, Hash)> = transactions
+        .iter()
+        .map(|tx| (Arc::clone(tx), tx.hash()))
+        .collect();
+
+    for (tx, tx_hash) in txs_with_hash.iter() {
+        tx.apply_with_partial_verify(tx_hash, &mut chain_state)
+            .await
+            .unwrap();
+    }
+
+    chain_state.apply_changes().await.unwrap();
+}
+
+/// Execute transactions in parallel using RocksDB storage
+async fn execute_parallel_rocksdb(
+    storage: &Arc<RwLock<RocksStorage>>,
+    environment: Arc<Environment>,
+    block: Block,
+    block_hash: Hash,
+    topoheight: TopoHeight,
+    transactions: &[Arc<Transaction>],
+) {
+    let parallel_state = ParallelChainState::new(
+        Arc::clone(storage),
+        environment,
+        topoheight.saturating_sub(1),
+        topoheight,
+        BlockVersion::V0,
+        block,
+        block_hash,
+    )
+    .await;
+
+    let executor = ParallelExecutor::with_parallelism(get_optimal_parallelism());
+    let tx_clones: Vec<Transaction> = transactions.iter().map(|tx| (**tx).clone()).collect();
+    let results = executor
+        .execute_batch(Arc::clone(&parallel_state), tx_clones)
+        .await;
+
+    for result in &results {
+        assert!(
+            result.success,
+            "Parallel execution failed: {:?}",
+            result.error
+        );
+    }
+
+    let mut guard = storage.write().await;
+    parallel_state.commit(&mut *guard).await.unwrap();
+}
+
+// Migrated to RocksDB - no Sled deadlock risk
 #[tokio::test]
 async fn test_parallel_matches_sequential_receive_then_spend() {
     // Accounts: Alice sends to Bob, Bob immediately spends to Charlie.
-    let (storage_seq, storage_par, environment) = prepare_test_environment().await;
+    // MIGRATED: Uses RocksDB storage instead of Sled to avoid deadlock issues
+    let (storage_seq, storage_par, environment) = prepare_test_environment_rocksdb().await;
 
     let alice = KeyPair::new();
     let bob = KeyPair::new();
     let charlie = KeyPair::new();
 
-    setup_account(
+    setup_account_rocksdb(
         &storage_seq,
         &alice.get_public_key().compress(),
         100 * COIN_VALUE,
         0,
     )
     .await;
-    setup_account(
+    setup_account_rocksdb(
         &storage_seq,
         &bob.get_public_key().compress(),
         50 * COIN_VALUE,
         0,
     )
     .await;
-    setup_account(&storage_seq, &charlie.get_public_key().compress(), 0, 0).await;
+    setup_account_rocksdb(&storage_seq, &charlie.get_public_key().compress(), 0, 0).await;
 
-    setup_account(
+    setup_account_rocksdb(
         &storage_par,
         &alice.get_public_key().compress(),
         100 * COIN_VALUE,
         0,
     )
     .await;
-    setup_account(
+    setup_account_rocksdb(
         &storage_par,
         &bob.get_public_key().compress(),
         50 * COIN_VALUE,
         0,
     )
     .await;
-    setup_account(&storage_par, &charlie.get_public_key().compress(), 0, 0).await;
+    setup_account_rocksdb(&storage_par, &charlie.get_public_key().compress(), 0, 0).await;
 
     let tx1 = Arc::new(create_transfer_transaction(
         &alice,
@@ -512,7 +694,7 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
     let transactions = vec![tx1.clone(), tx2.clone()];
 
     let (block, block_hash) = create_dummy_block();
-    execute_sequential(
+    execute_sequential_rocksdb(
         &storage_seq,
         &environment,
         &block,
@@ -523,7 +705,7 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
     .await;
 
     let (block_parallel, hash_parallel) = create_dummy_block();
-    execute_parallel(
+    execute_parallel_rocksdb(
         &storage_par,
         Arc::clone(&environment),
         block_parallel,
@@ -539,8 +721,8 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
         ("charlie", &charlie.get_public_key().compress()),
     ];
 
-    let seq_snapshot = snapshot_accounts(&storage_seq, &accounts).await;
-    let par_snapshot = snapshot_accounts(&storage_par, &accounts).await;
+    let seq_snapshot = snapshot_accounts_rocksdb(&storage_seq, &accounts).await;
+    let par_snapshot = snapshot_accounts_rocksdb(&storage_par, &accounts).await;
 
     assert_eq!(
         seq_snapshot, par_snapshot,
@@ -551,39 +733,36 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
     assert_eq!(seq_snapshot["charlie"].0, 20 * COIN_VALUE);
 }
 
-// FIXME: This test times out due to test infrastructure issues with versioned balance storage setup.
-// The test creates two separate storage instances and manually writes versioned balances, which
-// triggers sled deadlocks. Production code works correctly - other parallel execution tests pass.
-// TODO: Refactor test to use shared storage or simpler state setup to avoid sled concurrency issues.
-#[ignore]
+// Migrated to RocksDB - no Sled deadlock risk
 #[tokio::test]
 async fn test_parallel_matches_sequential_multiple_spends() {
     // Alice executes two outgoing transfers within the same block; ensure output_sum handling is identical.
-    let (storage_seq, storage_par, environment) = prepare_test_environment().await;
+    // MIGRATED: Uses RocksDB storage instead of Sled to avoid deadlock issues
+    let (storage_seq, storage_par, environment) = prepare_test_environment_rocksdb().await;
 
     let alice = KeyPair::new();
     let bob = KeyPair::new();
     let charlie = KeyPair::new();
 
-    setup_account(
+    setup_account_rocksdb(
         &storage_seq,
         &alice.get_public_key().compress(),
         200 * COIN_VALUE,
         0,
     )
     .await;
-    setup_account(&storage_seq, &bob.get_public_key().compress(), 0, 0).await;
-    setup_account(&storage_seq, &charlie.get_public_key().compress(), 0, 0).await;
+    setup_account_rocksdb(&storage_seq, &bob.get_public_key().compress(), 0, 0).await;
+    setup_account_rocksdb(&storage_seq, &charlie.get_public_key().compress(), 0, 0).await;
 
-    setup_account(
+    setup_account_rocksdb(
         &storage_par,
         &alice.get_public_key().compress(),
         200 * COIN_VALUE,
         0,
     )
     .await;
-    setup_account(&storage_par, &bob.get_public_key().compress(), 0, 0).await;
-    setup_account(&storage_par, &charlie.get_public_key().compress(), 0, 0).await;
+    setup_account_rocksdb(&storage_par, &bob.get_public_key().compress(), 0, 0).await;
+    setup_account_rocksdb(&storage_par, &charlie.get_public_key().compress(), 0, 0).await;
 
     let tx1 = Arc::new(create_transfer_transaction(
         &alice,
@@ -604,7 +783,7 @@ async fn test_parallel_matches_sequential_multiple_spends() {
     let transactions = vec![tx1.clone(), tx2.clone()];
 
     let (block, block_hash) = create_dummy_block();
-    execute_sequential(
+    execute_sequential_rocksdb(
         &storage_seq,
         &environment,
         &block,
@@ -615,7 +794,7 @@ async fn test_parallel_matches_sequential_multiple_spends() {
     .await;
 
     let (block_parallel, hash_parallel) = create_dummy_block();
-    execute_parallel(
+    execute_parallel_rocksdb(
         &storage_par,
         Arc::clone(&environment),
         block_parallel,
@@ -631,8 +810,8 @@ async fn test_parallel_matches_sequential_multiple_spends() {
         ("charlie", &charlie.get_public_key().compress()),
     ];
 
-    let seq_snapshot = snapshot_accounts(&storage_seq, &accounts).await;
-    let par_snapshot = snapshot_accounts(&storage_par, &accounts).await;
+    let seq_snapshot = snapshot_accounts_rocksdb(&storage_seq, &accounts).await;
+    let par_snapshot = snapshot_accounts_rocksdb(&storage_par, &accounts).await;
 
     assert_eq!(
         seq_snapshot, par_snapshot,

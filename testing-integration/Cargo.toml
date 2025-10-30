@@ -43,3 +43,17 @@ tokio-test = "0.4"
 default = []
 # Enable additional test utilities
 test-helpers = []
+
+# Test Configuration
+# Following Kaspa best practice: Run integration tests in Release mode
+#
+# Why Release mode for integration tests?
+# - Debug mode: 10-100x slower than Release
+# - Release mode: Production-like performance
+# - Integration tests involve blockchain operations (expensive)
+#
+# Usage:
+#   Unit tests (fast):        cargo test --lib
+#   Integration tests (slow): cargo test --tests --release
+#
+# CI/CD runs integration tests with --release flag automatically
