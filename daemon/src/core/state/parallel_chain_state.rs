@@ -540,6 +540,20 @@ impl<S: Storage> ParallelChainState<S> {
     }
 
     /// Reward a miner for the block mined
+    ///
+    /// CONSENSUS FIX: This method now loads existing balance from storage and accumulates
+    /// the reward on top of it, matching serial execution behavior exactly.
+    ///
+    /// CRITICAL: Rewards MUST be written to `accounts` cache (not `balances` DashMap)
+    /// because transaction execution reads from `accounts`. This ensures:
+    /// 1. Miners can immediately spend rewards in the same block (consensus requirement)
+    /// 2. Existing balances are preserved (no overwrite bug)
+    /// 3. Parallel execution matches serial execution results exactly
+    ///
+    /// Bug History:
+    /// - Old implementation wrote to `balances` DashMap → invisible to transactions
+    /// - Old implementation didn't load existing balance → overwrote on merge
+    /// - Both bugs caused consensus divergence and fund loss
     pub async fn reward_miner(&self, miner: &PublicKey, reward: u64) -> Result<(), BlockchainError> {
         use log::debug;
 
@@ -550,11 +564,31 @@ impl<S: Storage> ParallelChainState<S> {
                    self.topoheight);
         }
 
-        self.balances.entry(miner.clone())
-            .or_insert_with(HashMap::new)
-            .entry(TOS_ASSET.clone())
-            .and_modify(|b| *b = b.saturating_add(reward))
-            .or_insert(reward);
+        // CONSENSUS FIX: Load existing balance from storage into accounts cache
+        // This ensures we accumulate reward on top of existing balance (not overwrite)
+        self.ensure_balance_loaded(miner, &TOS_ASSET).await?;
+
+        // CONSENSUS FIX: Update balance in `accounts` cache (same cache used by transactions)
+        // This ensures rewards are immediately spendable in the same block
+        if let Some(mut entry) = self.accounts.get_mut(miner) {
+            let balance = entry.balances.entry(TOS_ASSET.clone()).or_insert(0);
+            let old_balance = *balance;
+            *balance = balance.saturating_add(reward);
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Miner {} balance updated: {} → {} TOS (reward: {})",
+                       miner.as_address(self.is_mainnet),
+                       tos_common::utils::format_tos(old_balance),
+                       tos_common::utils::format_tos(*balance),
+                       tos_common::utils::format_tos(reward));
+            }
+        } else {
+            // This should never happen because ensure_balance_loaded creates the entry
+            // Use AccountNotFound error with miner's address
+            return Err(BlockchainError::AccountNotFound(
+                miner.as_address(self.is_mainnet)
+            ));
+        }
 
         Ok(())
     }
@@ -571,10 +605,15 @@ impl<S: Storage> ParallelChainState<S> {
 
     /// Get all modified balances
     /// Returns iterator of ((PublicKey, Asset), new_balance)
+    ///
+    /// CONSENSUS FIX: Only collect from `accounts` cache (not `balances` DashMap).
+    /// All balance modifications (including miner rewards) are now tracked in `accounts`.
+    /// The `balances` DashMap is now deprecated and should be removed in future cleanup.
     pub fn get_modified_balances(&self) -> Vec<((PublicKey, Hash), u64)> {
         let mut result = Vec::new();
 
-        // Collect from accounts cache
+        // CONSENSUS FIX: Only collect from accounts cache
+        // All balance changes (transactions + rewards) are tracked here
         for entry in self.accounts.iter() {
             let account = entry.key();
             for (asset, balance) in &entry.value().balances {
@@ -582,13 +621,9 @@ impl<S: Storage> ParallelChainState<S> {
             }
         }
 
-        // Collect from balances cache
-        for entry in self.balances.iter() {
-            let account = entry.key();
-            for (asset, balance) in entry.value().iter() {
-                result.push(((account.clone(), asset.clone()), *balance));
-            }
-        }
+        // REMOVED: Collection from balances DashMap
+        // Old code collected from self.balances, which caused the overwrite bug
+        // because rewards were stored there as absolute values (not deltas)
 
         result
     }
