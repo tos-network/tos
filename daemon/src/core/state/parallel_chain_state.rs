@@ -12,6 +12,7 @@ use std::{
 use tokio::sync::{RwLock, Semaphore};
 use dashmap::DashMap;
 use tos_common::{
+    account::EnergyResource,
     block::{Block, BlockVersion, TopoHeight},
     config::TOS_ASSET,
     crypto::{Hash, PublicKey, Hashable},
@@ -46,6 +47,10 @@ struct AccountState {
     original_multisig: Option<MultiSigPayload>,
     /// Multisig configuration
     multisig: Option<MultiSigPayload>,
+    /// Original energy resource from storage (for modification tracking)
+    original_energy: Option<EnergyResource>,
+    /// Energy resource (current state)
+    energy: Option<EnergyResource>,
 }
 
 /// Contract state cached in memory
@@ -198,6 +203,8 @@ impl<S: Storage> ParallelChainState<S> {
             original_balances: HashMap::new(),
             original_multisig: multisig.clone(),
             multisig,
+            original_energy: None, // Energy loaded on-demand
+            energy: None,
         });
 
         Ok(())
@@ -240,6 +247,42 @@ impl<S: Storage> ParallelChainState<S> {
         if let Some(mut account_entry) = self.accounts.get_mut(account) {
             account_entry.balances.insert(asset.clone(), balance);
             account_entry.original_balances.insert(asset.clone(), balance);
+        }
+
+        Ok(())
+    }
+
+    /// Load energy resource from storage if not already cached
+    pub async fn ensure_energy_loaded(
+        &self,
+        account: &PublicKey,
+    ) -> Result<(), BlockchainError> {
+        use log::trace;
+
+        // First ensure account is loaded
+        self.ensure_account_loaded(account).await?;
+
+        // Check if energy already loaded
+        if let Some(account_entry) = self.accounts.get(account) {
+            if account_entry.energy.is_some() || account_entry.original_energy.is_some() {
+                return Ok(()); // Already loaded
+            }
+        }
+
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Loading energy resource from storage for {}",
+                   account.as_address(self.is_mainnet));
+        }
+
+        // Acquire read lock and load energy from storage
+        let storage = self.storage.read().await;
+        let energy = storage.get_energy_resource(account).await?;
+        drop(storage);
+
+        // Insert energy into account's cache and track original value
+        if let Some(mut account_entry) = self.accounts.get_mut(account) {
+            account_entry.energy = energy.clone();
+            account_entry.original_energy = energy;
         }
 
         Ok(())
@@ -671,6 +714,31 @@ impl<S: Storage> ParallelChainState<S> {
             .collect()
     }
 
+    /// Get energy resources that were modified
+    /// Only returns energy resources that were actually modified (not just loaded)
+    pub fn get_modified_energy_resources(&self) -> Vec<(PublicKey, Option<EnergyResource>)> {
+        self.accounts.iter()
+            .filter(|entry| {
+                // Check if energy was actually modified
+                let current_energy = &entry.value().energy;
+                let original_energy = &entry.value().original_energy;
+
+                match (current_energy, original_energy) {
+                    (None, None) => false, // Both None, not modified
+                    (Some(_), None) | (None, Some(_)) => true, // Changed from Some to None or vice versa
+                    (Some(current), Some(original)) => {
+                        // Compare by serializing both (since EnergyResource doesn't impl PartialEq)
+                        use tos_common::serializer::Serializer;
+                        let current_bytes = current.to_bytes();
+                        let original_bytes = original.to_bytes();
+                        current_bytes != original_bytes
+                    }
+                }
+            })
+            .map(|entry| (entry.key().clone(), entry.value().energy.clone()))
+            .collect()
+    }
+
     // Helper methods for ParallelApplyAdapter
 
     /// Get nonce for an account (must be loaded first)
@@ -732,6 +800,19 @@ impl<S: Storage> ParallelChainState<S> {
     pub fn set_multisig(&self, account: &PublicKey, multisig: Option<MultiSigPayload>) {
         if let Some(mut entry) = self.accounts.get_mut(account) {
             entry.multisig = multisig;
+        }
+    }
+
+    /// Get energy resource for an account (must be loaded first)
+    pub fn get_energy_resource(&self, account: &PublicKey) -> Option<EnergyResource> {
+        self.accounts.get(account)
+            .and_then(|entry| entry.energy.clone())
+    }
+
+    /// Set energy resource for an account (must be loaded first)
+    pub fn set_energy_resource(&self, account: &PublicKey, energy: Option<EnergyResource>) {
+        if let Some(mut entry) = self.accounts.get_mut(account) {
+            entry.energy = energy;
         }
     }
 
