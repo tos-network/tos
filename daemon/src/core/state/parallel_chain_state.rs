@@ -13,6 +13,7 @@ use tokio::sync::{RwLock, Semaphore};
 use dashmap::DashMap;
 use tos_common::{
     account::EnergyResource,
+    ai_mining::AIMiningState,
     block::{Block, BlockVersion, TopoHeight},
     config::TOS_ASSET,
     crypto::{Hash, PublicKey, Hashable},
@@ -114,6 +115,13 @@ pub struct ParallelChainState<S: Storage> {
     burned_supply: AtomicU64,
     gas_fee: AtomicU64,
 
+    // AI Mining global state (RwLock for shared mutable access)
+    // First Option: whether AI mining state is loaded
+    // Second Option: the actual AI mining state (None if no miners registered)
+    ai_mining_state: Arc<RwLock<Option<Option<AIMiningState>>>>,
+    // Original AI mining state from storage (for modification tracking)
+    original_ai_mining_state: Arc<RwLock<Option<Option<AIMiningState>>>>,
+
     // DEADLOCK FIX: Semaphore to serialize storage access during parallel execution
     // This prevents concurrent storage.read() calls that trigger sled internal deadlocks
     storage_semaphore: Arc<Semaphore>,
@@ -147,6 +155,9 @@ impl<S: Storage> ParallelChainState<S> {
             is_mainnet,
             burned_supply: AtomicU64::new(0),
             gas_fee: AtomicU64::new(0),
+            // AI Mining state (None = not loaded yet)
+            ai_mining_state: Arc::new(RwLock::new(None)),
+            original_ai_mining_state: Arc::new(RwLock::new(None)),
             // DEADLOCK FIX: Permit only 1 concurrent storage access during parallel execution
             storage_semaphore: Arc::new(Semaphore::new(1)),
         })
@@ -284,6 +295,34 @@ impl<S: Storage> ParallelChainState<S> {
             account_entry.energy = energy.clone();
             account_entry.original_energy = energy;
         }
+
+        Ok(())
+    }
+
+    /// Load AI mining state from storage if not already cached
+    pub async fn ensure_ai_mining_loaded(&self) -> Result<(), BlockchainError> {
+        use log::trace;
+
+        // Check if already loaded
+        {
+            let state = self.ai_mining_state.read().await;
+            if state.is_some() {
+                return Ok(()); // Already loaded
+            }
+        }
+
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Loading AI mining state from storage");
+        }
+
+        // Acquire read lock and load AI mining state from storage
+        let storage = self.storage.read().await;
+        let ai_state = storage.get_ai_mining_state().await?;
+        drop(storage);
+
+        // Cache the loaded state
+        *self.ai_mining_state.write().await = Some(ai_state.clone());
+        *self.original_ai_mining_state.write().await = Some(ai_state);
 
         Ok(())
     }
@@ -813,6 +852,40 @@ impl<S: Storage> ParallelChainState<S> {
     pub fn set_energy_resource(&self, account: &PublicKey, energy: Option<EnergyResource>) {
         if let Some(mut entry) = self.accounts.get_mut(account) {
             entry.energy = energy;
+        }
+    }
+
+    /// Get AI mining state (must be loaded first)
+    pub async fn get_ai_mining_state(&self) -> Option<AIMiningState> {
+        self.ai_mining_state.read().await.as_ref().and_then(|s| s.clone())
+    }
+
+    /// Set AI mining state (must be loaded first)
+    pub async fn set_ai_mining_state(&self, state: Option<AIMiningState>) {
+        *self.ai_mining_state.write().await = Some(state);
+    }
+
+    /// Get modified AI mining state
+    /// Returns Some(state) if modified, None if not loaded or not modified
+    pub async fn get_modified_ai_mining_state(&self) -> Option<AIMiningState> {
+        let current = self.ai_mining_state.read().await;
+        let original = self.original_ai_mining_state.read().await;
+
+        // Check if state was actually modified
+        match (current.as_ref(), original.as_ref()) {
+            (Some(curr), Some(orig)) => {
+                // Both loaded, check if different
+                if curr != orig {
+                    curr.clone()
+                } else {
+                    None // Not modified
+                }
+            }
+            (Some(curr), None) => {
+                // Current loaded but no original means this is a new state (modification)
+                curr.clone()
+            }
+            _ => None, // Not loaded or no current state
         }
     }
 
