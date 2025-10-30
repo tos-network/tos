@@ -3307,15 +3307,15 @@ impl<S: Storage> Blockchain<S> {
                 let min_txs_threshold = get_min_txs_for_parallel(&self.network);
 
                 // SECURITY FIX #6: Check for unsupported transaction types
-                // Contract invocations, deployments, energy, AI mining, and MultiSig are not yet implemented
+                // Contract invocations, energy, AI mining, and MultiSig are not yet implemented
                 // in parallel execution. MultiSig added because get_multisig_state returns None (phase 1 limitation).
+                // Contract deployments (DeployContract) are now supported in parallel execution.
                 // Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Issue #6
                 // Reference: High priority bug - MultiSig transactions fail in parallel mode
                 let has_unsupported_types = block.get_transactions().iter().any(|tx| {
                     use tos_common::transaction::TransactionType;
                     matches!(tx.get_data(),
                         TransactionType::InvokeContract(_) |
-                        TransactionType::DeployContract(_) |
                         TransactionType::Energy(_) |
                         TransactionType::AIMining(_) |
                         TransactionType::MultiSig(_)
