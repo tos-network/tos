@@ -361,14 +361,21 @@ async fn prepare_test_environment() -> (
 
 #[tokio::test]
 async fn test_parallel_matches_sequential_receive_then_spend() {
-    // Accounts: Alice sends to Bob, Bob immediately spends to Charlie.
-    let (storage_seq, storage_par, environment) = prepare_test_environment().await;
+    println!("\n=== TEST START: test_parallel_matches_sequential_receive_then_spend ===");
 
+    // Accounts: Alice sends to Bob, Bob immediately spends to Charlie.
+    println!("Step 1/6: Preparing test environment (creating RocksDB storages)...");
+    let (storage_seq, storage_par, environment) = prepare_test_environment().await;
+    println!("✓ Environment prepared");
+
+    println!("Step 2/6: Creating keypairs...");
     let alice = KeyPair::new();
     let bob = KeyPair::new();
     let charlie = KeyPair::new();
+    println!("✓ Keypairs created");
 
     // Setup accounts in both storages
+    println!("Step 3/6: Setting up accounts in sequential storage...");
     setup_account(
         &storage_seq,
         &alice.get_public_key().compress(),
@@ -384,7 +391,9 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
     )
     .await;
     setup_account(&storage_seq, &charlie.get_public_key().compress(), 0, 0).await;
+    println!("✓ Sequential storage accounts ready");
 
+    println!("Step 3/6: Setting up accounts in parallel storage...");
     setup_account(
         &storage_par,
         &alice.get_public_key().compress(),
@@ -400,10 +409,10 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
     )
     .await;
     setup_account(&storage_par, &charlie.get_public_key().compress(), 0, 0).await;
-
-    // NO flush needed with RocksDB!
+    println!("✓ Parallel storage accounts ready (NO flush needed with RocksDB!)");
 
     // Create transactions
+    println!("Step 4/6: Creating transactions...");
     let tx1 = Arc::new(create_transfer_transaction(
         &alice,
         &bob.get_public_key().compress(),
@@ -421,8 +430,10 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
     ));
 
     let transactions = vec![tx1.clone(), tx2.clone()];
+    println!("✓ Created {} transactions", transactions.len());
 
     // Execute sequentially
+    println!("Step 5/6: Executing transactions sequentially...");
     let (block, block_hash) = create_dummy_block();
     execute_sequential(
         &storage_seq,
@@ -433,8 +444,10 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
         &transactions,
     )
     .await;
+    println!("✓ Sequential execution completed");
 
     // Execute in parallel
+    println!("Step 5/6: Executing transactions in parallel...");
     let (block_parallel, hash_parallel) = create_dummy_block();
     execute_parallel(
         &storage_par,
@@ -445,8 +458,10 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
         &transactions,
     )
     .await;
+    println!("✓ Parallel execution completed");
 
     // Compare results
+    println!("Step 6/6: Comparing sequential vs parallel results...");
     let accounts = [
         ("alice", &alice.get_public_key().compress()),
         ("bob", &bob.get_public_key().compress()),
@@ -456,6 +471,11 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
     let seq_snapshot = snapshot_accounts(&storage_seq, &accounts).await;
     let par_snapshot = snapshot_accounts(&storage_par, &accounts).await;
 
+    println!("Sequential results: alice={}, bob={}, charlie={}",
+        seq_snapshot["alice"].0, seq_snapshot["bob"].0, seq_snapshot["charlie"].0);
+    println!("Parallel results:   alice={}, bob={}, charlie={}",
+        par_snapshot["alice"].0, par_snapshot["bob"].0, par_snapshot["charlie"].0);
+
     assert_eq!(
         seq_snapshot, par_snapshot,
         "Sequential and parallel states diverged"
@@ -463,6 +483,9 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
     assert_eq!(seq_snapshot["alice"].0, 70 * COIN_VALUE);
     assert_eq!(seq_snapshot["bob"].0, 60 * COIN_VALUE);
     assert_eq!(seq_snapshot["charlie"].0, 20 * COIN_VALUE);
+
+    println!("✓ All assertions passed!");
+    println!("=== TEST COMPLETED SUCCESSFULLY ===\n");
 }
 
 #[tokio::test]

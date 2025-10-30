@@ -650,8 +650,8 @@ mod rocksdb_tests {
         let storage_read = storage.read().await;
 
         // Verify TOS asset is registered
-        let asset = storage_read.get_asset(&TOS_ASSET).await.unwrap();
-        assert_eq!(asset.get_data().get_decimals(), COIN_DECIMALS);
+        let (_topoheight, asset) = storage_read.get_asset(&TOS_ASSET).await.unwrap();
+        assert_eq!(asset.get().get_decimals(), COIN_DECIMALS);
     }
 
     #[tokio::test]
