@@ -326,14 +326,87 @@ async fn test_reward_transaction_order_equivalence() {
 // ============================================================================
 /// Verifies that both miner and developer addresses receive rewards correctly.
 ///
+/// Current Status: PARTIAL IMPLEMENTATION - Miner rewards work, developer split not yet implemented
+///
 /// Scenario:
 /// 1. Block reward: 100 TOS total
 /// 2. Miner gets 90 TOS (90%)
 /// 3. Developer gets 10 TOS (10%)
 /// 4. Both old balances should be preserved and rewards added
+///
+/// LIMITATIONS:
+/// ============
+/// The ParallelChainState currently does not have a method to set or retrieve a developer address.
+/// The reward_miner() method only rewards the miner account. To implement full developer split:
+///
+/// TODO: Implement Developer Split in ParallelChainState
+/// ======================================================
+///
+/// 1. **Add Developer Address to ParallelChainState**:
+///    - Add a field: `developer_address: Option<PublicKey>` to struct ParallelChainState
+///    - This should be initialized in `ParallelChainState::new()` from either:
+///      a) Configuration file (daemon.toml)
+///      b) Storage layer (persisted as protocol state)
+///      c) Command line arguments (--developer-address)
+///    - Add getter method: `pub fn get_developer_address(&self) -> Option<&PublicKey>`
+///
+/// 2. **Create reward_miner_with_dev_split() Method**:
+///    ```rust
+///    pub async fn reward_miner_with_dev_split(
+///        &self,
+///        miner: &PublicKey,
+///        total_reward: u64,
+///    ) -> Result<(), BlockchainError> {
+///        const DEV_SPLIT_PERCENT: u64 = 10;  // 10% to developer
+///
+///        // Calculate split using integer arithmetic (u128 for safety)
+///        let dev_reward = (total_reward as u128 * DEV_SPLIT_PERCENT as u128) / 100u128;
+///        let dev_reward = dev_reward as u64;
+///        let miner_reward = total_reward.saturating_sub(dev_reward);
+///
+///        // Reward miner
+///        self.reward_miner(miner, miner_reward).await?;
+///
+///        // Reward developer if configured
+///        if let Some(dev_addr) = self.get_developer_address() {
+///            self.reward_miner(dev_addr, dev_reward).await?;
+///        }
+///
+///        Ok(())
+///    }
+///    ```
+///
+/// 3. **Integrate into Consensus Flow**:
+///    - Modify the main block execution path to call reward_miner_with_dev_split()
+///    - Update blockchain.rs to use the new method when processing block rewards
+///    - Reference: daemon/src/core/blockchain.rs (search for reward_miner calls)
+///
+/// 4. **Testing Requirements**:
+///    - Once implemented, enable the assertion below for dev balance validation
+///    - Add integration tests that verify:
+///      a) Dev split correctly divides rewards (rounding down)
+///      b) Developer balance is not affected if dev address not set
+///      c) Multiple blocks correctly accumulate dev rewards
+///      d) Dev and miner can spend rewards in same block
+///
+/// 5. **Configuration Integration**:
+///    - Add to daemon config schema (common/src/config/mod.rs):
+///      `developer_address: Option<PublicKey>`
+///    - Document in docs/ (RPC API, configuration guide)
+///    - Add to CLI argument parser (daemon/src/main.rs)
+///
+/// SECURITY CONSIDERATIONS:
+/// ========================
+/// - Use u128 scaled integer arithmetic to ensure deterministic rounding
+/// - Developer address must be validated and immutable once set
+/// - Dev split must be enforced at consensus layer (not optional)
+/// - Cannot be changed post-activation (consensus breaking change)
+/// - Add audit logging for all dev reward distributions
 #[tokio::test]
 async fn test_developer_split_regression() {
     println!("\n=== TEST 4: Developer Split Regression ===");
+    println!("STATUS: Testing current miner reward capability");
+    println!("NOTE: Developer split not yet implemented in ParallelChainState\n");
 
     // Step 1: Setup miner and developer accounts
     let storage = create_test_rocksdb_storage().await;
@@ -356,16 +429,18 @@ async fn test_developer_split_regression() {
     println!("  - Miner:     {} TOS", miner_initial / COIN_VALUE);
     println!("  - Developer: {} TOS", dev_initial / COIN_VALUE);
 
-    // Step 2: Simulate reward split
-    let _total_reward = 100 * COIN_VALUE;
+    // Step 2: Calculate expected reward split
+    let total_reward = 100 * COIN_VALUE;
     let miner_reward = 90 * COIN_VALUE;   // 90%
-    let _dev_reward = 10 * COIN_VALUE;      // 10%
+    let dev_reward = 10 * COIN_VALUE;     // 10%
 
-    println!("✓ Block reward split:");
+    println!("\n✓ Expected block reward split:");
+    println!("  - Total:     {} TOS", total_reward / COIN_VALUE);
     println!("  - Miner:     {} TOS (90%)", miner_reward / COIN_VALUE);
-    println!("  - Developer: {} TOS (10%)", _dev_reward / COIN_VALUE);
+    println!("  - Developer: {} TOS (10%)", dev_reward / COIN_VALUE);
 
     // Step 3: Create block and execute
+    // Currently: Only miner reward is applied
     let block = create_dummy_block(&miner);
     let block_hash = block.hash();
 
@@ -380,7 +455,11 @@ async fn test_developer_split_regression() {
     )
     .await;
 
+    println!("\n✓ Executing miner reward (developer split not yet implemented):");
+
     // Manually call reward_miner to simulate block reward
+    // NOTE: This only rewards the miner. Once developer split is implemented,
+    // we would call a hypothetical reward_miner_with_dev_split() method instead.
     parallel_state
         .reward_miner(&miner_pubkey, miner_reward)
         .await
@@ -391,7 +470,7 @@ async fn test_developer_split_regression() {
         parallel_state.commit(&mut *storage_write).await.unwrap();
     }
 
-    // Step 4: Verify both balances were correctly updated
+    // Step 4: Verify both balances
     {
         let storage_read = storage.read().await;
 
@@ -408,10 +487,10 @@ async fn test_developer_split_regression() {
             "Miner balance should be initial + reward"
         );
 
-        println!("✓ Miner balance verified:");
-        println!("  - Initial:  {} TOS", miner_initial / COIN_VALUE);
-        println!("  - Reward:   {} TOS", miner_reward / COIN_VALUE);
-        println!("  - Final:    {} TOS ✓", miner_balance.get_balance() / COIN_VALUE);
+        println!("  Miner balance:");
+        println!("    - Initial:  {} TOS", miner_initial / COIN_VALUE);
+        println!("    - Reward:   {} TOS (fully applied)", miner_reward / COIN_VALUE);
+        println!("    - Final:    {} TOS ✓", miner_balance.get_balance() / COIN_VALUE);
 
         // Check developer balance
         let (_, dev_balance) = storage_read
@@ -419,20 +498,28 @@ async fn test_developer_split_regression() {
             .await
             .unwrap();
 
-        // Note: Current implementation may not have dev split yet
-        // This test documents expected behavior
-        let expected_dev = dev_initial; // + _dev_reward when implemented
+        // Current behavior: Developer does not receive reward
+        let current_dev = dev_balance.get_balance();
 
-        println!("✓ Developer balance:");
-        println!("  - Initial:  {} TOS", dev_initial / COIN_VALUE);
-        println!("  - Current:  {} TOS", dev_balance.get_balance() / COIN_VALUE);
-        println!("  - Expected: {} TOS (when dev split implemented)", expected_dev / COIN_VALUE);
+        println!("\n  Developer balance (current implementation):");
+        println!("    - Initial:      {} TOS", dev_initial / COIN_VALUE);
+        println!("    - Current:      {} TOS", current_dev / COIN_VALUE);
+        println!("    - Expected*:    {} TOS (when dev split implemented)",
+                 (dev_initial + dev_reward) / COIN_VALUE);
+        println!("    - Dev reward*:  {} TOS (not yet distributed)", dev_reward / COIN_VALUE);
 
-        // TODO: Enable assertion when developer split is implemented
-        // assert_eq!(dev_balance.get_balance(), expected_dev);
+        // Verify developer balance unchanged (expected current behavior)
+        assert_eq!(
+            current_dev,
+            dev_initial,
+            "Developer balance unchanged (dev split not yet implemented)"
+        );
+
+        println!("\n  Status: Test documents current behavior and expectations");
+        println!("  * = Requires implementation of developer split feature");
     }
 
-    println!("✓ Test passed: Developer split regression documented");
+    println!("\n✓ Test passed: Developer split regression documented");
 }
 
 // ============================================================================
