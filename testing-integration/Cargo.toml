@@ -1,0 +1,45 @@
+[package]
+name = "tos-testing-integration"
+version = "0.1.0"
+edition = "2021"
+authors = ["TOS Development Team"]
+description = "Integration testing framework for TOS blockchain"
+license = "MIT"
+
+[dependencies]
+# TOS core dependencies
+tos_common = { path = "../common" }
+tos_daemon = { path = "../daemon" }
+tos_wallet = { path = "../wallet" }
+
+# Async runtime
+tokio = { version = "1.38", features = ["full"] }
+async-trait = "0.1"
+
+# Storage and data structures
+parking_lot = "0.12"
+dashmap = "6.0"
+
+# Networking
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Utilities
+tempdir = "0.3"
+rand = "0.8"
+log = "0.4"
+
+# Testing
+anyhow = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[features]
+default = []
+# Enable additional test utilities
+test-helpers = []

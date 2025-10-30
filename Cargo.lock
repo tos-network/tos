@@ -4239,6 +4239,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-test"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2468baabc3311435b55dd935f702f42cd1b8abb7e754fb7dfb16bd36aa88f9f7"
+dependencies = [
+ "async-stream",
+ "bytes",
+ "futures-core",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "tokio-tungstenite"
 version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4431,6 +4444,28 @@ dependencies = [
  "chacha20 0.9.1",
  "thiserror 1.0.69",
  "tiny-keccak",
+]
+
+[[package]]
+name = "tos-testing-integration"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "dashmap",
+ "log",
+ "parking_lot 0.12.4",
+ "rand 0.8.5",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "tempdir",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+ "tos_common",
+ "tos_daemon",
+ "tos_wallet",
 ]
 
 [[package]]
