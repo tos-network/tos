@@ -42,11 +42,16 @@ pub use utils::{
     blockchain::{mine_block, mine_blocks},
     transactions::create_simple_transfer,
     storage_helpers::{
+        // Sled storage helpers (legacy, for existing tests)
         create_test_storage,
         create_test_storage_with_tos_asset,
         create_test_storage_with_accounts,
         setup_account_safe,
         flush_storage_and_wait,
+        // RocksDB storage helpers (recommended for new tests)
+        create_test_rocksdb_storage,
+        create_test_rocksdb_storage_with_accounts,
+        setup_account_rocksdb,
     },
 };
 

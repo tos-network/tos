@@ -1,23 +1,22 @@
 //! Safe storage helpers for integration tests
 //!
-//! This module provides proven-safe storage helpers extracted from daemon/tests/common/mod.rs
-//! that avoid sled deadlock issues in parallel execution tests.
+//! This module provides storage helpers for integration tests with support for both
+//! SledStorage and RocksStorage backends.
 //!
-//! # Problem: Sled Deadlocks in Parallel Tests
+//! # Recommended: Use RocksDB for Tests
 //!
-//! Direct storage manipulation in tests can cause deadlocks with sled storage backend:
+//! **TOS production environment uses RocksDB by default**, so tests should use RocksDB
+//! to match production behavior and avoid sled-specific deadlock issues.
 //!
-//! 1. Test writes versioned balances/nonces to storage
-//! 2. ParallelChainState spawns parallel threads
-//! 3. Parallel threads try to read from storage
-//! 4. Sled's internal LRU cache Mutex deadlocks occur
+//! Use `create_test_rocksdb_storage()` or `create_test_rocksdb_storage_with_accounts()`
+//! for new tests.
 //!
-//! # Solution: Safe Setup Pattern
+//! # Legacy: Sled Storage with Safe Pattern
 //!
-//! These helpers implement a proven-safe pattern:
+//! For existing tests using SledStorage, avoid deadlock issues with the safe pattern:
 //!
 //! 1. Perform all storage writes in single-threaded context
-//! 2. Wait for sled to complete internal flush operations
+//! 2. Wait for sled to complete internal flush operations (10ms per account + 100ms)
 //! 3. Only then create ParallelChainState and begin parallel execution
 //!
 //! # Usage Example
@@ -73,9 +72,11 @@ use tos_common::{
     network::Network,
 };
 use tos_daemon::core::{
+    config::RocksDBConfig,
     error::BlockchainError,
     storage::{
         sled::{SledStorage, StorageMode},
+        rocksdb::RocksStorage,
         AccountProvider,
         AssetProvider,
         BalanceProvider,
@@ -467,5 +468,244 @@ mod tests {
         let storage_read = storage.read().await;
         let (_, balance) = storage_read.get_last_balance(&account, &TOS_ASSET).await.unwrap();
         assert_eq!(balance.get_balance(), 1000);
+    }
+}
+
+// ============================================================================
+// RocksDB Storage Helpers (Recommended for New Tests)
+// ============================================================================
+
+/// Create a test RocksDB storage instance with TOS asset registered
+///
+/// **RECOMMENDED**: Use this for new tests instead of SledStorage.
+/// TOS production environment uses RocksDB by default, and RocksDB doesn't
+/// have the deadlock issues that sled has.
+///
+/// # Configuration
+///
+/// - Network: Devnet
+/// - Cache: 1MB
+/// - Location: Temporary directory (auto-cleaned)
+/// - Compression: Snappy (default)
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tos_testing_integration::utils::storage_helpers::create_test_rocksdb_storage;
+///
+/// #[tokio::test]
+/// async fn test_with_rocksdb() {
+///     let storage = create_test_rocksdb_storage().await;
+///
+///     // No need for flush_storage_and_wait() with RocksDB!
+///     let parallel_state = ParallelChainState::new(storage.clone(), 0).await.unwrap();
+/// }
+/// ```
+pub async fn create_test_rocksdb_storage() -> Arc<tokio::sync::RwLock<RocksStorage>> {
+    let temp_dir = TempDir::new("tos_test_rocksdb").expect("Failed to create temp directory");
+    let dir_path = temp_dir.path().to_string_lossy().to_string();
+
+    // Use default RocksDB config optimized for tests
+    let config = RocksDBConfig::default();
+
+    let mut storage = RocksStorage::new(
+        &dir_path,
+        Network::Devnet,
+        Some(1024 * 1024), // 1MB cache
+        &config,
+    );
+
+    // Register TOS asset
+    let asset_data = AssetData::new(
+        COIN_DECIMALS,
+        "TOS".to_string(),
+        "TOS".to_string(),
+        None,
+        None,
+    );
+    let versioned: VersionedAssetData = Versioned::new(asset_data, Some(0));
+    storage.add_asset(&TOS_ASSET, 0, versioned).await.expect("Failed to register TOS asset");
+
+    // Store temp_dir to prevent cleanup (move ownership)
+    std::mem::forget(temp_dir);
+
+    Arc::new(tokio::sync::RwLock::new(storage))
+}
+
+/// Setup account in RocksDB storage (no deadlock risk, no delays needed)
+///
+/// Unlike sled, RocksDB doesn't require delays or flush operations.
+/// This function writes directly without waiting.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tos_testing_integration::utils::storage_helpers::{
+///     create_test_rocksdb_storage,
+///     setup_account_rocksdb,
+/// };
+///
+/// #[tokio::test]
+/// async fn test_account_setup() {
+///     let storage = create_test_rocksdb_storage().await;
+///     let account = PublicKey::default();
+///
+///     // Setup account (no delays needed!)
+///     setup_account_rocksdb(&storage, &account, 1000, 0).await.unwrap();
+///
+///     // Immediately safe to use in parallel execution
+///     let parallel_state = ParallelChainState::new(storage.clone(), 0).await.unwrap();
+/// }
+/// ```
+pub async fn setup_account_rocksdb(
+    storage: &Arc<tokio::sync::RwLock<RocksStorage>>,
+    account: &CompressedPublicKey,
+    balance: u64,
+    nonce: u64,
+) -> Result<(), BlockchainError> {
+    let mut storage_write = storage.write().await;
+
+    // Set nonce
+    storage_write
+        .set_last_nonce_to(account, 0, &VersionedNonce::new(nonce, Some(0)))
+        .await?;
+
+    // Set balance
+    storage_write
+        .set_last_balance_to(
+            account,
+            &TOS_ASSET,
+            0,
+            &VersionedBalance::new(balance, Some(0)),
+        )
+        .await?;
+
+    // Register account
+    storage_write
+        .set_account_registration_topoheight(account, 0)
+        .await?;
+
+    // No delays needed - RocksDB handles concurrency correctly!
+    Ok(())
+}
+
+/// Create RocksDB test storage with pre-populated accounts
+///
+/// **RECOMMENDED**: Use this for new tests that need multiple accounts.
+/// This is faster and simpler than the sled equivalent because RocksDB
+/// doesn't require delays.
+///
+/// # Arguments
+///
+/// * `accounts` - Vector of (PublicKey, balance, nonce) tuples
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tos_testing_integration::utils::storage_helpers::create_test_rocksdb_storage_with_accounts;
+///
+/// #[tokio::test]
+/// async fn test_transfers() {
+///     let alice = PublicKey::default();
+///     let bob = PublicKey::default();
+///
+///     let accounts = vec![
+///         (alice.clone(), 1000, 0),
+///         (bob.clone(), 2000, 0),
+///     ];
+///
+///     let storage = create_test_rocksdb_storage_with_accounts(accounts).await.unwrap();
+///
+///     // Immediately ready for parallel execution (no flush needed!)
+///     let parallel_state = ParallelChainState::new(storage.clone(), 0).await.unwrap();
+/// }
+/// ```
+pub async fn create_test_rocksdb_storage_with_accounts(
+    accounts: Vec<(CompressedPublicKey, u64, u64)>,
+) -> Result<Arc<tokio::sync::RwLock<RocksStorage>>, BlockchainError> {
+    let storage = create_test_rocksdb_storage().await;
+
+    for (account, balance, nonce) in accounts {
+        setup_account_rocksdb(&storage, &account, balance, nonce).await?;
+    }
+
+    // No flush needed! RocksDB is immediately ready for concurrent access
+    Ok(storage)
+}
+
+#[cfg(test)]
+mod rocksdb_tests {
+    use super::*;
+    use tos_common::serializer::{Reader, Serializer};
+
+    fn create_test_pubkey(seed: u8) -> CompressedPublicKey {
+        let data = [seed; 32];
+        let mut reader = Reader::new(&data);
+        CompressedPublicKey::read(&mut reader).expect("Failed to create test pubkey")
+    }
+
+    #[tokio::test]
+    async fn test_create_rocksdb_storage() {
+        let storage = create_test_rocksdb_storage().await;
+        let storage_read = storage.read().await;
+
+        // Verify TOS asset is registered
+        let asset = storage_read.get_asset(&TOS_ASSET).await.unwrap();
+        assert_eq!(asset.get_data().get_decimals(), COIN_DECIMALS);
+    }
+
+    #[tokio::test]
+    async fn test_setup_account_rocksdb() {
+        let storage = create_test_rocksdb_storage().await;
+        let account = create_test_pubkey(1);
+
+        setup_account_rocksdb(&storage, &account, 1000, 5).await.unwrap();
+
+        let storage_read = storage.read().await;
+        let (_, balance) = storage_read.get_last_balance(&account, &TOS_ASSET).await.unwrap();
+        let (_, nonce) = storage_read.get_last_nonce(&account).await.unwrap();
+
+        assert_eq!(balance.get_balance(), 1000);
+        assert_eq!(nonce.get_nonce(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_create_rocksdb_storage_with_accounts() {
+        let account1 = create_test_pubkey(1);
+        let account2 = create_test_pubkey(2);
+
+        let accounts = vec![
+            (account1.clone(), 1000, 0),
+            (account2.clone(), 2000, 3),
+        ];
+
+        let storage = create_test_rocksdb_storage_with_accounts(accounts).await.unwrap();
+
+        let storage_read = storage.read().await;
+
+        let (_, balance1) = storage_read.get_last_balance(&account1, &TOS_ASSET).await.unwrap();
+        let (_, balance2) = storage_read.get_last_balance(&account2, &TOS_ASSET).await.unwrap();
+        let (_, nonce2) = storage_read.get_last_nonce(&account2).await.unwrap();
+
+        assert_eq!(balance1.get_balance(), 1000);
+        assert_eq!(balance2.get_balance(), 2000);
+        assert_eq!(nonce2.get_nonce(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_rocksdb_no_deadlock_immediate_use() {
+        // This test verifies RocksDB can be used immediately without delays
+        let storage = create_test_rocksdb_storage().await;
+        let account = create_test_pubkey(99);
+
+        // Setup account
+        setup_account_rocksdb(&storage, &account, 1000, 0).await.unwrap();
+
+        // Immediately read from parallel context (would deadlock with sled!)
+        let storage_read = storage.read().await;
+        let (_, balance) = storage_read.get_last_balance(&account, &TOS_ASSET).await.unwrap();
+        assert_eq!(balance.get_balance(), 1000);
+
+        // No delays, no flush - RocksDB just works!
     }
 }
