@@ -323,18 +323,13 @@ async fn test_optimal_parallelism() {
 
 /// Test 8: Lock contention under high load (stress test)
 #[tokio::test]
-#[ignore] // Run with: cargo test --test integration -- --ignored test_high_concurrency_lock_stress
+// MIGRATED TO ROCKSDB: Now uses RocksDB storage instead of Sled to avoid deadlock issues
 async fn test_high_concurrency_lock_stress() {
-    let temp_dir = TempDir::new("tos_test_stress").unwrap();
-    let storage = SledStorage::new(
-        temp_dir.path().to_string_lossy().to_string(),
-        Some(1024 * 1024),
-        Network::Devnet,
-        1024 * 1024,
-        StorageMode::HighThroughput,
-    ).unwrap();
+    use tos_testing_integration::utils::storage_helpers::create_test_rocksdb_storage;
+    use tos_daemon::core::storage::rocksdb::RocksStorage;
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    // Create RocksDB storage (no deadlock risk)
+    let storage_arc: std::sync::Arc<tokio::sync::RwLock<RocksStorage>> = create_test_rocksdb_storage().await;
 
     // Spawn 100 concurrent read tasks
     let mut handles = vec![];

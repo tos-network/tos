@@ -1,6 +1,6 @@
 [package]
 name = "tos_miner"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["TOS Network Team <info@tos.network>"]
 license = "BSD-3-Clause"

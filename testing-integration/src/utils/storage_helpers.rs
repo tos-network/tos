@@ -3,13 +3,34 @@
 //! This module provides storage helpers for integration tests with support for both
 //! SledStorage and RocksStorage backends.
 //!
-//! # Recommended: Use RocksDB for Tests
+//! # Recommended: Use RocksDB with StorageLifetime for Tests
 //!
 //! **TOS production environment uses RocksDB by default**, so tests should use RocksDB
 //! to match production behavior and avoid sled-specific deadlock issues.
 //!
 //! Use `create_test_rocksdb_storage()` or `create_test_rocksdb_storage_with_accounts()`
 //! for new tests.
+//!
+//! ## StorageLifetime Pattern (NEW)
+//!
+//! TOS now provides a `StorageLifetime` guard pattern similar to Kaspa's `DbLifetime`
+//! for proper storage lifecycle management. The macros handle cleanup automatically:
+//!
+//! ```rust,ignore
+//! use tos_daemon::create_temp_rocksdb_storage;
+//! use tos_common::network::Network;
+//! use tos_daemon::core::config::RocksDBConfig;
+//!
+//! // Create temporary storage with automatic cleanup
+//! let config = RocksDBConfig::default();
+//! let (lifetime, storage) = create_temp_rocksdb_storage!(Network::Devnet, None, &config);
+//!
+//! // Use storage...
+//! drop(storage);
+//!
+//! // Lifetime guard ensures cleanup
+//! drop(lifetime);
+//! ```
 //!
 //! # Legacy: Sled Storage with Safe Pattern
 //!
@@ -67,7 +88,7 @@ use tos_common::{
     account::{VersionedBalance, VersionedNonce},
     asset::{AssetData, VersionedAssetData},
     config::{COIN_DECIMALS, TOS_ASSET},
-    crypto::{elgamal::CompressedPublicKey, PublicKey},
+    crypto::{elgamal::CompressedPublicKey, PublicKey, KeyPair},
     versioned_type::Versioned,
     network::Network,
 };
@@ -633,10 +654,109 @@ pub async fn create_test_rocksdb_storage_with_accounts(
     Ok(storage)
 }
 
+/// Create RocksDB test storage with funded accounts
+///
+/// **RECOMMENDED**: Use this helper to avoid mining 300+ blocks in tests.
+/// This creates storage with pre-funded accounts at genesis (topoheight 0),
+/// similar to how Kaspa initializes genesis UTXO balances.
+///
+/// # Arguments
+///
+/// * `count` - Number of accounts to create with random keypairs
+/// * `balance_per_account` - Initial balance for each account (in nanoTOS)
+///
+/// # Returns
+///
+/// * `(storage, keypairs)` - The RocksDB storage instance and the generated keypairs
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tos_testing_integration::utils::storage_helpers::create_test_storage_with_funded_accounts;
+/// use tos_common::config::COIN_VALUE;
+///
+/// #[tokio::test]
+/// async fn test_transfers() {
+///     // Create storage with 10 accounts, each with 1000 TOS
+///     let (storage, keypairs) = create_test_storage_with_funded_accounts(10, 1000 * COIN_VALUE).await.unwrap();
+///
+///     let alice = &keypairs[0];
+///     let bob = &keypairs[1];
+///
+///     // Immediately ready for transactions!
+///     // No need to mine 300+ blocks
+/// }
+/// ```
+pub async fn create_test_storage_with_funded_accounts(
+    count: usize,
+    balance_per_account: u64,
+) -> Result<(Arc<tokio::sync::RwLock<RocksStorage>>, Vec<KeyPair>), BlockchainError> {
+    let storage = create_test_rocksdb_storage().await;
+
+    let mut keypairs = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        let keypair = KeyPair::new();
+        setup_account_rocksdb(&storage, &keypair.get_public_key().compress(), balance_per_account, 0).await?;
+        keypairs.push(keypair);
+    }
+
+    Ok((storage, keypairs))
+}
+
+/// Fund specific accounts at genesis in existing RocksDB storage
+///
+/// This function allows you to fund specific keypairs at genesis (topoheight 0),
+/// useful when you want to control the keypairs or add more accounts to
+/// existing storage.
+///
+/// # Arguments
+///
+/// * `storage` - The RocksDB storage instance
+/// * `accounts` - Vector of (CompressedPublicKey, balance) tuples
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tos_testing_integration::utils::storage_helpers::{
+///     create_test_rocksdb_storage,
+///     fund_accounts_at_genesis,
+/// };
+/// use tos_common::crypto::KeyPair;
+/// use tos_common::config::COIN_VALUE;
+///
+/// #[tokio::test]
+/// async fn test_with_specific_keypairs() {
+///     let storage = create_test_rocksdb_storage().await;
+///
+///     let alice = KeyPair::new();
+///     let bob = KeyPair::new();
+///
+///     // Fund specific accounts
+///     fund_accounts_at_genesis(&storage, &[
+///         (alice.get_public_key().compress(), 1000 * COIN_VALUE),
+///         (bob.get_public_key().compress(), 500 * COIN_VALUE),
+///     ]).await.unwrap();
+///
+///     // Ready for transactions!
+/// }
+/// ```
+pub async fn fund_accounts_at_genesis(
+    storage: &Arc<tokio::sync::RwLock<RocksStorage>>,
+    accounts: &[(CompressedPublicKey, u64)],
+) -> Result<(), BlockchainError> {
+    for (pubkey, balance) in accounts {
+        setup_account_rocksdb(storage, pubkey, *balance, 0).await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod rocksdb_tests {
     use super::*;
     use tos_common::serializer::{Reader, Serializer};
+    use tos_common::crypto::KeyPair;
+    use tos_common::config::COIN_VALUE;
 
     fn create_test_pubkey(seed: u8) -> CompressedPublicKey {
         let data = [seed; 32];
@@ -707,5 +827,164 @@ mod rocksdb_tests {
         assert_eq!(balance.get_balance(), 1000);
 
         // No delays, no flush - RocksDB just works!
+    }
+
+    #[tokio::test]
+    async fn test_create_test_storage_with_funded_accounts() {
+        // Create storage with 5 funded accounts
+        let (storage, keypairs) = create_test_storage_with_funded_accounts(5, 1000 * COIN_VALUE)
+            .await
+            .unwrap();
+
+        assert_eq!(keypairs.len(), 5);
+
+        // Verify all accounts have correct balance
+        let storage_read = storage.read().await;
+        for keypair in keypairs.iter() {
+            let pubkey = keypair.get_public_key().compress();
+            let (_, balance) = storage_read.get_last_balance(&pubkey, &TOS_ASSET).await.unwrap();
+            assert_eq!(balance.get_balance(), 1000 * COIN_VALUE);
+
+            let (_, nonce) = storage_read.get_last_nonce(&pubkey).await.unwrap();
+            assert_eq!(nonce.get_nonce(), 0);
+
+            // Verify account is registered
+            let reg_topoheight = storage_read.get_account_registration_topoheight(&pubkey).await.unwrap();
+            assert_eq!(reg_topoheight, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_test_storage_with_funded_accounts_different_balances() {
+        // Create storage with accounts having different balances
+        let (storage, keypairs) = create_test_storage_with_funded_accounts(3, 500 * COIN_VALUE)
+            .await
+            .unwrap();
+
+        assert_eq!(keypairs.len(), 3);
+
+        let storage_read = storage.read().await;
+        for keypair in keypairs.iter() {
+            let pubkey = keypair.get_public_key().compress();
+            let (_, balance) = storage_read.get_last_balance(&pubkey, &TOS_ASSET).await.unwrap();
+            assert_eq!(balance.get_balance(), 500 * COIN_VALUE);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fund_accounts_at_genesis() {
+        let storage = create_test_rocksdb_storage().await;
+
+        // Create keypairs manually
+        let alice = KeyPair::new();
+        let bob = KeyPair::new();
+        let charlie = KeyPair::new();
+
+        // Fund specific accounts with different balances
+        fund_accounts_at_genesis(&storage, &[
+            (alice.get_public_key().compress(), 1000 * COIN_VALUE),
+            (bob.get_public_key().compress(), 2000 * COIN_VALUE),
+            (charlie.get_public_key().compress(), 500 * COIN_VALUE),
+        ])
+        .await
+        .unwrap();
+
+        // Verify balances
+        let storage_read = storage.read().await;
+
+        let (_, alice_balance) = storage_read
+            .get_last_balance(&alice.get_public_key().compress(), &TOS_ASSET)
+            .await
+            .unwrap();
+        assert_eq!(alice_balance.get_balance(), 1000 * COIN_VALUE);
+
+        let (_, bob_balance) = storage_read
+            .get_last_balance(&bob.get_public_key().compress(), &TOS_ASSET)
+            .await
+            .unwrap();
+        assert_eq!(bob_balance.get_balance(), 2000 * COIN_VALUE);
+
+        let (_, charlie_balance) = storage_read
+            .get_last_balance(&charlie.get_public_key().compress(), &TOS_ASSET)
+            .await
+            .unwrap();
+        assert_eq!(charlie_balance.get_balance(), 500 * COIN_VALUE);
+    }
+
+    #[tokio::test]
+    async fn test_fund_accounts_at_genesis_with_existing_storage() {
+        // Create storage with initial accounts
+        let (storage, initial_keypairs) = create_test_storage_with_funded_accounts(2, 1000 * COIN_VALUE)
+            .await
+            .unwrap();
+
+        // Add more accounts to the same storage
+        let alice = KeyPair::new();
+        let bob = KeyPair::new();
+
+        fund_accounts_at_genesis(&storage, &[
+            (alice.get_public_key().compress(), 5000 * COIN_VALUE),
+            (bob.get_public_key().compress(), 3000 * COIN_VALUE),
+        ])
+        .await
+        .unwrap();
+
+        // Verify all accounts exist
+        let storage_read = storage.read().await;
+
+        // Check initial accounts
+        for keypair in initial_keypairs.iter() {
+            let (_, balance) = storage_read
+                .get_last_balance(&keypair.get_public_key().compress(), &TOS_ASSET)
+                .await
+                .unwrap();
+            assert_eq!(balance.get_balance(), 1000 * COIN_VALUE);
+        }
+
+        // Check newly added accounts
+        let (_, alice_balance) = storage_read
+            .get_last_balance(&alice.get_public_key().compress(), &TOS_ASSET)
+            .await
+            .unwrap();
+        assert_eq!(alice_balance.get_balance(), 5000 * COIN_VALUE);
+
+        let (_, bob_balance) = storage_read
+            .get_last_balance(&bob.get_public_key().compress(), &TOS_ASSET)
+            .await
+            .unwrap();
+        assert_eq!(bob_balance.get_balance(), 3000 * COIN_VALUE);
+    }
+
+    #[tokio::test]
+    async fn test_create_test_storage_with_zero_accounts() {
+        // Edge case: create storage with 0 accounts
+        let (storage, keypairs) = create_test_storage_with_funded_accounts(0, 1000 * COIN_VALUE)
+            .await
+            .unwrap();
+
+        assert_eq!(keypairs.len(), 0);
+
+        // Storage should still have TOS asset registered
+        let storage_read = storage.read().await;
+        let (_topoheight, asset) = storage_read.get_asset(&TOS_ASSET).await.unwrap();
+        assert_eq!(asset.get().get_decimals(), COIN_DECIMALS);
+    }
+
+    #[tokio::test]
+    async fn test_create_test_storage_with_large_number_of_accounts() {
+        // Test with larger number of accounts (50)
+        let (storage, keypairs) = create_test_storage_with_funded_accounts(50, 100 * COIN_VALUE)
+            .await
+            .unwrap();
+
+        assert_eq!(keypairs.len(), 50);
+
+        // Spot check a few accounts
+        let storage_read = storage.read().await;
+        for i in [0, 10, 25, 49] {
+            let pubkey = keypairs[i].get_public_key().compress();
+            let (_, balance) = storage_read.get_last_balance(&pubkey, &TOS_ASSET).await.unwrap();
+            assert_eq!(balance.get_balance(), 100 * COIN_VALUE);
+        }
     }
 }

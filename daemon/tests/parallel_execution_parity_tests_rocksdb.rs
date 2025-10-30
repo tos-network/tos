@@ -253,7 +253,11 @@ async fn execute_sequential(
     topoheight: TopoHeight,
     transactions: &[Arc<Transaction>],
 ) {
+    println!("  [Sequential] Getting storage write lock...");
     let mut guard = storage.write().await;
+    println!("  [Sequential] ✓ Got write lock");
+
+    println!("  [Sequential] Creating ApplicableChainState...");
     let mut chain_state = ApplicableChainState::new(
         &mut *guard,
         environment,
@@ -264,19 +268,29 @@ async fn execute_sequential(
         block_hash,
         block,
     );
+    println!("  [Sequential] ✓ ApplicableChainState created");
 
+    println!("  [Sequential] Hashing transactions...");
     let txs_with_hash: Vec<(Arc<Transaction>, Hash)> = transactions
         .iter()
         .map(|tx| (Arc::clone(tx), tx.hash()))
         .collect();
+    println!("  [Sequential] ✓ Transactions hashed");
 
-    for (tx, tx_hash) in txs_with_hash.iter() {
+    println!("  [Sequential] Applying {} transactions...", txs_with_hash.len());
+    for (i, (tx, tx_hash)) in txs_with_hash.iter().enumerate() {
+        println!("  [Sequential]   Applying tx {}/{}...", i + 1, txs_with_hash.len());
+        let start = std::time::Instant::now();
         tx.apply_with_partial_verify(tx_hash, &mut chain_state)
             .await
             .unwrap();
+        println!("  [Sequential]   ✓ Tx {} applied in {:?}", i + 1, start.elapsed());
     }
 
+    println!("  [Sequential] Committing state changes...");
+    let start = std::time::Instant::now();
     chain_state.apply_changes().await.unwrap();
+    println!("  [Sequential] ✓ State committed in {:?}", start.elapsed());
 }
 
 /// Execute transactions in parallel

@@ -52,6 +52,9 @@ pub use utils::{
         create_test_rocksdb_storage,
         create_test_rocksdb_storage_with_accounts,
         setup_account_rocksdb,
+        // Genesis-funded accounts helpers (avoids mining 300+ blocks)
+        create_test_storage_with_funded_accounts,
+        fund_accounts_at_genesis,
     },
 };
 

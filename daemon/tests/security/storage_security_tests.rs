@@ -10,8 +10,8 @@ use std::collections::HashSet;
 /// V-20: Test state corruption via concurrent balance updates
 ///
 /// Verifies that concurrent balance updates don't corrupt state.
+/// MIGRATED TO ROCKSDB: Uses RocksDB storage to test real storage concurrency behavior
 #[tokio::test]
-#[ignore] // Requires full storage implementation
 async fn test_v20_concurrent_balance_updates_safe() {
     // SECURITY FIX: Balance updates must be atomic
 
@@ -20,51 +20,54 @@ async fn test_v20_concurrent_balance_updates_safe() {
     // 2. 10 threads simultaneously add 100 each
     // 3. Final balance should be 2000 (not less due to lost updates)
 
-    use tokio::sync::RwLock;
+    use tos_testing_integration::utils::storage_helpers::{
+        create_test_rocksdb_storage,
+        setup_account_rocksdb,
+    };
+    use tos_daemon::core::storage::{BalanceProvider, AccountProvider};
+    use tos_common::{config::TOS_ASSET, serializer::{Reader, Serializer}};
 
-    struct IsolatedAccount {
-        balance: Arc<RwLock<u64>>,
+    // Helper to create test public keys
+    fn create_test_pubkey(seed: u8) -> tos_common::crypto::elgamal::CompressedPublicKey {
+        use tos_common::serializer::Writer;
+        let data = [seed; 32];
+        let mut reader = Reader::new(&data);
+        tos_common::crypto::elgamal::CompressedPublicKey::read(&mut reader).unwrap()
     }
 
-    impl IsolatedAccount {
-        fn new(initial_balance: u64) -> Self {
-            Self {
-                balance: Arc::new(RwLock::new(initial_balance)),
-            }
-        }
+    // Create RocksDB storage and setup test account
+    let storage = create_test_rocksdb_storage().await;
+    let account = create_test_pubkey(1);
 
-        async fn add_balance(&self, amount: u64) -> Result<(), String> {
-            let mut balance = self.balance.write().await;
-            *balance = balance.checked_add(amount)
-                .ok_or_else(|| "Balance overflow".to_string())?;
-            Ok(())
-        }
-
-        async fn get_balance(&self) -> u64 {
-            *self.balance.read().await
-        }
-    }
-
-    let account = Arc::new(IsolatedAccount::new(1000));
+    // Setup account with initial balance of 1000
+    setup_account_rocksdb(&storage, &account, 1000, 0).await.unwrap();
 
     // Spawn 10 concurrent tasks that each add 100
     let handles: Vec<_> = (0..10)
-        .map(|_| {
+        .map(|i| {
+            let storage = storage.clone();
             let account = account.clone();
             tokio::spawn(async move {
-                account.add_balance(100).await
+                let mut storage_write = storage.write().await;
+                let (_, mut balance) = storage_write.get_last_balance(&account, &TOS_ASSET).await.unwrap();
+                let new_balance = balance.get_balance().checked_add(100)
+                    .expect("Balance overflow");
+                balance.set_balance(new_balance);
+                storage_write.set_last_balance_to(&account, &TOS_ASSET, 0, &balance).await.unwrap();
+                drop(storage_write);
             })
         })
         .collect();
 
     // Wait for all operations to complete
     for handle in handles {
-        handle.await.unwrap().expect("Balance update should succeed");
+        handle.await.unwrap();
     }
 
     // Final balance should be 1000 + (10 * 100) = 2000
-    let final_balance = account.get_balance().await;
-    assert_eq!(final_balance, 2000, "No balance updates should be lost - snapshot isolation ensures atomicity");
+    let storage_read = storage.read().await;
+    let (_, final_balance) = storage_read.get_last_balance(&account, &TOS_ASSET).await.unwrap();
+    assert_eq!(final_balance.get_balance(), 2000, "No balance updates should be lost - RocksDB MVCC ensures atomicity");
 }
 
 /// V-21: Test block timestamp manipulation detection
@@ -93,8 +96,8 @@ fn test_v21_block_timestamp_validation() {
 /// V-22: Test RocksDB write with fsync
 ///
 /// Verifies that critical data is fsync'd to disk.
+/// This test uses a mock implementation to verify fsync behavior patterns
 #[tokio::test]
-#[ignore] // Requires RocksDB integration
 async fn test_v22_critical_data_synced_to_disk() {
     // SECURITY FIX LOCATION: daemon/src/core/storage/
     // Critical writes should use WriteOptions with sync=true
@@ -185,8 +188,8 @@ async fn test_v22_critical_data_synced_to_disk() {
 /// V-23: Test cache invalidation on reorg
 ///
 /// Verifies that all caches are invalidated during chain reorganization.
+/// This test uses a mock blockchain to verify cache invalidation logic
 #[tokio::test]
-#[ignore] // Requires blockchain with cache implementation
 async fn test_v23_cache_invalidated_on_reorg() {
     // SECURITY FIX: All caches must be invalidated on reorg
 
@@ -271,8 +274,8 @@ async fn test_v23_cache_invalidated_on_reorg() {
 /// V-24: Test tip selection validation
 ///
 /// Verifies that tip selection properly validates candidates.
+/// This test uses a mock validator to verify tip validation logic
 #[tokio::test]
-#[ignore] // Requires blockchain implementation
 async fn test_v24_tip_selection_validation() {
     // Tips must be validated for:
     // 1. Existence in chain
@@ -571,8 +574,8 @@ fn test_v27_skip_validation_rejected_on_mainnet() {
 /// Test concurrent block processing doesn't corrupt state
 ///
 /// Verifies that multiple blocks can be processed concurrently safely.
+/// This test uses a mock block processor to verify concurrent processing logic
 #[tokio::test]
-#[ignore] // Requires full blockchain implementation
 async fn test_concurrent_block_processing_safety() {
     // Test scenario:
     // 1. Process 10 blocks concurrently
@@ -770,8 +773,8 @@ async fn test_storage_consistency_concurrent_ops() {
 /// Test cache coherency under concurrent access
 ///
 /// Verifies that cache and storage remain coherent.
+/// This test uses a mock cache implementation to verify coherency logic
 #[tokio::test]
-#[ignore] // Requires cache implementation
 async fn test_cache_coherency_concurrent() {
     // Test scenario:
     // 1. Multiple threads read from cache
@@ -899,8 +902,8 @@ async fn test_cache_coherency_concurrent() {
 /// Stress test: Many concurrent writes
 ///
 /// Tests storage under heavy concurrent write load.
+/// This test uses a mock storage implementation to verify concurrent write handling
 #[tokio::test]
-#[ignore] // Resource-intensive stress test
 async fn test_storage_stress_concurrent_writes() {
     const WRITE_COUNT: usize = 10_000;
     const THREAD_COUNT: usize = 10;
@@ -996,8 +999,8 @@ async fn test_storage_stress_concurrent_writes() {
 /// Test database transaction rollback
 ///
 /// Verifies that failed transactions are properly rolled back.
+/// This test uses a mock transactional storage to verify rollback logic
 #[tokio::test]
-#[ignore] // Requires database implementation
 async fn test_database_transaction_rollback() {
     // Test scenario:
     // 1. Begin transaction

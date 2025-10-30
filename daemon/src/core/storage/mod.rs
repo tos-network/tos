@@ -1,5 +1,6 @@
 mod providers;
 mod cache;
+mod lifetime;
 
 pub mod sled;
 pub mod rocksdb;
@@ -8,6 +9,7 @@ pub use self::{
     providers::*,
     sled::SledStorage,
     rocksdb::RocksStorage,
+    lifetime::{StorageLifetime, get_tos_tempdir},
 };
 
 use std::collections::HashSet;
