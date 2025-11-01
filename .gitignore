@@ -25,7 +25,7 @@ flamegraph.svg
 perf.data
 perf.data.old
 
-# ignore generated files by Terminos
+# ignore generated files by TOS
 difficulty_dataset.csv
 precomputed_tables_*.bin
 mainnet*

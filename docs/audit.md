@@ -1,6 +1,6 @@
 # Codebase vs Whitepaper Alignment Audit (October 2025)
 
-This document summarizes the review comparing the TopoSpartan Network source code (~/tos-network/tos) with the latest whitepaper draft (tos.tex).
+This document summarizes the review comparing the OpenSystem Network source code (~/tos-network/tos) with the latest whitepaper draft (tos.tex).
 
 ## 1. Components Present in the Repository
 - **BlockDAG Consensus**: Fully implemented in Rust (daemon/src/core), including PoW mining, difficulty, and storage.
@@ -33,4 +33,4 @@ Many advanced features described in the whitepaper should therefore be treated a
 5. **Documentation Refresh**: Update `AI_MINING_IMPLEMENTATION_STATUS.md` or create a new section to track progress on AGIW, CC/EC, and PAI features.
 
 ## 5. Conclusion
-The Rust codebase robustly implements the foundational TopoSpartan stack (BlockDAG + PoW + PoIW/AGIW + energy model). However, the more ambitious features described in the whitepaper—identity, compute/energy tokens, AI-assisted consensus, formal policy tooling—remain unimplemented. Aligning both terminology and roadmap expectations will make the whitepaper more credible, and adding the missing citations will satisfy the documentation requirements.
+The Rust codebase robustly implements the foundational OpenSystem stack (BlockDAG + PoW + PoIW/AGIW + energy model). However, the more ambitious features described in the whitepaper—identity, compute/energy tokens, AI-assisted consensus, formal policy tooling—remain unimplemented. Aligning both terminology and roadmap expectations will make the whitepaper more credible, and adding the missing citations will satisfy the documentation requirements.
