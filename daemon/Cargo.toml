@@ -97,6 +97,10 @@ harness = false
 name = "parallel_execution"
 harness = false
 
+[[bench]]
+name = "parallel_tps_comparison"
+harness = false
+
 # Test Configuration
 # Following Kaspa best practice: Integration tests run in Release mode
 #

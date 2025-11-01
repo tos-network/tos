@@ -3339,8 +3339,8 @@ impl<S: Storage> Blockchain<S> {
                     // Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Vulnerability #1
 
                     if log::log_enabled!(log::Level::Info) {
-                        info!("Using parallel execution for {} transactions in block {} (threshold: {})",
-                              tx_count, hash, min_txs_threshold);
+                        info!("Parallel execution ENABLED: block {} has {} transactions (threshold: {}) - using parallel path",
+                              hash, tx_count, min_txs_threshold);
                     }
 
                     if log::log_enabled!(log::Level::Debug) {
@@ -3542,6 +3542,16 @@ impl<S: Storage> Blockchain<S> {
                     }
                 } else {
                     // ===== SEQUENTIAL EXECUTION PATH (ORIGINAL) =====
+                    // Log the reason for using sequential execution
+                    if log::log_enabled!(log::Level::Info) {
+                        if has_unsupported_types {
+                            info!("Sequential execution ENABLED: block {} has unsupported transaction types (InvokeContract/Energy/AIMining/MultiSig) - parallel execution disabled", hash);
+                        } else if tx_count < min_txs_threshold {
+                            info!("Sequential execution ENABLED: block {} has {} transactions (threshold: {}) - below parallel threshold", hash, tx_count, min_txs_threshold);
+                        } else {
+                            info!("Sequential execution ENABLED: block {} has {} transactions - parallel execution disabled by configuration", hash, tx_count);
+                        }
+                    }
                     if log::log_enabled!(log::Level::Debug) {
                         debug!("Using sequential execution for {} transactions", block.get_transactions().len());
                     }
