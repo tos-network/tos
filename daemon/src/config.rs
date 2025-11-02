@@ -1,4 +1,3 @@
-use lazy_static::lazy_static;
 use tos_common::{
     api::daemon::{DevFeeThreshold, HardFork},
     block::BlockVersion,
@@ -87,37 +86,35 @@ pub const MAX_ORPHANED_TRANSACTIONS: usize = 10_000;
 // - Safer default for mainnet.
 // - Easy to turn on for dev/test environments without a rebuild.
 use std::env;
+use std::sync::OnceLock;
 
-lazy_static! {
-    /// Runtime toggle for parallel execution (default: OFF for safety)
-    /// Enable via: export TOS_PARALLEL_EXECUTION=1
-    static ref PARALLEL_EXECUTION_ENABLED: bool = {
+// OnceLock-based lazy initialization (Rust 1.70+)
+// Replaces lazy_static crate with zero-dependency standard library implementation
+static PARALLEL_EXECUTION_ENABLED: OnceLock<bool> = OnceLock::new();
+static PARALLEL_EXECUTION_TEST_MODE: OnceLock<bool> = OnceLock::new();
+
+/// Returns true if parallel execution is enabled at runtime.
+/// Zero-overhead access: cached at first call, ~1-2ns per subsequent call.
+/// Enable via: export TOS_PARALLEL_EXECUTION=1
+pub fn parallel_execution_enabled() -> bool {
+    *PARALLEL_EXECUTION_ENABLED.get_or_init(|| {
         match env::var("TOS_PARALLEL_EXECUTION") {
             Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "True"),
             Err(_) => false,  // Safe default: disabled
         }
-    };
-
-    /// Runtime toggle for parallel test mode (default: OFF)
-    /// Enable via: export TOS_PARALLEL_TEST_MODE=1
-    static ref PARALLEL_EXECUTION_TEST_MODE: bool = {
-        match env::var("TOS_PARALLEL_TEST_MODE") {
-            Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "True"),
-            Err(_) => false,  // Safe default: disabled
-        }
-    };
-}
-
-/// Returns true if parallel execution is enabled at runtime.
-/// Zero-overhead access: cached at first call, ~1-2ns per subsequent call.
-pub fn parallel_execution_enabled() -> bool {
-    *PARALLEL_EXECUTION_ENABLED
+    })
 }
 
 /// Returns true if parallel test-mode is enabled at runtime.
 /// Zero-overhead access: cached at first call, ~1-2ns per subsequent call.
+/// Enable via: export TOS_PARALLEL_TEST_MODE=1
 pub fn parallel_test_mode_enabled() -> bool {
-    *PARALLEL_EXECUTION_TEST_MODE
+    *PARALLEL_EXECUTION_TEST_MODE.get_or_init(|| {
+        match env::var("TOS_PARALLEL_TEST_MODE") {
+            Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "True"),
+            Err(_) => false,  // Safe default: disabled
+        }
+    })
 }
 
 // Minimum transactions required to trigger parallel execution (avoid overhead on small blocks)
@@ -393,11 +390,16 @@ pub fn get_hex_genesis_block(network: &Network) -> Option<&str> {
     }
 }
 
-lazy_static! {
-    // Developer public key is lazily converted from address to support any network
-    pub static ref DEV_PUBLIC_KEY: PublicKey = Address::from_string(&DEV_ADDRESS)
-        .expect("valid dev address")
-        .to_public_key();
+// OnceLock-based lazy initialization for DEV_PUBLIC_KEY (Rust 1.70+)
+static DEV_PUBLIC_KEY_CELL: OnceLock<PublicKey> = OnceLock::new();
+
+/// Get developer public key (lazily initialized from DEV_ADDRESS)
+pub fn dev_public_key() -> &'static PublicKey {
+    DEV_PUBLIC_KEY_CELL.get_or_init(|| {
+        Address::from_string(&DEV_ADDRESS)
+            .expect("valid dev address")
+            .to_public_key()
+    })
 }
 
 // Genesis block hash based on network selected

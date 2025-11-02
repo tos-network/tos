@@ -1,7 +1,7 @@
 use super::{ApiError, InternalRpcError};
 use crate::{
     config::{
-        get_hard_forks as get_configured_hard_forks, DEV_FEES, DEV_PUBLIC_KEY, MILLIS_PER_SECOND,
+        dev_public_key, get_hard_forks as get_configured_hard_forks, DEV_FEES, MILLIS_PER_SECOND,
     },
     core::{
         blockchain::{get_block_dev_fee, get_block_reward, Blockchain, BroadcastOption},
@@ -1905,7 +1905,7 @@ async fn get_account_history<S: Storage>(
     let mut history_count = 0;
     let mut history = Vec::new();
 
-    let is_dev_address = *key == *DEV_PUBLIC_KEY;
+    let is_dev_address = *key == *dev_public_key();
     while let Some((topo, prev_nonce, versioned_balance)) = version.take() {
         if log::log_enabled!(log::Level::Trace) {
             trace!(

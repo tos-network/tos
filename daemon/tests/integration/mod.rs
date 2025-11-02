@@ -7,4 +7,5 @@ pub mod dag_tests;
 pub mod ghostdag_tests;
 pub mod parallel_execution_e2e_test;
 pub mod parallel_execution_tests;
+pub mod runtime_toggle_tests;
 pub mod test_helpers;

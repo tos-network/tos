@@ -6,7 +6,7 @@ pub mod rpc;
 use crate::config::MILLIS_PER_SECOND;
 use anyhow::{Context as AnyContext, Result};
 use clap::Parser;
-use config::{DEV_PUBLIC_KEY, STABLE_LIMIT};
+use config::{dev_public_key, STABLE_LIMIT};
 use core::{
     blockchain::{get_block_reward, Blockchain, BroadcastOption},
     blockdag,
@@ -226,6 +226,20 @@ async fn main() -> Result<()> {
         info!("Tos Blockchain running version: {}", VERSION);
     }
     info!("----------------------------------------------");
+
+    // Log parallel execution configuration
+    if log::log_enabled!(log::Level::Info) {
+        info!(
+            "Parallel execution: {} (threshold: {} txs for {:?})",
+            if config::parallel_execution_enabled() {
+                "ENABLED"
+            } else {
+                "DISABLED"
+            },
+            config::get_min_txs_for_parallel(&config.network),
+            config.network
+        );
+    }
 
     let dir_path = blockchain_config.dir_path.as_deref().unwrap_or_default();
 
@@ -2175,7 +2189,7 @@ async fn mine_block<S: Storage>(
     manager.message(format!("Mining {} block(s)...", count));
     for _ in 0..count {
         let block = blockchain
-            .mine_block(&DEV_PUBLIC_KEY)
+            .mine_block(dev_public_key())
             .await
             .context("Error while mining block")?;
         let block_hash = block.hash();

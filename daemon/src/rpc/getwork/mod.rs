@@ -1,7 +1,7 @@
 mod miner;
 
 use crate::{
-    config::{DEV_PUBLIC_KEY, STABLE_LIMIT},
+    config::{dev_public_key, STABLE_LIMIT},
     core::{
         blockchain::{Blockchain, BroadcastOption},
         hard_fork::get_pow_algorithm_for_version,
@@ -216,7 +216,7 @@ impl<S: Storage> GetWorkServer<S> {
 
                     let header = self
                         .blockchain
-                        .get_block_template_for_storage(&storage, DEV_PUBLIC_KEY.clone())
+                        .get_block_template_for_storage(&storage, dev_public_key().clone())
                         .await
                         .context("Error while retrieving block template")?;
                     let (difficulty, _) = self
@@ -313,7 +313,7 @@ impl<S: Storage> GetWorkServer<S> {
 
             let header = self
                 .blockchain
-                .get_block_template_for_storage(&storage, DEV_PUBLIC_KEY.clone())
+                .get_block_template_for_storage(&storage, dev_public_key().clone())
                 .await
                 .context("Error while retrieving block template when notifying new job")?;
             let (difficulty, _) = self
