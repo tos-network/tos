@@ -20,7 +20,10 @@ use tokio::sync::RwLock;
 use tos_common::{
     block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
     config::TOS_ASSET,
-    crypto::{elgamal::{CompressedPublicKey, KeyPair}, Hash, Hashable, PublicKey},
+    crypto::{
+        elgamal::{CompressedPublicKey, KeyPair},
+        Hash, Hashable, PublicKey,
+    },
     immutable::Immutable,
     network::Network,
     serializer::{Reader, Serializer, Writer},
@@ -248,11 +251,11 @@ fn create_dummy_block() -> (Block, Hash) {
     let miner = create_test_pubkey([0u8; 32]);
     let header = BlockHeader::new_simple(
         BlockVersion::V0,
-        vec![],                         // No parents
-        0,                              // Timestamp 0
-        [0u8; EXTRA_NONCE_SIZE],       // Zero extra nonce
+        vec![],                  // No parents
+        0,                       // Timestamp 0
+        [0u8; EXTRA_NONCE_SIZE], // Zero extra nonce
         miner,
-        Hash::zero(),                   // Zero merkle root (no transactions)
+        Hash::zero(), // Zero merkle root (no transactions)
     );
     let block_hash = header.hash();
     let block = Block::new(Immutable::Owned(header), vec![]);
