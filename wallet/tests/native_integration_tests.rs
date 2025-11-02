@@ -14,9 +14,20 @@ mod tests {
         format!("test_wallet_{}_{}_{}", test_name, pid, timestamp)
     }
 
+    /// Get the wallet binary path (release or debug)
+    fn get_wallet_binary_path() -> &'static str {
+        use std::path::Path;
+        // Check for release binary first (CI runs with --release), then debug
+        if Path::new("../target/release/tos_wallet").exists() {
+            "../target/release/tos_wallet"
+        } else {
+            "../target/debug/tos_wallet"
+        }
+    }
+
     /// Helper function to run wallet command
     fn run_wallet_command(cmd: &str, wallet_name: &str) -> Result<std::process::Output> {
-        let output = Command::new("../target/debug/tos_wallet")
+        let output = Command::new(get_wallet_binary_path())
             .args(&[
                 "--precomputed-tables-l1",
                 "13",
@@ -68,7 +79,7 @@ mod tests {
     /// Test help command
     #[test]
     fn test_help_command() -> Result<()> {
-        let output = Command::new("../target/debug/tos_wallet")
+        let output = Command::new(get_wallet_binary_path())
             .args(&["--help"])
             .output()?;
 
@@ -86,7 +97,7 @@ mod tests {
     /// Test version command
     #[test]
     fn test_version_command() -> Result<()> {
-        let output = Command::new("../target/debug/tos_wallet")
+        let output = Command::new(get_wallet_binary_path())
             .args(&["--version"])
             .output()?;
 
@@ -106,14 +117,21 @@ mod tests {
     fn test_binary_exists() {
         use std::path::Path;
 
-        let binary_path = Path::new("../target/debug/tos_wallet");
+        // Check for release binary first (CI runs with --release), then debug
+        let binary_path = if Path::new("../target/release/tos_wallet").exists() {
+            Path::new("../target/release/tos_wallet")
+        } else {
+            Path::new("../target/debug/tos_wallet")
+        };
+
         assert!(
             binary_path.exists(),
-            "Wallet binary should exist at ../target/debug/tos_wallet"
+            "Wallet binary should exist at {:?}",
+            binary_path
         );
 
         // Try to get help output to verify it's executable
-        let output = Command::new("../target/debug/tos_wallet")
+        let output = Command::new(binary_path)
             .args(&["--help"])
             .output();
 
