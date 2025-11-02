@@ -178,7 +178,7 @@ async fn test_should_use_parallel_execution_threshold() {
     // Test threshold logic for parallel execution with network-specific thresholds
     use tos_common::network::Network;
     use tos_daemon::config::{
-        PARALLEL_EXECUTION_ENABLED,
+        parallel_execution_enabled,
         get_min_txs_for_parallel,
         MIN_TXS_FOR_PARALLEL_MAINNET,
         MIN_TXS_FOR_PARALLEL_TESTNET,
@@ -193,21 +193,21 @@ async fn test_should_use_parallel_execution_threshold() {
     // Test devnet threshold (lowest, for easier testing)
     let devnet_threshold = get_min_txs_for_parallel(&Network::Devnet);
     let should_use_devnet = |tx_count: usize| -> bool {
-        PARALLEL_EXECUTION_ENABLED && tx_count >= devnet_threshold
+        parallel_execution_enabled() && tx_count >= devnet_threshold
     };
 
     assert_eq!(should_use_devnet(0), false, "Empty batch should not use parallel");
     assert_eq!(should_use_devnet(1), false, "Single tx should not use parallel");
     assert_eq!(should_use_devnet(3), false, "Below devnet threshold should not use parallel");
 
-    let expected = PARALLEL_EXECUTION_ENABLED;
+    let expected = parallel_execution_enabled();
     assert_eq!(should_use_devnet(4), expected, "At devnet threshold (4)");
     assert_eq!(should_use_devnet(10), expected, "Above devnet threshold");
 
     // Test mainnet threshold (highest, for production)
     let mainnet_threshold = get_min_txs_for_parallel(&Network::Mainnet);
     let should_use_mainnet = |tx_count: usize| -> bool {
-        PARALLEL_EXECUTION_ENABLED && tx_count >= mainnet_threshold
+        parallel_execution_enabled() && tx_count >= mainnet_threshold
     };
 
     assert_eq!(should_use_mainnet(10), false, "Below mainnet threshold");
