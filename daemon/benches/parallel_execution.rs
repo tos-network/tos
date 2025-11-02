@@ -13,25 +13,28 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tokio::runtime::Runtime;
 use tempdir::TempDir;
+use tokio::runtime::Runtime;
+use tokio::sync::RwLock;
 
 use tos_common::{
-    block::BlockVersion,
+    block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
     config::TOS_ASSET,
-    crypto::{Hash, PublicKey, elgamal::KeyPair},
+    crypto::{elgamal::{CompressedPublicKey, KeyPair}, Hash, Hashable, PublicKey},
+    immutable::Immutable,
     network::Network,
+    serializer::{Reader, Serializer, Writer},
     transaction::{
-        Transaction, TransactionType,
-        builder::{TransactionBuilder, TransactionTypeBuilder, TransferBuilder, FeeBuilder, AccountState},
-        FeeType, TxVersion, Reference,
+        builder::{
+            AccountState, FeeBuilder, TransactionBuilder, TransactionTypeBuilder, TransferBuilder,
+        },
+        FeeType, Reference, Transaction, TransactionType, TxVersion,
     },
 };
 use tos_daemon::core::{
-    storage::sled::{SledStorage, StorageMode},
+    executor::{get_optimal_parallelism, ParallelExecutor},
     state::parallel_chain_state::ParallelChainState,
-    executor::{ParallelExecutor, get_optimal_parallelism},
+    storage::sled::{SledStorage, StorageMode},
 };
 use tos_environment::Environment;
 
@@ -59,13 +62,15 @@ impl BenchAccountState {
 impl tos_common::transaction::builder::FeeHelper for BenchAccountState {
     type Error = String;
 
-    fn account_exists(&self, _key: &tos_common::crypto::elgamal::CompressedPublicKey) -> Result<bool, Self::Error> {
+    fn account_exists(
+        &self,
+        _key: &tos_common::crypto::elgamal::CompressedPublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 }
 
 impl AccountState for BenchAccountState {
-
     fn is_mainnet(&self) -> bool {
         self.is_mainnet
     }
@@ -81,7 +86,11 @@ impl AccountState for BenchAccountState {
         }
     }
 
-    fn update_account_balance(&mut self, _asset: &Hash, new_balance: u64) -> Result<(), Self::Error> {
+    fn update_account_balance(
+        &mut self,
+        _asset: &Hash,
+        new_balance: u64,
+    ) -> Result<(), Self::Error> {
         self.balance = new_balance;
         Ok(())
     }
@@ -95,7 +104,10 @@ impl AccountState for BenchAccountState {
         Ok(())
     }
 
-    fn is_account_registered(&self, _key: &tos_common::crypto::elgamal::CompressedPublicKey) -> Result<bool, Self::Error> {
+    fn is_account_registered(
+        &self,
+        _key: &tos_common::crypto::elgamal::CompressedPublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 }
@@ -118,7 +130,10 @@ fn generate_transfer_transactions(count: usize) -> Vec<Transaction> {
         let transfer = TransferBuilder {
             asset: TOS_ASSET,
             amount: 1000,
-            destination: receiver_keypair.get_public_key().compress().to_address(false),
+            destination: receiver_keypair
+                .get_public_key()
+                .compress()
+                .to_address(false),
             extra_data: None,
         };
 
@@ -152,7 +167,10 @@ fn generate_conflicting_transactions(count: usize) -> Vec<Transaction> {
         let transfer = TransferBuilder {
             asset: TOS_ASSET,
             amount: 1000,
-            destination: receiver_keypair.get_public_key().compress().to_address(false),
+            destination: receiver_keypair
+                .get_public_key()
+                .compress()
+                .to_address(false),
             extra_data: None,
         };
 
@@ -186,7 +204,10 @@ fn generate_conflict_free_transactions(count: usize) -> Vec<Transaction> {
         let transfer = TransferBuilder {
             asset: TOS_ASSET,
             amount: 1000,
-            destination: receiver_keypair.get_public_key().compress().to_address(false),
+            destination: receiver_keypair
+                .get_public_key()
+                .compress()
+                .to_address(false),
             extra_data: None,
         };
 
@@ -205,6 +226,37 @@ fn generate_conflict_free_transactions(count: usize) -> Vec<Transaction> {
     }
 
     transactions
+}
+
+// ============================================================================
+// Helper: Create Dummy Block for Benchmarks
+// ============================================================================
+
+/// Helper function to create a test public key from bytes
+fn create_test_pubkey(bytes: [u8; 32]) -> CompressedPublicKey {
+    let mut buffer = Vec::new();
+    let mut writer = Writer::new(&mut buffer);
+    writer.write_bytes(&bytes);
+    let data = writer.as_bytes();
+    let mut reader = Reader::new(data);
+    CompressedPublicKey::read(&mut reader).expect("Failed to create test pubkey")
+}
+
+/// Create a minimal dummy block for benchmark ParallelChainState creation
+/// This is only for infrastructure benchmarks, not consensus validation
+fn create_dummy_block() -> (Block, Hash) {
+    let miner = create_test_pubkey([0u8; 32]);
+    let header = BlockHeader::new_simple(
+        BlockVersion::V0,
+        vec![],                         // No parents
+        0,                              // Timestamp 0
+        [0u8; EXTRA_NONCE_SIZE],       // Zero extra nonce
+        miner,
+        Hash::zero(),                   // Zero merkle root (no transactions)
+    );
+    let block_hash = header.hash();
+    let block = Block::new(Immutable::Owned(header), vec![]);
+    (block, block_hash)
 }
 
 // ============================================================================
@@ -227,10 +279,12 @@ fn bench_parallel_state_creation(c: &mut Criterion) {
                     Network::Devnet,
                     1024 * 1024,
                     StorageMode::HighThroughput,
-                ).expect("storage");
+                )
+                .expect("storage");
 
                 let storage_arc = Arc::new(RwLock::new(storage));
                 let environment = Arc::new(Environment::new());
+                let (block, block_hash) = create_dummy_block();
 
                 // Measure state creation time
                 let _state = ParallelChainState::new(
@@ -239,7 +293,10 @@ fn bench_parallel_state_creation(c: &mut Criterion) {
                     0, // stable_topoheight
                     1, // topoheight
                     BlockVersion::V0,
-                ).await;
+                    block,
+                    block_hash,
+                )
+                .await;
             })
         });
     });
@@ -273,10 +330,12 @@ fn bench_parallel_executor_batch_sizes(c: &mut Criterion) {
                             Network::Devnet,
                             1024 * 1024,
                             StorageMode::HighThroughput,
-                        ).expect("storage");
+                        )
+                        .expect("storage");
 
                         let storage_arc = Arc::new(RwLock::new(storage));
                         let environment = Arc::new(Environment::new());
+                        let (block, block_hash) = create_dummy_block();
 
                         let state = ParallelChainState::new(
                             storage_arc,
@@ -284,7 +343,10 @@ fn bench_parallel_executor_batch_sizes(c: &mut Criterion) {
                             0,
                             1,
                             BlockVersion::V0,
-                        ).await;
+                            block,
+                            block_hash,
+                        )
+                        .await;
 
                         let executor = ParallelExecutor::new();
                         let transactions = generate_transfer_transactions(size);
@@ -431,10 +493,12 @@ fn bench_executor_parallelism(c: &mut Criterion) {
                             Network::Devnet,
                             1024 * 1024,
                             StorageMode::HighThroughput,
-                        ).expect("storage");
+                        )
+                        .expect("storage");
 
                         let storage_arc = Arc::new(RwLock::new(storage));
                         let environment = Arc::new(Environment::new());
+                        let (block, block_hash) = create_dummy_block();
 
                         let state = ParallelChainState::new(
                             storage_arc,
@@ -442,7 +506,10 @@ fn bench_executor_parallelism(c: &mut Criterion) {
                             0,
                             1,
                             BlockVersion::V0,
-                        ).await;
+                            block,
+                            block_hash,
+                        )
+                        .await;
 
                         let executor = ParallelExecutor::with_parallelism(parallelism);
                         let transactions = generate_conflict_free_transactions(50);
@@ -481,10 +548,12 @@ fn bench_state_commit(c: &mut Criterion) {
                             Network::Devnet,
                             1024 * 1024,
                             StorageMode::HighThroughput,
-                        ).expect("storage");
+                        )
+                        .expect("storage");
 
                         let storage_arc = Arc::new(RwLock::new(storage));
                         let environment = Arc::new(Environment::new());
+                        let (block, block_hash) = create_dummy_block();
 
                         let state = ParallelChainState::new(
                             Arc::clone(&storage_arc),
@@ -492,13 +561,18 @@ fn bench_state_commit(c: &mut Criterion) {
                             0,
                             1,
                             BlockVersion::V0,
-                        ).await;
+                            block,
+                            block_hash,
+                        )
+                        .await;
 
                         let executor = ParallelExecutor::new();
                         let transactions = generate_conflict_free_transactions(count);
 
                         // Execute transactions
-                        let _results = executor.execute_batch(Arc::clone(&state), transactions).await;
+                        let _results = executor
+                            .execute_batch(Arc::clone(&state), transactions)
+                            .await;
 
                         // Measure commit time
                         let mut storage_lock = storage_arc.write().await;
@@ -531,35 +605,48 @@ fn bench_memory_overhead(c: &mut Criterion) {
                     Network::Devnet,
                     1024 * 1024,
                     StorageMode::HighThroughput,
-                ).expect("storage");
+                )
+                .expect("storage");
 
                 let storage_arc = Arc::new(RwLock::new(storage));
                 let environment = Arc::new(Environment::new());
 
                 // Create multiple states to measure overhead
+                let (block1, block_hash1) = create_dummy_block();
                 let _state1 = ParallelChainState::new(
                     Arc::clone(&storage_arc),
                     Arc::clone(&environment),
                     0,
                     1,
                     BlockVersion::V0,
-                ).await;
+                    block1,
+                    block_hash1,
+                )
+                .await;
 
+                let (block2, block_hash2) = create_dummy_block();
                 let _state2 = ParallelChainState::new(
                     Arc::clone(&storage_arc),
                     Arc::clone(&environment),
                     1,
                     2,
                     BlockVersion::V0,
-                ).await;
+                    block2,
+                    block_hash2,
+                )
+                .await;
 
+                let (block3, block_hash3) = create_dummy_block();
                 let _state3 = ParallelChainState::new(
                     storage_arc,
                     environment,
                     2,
                     3,
                     BlockVersion::V0,
-                ).await;
+                    block3,
+                    block_hash3,
+                )
+                .await;
             })
         });
     });
