@@ -357,6 +357,8 @@ pub enum BlockchainError {
     BlueScoreOverflow,
     #[error("Blue work overflow detected - would exceed U256::MAX")]
     BlueWorkOverflow,
+    #[error("Burned supply would exceed maximum allowed (total supply limit)")]
+    BurnedSupplyLimitExceeded,
     #[error("K-cluster violation: block {block} has anticone size {anticone_size} (k={k})")]
     KClusterViolation {
         block: Hash,

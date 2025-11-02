@@ -159,7 +159,9 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
     /// This fixes the premature state mutation vulnerability where failed transactions
     /// were leaving behind permanent state changes (nonce increments, multisig config changes,
     /// gas/burn accumulations).
-    pub fn commit_all(&self) {
+    ///
+    /// Returns an error if burned supply limit would be exceeded (overflow protection).
+    pub fn commit_all(&self) -> Result<(), BlockchainError> {
         // Commit balances (already implemented)
         self.commit_balances();
 
@@ -173,15 +175,17 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
             self.parallel_state.set_multisig(account, config.clone());
         }
 
-        // SECURITY FIX: Commit gas fees
+        // SECURITY FIX: Commit gas fees (saturating arithmetic, never fails)
         if self.staged_gas_fees > 0 {
             self.parallel_state.add_gas_fee(self.staged_gas_fees);
         }
 
-        // SECURITY FIX: Commit burned supply
+        // SECURITY FIX: Commit burned supply (with overflow protection)
         if self.staged_burned_supply > 0 {
-            self.parallel_state.add_burned_supply(self.staged_burned_supply);
+            self.parallel_state.add_burned_supply(self.staged_burned_supply)?;
         }
+
+        Ok(())
     }
 
     /// Get or load balance into cache

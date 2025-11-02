@@ -3419,12 +3419,27 @@ impl<S: Storage> Blockchain<S> {
                         &block,
                     );
 
-                    // Re-apply miner rewards (these were already applied before parallel execution)
-                    if dev_fee_percentage != 0 {
-                        let dev_fee_part = block_reward * dev_fee_percentage / 100;
-                        chain_state.reward_miner(&DEV_PUBLIC_KEY, dev_fee_part).await?;
-                    }
-                    chain_state.reward_miner(block.get_miner(), miner_reward).await?;
+                    // SECURITY FIX S2: Removed redundant post-execution reward application
+                    // Miner rewards are already applied in execute_transactions_parallel()
+                    // (lines 4535 and 4544) BEFORE transaction execution. Re-applying here
+                    // would double the reward, causing consensus divergence.
+                    //
+                    // SOURCE OF TRUTH: ParallelChainState::reward_miner() called in
+                    // execute_transactions_parallel() is the authoritative reward application.
+                    //
+                    // Historical context:
+                    // - Old code applied rewards here (post-execution, sequential style)
+                    // - Parallel V1 moved rewards to execute_transactions_parallel() (pre-execution)
+                    // - This redundant code was forgotten and could cause double-reward bug
+                    //
+                    // Reference: SECURITY_FIX_PLAN.md Section S2
+                    //
+                    // REMOVED CODE (do not uncomment):
+                    // if dev_fee_percentage != 0 {
+                    //     let dev_fee_part = block_reward * dev_fee_percentage / 100;
+                    //     chain_state.reward_miner(&DEV_PUBLIC_KEY, dev_fee_part).await?;
+                    // }
+                    // chain_state.reward_miner(block.get_miner(), miner_reward).await?;
 
                     if log::log_enabled!(log::Level::Debug) {
                         debug!("[PARALLEL] Merging parallel state into chain state...");
@@ -4598,7 +4613,11 @@ impl<S: Storage> Blockchain<S> {
         let storage = applicable_state.get_mut_storage();
 
         // Step 1: Merge account nonces
-        let modified_nonces = parallel_state.get_modified_nonces();
+        // SECURITY FIX (S1): Sort entries for deterministic merge order
+        // This ensures identical storage write sequence across all nodes
+        let mut modified_nonces = parallel_state.get_modified_nonces();
+        modified_nonces.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes())); // Sort by PublicKey bytes
+
         if log::log_enabled!(log::Level::Debug) {
             debug!("Merging {} modified account nonces", modified_nonces.len());
         }
@@ -4614,7 +4633,17 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // Step 2: Merge balance changes
-        let modified_balances = parallel_state.get_modified_balances();
+        // SECURITY FIX (S1): Sort entries for deterministic merge order
+        // Sort by (PublicKey, Hash) tuple for consistent write sequence
+        let mut modified_balances = parallel_state.get_modified_balances();
+        modified_balances.sort_by(|a, b| {
+            // Compare by PublicKey bytes first, then by Hash bytes (asset)
+            match a.0.0.as_bytes().cmp(b.0.0.as_bytes()) {
+                std::cmp::Ordering::Equal => a.0.1.as_bytes().cmp(b.0.1.as_bytes()),
+                other => other,
+            }
+        });
+
         if log::log_enabled!(log::Level::Debug) {
             debug!("Merging {} modified balances", modified_balances.len());
         }
@@ -4662,8 +4691,12 @@ impl<S: Storage> Blockchain<S> {
         // This prevents multisig updates from being lost when using parallel execution
         // Reference: SECURITY_AUDIT_PARALLEL_EXECUTION.md - Issue #5
         // NOTE: Done here while we still have storage borrowed, before gas/burned steps
-        let modified_multisigs = parallel_state.get_modified_multisigs();
+        // SECURITY FIX (S1): Sort entries for deterministic merge order
+        let mut modified_multisigs = parallel_state.get_modified_multisigs();
         if !modified_multisigs.is_empty() {
+            // Sort by PublicKey bytes for deterministic write sequence
+            modified_multisigs.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+
             if log::log_enabled!(log::Level::Debug) {
                 debug!("Merging {} modified multisig configurations", modified_multisigs.len());
             }
