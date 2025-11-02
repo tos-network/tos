@@ -131,9 +131,7 @@ mod tests {
         );
 
         // Try to get help output to verify it's executable
-        let output = Command::new(binary_path)
-            .args(&["--help"])
-            .output();
+        let output = Command::new(binary_path).args(&["--help"]).output();
 
         assert!(output.is_ok(), "Wallet binary should be executable");
     }

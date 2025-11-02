@@ -18,7 +18,10 @@ fn test_runtime_toggle_cached_in_process() {
     let initial_state = parallel_execution_enabled();
 
     // Try to modify environment variable (will not affect lazy_static)
-    std::env::set_var("TOS_PARALLEL_EXECUTION", if initial_state { "0" } else { "1" });
+    std::env::set_var(
+        "TOS_PARALLEL_EXECUTION",
+        if initial_state { "0" } else { "1" },
+    );
 
     // Verify state hasn't changed (lazy_static is immutable after first access)
     assert_eq!(
@@ -29,7 +32,10 @@ fn test_runtime_toggle_cached_in_process() {
 
     // Same test for test mode
     let initial_test_mode = parallel_test_mode_enabled();
-    std::env::set_var("TOS_PARALLEL_TEST_MODE", if initial_test_mode { "0" } else { "1" });
+    std::env::set_var(
+        "TOS_PARALLEL_TEST_MODE",
+        if initial_test_mode { "0" } else { "1" },
+    );
     assert_eq!(
         parallel_test_mode_enabled(),
         initial_test_mode,
@@ -74,8 +80,22 @@ fn test_runtime_toggle_print_config() {
     use tos_daemon::config::{parallel_execution_enabled, parallel_test_mode_enabled};
 
     // Print config for cross-process test verification
-    println!("Parallel execution: {}", if parallel_execution_enabled() { "ENABLED" } else { "DISABLED" });
-    println!("Parallel test mode: {}", if parallel_test_mode_enabled() { "ENABLED" } else { "DISABLED" });
+    println!(
+        "Parallel execution: {}",
+        if parallel_execution_enabled() {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        }
+    );
+    println!(
+        "Parallel test mode: {}",
+        if parallel_test_mode_enabled() {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        }
+    );
     println!("parallel_execution={}", parallel_execution_enabled());
     println!("parallel_test_mode={}", parallel_test_mode_enabled());
 }
