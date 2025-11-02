@@ -607,94 +607,82 @@ fn bench_tps_comparison(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
 
     for tx_count in [10, 50, 100].iter() {
+        // Fixed: Use standard b.iter() to include all overhead in measurement
         group.bench_with_input(
             BenchmarkId::new("sequential", format!("{}_txs", tx_count)),
             tx_count,
             |b, &count| {
-                b.iter_custom(|iters| {
-                    let mut total_duration = Duration::ZERO;
+                b.iter(|| {
+                    runtime.block_on(async {
+                        // Include storage creation in measurement (same as other benchmarks)
+                        let temp_dir = TempDir::new("tos-bench-tps-seq").expect("temp dir");
+                        let storage = SledStorage::new(
+                            temp_dir.path().to_string_lossy().to_string(),
+                            Some(1024 * 1024),
+                            Network::Devnet,
+                            1024 * 1024,
+                            StorageMode::HighThroughput,
+                        ).expect("storage");
 
-                    for _ in 0..iters {
-                        let duration = runtime.block_on(async {
-                            let temp_dir = TempDir::new("tos-bench-tps-seq").expect("temp dir");
-                            let storage = SledStorage::new(
-                                temp_dir.path().to_string_lossy().to_string(),
-                                Some(1024 * 1024),
-                                Network::Devnet,
-                                1024 * 1024,
-                                StorageMode::HighThroughput,
-                            ).expect("storage");
+                        let storage_arc = Arc::new(RwLock::new(storage));
+                        let environment = Arc::new(Environment::new());
 
-                            let storage_arc = Arc::new(RwLock::new(storage));
-                            let environment = Arc::new(Environment::new());
+                        let block = create_minimal_block();
+                        let block_hash = block.hash();
 
-                            let block = create_minimal_block();
-                            let block_hash = block.hash();
+                        let state = ParallelChainState::new(
+                            storage_arc,
+                            environment,
+                            0,
+                            1,
+                            BlockVersion::V0,
+                            block,
+                            block_hash,
+                        ).await;
 
-                            let state = ParallelChainState::new(
-                                storage_arc,
-                                environment,
-                                0,
-                                1,
-                                BlockVersion::V0,
-                                block,
-                                block_hash,
-                            ).await;
-
-                            let transactions = generate_conflict_free_transactions(count);
-                            execute_sequential(state, transactions).await
-                        });
-
-                        total_duration += duration;
-                    }
-
-                    total_duration
+                        let transactions = generate_conflict_free_transactions(count);
+                        let _duration = execute_sequential(state, transactions).await;
+                    })
                 });
             },
         );
 
+        // Fixed: Use standard b.iter() to include all overhead in measurement
         group.bench_with_input(
             BenchmarkId::new("parallel", format!("{}_txs", tx_count)),
             tx_count,
             |b, &count| {
-                b.iter_custom(|iters| {
-                    let mut total_duration = Duration::ZERO;
+                b.iter(|| {
+                    runtime.block_on(async {
+                        // Include storage creation in measurement (same as other benchmarks)
+                        let temp_dir = TempDir::new("tos-bench-tps-par").expect("temp dir");
+                        let storage = SledStorage::new(
+                            temp_dir.path().to_string_lossy().to_string(),
+                            Some(1024 * 1024),
+                            Network::Devnet,
+                            1024 * 1024,
+                            StorageMode::HighThroughput,
+                        ).expect("storage");
 
-                    for _ in 0..iters {
-                        let duration = runtime.block_on(async {
-                            let temp_dir = TempDir::new("tos-bench-tps-par").expect("temp dir");
-                            let storage = SledStorage::new(
-                                temp_dir.path().to_string_lossy().to_string(),
-                                Some(1024 * 1024),
-                                Network::Devnet,
-                                1024 * 1024,
-                                StorageMode::HighThroughput,
-                            ).expect("storage");
+                        let storage_arc = Arc::new(RwLock::new(storage));
+                        let environment = Arc::new(Environment::new());
 
-                            let storage_arc = Arc::new(RwLock::new(storage));
-                            let environment = Arc::new(Environment::new());
+                        let block = create_minimal_block();
+                        let block_hash = block.hash();
 
-                            let block = create_minimal_block();
-                            let block_hash = block.hash();
+                        let state = ParallelChainState::new(
+                            storage_arc,
+                            environment,
+                            0,
+                            1,
+                            BlockVersion::V0,
+                            block,
+                            block_hash,
+                        ).await;
 
-                            let state = ParallelChainState::new(
-                                storage_arc,
-                                environment,
-                                0,
-                                1,
-                                BlockVersion::V0,
-                                block,
-                                block_hash,
-                            ).await;
-
-                            let transactions = generate_conflict_free_transactions(count);
-                            execute_parallel(state, transactions).await
-                        });
-
-                        total_duration += duration;
-                    }
-
-                    total_duration
+                        let transactions = generate_conflict_free_transactions(count);
+                        let _duration = execute_parallel(state, transactions).await;
+                    })
                 });
             },
         );
