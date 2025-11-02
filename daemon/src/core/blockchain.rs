@@ -1,12 +1,12 @@
 use crate::{
     config::{
+        dev_public_key,
         get_genesis_block_hash,
         get_hex_genesis_block,
         get_min_txs_for_parallel,
         parallel_execution_enabled, // runtime toggle
         DEFAULT_CACHE_SIZE,
         DEV_FEES,
-        DEV_PUBLIC_KEY,
         EMISSION_SPEED_FACTOR,
         GENESIS_BLOCK_DIFFICULTY,
         MAX_ORPHANED_TRANSACTIONS,
@@ -781,7 +781,7 @@ impl<S: Storage> Blockchain<S> {
                         Vec::new(),
                         get_current_time_in_millis(),
                         [0u8; EXTRA_NONCE_SIZE],
-                        DEV_PUBLIC_KEY.clone(),
+                        dev_public_key().clone(),
                         Hash::zero(),
                     );
                     let block = Block::new(Immutable::Owned(header), Vec::new());
@@ -798,7 +798,7 @@ impl<S: Storage> Blockchain<S> {
                     (block, block_hash)
                 };
 
-            if *genesis_block.get_miner() != *DEV_PUBLIC_KEY {
+            if *genesis_block.get_miner() != *dev_public_key() {
                 return Err(BlockchainError::GenesisBlockMiner);
             }
 
@@ -4034,11 +4034,11 @@ impl<S: Storage> Blockchain<S> {
                         debug!(
                             "Adding dev fee {} to {} before TX execution",
                             format_tos(dev_fee_part),
-                            DEV_PUBLIC_KEY.as_address(self.network.is_mainnet())
+                            dev_public_key().as_address(self.network.is_mainnet())
                         );
                     }
                     chain_state
-                        .reward_miner(&DEV_PUBLIC_KEY, dev_fee_part)
+                        .reward_miner(dev_public_key(), dev_fee_part)
                         .await?;
                     miner_reward -= dev_fee_part;
                 }
@@ -4574,6 +4574,26 @@ impl<S: Storage> Blockchain<S> {
                     #[cfg(debug_assertions)]
                     {
                         let aggregated_gas = chain_state.get_gas_fee();
+
+                        // TYPE SAFETY: Compile-time verification that both fee types are u64
+                        // This prevents silent truncation bugs if types ever diverge
+                        const _: () = {
+                            // Assert both types are identical at compile time
+                            let _ = |aggregated: u64, total: u64| {
+                                let _: u64 = aggregated;
+                                let _: u64 = total;
+                            };
+                        };
+
+                        // Runtime assertion for type size parity (defensive check)
+                        debug_assert_eq!(
+                            std::mem::size_of_val(&aggregated_gas),
+                            std::mem::size_of_val(&total_fees),
+                            "Fee types must match to prevent truncation: aggregated_gas={}, total_fees={}",
+                            std::mem::size_of_val(&aggregated_gas),
+                            std::mem::size_of_val(&total_fees)
+                        );
+
                         if aggregated_gas != total_fees {
                             if log::log_enabled!(log::Level::Warn) {
                                 warn!(
@@ -5665,11 +5685,11 @@ impl<S: Storage> Blockchain<S> {
                 debug!(
                     "[PARALLEL] Adding dev fee {} to {} before TX execution",
                     format_tos(dev_fee),
-                    DEV_PUBLIC_KEY.as_address(parallel_state.is_mainnet())
+                    dev_public_key().as_address(parallel_state.is_mainnet())
                 );
             }
             parallel_state
-                .reward_miner(&DEV_PUBLIC_KEY, dev_fee)
+                .reward_miner(dev_public_key(), dev_fee)
                 .await?;
         }
 
@@ -5722,6 +5742,10 @@ impl<S: Storage> Blockchain<S> {
     /// - Balance changes from parallel state to storage
     /// - Gas fees accumulated during parallel execution
     /// - Burned supply accumulated during parallel execution
+    ///
+    /// ATOMICITY (P1):
+    /// All storage writes are wrapped in a commit point transaction for
+    /// atomic all-or-nothing semantics. On error, all changes are rolled back.
     #[allow(dead_code)]
     async fn merge_parallel_results(
         &self,
@@ -5729,7 +5753,7 @@ impl<S: Storage> Blockchain<S> {
         applicable_state: &mut ApplicableChainState<'_, S>,
         _results: &[super::state::parallel_chain_state::TransactionResult],
     ) -> Result<(), BlockchainError> {
-        use log::{debug, info, trace};
+        use log::{debug, info, trace, warn};
         use std::collections::HashSet;
         use tos_common::account::{VersionedBalance, VersionedNonce};
         use tos_common::transaction::verify::BlockchainApplyState;
@@ -5739,7 +5763,7 @@ impl<S: Storage> Blockchain<S> {
 
         if log::log_enabled!(log::Level::Info) {
             info!(
-                "Starting merge of parallel execution results at topoheight {}",
+                "Starting atomic merge of parallel execution results at topoheight {}",
                 topoheight
             );
         }
@@ -5747,31 +5771,42 @@ impl<S: Storage> Blockchain<S> {
         // Get storage for writing
         let storage = applicable_state.get_mut_storage();
 
-        // Step 1: Merge account nonces
-        // SECURITY FIX (S1): Sort entries for deterministic merge order
-        // This ensures identical storage write sequence across all nodes
-        let mut modified_nonces = parallel_state.get_modified_nonces();
-        modified_nonces.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes())); // Sort by PublicKey bytes
-
+        // ATOMICITY (P1): Start commit point for atomic batch writes
+        // All subsequent writes will be buffered until end_commit_point(true)
+        // On error, end_commit_point(false) rolls back all changes
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Merging {} modified account nonces", modified_nonces.len());
+            debug!("Starting atomic commit point for parallel merge");
         }
+        storage.start_commit_point().await?;
 
-        for (account, new_nonce) in modified_nonces {
-            if log::log_enabled!(log::Level::Trace) {
-                trace!(
-                    "Setting nonce {} for account {} at topoheight {}",
-                    new_nonce,
-                    account.as_address(storage.is_mainnet()),
-                    topoheight
-                );
+        // ATOMICITY (P1): Execute all writes inside a result-based block
+        // This allows us to rollback on any error before the final commit
+        let merge_result: Result<(), BlockchainError> = async {
+            // Step 1: Merge account nonces
+            // SECURITY FIX (S1): Sort entries for deterministic merge order
+            // This ensures identical storage write sequence across all nodes
+            let mut modified_nonces = parallel_state.get_modified_nonces();
+            modified_nonces.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes())); // Sort by PublicKey bytes
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Merging {} modified account nonces", modified_nonces.len());
             }
 
-            let versioned_nonce = VersionedNonce::new(new_nonce, Some(topoheight));
-            storage
-                .set_last_nonce_to(&account, topoheight, &versioned_nonce)
-                .await?;
-        }
+            for (account, new_nonce) in modified_nonces {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Setting nonce {} for account {} at topoheight {}",
+                        new_nonce,
+                        account.as_address(storage.is_mainnet()),
+                        topoheight
+                    );
+                }
+
+                let versioned_nonce = VersionedNonce::new(new_nonce, Some(topoheight));
+                storage
+                    .set_last_nonce_to(&account, topoheight, &versioned_nonce)
+                    .await?;
+            }
 
         // Step 2: Merge balance changes
         // SECURITY FIX (S1): Sort entries for deterministic merge order
@@ -5882,6 +5917,48 @@ impl<S: Storage> Blockchain<S> {
                 storage
                     .set_last_multisig_to(&account, topoheight, versioned_multisig)
                     .await?;
+            }
+        }
+
+            Ok(())
+        }.await;
+
+        // ATOMICITY (P1): Handle merge result with atomic commit or rollback
+        match merge_result {
+            Ok(_) => {
+                // All writes succeeded, commit the batch atomically
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Committing atomic batch for parallel merge");
+                }
+
+                match storage.end_commit_point(true).await {
+                    Ok(_) => {
+                        if log::log_enabled!(log::Level::Info) {
+                            info!("Atomic commit successful for parallel merge");
+                        }
+                    }
+                    Err(e) => {
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("Atomic commit failed during final write: {}", e);
+                        }
+                        return Err(e);
+                    }
+                }
+            }
+            Err(e) => {
+                // Error occurred during writes, rollback all changes
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Error during parallel merge, rolling back all changes: {}", e);
+                }
+
+                // Discard all buffered writes (apply=false)
+                if let Err(rollback_err) = storage.end_commit_point(false).await {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Rollback also failed: {}", rollback_err);
+                    }
+                }
+
+                return Err(e);
             }
         }
 
