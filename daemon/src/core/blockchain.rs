@@ -2431,9 +2431,11 @@ impl<S: Storage> Blockchain<S> {
                 ghostdag_data.mergeset_blues.len(),
                 ghostdag_data.mergeset_reds.len()
             );
-            for (i, tip) in sorted_tips_vec.iter().enumerate() {
-                let tip_blue_score = storage.get_ghostdag_blue_score(tip).await?;
-                debug!("  Parent[{}]: {} (blue_score={})", i, tip, tip_blue_score);
+            if log::log_enabled!(log::Level::Debug) {
+                for (i, tip) in sorted_tips_vec.iter().enumerate() {
+                    let tip_blue_score = storage.get_ghostdag_blue_score(tip).await?;
+                    debug!("  Parent[{}]: {} (blue_score={})", i, tip, tip_blue_score);
+                }
             }
         }
         let mut block = BlockHeader::new_simple(
@@ -2993,16 +2995,18 @@ impl<S: Storage> Blockchain<S> {
                 block.get_parents().len(),
                 block.get_blue_score()
             );
-            for (i, parent) in block.get_parents().iter().enumerate() {
-                match storage.get_ghostdag_blue_score(parent).await {
-                    Ok(parent_blue_score) => {
-                        debug!(
-                            "  Parent[{}]: {} (blue_score={})",
-                            i, parent, parent_blue_score
-                        );
-                    }
-                    Err(e) => {
-                        debug!("  Parent[{}]: {} (ERROR: {})", i, parent, e);
+            if log::log_enabled!(log::Level::Debug) {
+                for (i, parent) in block.get_parents().iter().enumerate() {
+                    match storage.get_ghostdag_blue_score(parent).await {
+                        Ok(parent_blue_score) => {
+                            debug!(
+                                "  Parent[{}]: {} (blue_score={})",
+                                i, parent, parent_blue_score
+                            );
+                        }
+                        Err(e) => {
+                            debug!("  Parent[{}]: {} (ERROR: {})", i, parent, e);
+                        }
                     }
                 }
             }
