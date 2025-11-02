@@ -10,9 +10,9 @@
 #[cfg(test)]
 mod comprehensive_tests {
     use super::super::*;
+    use std::collections::HashMap;
     use tos_common::crypto::Hash;
     use tos_common::difficulty::Difficulty;
-    use std::collections::HashMap;
 
     // ============================================================================
     // 1. Complex DAG Topology Tests
@@ -59,7 +59,10 @@ mod comprehensive_tests {
         // Verify all blocks are unique
         let mut all_blocks = vec![genesis, level1_left, level1_right];
         all_blocks.extend(level2);
-        let unique_count = all_blocks.iter().collect::<std::collections::HashSet<_>>().len();
+        let unique_count = all_blocks
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
         assert_eq!(unique_count, 7);
     }
 
@@ -88,9 +91,7 @@ mod comprehensive_tests {
         //   G -> D1 -> D2 -> D3
         // Each D is a diamond pattern
         // Tests complex merge scenarios
-        let blocks: Vec<Hash> = (0..=12)
-            .map(|i| Hash::new([i; 32]))
-            .collect();
+        let blocks: Vec<Hash> = (0..=12).map(|i| Hash::new([i; 32])).collect();
 
         assert_eq!(blocks.len(), 13);
     }
@@ -105,9 +106,7 @@ mod comprehensive_tests {
         //         M
         // Tests many parallel blocks
         let genesis = Hash::new([0u8; 32]);
-        let wide_layer: Vec<Hash> = (1..=5)
-            .map(|i| Hash::new([i; 32]))
-            .collect();
+        let wide_layer: Vec<Hash> = (1..=5).map(|i| Hash::new([i; 32])).collect();
         let merge = Hash::new([99u8; 32]);
 
         assert_eq!(wide_layer.len(), 5);
@@ -277,10 +276,7 @@ mod comprehensive_tests {
     fn test_mergeset_exclude_selected_parent_chain() {
         // Mergeset should exclude selected parent and its chain
         let _selected_parent = Hash::new([1u8; 32]);
-        let _other_parents = vec![
-            Hash::new([2u8; 32]),
-            Hash::new([3u8; 32]),
-        ];
+        let _other_parents = vec![Hash::new([2u8; 32]), Hash::new([3u8; 32])];
 
         assert!(true); // Placeholder
     }
@@ -359,7 +355,7 @@ mod comprehensive_tests {
         // Each blue block increments blue_score
         let scores = vec![0u64, 1, 2, 3, 4, 5];
         for i in 1..scores.len() {
-            assert_eq!(scores[i], scores[i-1] + 1);
+            assert_eq!(scores[i], scores[i - 1] + 1);
         }
     }
 
@@ -566,14 +562,14 @@ mod comprehensive_tests {
     #[test]
     fn test_ghostdag_data_creation() {
         let data = TosGhostdagData::new(
-            10,                           // blue_score
-            BlueWorkType::from(1000u64),  // blue_work
-            10,                           // daa_score: use same value as blue_score for test data
-            Hash::new([1u8; 32]),         // selected_parent
-            vec![Hash::new([2u8; 32])],   // mergeset_blues
-            vec![Hash::new([3u8; 32])],   // mergeset_reds
-            HashMap::new(),               // blues_anticone_sizes
-            vec![],                       // mergeset_non_daa
+            10,                          // blue_score
+            BlueWorkType::from(1000u64), // blue_work
+            10,                          // daa_score: use same value as blue_score for test data
+            Hash::new([1u8; 32]),        // selected_parent
+            vec![Hash::new([2u8; 32])],  // mergeset_blues
+            vec![Hash::new([3u8; 32])],  // mergeset_reds
+            HashMap::new(),              // blues_anticone_sizes
+            vec![],                      // mergeset_non_daa
         );
 
         assert_eq!(data.blue_score, 10);

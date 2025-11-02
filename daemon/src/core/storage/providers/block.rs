@@ -1,15 +1,15 @@
-use std::sync::Arc;
+use super::{BlocksAtHeightProvider, DifficultyProvider, TransactionProvider};
+use crate::core::error::BlockchainError;
 use async_trait::async_trait;
+use std::sync::Arc;
 use tos_common::{
     block::{Block, BlockHeader},
     crypto::Hash,
     difficulty::Difficulty,
     immutable::Immutable,
     transaction::Transaction,
-    varuint::VarUint
+    varuint::VarUint,
 };
-use crate::core::error::BlockchainError;
-use super::{BlocksAtHeightProvider, DifficultyProvider, TransactionProvider};
 
 #[async_trait]
 pub trait BlockProvider: TransactionProvider + DifficultyProvider + BlocksAtHeightProvider {
@@ -32,7 +32,14 @@ pub trait BlockProvider: TransactionProvider + DifficultyProvider + BlocksAtHeig
     // Hash is Immutable to be stored efficiently in caches and sharing the same object
     // with others caches (like P2p or GetWork)
     // Phase 2: cumulative_difficulty parameter removed - storage now only uses blue_work
-    async fn save_block(&mut self, block: Arc<BlockHeader>, txs: &[Arc<Transaction>], difficulty: Difficulty, p: VarUint, hash: Immutable<Hash>) -> Result<(), BlockchainError>;
+    async fn save_block(
+        &mut self,
+        block: Arc<BlockHeader>,
+        txs: &[Arc<Transaction>],
+        difficulty: Difficulty,
+        p: VarUint,
+        hash: Immutable<Hash>,
+    ) -> Result<(), BlockchainError>;
 
     // Delete a block using its hash
     async fn delete_block_with_hash(&mut self, hash: &Hash) -> Result<Block, BlockchainError>;

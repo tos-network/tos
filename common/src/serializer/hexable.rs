@@ -39,8 +39,7 @@ impl<'de, T: Serializer + Deserialize<'de>> Deserialize<'de> for Hexable<T> {
         match value {
             Value::String(hex) => Ok(Self(T::from_hex(&hex).map_err(serde::de::Error::custom)?)),
             _ => {
-                let inner = T::deserialize(value)
-                    .map_err(serde::de::Error::custom)?;
+                let inner = T::deserialize(value).map_err(serde::de::Error::custom)?;
                 Ok(Self(inner))
             }
         }
@@ -77,7 +76,10 @@ mod tests {
 
     #[test]
     fn test_hexable() {
-        let test = Test { a: 42, b: "hello".to_string() };
+        let test = Test {
+            a: 42,
+            b: "hello".to_string(),
+        };
         let hexable = Hexable::from(test.clone());
 
         let hex = serde_json::to_string(&hexable).unwrap();
@@ -89,15 +91,21 @@ mod tests {
     fn test_from_json() {
         let test = r#"{"a":42,"b":"hello"}"#;
         let test2: Test = serde_json::from_str(test).unwrap();
-        assert_eq!(test2, Test {
-            a: 42,
-            b: "hello".to_string(),
-        });
+        assert_eq!(
+            test2,
+            Test {
+                a: 42,
+                b: "hello".to_string(),
+            }
+        );
     }
 
     #[test]
     fn test_from_hex() {
-        let test = Test { a: 42, b: "hello".to_string() };
+        let test = Test {
+            a: 42,
+            b: "hello".to_string(),
+        };
         let hex = test.to_hex();
         let hexable: Hexable<Test> = serde_json::from_str(&format!("\"{}\"", hex)).unwrap();
         assert_eq!(*hexable, test);

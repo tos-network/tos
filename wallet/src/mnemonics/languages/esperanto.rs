@@ -1630,5 +1630,5 @@ pub const ESPERANTO: Language<'static> = Language {
         "zorgi",
         "zukino",
         "zumilo",
-    ]
+    ],
 };

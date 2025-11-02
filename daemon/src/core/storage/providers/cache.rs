@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use crate::core::error::BlockchainError;
+use async_trait::async_trait;
 #[macro_export]
 macro_rules! clear_caches {
     ($($cache:expr),*) => {
@@ -14,5 +14,5 @@ macro_rules! clear_caches {
 #[async_trait]
 pub trait CacheProvider {
     // Clear all the internal caches if any
-    async fn clear_caches(&mut self) -> Result<(), BlockchainError>;   
+    async fn clear_caches(&mut self) -> Result<(), BlockchainError>;
 }

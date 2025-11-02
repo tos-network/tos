@@ -1,68 +1,43 @@
-pub mod rpc;
 pub mod getwork;
+pub mod rpc;
 
 use crate::core::{
-    blockchain::Blockchain,
-    config::RPCConfig,
-    error::BlockchainError,
-    storage::Storage
+    blockchain::Blockchain, config::RPCConfig, error::BlockchainError, storage::Storage,
 };
 use actix_web::{
-    get,
-    HttpServer,
-    App,
-    HttpResponse,
-    Responder,
-    HttpRequest,
-    web::{
-        self,
-        Data,
-        Payload
-    },
     dev::ServerHandle,
-    error::Error
+    error::Error,
+    get,
+    web::{self, Data, Payload},
+    App, HttpRequest, HttpResponse, HttpServer, Responder,
 };
 use anyhow::Context;
+use getwork::GetWorkServer;
+use log::{error, info, warn};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
+use std::{collections::HashSet, sync::Arc};
 use tos_common::{
-    tokio::sync::Mutex,
     api::daemon::NotifyEvent,
     config,
     rpc::{
         server::{
-            json_rpc,
-            websocket,
-            websocket::{
-                EventWebSocketHandler,
-                WebSocketServer,
-                WebSocketServerShared
-            },
-            WebSocketServerHandler,
-            RPCServerHandler,
+            json_rpc, websocket,
+            websocket::{EventWebSocketHandler, WebSocketServer, WebSocketServerShared},
+            RPCServerHandler, WebSocketServerHandler,
         },
-        InternalRpcError,
-        RPCHandler,
+        InternalRpcError, RPCHandler,
     },
-    tokio::spawn_task
+    tokio::spawn_task,
+    tokio::sync::Mutex,
 };
-use std::{
-    collections::HashSet,
-    sync::Arc,
-};
-use log::{
-    info,
-    warn,
-    error,
-};
-use getwork::GetWorkServer;
 
 pub type SharedDaemonRpcServer<S> = Arc<DaemonRpcServer<S>>;
 
 pub struct DaemonRpcServer<S: Storage> {
     handle: Mutex<Option<ServerHandle>>,
     websocket: WebSocketServerShared<EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>>,
-    getwork: Option<WebSocketServerShared<GetWorkServer<S>>>
+    getwork: Option<WebSocketServerShared<GetWorkServer<S>>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -74,20 +49,20 @@ pub enum ApiError {
     #[error("P2p engine is not running")]
     NoP2p,
     #[error("WebSocket server is not started")]
-    NoWebSocketServer
+    NoWebSocketServer,
 }
 
 impl<S: Storage> DaemonRpcServer<S> {
     pub async fn new(
         blockchain: Arc<Blockchain<S>>,
-        config: RPCConfig
+        config: RPCConfig,
     ) -> Result<SharedDaemonRpcServer<S>, BlockchainError> {
         let getwork = if !config.getwork.disable {
             info!("Creating GetWork server...");
             Some(WebSocketServer::new(GetWorkServer::new(
                 blockchain.clone(),
                 config.getwork.rate_limit_ms,
-                config.getwork.notify_job_concurrency
+                config.getwork.notify_job_concurrency,
             )))
         } else {
             None
@@ -98,7 +73,10 @@ impl<S: Storage> DaemonRpcServer<S> {
         rpc::register_methods(&mut rpc_handler, !config.getwork.disable);
 
         // create the default websocket server (support event & rpc methods)
-        let ws = WebSocketServer::new(EventWebSocketHandler::new(rpc_handler, config.notify_events_concurrency));
+        let ws = WebSocketServer::new(EventWebSocketHandler::new(
+            rpc_handler,
+            config.notify_events_concurrency,
+        ));
 
         let server = Arc::new(Self {
             handle: Mutex::new(None),
@@ -116,7 +94,10 @@ impl<S: Storage> DaemonRpcServer<S> {
                 .context("Failed to set global recorder for Prometheus")?;
 
             if log::log_enabled!(log::Level::Info) {
-                info!("Prometheus metrics enabled on route: {}", config.prometheus.route);
+                info!(
+                    "Prometheus metrics enabled on route: {}",
+                    config.prometheus.route
+                );
             }
             Some((config.prometheus.route, handle))
         } else {
@@ -126,7 +107,9 @@ impl<S: Storage> DaemonRpcServer<S> {
         // SECURITY WARNING: Check if RPC is exposed to network
         if config.bind_address.starts_with("0.0.0.0") {
             warn!("⚠️  SECURITY WARNING: RPC server is bound to 0.0.0.0 (all interfaces)");
-            warn!("⚠️  This exposes administrative endpoints to the network WITHOUT authentication!");
+            warn!(
+                "⚠️  This exposes administrative endpoints to the network WITHOUT authentication!"
+            );
             warn!("⚠️  Attackers can:");
             warn!("⚠️    - Submit malicious blocks");
             warn!("⚠️    - Manipulate mempool");
@@ -148,12 +131,26 @@ impl<S: Storage> DaemonRpcServer<S> {
                 let server = Arc::clone(&clone);
                 let mut app = App::new()
                     .app_data(web::Data::from(server))
-                    .app_data(web::Data::new(prometheus.as_ref().map(|(_, handle)| handle.clone())))
+                    .app_data(web::Data::new(
+                        prometheus.as_ref().map(|(_, handle)| handle.clone()),
+                    ))
                     // Traditional HTTP
-                    .route("/json_rpc", web::post().to(json_rpc::<Arc<Blockchain<S>>, DaemonRpcServer<S>>))
+                    .route(
+                        "/json_rpc",
+                        web::post().to(json_rpc::<Arc<Blockchain<S>>, DaemonRpcServer<S>>),
+                    )
                     // WebSocket support
-                    .route("/json_rpc", web::get().to(websocket::<EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>, DaemonRpcServer<S>>))
-                    .route("/getwork/{address}/{worker}", web::get().to(getwork_endpoint::<S>))
+                    .route(
+                        "/json_rpc",
+                        web::get().to(websocket::<
+                            EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>,
+                            DaemonRpcServer<S>,
+                        >),
+                    )
+                    .route(
+                        "/getwork/{address}/{worker}",
+                        web::get().to(getwork_endpoint::<S>),
+                    )
                     .service(index);
 
                 if let Some((route, _)) = &prometheus {
@@ -166,11 +163,11 @@ impl<S: Storage> DaemonRpcServer<S> {
 
             let http_server = builder.workers(config.threads).run();
 
-            { // save the server handle to be able to stop it later
+            {
+                // save the server handle to be able to stop it later
                 let handle = http_server.handle();
                 let mut lock = server.handle.lock().await;
                 *lock = Some(handle);
-
             }
             spawn_task("rpc-server", http_server);
         }
@@ -178,11 +175,17 @@ impl<S: Storage> DaemonRpcServer<S> {
     }
 
     pub async fn get_tracked_events(&self) -> HashSet<NotifyEvent> {
-        self.get_websocket().get_handler().get_tracked_events().await
+        self.get_websocket()
+            .get_handler()
+            .get_tracked_events()
+            .await
     }
 
     pub async fn is_event_tracked(&self, event: &NotifyEvent) -> bool {
-        self.get_websocket().get_handler().is_event_tracked(event).await
+        self.get_websocket()
+            .get_handler()
+            .is_event_tracked(event)
+            .await
     }
 
     pub async fn notify_clients_with<V: serde::Serialize>(&self, event: &NotifyEvent, value: V) {
@@ -193,8 +196,15 @@ impl<S: Storage> DaemonRpcServer<S> {
         }
     }
 
-    pub async fn notify_clients(&self, event: &NotifyEvent, value: Value) -> Result<(), anyhow::Error> {
-        self.get_websocket().get_handler().notify(event, value).await;
+    pub async fn notify_clients(
+        &self,
+        event: &NotifyEvent,
+        value: Value,
+    ) -> Result<(), anyhow::Error> {
+        self.get_websocket()
+            .get_handler()
+            .notify(event, value)
+            .await;
         Ok(())
     }
 
@@ -214,8 +224,12 @@ impl<S: Storage> DaemonRpcServer<S> {
     }
 }
 
-impl<S: Storage> WebSocketServerHandler<EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>> for DaemonRpcServer<S> {
-    fn get_websocket(&self) -> &WebSocketServerShared<EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>> {
+impl<S: Storage> WebSocketServerHandler<EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>>
+    for DaemonRpcServer<S>
+{
+    fn get_websocket(
+        &self,
+    ) -> &WebSocketServerShared<EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>> {
         &self.websocket
     }
 }
@@ -225,7 +239,6 @@ impl<S: Storage> RPCServerHandler<Arc<Blockchain<S>>> for DaemonRpcServer<S> {
         self.get_websocket().get_handler().get_rpc_handler()
     }
 }
-
 
 #[get("/")]
 async fn index() -> impl Responder {
@@ -239,14 +252,20 @@ async fn prometheus_metrics(handle: Data<Option<PrometheusHandle>>) -> Result<Ht
             HttpResponse::Ok()
                 .content_type("text/plain; version=0.0.4")
                 .body(metrics)
-        },
-        None => HttpResponse::NotFound().body("Prometheus metrics are not enabled")
+        }
+        None => HttpResponse::NotFound().body("Prometheus metrics are not enabled"),
     })
 }
 
-async fn getwork_endpoint<S: Storage>(server: Data<DaemonRpcServer<S>>, request: HttpRequest, stream: Payload) -> Result<HttpResponse, Error> {
+async fn getwork_endpoint<S: Storage>(
+    server: Data<DaemonRpcServer<S>>,
+    request: HttpRequest,
+    stream: Payload,
+) -> Result<HttpResponse, Error> {
     match &server.getwork {
         Some(getwork) => getwork.handle_connection(request, stream).await,
-        None => Ok(HttpResponse::NotFound().reason("GetWork server is not enabled").finish()) // getwork server is not started
+        None => Ok(HttpResponse::NotFound()
+            .reason("GetWork server is not enabled")
+            .finish()), // getwork server is not started
     }
 }

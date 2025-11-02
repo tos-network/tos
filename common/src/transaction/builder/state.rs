@@ -1,15 +1,10 @@
-use crate::{
-    account::Nonce,
-    crypto::Hash,
-    transaction::Reference
-};
+use crate::{account::Nonce, crypto::Hash, transaction::Reference};
 
 use super::FeeHelper;
 
 /// If the returned balance and ct do not match, the build function will panic and/or
 /// the proof will be invalid.
 pub trait AccountState: FeeHelper {
-
     /// Used to verify if the address is on the same chain
     fn is_mainnet(&self) -> bool;
 
@@ -20,7 +15,8 @@ pub trait AccountState: FeeHelper {
     fn get_reference(&self) -> Reference;
 
     /// Update the balance
-    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64) -> Result<(), Self::Error>;
+    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64)
+        -> Result<(), Self::Error>;
 
     /// Get the nonce of the account
     fn get_nonce(&self) -> Result<Nonce, Self::Error>;

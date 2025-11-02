@@ -1,7 +1,10 @@
-use std::{fmt::{Display, Formatter, self}, str::FromStr};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::{
+    fmt::{self, Display, Formatter},
+    str::FromStr,
+};
 
-use crate::serializer::{Serializer, Reader, ReaderError, Writer};
+use crate::serializer::{Reader, ReaderError, Serializer, Writer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Network {
@@ -16,7 +19,7 @@ pub enum Network {
     Stagenet,
     // Development network
     // This is a local network for development purposes
-    Devnet
+    Devnet,
 }
 
 #[cfg(feature = "clap")]
@@ -30,12 +33,14 @@ impl clap::ValueEnum for Network {
             Self::Mainnet => Some(clap::builder::PossibleValue::new("mainnet").alias("Mainnet")),
             Self::Testnet => Some(clap::builder::PossibleValue::new("testnet").alias("Testnet")),
             Self::Stagenet => Some(clap::builder::PossibleValue::new("stagenet").alias("Stagenet")),
-            Self::Devnet => Some(clap::builder::PossibleValue::new("devnet").alias("Devnet"))
+            Self::Devnet => Some(clap::builder::PossibleValue::new("devnet").alias("Devnet")),
         }
     }
 
     fn from_str(input: &str, _: bool) -> Result<Self, String> {
-        input.parse().map_err(|_| format!("Invalid network: {}", input))
+        input
+            .parse()
+            .map_err(|_| format!("Invalid network: {}", input))
     }
 }
 
@@ -49,19 +54,25 @@ impl Network {
     pub fn is_mainnet(&self) -> bool {
         match &self {
             Self::Mainnet => true,
-            _ => false
+            _ => false,
         }
     }
 }
 
 impl Serialize for Network {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
         serializer.serialize_str(self.to_string().as_str())
     }
 }
 
 impl<'de> Deserialize<'de> for Network {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
         let s = String::deserialize(deserializer)?;
         s.parse().map_err(serde::de::Error::custom)
     }
@@ -73,7 +84,7 @@ impl Display for Network {
             Self::Mainnet => "Mainnet",
             Self::Testnet => "Testnet",
             Self::Stagenet => "Stagenet",
-            Self::Devnet => "Dev"
+            Self::Devnet => "Dev",
         };
         write!(f, "{}", str)
     }
@@ -88,7 +99,7 @@ impl FromStr for Network {
             "testnet" | "1" => Self::Testnet,
             "stagenet" | "2" => Self::Stagenet,
             "dev" | "3" => Self::Devnet,
-            _ => return Err("Invalid network".into())
+            _ => return Err("Invalid network".into()),
         })
     }
 }
@@ -100,7 +111,7 @@ impl Serializer for Network {
             1 => Self::Testnet,
             2 => Self::Stagenet,
             3 => Self::Devnet,
-            _ => return Err(ReaderError::InvalidValue)
+            _ => return Err(ReaderError::InvalidValue),
         })
     }
 
@@ -109,7 +120,7 @@ impl Serializer for Network {
             Self::Mainnet => 0,
             Self::Testnet => 1,
             Self::Stagenet => 2,
-            Self::Devnet => 3 
+            Self::Devnet => 3,
         };
         writer.write_u8(id);
     }

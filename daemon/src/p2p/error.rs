@@ -1,39 +1,28 @@
-use std::{
-    array::TryFromSliceError,
-    net::{AddrParseError, SocketAddr},
-    sync::{
-        mpsc::SendError,
-        PoisonError,
-    },
-    io::Error as IOError
-};
-use thiserror::Error;
-use anyhow::Error;
-use tos_common::{
-    tokio::{
-        sync::{
-            AcquireError,
-            mpsc::error::SendError as TSendError,
-            oneshot::error::RecvError,
-        },
-        time::error::Elapsed
-    },
-    api::daemon::{TimedDirection, Direction},
-    crypto::Hash,
-    serializer::ReaderError,
+use super::{
+    encryption::EncryptionError,
+    packet::{ObjectRequest, OwnedObjectResponse, StepKind},
+    peer_list::DiskError,
 };
 use crate::{
+    config::{CHAIN_SYNC_RESPONSE_MAX_BLOCKS, CHAIN_SYNC_RESPONSE_MIN_BLOCKS},
     core::error::BlockchainError,
-    config::{CHAIN_SYNC_RESPONSE_MAX_BLOCKS, CHAIN_SYNC_RESPONSE_MIN_BLOCKS}
 };
-use super::{
-    peer_list::DiskError,
-    encryption::EncryptionError,
-    packet::{
-        StepKind,
-        ObjectRequest,
-        OwnedObjectResponse,
-    }
+use anyhow::Error;
+use std::{
+    array::TryFromSliceError,
+    io::Error as IOError,
+    net::{AddrParseError, SocketAddr},
+    sync::{mpsc::SendError, PoisonError},
+};
+use thiserror::Error;
+use tos_common::{
+    api::daemon::{Direction, TimedDirection},
+    crypto::Hash,
+    serializer::ReaderError,
+    tokio::{
+        sync::{mpsc::error::SendError as TSendError, oneshot::error::RecvError, AcquireError},
+        time::error::Elapsed,
+    },
 };
 
 #[derive(Error, Debug)]
@@ -54,7 +43,11 @@ pub enum P2pError {
     InvalidP2pVersion(String),
     #[error("Invalid tag, it must be greater than 0 and maximum 16 chars")]
     InvalidTag,
-    #[error("Invalid max chain response size, it must be between {} and {}", CHAIN_SYNC_RESPONSE_MIN_BLOCKS, CHAIN_SYNC_RESPONSE_MAX_BLOCKS)]
+    #[error(
+        "Invalid max chain response size, it must be between {} and {}",
+        CHAIN_SYNC_RESPONSE_MIN_BLOCKS,
+        CHAIN_SYNC_RESPONSE_MAX_BLOCKS
+    )]
     InvalidMaxChainResponseSize,
     #[error("Invalid max peers, it must be greater than 0")]
     InvalidMaxPeers,
@@ -78,11 +71,24 @@ pub enum P2pError {
     InvalidDirection,
     #[error("Invalid merkle hash")]
     InvalidMerkleHash,
-    #[error("Duplicated peer {} received from {} received in ping packet (direction = {:?})", _0, _1, _2)]
+    #[error(
+        "Duplicated peer {} received from {} received in ping packet (direction = {:?})",
+        _0,
+        _1,
+        _2
+    )]
     DuplicatedPeer(SocketAddr, SocketAddr, TimedDirection),
-    #[error("Pruned topoheight {} is greater than topoheight {} in ping packet", _0, _1)]
+    #[error(
+        "Pruned topoheight {} is greater than topoheight {} in ping packet",
+        _0,
+        _1
+    )]
     InvalidPrunedTopoHeight(u64, u64),
-    #[error("Pruned topoheight {} is less than old pruned topoheight {} in ping packet", _0, _1)]
+    #[error(
+        "Pruned topoheight {} is less than old pruned topoheight {} in ping packet",
+        _0,
+        _1
+    )]
     InvalidNewPrunedTopoHeight(u64, u64),
     #[error("impossible to change the pruned state")]
     InvalidPrunedTopoHeightChange,
@@ -104,7 +110,11 @@ pub enum P2pError {
     MalformedChainRequest(usize),
     #[error("Received a unrequested chain response")]
     UnrequestedChainResponse,
-    #[error("Invalid chain response size, got {} blocks while maximum set was {}", _0, _1)]
+    #[error(
+        "Invalid chain response size, got {} blocks while maximum set was {}",
+        _0,
+        _1
+    )]
     InvalidChainResponseSize(usize, usize),
     #[error("Received a unrequested bootstrap chain response")]
     UnrequestedBootstrapChainResponse,
@@ -180,7 +190,10 @@ pub enum P2pError {
     ExpectedBlockHeader(OwnedObjectResponse),
     #[error("Expected a transaction type got {0}")]
     ExpectedTransaction(OwnedObjectResponse),
-    #[error("Peer sent us a peerlist faster than protocol rules, expected to wait {} seconds more", _0)]
+    #[error(
+        "Peer sent us a peerlist faster than protocol rules, expected to wait {} seconds more",
+        _0
+    )]
     PeerInvalidPeerListCountdown(u64),
     #[error("Peer sent us a ping packet faster than protocol rules")]
     PeerInvalidPingCoutdown,
@@ -197,7 +210,7 @@ pub enum P2pError {
     #[error(transparent)]
     EncryptionError(#[from] EncryptionError),
     #[error(transparent)]
-    Any(#[from] Error)
+    Any(#[from] Error),
 }
 
 impl From<BlockchainError> for P2pError {
@@ -205,7 +218,6 @@ impl From<BlockchainError> for P2pError {
         Self::BlockchainError(Box::new(err))
     }
 }
-
 
 impl<T> From<PoisonError<T>> for P2pError {
     fn from(err: PoisonError<T>) -> Self {

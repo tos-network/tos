@@ -1,7 +1,3 @@
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
-use async_trait::async_trait;
-use indexmap::IndexSet;
-use tos_vm::{Chunk, Environment, Module};
 use crate::{
     account::Nonce,
     api::{DataElement, DataValue},
@@ -9,50 +5,35 @@ use crate::{
     config::{BURN_PER_CONTRACT, COIN_VALUE, TOS_ASSET},
     crypto::{
         elgamal::{CompressedPublicKey, PedersenOpening},
-        Address,
-        Hash,
-        Hashable,
-        KeyPair,
-        PublicKey,
+        Address, Hash, Hashable, KeyPair, PublicKey,
     },
     serializer::Serializer,
     transaction::{
         builder::{
-            AccountState,
-            FeeBuilder,
-            FeeHelper,
-            TransactionBuilder,
-            TransactionTypeBuilder,
-            TransferBuilder,
-            MultiSigBuilder,
-            ContractDepositBuilder,
-            DeployContractBuilder,
-            InvokeContractBuilder,
-            GenerationError,
-            EnergyBuilder,
+            AccountState, ContractDepositBuilder, DeployContractBuilder, EnergyBuilder, FeeBuilder,
+            FeeHelper, GenerationError, InvokeContractBuilder, MultiSigBuilder, TransactionBuilder,
+            TransactionTypeBuilder, TransferBuilder,
         },
-        extra_data::{
-            derive_shared_key_from_opening,
-            PlaintextData,
-        },
-        verify::{ZKPCache, NoZKPCache, BlockchainVerificationState},
-        MAX_TRANSFER_COUNT,
-        Transaction,
-        BurnPayload,
-        Reference,
         extra_data::Role,
-        TxVersion,
-        TransactionType,
-        MultiSigPayload,
+        extra_data::{derive_shared_key_from_opening, PlaintextData},
+        verify::{BlockchainVerificationState, NoZKPCache, ZKPCache},
+        BurnPayload, MultiSigPayload, Reference, Transaction, TransactionType, TxVersion,
+        MAX_TRANSFER_COUNT,
     },
 };
+use async_trait::async_trait;
+use indexmap::IndexSet;
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use tos_vm::{Chunk, Environment, Module};
 
 // Create a newtype wrapper to avoid orphan rule violation
 #[derive(Debug, Clone)]
 struct TestError(());
 
 impl<'a> From<&'a str> for TestError {
-    fn from(_: &'a str) -> Self { TestError(()) }
+    fn from(_: &'a str) -> Self {
+        TestError(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -102,9 +83,7 @@ impl Account {
     }
 
     fn set_balance(&mut self, asset: Hash, balance: u64) {
-        self.balances.insert(asset, Balance {
-            balance,
-        });
+        self.balances.insert(asset, Balance { balance });
     }
 
     fn address(&self) -> Address {
@@ -118,7 +97,12 @@ struct AccountStateImpl {
     nonce: Nonce,
 }
 
-fn create_tx_for(account: Account, destination: Address, amount: u64, extra_data: Option<DataElement>) -> Arc<Transaction> {
+fn create_tx_for(
+    account: Account,
+    destination: Address,
+    amount: u64,
+    extra_data: Option<DataElement>,
+) -> Arc<Transaction> {
     let mut state = AccountStateImpl {
         balances: account.balances,
         nonce: account.nonce,
@@ -131,7 +115,10 @@ fn create_tx_for(account: Account, destination: Address, amount: u64, extra_data
     // Debug extra_data size (before moving)
     if let Some(ref extra_data) = extra_data {
         println!("Debug extra_data size: {}", extra_data.to_bytes().len());
-        println!("Debug extra_data estimate: {}", 2 + extra_data.to_bytes().len() + 64);
+        println!(
+            "Debug extra_data estimate: {}",
+            2 + extra_data.to_bytes().len() + 64
+        );
     }
 
     let data = TransactionTypeBuilder::Transfers(vec![TransferBuilder {
@@ -141,22 +128,42 @@ fn create_tx_for(account: Account, destination: Address, amount: u64, extra_data
         extra_data,
     }]);
 
-    let builder = TransactionBuilder::new(TxVersion::T0, account.keypair.get_public_key().compress(), None, data, FeeBuilder::default()); // Use T0 for all operations
+    let builder = TransactionBuilder::new(
+        TxVersion::T0,
+        account.keypair.get_public_key().compress(),
+        None,
+        data,
+        FeeBuilder::default(),
+    ); // Use T0 for all operations
     let estimated_size = builder.estimate_size();
     let tx = builder.build(&mut state, &account.keypair).unwrap();
     let actual_size = tx.size();
     let to_bytes_size = tx.to_bytes().len();
-    println!("Debug sizes: estimated={}, actual={}, to_bytes={}", estimated_size, actual_size, to_bytes_size);
+    println!(
+        "Debug sizes: estimated={}, actual={}, to_bytes={}",
+        estimated_size, actual_size, to_bytes_size
+    );
     println!("Debug components: version={}, source={}, data={}, fee={}, fee_type={}, nonce={}, signature={}",
              1, tx.get_source().size(), tx.get_data().size(), 8, 1, 8, tx.get_signature().size());
     println!("Debug reference size: {}", tx.get_reference().size());
 
     // Calculate actual components
-    let actual_components = 1 + tx.get_source().size() + tx.get_data().size() + 8 + 1 + 8 +
-                           tx.get_reference().size() + tx.get_signature().size();
+    let actual_components = 1
+        + tx.get_source().size()
+        + tx.get_data().size()
+        + 8
+        + 1
+        + 8
+        + tx.get_reference().size()
+        + tx.get_signature().size();
     println!("Debug calculated actual: {}", actual_components);
-    
-    assert!(estimated_size == tx.size(), "expected {} bytes got {} bytes", estimated_size, actual_size);
+
+    assert!(
+        estimated_size == tx.size(),
+        "expected {} bytes got {} bytes",
+        estimated_size,
+        actual_size
+    );
     assert!(tx.to_bytes().len() == estimated_size);
 
     Arc::new(tx)
@@ -180,9 +187,12 @@ fn test_encrypt_decrypt() {
 #[test]
 fn test_encrypt_decrypt_two_parties() {
     let mut alice = Account::new();
-    alice.balances.insert(TOS_ASSET, Balance {
-        balance: 100 * COIN_VALUE,
-    });
+    alice.balances.insert(
+        TOS_ASSET,
+        Balance {
+            balance: 100 * COIN_VALUE,
+        },
+    );
 
     let bob = Account::new();
 
@@ -196,20 +206,39 @@ fn test_encrypt_decrypt_two_parties() {
     let cipher = transfer.get_extra_data().clone().unwrap();
     // Verify the extra data from alice (sender)
     {
-        let decrypted = cipher.decrypt(&alice.keypair.get_private_key(), None, Role::Sender, TxVersion::T0).unwrap();
+        let decrypted = cipher
+            .decrypt(
+                &alice.keypair.get_private_key(),
+                None,
+                Role::Sender,
+                TxVersion::T0,
+            )
+            .unwrap();
         assert_eq!(decrypted.data(), Some(&payload));
     }
 
     // Verify the extra data from bob (receiver)
     {
-        let decrypted = cipher.decrypt(&bob.keypair.get_private_key(), None, Role::Receiver, TxVersion::T0).unwrap();
+        let decrypted = cipher
+            .decrypt(
+                &bob.keypair.get_private_key(),
+                None,
+                Role::Receiver,
+                TxVersion::T0,
+            )
+            .unwrap();
         assert_eq!(decrypted.data(), Some(&payload));
     }
 
     // Balance simplification: With plaintext extra_data, decryption succeeds even with wrong role
     // This is expected behavior - no encryption means no role-based access control
     {
-        let decrypted = cipher.decrypt(&bob.keypair.get_private_key(), None, Role::Sender, TxVersion::T0);
+        let decrypted = cipher.decrypt(
+            &bob.keypair.get_private_key(),
+            None,
+            Role::Sender,
+            TxVersion::T0,
+        );
         assert!(decrypted.is_ok()); // Changed: plaintext succeeds even with wrong role
         assert_eq!(decrypted.unwrap().data(), Some(&payload));
     }
@@ -235,10 +264,13 @@ async fn test_tx_verify() {
         for (asset, balance) in &alice.balances {
             balances.insert(asset.clone(), balance.balance);
         }
-        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     {
@@ -246,10 +278,13 @@ async fn test_tx_verify() {
         for (asset, balance) in &bob.balances {
             balances.insert(asset.clone(), balance.balance);
         }
-        state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            bob.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     let hash = tx.hash();
@@ -260,8 +295,13 @@ async fn test_tx_verify() {
     // add it here for this test (since we're not calling apply())
     {
         // Add amount to Bob's balance (receiver - only updated in apply())
-        let bob_balance = state.accounts.get_mut(&bob.keypair.get_public_key().compress()).unwrap()
-            .balances.entry(TOS_ASSET).or_insert(0);
+        let bob_balance = state
+            .accounts
+            .get_mut(&bob.keypair.get_public_key().compress())
+            .unwrap()
+            .balances
+            .entry(TOS_ASSET)
+            .or_insert(0);
         *bob_balance = bob_balance.checked_add(50).unwrap();
 
         // Sender balance (Alice) was already mutated by verify(), no need to deduct again
@@ -275,7 +315,6 @@ async fn test_tx_verify() {
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     assert_eq!(balance, (100u64 * COIN_VALUE) - (50 + tx.fee));
 }
-
 
 // Balance simplification: Re-enabled test - passes with plaintext balances
 // This test verifies transaction caching behavior, which is independent of proof system
@@ -298,10 +337,13 @@ async fn test_tx_verify_with_zkp_cache() {
         for (asset, balance) in &alice.balances {
             balances.insert(asset.clone(), balance.balance);
         }
-        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     {
@@ -309,10 +351,13 @@ async fn test_tx_verify_with_zkp_cache() {
         for (asset, balance) in &bob.balances {
             balances.insert(asset.clone(), balance.balance);
         }
-        state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            bob.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     let mut clean_state = state.clone();
@@ -332,7 +377,9 @@ async fn test_tx_verify_with_zkp_cache() {
     }
 
     // Fix the nonce to pass the verification
-    state.accounts.get_mut(&alice.keypair.get_public_key().compress())
+    state
+        .accounts
+        .get_mut(&alice.keypair.get_public_key().compress())
         .unwrap()
         .nonce = 0;
 
@@ -341,7 +388,10 @@ async fn test_tx_verify_with_zkp_cache() {
     // assert!(matches!(tx.verify(&hash, &mut state, &DummyCache).await, Err(_)));
 
     // But should be fine for a clean state
-    assert!(tx.verify(&hash, &mut clean_state, &DummyCache).await.is_ok());
+    assert!(tx
+        .verify(&hash, &mut clean_state, &DummyCache)
+        .await
+        .is_ok());
 }
 
 // TODO: Balance simplification - Proof system needs reimplementation for plain u64 balances
@@ -365,7 +415,13 @@ async fn test_burn_tx_verify() {
             amount: 50 * COIN_VALUE,
             asset: TOS_ASSET,
         });
-        let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), None, data, FeeBuilder::default());
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            alice.keypair.get_public_key().compress(),
+            None,
+            data,
+            FeeBuilder::default(),
+        );
         let estimated_size = builder.estimate_size();
         let tx = builder.build(&mut state, &alice.keypair).unwrap();
         assert!(estimated_size == tx.size());
@@ -382,10 +438,13 @@ async fn test_burn_tx_verify() {
         for (asset, balance) in &alice.balances {
             balances.insert(asset.clone(), balance.balance);
         }
-        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     let hash = tx.hash();
@@ -421,15 +480,24 @@ async fn test_tx_invoke_contract() {
             chunk_id: 0,
             max_gas: 1000,
             parameters: Vec::new(),
-            deposits: [
-                (TOS_ASSET, ContractDepositBuilder {
+            deposits: [(
+                TOS_ASSET,
+                ContractDepositBuilder {
                     amount: 50 * COIN_VALUE,
-                    private: false
-                })
-            ].into_iter().collect(),
-            contract_key: None
+                    private: false,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            contract_key: None,
         });
-        let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), None, data, FeeBuilder::default()); // Use T0 for InvokeContract
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            alice.keypair.get_public_key().compress(),
+            None,
+            data,
+            FeeBuilder::default(),
+        ); // Use T0 for InvokeContract
         let estimated_size = builder.estimate_size();
         let tx = builder.build(&mut state, &alice.keypair).unwrap();
         assert!(estimated_size == tx.size());
@@ -449,10 +517,13 @@ async fn test_tx_invoke_contract() {
         for (asset, balance) in &alice.balances {
             balances.insert(asset.clone(), balance.balance);
         }
-        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     let hash = tx.hash();
@@ -496,18 +567,32 @@ async fn test_tx_invoke_contract_multiple_deposits() {
             chunk_id: 0,
             max_gas: 1000,
             parameters: Vec::new(),
-            deposits: [
-                (TOS_ASSET, ContractDepositBuilder {
+            deposits: [(
+                TOS_ASSET,
+                ContractDepositBuilder {
                     amount: 50 * COIN_VALUE,
-                    private: false  // Public deposit
-                })
-            ].into_iter().collect(),
-            contract_key: None
+                    private: false, // Public deposit
+                },
+            )]
+            .into_iter()
+            .collect(),
+            contract_key: None,
         });
-        let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), None, data, FeeBuilder::default());
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            alice.keypair.get_public_key().compress(),
+            None,
+            data,
+            FeeBuilder::default(),
+        );
         let estimated_size = builder.estimate_size();
         let tx = builder.build(&mut state, &alice.keypair).unwrap();
-        assert!(estimated_size == tx.size(), "expected {} bytes got {} bytes", tx.size(), estimated_size);
+        assert!(
+            estimated_size == tx.size(),
+            "expected {} bytes got {} bytes",
+            tx.size(),
+            estimated_size
+        );
         assert!(tx.to_bytes().len() == estimated_size);
 
         Arc::new(tx)
@@ -524,10 +609,13 @@ async fn test_tx_invoke_contract_multiple_deposits() {
         for (asset, balance) in &alice.balances {
             balances.insert(asset.clone(), balance.balance);
         }
-        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     let hash = tx.hash();
@@ -565,12 +653,23 @@ async fn test_tx_deploy_contract() {
         module.add_chunk(Chunk::new());
         let data = TransactionTypeBuilder::DeployContract(DeployContractBuilder {
             module: module.to_hex(),
-            invoke: None
+            invoke: None,
         });
-        let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), None, data, FeeBuilder::default()); // Use T0 for DeployContract
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            alice.keypair.get_public_key().compress(),
+            None,
+            data,
+            FeeBuilder::default(),
+        ); // Use T0 for DeployContract
         let estimated_size = builder.estimate_size();
         let tx = builder.build(&mut state, &alice.keypair).unwrap();
-        assert!(estimated_size == tx.size(), "expected {} bytes got {} bytes", tx.size(), estimated_size);
+        assert!(
+            estimated_size == tx.size(),
+            "expected {} bytes got {} bytes",
+            tx.size(),
+            estimated_size
+        );
         assert!(tx.to_bytes().len() == estimated_size);
 
         Arc::new(tx)
@@ -584,10 +683,13 @@ async fn test_tx_deploy_contract() {
         for (asset, balance) in &alice.balances {
             balances.insert(asset.clone(), balance.balance);
         }
-        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     let hash = tx.hash();
@@ -622,7 +724,7 @@ async fn test_max_transfers() {
                 destination: bob.address(),
                 asset: TOS_ASSET,
                 extra_data: None,
-                    });
+            });
         }
 
         let mut state = AccountStateImpl {
@@ -635,7 +737,13 @@ async fn test_max_transfers() {
         };
 
         let data = TransactionTypeBuilder::Transfers(transfers);
-        let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), None, data, FeeBuilder::default());
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            alice.keypair.get_public_key().compress(),
+            None,
+            data,
+            FeeBuilder::default(),
+        );
         let estimated_size = builder.estimate_size();
         let tx = builder.build(&mut state, &alice.keypair).unwrap();
         assert!(estimated_size == tx.size());
@@ -653,10 +761,13 @@ async fn test_max_transfers() {
         for (asset, balance) in alice.balances {
             balances.insert(asset, balance.balance);
         }
-        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
     // Bob
     {
@@ -664,10 +775,13 @@ async fn test_max_transfers() {
         for (asset, balance) in bob.balances {
             balances.insert(asset, balance.balance);
         }
-        state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: bob.nonce,
-        });
+        state.accounts.insert(
+            bob.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: bob.nonce,
+            },
+        );
     }
     let hash = tx.hash();
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
@@ -696,9 +810,18 @@ async fn test_multisig_setup() {
 
         let data = TransactionTypeBuilder::MultiSig(MultiSigBuilder {
             threshold: 2,
-            participants: IndexSet::from_iter(vec![bob.keypair.get_public_key().to_address(false), charlie.keypair.get_public_key().to_address(false)]),
+            participants: IndexSet::from_iter(vec![
+                bob.keypair.get_public_key().to_address(false),
+                charlie.keypair.get_public_key().to_address(false),
+            ]),
         });
-        let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), None, data, FeeBuilder::default()); // Use T0 for MultiSig
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            alice.keypair.get_public_key().compress(),
+            None,
+            data,
+            FeeBuilder::default(),
+        ); // Use T0 for MultiSig
         let estimated_size = builder.estimate_size();
         let tx = builder.build(&mut state, &alice.keypair).unwrap();
         assert!(estimated_size == tx.size());
@@ -715,10 +838,13 @@ async fn test_multisig_setup() {
         for (asset, balance) in alice.balances {
             balances.insert(asset, balance.balance);
         }
-        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     {
@@ -726,16 +852,21 @@ async fn test_multisig_setup() {
         for (asset, balance) in bob.balances {
             balances.insert(asset, balance.balance);
         }
-        state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            bob.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     let hash = tx.hash();
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
 
-    assert!(state.multisig.contains_key(&alice.keypair.get_public_key().compress()));
+    assert!(state
+        .multisig
+        .contains_key(&alice.keypair.get_public_key().compress()));
 }
 
 // Balance simplification: Re-enabled test - passes with plaintext balances
@@ -767,8 +898,14 @@ async fn test_multisig() {
             destination: bob.address(),
             asset: TOS_ASSET,
             extra_data: None,
-            }]);
-        let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), Some(2), data, FeeBuilder::default()); // Use T0 for MultiSig
+        }]);
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            alice.keypair.get_public_key().compress(),
+            Some(2),
+            data,
+            FeeBuilder::default(),
+        ); // Use T0 for MultiSig
         let mut tx = builder.build_unsigned(&mut state, &alice.keypair).unwrap();
 
         tx.sign_multisig(&charlie.keypair, 0);
@@ -786,10 +923,13 @@ async fn test_multisig() {
         for (asset, balance) in alice.balances {
             balances.insert(asset, balance.balance);
         }
-        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     // Bob
@@ -799,16 +939,25 @@ async fn test_multisig() {
             balances.insert(asset, balance.balance);
         }
 
-        state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            bob.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
-    state.multisig.insert(alice.keypair.get_public_key().compress(), MultiSigPayload {
-        threshold: 2,
-        participants: IndexSet::from_iter(vec![charlie.keypair.get_public_key().compress(), dave.keypair.get_public_key().compress()]),
-    });
+    state.multisig.insert(
+        alice.keypair.get_public_key().compress(),
+        MultiSigPayload {
+            threshold: 2,
+            participants: IndexSet::from_iter(vec![
+                charlie.keypair.get_public_key().compress(),
+                dave.keypair.get_public_key().compress(),
+            ]),
+        },
+    );
 
     let hash = tx.hash();
     tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
@@ -840,9 +989,15 @@ async fn test_transfer_extra_data_limits() {
             destination: bob.address(),
             asset: TOS_ASSET,
             extra_data: Some(max_extra_data),
-            }]);
+        }]);
 
-        let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), None, data, FeeBuilder::default());
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            alice.keypair.get_public_key().compress(),
+            None,
+            data,
+            FeeBuilder::default(),
+        );
         builder.build(&mut state, &alice.keypair).unwrap()
     };
 
@@ -855,10 +1010,13 @@ async fn test_transfer_extra_data_limits() {
         for (asset, balance) in &alice.balances {
             balances.insert(asset.clone(), balance.balance);
         }
-        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
     // Bob
     {
@@ -866,30 +1024,46 @@ async fn test_transfer_extra_data_limits() {
         for (asset, balance) in &bob.balances {
             balances.insert(asset.clone(), balance.balance);
         }
-        state.accounts.insert(bob.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: bob.nonce,
-        });
+        state.accounts.insert(
+            bob.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: bob.nonce,
+            },
+        );
     }
 
     // Verify the transaction
     let tx_hash = tx.hash();
     let tx_fee = tx.fee; // Save fee before moving tx into Arc
     let result = Arc::new(tx).verify(&tx_hash, &mut state, &NoZKPCache).await;
-    assert!(result.is_ok(), "Transaction with maximum extra data should be valid");
+    assert!(
+        result.is_ok(),
+        "Transaction with maximum extra data should be valid"
+    );
 
     // Balance simplification: verify() only validates, doesn't apply state changes
     // Manually apply balance changes to simulate what apply() does in production
     {
         // Deduct amount + fee from Alice's balance
         let total_spend = 1 + tx_fee;
-        let alice_balance = state.accounts.get_mut(&alice.keypair.get_public_key().compress()).unwrap()
-            .balances.get_mut(&TOS_ASSET).unwrap();
+        let alice_balance = state
+            .accounts
+            .get_mut(&alice.keypair.get_public_key().compress())
+            .unwrap()
+            .balances
+            .get_mut(&TOS_ASSET)
+            .unwrap();
         *alice_balance = alice_balance.checked_sub(total_spend).unwrap();
 
         // Add amount to Bob's balance
-        let bob_balance = state.accounts.get_mut(&bob.keypair.get_public_key().compress()).unwrap()
-            .balances.get_mut(&TOS_ASSET).unwrap();
+        let bob_balance = state
+            .accounts
+            .get_mut(&bob.keypair.get_public_key().compress())
+            .unwrap()
+            .balances
+            .get_mut(&TOS_ASSET)
+            .unwrap();
         *bob_balance = bob_balance.checked_add(1).unwrap();
     }
 
@@ -910,9 +1084,15 @@ async fn test_transfer_extra_data_limits() {
             destination: bob.address(),
             asset: TOS_ASSET,
             extra_data: Some(oversized_extra_data),
-            }]);
+        }]);
 
-        let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), None, data, FeeBuilder::default());
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            alice.keypair.get_public_key().compress(),
+            None,
+            data,
+            FeeBuilder::default(),
+        );
         builder.build(&mut state, &alice.keypair)
     };
 
@@ -920,7 +1100,10 @@ async fn test_transfer_extra_data_limits() {
         Ok(_) => panic!("Transaction with oversized extra data should fail"),
         Err(e) => {
             println!("Actual error: {:?}", e);
-            assert!(matches!(e, GenerationError::ExtraDataTooLarge), "Expected ExtraDataTooLarge error");
+            assert!(
+                matches!(e, GenerationError::ExtraDataTooLarge),
+                "Expected ExtraDataTooLarge error"
+            );
         }
     }
 
@@ -936,7 +1119,7 @@ async fn test_transfer_extra_data_limits() {
             destination: bob.address(),
             asset: TOS_ASSET,
             extra_data: Some(extra_data),
-            });
+        });
     }
 
     let tx_total_oversized = {
@@ -950,7 +1133,13 @@ async fn test_transfer_extra_data_limits() {
         };
 
         let data = TransactionTypeBuilder::Transfers(transfers);
-        let builder = TransactionBuilder::new(TxVersion::T0, alice.keypair.get_public_key().compress(), None, data, FeeBuilder::default());
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            alice.keypair.get_public_key().compress(),
+            None,
+            data,
+            FeeBuilder::default(),
+        );
         builder.build(&mut state, &alice.keypair)
     };
 
@@ -958,8 +1147,14 @@ async fn test_transfer_extra_data_limits() {
         Ok(_) => panic!("Transaction with total oversized extra data should fail"),
         Err(e) => {
             println!("Actual total oversized error: {:?}", e);
-            assert!(matches!(e, GenerationError::ExtraDataTooLarge | GenerationError::EncryptedExtraDataTooLarge(_, _)), 
-                   "Expected ExtraDataTooLarge or EncryptedExtraDataTooLarge error for total size");
+            assert!(
+                matches!(
+                    e,
+                    GenerationError::ExtraDataTooLarge
+                        | GenerationError::EncryptedExtraDataTooLarge(_, _)
+                ),
+                "Expected ExtraDataTooLarge or EncryptedExtraDataTooLarge error for total size"
+            );
         }
     }
 }
@@ -1009,16 +1204,22 @@ async fn test_unfreeze_tos_balance_refund() {
         for (asset, balance) in &alice.balances {
             balances.insert(asset.clone(), balance.balance);
         }
-        state.accounts.insert(alice.keypair.get_public_key().compress(), AccountChainState {
-            balances,
-            nonce: alice.nonce,
-        });
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
     }
 
     // Check balance before verify
-    let balance_before_verify = state.accounts.get(&alice.keypair.get_public_key().compress())
+    let balance_before_verify = state
+        .accounts
+        .get(&alice.keypair.get_public_key().compress())
         .unwrap()
-        .balances.get(&TOS_ASSET)
+        .balances
+        .get(&TOS_ASSET)
         .unwrap();
     println!("Balance before verify: {}", balance_before_verify);
 
@@ -1026,23 +1227,32 @@ async fn test_unfreeze_tos_balance_refund() {
     let unfreeze_tx_hash = unfreeze_tx.hash();
     let tx_fee = unfreeze_tx.fee; // Save actual fee from transaction
     println!("Transaction fee: {}", tx_fee);
-    let unfreeze_result = Arc::new(unfreeze_tx).verify(&unfreeze_tx_hash, &mut state, &NoZKPCache).await;
-    assert!(unfreeze_result.is_ok(), "UnfreezeTos transaction should succeed");
+    let unfreeze_result = Arc::new(unfreeze_tx)
+        .verify(&unfreeze_tx_hash, &mut state, &NoZKPCache)
+        .await;
+    assert!(
+        unfreeze_result.is_ok(),
+        "UnfreezeTos transaction should succeed"
+    );
 
     // After UnfreezeTos verify: balance should be increased by unfreeze_amount but decreased by fee
     // Expected: initial + unfreeze_amount - tx_fee (use actual tx fee, not hardcoded)
-    let alice_balance_after_unfreeze = state.accounts.get(&alice.keypair.get_public_key().compress())
+    let alice_balance_after_unfreeze = state
+        .accounts
+        .get(&alice.keypair.get_public_key().compress())
         .unwrap()
-        .balances.get(&TOS_ASSET)
+        .balances
+        .get(&TOS_ASSET)
         .unwrap();
     println!("Balance after verify: {}", alice_balance_after_unfreeze);
 
     let expected_balance = initial_balance + unfreeze_amount - tx_fee;
-    println!("Expected balance: {} (initial {} + unfreeze {} - fee {})",
-        expected_balance, initial_balance, unfreeze_amount, tx_fee);
+    println!(
+        "Expected balance: {} (initial {} + unfreeze {} - fee {})",
+        expected_balance, initial_balance, unfreeze_amount, tx_fee
+    );
     assert_eq!(
-        *alice_balance_after_unfreeze,
-        expected_balance,
+        *alice_balance_after_unfreeze, expected_balance,
         "Balance should be initial + unfreeze_amount - fee (refund happens in verify phase)"
     );
 
@@ -1050,8 +1260,7 @@ async fn test_unfreeze_tos_balance_refund() {
     // If refund didn't happen, balance would be: initial - tx_fee
     let no_refund_balance = initial_balance - tx_fee;
     assert_ne!(
-        *alice_balance_after_unfreeze,
-        no_refund_balance,
+        *alice_balance_after_unfreeze, no_refund_balance,
         "Balance should show refund (if equal to this, refund logic is missing)"
     );
 
@@ -1060,17 +1269,16 @@ async fn test_unfreeze_tos_balance_refund() {
     println!("   Unfreeze amount:     {}", unfreeze_amount);
     println!("   Transaction fee:     {}", tx_fee);
     println!("   Final balance:       {}", expected_balance);
-    println!("   Formula verified:    {} + {} - {} = {}", initial_balance, unfreeze_amount, tx_fee, expected_balance);
+    println!(
+        "   Formula verified:    {} + {} - {} = {}",
+        initial_balance, unfreeze_amount, tx_fee, expected_balance
+    );
 }
 
 #[async_trait]
 impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
-
     /// Pre-verify the TX
-    async fn pre_verify_tx<'b>(
-        &'b mut self,
-        _: &Transaction,
-    ) -> Result<(), TestError> {
+    async fn pre_verify_tx<'b>(&'b mut self, _: &Transaction) -> Result<(), TestError> {
         Ok(())
     }
 
@@ -1084,7 +1292,10 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         // Get account or error if not found
         let account_state = self.accounts.get_mut(&account).ok_or(TestError(()))?;
         // Auto-create balance entry if missing (for new assets being received)
-        Ok(account_state.balances.entry(asset.into_owned()).or_insert(0))
+        Ok(account_state
+            .balances
+            .entry(asset.into_owned())
+            .or_insert(0))
     }
 
     /// Get the balance used for verification of funds for the sender account
@@ -1094,7 +1305,10 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         asset: &'a Hash,
         _: &Reference,
     ) -> Result<&'b mut u64, TestError> {
-        self.accounts.get_mut(account).and_then(|account| account.balances.get_mut(asset)).ok_or(TestError(()))
+        self.accounts
+            .get_mut(account)
+            .and_then(|account| account.balances.get_mut(asset))
+            .ok_or(TestError(()))
     }
 
     /// Apply new output to a sender account
@@ -1108,20 +1322,23 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     }
 
     /// Get the nonce of an account
-    async fn get_account_nonce(
-        &mut self,
-        account: &'a PublicKey
-    ) -> Result<Nonce, TestError> {
-        self.accounts.get(account).map(|account| account.nonce).ok_or(TestError(()))
+    async fn get_account_nonce(&mut self, account: &'a PublicKey) -> Result<Nonce, TestError> {
+        self.accounts
+            .get(account)
+            .map(|account| account.nonce)
+            .ok_or(TestError(()))
     }
 
     /// Apply a new nonce to an account
     async fn update_account_nonce(
         &mut self,
         account: &'a PublicKey,
-        new_nonce: Nonce
+        new_nonce: Nonce,
     ) -> Result<(), TestError> {
-        self.accounts.get_mut(account).map(|account| account.nonce = new_nonce).ok_or(TestError(()))
+        self.accounts
+            .get_mut(account)
+            .map(|account| account.nonce = new_nonce)
+            .ok_or(TestError(()))
     }
 
     /// Atomic compare-and-swap for nonce (V-11 security fix)
@@ -1129,7 +1346,7 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         &mut self,
         account: &'a CompressedPublicKey,
         expected: Nonce,
-        new_value: Nonce
+        new_value: Nonce,
     ) -> Result<bool, TestError> {
         // For test state, we don't need true atomicity
         // Note: In this test module, PublicKey is already CompressedPublicKey
@@ -1149,7 +1366,7 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     async fn set_multisig_state(
         &mut self,
         account: &'a PublicKey,
-        multisig: &MultiSigPayload
+        multisig: &MultiSigPayload,
     ) -> Result<(), TestError> {
         self.multisig.insert(account.clone(), multisig.clone());
         Ok(())
@@ -1157,7 +1374,7 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
 
     async fn get_multisig_state(
         &mut self,
-        account: &'a PublicKey
+        account: &'a PublicKey,
     ) -> Result<Option<&MultiSigPayload>, TestError> {
         Ok(self.multisig.get(account))
     }
@@ -1169,22 +1386,19 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     async fn set_contract_module(
         &mut self,
         hash: &'a Hash,
-        module: &'a Module
+        module: &'a Module,
     ) -> Result<(), TestError> {
         self.contracts.insert(hash.clone(), module.clone());
         Ok(())
     }
 
-    async fn load_contract_module(
-        &mut self,
-        hash: &'a Hash
-    ) -> Result<bool, TestError> {
+    async fn load_contract_module(&mut self, hash: &'a Hash) -> Result<bool, TestError> {
         Ok(self.contracts.contains_key(hash))
     }
 
     async fn get_contract_module_with_environment(
         &self,
-        contract: &'a Hash
+        contract: &'a Hash,
     ) -> Result<(&Module, &Environment), TestError> {
         let module = self.contracts.get(contract).ok_or(TestError(()))?;
         Ok((module, &self.env))
@@ -1204,26 +1418,31 @@ impl AccountState for AccountStateImpl {
         false
     }
 
-    fn get_account_balance(&self, asset: &Hash) -> Result<u64, TestError> { // Use TestError
-        self.balances.get(asset).map(|balance| balance.balance).ok_or(TestError(()))
+    fn get_account_balance(&self, asset: &Hash) -> Result<u64, TestError> {
+        // Use TestError
+        self.balances
+            .get(asset)
+            .map(|balance| balance.balance)
+            .ok_or(TestError(()))
     }
 
     fn get_reference(&self) -> Reference {
         self.reference.clone()
     }
 
-    fn update_account_balance(&mut self, asset: &Hash, balance: u64) -> Result<(), TestError> { // Use TestError
-        self.balances.insert(asset.clone(), Balance {
-            balance,
-        });
+    fn update_account_balance(&mut self, asset: &Hash, balance: u64) -> Result<(), TestError> {
+        // Use TestError
+        self.balances.insert(asset.clone(), Balance { balance });
         Ok(())
     }
 
-    fn get_nonce(&self) -> Result<Nonce, TestError> { // Use TestError
+    fn get_nonce(&self) -> Result<Nonce, TestError> {
+        // Use TestError
         Ok(self.nonce)
     }
 
-    fn update_nonce(&mut self, new_nonce: Nonce) -> Result<(), TestError> { // Use TestError
+    fn update_nonce(&mut self, new_nonce: Nonce) -> Result<(), TestError> {
+        // Use TestError
         self.nonce = new_nonce;
         Ok(())
     }
@@ -1279,18 +1498,14 @@ fn create_transfer_tx(
         sender.keypair.get_public_key().compress(),
         None,
         data,
-        FeeBuilder::default()
+        FeeBuilder::default(),
     );
 
     Arc::new(builder.build(&mut state, &sender.keypair).unwrap())
 }
 
 // Helper function to create a burn transaction
-fn create_burn_tx(
-    sender: &Account,
-    amount: u64,
-    asset: Hash,
-) -> Arc<Transaction> {
+fn create_burn_tx(sender: &Account, amount: u64, asset: Hash) -> Arc<Transaction> {
     let mut state = AccountStateImpl {
         balances: sender.balances.clone(),
         nonce: sender.nonce,
@@ -1300,17 +1515,14 @@ fn create_burn_tx(
         },
     };
 
-    let data = TransactionTypeBuilder::Burn(BurnPayload {
-        amount,
-        asset,
-    });
+    let data = TransactionTypeBuilder::Burn(BurnPayload { amount, asset });
 
     let builder = TransactionBuilder::new(
         TxVersion::T0,
         sender.keypair.get_public_key().compress(),
         None,
         data,
-        FeeBuilder::default()
+        FeeBuilder::default(),
     );
 
     Arc::new(builder.build(&mut state, &sender.keypair).unwrap())
@@ -1336,14 +1548,22 @@ async fn test_p04_transfer_balance_mutation() {
     state.accounts.insert(
         alice.keypair.get_public_key().compress(),
         AccountChainState {
-            balances: alice.balances.iter().map(|(k, v)| (k.clone(), v.balance)).collect(),
+            balances: alice
+                .balances
+                .iter()
+                .map(|(k, v)| (k.clone(), v.balance))
+                .collect(),
             nonce: alice.nonce,
         },
     );
     state.accounts.insert(
         bob.keypair.get_public_key().compress(),
         AccountChainState {
-            balances: bob.balances.iter().map(|(k, v)| (k.clone(), v.balance)).collect(),
+            balances: bob
+                .balances
+                .iter()
+                .map(|(k, v)| (k.clone(), v.balance))
+                .collect(),
             nonce: bob.nonce,
         },
     );
@@ -1357,14 +1577,19 @@ async fn test_p04_transfer_balance_mutation() {
     // to simulate what apply() does (P0-2 implementation test)
     {
         // Add amount to Bob's balance (receiver - simulates apply() receiver update logic)
-        let bob_balance = state.accounts.get_mut(&bob.keypair.get_public_key().compress()).unwrap()
-            .balances.entry(TOS_ASSET).or_insert(0);
+        let bob_balance = state
+            .accounts
+            .get_mut(&bob.keypair.get_public_key().compress())
+            .unwrap()
+            .balances
+            .entry(TOS_ASSET)
+            .or_insert(0);
         *bob_balance = bob_balance.checked_add(500 * COIN_VALUE).unwrap();
     }
 
     // Verify Alice's balance: 1000 - 500 - fee (sender deduction from verify())
-    let alice_balance = state.accounts[&alice.keypair.get_public_key().compress()]
-        .balances[&TOS_ASSET];
+    let alice_balance =
+        state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     assert_eq!(
         alice_balance,
         1000 * COIN_VALUE - 500 * COIN_VALUE - tx_fee,
@@ -1372,8 +1597,7 @@ async fn test_p04_transfer_balance_mutation() {
     );
 
     // Verify Bob's balance: 0 + 500 (receiver credit from simulated apply())
-    let bob_balance = state.accounts[&bob.keypair.get_public_key().compress()]
-        .balances[&TOS_ASSET];
+    let bob_balance = state.accounts[&bob.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     assert_eq!(
         bob_balance,
         500 * COIN_VALUE,
@@ -1411,7 +1635,9 @@ async fn test_p04_double_spend_prevention() {
     state.accounts.insert(
         alice.keypair.get_public_key().compress(),
         AccountChainState {
-            balances: vec![(TOS_ASSET.clone(), 100 * COIN_VALUE)].into_iter().collect(),
+            balances: vec![(TOS_ASSET.clone(), 100 * COIN_VALUE)]
+                .into_iter()
+                .collect(),
             nonce: 0,
         },
     );
@@ -1432,11 +1658,20 @@ async fn test_p04_double_spend_prevention() {
     // After TX1, Alice has: 100 - 60 - fee1 < 60 + fee2
     let tx2_hash = tx2.hash();
     let result2 = tx2.verify(&tx2_hash, &mut state, &NoZKPCache).await;
-    assert!(result2.is_err(), "Second transaction should fail (double-spend prevention)");
+    assert!(
+        result2.is_err(),
+        "Second transaction should fail (double-spend prevention)"
+    );
 
     match result2 {
-        Err(VerificationError::InsufficientFunds { available, required }) => {
-            println!("✓ Double-spend prevented: available={}, required={}", available, required);
+        Err(VerificationError::InsufficientFunds {
+            available,
+            required,
+        }) => {
+            println!(
+                "✓ Double-spend prevented: available={}, required={}",
+                available, required
+            );
             assert!(available < required, "Should have insufficient funds");
         }
         _ => panic!("Expected InsufficientFunds error, got {:?}", result2),
@@ -1462,7 +1697,9 @@ async fn test_p04_insufficient_balance() {
     state.accounts.insert(
         alice.keypair.get_public_key().compress(),
         AccountChainState {
-            balances: vec![(TOS_ASSET.clone(), 50 * COIN_VALUE)].into_iter().collect(),
+            balances: vec![(TOS_ASSET.clone(), 50 * COIN_VALUE)]
+                .into_iter()
+                .collect(),
             nonce: alice.nonce,
         },
     );
@@ -1478,11 +1715,24 @@ async fn test_p04_insufficient_balance() {
     let tx_hash = tx.hash();
     let result = tx.verify(&tx_hash, &mut state, &NoZKPCache).await;
 
-    assert!(result.is_err(), "Transaction should fail due to insufficient balance");
+    assert!(
+        result.is_err(),
+        "Transaction should fail due to insufficient balance"
+    );
     match result {
-        Err(VerificationError::InsufficientFunds { available, required }) => {
-            println!("✓ Insufficient balance detected: available={}, required={}", available, required);
-            assert_eq!(available, 50 * COIN_VALUE, "Available balance should be 50 TOS");
+        Err(VerificationError::InsufficientFunds {
+            available,
+            required,
+        }) => {
+            println!(
+                "✓ Insufficient balance detected: available={}, required={}",
+                available, required
+            );
+            assert_eq!(
+                available,
+                50 * COIN_VALUE,
+                "Available balance should be 50 TOS"
+            );
             assert!(required > available, "Required should exceed available");
         }
         _ => panic!("Expected InsufficientFunds error, got {:?}", result),
@@ -1524,7 +1774,10 @@ async fn test_p04_overflow_protection() {
     // verify() deducts from sender - should succeed
     let tx_hash = tx.hash();
     let result_verify = tx.verify(&tx_hash, &mut state, &NoZKPCache).await;
-    assert!(result_verify.is_ok(), "verify() should succeed (sender balance deduction is OK)");
+    assert!(
+        result_verify.is_ok(),
+        "verify() should succeed (sender balance deduction is OK)"
+    );
 
     // Now manually simulate apply() receiver balance update - this should detect overflow
     // In production, apply() would do this receiver balance update and catch the overflow
@@ -1532,16 +1785,27 @@ async fn test_p04_overflow_protection() {
         panic!("Expected Transfers transaction");
     };
 
-    for transfer in transfers {
-        let current_balance = state.accounts.get_mut(&bob.keypair.get_public_key().compress()).unwrap()
-            .balances.get_mut(&TOS_ASSET).unwrap();
+    if let Some(transfer) = transfers.iter().next() {
+        let current_balance = state
+            .accounts
+            .get_mut(&bob.keypair.get_public_key().compress())
+            .unwrap()
+            .balances
+            .get_mut(&TOS_ASSET)
+            .unwrap();
 
         let amount = transfer.get_amount();
         let result = current_balance.checked_add(amount);
 
         // This should be None (overflow detected)
-        assert!(result.is_none(), "Overflow should be detected when adding to u64::MAX");
-        println!("✓ Overflow protection triggered: u64::MAX + {} would overflow", amount);
+        assert!(
+            result.is_none(),
+            "Overflow should be detected when adding to u64::MAX"
+        );
+        println!(
+            "✓ Overflow protection triggered: u64::MAX + {} would overflow",
+            amount
+        );
         return;
     }
 
@@ -1570,7 +1834,9 @@ async fn test_p04_fee_deduction() {
     state.accounts.insert(
         alice.keypair.get_public_key().compress(),
         AccountChainState {
-            balances: vec![(TOS_ASSET.clone(), 1000 * COIN_VALUE)].into_iter().collect(),
+            balances: vec![(TOS_ASSET.clone(), 1000 * COIN_VALUE)]
+                .into_iter()
+                .collect(),
             nonce: alice.nonce,
         },
     );
@@ -1588,14 +1854,19 @@ async fn test_p04_fee_deduction() {
 
     // Simulate apply() receiver balance update
     {
-        let bob_balance = state.accounts.get_mut(&bob.keypair.get_public_key().compress()).unwrap()
-            .balances.entry(TOS_ASSET).or_insert(0);
+        let bob_balance = state
+            .accounts
+            .get_mut(&bob.keypair.get_public_key().compress())
+            .unwrap()
+            .balances
+            .entry(TOS_ASSET)
+            .or_insert(0);
         *bob_balance = bob_balance.checked_add(100 * COIN_VALUE).unwrap();
     }
 
     // Verify Alice's balance includes fee deduction
-    let alice_balance = state.accounts[&alice.keypair.get_public_key().compress()]
-        .balances[&TOS_ASSET];
+    let alice_balance =
+        state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     assert_eq!(
         alice_balance,
         1000 * COIN_VALUE - 100 * COIN_VALUE - tx_fee,
@@ -1603,8 +1874,7 @@ async fn test_p04_fee_deduction() {
     );
 
     // Verify Bob received exact transfer amount (no fee deduction)
-    let bob_balance = state.accounts[&bob.keypair.get_public_key().compress()]
-        .balances[&TOS_ASSET];
+    let bob_balance = state.accounts[&bob.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     assert_eq!(
         bob_balance,
         100 * COIN_VALUE,
@@ -1632,7 +1902,9 @@ async fn test_p04_burn_transaction() {
     state.accounts.insert(
         alice.keypair.get_public_key().compress(),
         AccountChainState {
-            balances: vec![(TOS_ASSET.clone(), 1000 * COIN_VALUE)].into_iter().collect(),
+            balances: vec![(TOS_ASSET.clone(), 1000 * COIN_VALUE)]
+                .into_iter()
+                .collect(),
             nonce: alice.nonce,
         },
     );
@@ -1642,15 +1914,18 @@ async fn test_p04_burn_transaction() {
     tx.verify(&tx_hash, &mut state, &NoZKPCache).await.unwrap();
 
     // Verify Alice's balance: 1000 - 200 (burned) - fee
-    let alice_balance = state.accounts[&alice.keypair.get_public_key().compress()]
-        .balances[&TOS_ASSET];
+    let alice_balance =
+        state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     assert_eq!(
         alice_balance,
         1000 * COIN_VALUE - 200 * COIN_VALUE - tx_fee,
         "Alice's balance should be deducted by burn amount + fee"
     );
 
-    println!("✓ Burn transaction correctly deducted: 200 TOS + {} fee", tx_fee);
+    println!(
+        "✓ Burn transaction correctly deducted: 200 TOS + {} fee",
+        tx_fee
+    );
 }
 
 // Test 7: Multiple transfers in single transaction
@@ -1694,7 +1969,7 @@ async fn test_p04_multiple_transfers() {
         alice.keypair.get_public_key().compress(),
         None,
         data,
-        FeeBuilder::default()
+        FeeBuilder::default(),
     );
 
     let tx = Arc::new(builder.build(&mut state_impl, &alice.keypair).unwrap());
@@ -1705,7 +1980,9 @@ async fn test_p04_multiple_transfers() {
     state.accounts.insert(
         alice.keypair.get_public_key().compress(),
         AccountChainState {
-            balances: vec![(TOS_ASSET.clone(), 1000 * COIN_VALUE)].into_iter().collect(),
+            balances: vec![(TOS_ASSET.clone(), 1000 * COIN_VALUE)]
+                .into_iter()
+                .collect(),
             nonce: alice.nonce,
         },
     );
@@ -1730,18 +2007,28 @@ async fn test_p04_multiple_transfers() {
 
     // Simulate apply() receiver balance updates
     {
-        let bob_balance = state.accounts.get_mut(&bob.keypair.get_public_key().compress()).unwrap()
-            .balances.entry(TOS_ASSET).or_insert(0);
+        let bob_balance = state
+            .accounts
+            .get_mut(&bob.keypair.get_public_key().compress())
+            .unwrap()
+            .balances
+            .entry(TOS_ASSET)
+            .or_insert(0);
         *bob_balance = bob_balance.checked_add(300 * COIN_VALUE).unwrap();
 
-        let charlie_balance = state.accounts.get_mut(&charlie.keypair.get_public_key().compress()).unwrap()
-            .balances.entry(TOS_ASSET).or_insert(0);
+        let charlie_balance = state
+            .accounts
+            .get_mut(&charlie.keypair.get_public_key().compress())
+            .unwrap()
+            .balances
+            .entry(TOS_ASSET)
+            .or_insert(0);
         *charlie_balance = charlie_balance.checked_add(200 * COIN_VALUE).unwrap();
     }
 
     // Verify Alice's balance: 1000 - 300 - 200 - fee
-    let alice_balance = state.accounts[&alice.keypair.get_public_key().compress()]
-        .balances[&TOS_ASSET];
+    let alice_balance =
+        state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     assert_eq!(
         alice_balance,
         1000 * COIN_VALUE - 300 * COIN_VALUE - 200 * COIN_VALUE - tx_fee,
@@ -1749,14 +2036,17 @@ async fn test_p04_multiple_transfers() {
     );
 
     // Verify Bob's balance
-    let bob_balance = state.accounts[&bob.keypair.get_public_key().compress()]
-        .balances[&TOS_ASSET];
+    let bob_balance = state.accounts[&bob.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     assert_eq!(bob_balance, 300 * COIN_VALUE, "Bob should receive 300 TOS");
 
     // Verify Charlie's balance
-    let charlie_balance = state.accounts[&charlie.keypair.get_public_key().compress()]
-        .balances[&TOS_ASSET];
-    assert_eq!(charlie_balance, 200 * COIN_VALUE, "Charlie should receive 200 TOS");
+    let charlie_balance =
+        state.accounts[&charlie.keypair.get_public_key().compress()].balances[&TOS_ASSET];
+    assert_eq!(
+        charlie_balance,
+        200 * COIN_VALUE,
+        "Charlie should receive 200 TOS"
+    );
 
     println!("✓ Multiple transfers correctly processed: 300 + 200 TOS");
 }

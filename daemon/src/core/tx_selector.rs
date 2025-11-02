@@ -1,19 +1,11 @@
 use std::{
-    collections::{
-        VecDeque,
-        BinaryHeap,
-        HashMap,
-        hash_map::Entry
-    },
+    cmp::Ordering,
+    collections::{hash_map::Entry, BinaryHeap, HashMap, VecDeque},
     sync::Arc,
-    cmp::Ordering
 };
 use tos_common::{
+    crypto::{Hash, PublicKey},
     transaction::Transaction,
-    crypto::{
-        Hash,
-        PublicKey
-    }
 };
 
 // this struct is used to store transaction with its hash and its size in bytes
@@ -23,7 +15,7 @@ pub struct TxSelectorEntry<'a> {
     // Current transaction
     pub tx: &'a Arc<Transaction>,
     // Size in bytes of the TX
-    pub size: usize
+    pub size: usize,
 }
 
 impl PartialEq for TxSelectorEntry<'_> {
@@ -42,13 +34,19 @@ struct Transactions<'a>(VecDeque<TxSelectorEntry<'a>>);
 
 impl PartialOrd for Transactions<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0.front().map(|e| e.tx.get_fee()).partial_cmp(&other.0.front().map(|e| e.tx.get_fee()))
+        self.0
+            .front()
+            .map(|e| e.tx.get_fee())
+            .partial_cmp(&other.0.front().map(|e| e.tx.get_fee()))
     }
 }
 
 impl Ord for Transactions<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0.front().map(|e| e.tx.get_fee()).cmp(&other.0.front().map(|e| e.tx.get_fee()))
+        self.0
+            .front()
+            .map(|e| e.tx.get_fee())
+            .cmp(&other.0.front().map(|e| e.tx.get_fee()))
     }
 }
 
@@ -56,51 +54,45 @@ impl Ord for Transactions<'_> {
 // It create sub groups of transactions by sender and order them by nonces
 // It joins all sub groups in a queue that is ordered by fees
 pub struct TxSelector<'a> {
-    queue: BinaryHeap<Transactions<'a>>
+    queue: BinaryHeap<Transactions<'a>>,
 }
 
 impl<'a> TxSelector<'a> {
     // Create a TxSelector from a list of groups
     pub fn grouped<I>(groups: I) -> Self
     where
-        I: Iterator<Item = Vec<TxSelectorEntry<'a>>> + ExactSizeIterator
+        I: Iterator<Item = Vec<TxSelectorEntry<'a>>> + ExactSizeIterator,
     {
         let mut queue = BinaryHeap::with_capacity(groups.len());
 
         // push every group to the queue
         queue.extend(groups.map(|v| Transactions(VecDeque::from(v))));
 
-        Self {
-            queue
-        }
+        Self { queue }
     }
 
     // Create a TxSelector with a given capacity
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            queue: BinaryHeap::with_capacity(capacity)
+            queue: BinaryHeap::with_capacity(capacity),
         }
     }
 
     // Create a TxSelector from a list of transactions with their hash and size
     pub fn new<I>(iter: I) -> Self
     where
-        I: Iterator<Item = (usize, &'a Arc<Hash>, &'a Arc<Transaction>)>
+        I: Iterator<Item = (usize, &'a Arc<Hash>, &'a Arc<Transaction>)>,
     {
         let mut groups: HashMap<&PublicKey, Vec<TxSelectorEntry>> = HashMap::new();
 
         // Create groups of transactions
         for (size, hash, tx) in iter {
-            let entry = TxSelectorEntry {
-                hash,
-                tx,
-                size
-            };
+            let entry = TxSelectorEntry { hash, tx, size };
 
             match groups.entry(tx.get_source()) {
                 Entry::Occupied(mut e) => {
                     e.get_mut().push(entry);
-                },
+                }
                 Entry::Vacant(e) => {
                     e.insert(vec![entry]);
                 }

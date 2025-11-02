@@ -1,24 +1,14 @@
-use core::fmt;
-use std::{borrow::Cow, str::FromStr};
-use log::debug;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use crate::{
-    crypto::{
-        elgamal::RISTRETTO_COMPRESSED_SIZE,
-        hash,
-        Hash,
-        Hashable,
-        PublicKey,
-    },
+    crypto::{elgamal::RISTRETTO_COMPRESSED_SIZE, hash, Hash, Hashable, PublicKey},
     serializer::{Reader, ReaderError, Serializer, Writer},
     time::TimestampMillis,
 };
-use tos_hash::{
-    Error as TosHashError,
-    v1,
-    v2,
-};
+use core::fmt;
+use log::debug;
+use serde::{Deserialize, Serialize};
+use std::{borrow::Cow, str::FromStr};
+use thiserror::Error;
+use tos_hash::{v1, v2, Error as TosHashError};
 
 use super::{BlockHeader, BLOCK_WORK_SIZE, EXTRA_NONCE_SIZE};
 
@@ -33,7 +23,7 @@ impl WorkVariant {
         Some(match self {
             WorkVariant::Uninitialized => return None,
             WorkVariant::V1(_) => Algorithm::V1,
-            WorkVariant::V2(_) => Algorithm::V2
+            WorkVariant::V2(_) => Algorithm::V2,
         })
     }
 }
@@ -43,7 +33,7 @@ impl WorkVariant {
 #[repr(u8)]
 pub enum Algorithm {
     V1 = 0,
-    V2 = 1
+    V2 = 1,
 }
 
 impl FromStr for Algorithm {
@@ -53,19 +43,25 @@ impl FromStr for Algorithm {
         match s {
             "tos/v1" => Ok(Algorithm::V1),
             "tos/v2" => Ok(Algorithm::V2),
-            _ => Err("invalid algorithm")
+            _ => Err("invalid algorithm"),
         }
     }
 }
 
 impl Serialize for Algorithm {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
         self.to_string().serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for Algorithm {
-    fn deserialize<D>(deserializer: D) -> Result<Algorithm, D::Error> where D: serde::Deserializer<'de> {
+    fn deserialize<D>(deserializer: D) -> Result<Algorithm, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
         let s = String::deserialize(deserializer)?;
         Algorithm::from_str(&s).map_err(serde::de::Error::custom)
     }
@@ -73,10 +69,14 @@ impl<'de> Deserialize<'de> for Algorithm {
 
 impl fmt::Display for Algorithm {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", match self {
-            Algorithm::V1 => "tos/v1",
-            Algorithm::V2 => "tos/v2"
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                Algorithm::V1 => "tos/v1",
+                Algorithm::V2 => "tos/v2",
+            }
+        )
     }
 }
 
@@ -89,7 +89,7 @@ pub struct MinerWork<'a> {
     miner: Option<Cow<'a, PublicKey>>,
     // Extra nonce so miner can write anything
     // Can also be used to spread more the work job and increase its work capacity
-    extra_nonce: [u8; EXTRA_NONCE_SIZE]
+    extra_nonce: [u8; EXTRA_NONCE_SIZE],
 }
 
 // Worker is used to store the current work and its variant
@@ -97,7 +97,7 @@ pub struct MinerWork<'a> {
 // It is used by the miner to efficiently switch context in case of algorithm change
 pub struct Worker<'a> {
     work: Option<(MinerWork<'a>, [u8; BLOCK_WORK_SIZE])>,
-    variant: WorkVariant
+    variant: WorkVariant,
 }
 
 #[derive(Debug, Error)]
@@ -107,7 +107,7 @@ pub enum WorkerError {
     #[error("missing miner work")]
     MissingWork,
     #[error(transparent)]
-    HashError(#[from] TosHashError)
+    HashError(#[from] TosHashError),
 }
 
 impl<'a> Worker<'a> {
@@ -115,7 +115,7 @@ impl<'a> Worker<'a> {
     pub fn new() -> Self {
         Self {
             work: None,
-            variant: WorkVariant::Uninitialized
+            variant: WorkVariant::Uninitialized,
         }
     }
 
@@ -130,9 +130,9 @@ impl<'a> Worker<'a> {
         if self.variant.get_algorithm() != Some(kind) {
             match kind {
                 Algorithm::V1 => {
-                    let scratch_pad = v1::ScratchPad::default();    
+                    let scratch_pad = v1::ScratchPad::default();
                     self.variant = WorkVariant::V1(scratch_pad);
-                },
+                }
                 Algorithm::V2 => {
                     let scratch_pad = v2::ScratchPad::default();
                     self.variant = WorkVariant::V2(scratch_pad);
@@ -154,8 +154,8 @@ impl<'a> Worker<'a> {
             Some((work, input)) => {
                 work.increase_nonce();
                 input[40..48].copy_from_slice(&work.nonce().to_be_bytes());
-            },
-            None => return Err(WorkerError::MissingWork)
+            }
+            None => return Err(WorkerError::MissingWork),
         };
 
         Ok(())
@@ -167,7 +167,7 @@ impl<'a> Worker<'a> {
             Some((work, input)) => {
                 work.set_timestamp(timestamp);
                 input[32..40].copy_from_slice(&work.timestamp().to_be_bytes());
-            },
+            }
             None => return Err(WorkerError::MissingWork),
         };
 
@@ -178,7 +178,7 @@ impl<'a> Worker<'a> {
     pub fn get_pow_hash(&mut self) -> Result<Hash, WorkerError> {
         let work = match self.work.as_ref() {
             Some((_, input)) => input,
-            None => return Err(WorkerError::MissingWork)
+            None => return Err(WorkerError::MissingWork),
         };
 
         let hash = match &mut self.variant {
@@ -189,7 +189,7 @@ impl<'a> Worker<'a> {
                 let slice = input.as_mut_slice()?;
                 slice[0..BLOCK_WORK_SIZE].copy_from_slice(work.as_ref());
                 v1::tos_hash(slice, scratch_pad).map(|bytes| Hash::new(bytes))?
-            },
+            }
             WorkVariant::V2(scratch_pad) => {
                 v2::tos_hash(work, scratch_pad).map(|bytes| Hash::new(bytes))?
             }
@@ -203,7 +203,7 @@ impl<'a> Worker<'a> {
     pub fn get_block_hash(&self) -> Result<Hash, WorkerError> {
         match self.work.as_ref() {
             Some((_, cache)) => Ok(hash(cache)),
-            None => Err(WorkerError::MissingWork)
+            None => Err(WorkerError::MissingWork),
         }
     }
 }
@@ -215,7 +215,7 @@ impl<'a> MinerWork<'a> {
             timestamp,
             nonce: 0,
             miner: None,
-            extra_nonce: [0u8; EXTRA_NONCE_SIZE]
+            extra_nonce: [0u8; EXTRA_NONCE_SIZE],
         }
     }
 
@@ -229,7 +229,7 @@ impl<'a> MinerWork<'a> {
             timestamp: header.get_timestamp(),
             nonce: 0,
             miner: Some(Cow::Owned(header.miner)),
-            extra_nonce: header.extra_nonce
+            extra_nonce: header.extra_nonce,
         }
     }
 
@@ -283,8 +283,22 @@ impl<'a> MinerWork<'a> {
     }
 
     #[inline(always)]
-    pub fn take(self) -> (Hash, TimestampMillis, u64, Option<Cow<'a, PublicKey>>, [u8; EXTRA_NONCE_SIZE]) {
-        (self.header_work_hash, self.timestamp, self.nonce, self.miner, self.extra_nonce)
+    pub fn take(
+        self,
+    ) -> (
+        Hash,
+        TimestampMillis,
+        u64,
+        Option<Cow<'a, PublicKey>>,
+        [u8; EXTRA_NONCE_SIZE],
+    ) {
+        (
+            self.header_work_hash,
+            self.timestamp,
+            self.nonce,
+            self.miner,
+            self.extra_nonce,
+        )
     }
 }
 
@@ -303,15 +317,24 @@ impl<'a> Serializer for MinerWork<'a> {
             writer.write_bytes(&[0u8; RISTRETTO_COMPRESSED_SIZE]);
         }
 
-        debug_assert!(writer.total_write() == BLOCK_WORK_SIZE, "invalid block work size, expected {}, got {}", BLOCK_WORK_SIZE, writer.total_write());
+        debug_assert!(
+            writer.total_write() == BLOCK_WORK_SIZE,
+            "invalid block work size, expected {}, got {}",
+            BLOCK_WORK_SIZE,
+            writer.total_write()
+        );
     }
 
     fn read(reader: &mut Reader) -> Result<MinerWork<'a>, ReaderError> {
         if reader.total_size() != BLOCK_WORK_SIZE {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("invalid block work size, expected {}, got {}", BLOCK_WORK_SIZE, reader.total_size());
+                debug!(
+                    "invalid block work size, expected {}, got {}",
+                    BLOCK_WORK_SIZE,
+                    reader.total_size()
+                );
             }
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         let header_work_hash = reader.read_hash()?;
@@ -325,7 +348,7 @@ impl<'a> Serializer for MinerWork<'a> {
             timestamp,
             nonce,
             extra_nonce,
-            miner
+            miner,
         })
     }
 
@@ -357,14 +380,16 @@ mod tests {
             timestamp,
             nonce,
             miner: Some(Cow::Owned(miner)),
-            extra_nonce
+            extra_nonce,
         };
         let work_hex = work.to_hex();
 
         let mut input = v1::AlignedInput::default();
         let slice = input.as_mut_slice().unwrap();
         slice[0..BLOCK_WORK_SIZE].copy_from_slice(&work.to_bytes());
-        let expected_hash = v1::tos_hash(slice, &mut v1::ScratchPad::default()).map(|bytes| Hash::new(bytes)).unwrap();
+        let expected_hash = v1::tos_hash(slice, &mut v1::ScratchPad::default())
+            .map(|bytes| Hash::new(bytes))
+            .unwrap();
         let block_hash = work.hash();
 
         let mut worker = Worker::new();
@@ -381,6 +406,5 @@ mod tests {
         assert_eq!(expected_hash, next_worker_hash);
 
         assert_eq!(work_hex, worker.take_work().unwrap().to_hex());
-
     }
 }

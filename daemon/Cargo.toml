@@ -33,6 +33,10 @@ bytes = "1"
 humantime = "2.1.0"
 human_bytes = "0.4.2"
 tokio-socks = "0.5.2"
+num_cpus = "1.16"
+reqwest = { version = "0.12", features = ["json"] }
+env_logger = "0.11"
+tempdir = "0.3"
 
 # GHOSTDAG dependencies (TIP-2 Phase 1)
 primitive-types = { version = "0.12", features = ["serde"] }
@@ -66,12 +70,64 @@ path = "src/lib.rs"
 name = "tps_benchmark"
 path = "benches/transaction_throughput.rs"
 
+[[bin]]
+name = "tx_generator"
+path = "tests/tools/tx_generator.rs"
+
+[[bin]]
+name = "setup_test_accounts"
+path = "tests/tools/setup_test_accounts.rs"
+
+[[bin]]
+name = "distribute_funds"
+path = "tests/tools/distribute_funds.rs"
+
 [dev-dependencies]
 tempdir = "*"
 criterion = "0.6.0"
 rayon = "1.8"
 sysinfo = "0.32"
+tos-testing-integration = { path = "../testing-integration" }
 
 [[bench]]
 name = "tps"
 harness = false
+
+[[bench]]
+name = "parallel_execution"
+harness = false
+
+[[bench]]
+name = "parallel_tps_comparison"
+harness = false
+
+# Test Configuration
+# Following Kaspa best practice: Integration tests run in Release mode
+#
+# Test Categories:
+# 1. Unit tests (--lib):
+#    - Fast, run in Debug mode
+#    - Test individual functions and modules
+#    - Usage: cargo test --lib
+#
+# 2. Integration tests (--tests):
+#    - Slow, MUST run in Release mode
+#    - Test blockchain operations, parallel execution, security
+#    - Usage: cargo test --tests --release
+#
+# 3. Benchmarks (--bench):
+#    - Always run in Release mode
+#    - Usage: cargo bench
+#
+# Why Release mode for integration tests?
+# - Debug mode: 10-100x slower (especially for parallel execution)
+# - Release mode: Production-like performance and realistic timing
+# - Blockchain operations are computationally expensive
+#
+# Local Development:
+#   ./scripts/run_unit_tests.sh          # Fast unit tests (Debug)
+#   ./scripts/run_integration_tests.sh   # Integration tests (Release)
+#   ./scripts/run_parallel_tests.sh      # Parallel tests (Release)
+#   ./scripts/run_all_tests.sh           # Complete test suite
+#
+# CI/CD automatically runs integration tests with --release flag

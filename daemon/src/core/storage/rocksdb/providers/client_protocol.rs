@@ -1,17 +1,12 @@
 use std::{borrow::Cow, collections::HashSet};
 
+use crate::core::{
+    error::BlockchainError,
+    storage::{rocksdb::Column, ClientProtocolProvider, RocksStorage, Tips},
+};
 use async_trait::async_trait;
 use log::trace;
 use tos_common::crypto::Hash;
-use crate::core::{
-    error::BlockchainError,
-    storage::{
-        rocksdb::Column,
-        ClientProtocolProvider,
-        RocksStorage,
-        Tips
-    }
-};
 
 #[async_trait]
 impl ClientProtocolProvider for RocksStorage {
@@ -37,7 +32,7 @@ impl ClientProtocolProvider for RocksStorage {
             trace!("is tx executed in block {} in block {}", tx, block);
         }
         if let Ok(hash) = self.get_block_executor_for_tx(tx) {
-            return Ok(hash == *block)
+            return Ok(hash == *block);
         }
 
         Ok(false)
@@ -60,11 +55,16 @@ impl ClientProtocolProvider for RocksStorage {
     }
 
     // Same as has_block_linked_to_tx + add_block_for_tx but read only one time
-    fn add_block_linked_to_tx_if_not_present(&mut self, tx: &Hash, block: &Hash) -> Result<bool, BlockchainError> {
+    fn add_block_linked_to_tx_if_not_present(
+        &mut self,
+        tx: &Hash,
+        block: &Hash,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("add block linked to tx {} if not present", tx);
         }
-        let mut hashes: HashSet<Cow<'_, Hash>> = self.load_optional_from_disk(Column::TransactionInBlocks, tx)?
+        let mut hashes: HashSet<Cow<'_, Hash>> = self
+            .load_optional_from_disk(Column::TransactionInBlocks, tx)?
             .unwrap_or_else(HashSet::new);
 
         if hashes.insert(Cow::Borrowed(block)) {
@@ -84,7 +84,11 @@ impl ClientProtocolProvider for RocksStorage {
     }
 
     // Set the block hash that executed the transaction
-    fn mark_tx_as_executed_in_block(&mut self, tx: &Hash, block: &Hash) -> Result<(), BlockchainError> {
+    fn mark_tx_as_executed_in_block(
+        &mut self,
+        tx: &Hash,
+        block: &Hash,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("mark tx {} executed in block {}", tx, block);
         }

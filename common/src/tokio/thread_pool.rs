@@ -1,13 +1,11 @@
-use std::{
-    future::Future, pin::Pin, sync::Arc
-};
+use std::{future::Future, pin::Pin, sync::Arc};
 
-use log::debug;
 use super::{
+    spawn_task,
     sync::{mpsc, Mutex},
     task::JoinHandle,
-    spawn_task
 };
+use log::debug;
 
 type Job = Pin<Box<dyn Future<Output = ()> + Send>>;
 
@@ -53,7 +51,7 @@ impl ThreadPool {
 
 struct Worker {
     id: usize,
-    handle: JoinHandle<()>
+    handle: JoinHandle<()>,
 }
 
 impl Worker {

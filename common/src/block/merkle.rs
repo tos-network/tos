@@ -21,10 +21,7 @@ pub fn calculate_merkle_root(transactions: &[Arc<Transaction>]) -> Hash {
     }
 
     // Create leaf hashes
-    let mut hashes: Vec<Hash> = transactions
-        .iter()
-        .map(|tx| tx.hash())
-        .collect();
+    let mut hashes: Vec<Hash> = transactions.iter().map(|tx| tx.hash()).collect();
 
     // Special case: single transaction pairs with itself
     if hashes.len() == 1 {
@@ -71,11 +68,11 @@ fn hash_pair(left: &Hash, right: &Hash) -> Hash {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transaction::{
-        Transaction, TransactionType, BurnPayload, TxVersion, FeeType, Reference,
-    };
     use crate::crypto::elgamal::CompressedPublicKey;
     use crate::serializer::Serializer;
+    use crate::transaction::{
+        BurnPayload, FeeType, Reference, Transaction, TransactionType, TxVersion,
+    };
     // Balance simplification: bulletproofs removed, using plaintext amounts
     // use bulletproofs::RangeProof;
     // use curve25519_dalek::scalar::Scalar;

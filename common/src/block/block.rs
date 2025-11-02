@@ -1,32 +1,29 @@
-use std::{
-    fmt::{Display, Formatter},
-    fmt::Error,
-    ops::Deref,
-    sync::Arc
-};
-use crate::{
-    crypto::{
-        Hashable,
-        Hash,
-    },
-    immutable::Immutable,
-    transaction::Transaction,
-    serializer::{Serializer, Writer, Reader, ReaderError},
-};
 use super::BlockHeader;
+use crate::{
+    crypto::{Hash, Hashable},
+    immutable::Immutable,
+    serializer::{Reader, ReaderError, Serializer, Writer},
+    transaction::Transaction,
+};
+use std::{
+    fmt::Error,
+    fmt::{Display, Formatter},
+    ops::Deref,
+    sync::Arc,
+};
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Block {
     #[serde(flatten)]
     header: Immutable<BlockHeader>,
-    transactions: Vec<Arc<Transaction>>
+    transactions: Vec<Arc<Transaction>>,
 }
 
 impl Block {
     pub fn new(header: Immutable<BlockHeader>, transactions: Vec<Arc<Transaction>>) -> Self {
         Block {
             header,
-            transactions
+            transactions,
         }
     }
 
@@ -90,13 +87,14 @@ impl Deref for Block {
     type Target = BlockHeader;
 
     fn deref(&self) -> &Self::Target {
-        &self.get_header()        
+        &self.get_header()
     }
 }
 
 impl Display for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        let parents: Vec<String> = self.get_parents()
+        let parents: Vec<String> = self
+            .get_parents()
             .iter()
             .map(|h| format!("{}", h))
             .collect();

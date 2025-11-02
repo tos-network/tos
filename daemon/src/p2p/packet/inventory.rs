@@ -1,14 +1,9 @@
-use std::borrow::Cow;
 use indexmap::IndexSet;
 use log::debug;
+use std::borrow::Cow;
 use tos_common::{
     crypto::{Hash, HASH_SIZE},
-    serializer::{
-        Serializer,
-        ReaderError,
-        Reader,
-        Writer
-    }
+    serializer::{Reader, ReaderError, Serializer, Writer},
 };
 
 pub const NOTIFY_MAX_LEN: usize = 16384; // 16384 * 32 bytes = 512 KiB
@@ -20,9 +15,7 @@ pub struct NotifyInventoryRequest {
 
 impl NotifyInventoryRequest {
     pub fn new(page: Option<u8>) -> Self {
-        Self {
-            page
-        }
+        Self { page }
     }
 
     pub fn page(self) -> Option<u8> {
@@ -53,10 +46,7 @@ pub struct NotifyInventoryResponse<'a> {
 
 impl<'a> NotifyInventoryResponse<'a> {
     pub fn new(next: Option<u8>, txs: Cow<'a, IndexSet<Cow<'a, Hash>>>) -> Self {
-        Self {
-            next,
-            txs
-        }
+        Self { next, txs }
     }
 
     pub fn next(&self) -> Option<u8> {
@@ -79,12 +69,12 @@ impl<'a> Serializer for NotifyInventoryResponse<'a> {
         if count > NOTIFY_MAX_LEN as u16 {
             return Err(ReaderError::InvalidSize);
         }
- 
+
         let mut txs = IndexSet::with_capacity(count as usize);
         for _ in 0..count {
             if !txs.insert(Cow::Owned(reader.read_hash()?)) {
                 debug!("Duplicate transaction in NotifyInventoryResponse");
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         }
         Ok(Self::new(next, Cow::Owned(txs)))

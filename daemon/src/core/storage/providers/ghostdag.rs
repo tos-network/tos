@@ -1,13 +1,13 @@
 // TOS GHOSTDAG Storage Provider
 // Follows TOS storage architecture patterns
 
-use async_trait::async_trait;
-use std::sync::Arc;
-use tos_common::crypto::Hash;
 use crate::core::{
     error::BlockchainError,
     ghostdag::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData},
 };
+use async_trait::async_trait;
+use std::sync::Arc;
+use tos_common::crypto::Hash;
 
 /// GHOSTDAG Data Provider
 ///
@@ -40,13 +40,19 @@ pub trait GhostdagDataProvider {
     ///
     /// Mergeset blues are the blue blocks being merged by this block
     /// (excluding the selected parent, which is also blue).
-    async fn get_ghostdag_mergeset_blues(&self, hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError>;
+    async fn get_ghostdag_mergeset_blues(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<Vec<Hash>>, BlockchainError>;
 
     /// Get the mergeset reds for a block
     ///
     /// Mergeset reds are the red blocks being merged by this block.
     /// Red blocks violate the k-cluster constraint.
-    async fn get_ghostdag_mergeset_reds(&self, hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError>;
+    async fn get_ghostdag_mergeset_reds(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<Vec<Hash>>, BlockchainError>;
 
     /// Get the blues anticone sizes map for a block
     ///
@@ -61,13 +67,17 @@ pub trait GhostdagDataProvider {
     ///
     /// Returns all GHOSTDAG information for the block.
     /// This is the primary method for retrieving full consensus data.
-    async fn get_ghostdag_data(&self, hash: &Hash) -> Result<Arc<TosGhostdagData>, BlockchainError>;
+    async fn get_ghostdag_data(&self, hash: &Hash)
+        -> Result<Arc<TosGhostdagData>, BlockchainError>;
 
     /// Get compact GHOSTDAG data for a block
     ///
     /// Returns only essential fields (blue_score, blue_work, selected_parent).
     /// More efficient for queries that don't need full mergeset data.
-    async fn get_ghostdag_compact_data(&self, hash: &Hash) -> Result<CompactGhostdagData, BlockchainError>;
+    async fn get_ghostdag_compact_data(
+        &self,
+        hash: &Hash,
+    ) -> Result<CompactGhostdagData, BlockchainError>;
 
     /// Check if GHOSTDAG data exists for a block
     ///
@@ -82,7 +92,11 @@ pub trait GhostdagDataProvider {
     /// # Arguments
     /// * `hash` - The block hash
     /// * `data` - The GHOSTDAG data to store
-    async fn insert_ghostdag_data(&mut self, hash: &Hash, data: Arc<TosGhostdagData>) -> Result<(), BlockchainError>;
+    async fn insert_ghostdag_data(
+        &mut self,
+        hash: &Hash,
+        data: Arc<TosGhostdagData>,
+    ) -> Result<(), BlockchainError>;
 
     /// Delete GHOSTDAG data for a block
     ///

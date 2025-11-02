@@ -21,7 +21,7 @@ impl Serializer for Asset {
         Ok(Self {
             id,
             data_pointer,
-            supply_pointer
+            supply_pointer,
         })
     }
 
@@ -32,8 +32,6 @@ impl Serializer for Asset {
     }
 
     fn size(&self) -> usize {
-        self.id.size()
-        + self.data_pointer.size()
-        + self.supply_pointer.size()
+        self.id.size() + self.data_pointer.size() + self.supply_pointer.size()
     }
 }

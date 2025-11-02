@@ -1,15 +1,9 @@
-use std::time::Duration;
+use crate::{config::MILLIS_PER_SECOND, core::difficulty::kalman_filter};
 use humantime::format_duration;
 use log::trace;
+use std::time::Duration;
 use tos_common::{
-    difficulty::Difficulty,
-    time::TimestampMillis,
-    utils::format_difficulty,
-    varuint::VarUint
-};
-use crate::{
-    config::MILLIS_PER_SECOND,
-    core::difficulty::kalman_filter
+    difficulty::Difficulty, time::TimestampMillis, utils::format_difficulty, varuint::VarUint,
 };
 
 const SHIFT: u64 = 20;
@@ -24,12 +18,31 @@ pub const P: VarUint = LEFT_SHIFT;
 
 // Calculate the required difficulty for the next block based on the solve time of the previous block
 // We are using a Kalman filter to estimate the hashrate and adjust the difficulty
-pub fn calculate_difficulty(solve_time: TimestampMillis, previous_difficulty: Difficulty, p: VarUint, minimum_difficulty: Difficulty, block_time_target: TimestampMillis) -> (Difficulty, VarUint) {
+pub fn calculate_difficulty(
+    solve_time: TimestampMillis,
+    previous_difficulty: Difficulty,
+    p: VarUint,
+    minimum_difficulty: Difficulty,
+    block_time_target: TimestampMillis,
+) -> (Difficulty, VarUint) {
     let z = previous_difficulty * MILLIS_PER_SECOND / solve_time;
     if log::log_enabled!(log::Level::Trace) {
-        trace!("Calculating difficulty v2, solve time: {}, previous_difficulty: {}, z: {}, p: {}", format_duration(Duration::from_millis(solve_time)), format_difficulty(previous_difficulty), z, p);
+        trace!(
+            "Calculating difficulty v2, solve time: {}, previous_difficulty: {}, z: {}, p: {}",
+            format_duration(Duration::from_millis(solve_time)),
+            format_difficulty(previous_difficulty),
+            z,
+            p
+        );
     }
-    let (x_est_new, p_new) = kalman_filter(z, previous_difficulty * MILLIS_PER_SECOND / block_time_target, p, SHIFT, LEFT_SHIFT, PROCESS_NOISE_COVAR);
+    let (x_est_new, p_new) = kalman_filter(
+        z,
+        previous_difficulty * MILLIS_PER_SECOND / block_time_target,
+        p,
+        SHIFT,
+        LEFT_SHIFT,
+        PROCESS_NOISE_COVAR,
+    );
     if log::log_enabled!(log::Level::Trace) {
         trace!("x_est_new: {}, p_new: {}", x_est_new, p_new);
     }
@@ -51,11 +64,19 @@ mod tests {
         const DEFAULT_DIFFICULTY: Difficulty = Difficulty::from_u64(20 * 15 * 1000);
 
         let z = DEFAULT_DIFFICULTY / VarUint::from_u64(1000);
-        let (x_est_new, p_new) = kalman_filter(z, VarUint::one(), P, SHIFT, LEFT_SHIFT, PROCESS_NOISE_COVAR);
+        let (x_est_new, p_new) =
+            kalman_filter(z, VarUint::one(), P, SHIFT, LEFT_SHIFT, PROCESS_NOISE_COVAR);
         assert_eq!(x_est_new, VarUint::one());
         assert_eq!(p_new, VarUint::from_u64(1067732));
 
-        let (x_est_new, p_new) = kalman_filter(DEFAULT_DIFFICULTY / VarUint::from_u64(2000), x_est_new, p_new, SHIFT, LEFT_SHIFT, PROCESS_NOISE_COVAR);
+        let (x_est_new, p_new) = kalman_filter(
+            DEFAULT_DIFFICULTY / VarUint::from_u64(2000),
+            x_est_new,
+            p_new,
+            SHIFT,
+            LEFT_SHIFT,
+            PROCESS_NOISE_COVAR,
+        );
         assert_eq!(x_est_new, VarUint::one());
         assert_eq!(p_new, VarUint::from_u64(1084948));
     }

@@ -3,22 +3,20 @@ use log::trace;
 use tos_common::{
     block::{BlockHeader, TopoHeight},
     crypto::Hash,
-    immutable::Immutable
+    immutable::Immutable,
 };
 
 use crate::core::{
     error::{BlockchainError, DiskContext},
-    storage::{
-        BlockDagProvider,
-        DagOrderProvider,
-        DifficultyProvider,
-        SledStorage
-    }
+    storage::{BlockDagProvider, DagOrderProvider, DifficultyProvider, SledStorage},
 };
 
 #[async_trait]
 impl BlockDagProvider for SledStorage {
-    async fn get_block_header_at_topoheight(&self, topoheight: TopoHeight) -> Result<(Hash, Immutable<BlockHeader>), BlockchainError> {
+    async fn get_block_header_at_topoheight(
+        &self,
+        topoheight: TopoHeight,
+    ) -> Result<(Hash, Immutable<BlockHeader>), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get block at topoheight: {}", topoheight);
         }
@@ -27,7 +25,10 @@ impl BlockDagProvider for SledStorage {
         Ok((hash, block))
     }
 
-    fn get_block_reward_at_topo_height(&self, topoheight: TopoHeight) -> Result<u64, BlockchainError> {
+    fn get_block_reward_at_topo_height(
+        &self,
+        topoheight: TopoHeight,
+    ) -> Result<u64, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get block reward at topo height {}", topoheight);
         }
@@ -47,7 +48,11 @@ impl BlockDagProvider for SledStorage {
         }
 
         // Cache miss: Load from disk
-        let reward: u64 = self.load_from_disk(&self.rewards, &topoheight.to_be_bytes(), DiskContext::BlockRewardAtTopoHeight(topoheight))?;
+        let reward: u64 = self.load_from_disk(
+            &self.rewards,
+            &topoheight.to_be_bytes(),
+            DiskContext::BlockRewardAtTopoHeight(topoheight),
+        )?;
 
         // Store in cache
         if let Some(cache) = &self.block_reward_cache {
@@ -61,7 +66,10 @@ impl BlockDagProvider for SledStorage {
         Ok(reward)
     }
 
-    async fn get_supply_at_topo_height(&self, topoheight: TopoHeight) -> Result<u64, BlockchainError> {
+    async fn get_supply_at_topo_height(
+        &self,
+        topoheight: TopoHeight,
+    ) -> Result<u64, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get supply at topo height {}", topoheight);
         }
@@ -78,7 +86,11 @@ impl BlockDagProvider for SledStorage {
         }
 
         // Cache miss: Load from disk
-        let supply: u64 = self.load_from_disk(&self.supply, &topoheight.to_be_bytes(), DiskContext::SupplyAtTopoHeight(topoheight))?;
+        let supply: u64 = self.load_from_disk(
+            &self.supply,
+            &topoheight.to_be_bytes(),
+            DiskContext::SupplyAtTopoHeight(topoheight),
+        )?;
 
         // Store in cache
         if let Some(cache) = &self.supply_cache {
@@ -89,7 +101,10 @@ impl BlockDagProvider for SledStorage {
         Ok(supply)
     }
 
-    async fn get_burned_supply_at_topo_height(&self, topoheight: TopoHeight) -> Result<u64, BlockchainError> {
+    async fn get_burned_supply_at_topo_height(
+        &self,
+        topoheight: TopoHeight,
+    ) -> Result<u64, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get burned supply at topo height {}", topoheight);
         }
@@ -106,7 +121,11 @@ impl BlockDagProvider for SledStorage {
         }
 
         // Cache miss: Load from disk
-        let burned_supply: u64 = self.load_from_disk(&self.burned_supply, &topoheight.to_be_bytes(), DiskContext::BurnedSupplyAtTopoHeight(topoheight))?;
+        let burned_supply: u64 = self.load_from_disk(
+            &self.burned_supply,
+            &topoheight.to_be_bytes(),
+            DiskContext::BurnedSupplyAtTopoHeight(topoheight),
+        )?;
 
         // Store in cache
         if let Some(cache) = &self.burned_supply_cache {
@@ -118,14 +137,35 @@ impl BlockDagProvider for SledStorage {
     }
 
     // Set the metadata for topoheight
-    fn set_topoheight_metadata(&mut self, topoheight: TopoHeight, block_reward: u64, supply: u64, burned_supply: u64) -> Result<(), BlockchainError> {
+    fn set_topoheight_metadata(
+        &mut self,
+        topoheight: TopoHeight,
+        block_reward: u64,
+        supply: u64,
+        burned_supply: u64,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set topoheight metadata at {}", topoheight);
         }
 
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.rewards, &topoheight.to_be_bytes(), &block_reward.to_be_bytes())?;
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.supply, &topoheight.to_be_bytes(), &supply.to_be_bytes())?;
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.burned_supply, &topoheight.to_be_bytes(), &burned_supply.to_be_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.rewards,
+            &topoheight.to_be_bytes(),
+            &block_reward.to_be_bytes(),
+        )?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.supply,
+            &topoheight.to_be_bytes(),
+            &supply.to_be_bytes(),
+        )?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.burned_supply,
+            &topoheight.to_be_bytes(),
+            &burned_supply.to_be_bytes(),
+        )?;
 
         Ok(())
     }

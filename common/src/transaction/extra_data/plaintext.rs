@@ -1,10 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    api::DataElement,
-    serializer::*,
-};
 use super::SharedKey;
+use crate::{api::DataElement, serializer::*};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -19,7 +16,7 @@ pub enum PlaintextFlag {
     // We store it as is in a ValueType::Blob
     Proprietary,
     // Decoding has failed, we don't store any
-    Failed
+    Failed,
 }
 
 impl Serializer for PlaintextFlag {
@@ -29,7 +26,7 @@ impl Serializer for PlaintextFlag {
             1 => Ok(Self::Public),
             2 => Ok(Self::Proprietary),
             3 => Ok(Self::Failed),
-            _ => Err(ReaderError::InvalidValue)
+            _ => Err(ReaderError::InvalidValue),
         }
     }
 
@@ -38,7 +35,7 @@ impl Serializer for PlaintextFlag {
             Self::Private => 0,
             Self::Public => 1,
             Self::Proprietary => 2,
-            Self::Failed => 3
+            Self::Failed => 3,
         };
         writer.write_u8(id);
     }
@@ -61,11 +58,15 @@ pub struct PlaintextExtraData {
 }
 
 impl PlaintextExtraData {
-    pub fn new(shared_key: Option<SharedKey>, data: Option<DataElement>, flag: PlaintextFlag) -> Self {
+    pub fn new(
+        shared_key: Option<SharedKey>,
+        data: Option<DataElement>,
+        flag: PlaintextFlag,
+    ) -> Self {
         Self {
             shared_key,
             data,
-            flag
+            flag,
         }
     }
 
@@ -93,13 +94,11 @@ impl Serializer for PlaintextExtraData {
         Ok(Self {
             shared_key: Option::read(reader)?,
             data: Option::read(reader)?,
-            flag: PlaintextFlag::read(reader)?
+            flag: PlaintextFlag::read(reader)?,
         })
     }
 
     fn size(&self) -> usize {
-        self.shared_key.size()
-        + self.data.size()
-        + self.flag.size()
+        self.shared_key.size() + self.data.size() + self.flag.size()
     }
 }

@@ -1,144 +1,82 @@
+use anyhow::{Context, Error};
+use chrono::TimeZone;
+use log::{debug, error, info, trace};
+use rand::{rngs::OsRng, RngCore};
+use serde::Serialize;
 use std::{
     collections::HashSet,
     io::Write,
-    sync::{atomic::{AtomicBool, Ordering}, Arc}
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
-use rand::{rngs::OsRng, RngCore};
-use log::{
-    debug,
-    error,
-    info,
-    trace
-};
-use anyhow::{Error, Context};
-use chrono::TimeZone;
-use serde::Serialize;
 use tos_common::{
     ai_mining::AIMiningPayload,
     api::{
-        wallet::{
-            BalanceChanged,
-            NotifyEvent,
-            TransactionEntry
-        },
-        DataElement
+        wallet::{BalanceChanged, NotifyEvent, TransactionEntry},
+        DataElement,
     },
-    asset::RPCAssetData,
+    asset::{AssetData, RPCAssetData},
     crypto::{
-        elgamal::DecryptHandle,
-        Address,
-        Hash,
-        Hashable,
-        KeyPair,
-        PrivateKey,
-        PublicKey,
-        Signature
+        elgamal::DecryptHandle, Address, Hash, Hashable, KeyPair, PrivateKey, PublicKey, Signature,
     },
     network::Network,
-    tokio::sync::{
-            broadcast,
-            Mutex,
-            RwLock,
-            Semaphore
-        },
+    tokio::sync::{broadcast, Mutex, RwLock, Semaphore},
     transaction::{
-        builder::{
-            FeeBuilder,
-            TransactionBuilder,
-            TransactionTypeBuilder,
-            UnsignedTransaction
-        },
-        extra_data::{
-            PlaintextExtraData,
-            Role,
-            UnknownExtraDataFormat
-        },
-        Reference,
-        Transaction,
-        TxVersion
-    }, utils::{format_coin, format_tos}
+        builder::{FeeBuilder, TransactionBuilder, TransactionTypeBuilder, UnsignedTransaction},
+        extra_data::{PlaintextExtraData, Role, UnknownExtraDataFormat},
+        Reference, Transaction, TxVersion,
+    },
+    utils::{format_coin, format_tos},
 };
 
 use crate::{
     cipher::Cipher,
-    config::{
-        PASSWORD_ALGORITHM,
-        PASSWORD_HASH_SIZE,
-        SALT_SIZE
-    },
+    config::{PASSWORD_ALGORITHM, PASSWORD_HASH_SIZE, SALT_SIZE},
     entry::{EntryData, TransactionEntry as InnerTransactionEntry},
     error::WalletError,
     mnemonics,
     precomputed_tables::PrecomputedTablesShared,
-    storage::{
-        EncryptedStorage,
-        Storage
-    },
-    transaction_builder::{
-        EstimateFeesState,
-        TransactionBuilderState
-    }
+    storage::{EncryptedStorage, Storage},
+    transaction_builder::{EstimateFeesState, TransactionBuilderState},
 };
 #[cfg(feature = "network_handler")]
 use {
-    log::warn,
     crate::{
-        network_handler::{
-            NetworkHandler,
-            SharedNetworkHandler
-        },
         daemon_api::DaemonAPI,
+        network_handler::{NetworkHandler, SharedNetworkHandler},
         storage::Balance,
     },
+    log::warn,
     tos_common::config::TOS_ASSET,
 };
 
 #[cfg(feature = "xswd")]
 use {
-    serde_json::{json, Value},
-    async_trait::async_trait,
     crate::api::{
-        ApplicationDataRelayer,
-        XSWDRelayer,
-        XSWDRelayerShared,
-        register_rpc_methods,
-        AppStateShared,
-        PermissionResult,
-        PermissionRequest,
-        XSWDHandler
+        register_rpc_methods, AppStateShared, ApplicationDataRelayer, PermissionRequest,
+        PermissionResult, XSWDHandler, XSWDRelayer, XSWDRelayerShared,
     },
+    async_trait::async_trait,
+    serde_json::{json, Value},
     tos_common::{
-        rpc::{
-            RPCHandler,
-            RpcRequest,
-            InternalRpcError,
-            RpcResponseError,
-            JSON_RPC_VERSION
-        },
+        crypto::elgamal::PublicKey as DecompressedPublicKey,
+        rpc::{InternalRpcError, RPCHandler, RpcRequest, RpcResponseError, JSON_RPC_VERSION},
         tokio::sync::{
-            mpsc::{
-                UnboundedSender,
-                UnboundedReceiver,
-                unbounded_channel
-            },
+            mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
             oneshot,
         },
-        crypto::elgamal::PublicKey as DecompressedPublicKey
-    }
+    },
 };
 
 #[cfg(feature = "api_server")]
-use crate::api::{
-    XSWDServer,
-    WalletRpcServer,
-    AuthConfig,
-    APIServer,
-};
+use crate::api::{APIServer, AuthConfig, WalletRpcServer, XSWDServer};
 
 // Recover option for wallet creation
 pub enum RecoverOption<'a> {
     Seed(&'a str),
-    PrivateKey(&'a str)
+    PrivateKey(&'a str),
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -151,9 +89,7 @@ pub enum Event {
     // And some topoheight can be skipped because of DAG reorg
     // Example: two blocks at same height, both got same topoheight 69, next block reorg them together
     // and one of the block get topoheight 69, the other 70, next is 71, but 70 is skipped
-    NewTopoHeight {
-        topoheight: u64
-    },
+    NewTopoHeight { topoheight: u64 },
     // When a balance change occurs on wallet
     BalanceChanged(BalanceChanged),
     // When a new asset is added to wallet
@@ -161,26 +97,16 @@ pub enum Event {
     // When a rescan happened (because of user request or DAG reorg/fork)
     // Value is topoheight until it deleted transactions
     // Next sync will restart at this topoheight
-    Rescan {
-        start_topoheight: u64   
-    },
+    Rescan { start_topoheight: u64 },
     // Called when the `sync_new_blocks` is done
-    HistorySynced {
-        topoheight: u64
-    },
+    HistorySynced { topoheight: u64 },
     // Wallet is now in online mode
     Online,
     // Wallet is now in offline mode
     Offline,
-    SyncError {
-        message: String
-    },
-    TrackAsset {
-        asset: Hash
-    },
-    UntrackAsset {
-        asset: Hash
-    },
+    SyncError { message: String },
+    TrackAsset { asset: Hash },
+    UntrackAsset { asset: Hash },
 }
 
 impl Event {
@@ -253,35 +179,51 @@ struct Account {
 }
 
 impl Account {
-    fn new(precomputed_tables: PrecomputedTablesShared, keypair: KeyPair, n_threads: usize) -> Self {
+    fn new(
+        precomputed_tables: PrecomputedTablesShared,
+        keypair: KeyPair,
+        n_threads: usize,
+    ) -> Self {
         let inner = Arc::new(InnerAccount {
             keypair,
-            precomputed_tables
+            precomputed_tables,
         });
 
         Self {
             public_key: inner.keypair.get_public_key().compress(),
             inner,
-            semaphore: Semaphore::new(n_threads)
+            semaphore: Semaphore::new(n_threads),
         }
     }
 
     // Balance simplification: Decryption no longer supported - balances are plain u64
     #[allow(dead_code)]
     pub async fn decrypt_ciphertext(&self, _max_supply: u64) -> Result<Option<u64>, WalletError> {
-        Err(WalletError::Any(anyhow::anyhow!("Ciphertext decryption is no longer supported - balances are plain u64")))
+        Err(WalletError::Any(anyhow::anyhow!(
+            "Ciphertext decryption is no longer supported - balances are plain u64"
+        )))
     }
 }
 
 pub fn hash_password(password: &str, salt: &[u8]) -> Result<[u8; PASSWORD_HASH_SIZE], WalletError> {
     let mut output = [0; PASSWORD_HASH_SIZE];
-    PASSWORD_ALGORITHM.hash_password_into(password.as_bytes(), salt, &mut output).map_err(|e| WalletError::AlgorithmHashingError(e.to_string()))?;
+    PASSWORD_ALGORITHM
+        .hash_password_into(password.as_bytes(), salt, &mut output)
+        .map_err(|e| WalletError::AlgorithmHashingError(e.to_string()))?;
     Ok(output)
 }
 
 impl Wallet {
     // Create a new wallet with the specificed storage, keypair and its network
-    fn new(storage: EncryptedStorage, keypair: KeyPair, network: Network, precomputed_tables: PrecomputedTablesShared, n_threads: usize, concurrency: usize, light_mode: bool) -> Arc<Self> {
+    fn new(
+        storage: EncryptedStorage,
+        keypair: KeyPair,
+        network: Network,
+        precomputed_tables: PrecomputedTablesShared,
+        n_threads: usize,
+        concurrency: usize,
+        light_mode: bool,
+    ) -> Arc<Self> {
         let zelf = Self {
             storage: RwLock::new(storage),
             #[cfg(feature = "network_handler")]
@@ -307,9 +249,18 @@ impl Wallet {
     }
 
     // Create a new wallet on disk
-    pub async fn create<'a>(name: &'a str, password: &'a str, seed: Option<RecoverOption<'a>>, network: Network, precomputed_tables: PrecomputedTablesShared, n_threads: usize, concurrency: usize, light_mode: bool) -> Result<Arc<Self>, Error> {
+    pub async fn create<'a>(
+        name: &'a str,
+        password: &'a str,
+        seed: Option<RecoverOption<'a>>,
+        network: Network,
+        precomputed_tables: PrecomputedTablesShared,
+        n_threads: usize,
+        concurrency: usize,
+        light_mode: bool,
+    ) -> Result<Arc<Self>, Error> {
         if name.is_empty() {
-            return Err(WalletError::EmptyName.into())
+            return Err(WalletError::EmptyName.into());
         }
 
         // generate random keypair or recover it from seed
@@ -318,7 +269,7 @@ impl Wallet {
             let key = match seed {
                 RecoverOption::PrivateKey(hex) => {
                     PrivateKey::from_hex(hex).context("Invalid private key provided")?
-                },
+                }
                 RecoverOption::Seed(seed) => {
                     let words: Vec<&str> = seed.trim().split_whitespace().collect();
                     mnemonics::words_to_key(&words)?
@@ -370,23 +321,58 @@ impl Wallet {
         // Store the private key
         storage.set_private_key(&keypair.get_private_key())?;
 
+        // Auto-track TOS asset for convenience (Issue 2: Option 1)
+        // This allows users to immediately use "TOS" or the asset hash without manual tracking
+        debug!("Auto-tracking TOS asset");
+        storage
+            .add_asset(
+                &TOS_ASSET,
+                AssetData::new(
+                    tos_common::config::COIN_DECIMALS,
+                    "TOS".to_string(),
+                    "TOS".to_string(),
+                    None, // No max supply
+                    None, // No owner
+                ),
+            )
+            .await?;
+        storage
+            .set_asset_name(&TOS_ASSET, "TOS".to_string())
+            .await?;
+
         // Flush the storage to be sure its written on disk
         storage.flush().await?;
 
-        Ok(Self::new(storage, keypair, network, precomputed_tables, n_threads, concurrency, light_mode))
+        Ok(Self::new(
+            storage,
+            keypair,
+            network,
+            precomputed_tables,
+            n_threads,
+            concurrency,
+            light_mode,
+        ))
     }
 
     // Open an existing wallet on disk
-    pub fn open(name: &str, password: &str, network: Network, precomputed_tables: PrecomputedTablesShared, n_threads: usize, concurrency: usize, light_mode: bool) -> Result<Arc<Self>, Error> {
+    pub fn open(
+        name: &str,
+        password: &str,
+        network: Network,
+        precomputed_tables: PrecomputedTablesShared,
+        n_threads: usize,
+        concurrency: usize,
+        light_mode: bool,
+    ) -> Result<Arc<Self>, Error> {
         if name.is_empty() {
-            return Err(WalletError::EmptyName.into())
+            return Err(WalletError::EmptyName.into());
         }
 
         if log::log_enabled!(log::Level::Debug) {
             debug!("Creating storage for {}", name);
         }
         let storage = Storage::new(name)?;
-        
+
         // get password salt for KDF
         debug!("Retrieving password salt from public storage");
         let salt = storage.get_password_salt()?;
@@ -399,14 +385,21 @@ impl Wallet {
 
         // decrypt the encrypted master key using the hashed password (used as key)
         let cipher = Cipher::new(&hashed_password, None)?;
-        let master_key = cipher.decrypt_value(&encrypted_master_key).context("Invalid password provided for this wallet")?;
+        let master_key = cipher
+            .decrypt_value(&encrypted_master_key)
+            .context("Invalid password provided for this wallet")?;
 
         // Retrieve the encrypted storage salt
         let encrypted_storage_salt = storage.get_encrypted_storage_salt()?;
-        let storage_salt = cipher.decrypt_value(&encrypted_storage_salt).context("Invalid encrypted storage salt for this wallet")?;
+        let storage_salt = cipher
+            .decrypt_value(&encrypted_storage_salt)
+            .context("Invalid encrypted storage salt for this wallet")?;
         if storage_salt.len() != SALT_SIZE {
             if log::log_enabled!(log::Level::Error) {
-                error!("Invalid size received after decrypting storage salt: {} bytes", storage_salt.len());
+                error!(
+                    "Invalid size received after decrypting storage salt: {} bytes",
+                    storage_salt.len()
+                );
             }
             return Err(WalletError::InvalidSaltSize.into());
         }
@@ -417,11 +410,19 @@ impl Wallet {
         debug!("Creating encrypted storage");
         let storage = EncryptedStorage::new(storage, &master_key, salt, network)?;
         debug!("Retrieving private key from encrypted storage");
-        let private_key =  storage.get_private_key()?;
+        let private_key = storage.get_private_key()?;
         let keypair = KeyPair::from_private_key(private_key)
             .map_err(|_| WalletError::Any(anyhow::anyhow!("Invalid private key")))?;
 
-        Ok(Self::new(storage, keypair, network, precomputed_tables, n_threads, concurrency, light_mode))
+        Ok(Self::new(
+            storage,
+            keypair,
+            network,
+            precomputed_tables,
+            n_threads,
+            concurrency,
+            light_mode,
+        ))
     }
 
     // Close the wallet
@@ -445,15 +446,11 @@ impl Wallet {
         // Close XSWD channel in case it exists
         {
             {
-                self.xswd_channel.write()
-                    .await
-                    .take();
+                self.xswd_channel.write().await.take();
             }
 
             {
-                self.xswd_relayer.lock()
-                    .await
-                    .take();
+                self.xswd_relayer.lock().await.take();
             }
         }
 
@@ -516,7 +513,9 @@ impl Wallet {
     #[cfg(feature = "network_handler")]
     pub async fn get_light_api(&self) -> Result<Arc<crate::light_api::LightAPI>, WalletError> {
         let lock = self.light_api.lock().await;
-        lock.clone().ok_or(WalletError::Any(anyhow::anyhow!("Light API not initialized")))
+        lock.clone().ok_or(WalletError::Any(anyhow::anyhow!(
+            "Light API not initialized"
+        )))
     }
 
     // Set the light API client
@@ -569,13 +568,16 @@ impl Wallet {
         {
             let mut storage = self.storage.write().await;
             if storage.is_asset_tracked(&asset)? {
-                return Ok(false)
+                return Ok(false);
             }
 
             storage.track_asset(&asset)?;
         }
 
-        self.propagate_event(Event::TrackAsset { asset: asset.clone() }).await;
+        self.propagate_event(Event::TrackAsset {
+            asset: asset.clone(),
+        })
+        .await;
 
         #[cfg(feature = "network_handler")]
         {
@@ -583,13 +585,20 @@ impl Wallet {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Syncing head state for newly tracked asset {}", asset);
                 }
-                network_handler.sync_head_state(&self.get_address(), Some(HashSet::from_iter([asset])), None, false, false).await?;
+                network_handler
+                    .sync_head_state(
+                        &self.get_address(),
+                        Some(HashSet::from_iter([asset])),
+                        None,
+                        false,
+                        false,
+                    )
+                    .await?;
             }
         }
 
         Ok(true)
     }
-
 
     // Mark an asset tracked by the wallet
     pub async fn untrack_asset(&self, asset: Hash) -> Result<bool, WalletError> {
@@ -599,7 +608,7 @@ impl Wallet {
         {
             let mut storage = self.storage.write().await;
             if !storage.is_asset_tracked(&asset)? {
-                return Ok(false)
+                return Ok(false);
             }
 
             storage.untrack_asset(&asset)?;
@@ -633,10 +642,15 @@ impl Wallet {
 
     // Enable RPC Server with requested authentication and bind address
     #[cfg(feature = "api_server")]
-    pub async fn enable_rpc_server(self: &Arc<Self>, bind_address: String, config: Option<AuthConfig>, threads: Option<usize>) -> Result<(), Error> {
+    pub async fn enable_rpc_server(
+        self: &Arc<Self>,
+        bind_address: String,
+        config: Option<AuthConfig>,
+        threads: Option<usize>,
+    ) -> Result<(), Error> {
         let mut lock = self.api_server.lock().await;
         if lock.is_some() {
-            return Err(WalletError::RPCServerAlreadyRunning.into())
+            return Err(WalletError::RPCServerAlreadyRunning.into());
         }
         let mut rpc_handler = RPCHandler::new(self.clone());
         register_rpc_methods(&mut rpc_handler);
@@ -650,7 +664,7 @@ impl Wallet {
     async fn init_xswd_channel(&self) -> Option<UnboundedReceiver<XSWDEvent>> {
         let mut channel = self.xswd_channel.write().await;
         if channel.is_some() {
-            return None
+            return None;
         }
 
         let (sender, receiver) = unbounded_channel();
@@ -660,12 +674,14 @@ impl Wallet {
 
     // Enable XSWD Protocol
     #[cfg(feature = "api_server")]
-    pub async fn enable_xswd(self: &Arc<Self>) -> Result<Option<UnboundedReceiver<XSWDEvent>>, Error> {
-        let receiver =  self.init_xswd_channel().await;
+    pub async fn enable_xswd(
+        self: &Arc<Self>,
+    ) -> Result<Option<UnboundedReceiver<XSWDEvent>>, Error> {
+        let receiver = self.init_xswd_channel().await;
 
         let mut lock = self.api_server.lock().await;
         if lock.is_some() {
-            return Err(WalletError::RPCServerAlreadyRunning.into())
+            return Err(WalletError::RPCServerAlreadyRunning.into());
         }
         let mut rpc_handler = RPCHandler::new(self.clone());
         register_rpc_methods(&mut rpc_handler);
@@ -689,7 +705,10 @@ impl Wallet {
     }
 
     #[cfg(feature = "xswd")]
-    pub async fn add_xswd_relayer(self: &Arc<Self>, app_data: ApplicationDataRelayer) -> Result<Option<UnboundedReceiver<XSWDEvent>>, Error> {
+    pub async fn add_xswd_relayer(
+        self: &Arc<Self>,
+        app_data: ApplicationDataRelayer,
+    ) -> Result<Option<UnboundedReceiver<XSWDEvent>>, Error> {
         let receiver = self.init_xswd_channel().await;
         let mut xswd = self.xswd_relayer.lock().await;
         if xswd.is_none() {
@@ -717,7 +736,9 @@ impl Wallet {
         let hashed_password = hash_password(password, &salt)?;
         let cipher = Cipher::new(&hashed_password, None)?;
         let encrypted_master_key = storage.get_encrypted_master_key()?;
-        let _ = cipher.decrypt_value(&encrypted_master_key).context("Invalid password provided")?;
+        let _ = cipher
+            .decrypt_value(&encrypted_master_key)
+            .context("Invalid password provided")?;
         Ok(())
     }
 
@@ -735,7 +756,9 @@ impl Wallet {
 
             // decrypt the encrypted master key using the provided password
             let cipher = Cipher::new(&hashed_password, None)?;
-            let master_key = cipher.decrypt_value(&encrypted_master_key).context("Invalid password provided")?;
+            let master_key = cipher
+                .decrypt_value(&encrypted_master_key)
+                .context("Invalid password provided")?;
             let storage_salt = cipher.decrypt_value(&encrypted_storage_salt)?;
             (master_key, storage_salt)
         };
@@ -764,28 +787,55 @@ impl Wallet {
 
     // Balance simplification: Decryption no longer supported - balances are plain u64
     #[allow(dead_code)]
-    pub async fn decrypt_ciphertext_of_asset(&self, _asset: &Hash) -> Result<Option<u64>, WalletError> {
-        Err(WalletError::Any(anyhow::anyhow!("Ciphertext decryption is no longer supported - balances are plain u64")))
+    pub async fn decrypt_ciphertext_of_asset(
+        &self,
+        _asset: &Hash,
+    ) -> Result<Option<u64>, WalletError> {
+        Err(WalletError::Any(anyhow::anyhow!(
+            "Ciphertext decryption is no longer supported - balances are plain u64"
+        )))
     }
 
     #[allow(dead_code)]
-    pub async fn decrypt_ciphertext_with(&self, _max_supply: Option<u64>) -> Result<Option<u64>, WalletError> {
-        Err(WalletError::Any(anyhow::anyhow!("Ciphertext decryption is no longer supported - balances are plain u64")))
+    pub async fn decrypt_ciphertext_with(
+        &self,
+        _max_supply: Option<u64>,
+    ) -> Result<Option<u64>, WalletError> {
+        Err(WalletError::Any(anyhow::anyhow!(
+            "Ciphertext decryption is no longer supported - balances are plain u64"
+        )))
     }
 
     // Decrypt the extra data from a transfer
-    pub fn decrypt_extra_data(&self, cipher: UnknownExtraDataFormat, handle: Option<&DecryptHandle>, role: Role, version: TxVersion) -> Result<PlaintextExtraData, WalletError> {
+    pub fn decrypt_extra_data(
+        &self,
+        cipher: UnknownExtraDataFormat,
+        handle: Option<&DecryptHandle>,
+        role: Role,
+        version: TxVersion,
+    ) -> Result<PlaintextExtraData, WalletError> {
         trace!("decrypt extra data");
-        let res = cipher.decrypt(self.account.inner.keypair.get_private_key(), handle, role, version)?;
+        let res = cipher.decrypt(
+            self.account.inner.keypair.get_private_key(),
+            handle,
+            role,
+            version,
+        )?;
         Ok(res)
     }
 
     // Create a transaction with the given transaction type and fee
     // this will apply the changes to the storage if the transaction
-    pub async fn create_transaction(&self, transaction_type: TransactionTypeBuilder, fee: FeeBuilder) -> Result<Transaction, WalletError> {
+    pub async fn create_transaction(
+        &self,
+        transaction_type: TransactionTypeBuilder,
+        fee: FeeBuilder,
+    ) -> Result<Transaction, WalletError> {
         trace!("create transaction");
         let mut storage = self.storage.write().await;
-        let (tx, mut state) = self.create_transaction_with_storage(&storage, transaction_type, fee).await?;
+        let (tx, mut state) = self
+            .create_transaction_with_storage(&storage, transaction_type, fee)
+            .await?;
         state.apply_changes(&mut storage).await?;
 
         Ok(tx)
@@ -793,13 +843,23 @@ impl Wallet {
 
     // Create a transaction with the given transaction type and fee
     // this will apply the changes to the storage if the transaction
-    pub async fn create_transaction_with_storage(&self, storage: &EncryptedStorage, transaction_type: TransactionTypeBuilder, fee: FeeBuilder) -> Result<(Transaction, TransactionBuilderState), WalletError> {
+    pub async fn create_transaction_with_storage(
+        &self,
+        storage: &EncryptedStorage,
+        transaction_type: TransactionTypeBuilder,
+        fee: FeeBuilder,
+    ) -> Result<(Transaction, TransactionBuilderState), WalletError> {
         trace!("create transaction with storage");
-        let mut state = self.create_transaction_state_with_storage(&storage, &transaction_type, &fee, None).await?;
-        let threshold = storage.get_multisig_state().await?
+        let mut state = self
+            .create_transaction_state_with_storage(&storage, &transaction_type, &fee, None)
+            .await?;
+        let threshold = storage
+            .get_multisig_state()
+            .await?
             .map(|m| m.payload.threshold);
         let tx_version = storage.get_tx_version().await?;
-        let transaction = self.create_transaction_with(&mut state, threshold, tx_version, transaction_type, fee)?;
+        let transaction =
+            self.create_transaction_with(&mut state, threshold, tx_version, transaction_type, fee)?;
 
         Ok((transaction, state))
     }
@@ -809,7 +869,13 @@ impl Wallet {
     // This will returns the transaction builder state along the transaction
     // You must handle "apply changes" to the storage
     // Warning: this is locking the network handler to access to the daemon api
-    pub async fn create_transaction_state_with_storage(&self, storage: &EncryptedStorage, transaction_type: &TransactionTypeBuilder, fee: &FeeBuilder, nonce: Option<u64>) -> Result<TransactionBuilderState, WalletError> {
+    pub async fn create_transaction_state_with_storage(
+        &self,
+        storage: &EncryptedStorage,
+        transaction_type: &TransactionTypeBuilder,
+        fee: &FeeBuilder,
+        nonce: Option<u64>,
+    ) -> Result<TransactionBuilderState, WalletError> {
         trace!("create transaction with storage");
 
         // Light mode: Query nonce and reference on-demand from daemon
@@ -819,15 +885,26 @@ impl Wallet {
             let address = self.get_address();
 
             // Query nonce on-demand (ignore provided nonce in light mode)
-            let queried_nonce = light_api.get_nonce(&address).await
-                .map_err(|e| WalletError::Any(anyhow::anyhow!("Failed to query nonce from daemon in light mode: {}", e)))?;
+            let queried_nonce = light_api.get_nonce(&address).await.map_err(|e| {
+                WalletError::Any(anyhow::anyhow!(
+                    "Failed to query nonce from daemon in light mode: {}",
+                    e
+                ))
+            })?;
 
             // Query reference on-demand
-            let queried_reference = light_api.get_reference_block().await
-                .map_err(|e| WalletError::Any(anyhow::anyhow!("Failed to query reference from daemon in light mode: {}", e)))?;
+            let queried_reference = light_api.get_reference_block().await.map_err(|e| {
+                WalletError::Any(anyhow::anyhow!(
+                    "Failed to query reference from daemon in light mode: {}",
+                    e
+                ))
+            })?;
 
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Light mode: queried nonce={}, reference.topoheight={}", queried_nonce, queried_reference.topoheight);
+                debug!(
+                    "Light mode: queried nonce={}, reference.topoheight={}",
+                    queried_nonce, queried_reference.topoheight
+                );
             }
 
             (queried_nonce, queried_reference, true)
@@ -835,7 +912,7 @@ impl Wallet {
             // Normal mode: Use local storage
             let nonce = match nonce {
                 Some(n) => n,
-                None => storage.get_unconfirmed_nonce()?
+                None => storage.get_unconfirmed_nonce()?,
             };
 
             let mut generated = false;
@@ -845,7 +922,7 @@ impl Wallet {
                 generated = true;
                 Reference {
                     topoheight: storage.get_synced_topoheight()?,
-                    hash: storage.get_top_block_hash()?
+                    hash: storage.get_top_block_hash()?,
                 }
             };
 
@@ -856,7 +933,7 @@ impl Wallet {
         let (nonce, reference, mut generated) = {
             let nonce = match nonce {
                 Some(n) => n,
-                None => storage.get_unconfirmed_nonce()?
+                None => storage.get_unconfirmed_nonce()?,
             };
 
             let mut generated = false;
@@ -866,7 +943,7 @@ impl Wallet {
                 generated = true;
                 Reference {
                     topoheight: storage.get_synced_topoheight()?,
-                    hash: storage.get_top_block_hash()?
+                    hash: storage.get_top_block_hash()?,
                 }
             };
 
@@ -877,14 +954,11 @@ impl Wallet {
         let used_assets = transaction_type.used_assets();
 
         // state used to build the transaction
-        let mut state = TransactionBuilderState::new(
-            self.network.is_mainnet(),
-            reference,
-            nonce
-        );
+        let mut state = TransactionBuilderState::new(self.network.is_mainnet(), reference, nonce);
 
         #[cfg(feature = "network_handler")]
-        self.add_registered_keys_for_fees_estimation(state.as_mut(), fee, transaction_type).await?;
+        self.add_registered_keys_for_fees_estimation(state.as_mut(), fee, transaction_type)
+            .await?;
 
         // Lets prevent any front running due to mining
         #[cfg(feature = "network_handler")]
@@ -897,11 +971,18 @@ impl Wallet {
                     let mut daemon_stable_topoheight = None;
                     // Last mining reward is above stable topoheight, this may increase orphans rate
                     // To avoid this, we will use the last balance version in stable topoheight as reference
-                    let mut use_stable_balance = if let Some(topoheight) = storage.get_last_coinbase_reward_topoheight().filter(|_| !force_stable_balance) {
-                        let stable_topoheight = network_handler.get_api().get_stable_topoheight().await?;
+                    let mut use_stable_balance = if let Some(topoheight) = storage
+                        .get_last_coinbase_reward_topoheight()
+                        .filter(|_| !force_stable_balance)
+                    {
+                        let stable_topoheight =
+                            network_handler.get_api().get_stable_topoheight().await?;
                         daemon_stable_topoheight = Some(stable_topoheight);
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("stable topoheight: {}, topoheight: {}", stable_topoheight, topoheight);
+                            debug!(
+                                "stable topoheight: {}, topoheight: {}",
+                                stable_topoheight, topoheight
+                            );
                         }
                         topoheight > stable_topoheight
                     } else {
@@ -947,30 +1028,40 @@ impl Wallet {
                             if log::log_enabled!(log::Level::Debug) {
                                 debug!("Searching stable balance for asset {}", asset);
                             }
-                            match network_handler.get_api().get_stable_balance(&address, &asset).await {
+                            match network_handler
+                                .get_api()
+                                .get_stable_balance(&address, &asset)
+                                .await
+                            {
                                 Ok(stable_point) => {
                                     // Balance simplification: Stable balance is plain u64 from daemon
                                     let amount = stable_point.balance;
                                     let balance = Balance::new(amount);
 
                                     if log::log_enabled!(log::Level::Debug) {
-                                        debug!("Using stable balance for asset {} with amount {}", asset, balance.amount);
+                                        debug!(
+                                            "Using stable balance for asset {} with amount {}",
+                                            asset, balance.amount
+                                        );
                                     }
                                     state.add_balance((*asset).clone(), balance);
 
                                     // Build the stable reference
                                     // We need to find the highest stable point
-                                    if generated || state.get_reference().topoheight < stable_point.stable_topoheight {
+                                    if generated
+                                        || state.get_reference().topoheight
+                                            < stable_point.stable_topoheight
+                                    {
                                         if log::log_enabled!(log::Level::Debug) {
                                             debug!("Setting stable reference for TX creation at topoheight {} with hash {}", stable_point.stable_topoheight, stable_point.stable_block_hash);
                                         }
                                         state.set_reference(Reference {
                                             topoheight: stable_point.stable_topoheight,
-                                            hash: stable_point.stable_block_hash
+                                            hash: stable_point.stable_block_hash,
                                         });
                                         generated = false;
                                     }
-                                },
+                                }
                                 Err(e) => {
                                     if log::log_enabled!(log::Level::Warn) {
                                         warn!("Couldn't fetch stable balance for asset ({}), will try without: {}", asset, e);
@@ -1003,7 +1094,7 @@ impl Wallet {
             }
 
             if !storage.is_asset_tracked(asset)? {
-                return Err(WalletError::AssetNotTracked(asset.clone()))
+                return Err(WalletError::AssetNotTracked(asset.clone()));
             }
 
             // Light mode: Query balance on-demand from daemon
@@ -1011,11 +1102,19 @@ impl Wallet {
             let balance = if self.is_light_mode() {
                 let light_api = self.get_light_api().await?;
                 let address = self.get_address();
-                let balance_amount = light_api.get_balance(&address, &asset).await
-                    .map_err(|e| WalletError::Any(anyhow::anyhow!("Failed to query balance from daemon in light mode: {}", e)))?;
+                let balance_amount =
+                    light_api.get_balance(&address, &asset).await.map_err(|e| {
+                        WalletError::Any(anyhow::anyhow!(
+                            "Failed to query balance from daemon in light mode: {}",
+                            e
+                        ))
+                    })?;
 
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Light mode: queried balance for asset {} = {}", asset, balance_amount);
+                    debug!(
+                        "Light mode: queried balance for asset {} = {}",
+                        asset, balance_amount
+                    );
                 }
 
                 Balance::new(balance_amount)
@@ -1026,7 +1125,10 @@ impl Wallet {
                 }
                 let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(&asset).await?;
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Using balance (unconfirmed: {}) for asset {} with amount {}", unconfirmed, asset, balance.amount);
+                    debug!(
+                        "Using balance (unconfirmed: {}) for asset {} with amount {}",
+                        unconfirmed, asset, balance.amount
+                    );
                 }
                 balance
             };
@@ -1038,7 +1140,10 @@ impl Wallet {
                 }
                 let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(&asset).await?;
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Using balance (unconfirmed: {}) for asset {} with amount {}", unconfirmed, asset, balance.amount);
+                    debug!(
+                        "Using balance (unconfirmed: {}) for asset {} with amount {}",
+                        unconfirmed, asset, balance.amount
+                    );
                 }
                 balance
             };
@@ -1050,17 +1155,36 @@ impl Wallet {
     }
 
     // Create the transaction with all needed parameters
-    pub fn create_transaction_with(&self, state: &mut TransactionBuilderState, threshold: Option<u8>, tx_version: TxVersion, transaction_type: TransactionTypeBuilder, fee: FeeBuilder) -> Result<Transaction, WalletError> {
+    pub fn create_transaction_with(
+        &self,
+        state: &mut TransactionBuilderState,
+        threshold: Option<u8>,
+        tx_version: TxVersion,
+        transaction_type: TransactionTypeBuilder,
+        fee: FeeBuilder,
+    ) -> Result<Transaction, WalletError> {
         // Create the transaction builder
-        let builder = TransactionBuilder::new(tx_version, self.get_public_key().clone(), threshold, transaction_type, fee);
+        let builder = TransactionBuilder::new(
+            tx_version,
+            self.get_public_key().clone(),
+            threshold,
+            transaction_type,
+            fee,
+        );
 
         // Build the final transaction
-        let transaction = builder.build(state, self.get_keypair())
+        let transaction = builder
+            .build(state, self.get_keypair())
             .map_err(|e| WalletError::Any(e.into()))?;
 
         let tx_hash = transaction.hash();
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Transaction created: {} with nonce {} and reference {}", tx_hash, transaction.get_nonce(), transaction.get_reference());
+            debug!(
+                "Transaction created: {} with nonce {} and reference {}",
+                tx_hash,
+                transaction.get_nonce(),
+                transaction.get_reference()
+            );
         }
         state.set_tx_hash_built(tx_hash);
 
@@ -1068,10 +1192,24 @@ impl Wallet {
     }
 
     // Create an unsigned transaction with the given transaction type and fee
-    pub fn create_unsigned_transaction(&self, state: &mut TransactionBuilderState, threshold: Option<u8>, transaction_type: TransactionTypeBuilder, fee: FeeBuilder, tx_version: TxVersion) -> Result<UnsignedTransaction, WalletError> {
+    pub fn create_unsigned_transaction(
+        &self,
+        state: &mut TransactionBuilderState,
+        threshold: Option<u8>,
+        transaction_type: TransactionTypeBuilder,
+        fee: FeeBuilder,
+        tx_version: TxVersion,
+    ) -> Result<UnsignedTransaction, WalletError> {
         trace!("create unsigned transaction");
-        let builder = TransactionBuilder::new(tx_version, self.get_public_key().clone(), threshold, transaction_type, fee);
-        let unsigned = builder.build_unsigned(state, self.get_keypair())
+        let builder = TransactionBuilder::new(
+            tx_version,
+            self.get_public_key().clone(),
+            threshold,
+            transaction_type,
+            fee,
+        );
+        let unsigned = builder
+            .build_unsigned(state, self.get_keypair())
             .map_err(|e| WalletError::Any(e.into()))?;
 
         Ok(unsigned)
@@ -1088,8 +1226,11 @@ impl Wallet {
         {
             let network_handler = self.network_handler.lock().await;
             if let Some(network_handler) = network_handler.as_ref() {
-                network_handler.get_api().submit_transaction(transaction).await?;
-                return Ok(())
+                network_handler
+                    .get_api()
+                    .submit_transaction(transaction)
+                    .await?;
+                return Ok(());
             }
         }
         Err(WalletError::NotOnlineMode)
@@ -1097,10 +1238,15 @@ impl Wallet {
 
     // Search if possible all registered keys for the transaction type
     #[cfg(feature = "network_handler")]
-    pub async fn add_registered_keys_for_fees_estimation(&self, state: &mut EstimateFeesState, fee: &FeeBuilder, transaction_type: &TransactionTypeBuilder) -> Result<(), WalletError> {
+    pub async fn add_registered_keys_for_fees_estimation(
+        &self,
+        state: &mut EstimateFeesState,
+        fee: &FeeBuilder,
+        transaction_type: &TransactionTypeBuilder,
+    ) -> Result<(), WalletError> {
         trace!("add registered keys for fees estimation");
         if matches!(fee, FeeBuilder::Value(_)) {
-            return Ok(())
+            return Ok(());
         }
 
         // To pay exact fees needed, we must verify that we don't have to pay more than needed
@@ -1115,7 +1261,10 @@ impl Wallet {
                         if log::log_enabled!(log::Level::Trace) {
                             trace!("Checking if {} is registered in stable height", addr);
                         }
-                        let registered = network_handler.get_api().is_account_registered(&addr, true).await?;
+                        let registered = network_handler
+                            .get_api()
+                            .is_account_registered(&addr, true)
+                            .await?;
                         if log::log_enabled!(log::Level::Trace) {
                             trace!("registered: {}", registered);
                         }
@@ -1132,23 +1281,37 @@ impl Wallet {
 
     // Estimate fees for a given transaction type
     // Estimated fees returned are the minimum required to be valid on chain
-    pub async fn estimate_fees(&self, tx_type: TransactionTypeBuilder, fee: FeeBuilder) -> Result<u64, WalletError> {
+    pub async fn estimate_fees(
+        &self,
+        tx_type: TransactionTypeBuilder,
+        fee: FeeBuilder,
+    ) -> Result<u64, WalletError> {
         trace!("estimate fees");
         let mut state = EstimateFeesState::new();
 
         #[cfg(feature = "network_handler")]
-        self.add_registered_keys_for_fees_estimation(&mut state, &fee, &tx_type).await?;
+        self.add_registered_keys_for_fees_estimation(&mut state, &fee, &tx_type)
+            .await?;
 
         let (threshold, version) = {
             let storage = self.storage.read().await;
-            let threshold = storage.get_multisig_state().await?
+            let threshold = storage
+                .get_multisig_state()
+                .await?
                 .map(|m| m.payload.threshold);
             let version = storage.get_tx_version().await?;
             (threshold, version)
         };
 
-        let builder = TransactionBuilder::new(version, self.get_public_key().clone(), threshold, tx_type, fee);
-        let estimated_fees = builder.estimate_fees(&mut state)
+        let builder = TransactionBuilder::new(
+            version,
+            self.get_public_key().clone(),
+            threshold,
+            tx_type,
+            fee,
+        );
+        let estimated_fees = builder
+            .estimate_fees(&mut state)
             .map_err(|e| WalletError::Any(e.into()))?;
 
         Ok(estimated_fees)
@@ -1156,103 +1319,286 @@ impl Wallet {
 
     // Export all transactions in CSV format to the given writer
     // This will sort the transactions by topoheight before exporting
-    pub async fn export_transactions_in_csv<W: Write>(&self, storage: &EncryptedStorage, mut transactions: Vec<InnerTransactionEntry>, w: &mut W) -> Result<(), WalletError> {
+    pub async fn export_transactions_in_csv<W: Write>(
+        &self,
+        storage: &EncryptedStorage,
+        mut transactions: Vec<InnerTransactionEntry>,
+        w: &mut W,
+    ) -> Result<(), WalletError> {
         trace!("export transactions in csv");
 
         // Sort transactions by topoheight
         transactions.sort_by(|a, b| a.get_topoheight().cmp(&b.get_topoheight()));
 
-        writeln!(w, "Date,TopoHeight,Hash,Type,From/To,Asset,Amount,Fee,Nonce").context("Error while writing headers")?;
+        writeln!(
+            w,
+            "Date,TopoHeight,Hash,Type,From/To,Asset,Amount,Fee,Nonce"
+        )
+        .context("Error while writing headers")?;
         for tx in transactions {
             match tx.get_entry() {
-                EntryData::Burn { asset, amount, fee, nonce } => {
+                EntryData::Burn {
+                    asset,
+                    amount,
+                    fee,
+                    nonce,
+                } => {
                     let data = storage.get_asset(&asset).await?;
-                    writeln!(w, "{},{},{},{},{},-,{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "Burn", data.get_name(), format_coin(*amount, data.get_decimals()), format_tos(*fee), nonce).context("Error while writing csv line")?;
-                },
+                    writeln!(
+                        w,
+                        "{},{},{},{},{},-,{},{},{}",
+                        datetime_from_timestamp(tx.get_timestamp())?,
+                        tx.get_topoheight(),
+                        tx.get_hash(),
+                        "Burn",
+                        data.get_name(),
+                        format_coin(*amount, data.get_decimals()),
+                        format_tos(*fee),
+                        nonce
+                    )
+                    .context("Error while writing csv line")?;
+                }
                 EntryData::Coinbase { reward } => {
-                    writeln!(w, "{},{},{},{},{},-,{},-,-", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "Coinbase", "TOS", format_tos(*reward)).context("Error while writing csv line")?;
-                },
+                    writeln!(
+                        w,
+                        "{},{},{},{},{},-,{},-,-",
+                        datetime_from_timestamp(tx.get_timestamp())?,
+                        tx.get_topoheight(),
+                        tx.get_hash(),
+                        "Coinbase",
+                        "TOS",
+                        format_tos(*reward)
+                    )
+                    .context("Error while writing csv line")?;
+                }
                 EntryData::Incoming { from, transfers } => {
                     for transfer in transfers {
                         let data = storage.get_asset(&transfer.get_asset()).await?;
-                        writeln!(w, "{},{},{},{},{},{},{},-,-", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "Incoming", from.as_address(self.get_network().is_mainnet()), data.get_name(), format_coin(transfer.get_amount(), data.get_decimals())).context("Error while writing csv line")?;
+                        writeln!(
+                            w,
+                            "{},{},{},{},{},{},{},-,-",
+                            datetime_from_timestamp(tx.get_timestamp())?,
+                            tx.get_topoheight(),
+                            tx.get_hash(),
+                            "Incoming",
+                            from.as_address(self.get_network().is_mainnet()),
+                            data.get_name(),
+                            format_coin(transfer.get_amount(), data.get_decimals())
+                        )
+                        .context("Error while writing csv line")?;
                     }
-                },
-                EntryData::Outgoing { transfers, fee, nonce } => {
+                }
+                EntryData::Outgoing {
+                    transfers,
+                    fee,
+                    nonce,
+                } => {
                     for transfer in transfers {
                         let data = storage.get_asset(&transfer.get_asset()).await?;
-                        writeln!(w, "{},{},{},{},{},{},{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "Outgoing", transfer.get_destination().as_address(self.get_network().is_mainnet()), data.get_name(), format_coin(transfer.get_amount(), data.get_decimals()), format_tos(*fee), nonce).context("Error while writing csv line")?;
+                        writeln!(
+                            w,
+                            "{},{},{},{},{},{},{},{},{}",
+                            datetime_from_timestamp(tx.get_timestamp())?,
+                            tx.get_topoheight(),
+                            tx.get_hash(),
+                            "Outgoing",
+                            transfer
+                                .get_destination()
+                                .as_address(self.get_network().is_mainnet()),
+                            data.get_name(),
+                            format_coin(transfer.get_amount(), data.get_decimals()),
+                            format_tos(*fee),
+                            nonce
+                        )
+                        .context("Error while writing csv line")?;
                     }
-                },
-                EntryData::MultiSig { participants, threshold, fee, nonce } => {
-                    let str_participants: Vec<String> = participants.iter().map(|p| p.as_address(self.get_network().is_mainnet()).to_string()).collect();
-                    writeln!(w, "{},{},{},{},{},{},-,{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "MultiSig", str_participants.join("|"), threshold, format_tos(*fee), nonce).context("Error while writing csv line")?;
-                },
-                EntryData::InvokeContract { contract, deposits, chunk_id, fee, max_gas, nonce } => {
+                }
+                EntryData::MultiSig {
+                    participants,
+                    threshold,
+                    fee,
+                    nonce,
+                } => {
+                    let str_participants: Vec<String> = participants
+                        .iter()
+                        .map(|p| p.as_address(self.get_network().is_mainnet()).to_string())
+                        .collect();
+                    writeln!(
+                        w,
+                        "{},{},{},{},{},{},-,{},{}",
+                        datetime_from_timestamp(tx.get_timestamp())?,
+                        tx.get_topoheight(),
+                        tx.get_hash(),
+                        "MultiSig",
+                        str_participants.join("|"),
+                        threshold,
+                        format_tos(*fee),
+                        nonce
+                    )
+                    .context("Error while writing csv line")?;
+                }
+                EntryData::InvokeContract {
+                    contract,
+                    deposits,
+                    chunk_id,
+                    fee,
+                    max_gas,
+                    nonce,
+                } => {
                     let mut str_deposits = Vec::new();
                     str_deposits.push(format!("Gas:{}", format_tos(*max_gas)));
                     for (asset, amount) in deposits {
                         let data = storage.get_asset(&asset).await?;
-                        str_deposits.push(format!("{}:{}", data.get_name(), format_coin(*amount, data.get_decimals())));
+                        str_deposits.push(format!(
+                            "{}:{}",
+                            data.get_name(),
+                            format_coin(*amount, data.get_decimals())
+                        ));
                     }
 
-                    writeln!(w, "{},{},{},{},{},{},{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "InvokeContract", contract, str_deposits.join("|"), chunk_id, format_tos(*fee), nonce).context("Error while writing csv line")?;
-                },
+                    writeln!(
+                        w,
+                        "{},{},{},{},{},{},{},{},{}",
+                        datetime_from_timestamp(tx.get_timestamp())?,
+                        tx.get_topoheight(),
+                        tx.get_hash(),
+                        "InvokeContract",
+                        contract,
+                        str_deposits.join("|"),
+                        chunk_id,
+                        format_tos(*fee),
+                        nonce
+                    )
+                    .context("Error while writing csv line")?;
+                }
                 EntryData::DeployContract { fee, nonce, invoke } => {
                     let mut str_deposits = Vec::new();
                     if let Some(invoke) = invoke {
                         str_deposits.push(format!("Gas:{}", format_tos(invoke.max_gas)));
                         for (asset, amount) in invoke.deposits.iter() {
                             let data = storage.get_asset(&asset).await?;
-                            str_deposits.push(format!("{}:{}", data.get_name(), format_coin(*amount, data.get_decimals())));
+                            str_deposits.push(format!(
+                                "{}:{}",
+                                data.get_name(),
+                                format_coin(*amount, data.get_decimals())
+                            ));
                         }
                     }
 
-                    writeln!(w, "{},{},{},{},-,-,{},{},{}", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), "DeployContract", str_deposits.join("|"), format_tos(*fee), nonce).context("Error while writing csv line")?;
-                },
-                EntryData::AIMining { hash: _, payload, outgoing } => {
+                    writeln!(
+                        w,
+                        "{},{},{},{},-,-,{},{},{}",
+                        datetime_from_timestamp(tx.get_timestamp())?,
+                        tx.get_topoheight(),
+                        tx.get_hash(),
+                        "DeployContract",
+                        str_deposits.join("|"),
+                        format_tos(*fee),
+                        nonce
+                    )
+                    .context("Error while writing csv line")?;
+                }
+                EntryData::AIMining {
+                    hash: _,
+                    payload,
+                    outgoing,
+                } => {
                     let (tx_type, details) = match payload {
-                        AIMiningPayload::PublishTask { task_id, reward_amount, difficulty, deadline: _, description: _ } => {
-                            ("PublishTask", format!("Task:{} Reward:{} Difficulty:{:?}", task_id, format_tos(*reward_amount), difficulty))
-                        },
-                        AIMiningPayload::SubmitAnswer { task_id, answer_hash: _, stake_amount, answer_content: _ } => {
-                            ("SubmitAnswer", format!("Task:{} Stake:{}", task_id, format_tos(*stake_amount)))
-                        },
-                        AIMiningPayload::ValidateAnswer { task_id, answer_id: _, validation_score } => {
-                            ("ValidateAnswer", format!("Task:{} Score:{}", task_id, validation_score))
-                        },
-                        AIMiningPayload::RegisterMiner { miner_address: _, registration_fee } => {
-                            ("RegisterMiner", format!("Fee:{}", format_tos(*registration_fee)))
-                        },
+                        AIMiningPayload::PublishTask {
+                            task_id,
+                            reward_amount,
+                            difficulty,
+                            deadline: _,
+                            description: _,
+                        } => (
+                            "PublishTask",
+                            format!(
+                                "Task:{} Reward:{} Difficulty:{:?}",
+                                task_id,
+                                format_tos(*reward_amount),
+                                difficulty
+                            ),
+                        ),
+                        AIMiningPayload::SubmitAnswer {
+                            task_id,
+                            answer_hash: _,
+                            stake_amount,
+                            answer_content: _,
+                        } => (
+                            "SubmitAnswer",
+                            format!("Task:{} Stake:{}", task_id, format_tos(*stake_amount)),
+                        ),
+                        AIMiningPayload::ValidateAnswer {
+                            task_id,
+                            answer_id: _,
+                            validation_score,
+                        } => (
+                            "ValidateAnswer",
+                            format!("Task:{} Score:{}", task_id, validation_score),
+                        ),
+                        AIMiningPayload::RegisterMiner {
+                            miner_address: _,
+                            registration_fee,
+                        } => (
+                            "RegisterMiner",
+                            format!("Fee:{}", format_tos(*registration_fee)),
+                        ),
                     };
                     let direction = if *outgoing { "Outgoing" } else { "Incoming" };
-                    writeln!(w, "{},{},{},{},{},{},{},-,-", datetime_from_timestamp(tx.get_timestamp())?, tx.get_topoheight(), tx.get_hash(), format!("AIMining-{}", tx_type), direction, details, "TOS").context("Error while writing csv line")?;
-                },
+                    writeln!(
+                        w,
+                        "{},{},{},{},{},{},{},-,-",
+                        datetime_from_timestamp(tx.get_timestamp())?,
+                        tx.get_topoheight(),
+                        tx.get_hash(),
+                        format!("AIMining-{}", tx_type),
+                        direction,
+                        details,
+                        "TOS"
+                    )
+                    .context("Error while writing csv line")?;
+                }
             }
         }
-    
+
         w.flush().context("Error while flushing CSV file")?;
         Ok(())
     }
 
     // set wallet in online mode: start a communication task which will keep the wallet synced
     #[cfg(feature = "network_handler")]
-    pub async fn set_online_mode(self: &Arc<Self>, daemon_address: &String, auto_reconnect: bool) -> Result<(), WalletError> {
+    pub async fn set_online_mode(
+        self: &Arc<Self>,
+        daemon_address: &String,
+        auto_reconnect: bool,
+    ) -> Result<(), WalletError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Set online mode to daemon {} with auto reconnect set to {}", daemon_address, auto_reconnect);
+            trace!(
+                "Set online mode to daemon {} with auto reconnect set to {}",
+                daemon_address,
+                auto_reconnect
+            );
         }
         if self.is_online().await {
             // user have to set in offline mode himself first
-            return Err(WalletError::AlreadyOnlineMode)
+            return Err(WalletError::AlreadyOnlineMode);
         }
 
         // Create DaemonAPI first so we can share it between NetworkHandler and LightAPI
         use crate::daemon_api::DaemonAPI;
         use tos_common::utils::sanitize_ws_address;
-        let daemon_api = Arc::new(DaemonAPI::new(format!("{}/json_rpc", sanitize_ws_address(daemon_address.as_str()))).await?);
+        let daemon_api = Arc::new(
+            DaemonAPI::new(format!(
+                "{}/json_rpc",
+                sanitize_ws_address(daemon_address.as_str())
+            ))
+            .await?,
+        );
 
         // create the network handler with the shared DaemonAPI
-        let network_handler = NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone(), self.concurrency).await?;
+        let network_handler =
+            NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone(), self.concurrency)
+                .await?;
 
         // Initialize LightAPI if in light mode
         if self.is_light_mode() {
@@ -1281,17 +1627,26 @@ impl Wallet {
     // set the wallet in online mode using a shared daemon API
     // this allows to share the same connection/Daemon API across several wallets to save resources
     #[cfg(feature = "network_handler")]
-    pub async fn set_online_mode_with_api(self: &Arc<Self>, daemon_api: Arc<DaemonAPI>, auto_reconnect: bool) -> Result<(), WalletError> {
+    pub async fn set_online_mode_with_api(
+        self: &Arc<Self>,
+        daemon_api: Arc<DaemonAPI>,
+        auto_reconnect: bool,
+    ) -> Result<(), WalletError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Set online mode with API with auto reconnect set to {}", auto_reconnect);
+            trace!(
+                "Set online mode with API with auto reconnect set to {}",
+                auto_reconnect
+            );
         }
         if self.is_online().await {
             // user have to set in offline mode himself first
-            return Err(WalletError::AlreadyOnlineMode)
+            return Err(WalletError::AlreadyOnlineMode);
         }
 
         // create the network handler
-        let network_handler = NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone(), self.concurrency).await?;
+        let network_handler =
+            NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone(), self.concurrency)
+                .await?;
 
         // Initialize LightAPI if in light mode
         if self.is_light_mode() {
@@ -1326,7 +1681,7 @@ impl Wallet {
         if let Some(network_handler) = handler.take() {
             network_handler.stop(true).await?;
         } else {
-            return Err(WalletError::NotOnlineMode)
+            return Err(WalletError::NotOnlineMode);
         }
 
         Ok(())
@@ -1336,18 +1691,22 @@ impl Wallet {
     // that will delete all transactions above the given topoheight and all balances
     // then it will re-fetch all transactions and balances from daemon
     #[cfg(feature = "network_handler")]
-    pub async fn rescan(&self, mut topoheight: u64, auto_reconnect: bool) -> Result<(), WalletError> {
+    pub async fn rescan(
+        &self,
+        mut topoheight: u64,
+        auto_reconnect: bool,
+    ) -> Result<(), WalletError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("Rescan wallet from topoheight {}", topoheight);
         }
         if !self.is_online().await {
             // user have to set it online
-            return Err(WalletError::NotOnlineMode)
+            return Err(WalletError::NotOnlineMode);
         }
 
         let mut storage = self.get_storage().write().await;
         if topoheight > storage.get_synced_topoheight()? {
-            return Err(WalletError::RescanTopoheightTooHigh)
+            return Err(WalletError::RescanTopoheightTooHigh);
         }
 
         let handler = self.network_handler.lock().await;
@@ -1386,7 +1745,7 @@ impl Wallet {
             debug!("Starting again network handler");
             network_handler.start(auto_reconnect).await?;
         } else {
-            return Err(WalletError::NotOnlineMode)
+            return Err(WalletError::NotOnlineMode);
         }
 
         Ok(())
@@ -1396,7 +1755,7 @@ impl Wallet {
     pub async fn is_online(&self) -> bool {
         #[cfg(feature = "network_handler")]
         if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
-            return network_handler.is_running().await
+            return network_handler.is_running().await;
         }
 
         false
@@ -1407,6 +1766,90 @@ impl Wallet {
     #[cfg(feature = "network_handler")]
     pub fn get_network_handler(&self) -> &Mutex<Option<Arc<NetworkHandler>>> {
         &self.network_handler
+    }
+
+    // Check if wallet is synchronized with daemon
+    // Returns true if wallet_topoheight >= daemon_topoheight
+    #[cfg(feature = "network_handler")]
+    pub async fn is_synced(&self) -> Result<bool, Error> {
+        // Get daemon topoheight
+        let network_handler = self.network_handler.lock().await;
+        let handler = network_handler
+            .as_ref()
+            .ok_or_else(|| Error::msg("Network handler not available"))?;
+
+        let daemon_info = handler.get_api().get_info().await?;
+        let daemon_topoheight = daemon_info.topoheight;
+
+        // Get wallet synced topoheight
+        let storage = self.storage.read().await;
+        let wallet_topoheight = storage.get_synced_topoheight()?;
+
+        Ok(wallet_topoheight >= daemon_topoheight)
+    }
+
+    // Wait for wallet to synchronize with daemon
+    // Polls until wallet_topoheight >= daemon_topoheight
+    // Returns error if timeout is reached
+    #[cfg(feature = "network_handler")]
+    pub async fn wait_for_sync(&self, timeout_secs: u64) -> Result<(), Error> {
+        use tos_common::tokio::time::{sleep, Duration, Instant};
+
+        let start = Instant::now();
+        let timeout = Duration::from_secs(timeout_secs);
+        let poll_interval = Duration::from_millis(500);
+
+        loop {
+            // Check if synced
+            if self.is_synced().await? {
+                return Ok(());
+            }
+
+            // Check timeout
+            if start.elapsed() >= timeout {
+                let storage = self.storage.read().await;
+                let wallet_topoheight = storage.get_synced_topoheight()?;
+
+                let network_handler = self.network_handler.lock().await;
+                let handler = network_handler
+                    .as_ref()
+                    .ok_or_else(|| Error::msg("Network handler not available"))?;
+                let daemon_info = handler.get_api().get_info().await?;
+                let daemon_topoheight = daemon_info.topoheight;
+
+                return Err(Error::msg(format!(
+                    "Sync timeout after {} seconds. Wallet at topoheight {}, daemon at {}",
+                    timeout_secs, wallet_topoheight, daemon_topoheight
+                )));
+            }
+
+            // Wait before next poll
+            sleep(poll_interval).await;
+        }
+    }
+
+    // Get sync progress information
+    // Returns (wallet_topoheight, daemon_topoheight, percentage)
+    #[cfg(feature = "network_handler")]
+    pub async fn get_sync_progress(&self) -> Result<(u64, u64, f64), Error> {
+        let network_handler = self.network_handler.lock().await;
+        let handler = network_handler
+            .as_ref()
+            .ok_or_else(|| Error::msg("Network handler not available"))?;
+
+        let daemon_info = handler.get_api().get_info().await?;
+        let daemon_topoheight = daemon_info.topoheight;
+
+        let storage = self.storage.read().await;
+        let wallet_topoheight = storage.get_synced_topoheight()?;
+
+        let percentage = if daemon_topoheight > 0 {
+            (wallet_topoheight as f64 / daemon_topoheight as f64) * 100.0
+        } else {
+            100.0
+        };
+
+        Ok((wallet_topoheight, daemon_topoheight, percentage))
     }
 
     // Create a signature of the given data
@@ -1426,13 +1869,19 @@ impl Wallet {
 
     // Get the address of the wallet using its network used
     pub fn get_address(&self) -> Address {
-        self.get_public_key().clone().to_address(self.get_network().is_mainnet())
+        self.get_public_key()
+            .clone()
+            .to_address(self.get_network().is_mainnet())
     }
 
     // Get the address with integrated data and using its network used
     pub fn get_address_with(&self, data: DataElement) -> Address {
         use tos_common::crypto::AddressType;
-        Address::new(self.get_network().is_mainnet(), AddressType::Data(data), self.get_public_key().clone())
+        Address::new(
+            self.get_network().is_mainnet(),
+            AddressType::Data(data),
+            self.get_public_key().clone(),
+        )
     }
 
     // Returns the seed using the language index provided
@@ -1463,30 +1912,45 @@ impl Wallet {
 fn datetime_from_timestamp(timestamp: u64) -> Result<chrono::DateTime<chrono::Local>, WalletError> {
     match chrono::Local.timestamp_millis_opt(timestamp as i64) {
         chrono::LocalResult::Single(dt) => Ok(dt),
-        _ => Err(WalletError::InvalidDatetime)
+        _ => Err(WalletError::InvalidDatetime),
     }
 }
 
 #[cfg(feature = "xswd")]
 pub enum XSWDEvent {
-    RequestPermission(AppStateShared, RpcRequest, oneshot::Sender<Result<PermissionResult, Error>>),
-    RequestApplication(AppStateShared, oneshot::Sender<Result<PermissionResult, Error>>),
+    RequestPermission(
+        AppStateShared,
+        RpcRequest,
+        oneshot::Sender<Result<PermissionResult, Error>>,
+    ),
+    RequestApplication(
+        AppStateShared,
+        oneshot::Sender<Result<PermissionResult, Error>>,
+    ),
     CancelRequest(AppStateShared, oneshot::Sender<Result<(), Error>>),
-    AppDisconnect(AppStateShared)
+    AppDisconnect(AppStateShared),
 }
 
 #[cfg(feature = "xswd")]
 #[async_trait]
 impl XSWDHandler for Arc<Wallet> {
-    async fn request_permission(&self, app_state: &AppStateShared, request: PermissionRequest<'_>) -> Result<PermissionResult, Error> {
+    async fn request_permission(
+        &self,
+        app_state: &AppStateShared,
+        request: PermissionRequest<'_>,
+    ) -> Result<PermissionResult, Error> {
         if let Some(sender) = self.xswd_channel.read().await.as_ref() {
             // no other way ?
             let app_state = app_state.clone();
             // create a callback channel to receive the answer
             let (callback, receiver) = oneshot::channel();
             let event = match request {
-                PermissionRequest::Application => XSWDEvent::RequestApplication(app_state, callback),
-                PermissionRequest::Request(request) => XSWDEvent::RequestPermission(app_state, request.clone(), callback)
+                PermissionRequest::Application => {
+                    XSWDEvent::RequestApplication(app_state, callback)
+                }
+                PermissionRequest::Request(request) => {
+                    XSWDEvent::RequestPermission(app_state, request.clone(), callback)
+                }
             };
 
             // Send the XSWD Message
@@ -1526,13 +1990,21 @@ impl XSWDHandler for Arc<Wallet> {
             if let Some(network_handler) = network_handler.as_ref() {
                 if network_handler.is_running().await {
                     let api = network_handler.get_api();
-                    let response = api.call(&request.method, &request.params).await.map_err(|e| RpcResponseError::new(id.clone(), InternalRpcError::Custom(-31999, e.to_string())))?;
-    
+                    let response =
+                        api.call(&request.method, &request.params)
+                            .await
+                            .map_err(|e| {
+                                RpcResponseError::new(
+                                    id.clone(),
+                                    InternalRpcError::Custom(-31999, e.to_string()),
+                                )
+                            })?;
+
                     return Ok(json!({
                         "jsonrpc": JSON_RPC_VERSION,
                         "id": id,
                         "result": response
-                    }))
+                    }));
                 }
             }
         }
@@ -1545,7 +2017,7 @@ impl XSWDHandler for Arc<Wallet> {
             // Send XSWD Message
             sender.send(XSWDEvent::AppDisconnect(app))?;
 
-            return Ok(())
+            return Ok(());
         }
 
         Err(WalletError::NoHandlerAvailable.into())

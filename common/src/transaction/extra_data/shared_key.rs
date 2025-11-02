@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::serializer::*;
+use serde::{Deserialize, Serialize};
 
 /// Shared key used to encrypt/decrypt the extra data
 #[derive(Debug, Clone)]
@@ -34,7 +34,6 @@ impl<'a> Deserialize<'a> for SharedKey {
         D: serde::Deserializer<'a>,
     {
         let hex = String::deserialize(deserializer)?;
-        SharedKey::from_hex(&hex)
-            .map_err(serde::de::Error::custom)
+        SharedKey::from_hex(&hex).map_err(serde::de::Error::custom)
     }
 }

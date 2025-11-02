@@ -1,18 +1,13 @@
 use anyhow::Result;
 use log::warn;
-use thiserror::Error;
-use tos_common::serializer::{
-    Reader,
-    ReaderError,
-    Serializer,
-    Writer
-};
 use std::{
     borrow::Borrow,
     collections::{BTreeMap, HashMap},
     ops::{Bound, Deref, RangeBounds},
-    sync::{Arc, Mutex}
+    sync::{Arc, Mutex},
 };
+use thiserror::Error;
+use tos_common::serializer::{Reader, ReaderError, Serializer, Writer};
 
 #[cfg(all(
     target_arch = "wasm32",
@@ -108,7 +103,7 @@ impl Borrow<[u8]> for IVec {
 pub struct Db {
     name: String,
     default: Tree,
-    trees: Mutex<HashMap<IVec, Tree>>
+    trees: Mutex<HashMap<IVec, Tree>>,
 }
 
 #[cfg(not(all(
@@ -119,7 +114,7 @@ pub struct Db {
 #[derive(Debug, Error)]
 pub enum DbError {
     #[error("An error occured on the database")]
-    Poisoned
+    Poisoned,
 }
 
 #[cfg(all(
@@ -160,18 +155,21 @@ pub fn open<S: Into<String>>(name: S) -> Result<Db> {
     {
         // Access to the browser local storage
         let window = web_sys::window().ok_or(DbError::Window)?;
-        let local_storage = window.local_storage()
+        let local_storage = window
+            .local_storage()
             .map_err(|_| DbError::LocalStorage)?
             .ok_or(DbError::NoLocalStorage)?;
-    
+
         // Check if the database already exists
         let db_name = format!("{}{}", PREFIX_DB_KEY, db.name());
-        let item = local_storage.get_item(db_name.as_str())
+        let item = local_storage
+            .get_item(db_name.as_str())
             .map_err(|_| DbError::ItemNotFound)?;
 
         // If the database already exists, populate it
         if let Some(content) = item {
-            let decoded = STANDARD.decode(content)
+            let decoded = STANDARD
+                .decode(content)
                 .map_err(|_| DbError::Base64Decode)?;
             db.import(&decoded)?;
         }
@@ -188,7 +186,7 @@ impl Db {
         Self {
             name,
             default: InnerTree::new("default".into()),
-            trees: Mutex::new(HashMap::new())
+            trees: Mutex::new(HashMap::new()),
         }
     }
 
@@ -257,14 +255,16 @@ impl Db {
         ))]
         {
             let window = web_sys::window().ok_or(DbError::Window)?;
-            let local_storage = window.local_storage()
+            let local_storage = window
+                .local_storage()
                 .map_err(|_| DbError::LocalStorage)?
                 .ok_or(DbError::NoLocalStorage)?;
-    
+
             let encoded = STANDARD.encode(buffer);
 
             let db_name = format!("{}{}", PREFIX_DB_KEY, self.name());
-            local_storage.set_item(db_name.as_str(), encoded.as_str())
+            local_storage
+                .set_item(db_name.as_str(), encoded.as_str())
                 .map_err(|_| DbError::ItemError)?;
         }
 
@@ -282,8 +282,7 @@ impl Db {
 
     /// Export the database to a writer.
     fn export(&self, writer: &mut Writer) -> Result<()> {
-        let trees = self.trees.lock()
-            .map_err(|_| DbError::Poisoned)?;
+        let trees = self.trees.lock().map_err(|_| DbError::Poisoned)?;
 
         // Write the default tree
         self.default.export(writer)?;
@@ -301,8 +300,7 @@ impl Db {
 
     /// Populate the database from a reader.
     fn populate(&self, reader: &mut Reader) -> Result<()> {
-        let mut trees = self.trees.lock()
-            .map_err(|_| DbError::Poisoned)?;
+        let mut trees = self.trees.lock().map_err(|_| DbError::Poisoned)?;
 
         // Read the default tree
         self.default.populate(reader)?;
@@ -330,7 +328,7 @@ impl Deref for Db {
 
 pub struct InnerTree {
     name: IVec,
-    entries: Mutex<BTreeMap<IVec, IVec>>
+    entries: Mutex<BTreeMap<IVec, IVec>>,
 }
 
 pub type Tree = Arc<InnerTree>;
@@ -340,7 +338,7 @@ impl InnerTree {
     fn new(name: IVec) -> Tree {
         Arc::new(InnerTree {
             name,
-            entries: Mutex::new(BTreeMap::new())
+            entries: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -394,7 +392,9 @@ impl InnerTree {
     /// Returns the last entry (key/value) (by order) from this tree.
     pub fn last(&self) -> Result<Option<(IVec, IVec)>> {
         let entries = self.entries.lock().expect("Poisoned");
-        Ok(entries.last_key_value().map(|(k, v)| (k.clone(), v.clone())))
+        Ok(entries
+            .last_key_value()
+            .map(|(k, v)| (k.clone(), v.clone())))
     }
 
     /// Clears the `Tree`, removing all values.
@@ -411,7 +411,7 @@ impl InnerTree {
             tree: self.clone(),
             index: 0,
             index_back: 0,
-            range: (Bound::Unbounded, Bound::Unbounded)
+            range: (Bound::Unbounded, Bound::Unbounded),
         }
     }
 
@@ -422,22 +422,14 @@ impl InnerTree {
         R: RangeBounds<K>,
     {
         let lo = match range.start_bound() {
-            Bound::Included(start) => {
-                Bound::Included(IVec::from(start.as_ref()))
-            }
-            Bound::Excluded(start) => {
-                Bound::Excluded(IVec::from(start.as_ref()))
-            }
+            Bound::Included(start) => Bound::Included(IVec::from(start.as_ref())),
+            Bound::Excluded(start) => Bound::Excluded(IVec::from(start.as_ref())),
             Bound::Unbounded => Bound::Included(IVec::from(&[])),
         };
 
         let hi = match range.end_bound() {
-            Bound::Included(end) => {
-                Bound::Included(IVec::from(end.as_ref()))
-            }
-            Bound::Excluded(end) => {
-                Bound::Excluded(IVec::from(end.as_ref()))
-            }
+            Bound::Included(end) => Bound::Included(IVec::from(end.as_ref())),
+            Bound::Excluded(end) => Bound::Excluded(IVec::from(end.as_ref())),
             Bound::Unbounded => Bound::Unbounded,
         };
 
@@ -445,14 +437,13 @@ impl InnerTree {
             tree: self.clone(),
             index: 0,
             index_back: 0,
-            range: (lo, hi)
+            range: (lo, hi),
         }
     }
 
     /// Internal function to export the tree to a writer.
     fn export(&self, writer: &mut Writer) -> Result<()> {
-        let entries = self.entries.lock()
-            .map_err(|_| DbError::Poisoned)?;
+        let entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
 
         let len = entries.len() as u16;
         writer.write_u16(len);
@@ -466,8 +457,7 @@ impl InnerTree {
 
     /// Internal function to populate the tree from a reader.
     fn populate(&self, reader: &mut Reader) -> Result<()> {
-        let mut entries = self.entries.lock()
-            .map_err(|_| DbError::Poisoned)?;
+        let mut entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
 
         let len = reader.read_u16()?;
         for _ in 0..len {
@@ -487,21 +477,17 @@ pub struct Iter {
     tree: Tree,
     index: usize,
     index_back: usize,
-    range: (Bound<IVec>, Bound<IVec>)
+    range: (Bound<IVec>, Bound<IVec>),
 }
 
 impl Iter {
     /// Iterate over the keys of this Tree
-    pub fn keys(
-        self,
-    ) -> impl DoubleEndedIterator<Item = Result<IVec>> {
+    pub fn keys(self) -> impl DoubleEndedIterator<Item = Result<IVec>> {
         self.map(|r| r.map(|(k, _v)| k))
     }
 
     /// Iterate over the values of this Tree
-    pub fn values(
-        self,
-    ) -> impl DoubleEndedIterator<Item = Result<IVec>> {
+    pub fn values(self) -> impl DoubleEndedIterator<Item = Result<IVec>> {
         self.map(|r| r.map(|(_k, v)| v))
     }
 }
@@ -516,7 +502,7 @@ impl Iterator for Iter {
         };
 
         if self.index >= entries.len() - self.index_back {
-            return None
+            return None;
         }
         let (k, v) = entries.range(self.range.clone()).nth(self.index)?;
         self.index += 1;
@@ -534,10 +520,13 @@ impl DoubleEndedIterator for Iter {
 
         // If we reach the other bound, we stop
         if self.index >= entries.len() - self.index_back {
-            return None
+            return None;
         }
 
-        let (k, v) = entries.range(self.range.clone()).rev().nth(self.index_back)?;
+        let (k, v) = entries
+            .range(self.range.clone())
+            .rev()
+            .nth(self.index_back)?;
         self.index_back += 1;
 
         Some(Ok((k.clone(), v.clone())))
@@ -577,8 +566,14 @@ mod tests {
 
         tree.insert("b", "c").unwrap();
         let mut iter = tree.iter();
-        assert_eq!(iter.next_back().unwrap().unwrap(), (b"b".into(), b"c".into()));
-        assert_eq!(iter.next_back().unwrap().unwrap(), (b"a".into(), b"b".into()));
+        assert_eq!(
+            iter.next_back().unwrap().unwrap(),
+            (b"b".into(), b"c".into())
+        );
+        assert_eq!(
+            iter.next_back().unwrap().unwrap(),
+            (b"a".into(), b"b".into())
+        );
         assert!(iter.next_back().is_none());
 
         db.flush().unwrap();
@@ -638,11 +633,13 @@ mod tests {
 
         let mut iter = tree.iter();
         assert_eq!(iter.next().unwrap().unwrap(), (b"a".into(), b"999".into()));
-        assert_eq!(iter.next_back().unwrap().unwrap(), (b"c".into(), b"333".into()));
+        assert_eq!(
+            iter.next_back().unwrap().unwrap(),
+            (b"c".into(), b"333".into())
+        );
         assert_eq!(iter.next().unwrap().unwrap(), (b"b".into(), b"666".into()));
         assert!(iter.next_back().is_none());
         assert!(iter.next().is_none());
-
     }
 
     #[test]
@@ -654,13 +651,25 @@ mod tests {
         tree.insert(25u64.to_be_bytes(), "b").unwrap();
 
         let mut range = tree.range(0u64.to_be_bytes()..).keys();
-        assert_eq!(range.next().unwrap().unwrap(), IVec::from(&10u64.to_be_bytes()));
-        assert_eq!(range.next().unwrap().unwrap(), IVec::from(&25u64.to_be_bytes()));
-        assert_eq!(range.next().unwrap().unwrap(), IVec::from(&50u64.to_be_bytes()));
+        assert_eq!(
+            range.next().unwrap().unwrap(),
+            IVec::from(&10u64.to_be_bytes())
+        );
+        assert_eq!(
+            range.next().unwrap().unwrap(),
+            IVec::from(&25u64.to_be_bytes())
+        );
+        assert_eq!(
+            range.next().unwrap().unwrap(),
+            IVec::from(&50u64.to_be_bytes())
+        );
         assert!(range.next().is_none());
 
         let mut range = tree.range(10u64.to_be_bytes()..=10u64.to_be_bytes()).keys();
-        assert_eq!(range.next().unwrap().unwrap(), IVec::from(&10u64.to_be_bytes()));
+        assert_eq!(
+            range.next().unwrap().unwrap(),
+            IVec::from(&10u64.to_be_bytes())
+        );
         assert!(range.next().is_none());
     }
 
@@ -671,6 +680,9 @@ mod tests {
         assert!(tree.last().unwrap().is_none());
 
         tree.insert(50u64.to_be_bytes(), "c").unwrap();
-        assert_eq!(tree.last().unwrap().unwrap(), (IVec::from(&50u64.to_be_bytes()), IVec::from("c".as_bytes())));
+        assert_eq!(
+            tree.last().unwrap().unwrap(),
+            (IVec::from(&50u64.to_be_bytes()), IVec::from("c".as_bytes()))
+        );
     }
 }

@@ -1,30 +1,32 @@
-pub mod command;
 pub mod argument;
 pub mod art;
+pub mod command;
 
 mod error;
 mod option;
 mod state;
 
+use self::command::{CommandError, CommandManager};
 use crate::{
-    tokio::{
-        spawn_task,
-        task::JoinHandle,
-        sync::{
-            mpsc::{
-                self,
-                UnboundedReceiver,
-                Sender,
-                Receiver
-            },
-            oneshot,
-            Mutex as AsyncMutex
-        },
-        time::{interval, timeout}
-    },
     crypto::Hash,
     serializer::Serializer,
+    tokio::{
+        spawn_task,
+        sync::{
+            mpsc::{self, Receiver, Sender, UnboundedReceiver},
+            oneshot, Mutex as AsyncMutex,
+        },
+        task::JoinHandle,
+        time::{interval, timeout},
+    },
 };
+use anyhow::Error;
+use crossterm::terminal;
+use fern::colors::ColoredLevelConfig;
+use log::{debug, error, info, trace, warn, Level, LevelFilter};
+use option::OptionReader;
+use serde::{Deserialize, Serialize};
+use state::State;
 use std::{
     fmt::{self, Display, Formatter},
     fs::{self, create_dir_all},
@@ -33,25 +35,13 @@ use std::{
     path::Path,
     pin::Pin,
     str::FromStr,
-    sync::{
-        atomic::Ordering,
-        Arc,
-        Mutex,
-    },
-    time::Duration
+    sync::{atomic::Ordering, Arc, Mutex},
+    time::Duration,
 };
-use crossterm::terminal;
-use self::command::{CommandError, CommandManager};
-use anyhow::Error;
-use fern::colors::ColoredLevelConfig;
-use log::{debug, error, info, trace, warn, Level, LevelFilter};
-use serde::{Serialize, Deserialize};
-use state::State;
-use option::OptionReader;
 
 // Re-export fern and colors
-pub use fern::colors::Color;
 pub use error::PromptError;
+pub use fern::colors::Color;
 
 pub const DEFAULT_LOGS_DATETIME_FORMAT: &str = "[%Y-%m-%d] (%H:%M:%S%.3f)";
 
@@ -69,7 +59,7 @@ pub enum LogLevel {
     Warn,
     Info,
     Debug,
-    Trace
+    Trace,
 }
 
 impl Default for LogLevel {
@@ -81,7 +71,7 @@ impl Default for LogLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleConfig {
     pub module: String,
-    pub level: LogLevel
+    pub level: LogLevel,
 }
 
 impl FromStr for ModuleConfig {
@@ -91,10 +81,7 @@ impl FromStr for ModuleConfig {
         let mut parts = s.split('=');
         let module = parts.next().ok_or("Invalid module")?.to_string();
         let level = parts.next().ok_or("Invalid level")?.parse()?;
-        Ok(Self {
-            module,
-            level
-        })
+        Ok(Self { module, level })
     }
 }
 
@@ -106,7 +93,7 @@ impl From<LogLevel> for LevelFilter {
             LogLevel::Warn => Self::Warn,
             LogLevel::Info => Self::Info,
             LogLevel::Debug => Self::Debug,
-            LogLevel::Trace => Self::Trace
+            LogLevel::Trace => Self::Trace,
         }
     }
 }
@@ -119,7 +106,7 @@ impl From<LogLevel> for Level {
             LogLevel::Warn => Self::Warn,
             LogLevel::Info => Self::Info,
             LogLevel::Debug => Self::Debug,
-            LogLevel::Trace => Self::Trace
+            LogLevel::Trace => Self::Trace,
         }
     }
 }
@@ -149,7 +136,7 @@ impl FromStr for LogLevel {
             "debug" => Self::Debug,
             "trace" => Self::Trace,
             "off" => Self::Off,
-            _ => return Err("Invalid log level")
+            _ => return Err("Invalid log level"),
         })
     }
 }
@@ -163,7 +150,7 @@ pub struct Prompt {
     // Should we set colors or not
     disable_colors: bool,
     // Handle to compress the log file
-    compression_handle: Option<JoinHandle<()>>
+    compression_handle: Option<JoinHandle<()>>,
 }
 
 pub type ShareablePrompt = Arc<Prompt>;
@@ -201,11 +188,11 @@ impl Prompt {
             read_input_receiver: AsyncMutex::new(read_input_receiver),
             read_input_sender,
             disable_colors,
-            compression_handle: None
+            compression_handle: None,
         };
 
         if enable_auto_compress_logs && disable_file_log_date_based {
-            return Err(PromptError::AutoCompressParam)
+            return Err(PromptError::AutoCompressParam);
         }
 
         if is_maybe_dir(filename_log) {
@@ -231,8 +218,12 @@ impl Prompt {
         {
             info!("Tracing enabled");
             console_subscriber::Builder::default()
-                .event_buffer_capacity(console_subscriber::ConsoleLayer::DEFAULT_EVENT_BUFFER_CAPACITY * 2000)
-                .client_buffer_capacity(console_subscriber::ConsoleLayer::DEFAULT_CLIENT_BUFFER_CAPACITY * 2000)
+                .event_buffer_capacity(
+                    console_subscriber::ConsoleLayer::DEFAULT_EVENT_BUFFER_CAPACITY * 2000,
+                )
+                .client_buffer_capacity(
+                    console_subscriber::ConsoleLayer::DEFAULT_CLIENT_BUFFER_CAPACITY * 2000,
+                )
                 .init();
         }
 
@@ -247,7 +238,7 @@ impl Prompt {
                     }
                 };
             });
-    
+
             let mut lock = prompt.input_receiver.lock()?;
             *lock = Some(input_receiver);
         }
@@ -273,8 +264,12 @@ impl Prompt {
 
     // Start the thread to read stdin and handle events
     // Execute commands if a commande manager is present
-    pub async fn start<'a>(&'a self, update_every: Duration, fn_message: AsyncF<'a, Self, Option<&'a CommandManager>, Result<String, PromptError>>, command_manager: Option<&'a CommandManager>) -> Result<(), PromptError>
-    {
+    pub async fn start<'a>(
+        &'a self,
+        update_every: Duration,
+        fn_message: AsyncF<'a, Self, Option<&'a CommandManager>, Result<String, PromptError>>,
+        command_manager: Option<&'a CommandManager>,
+    ) -> Result<(), PromptError> {
         // setup the exit channel
         let mut exit_receiver = {
             let (sender, receiver) = oneshot::channel();
@@ -399,32 +394,43 @@ impl Prompt {
     }
 
     // Read value from the user and check if it is a valid value (in lower case only)
-    pub async fn read_valid_str_value(&self, mut prompt: String, valid_values: Vec<&str>) -> Result<String, PromptError> {
+    pub async fn read_valid_str_value(
+        &self,
+        mut prompt: String,
+        valid_values: Vec<&str>,
+    ) -> Result<String, PromptError> {
         let original_prompt = prompt.clone();
         loop {
             let input = self.read_input(prompt, false).await?.to_lowercase();
             if valid_values.contains(&input.as_str()) {
                 return Ok(input);
             }
-            let escaped_colors = self.state.get_ascii_escape_regex().replace_all(&original_prompt, "");
+            let escaped_colors = self
+                .state
+                .get_ascii_escape_regex()
+                .replace_all(&original_prompt, "");
             prompt = self.colorize_string(Color::Red, &escaped_colors.into_owned());
         }
     }
 
     pub async fn ask_confirmation(&self) -> Result<bool, PromptError> {
-        let res = self.read_valid_str_value(
-            self.colorize_string(Color::Green, "Confirm ? (Y/N): "),
-            vec!["y", "n"]
-        ).await?;
+        let res = self
+            .read_valid_str_value(
+                self.colorize_string(Color::Green, "Confirm ? (Y/N): "),
+                vec!["y", "n"],
+            )
+            .await?;
         Ok(res == "y")
     }
 
     pub async fn read<F: FromStr, S: ToString>(&self, prompt: S) -> Result<F, PromptError>
     where
-        <F as FromStr>::Err: Display
+        <F as FromStr>::Err: Display,
     {
         let value = self.read_input(prompt, false).await?;
-        value.parse().map_err(|e: F::Err| PromptError::ParseInputError(e.to_string()))
+        value
+            .parse()
+            .map_err(|e: F::Err| PromptError::ParseInputError(e.to_string()))
     }
 
     pub async fn read_hash<S: ToString>(&self, prompt: S) -> Result<Hash, PromptError> {
@@ -438,13 +444,17 @@ impl Prompt {
     }
 
     // read a message from the user and apply the input mask if necessary
-    pub async fn read_input<S: ToString>(&self, prompt: S, apply_mask: bool) -> Result<String, PromptError> {
+    pub async fn read_input<S: ToString>(
+        &self,
+        prompt: S,
+        apply_mask: bool,
+    ) -> Result<String, PromptError> {
         // This is also used as a sempahore to have only one call at a time
         let mut canceler = self.read_input_receiver.lock().await;
 
         // Verify that during the time it hasn't exited
         if self.state.exit().load(Ordering::SeqCst) {
-            return Err(PromptError::NotRunning)
+            return Err(PromptError::NotRunning);
         }
 
         // register our reader
@@ -586,28 +596,34 @@ impl Prompt {
                 create_dir_all(logs_path)?;
             }
 
-            let mut file_log = fern::Dispatch::new()
-            .level(file_level.into())
-            .format(move |out, message, record| {
-                let pad = " ".repeat((30i16 - record.target().len() as i16).max(0) as usize);
-                let level_pad = if record.level() == Level::Error || record.level() == Level::Debug { "" } else { " " };
-                let messages = message.to_string()
-                    .lines()
-                    .map(|line| {
-                        format!(
-                            "{} [{}{}] [{}]{} | {}",
-                            chrono::Local::now().format("[%Y-%m-%d] (%H:%M:%S%.3f)"),
-                            record.level(),
-                            level_pad,
-                            record.target(),
-                            pad,
-                            line
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                out.finish(format_args!("{}", messages))
-            });
+            let mut file_log = fern::Dispatch::new().level(file_level.into()).format(
+                move |out, message, record| {
+                    let pad = " ".repeat((30i16 - record.target().len() as i16).max(0) as usize);
+                    let level_pad =
+                        if record.level() == Level::Error || record.level() == Level::Debug {
+                            ""
+                        } else {
+                            " "
+                        };
+                    let messages = message
+                        .to_string()
+                        .lines()
+                        .map(|line| {
+                            format!(
+                                "{} [{}{}] [{}]{} | {}",
+                                chrono::Local::now().format("[%Y-%m-%d] (%H:%M:%S%.3f)"),
+                                record.level(),
+                                level_pad,
+                                record.target(),
+                                pad,
+                                line
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    out.finish(format_args!("{}", messages))
+                },
+            );
 
             // Don't rotate the log file based on date ourself if its disabled
             if !disable_file_log_date_based {
@@ -624,7 +640,7 @@ impl Prompt {
                             }
                         }
                     });
-    
+
                     self.compression_handle = Some(handle);
                 }
             } else {
@@ -636,7 +652,8 @@ impl Prompt {
 
         // Default log level modules
         // It can be overriden by the user below
-        base = base.level_for("sled", log::LevelFilter::Warn)
+        base = base
+            .level_for("sled", log::LevelFilter::Warn)
             .level_for("actix_server", log::LevelFilter::Warn)
             .level_for("actix_web", log::LevelFilter::Off)
             .level_for("actix_http", log::LevelFilter::Off)
@@ -646,7 +663,8 @@ impl Prompt {
 
         #[cfg(not(feature = "tracing"))]
         {
-            base = base.level_for("tracing", log::LevelFilter::Warn)
+            base = base
+                .level_for("tracing", log::LevelFilter::Warn)
                 .level_for("runtime", log::LevelFilter::Warn)
                 .level_for("tokio", log::LevelFilter::Warn);
         }
@@ -665,7 +683,7 @@ impl Prompt {
     fn zip_log_file(log_file_path: &str, zip_file_path: &str) -> io::Result<()> {
         let file = fs::File::create(zip_file_path)?;
         let mut zip = zip::ZipWriter::new(file);
-    
+
         let log_file_data = fs::read(log_file_path)?;
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Zstd)
@@ -674,7 +692,7 @@ impl Prompt {
         zip.start_file(log_file_path, options)?;
         zip.write_all(&log_file_data)?;
         zip.finish()?;
-    
+
         // Delete the original log file
         fs::remove_file(log_file_path)?;
 
@@ -684,14 +702,16 @@ impl Prompt {
     // Compress the log file every day
     // The log file is compressed with the date of the previous day
     async fn loop_compress_log_file(dir_path: String, suffix: String) -> Result<(), anyhow::Error> {
-        let mut current = chrono::Local::now()
-            .date_naive();
+        let mut current = chrono::Local::now().date_naive();
 
         loop {
-            let now = chrono::Local::now()
-                .date_naive();
+            let now = chrono::Local::now().date_naive();
             if log::log_enabled!(log::Level::Trace) {
-                trace!("Checking if we need to compress log file, current: {}, now: {}", current, now);
+                trace!(
+                    "Checking if we need to compress log file, current: {}, now: {}",
+                    current,
+                    now
+                );
             }
 
             // We need to check that current != now
@@ -746,7 +766,7 @@ impl Drop for Prompt {
                         error!("Error while forcing to disable raw mode: {}", e);
                     }
                 }
-            } 
+            }
         }
     }
 }

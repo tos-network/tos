@@ -211,6 +211,6 @@ Commands that require specific parameters:
 - `balance <hash>`
 - `track_asset <hash>`
 - `untrack_asset <hash>`
-- `transfer <address> <amount> <fee_type> <confirm>`
-- `transfer_all <address> <fee_type> <confirm>`
+- `transfer <asset> <address> <amount> <fee_type> <confirm>`
+- `transfer_all <asset> <address> <fee_type> <confirm>`
 - `burn <amount> <confirm>` 

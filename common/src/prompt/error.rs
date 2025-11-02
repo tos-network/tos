@@ -1,13 +1,10 @@
-use std::{
-    sync::PoisonError,
-    io::Error as IOError
-};
+use std::{io::Error as IOError, sync::PoisonError};
 
 use anyhow::Error;
 use thiserror::Error;
 
-use crate::serializer::ReaderError;
 use super::command::CommandError;
+use crate::serializer::ReaderError;
 
 #[derive(Error, Debug)]
 pub enum PromptError {
@@ -40,7 +37,7 @@ pub enum PromptError {
     #[error(transparent)]
     CommandError(#[from] CommandError),
     #[error(transparent)]
-    Any(#[from] Error)
+    Any(#[from] Error),
 }
 
 impl<T> From<PoisonError<T>> for PromptError {

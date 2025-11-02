@@ -12,7 +12,7 @@
 
 use async_trait::async_trait;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use rocksdb::{DB, WriteBatch};
+use rocksdb::{WriteBatch, DB};
 use tempdir::TempDir;
 use tokio::runtime::{Builder, Runtime};
 
@@ -32,7 +32,10 @@ use tos_common::{
         Hash, Hashable,
     },
     transaction::{
-        builder::{AccountState, FeeBuilder, FeeHelper, TransactionBuilder, TransactionTypeBuilder, TransferBuilder},
+        builder::{
+            AccountState, FeeBuilder, FeeHelper, TransactionBuilder, TransactionTypeBuilder,
+            TransferBuilder,
+        },
         verify::NoZKPCache,
         FeeType, MultiSigPayload, Reference, Transaction, TransactionType, TxVersion,
     },
@@ -60,11 +63,12 @@ impl BenchAccount {
     fn new_with_balance(amount: u64) -> Self {
         let keypair = KeyPair::new();
         let mut balances = HashMap::new();
-        balances.insert(
-            TOS_ASSET,
-            BalanceEntry { amount },
-        );
-        Self { keypair, balances, nonce: 0 }
+        balances.insert(TOS_ASSET, BalanceEntry { amount });
+        Self {
+            keypair,
+            balances,
+            nonce: 0,
+        }
     }
 
     fn update_from_state(&mut self, state: &AccountStateImpl) {
@@ -76,9 +80,7 @@ impl BenchAccount {
         let entry = self
             .balances
             .entry(asset.clone())
-            .or_insert_with(|| BalanceEntry {
-                amount: 0,
-            });
+            .or_insert_with(|| BalanceEntry { amount: 0 });
         entry.amount = entry.amount.saturating_add(value);
     }
 }
@@ -93,7 +95,10 @@ impl AccountStateImpl {
     fn from_account(account: &BenchAccount) -> Self {
         Self {
             balances: account.balances.clone(),
-            reference: Reference { topoheight: 0, hash: Hash::zero() },
+            reference: Reference {
+                topoheight: 0,
+                hash: Hash::zero(),
+            },
             nonce: account.nonce,
         }
     }
@@ -108,23 +113,39 @@ impl FeeHelper for AccountStateImpl {
 }
 
 impl AccountState for AccountStateImpl {
-    fn is_mainnet(&self) -> bool { false }
-
-    fn get_account_balance(&self, asset: &Hash) -> Result<u64, Self::Error> {
-        Ok(self.balances.get(asset).map(|b| b.amount).unwrap_or_default())
+    fn is_mainnet(&self) -> bool {
+        false
     }
 
-    fn get_reference(&self) -> Reference { self.reference.clone() }
+    fn get_account_balance(&self, asset: &Hash) -> Result<u64, Self::Error> {
+        Ok(self
+            .balances
+            .get(asset)
+            .map(|b| b.amount)
+            .unwrap_or_default())
+    }
 
-    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64) -> Result<(), Self::Error> {
+    fn get_reference(&self) -> Reference {
+        self.reference.clone()
+    }
+
+    fn update_account_balance(
+        &mut self,
+        asset: &Hash,
+        new_balance: u64,
+    ) -> Result<(), Self::Error> {
         self.balances.insert(
             asset.clone(),
-            BalanceEntry { amount: new_balance },
+            BalanceEntry {
+                amount: new_balance,
+            },
         );
         Ok(())
     }
 
-    fn get_nonce(&self) -> Result<u64, Self::Error> { Ok(self.nonce) }
+    fn get_nonce(&self) -> Result<u64, Self::Error> {
+        Ok(self.nonce)
+    }
 
     fn update_nonce(&mut self, new_nonce: u64) -> Result<(), Self::Error> {
         self.nonce = new_nonce;
@@ -173,7 +194,10 @@ impl ExecutionLedger {
             return Err("invalid nonce");
         }
 
-        let sender_balances = self.balances.get_mut(sender).ok_or("missing sender balance")?;
+        let sender_balances = self
+            .balances
+            .get_mut(sender)
+            .ok_or("missing sender balance")?;
         let sender_balance = sender_balances.entry(TOS_ASSET).or_insert(0);
         let total_cost = amount.checked_add(tx.get_fee()).ok_or("overflow")?;
         if *sender_balance < total_cost {
@@ -191,7 +215,9 @@ impl ExecutionLedger {
                     .balances
                     .entry(transfer.get_destination().clone())
                     .or_insert_with(HashMap::new);
-                *dest_balances.entry(transfer.get_asset().clone()).or_insert(0) += per_transfer;
+                *dest_balances
+                    .entry(transfer.get_asset().clone())
+                    .or_insert(0) += per_transfer;
             }
         } else {
             return Err("unsupported transaction type");
@@ -231,13 +257,17 @@ impl VerificationState {
         };
 
         for account in accounts {
-            let balances: HashMap<Hash, u64> = account.balances
+            let balances: HashMap<Hash, u64> = account
+                .balances
                 .iter()
                 .map(|(asset, balance)| (asset.clone(), balance.amount))
                 .collect();
             state.accounts.insert(
                 account.keypair.get_public_key().compress(),
-                VerificationAccountState { balances, nonce: account.nonce },
+                VerificationAccountState {
+                    balances,
+                    nonce: account.nonce,
+                },
             );
         }
 
@@ -246,7 +276,9 @@ impl VerificationState {
 }
 
 #[async_trait]
-impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()> for VerificationState {
+impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
+    for VerificationState
+{
     async fn pre_verify_tx<'b>(&'b mut self, _tx: &Transaction) -> Result<(), ()> {
         Ok(())
     }
@@ -274,15 +306,27 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()> fo
             .ok_or(())
     }
 
-    async fn add_sender_output(&mut self, _account: &'a CompressedPublicKey, _asset: &'a Hash, _output: u64) -> Result<(), ()> {
+    async fn add_sender_output(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+        _asset: &'a Hash,
+        _output: u64,
+    ) -> Result<(), ()> {
         Ok(())
     }
 
     async fn get_account_nonce(&mut self, account: &'a CompressedPublicKey) -> Result<Nonce, ()> {
-        self.accounts.get(account).map(|account| account.nonce).ok_or(())
+        self.accounts
+            .get(account)
+            .map(|account| account.nonce)
+            .ok_or(())
     }
 
-    async fn update_account_nonce(&mut self, account: &'a CompressedPublicKey, new_nonce: Nonce) -> Result<(), ()> {
+    async fn update_account_nonce(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        new_nonce: Nonce,
+    ) -> Result<(), ()> {
         let entry = self.accounts.get_mut(account).ok_or(())?;
         entry.nonce = new_nonce;
         Ok(())
@@ -307,12 +351,19 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()> fo
         BlockVersion::V0
     }
 
-    async fn set_multisig_state(&mut self, account: &'a CompressedPublicKey, config: &MultiSigPayload) -> Result<(), ()> {
+    async fn set_multisig_state(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        config: &MultiSigPayload,
+    ) -> Result<(), ()> {
         self.multisig.insert(account.clone(), config.clone());
         Ok(())
     }
 
-    async fn get_multisig_state(&mut self, account: &'a CompressedPublicKey) -> Result<Option<&MultiSigPayload>, ()> {
+    async fn get_multisig_state(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<&MultiSigPayload>, ()> {
         Ok(self.multisig.get(account))
     }
 
@@ -329,7 +380,10 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()> fo
         Ok(self.contracts.contains_key(hash))
     }
 
-    async fn get_contract_module_with_environment(&self, hash: &'a Hash) -> Result<(&Module, &Environment), ()> {
+    async fn get_contract_module_with_environment(
+        &self,
+        hash: &'a Hash,
+    ) -> Result<(&Module, &Environment), ()> {
         let module = self.contracts.get(hash).ok_or(())?;
         Ok((module, &self.env))
     }
@@ -350,7 +404,8 @@ struct GeneratedBlock {
 }
 
 fn generate_block(tx_count: usize, amount: u64, fee: u64) -> GeneratedBlock {
-    let mut sender = BenchAccount::new_with_balance(tx_count as u64 * (amount + fee) + 10 * COIN_VALUE);
+    let mut sender =
+        BenchAccount::new_with_balance(tx_count as u64 * (amount + fee) + 10 * COIN_VALUE);
     let mut receiver = BenchAccount::new_with_balance(0);
 
     let mut sender_snapshots = Vec::with_capacity(tx_count + 1);
@@ -365,7 +420,11 @@ fn generate_block(tx_count: usize, amount: u64, fee: u64) -> GeneratedBlock {
         let transfer = TransferBuilder {
             asset: TOS_ASSET,
             amount,
-            destination: receiver.keypair.get_public_key().compress().to_address(false),
+            destination: receiver
+                .keypair
+                .get_public_key()
+                .compress()
+                .to_address(false),
             extra_data: None,
         };
 
@@ -422,15 +481,17 @@ impl PipelineMode {
         }
     }
 
-    fn persist(self) -> bool { matches!(self, PipelineMode::ExecutionWithProofsAndStorage) }
+    fn persist(self) -> bool {
+        matches!(self, PipelineMode::ExecutionWithProofsAndStorage)
+    }
 }
 
 // Benchmark configuration with environment variable overrides
 const DEFAULT_WORKER_THREADS: usize = 4;
 const DEFAULT_BATCH_SIZE: usize = 64;
 const DEFAULT_TX_COUNTS: &[usize] = &[16, 64, 128, 256, 512];
-const DEFAULT_TRANSFER_AMOUNT: u64 = 50;  // In TOS coins
-const DEFAULT_FEE: u64 = 5_000;            // In base units
+const DEFAULT_TRANSFER_AMOUNT: u64 = 50; // In TOS coins
+const DEFAULT_FEE: u64 = 5_000; // In base units
 
 fn get_worker_threads() -> usize {
     std::env::var("TOS_BENCH_THREADS")
@@ -476,8 +537,10 @@ fn print_performance_stats(mode: &str, tx_count: usize, duration: Duration) {
     let tps = tx_count_f64 / duration_secs;
     let latency_ms = (duration_secs * 1000.0) / tx_count_f64;
 
-    println!("[{}] tx_count={} | TPS={:.2} | avg_latency={:.3}ms | total_time={:.3}s",
-        mode, tx_count, tps, latency_ms, duration_secs);
+    println!(
+        "[{}] tx_count={} | TPS={:.2} | avg_latency={:.3}ms | total_time={:.3}s",
+        mode, tx_count, tps, latency_ms, duration_secs
+    );
 }
 
 fn run_pipeline(c: &mut Criterion, mode: PipelineMode) {
@@ -507,7 +570,9 @@ fn run_pipeline(c: &mut Criterion, mode: PipelineMode) {
                             let mut state = baseline.clone();
                             let start = Instant::now();
                             for tx in &transactions {
-                                state.apply_transaction(tx, transfer_amount).expect("baseline");
+                                state
+                                    .apply_transaction(tx, transfer_amount)
+                                    .expect("baseline");
                             }
                             total += start.elapsed();
                         }
@@ -524,7 +589,9 @@ fn run_pipeline(c: &mut Criterion, mode: PipelineMode) {
                         let mut total = Duration::ZERO;
 
                         for iter_idx in 0..iters {
-                            let temp_dir = mode.persist().then(|| TempDir::new("tos-bench").expect("temp dir"));
+                            let temp_dir = mode
+                                .persist()
+                                .then(|| TempDir::new("tos-bench").expect("temp dir"));
                             let db = temp_dir
                                 .as_ref()
                                 .map(|dir| DB::open_default(dir.path()).expect("open RocksDB"));
@@ -533,7 +600,8 @@ fn run_pipeline(c: &mut Criterion, mode: PipelineMode) {
                             runtime.block_on(async {
                                 // Pre-allocate futures vector with exact capacity
                                 let batch_size = get_batch_size();
-                                let num_batches = (transactions.len() + batch_size - 1) / batch_size;
+                                let num_batches =
+                                    (transactions.len() + batch_size - 1) / batch_size;
                                 let mut futures = Vec::with_capacity(num_batches);
 
                                 // Process transactions in batches
@@ -542,7 +610,8 @@ fn run_pipeline(c: &mut Criterion, mode: PipelineMode) {
                                     let end_idx = (start_idx + batch_size).min(transactions.len());
 
                                     // Share transaction and hash data via Arc (already Arc<Transaction>)
-                                    let tx_chunk: Vec<_> = transactions[start_idx..end_idx].to_vec();
+                                    let tx_chunk: Vec<_> =
+                                        transactions[start_idx..end_idx].to_vec();
                                     let hash_chunk: Vec<_> = hashes[start_idx..end_idx].to_vec();
 
                                     // Clone account states only once per batch
@@ -551,7 +620,10 @@ fn run_pipeline(c: &mut Criterion, mode: PipelineMode) {
 
                                     futures.push(async move {
                                         let cache = NoZKPCache;
-                                        let mut state = VerificationState::from_accounts(&[sender_state, receiver_state]);
+                                        let mut state = VerificationState::from_accounts(&[
+                                            sender_state,
+                                            receiver_state,
+                                        ]);
 
                                         // Verify all transactions in this batch sequentially
                                         for (tx, hash) in tx_chunk.iter().zip(hash_chunk.iter()) {

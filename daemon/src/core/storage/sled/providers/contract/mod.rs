@@ -1,36 +1,42 @@
+mod balance;
 mod data;
 mod output;
 mod provider;
-mod balance;
 mod supply;
 
-use async_trait::async_trait;
-use tos_common::{
-    block::TopoHeight,
-    crypto::Hash,
-    serializer::Serializer,
-};
 use crate::core::{
     error::{BlockchainError, DiskContext},
-    storage::{
-        ContractProvider,
-        SledStorage,
-        VersionedContract,
-        sled::CONTRACTS_COUNT
-    }
+    storage::{sled::CONTRACTS_COUNT, ContractProvider, SledStorage, VersionedContract},
 };
+use async_trait::async_trait;
 use log::trace;
+use tos_common::{block::TopoHeight, crypto::Hash, serializer::Serializer};
 
 #[async_trait]
 impl ContractProvider for SledStorage {
-    async fn set_last_contract_to<'a>(&mut self, hash: &Hash, topoheight: TopoHeight, contract: &VersionedContract<'a>) -> Result<(), BlockchainError> {
+    async fn set_last_contract_to<'a>(
+        &mut self,
+        hash: &Hash,
+        topoheight: TopoHeight,
+        contract: &VersionedContract<'a>,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("Setting contract {} at topoheight {}", hash, topoheight);
         }
         let key = self.get_versioned_contract_key(hash, topoheight);
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.versioned_contracts, &key, contract.to_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.versioned_contracts,
+            &key,
+            contract.to_bytes(),
+        )?;
 
-        let prev = Self::insert_into_disk(self.snapshot.as_mut(), &self.contracts, hash.as_bytes(), &topoheight.to_be_bytes())?;
+        let prev = Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.contracts,
+            hash.as_bytes(),
+            &topoheight.to_be_bytes(),
+        )?;
         if prev.is_none() {
             self.store_contracts_count(self.count_contracts().await? + 1)?;
         }
@@ -38,30 +44,52 @@ impl ContractProvider for SledStorage {
         Ok(())
     }
 
-    async fn get_last_topoheight_for_contract(&self, hash: &Hash) -> Result<Option<TopoHeight>, BlockchainError> {
+    async fn get_last_topoheight_for_contract(
+        &self,
+        hash: &Hash,
+    ) -> Result<Option<TopoHeight>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("Getting last topoheight for contract {}", hash);
         }
         self.load_optional_from_disk(&self.contracts, hash.as_bytes())
     }
 
-    async fn get_contract_at_topoheight_for<'a>(&self, hash: &Hash, topoheight: TopoHeight) -> Result<VersionedContract<'a>, BlockchainError> {
+    async fn get_contract_at_topoheight_for<'a>(
+        &self,
+        hash: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<VersionedContract<'a>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("Getting contract {} at topoheight {}", hash, topoheight);
         }
         let key = self.get_versioned_contract_key(hash, topoheight);
-        self.load_from_disk(&self.versioned_contracts, &key, DiskContext::ContractTopoHeight)
+        self.load_from_disk(
+            &self.versioned_contracts,
+            &key,
+            DiskContext::ContractTopoHeight,
+        )
     }
 
-    async fn get_contract_at_maximum_topoheight_for<'a>(&self, hash: &Hash, maximum_topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedContract<'a>)>, BlockchainError> {
+    async fn get_contract_at_maximum_topoheight_for<'a>(
+        &self,
+        hash: &Hash,
+        maximum_topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, VersionedContract<'a>)>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Getting contract {} at maximum topoheight {}", hash, maximum_topoheight);
+            trace!(
+                "Getting contract {} at maximum topoheight {}",
+                hash,
+                maximum_topoheight
+            );
         }
         let Some(pointer) = self.get_last_topoheight_for_contract(hash).await? else {
-            return Ok(None)
+            return Ok(None);
         };
 
-        let topo = if self.has_contract_at_exact_topoheight(hash, maximum_topoheight).await? {
+        let topo = if self
+            .has_contract_at_exact_topoheight(hash, maximum_topoheight)
+            .await?
+        {
             maximum_topoheight
         } else {
             pointer
@@ -70,56 +98,76 @@ impl ContractProvider for SledStorage {
         let mut previous_topo = Some(topo);
         while let Some(topoheight) = previous_topo {
             if topoheight <= maximum_topoheight {
-                let version = self.get_contract_at_topoheight_for(hash, topoheight).await?;
+                let version = self
+                    .get_contract_at_topoheight_for(hash, topoheight)
+                    .await?;
                 if log::log_enabled!(log::Level::Trace) {
                     trace!("Contract {} is at maximum topoheight", hash);
                 }
-                return Ok(Some((topoheight, version)))
+                return Ok(Some((topoheight, version)));
             }
 
             previous_topo = self.load_from_disk(
                 &self.versioned_contracts,
                 &self.get_versioned_contract_key(hash, topoheight),
-                DiskContext::ContractTopoHeight
+                DiskContext::ContractTopoHeight,
             )?;
         }
 
         Ok(None)
     }
 
-    async fn has_contract_at_maximum_topoheight(&self, hash: &Hash, maximum_topoheight: TopoHeight) -> Result<bool, BlockchainError> {
+    async fn has_contract_at_maximum_topoheight(
+        &self,
+        hash: &Hash,
+        maximum_topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("has contract {} at maximum topoheight {}", hash, maximum_topoheight);
+            trace!(
+                "has contract {} at maximum topoheight {}",
+                hash,
+                maximum_topoheight
+            );
         }
         let Some(pointer) = self.get_last_topoheight_for_contract(hash).await? else {
-            return Ok(false)
+            return Ok(false);
         };
 
         let mut previous_topo = Some(pointer);
         while let Some(topoheight) = previous_topo {
             if topoheight <= maximum_topoheight {
-                let exists = self.load_from_disk::<(Option<TopoHeight>, bool)>(
-                    &self.versioned_contracts,
-                    &self.get_versioned_contract_key(hash, topoheight),
-                    DiskContext::ContractTopoHeight
-                )?.1;
+                let exists = self
+                    .load_from_disk::<(Option<TopoHeight>, bool)>(
+                        &self.versioned_contracts,
+                        &self.get_versioned_contract_key(hash, topoheight),
+                        DiskContext::ContractTopoHeight,
+                    )?
+                    .1;
 
-                return Ok(exists)
+                return Ok(exists);
             }
 
             previous_topo = self.load_from_disk(
                 &self.versioned_contracts,
                 &self.get_versioned_contract_key(hash, topoheight),
-                DiskContext::ContractTopoHeight
+                DiskContext::ContractTopoHeight,
             )?;
         }
 
         Ok(false)
     }
 
-    async fn get_contracts<'a>(&'a self, minimum_topoheight: TopoHeight, maximum_topoheight: TopoHeight) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
+    async fn get_contracts<'a>(
+        &'a self,
+        minimum_topoheight: TopoHeight,
+        maximum_topoheight: TopoHeight,
+    ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Getting contracts, minimum_topoheight: {}, maximum_topoheight: {}", minimum_topoheight, maximum_topoheight);
+            trace!(
+                "Getting contracts, minimum_topoheight: {}, maximum_topoheight: {}",
+                minimum_topoheight,
+                maximum_topoheight
+            );
         }
 
         Ok(Self::iter(self.snapshot.as_ref(), &self.contracts)
@@ -138,24 +186,34 @@ impl ContractProvider for SledStorage {
                     }
 
                     if topo <= maximum_topoheight {
-                        return Ok(Some(hash))
+                        return Ok(Some(hash));
                     }
 
                     let versioned_key = Self::get_versioned_contract_key(&self, &hash, topo);
-                    prev_topo = self.load_from_disk(&self.versioned_contracts, &versioned_key, DiskContext::ContractAtTopoHeight(topo))?;
+                    prev_topo = self.load_from_disk(
+                        &self.versioned_contracts,
+                        &versioned_key,
+                        DiskContext::ContractAtTopoHeight(topo),
+                    )?;
                 }
 
                 Ok(None)
             })
-            .filter_map(Result::transpose)
-        )
+            .filter_map(Result::transpose))
     }
 
-    async fn delete_last_topoheight_for_contract(&mut self, hash: &Hash) -> Result<(), BlockchainError> {
+    async fn delete_last_topoheight_for_contract(
+        &mut self,
+        hash: &Hash,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("Deleting last topoheight for contract {}", hash);
         }
-        let prev = Self::remove_from_disk_without_reading(self.snapshot.as_mut(), &self.contracts, hash.as_bytes())?;
+        let prev = Self::remove_from_disk_without_reading(
+            self.snapshot.as_mut(),
+            &self.contracts,
+            hash.as_bytes(),
+        )?;
         if prev {
             self.store_contracts_count(self.count_contracts().await? - 1)?;
         }
@@ -174,23 +232,41 @@ impl ContractProvider for SledStorage {
             trace!("Checking if contract {} exists", hash);
         }
         let Some(pointer) = self.get_last_topoheight_for_contract(hash).await? else {
-            return Ok(false)
+            return Ok(false);
         };
-        
+
         self.has_contract_module_at_topoheight(hash, pointer).await
     }
 
-    async fn has_contract_module_at_topoheight(&self, hash: &Hash, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
+    async fn has_contract_module_at_topoheight(
+        &self,
+        hash: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Checking if contract module {} exists at topoheight {}", hash, topoheight);
+            trace!(
+                "Checking if contract module {} exists at topoheight {}",
+                hash,
+                topoheight
+            );
         }
-        let contract = self.get_contract_at_topoheight_for(hash, topoheight).await?;
+        let contract = self
+            .get_contract_at_topoheight_for(hash, topoheight)
+            .await?;
         Ok(contract.get().is_some())
     }
 
-    async fn has_contract_at_exact_topoheight(&self, hash: &Hash, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
+    async fn has_contract_at_exact_topoheight(
+        &self,
+        hash: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Checking if contract {} exists at exact topoheight {}", hash, topoheight);
+            trace!(
+                "Checking if contract {} exists at exact topoheight {}",
+                hash,
+                topoheight
+            );
         }
         let key = self.get_versioned_contract_key(hash, topoheight);
         self.contains_data(&self.versioned_contracts, &key)
@@ -219,11 +295,20 @@ impl SledStorage {
         } else {
             self.cache.contracts_count = count;
         }
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.extra, CONTRACTS_COUNT, &count.to_be_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.extra,
+            CONTRACTS_COUNT,
+            &count.to_be_bytes(),
+        )?;
         Ok(())
     }
 
-    pub(super) fn get_versioned_contract_key(&self, hash: &Hash, topoheight: TopoHeight) -> [u8; 40] {
+    pub(super) fn get_versioned_contract_key(
+        &self,
+        hash: &Hash,
+        topoheight: TopoHeight,
+    ) -> [u8; 40] {
         let mut key = [0; 40];
         key[..8].copy_from_slice(&topoheight.to_be_bytes());
         key[8..].copy_from_slice(hash.as_bytes());

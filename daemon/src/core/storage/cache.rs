@@ -1,11 +1,14 @@
-use std::{ops::{Deref, DerefMut}, sync::Arc};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use lru::LruCache;
 use tos_common::{
-    tokio::sync::Mutex,
     block::{BlockHeader, TopoHeight},
     crypto::{Hash, PublicKey},
-    transaction::Transaction
+    tokio::sync::Mutex,
+    transaction::Transaction,
 };
 
 use super::Tips;
@@ -14,7 +17,9 @@ use super::Tips;
 macro_rules! init_cache {
     ($cache_size: expr) => {{
         if let Some(size) = &$cache_size {
-            Some(Mutex::new(LruCache::new(std::num::NonZeroUsize::new(*size).expect("Non zero value for cache"))))
+            Some(Mutex::new(LruCache::new(
+                std::num::NonZeroUsize::new(*size).expect("Non zero value for cache"),
+            )))
         } else {
             None
         }
@@ -86,7 +91,7 @@ impl StorageCache {
             block_reward_cache: init_cache!(cache_size),
             supply_cache: init_cache!(cache_size),
             burned_supply_cache: init_cache!(cache_size),
-            cache_size
+            cache_size,
         }
     }
 }

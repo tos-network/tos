@@ -1,13 +1,15 @@
+use crate::core::error::BlockchainError;
 use async_trait::async_trait;
 use tos_common::crypto::Hash;
-use crate::core::error::BlockchainError;
 
 // This provider tracks the order in which blocks are added in the chain.
 // This is independant of the DAG order and is used for debug purposes.
 #[async_trait]
 pub trait BlockExecutionOrderProvider {
     // Get the blocks execution order
-    async fn get_blocks_execution_order<'a>(&'a self) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError>;
+    async fn get_blocks_execution_order<'a>(
+        &'a self,
+    ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError>;
 
     // Get the position of a block in the execution order
     async fn get_block_position_in_order(&self, hash: &Hash) -> Result<u64, BlockchainError>;
@@ -22,5 +24,9 @@ pub trait BlockExecutionOrderProvider {
     async fn get_blocks_execution_count(&self) -> u64;
 
     // Swap the position of two blocks in the execution order
-    async fn swap_blocks_executions_positions(&mut self, left: &Hash, right: &Hash) -> Result<(), BlockchainError>;
+    async fn swap_blocks_executions_positions(
+        &mut self,
+        left: &Hash,
+        right: &Hash,
+    ) -> Result<(), BlockchainError>;
 }

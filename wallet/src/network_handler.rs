@@ -1,55 +1,40 @@
+use crate::{
+    config::AUTO_RECONNECT_INTERVAL,
+    daemon_api::DaemonAPI,
+    entry::{DeployInvoke, EntryData, TransactionEntry, TransferIn, TransferOut},
+    storage::{Balance, MultiSig},
+    wallet::{Event, Wallet},
+};
+use anyhow::Error;
+use futures::{stream, StreamExt, TryStreamExt};
+use indexmap::IndexMap;
+use log::{debug, error, info, trace, warn};
 use std::{
     borrow::Cow,
     collections::HashSet,
     sync::Arc,
-    time::{Duration, Instant}
+    time::{Duration, Instant},
 };
-use futures::{stream, StreamExt, TryStreamExt};
-use indexmap::IndexMap;
 use thiserror::Error;
-use anyhow::Error;
-use log::{debug, error, info, trace, warn};
 use tos_common::{
     api::{
-        daemon::{
-            BlockResponse,
-            MultisigState,
-            NewBlockEvent,
-            RPCBlockResponse
-        },
+        daemon::{BlockResponse, MultisigState, NewBlockEvent, RPCBlockResponse},
         wallet::BalanceChanged,
-        RPCTransactionType
+        RPCTransactionType,
     },
     config::TOS_ASSET,
-    crypto::{
-        Address,
-        Hash
-    },
+    crypto::{Address, Hash},
     tokio::{
-        select,
-        spawn_task,
+        select, spawn_task,
         sync::{mpsc::channel, Mutex},
         task::{JoinError, JoinHandle},
-        time::sleep
+        time::sleep,
     },
     transaction::{
         extra_data::{PlaintextExtraData, PlaintextFlag, Role},
-        MultiSigPayload
+        MultiSigPayload,
     },
-    utils::sanitize_ws_address
-};
-use crate::{
-    config::AUTO_RECONNECT_INTERVAL,
-    daemon_api::DaemonAPI,
-    entry::{
-        DeployInvoke,
-        EntryData,
-        TransactionEntry,
-        TransferIn,
-        TransferOut
-    },
-    storage::{Balance, MultiSig},
-    wallet::{Event, Wallet}
+    utils::sanitize_ws_address,
 };
 
 // NetworkHandler must be behind a Arc to be accessed from Wallet (to stop it) or from tokio task
@@ -66,7 +51,7 @@ pub enum NetworkError {
     #[error(transparent)]
     DaemonAPIError(#[from] Error),
     #[error("Network mismatch")]
-    NetworkMismatch
+    NetworkMismatch,
 }
 
 pub struct NetworkHandler {
@@ -85,14 +70,22 @@ pub struct NetworkHandler {
 impl NetworkHandler {
     // Create a new network handler with a wallet and a daemon address
     // This will create itself a DaemonAPI and verify if connection is possible
-    pub async fn new<S: ToString>(wallet: Arc<Wallet>, daemon_address: S, concurrency: usize) -> Result<SharedNetworkHandler, Error> {
+    pub async fn new<S: ToString>(
+        wallet: Arc<Wallet>,
+        daemon_address: S,
+        concurrency: usize,
+    ) -> Result<SharedNetworkHandler, Error> {
         let s = daemon_address.to_string();
         let api = DaemonAPI::new(format!("{}/json_rpc", sanitize_ws_address(s.as_str()))).await?;
         Self::with_api(wallet, Arc::new(api), concurrency).await
     }
 
     // Create a new network handler with an already created daemon API
-    pub async fn with_api(wallet: Arc<Wallet>, api: Arc<DaemonAPI>, concurrency: usize) -> Result<SharedNetworkHandler, Error> {
+    pub async fn with_api(
+        wallet: Arc<Wallet>,
+        api: Arc<DaemonAPI>,
+        concurrency: usize,
+    ) -> Result<SharedNetworkHandler, Error> {
         // check that we can correctly get version from daemon
         let version = api.get_version().await?;
         if log::log_enabled!(log::Level::Debug) {
@@ -103,7 +96,7 @@ impl NetworkHandler {
             task: Mutex::new(None),
             wallet,
             api,
-            concurrency
+            concurrency,
         }))
     }
 
@@ -112,14 +105,14 @@ impl NetworkHandler {
         trace!("Starting network handler");
 
         if self.is_running().await {
-            return Err(NetworkError::AlreadyRunning)
+            return Err(NetworkError::AlreadyRunning);
         }
 
         if !self.api.is_online() {
             debug!("API is offline, trying to reconnect #1");
             if !self.api.reconnect().await? {
                 error!("Couldn't reconnect to server");
-                return Err(NetworkError::NotRunning)
+                return Err(NetworkError::NotRunning);
             }
         }
 
@@ -129,12 +122,16 @@ impl NetworkHandler {
                 // Notify that we are online
                 zelf.wallet.propagate_event(Event::Online).await;
 
-                let res =  zelf.start_syncing().await;
+                let res = zelf.start_syncing().await;
                 if let Err(e) = res.as_ref() {
                     if log::log_enabled!(log::Level::Error) {
                         error!("Error while syncing: {}", e);
                     }
-                    zelf.wallet.propagate_event(Event::SyncError { message: e.to_string() }).await;
+                    zelf.wallet
+                        .propagate_event(Event::SyncError {
+                            message: e.to_string(),
+                        })
+                        .await;
                 }
 
                 // Notify that we are offline
@@ -154,13 +151,19 @@ impl NetworkHandler {
                         debug!("API is offline, trying to reconnect #2");
                         if !zelf.api.reconnect().await? {
                             if log::log_enabled!(log::Level::Error) {
-                                error!("Couldn't reconnect to server, trying again in {} seconds", AUTO_RECONNECT_INTERVAL);
+                                error!(
+                                    "Couldn't reconnect to server, trying again in {} seconds",
+                                    AUTO_RECONNECT_INTERVAL
+                                );
                             }
                             sleep(Duration::from_secs(AUTO_RECONNECT_INTERVAL)).await;
                         }
                     } else {
                         if log::log_enabled!(log::Level::Warn) {
-                            warn!("Daemon is online but we couldn't sync, trying again in {} seconds", AUTO_RECONNECT_INTERVAL);
+                            warn!(
+                                "Daemon is online but we couldn't sync, trying again in {} seconds",
+                                AUTO_RECONNECT_INTERVAL
+                            );
                         }
                         sleep(Duration::from_secs(AUTO_RECONNECT_INTERVAL)).await;
                     }
@@ -221,17 +224,28 @@ impl NetworkHandler {
     // Process a block by checking if it contains any transaction for us
     // Or that we mined it
     // Returns assets that changed and returns the highest nonce if we send a transaction
-    async fn process_block(&self, address: &Address, block: BlockResponse, topoheight: u64) -> Result<Option<(HashSet<Hash>, Option<u64>)>, Error> {
+    async fn process_block(
+        &self,
+        address: &Address,
+        block: BlockResponse,
+        topoheight: u64,
+    ) -> Result<Option<(HashSet<Hash>, Option<u64>)>, Error> {
         let block_hash = block.hash.into_owned();
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Processing block {} at topoheight {}", block_hash, topoheight);
+            debug!(
+                "Processing block {} at topoheight {}",
+                block_hash, topoheight
+            );
         }
 
         if block.miner.is_mainnet() != self.wallet.get_network().is_mainnet() {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Block {} at topoheight {} is not on the same network as the wallet", block_hash, topoheight);
+                debug!(
+                    "Block {} at topoheight {} is not on the same network as the wallet",
+                    block_hash, topoheight
+                );
             }
-            return Err(NetworkError::NetworkMismatch.into())
+            return Err(NetworkError::NetworkMismatch.into());
         }
 
         let mut assets_changed = HashSet::new();
@@ -245,14 +259,22 @@ impl NetworkHandler {
         // create Coinbase entry if its our address and we're looking for TOS asset
         if miner == *address.get_public_key() {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Block {} at topoheight {} is mined by us", block_hash, topoheight);
+                debug!(
+                    "Block {} at topoheight {} is mined by us",
+                    block_hash, topoheight
+                );
             }
             if let Some(reward) = block.miner_reward {
                 assets_changed.insert(TOS_ASSET);
-                
+
                 if should_scan_history {
                     let coinbase = EntryData::Coinbase { reward };
-                    let entry = TransactionEntry::new(block_hash.clone(), topoheight, block.timestamp, coinbase);
+                    let entry = TransactionEntry::new(
+                        block_hash.clone(),
+                        topoheight,
+                        block.timestamp,
+                        coinbase,
+                    );
 
                     let broadcast = {
                         let mut storage = self.wallet.get_storage().write().await;
@@ -263,12 +285,12 @@ impl NetworkHandler {
                             debug!("Storing last coinbase reward topoheight {}", topoheight);
                         }
                         storage.set_last_coinbase_reward_topoheight(Some(topoheight))?;
-    
+
                         if storage.has_transaction(entry.get_hash())? {
                             false
                         } else {
                             storage.save_transaction(entry.get_hash(), &entry)?;
-        
+
                             // Store the changes for history
                             if !changes_stored {
                                 storage.add_topoheight_to_changes(topoheight, &block_hash)?;
@@ -277,15 +299,22 @@ impl NetworkHandler {
                             true
                         }
                     };
-    
+
                     // Propagate the event to the wallet
                     if broadcast {
-                        self.wallet.propagate_event(Event::NewTransaction(entry.serializable(self.wallet.get_network().is_mainnet()))).await;
+                        self.wallet
+                            .propagate_event(Event::NewTransaction(
+                                entry.serializable(self.wallet.get_network().is_mainnet()),
+                            ))
+                            .await;
                     }
                 }
             } else {
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("No reward for block {} at topoheight {}", block_hash, topoheight);
+                    warn!(
+                        "No reward for block {} at topoheight {}",
+                        block_hash, topoheight
+                    );
                 }
             }
         }
@@ -321,7 +350,7 @@ impl NetworkHandler {
                                 }
                                 return Ok((None, assets_changed));
                             }
-    
+
                             Some(EntryData::Burn { asset: payload.asset, amount: payload.amount, fee: tx.fee, nonce: tx.nonce })
                         } else {
                             None
@@ -330,7 +359,7 @@ impl NetworkHandler {
                     RPCTransactionType::Transfers(txs) => {
                         let mut transfers_in: Vec<TransferIn> = Vec::new();
                         let mut transfers_out: Vec<TransferOut> = Vec::new();
-    
+
                         // Used to check only once if we have processed this TX already
                         let mut checked = false;
                         for (_i, transfer) in txs.into_iter().enumerate() {
@@ -390,7 +419,7 @@ impl NetworkHandler {
                                 }
                             }
                         }
-    
+
                         if is_owner && !transfers_out.is_empty() { // check that we are owner of this TX
                             Some(EntryData::Outgoing { transfers: transfers_out, fee: tx.fee, nonce: tx.nonce })
                         } else if !transfers_in.is_empty() { // otherwise, check that we received one or few transfers from it
@@ -408,7 +437,7 @@ impl NetworkHandler {
                                 }
                                 return Ok((None, assets_changed));
                             }
-    
+
                             Some(EntryData::MultiSig { participants: payload.participants, threshold: payload.threshold, fee: tx.fee, nonce: tx.nonce })
                         } else {
                             None
@@ -423,7 +452,7 @@ impl NetworkHandler {
                                 }
                                 return Ok((None, assets_changed));
                             }
-    
+
                             let mut deposits = IndexMap::new();
                             for (asset, deposit) in payload.deposits {
                                 assets_changed.insert(asset.clone());
@@ -512,7 +541,7 @@ impl NetworkHandler {
                     // Transaction found at which topoheight it was executed
                     let mut tx_topoheight = topoheight;
                     let mut tx_timestamp = block.timestamp;
-    
+
                     // New transaction entry that may be linked to us, check if TX was executed
                     if !self.api.is_tx_executed_in_block(&tx.hash, &block_hash).await? {
                         if log::log_enabled!(log::Level::Debug) {
@@ -558,65 +587,88 @@ impl NetworkHandler {
             .await?;
 
         for (entry, changes) in results {
-                assets_changed.extend(changes);
+            assets_changed.extend(changes);
 
-                if let Some((entry, tx_topoheight, tx_nonce)) = entry {
-                    // Find the highest nonce
-                    if let Some(tx_nonce) = tx_nonce {
-                        if our_highest_nonce.map(|n| tx_nonce > n).unwrap_or(true) {
-                            if log::log_enabled!(log::Level::Debug) {
-                                debug!("Found new highest nonce {} in TX {}", tx_nonce, entry.get_hash());
-                            }
-                            our_highest_nonce = Some(tx_nonce);
+            if let Some((entry, tx_topoheight, tx_nonce)) = entry {
+                // Find the highest nonce
+                if let Some(tx_nonce) = tx_nonce {
+                    if our_highest_nonce.map(|n| tx_nonce > n).unwrap_or(true) {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "Found new highest nonce {} in TX {}",
+                                tx_nonce,
+                                entry.get_hash()
+                            );
                         }
+                        our_highest_nonce = Some(tx_nonce);
                     }
-
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("storing new entry {} from block {}", entry.get_hash(), block_hash);
-                    }
-                    {
-                        let mut storage = self.wallet.get_storage().write().await;
-                        storage.save_transaction(entry.get_hash(), &entry)?;
-                        // Store the changes for history
-                        if !changes_stored {
-                            if log::log_enabled!(log::Level::Debug) {
-                                debug!("mark topoheight {} as changed", topoheight);
-                            }
-                            storage.add_topoheight_to_changes(topoheight, &block_hash)?;
-                            changes_stored = true;
-                        }
-
-                        if let EntryData::MultiSig { participants, threshold, .. } = entry.get_entry() {
-                            let multisig = MultiSig {
-                                payload: MultiSigPayload {
-                                    participants: participants.clone(),
-                                    threshold: *threshold
-                                },
-                                topoheight: tx_topoheight
-                            };
-                            let store = storage.get_multisig_state().await?
-                                .map(|m| m.topoheight < tx_topoheight)
-                                .unwrap_or(true);
-
-                            if store {
-                                if log::log_enabled!(log::Level::Info) {
-                                    info!("Detected a multisig state change at topoheight {} from TX {}", tx_topoheight, entry.get_hash());
-                                }
-                                if multisig.payload.is_delete() {
-                                    info!("Deleting multisig state");
-                                    storage.delete_multisig_state().await?;
-                                } else {
-                                    info!("Updating multisig state");
-                                    storage.set_multisig_state(multisig).await?;
-                                }
-                            }
-                        }
-                    }
-
-                    // Propagate the event to the wallet
-                    self.wallet.propagate_event(Event::NewTransaction(entry.serializable(self.wallet.get_network().is_mainnet()))).await;
                 }
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "storing new entry {} from block {}",
+                        entry.get_hash(),
+                        block_hash
+                    );
+                }
+                {
+                    let mut storage = self.wallet.get_storage().write().await;
+                    storage.save_transaction(entry.get_hash(), &entry)?;
+                    // Store the changes for history
+                    if !changes_stored {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("mark topoheight {} as changed", topoheight);
+                        }
+                        storage.add_topoheight_to_changes(topoheight, &block_hash)?;
+                        changes_stored = true;
+                    }
+
+                    if let EntryData::MultiSig {
+                        participants,
+                        threshold,
+                        ..
+                    } = entry.get_entry()
+                    {
+                        let multisig = MultiSig {
+                            payload: MultiSigPayload {
+                                participants: participants.clone(),
+                                threshold: *threshold,
+                            },
+                            topoheight: tx_topoheight,
+                        };
+                        let store = storage
+                            .get_multisig_state()
+                            .await?
+                            .map(|m| m.topoheight < tx_topoheight)
+                            .unwrap_or(true);
+
+                        if store {
+                            if log::log_enabled!(log::Level::Info) {
+                                info!(
+                                    "Detected a multisig state change at topoheight {} from TX {}",
+                                    tx_topoheight,
+                                    entry.get_hash()
+                                );
+                            }
+                            if multisig.payload.is_delete() {
+                                info!("Deleting multisig state");
+                                storage.delete_multisig_state().await?;
+                            } else {
+                                info!("Updating multisig state");
+                                storage.set_multisig_state(multisig).await?;
+                            }
+                        }
+                    }
+                }
+
+                // Propagate the event to the wallet
+                self.wallet
+                    .propagate_event(Event::NewTransaction(
+                        entry.serializable(self.wallet.get_network().is_mainnet()),
+                    ))
+                    .await;
             }
+        }
 
         // Also, verify the block version, so we handle smoothly a change in TX Version
         {
@@ -632,7 +684,13 @@ impl NetworkHandler {
 
         if !changes_stored || assets_changed.is_empty() {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("No changes found in block {} at topoheight {}, assets: {}, changes stored: {}", block_hash, topoheight, assets_changed.len(), changes_stored);
+                debug!(
+                    "No changes found in block {} at topoheight {}, assets: {}, changes stored: {}",
+                    block_hash,
+                    topoheight,
+                    assets_changed.len(),
+                    changes_stored
+                );
             }
             Ok(None)
         } else {
@@ -650,21 +708,38 @@ impl NetworkHandler {
 
     // Scan the chain using a specific balance asset, this helps us to get a list of version to only requests blocks where changes happened
     // When the block is requested, we don't limit the syncing to asset in parameter
-    async fn get_balance_and_transactions(&self, topoheight_processed: Arc<Mutex<HashSet<u64>>>, address: &Address, asset: &Hash, min_topoheight: u64, balances: bool, highest_nonce: &mut Option<u64>) -> Result<(), Error> {
+    async fn get_balance_and_transactions(
+        &self,
+        topoheight_processed: Arc<Mutex<HashSet<u64>>>,
+        address: &Address,
+        asset: &Hash,
+        min_topoheight: u64,
+        balances: bool,
+        highest_nonce: &mut Option<u64>,
+    ) -> Result<(), Error> {
         // Retrieve the highest balance
-        let (topoheight, balance) = self.api.get_balance(address, asset).await
+        let (topoheight, balance) = self
+            .api
+            .get_balance(address, asset)
+            .await
             .map(|res| (res.topoheight, res.balance))?;
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Starting sync from topoheight {} for asset {}", topoheight, asset);
+            debug!(
+                "Starting sync from topoheight {} for asset {}",
+                topoheight, asset
+            );
         }
 
         // don't sync already synced blocks
         if min_topoheight >= topoheight {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Reached minimum topoheight {}, topo: {}", min_topoheight, topoheight);
+                debug!(
+                    "Reached minimum topoheight {}, topo: {}",
+                    min_topoheight, topoheight
+                );
             }
-            return Ok(())
+            return Ok(());
         }
 
         // Determine if its the highest version of balance or not
@@ -674,7 +749,8 @@ impl NetworkHandler {
         // This channel is used to send all the blocks to the processing loop
         // No more than {concurrency} blocks and versions will be prefetch in advance
         // as the task will automatically await on the channel
-        let (data_sender, mut data_receiver) = channel::<(u64, u64, Option<RPCBlockResponse<'static>>)>(self.concurrency);
+        let (data_sender, mut data_receiver) =
+            channel::<(u64, u64, Option<RPCBlockResponse<'static>>)>(self.concurrency);
         let handle = {
             let api = self.api.clone();
             spawn_task("fetch-asset-versions", async move {
@@ -722,11 +798,13 @@ impl NetworkHandler {
                             }
                             *highest_nonce = Some(storage.get_nonce()?);
                         }
-    
+
                         // Store only the highest nonce
                         // Because if we are building queued transactions, it may break our queue
                         // Our we couldn't submit new txs before they get removed from mempool
-                        if let Some(nonce) = nonce.filter(|n| highest_nonce.as_ref().map(|h| *h < *n).unwrap_or(true)) {
+                        if let Some(nonce) = nonce
+                            .filter(|n| highest_nonce.as_ref().map(|h| *h < *n).unwrap_or(true))
+                        {
                             if log::log_enabled!(log::Level::Debug) {
                                 debug!("Storing new highest nonce {}", nonce);
                             }
@@ -736,19 +814,30 @@ impl NetworkHandler {
                     }
 
                     // If we have no balance in storage OR the stored balance isn't the same, we should store it
-                    let store = storage.get_balance_for(asset).await.map(|b| b.amount != balance).unwrap_or(true);
+                    let store = storage
+                        .get_balance_for(asset)
+                        .await
+                        .map(|b| b.amount != balance)
+                        .unwrap_or(true);
                     if store {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("Storing balance from topoheight {} for asset {} {}", topoheight, asset, balance);
+                            debug!(
+                                "Storing balance from topoheight {} for asset {} {}",
+                                topoheight, asset, balance
+                            );
                         }
                         // Store the new balance
-                        storage.set_balance_for(asset, Balance::new(balance)).await?;
+                        storage
+                            .set_balance_for(asset, Balance::new(balance))
+                            .await?;
 
                         // Propagate the event
-                        self.wallet.propagate_event(Event::BalanceChanged(BalanceChanged {
-                            asset: asset.clone(),
-                            balance
-                        })).await;
+                        self.wallet
+                            .propagate_event(Event::BalanceChanged(BalanceChanged {
+                                asset: asset.clone(),
+                                balance,
+                            }))
+                            .await;
                     }
                 }
             }
@@ -778,9 +867,12 @@ impl NetworkHandler {
             let network = self.wallet.get_network();
             if info.network != *network {
                 if log::log_enabled!(log::Level::Error) {
-                    error!("Network mismatch! Our network is {} while daemon is {}", network, info.network);
+                    error!(
+                        "Network mismatch! Our network is {} while daemon is {}",
+                        network, info.network
+                    );
                 }
-                return Err(NetworkError::NetworkMismatch)
+                return Err(NetworkError::NetworkMismatch);
             }
         }
 
@@ -796,13 +888,13 @@ impl NetworkHandler {
                 // Check if its the top
                 if daemon_topoheight == synced_topoheight && daemon_block_hash == top_block_hash {
                     // No need to sync back, we are already synced
-                    return Ok((daemon_topoheight, daemon_block_hash, synced_topoheight))
+                    return Ok((daemon_topoheight, daemon_block_hash, synced_topoheight));
                 }
 
                 // Verify we are not above the daemon chain
                 if synced_topoheight > daemon_topoheight {
                     warn!("We are above the daemon chain, we should sync from scratch");
-                    return Ok((daemon_topoheight, daemon_block_hash, 0))
+                    return Ok((daemon_topoheight, daemon_block_hash, 0));
                 }
 
                 if synced_topoheight > pruned_topoheight {
@@ -811,7 +903,7 @@ impl NetworkHandler {
                     let block_hash = header.hash.into_owned();
                     if block_hash == top_block_hash {
                         // topoheight and block hash are equal, we are still on right chain
-                        return Ok((daemon_topoheight, daemon_block_hash, synced_topoheight))
+                        return Ok((daemon_topoheight, daemon_block_hash, synced_topoheight));
                     }
                 }
 
@@ -849,7 +941,10 @@ impl NetworkHandler {
 
             // Check if we are on the same chain
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Checking if we are on the same chain at topoheight {}", maximum);
+                debug!(
+                    "Checking if we are on the same chain at topoheight {}",
+                    maximum
+                );
             }
             let header = self.api.get_block_at_topoheight(maximum).await?;
             let block_hash = header.hash.into_owned();
@@ -889,7 +984,11 @@ impl NetworkHandler {
 
         // Verify its not the first time we do a sync
         if synced_topoheight != 0 {
-            self.wallet.propagate_event(Event::Rescan { start_topoheight: maximum }).await;   
+            self.wallet
+                .propagate_event(Event::Rescan {
+                    start_topoheight: maximum,
+                })
+                .await;
         }
 
         Ok((daemon_topoheight, daemon_block_hash, maximum))
@@ -898,7 +997,14 @@ impl NetworkHandler {
     // Sync the latest version of our balances and nonces and determine if we should parse all blocks
     // If assets are provided, we'll only sync these assets
     // If nonce is not provided, we will fetch it from the daemon
-    pub async fn sync_head_state(&self, address: &Address, assets: Option<HashSet<Hash>>, nonce: Option<u64>, sync_nonce: bool, sync_multisig: bool) -> Result<bool, Error> {
+    pub async fn sync_head_state(
+        &self,
+        address: &Address,
+        assets: Option<HashSet<Hash>>,
+        nonce: Option<u64>,
+        sync_nonce: bool,
+        sync_multisig: bool,
+    ) -> Result<bool, Error> {
         trace!("syncing head state");
         let new_nonce = if sync_nonce {
             if log::log_enabled!(log::Level::Debug) {
@@ -923,7 +1029,7 @@ impl NetworkHandler {
                         }
                     }
                     // Account is not registered, we can return safely here
-                    return Ok(false)
+                    return Ok(false);
                 }
             }
         } else {
@@ -937,19 +1043,34 @@ impl NetworkHandler {
                     debug!("Multisig account detected");
                 }
                 let data = self.api.get_multisig(address).await?;
-                if let MultisigState::Active { participants, threshold } = data.state {
+                if let MultisigState::Active {
+                    participants,
+                    threshold,
+                } = data.state
+                {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Active multisig account with participants [{}] and threshold {}", participants.iter().map(Address::to_string).collect::<Vec<_>>().join(", "), threshold);
+                        debug!(
+                            "Active multisig account with participants [{}] and threshold {}",
+                            participants
+                                .iter()
+                                .map(Address::to_string)
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            threshold
+                        );
                     }
-    
+
                     let payload = MultiSigPayload {
-                        participants: participants.into_iter().map(|p| p.to_public_key()).collect(),
-                        threshold
+                        participants: participants
+                            .into_iter()
+                            .map(|p| p.to_public_key())
+                            .collect(),
+                        threshold,
                     };
-    
+
                     let multisig = MultiSig {
                         payload,
-                        topoheight: data.topoheight
+                        topoheight: data.topoheight,
                     };
                     let mut storage = self.wallet.get_storage().write().await;
                     storage.set_multisig_state(multisig).await?;
@@ -983,7 +1104,10 @@ impl NetworkHandler {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("requesting account assets, skip {}", skip);
                 }
-                let response = self.api.get_account_assets(address, None, Some(skip)).await?;
+                let response = self
+                    .api
+                    .get_account_assets(address, None, Some(skip))
+                    .await?;
                 if response.is_empty() {
                     break;
                 }
@@ -998,7 +1122,7 @@ impl NetworkHandler {
                         warn!("No asset detected while syncing head state, deleting local assets");
                     }
                     storage.delete_assets().await?;
-                    return Ok(false)
+                    return Ok(false);
                 }
             }
 
@@ -1039,7 +1163,8 @@ impl NetworkHandler {
                 }
 
                 Ok(())
-            }).await?;
+            })
+            .await?;
 
         // Now, we only sync the balances of the tracked assets
         let tracked_assets = if let Some(assets) = assets.filter(|a| !a.is_empty()) {
@@ -1051,7 +1176,10 @@ impl NetworkHandler {
                     tracked_assets.insert(asset);
                 } else {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Asset {} was requested but its not tracked, skipping...", asset);
+                        debug!(
+                            "Asset {} was requested but its not tracked, skipping...",
+                            asset
+                        );
                     }
                 }
             }
@@ -1094,8 +1222,12 @@ impl NetworkHandler {
                         if log::log_enabled!(log::Level::Warn) {
                             warn!("No balance found for tracked asset {}: {}", asset, e);
                         }
-                        self.wallet.propagate_event(Event::SyncError { message: format!("Error on asset {}: {}", asset, e) }).await;
-                        return Ok::<bool, Error>(false)
+                        self.wallet
+                            .propagate_event(Event::SyncError {
+                                message: format!("Error on asset {}: {}", asset, e),
+                            })
+                            .await;
+                        return Ok::<bool, Error>(false);
                     }
                 };
                 if log::log_enabled!(log::Level::Trace) {
@@ -1109,27 +1241,37 @@ impl NetworkHandler {
                     match storage.get_balance_for(&asset).await {
                         Ok(previous) => previous.amount != balance,
                         // If we don't have a balance for this asset, we should update it
-                        Err(_) => true
+                        Err(_) => true,
                     }
                 };
 
                 if must_update {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("must update balance for asset: {}, balance: {}", asset, balance);
+                        debug!(
+                            "must update balance for asset: {}, balance: {}",
+                            asset, balance
+                        );
                     }
 
                     // Inform the change of the balance
-                    self.wallet.propagate_event(Event::BalanceChanged(BalanceChanged {
-                        asset: asset.clone(),
-                        balance
-                    })).await;
+                    self.wallet
+                        .propagate_event(Event::BalanceChanged(BalanceChanged {
+                            asset: asset.clone(),
+                            balance,
+                        }))
+                        .await;
 
                     // Update the balance
                     let mut storage = self.wallet.get_storage().write().await;
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Storing balance at topoheight {} for asset {} {}", topoheight, asset, balance);
+                        debug!(
+                            "Storing balance at topoheight {} for asset {} {}",
+                            topoheight, asset, balance
+                        );
                     }
-                    storage.set_balance_for(&asset, Balance::new(balance)).await?;
+                    storage
+                        .set_balance_for(&asset, Balance::new(balance))
+                        .await?;
 
                     Ok(true)
                 } else {
@@ -1140,9 +1282,8 @@ impl NetworkHandler {
                 }
             })
             .buffer_unordered(self.concurrency)
-            .try_fold(false, |acc, x| async move {
-                Ok(acc | x)
-            }).await?;
+            .try_fold(false, |acc, x| async move { Ok(acc | x) })
+            .await?;
 
         // Apply changes
         {
@@ -1180,9 +1321,19 @@ impl NetworkHandler {
             // We can safely handle it by hand because `locate_sync_topoheight_and_clean` secure us from being on a wrong chain
             if let Some(topoheight) = block.topoheight {
                 let block_hash = block.hash.as_ref().clone();
-                if let Some((assets, mut nonce)) = self.process_block(address, block, topoheight).await? {
+                if let Some((assets, mut nonce)) =
+                    self.process_block(address, block, topoheight).await?
+                {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("We must sync head state, assets: {}, nonce: {:?}", assets.iter().map(|a| a.to_string()).collect::<Vec<String>>().join(", "), nonce);
+                        debug!(
+                            "We must sync head state, assets: {}, nonce: {:?}",
+                            assets
+                                .iter()
+                                .map(|a| a.to_string())
+                                .collect::<Vec<String>>()
+                                .join(", "),
+                            nonce
+                        );
                     }
                     {
                         let storage = self.wallet.get_storage().read().await;
@@ -1192,13 +1343,18 @@ impl NetworkHandler {
                         let stored_nonce = storage.get_nonce().unwrap_or(0);
                         if nonce.is_some_and(|n| n <= stored_nonce) {
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("Nonce {:?} is lower or equal to stored nonce {}, skipping it", nonce, stored_nonce);
+                                debug!(
+                                    "Nonce {:?} is lower or equal to stored nonce {}, skipping it",
+                                    nonce, stored_nonce
+                                );
                             }
                             nonce = None;
                         }
                     }
                     // A change happened in this block, lets update balance and nonce
-                    sync_new_blocks |= self.sync_head_state(&address, Some(assets), nonce, false, false).await?;
+                    sync_new_blocks |= self
+                        .sync_head_state(&address, Some(assets), nonce, false, false)
+                        .await?;
                 }
 
                 wallet_topoheight = topoheight;
@@ -1209,21 +1365,27 @@ impl NetworkHandler {
                 if log::log_enabled!(log::Level::Warn) {
                     warn!("Block {} is not ordered, skipping it", block.hash);
                 }
-                return Ok(())
+                return Ok(());
             }
         } else {
             if log::log_enabled!(log::Level::Debug) {
                 debug!("No event received, verify that we are on the right chain");
             }
             // First, locate the last topoheight valid for syncing
-            (daemon_topoheight, daemon_block_hash, wallet_topoheight) = self.locate_sync_topoheight_and_clean().await?;
+            (daemon_topoheight, daemon_block_hash, wallet_topoheight) =
+                self.locate_sync_topoheight_and_clean().await?;
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Daemon topoheight: {}, wallet topoheight: {}", daemon_topoheight, wallet_topoheight);
+                debug!(
+                    "Daemon topoheight: {}, wallet topoheight: {}",
+                    daemon_topoheight, wallet_topoheight
+                );
             }
 
             trace!("sync head state");
             // Now sync head state, this will helps us to determinate if we should sync blocks or not
-            sync_new_blocks |= self.sync_head_state(&address, None, None, true, true).await?;
+            sync_new_blocks |= self
+                .sync_head_state(&address, None, None, true, true)
+                .await?;
         }
 
         // Update the topoheight and block hash for wallet
@@ -1240,7 +1402,8 @@ impl NetworkHandler {
             if log::log_enabled!(log::Level::Debug) {
                 debug!("Syncing new blocks");
             }
-            self.sync_new_blocks(address, wallet_topoheight, true).await?;
+            self.sync_new_blocks(address, wallet_topoheight, true)
+                .await?;
         }
 
         {
@@ -1255,7 +1418,11 @@ impl NetworkHandler {
         }
 
         // Propagate the event
-        self.wallet.propagate_event(Event::NewTopoHeight { topoheight: daemon_topoheight }).await;
+        self.wallet
+            .propagate_event(Event::NewTopoHeight {
+                topoheight: daemon_topoheight,
+            })
+            .await;
         if log::log_enabled!(log::Level::Debug) {
             debug!("Synced to topoheight {}", daemon_topoheight);
         }
@@ -1389,7 +1556,7 @@ impl NetworkHandler {
                 res = on_connection.recv() => {
                     trace!("on_connection");
                     res?;
-                    // We are connected again, make sure we are still up-to-date with node 
+                    // We are connected again, make sure we are still up-to-date with node
                     self.sync(&address, None).await?;
 
                     self.wallet.propagate_event(Event::Online).await;
@@ -1406,7 +1573,12 @@ impl NetworkHandler {
     // Sync all new blocks until the current topoheight
     // If balances is set to false, only the history will be updated
     // and not the nonce or balances
-    async fn sync_new_blocks(&self, address: &Address, current_topoheight: u64, balances: bool) -> Result<(), Error> {
+    async fn sync_new_blocks(
+        &self,
+        address: &Address,
+        current_topoheight: u64,
+        balances: bool,
+    ) -> Result<(), Error> {
         if log::log_enabled!(log::Level::Debug) {
             debug!("Scanning history for each asset");
         }
@@ -1435,11 +1607,25 @@ impl NetworkHandler {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("fetch history for asset {}", asset);
                 }
-                if let Err(e) = self.get_balance_and_transactions(topoheight_processed.clone(), address, &asset, current_topoheight, balances, &mut highest_nonce).await {
+                if let Err(e) = self
+                    .get_balance_and_transactions(
+                        topoheight_processed.clone(),
+                        address,
+                        &asset,
+                        current_topoheight,
+                        balances,
+                        &mut highest_nonce,
+                    )
+                    .await
+                {
                     if log::log_enabled!(log::Level::Error) {
                         error!("Error while syncing balance for asset {}: {}", asset, e);
                     }
-                    self.wallet.propagate_event(Event::SyncError { message: e.to_string() }).await;
+                    self.wallet
+                        .propagate_event(Event::SyncError {
+                            message: e.to_string(),
+                        })
+                        .await;
                 }
             }
         }
@@ -1456,7 +1642,11 @@ impl NetworkHandler {
             }
         }
 
-        self.wallet.propagate_event(Event::HistorySynced { topoheight: current_topoheight }).await;
+        self.wallet
+            .propagate_event(Event::HistorySynced {
+                topoheight: current_topoheight,
+            })
+            .await;
         if log::log_enabled!(log::Level::Info) {
             info!("Sync new blocks completed in {:?}", start.elapsed());
         }

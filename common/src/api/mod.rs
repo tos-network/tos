@@ -1,64 +1,50 @@
-mod data;
-pub mod wallet;
 pub mod daemon;
+mod data;
 pub mod query;
+pub mod wallet;
 
-use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::borrow::Cow;
 // Balance simplification: bulletproofs removed
 // use bulletproofs::RangeProof;
 use crate::{
     account::Nonce,
-    crypto::{
-        Address,
-        Hash,
-        Signature
-    },
-    serializer::Serializer,
     contract::ContractOutput,
+    crypto::{Address, Hash, Signature},
+    serializer::Serializer,
     transaction::{
-        extra_data::UnknownExtraDataFormat,
-        multisig::MultiSig,
-        BurnPayload,
-        EnergyPayload,
-        InvokeContractPayload,
-        DeployContractPayload,
-        MultiSigPayload,
-        Reference,
-        Transaction,
-        TransactionType,
-        TransferPayload,
-        TxVersion,
-        FeeType,
-    }
+        extra_data::UnknownExtraDataFormat, multisig::MultiSig, BurnPayload, DeployContractPayload,
+        EnergyPayload, FeeType, InvokeContractPayload, MultiSigPayload, Reference, Transaction,
+        TransactionType, TransferPayload, TxVersion,
+    },
 };
 pub use data::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct SubscribeParams<'a, E: Clone> {
-    pub notify: Cow<'a, E>
+    pub notify: Cow<'a, E>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct EventResult<'a, E: Clone> {
     pub event: Cow<'a, E>,
     #[serde(flatten)]
-    pub value: Value
+    pub value: Value,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct DataHash<'a, T: Clone> {
     pub hash: Cow<'a, Hash>,
     #[serde(flatten)]
-    pub data: Cow<'a, T>
+    pub data: Cow<'a, T>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RPCTransferPayload<'a> {
     pub asset: Cow<'a, Hash>,
     pub destination: Address,
-    pub amount: u64,  // Plaintext amount
+    pub amount: u64, // Plaintext amount
     pub extra_data: Cow<'a, Option<UnknownExtraDataFormat>>,
 }
 
@@ -82,7 +68,7 @@ pub enum RPCTransactionType<'a> {
     InvokeContract(Cow<'a, InvokeContractPayload>),
     DeployContract(Cow<'a, DeployContractPayload>),
     Energy(Cow<'a, EnergyPayload>),
-    AIMining(Cow<'a, crate::ai_mining::AIMiningPayload>)
+    AIMining(Cow<'a, crate::ai_mining::AIMiningPayload>),
 }
 
 impl<'a> RPCTransactionType<'a> {
@@ -99,13 +85,17 @@ impl<'a> RPCTransactionType<'a> {
                     });
                 }
                 Self::Transfers(rpc_transfers)
-            },
+            }
             TransactionType::Burn(burn) => Self::Burn(Cow::Borrowed(burn)),
             TransactionType::MultiSig(payload) => Self::MultiSig(Cow::Borrowed(payload)),
-            TransactionType::InvokeContract(payload) => Self::InvokeContract(Cow::Borrowed(payload)),
-            TransactionType::DeployContract(payload) => Self::DeployContract(Cow::Borrowed(payload)),
+            TransactionType::InvokeContract(payload) => {
+                Self::InvokeContract(Cow::Borrowed(payload))
+            }
+            TransactionType::DeployContract(payload) => {
+                Self::DeployContract(Cow::Borrowed(payload))
+            }
             TransactionType::Energy(payload) => Self::Energy(Cow::Borrowed(payload)),
-            TransactionType::AIMining(payload) => Self::AIMining(Cow::Borrowed(payload))
+            TransactionType::AIMining(payload) => Self::AIMining(Cow::Borrowed(payload)),
         }
     }
 }
@@ -113,15 +103,26 @@ impl<'a> RPCTransactionType<'a> {
 impl From<RPCTransactionType<'_>> for TransactionType {
     fn from(data: RPCTransactionType) -> Self {
         match data {
-            RPCTransactionType::Transfers(transfers) => {
-                TransactionType::Transfers(transfers.into_iter().map(|transfer| transfer.into()).collect::<Vec<TransferPayload>>())
-            },
+            RPCTransactionType::Transfers(transfers) => TransactionType::Transfers(
+                transfers
+                    .into_iter()
+                    .map(|transfer| transfer.into())
+                    .collect::<Vec<TransferPayload>>(),
+            ),
             RPCTransactionType::Burn(burn) => TransactionType::Burn(burn.into_owned()),
-            RPCTransactionType::MultiSig(payload) => TransactionType::MultiSig(payload.into_owned()),
-            RPCTransactionType::InvokeContract(payload) => TransactionType::InvokeContract(payload.into_owned()),
-            RPCTransactionType::DeployContract(payload) => TransactionType::DeployContract(payload.into_owned()),
+            RPCTransactionType::MultiSig(payload) => {
+                TransactionType::MultiSig(payload.into_owned())
+            }
+            RPCTransactionType::InvokeContract(payload) => {
+                TransactionType::InvokeContract(payload.into_owned())
+            }
+            RPCTransactionType::DeployContract(payload) => {
+                TransactionType::DeployContract(payload.into_owned())
+            }
             RPCTransactionType::Energy(payload) => TransactionType::Energy(payload.into_owned()),
-            RPCTransactionType::AIMining(payload) => TransactionType::AIMining(payload.into_owned())
+            RPCTransactionType::AIMining(payload) => {
+                TransactionType::AIMining(payload.into_owned())
+            }
         }
     }
 }
@@ -151,7 +152,7 @@ pub struct RPCTransaction<'a> {
     /// Signature of the transaction
     pub signature: Cow<'a, Signature>,
     /// TX size in bytes
-    pub size: usize
+    pub size: usize,
 }
 
 impl<'a> RPCTransaction<'a> {
@@ -166,7 +167,7 @@ impl<'a> RPCTransaction<'a> {
             reference: Cow::Borrowed(tx.get_reference()),
             multisig: Cow::Borrowed(tx.get_multisig()),
             signature: Cow::Borrowed(tx.get_signature()),
-            size: tx.size()
+            size: tx.size(),
         }
     }
 }
@@ -182,7 +183,7 @@ impl<'a> From<RPCTransaction<'a>> for Transaction {
             tx.nonce,
             tx.reference.into_owned(),
             tx.multisig.into_owned(),
-            tx.signature.into_owned()
+            tx.signature.into_owned(),
         )
     }
 }
@@ -194,7 +195,7 @@ pub type TransactionResponse = RPCTransaction<'static>;
 #[derive(Serialize, Deserialize)]
 pub struct SplitAddressParams {
     // address which must be in integrated form
-    pub address: Address
+    pub address: Address,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -204,54 +205,60 @@ pub struct SplitAddressResult {
     // Encoded data from address
     pub integrated_data: DataElement,
     // Integrated data size
-    pub size: usize
+    pub size: usize,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RPCContractOutput<'a> {
     RefundGas {
-        amount: u64
+        amount: u64,
     },
     Transfer {
         amount: u64,
         asset: Cow<'a, Hash>,
-        destination: Cow<'a, Address>
+        destination: Cow<'a, Address>,
     },
     Mint {
         asset: Cow<'a, Hash>,
-        amount: u64
+        amount: u64,
     },
     Burn {
         asset: Cow<'a, Hash>,
-        amount: u64
+        amount: u64,
     },
     NewAsset {
-        asset: Cow<'a, Hash>
+        asset: Cow<'a, Hash>,
     },
     ExitCode(Option<u64>),
-    RefundDeposits
+    RefundDeposits,
 }
 
 impl<'a> RPCContractOutput<'a> {
     pub fn from_output(output: &'a ContractOutput, mainnet: bool) -> Self {
         match output {
-            ContractOutput::RefundGas { amount } => RPCContractOutput::RefundGas { amount: *amount },
-            ContractOutput::Transfer { amount, asset, destination } => RPCContractOutput::Transfer {
+            ContractOutput::RefundGas { amount } => {
+                RPCContractOutput::RefundGas { amount: *amount }
+            }
+            ContractOutput::Transfer {
+                amount,
+                asset,
+                destination,
+            } => RPCContractOutput::Transfer {
                 amount: *amount,
                 asset: Cow::Borrowed(asset),
-                destination: Cow::Owned(destination.as_address(mainnet))
+                destination: Cow::Owned(destination.as_address(mainnet)),
             },
             ContractOutput::Mint { asset, amount } => RPCContractOutput::Mint {
                 asset: Cow::Borrowed(asset),
-                amount: *amount
+                amount: *amount,
             },
             ContractOutput::Burn { asset, amount } => RPCContractOutput::Burn {
                 asset: Cow::Borrowed(asset),
-                amount: *amount
+                amount: *amount,
             },
             ContractOutput::NewAsset { asset } => RPCContractOutput::NewAsset {
-                asset: Cow::Borrowed(asset)
+                asset: Cow::Borrowed(asset),
             },
             ContractOutput::ExitCode(code) => RPCContractOutput::ExitCode(code.clone()),
             ContractOutput::RefundDeposits => RPCContractOutput::RefundDeposits,
@@ -263,21 +270,25 @@ impl<'a> From<RPCContractOutput<'a>> for ContractOutput {
     fn from(output: RPCContractOutput<'a>) -> Self {
         match output {
             RPCContractOutput::RefundGas { amount } => ContractOutput::RefundGas { amount },
-            RPCContractOutput::Transfer { amount, asset, destination } => ContractOutput::Transfer {
+            RPCContractOutput::Transfer {
+                amount,
+                asset,
+                destination,
+            } => ContractOutput::Transfer {
                 amount,
                 asset: asset.into_owned(),
-                destination: destination.into_owned().to_public_key()
+                destination: destination.into_owned().to_public_key(),
             },
             RPCContractOutput::Mint { asset, amount } => ContractOutput::Mint {
                 asset: asset.into_owned(),
-                amount
+                amount,
             },
             RPCContractOutput::Burn { asset, amount } => ContractOutput::Burn {
                 asset: asset.into_owned(),
-                amount
+                amount,
             },
             RPCContractOutput::NewAsset { asset } => ContractOutput::NewAsset {
-                asset: asset.into_owned()
+                asset: asset.into_owned(),
             },
             RPCContractOutput::ExitCode(code) => ContractOutput::ExitCode(code),
             RPCContractOutput::RefundDeposits => ContractOutput::RefundDeposits,

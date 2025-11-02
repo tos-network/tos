@@ -1,28 +1,22 @@
-use std::sync::Arc;
+use crate::core::{
+    error::BlockchainError,
+    storage::{
+        rocksdb::{BlockDifficulty, Column},
+        sled::{BLOCKS_COUNT, TXS_COUNT},
+        BlockProvider, BlocksAtHeightProvider, DifficultyProvider, RocksStorage,
+        TransactionProvider,
+    },
+};
 use async_trait::async_trait;
 use log::trace;
+use std::sync::Arc;
 use tos_common::{
     block::{Block, BlockHeader},
     crypto::{Hash, Hashable},
     difficulty::Difficulty,
     immutable::Immutable,
     transaction::Transaction,
-    varuint::VarUint
-};
-use crate::core::{
-    error::BlockchainError,
-    storage::{
-        rocksdb::{
-            BlockDifficulty,
-            Column,
-        },
-        sled::{BLOCKS_COUNT, TXS_COUNT},
-        BlockProvider,
-        BlocksAtHeightProvider,
-        DifficultyProvider,
-        RocksStorage,
-        TransactionProvider
-    }
+    varuint::VarUint,
 };
 
 #[async_trait]
@@ -60,7 +54,8 @@ impl BlockProvider for RocksStorage {
         let header = self.get_block_header_by_hash(hash).await?;
 
         // TIP-2 Phase 1 fix: Load transaction hashes from BlockTransactions column
-        let tx_hashes: Vec<Hash> = self.load_optional_from_disk(Column::BlockTransactions, hash.as_bytes())?
+        let tx_hashes: Vec<Hash> = self
+            .load_optional_from_disk(Column::BlockTransactions, hash.as_bytes())?
             .unwrap_or_default();
 
         // Load each transaction from storage
@@ -76,7 +71,14 @@ impl BlockProvider for RocksStorage {
     // Save a new block with its transactions and difficulty
     // Hash is Immutable to be stored efficiently in caches and sharing the same object
     // with others caches (like P2p or GetWork)
-    async fn save_block(&mut self, block: Arc<BlockHeader>, txs: &[Arc<Transaction>], difficulty: Difficulty, covariance: VarUint, hash: Immutable<Hash>) -> Result<(), BlockchainError> {
+    async fn save_block(
+        &mut self,
+        block: Arc<BlockHeader>,
+        txs: &[Arc<Transaction>],
+        difficulty: Difficulty,
+        covariance: VarUint,
+        hash: Immutable<Hash>,
+    ) -> Result<(), BlockchainError> {
         trace!("save block");
 
         let mut count_txs = 0;
@@ -109,7 +111,8 @@ impl BlockProvider for RocksStorage {
         // V-22 Fix: Use fsync for critical block difficulty data
         self.insert_into_disk_sync(Column::BlockDifficulty, hash.as_bytes(), &block_difficulty)?;
 
-        self.add_block_hash_at_blue_score(&hash, block.get_blue_score()).await?;
+        self.add_block_hash_at_blue_score(&hash, block.get_blue_score())
+            .await?;
 
         if count_txs > 0 {
             count_txs += self.count_transactions().await?;

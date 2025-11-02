@@ -1630,5 +1630,5 @@ pub const ENGLISH: Language<'static> = Language {
         "zombie",
         "zones",
         "zoom",
-    ]
+    ],
 };

@@ -2,15 +2,9 @@ use serde::{Deserialize, Serialize};
 use tos_common::{
     block::TopoHeight,
     crypto::Hash,
-    serializer::{
-        Reader,
-        ReaderError,
-        Serializer,
-        Writer
-    },
-    transaction::{MultiSigPayload, Reference}
+    serializer::{Reader, ReaderError, Serializer, Writer},
+    transaction::{MultiSigPayload, Reference},
 };
-
 
 #[derive(Debug, Clone)]
 pub struct Balance {
@@ -19,9 +13,7 @@ pub struct Balance {
 
 impl Balance {
     pub fn new(amount: u64) -> Self {
-        Self {
-            amount,
-        }
+        Self { amount }
     }
 }
 
@@ -32,12 +24,9 @@ impl Serializer for Balance {
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let amount = u64::read(reader)?;
-        Ok(Self {
-            amount,
-        })
+        Ok(Self { amount })
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct TxCache {
@@ -68,7 +57,7 @@ impl Serializer for MultiSig {
         let topoheight = TopoHeight::read(reader)?;
         Ok(Self {
             payload,
-            topoheight
+            topoheight,
         })
     }
 }

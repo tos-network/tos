@@ -1,3 +1,10 @@
+use crate::core::{
+    error::BlockchainError,
+    storage::{
+        rocksdb::{Asset, AssetId, Column, IteratorMode},
+        AssetProvider, NetworkProvider, RocksStorage,
+    },
+};
 use async_trait::async_trait;
 use log::trace;
 use rocksdb::Direction;
@@ -6,19 +13,6 @@ use tos_common::{
     block::TopoHeight,
     crypto::{Hash, PublicKey},
     serializer::Skip,
-};
-use crate::core::{error::BlockchainError,
-    storage::{
-        rocksdb::{
-            Asset,
-            AssetId,
-            Column,
-            IteratorMode,
-        },
-        AssetProvider,
-        NetworkProvider,
-        RocksStorage
-    }
 };
 
 pub const ASSETS_ID: &[u8] = b"ASID";
@@ -34,7 +28,11 @@ impl AssetProvider for RocksStorage {
     }
 
     // Check if an asset version exists at exact topoheight
-    async fn has_asset_at_exact_topoheight(&self, hash: &Hash, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
+    async fn has_asset_at_exact_topoheight(
+        &self,
+        hash: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("has asset {} at topoheight {}", hash, topoheight);
         }
@@ -45,7 +43,10 @@ impl AssetProvider for RocksStorage {
     }
 
     // Get the asset topoheight at which it got registered
-    async fn get_asset_topoheight(&self, hash: &Hash) -> Result<Option<TopoHeight>, BlockchainError> {
+    async fn get_asset_topoheight(
+        &self,
+        hash: &Hash,
+    ) -> Result<Option<TopoHeight>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get asset {} topoheight", hash);
         }
@@ -53,14 +54,18 @@ impl AssetProvider for RocksStorage {
             if log::log_enabled!(log::Level::Trace) {
                 trace!("asset {} not found", hash);
             }
-            return Ok(None)
+            return Ok(None);
         };
 
         Ok(asset.data_pointer)
     }
 
     // Get the asset data from its hash and topoheight at which it got registered
-    async fn get_asset_at_topoheight(&self, hash: &Hash, topoheight: TopoHeight) -> Result<VersionedAssetData, BlockchainError> {
+    async fn get_asset_at_topoheight(
+        &self,
+        hash: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<VersionedAssetData, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get asset {} at topoheight {}", hash, topoheight);
         }
@@ -68,21 +73,33 @@ impl AssetProvider for RocksStorage {
         self.get_asset_at_topoheight_internal(asset.id, topoheight)
     }
 
-    // Check that the asset has been registered <= maximum topoheight  
-    async fn is_asset_registered_at_maximum_topoheight(&self, hash: &Hash, maximum_topoheight: TopoHeight) -> Result<bool, BlockchainError> {
+    // Check that the asset has been registered <= maximum topoheight
+    async fn is_asset_registered_at_maximum_topoheight(
+        &self,
+        hash: &Hash,
+        maximum_topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("is asset {} registered at maximum topoheight {}", hash, maximum_topoheight);
+            trace!(
+                "is asset {} registered at maximum topoheight {}",
+                hash,
+                maximum_topoheight
+            );
         }
         let topoheight = self.get_asset_topoheight(hash).await?;
         match topoheight {
             Some(topo) if topo <= maximum_topoheight => Ok(true),
-            _ => Ok(false)
+            _ => Ok(false),
         }
     }
 
     // Get asset data for topoheight
     // This check that asset topoheight is <= requested topoheight
-    async fn get_asset_at_maximum_topoheight(&self, hash: &Hash, topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedAssetData)>, BlockchainError> {
+    async fn get_asset_at_maximum_topoheight(
+        &self,
+        hash: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, VersionedAssetData)>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get asset {} at maximum topoheight {}", hash, topoheight);
         }
@@ -90,7 +107,7 @@ impl AssetProvider for RocksStorage {
             if log::log_enabled!(log::Level::Trace) {
                 trace!("asset {} not found", hash);
             }
-            return Ok(None)
+            return Ok(None);
         };
 
         let mut topo = metadata.data_pointer;
@@ -100,7 +117,7 @@ impl AssetProvider for RocksStorage {
                     trace!("asset {} found at topoheight {}", hash, previous);
                 }
                 let data = self.get_asset_at_topoheight_internal(metadata.id, previous)?;
-                return Ok(Some((previous, data)))
+                return Ok(Some((previous, data)));
             }
 
             let key = Self::get_asset_versioned_key(topoheight, metadata.id);
@@ -111,12 +128,16 @@ impl AssetProvider for RocksStorage {
     }
 
     // Get the asset data from its hash and topoheight at which it got registered
-    async fn get_asset(&self, hash: &Hash) -> Result<(TopoHeight, VersionedAssetData), BlockchainError> {
+    async fn get_asset(
+        &self,
+        hash: &Hash,
+    ) -> Result<(TopoHeight, VersionedAssetData), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get asset {}", hash);
         }
         let asset = self.get_asset_type(hash)?;
-        let topoheight = asset.data_pointer
+        let topoheight = asset
+            .data_pointer
             .ok_or_else(|| BlockchainError::AssetNotFound(hash.clone()))?;
 
         let data = self.get_asset_at_topoheight_internal(asset.id, topoheight)?;
@@ -125,60 +146,92 @@ impl AssetProvider for RocksStorage {
     }
 
     // Get all available assets
-    async fn get_assets<'a>(&'a self) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
+    async fn get_assets<'a>(
+        &'a self,
+    ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
         trace!("get assets");
         self.iter_keys(Column::Assets, IteratorMode::Start)
     }
 
     // Get all available assets with their Asset Data in specified range
-    async fn get_assets_with_data_in_range<'a>(&'a self, minimum_topoheight: Option<u64>, maximum_topoheight: Option<u64>) -> Result<impl Iterator<Item = Result<(Hash, TopoHeight, AssetData), BlockchainError>> + 'a, BlockchainError> {
+    async fn get_assets_with_data_in_range<'a>(
+        &'a self,
+        minimum_topoheight: Option<u64>,
+        maximum_topoheight: Option<u64>,
+    ) -> Result<
+        impl Iterator<Item = Result<(Hash, TopoHeight, AssetData), BlockchainError>> + 'a,
+        BlockchainError,
+    > {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("get assets with data in range minimum_topoheight: {:?}, maximum_topoheight: {:?}", minimum_topoheight, maximum_topoheight);
+            trace!(
+                "get assets with data in range minimum_topoheight: {:?}, maximum_topoheight: {:?}",
+                minimum_topoheight,
+                maximum_topoheight
+            );
         }
-        Ok(self.iter::<Hash, Asset>(Column::Assets, IteratorMode::Start)?
+        Ok(self
+            .iter::<Hash, Asset>(Column::Assets, IteratorMode::Start)?
             .map(move |res| {
                 let (asset, metadata) = res?;
 
                 let Some(topoheight) = metadata.data_pointer else {
-                    return Ok(None)
+                    return Ok(None);
                 };
 
-                if minimum_topoheight.is_some_and(|v| topoheight < v) || maximum_topoheight.is_some_and(|v| topoheight > v) {
-                    return Ok(None)
+                if minimum_topoheight.is_some_and(|v| topoheight < v)
+                    || maximum_topoheight.is_some_and(|v| topoheight > v)
+                {
+                    return Ok(None);
                 }
 
                 let key = Self::get_asset_versioned_key(topoheight, metadata.id);
-                match self.load_optional_from_disk::<_, VersionedAssetData>(Column::VersionedAssets, &key)? {
+                match self.load_optional_from_disk::<_, VersionedAssetData>(
+                    Column::VersionedAssets,
+                    &key,
+                )? {
                     Some(data) => Ok(Some((asset, topoheight, data.take()))),
-                    None => Ok(None)
+                    None => Ok(None),
                 }
             })
-            .filter_map(Result::transpose)
-        )
+            .filter_map(Result::transpose))
     }
 
     // Get all assets for a specific key
-    async fn get_assets_for<'a>(&'a self, key: &'a PublicKey) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
+    async fn get_assets_for<'a>(
+        &'a self,
+        key: &'a PublicKey,
+    ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get assets for {}", key.as_address(self.is_mainnet()));
         }
         let account_id = self.get_account_id(key)?;
-        self.iter_keys::<Skip<8, AssetId>>(Column::Balances, IteratorMode::WithPrefix(&account_id.to_be_bytes(), Direction::Forward))
-            .map(|iter| iter.map(|res| {
+        self.iter_keys::<Skip<8, AssetId>>(
+            Column::Balances,
+            IteratorMode::WithPrefix(&account_id.to_be_bytes(), Direction::Forward),
+        )
+        .map(|iter| {
+            iter.map(|res| {
                 let k = res?;
                 self.get_asset_hash_from_id(k.0)
-            }))
+            })
+        })
     }
 
     // Count the number of assets stored
     async fn count_assets(&self) -> Result<u64, BlockchainError> {
         trace!("count assets");
         // TODO: cache
-        self.load_optional_from_disk(Column::Common, &ASSETS_ID).map(|v| v.unwrap_or(0))
+        self.load_optional_from_disk(Column::Common, &ASSETS_ID)
+            .map(|v| v.unwrap_or(0))
     }
 
     // Add an asset to the storage
-    async fn add_asset(&mut self, hash: &Hash, topoheight: TopoHeight, data: VersionedAssetData) -> Result<(), BlockchainError> {
+    async fn add_asset(
+        &mut self,
+        hash: &Hash,
+        topoheight: TopoHeight,
+        data: VersionedAssetData,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("add asset {} at topoheight {}", hash, topoheight);
         }
@@ -191,7 +244,7 @@ impl AssetProvider for RocksStorage {
             let asset = Asset {
                 id,
                 data_pointer: Some(topoheight),
-                supply_pointer: None
+                supply_pointer: None,
             };
 
             self.insert_into_disk(Column::AssetById, &id.to_be_bytes(), hash)?;
@@ -209,7 +262,8 @@ impl AssetProvider for RocksStorage {
 impl RocksStorage {
     fn get_next_asset_id(&mut self) -> Result<AssetId, BlockchainError> {
         trace!("get next asset id");
-        let id = self.load_optional_from_disk(Column::Common, &ASSETS_ID)?
+        let id = self
+            .load_optional_from_disk(Column::Common, &ASSETS_ID)?
             .unwrap_or(0);
 
         if log::log_enabled!(log::Level::Trace) {
@@ -220,7 +274,11 @@ impl RocksStorage {
         Ok(id)
     }
 
-    fn get_asset_at_topoheight_internal(&self, id: AssetId, topoheight: TopoHeight) -> Result<VersionedAssetData, BlockchainError> {
+    fn get_asset_at_topoheight_internal(
+        &self,
+        id: AssetId,
+        topoheight: TopoHeight,
+    ) -> Result<VersionedAssetData, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get asset at topoheight internal {} {}", id, topoheight);
         }
@@ -228,7 +286,10 @@ impl RocksStorage {
         self.load_from_disk(Column::VersionedAssets, &key)
     }
 
-    pub(super) fn get_optional_asset_type(&self, hash: &Hash) -> Result<Option<Asset>, BlockchainError> {
+    pub(super) fn get_optional_asset_type(
+        &self,
+        hash: &Hash,
+    ) -> Result<Option<Asset>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get optional asset {}", hash);
         }
@@ -242,7 +303,10 @@ impl RocksStorage {
         self.load_from_disk(Column::Assets, hash)
     }
 
-    pub(super) fn get_optional_asset_id(&self, hash: &Hash) -> Result<Option<AssetId>, BlockchainError> {
+    pub(super) fn get_optional_asset_id(
+        &self,
+        hash: &Hash,
+    ) -> Result<Option<AssetId>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get optional asset id {}", hash);
         }

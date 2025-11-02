@@ -1,26 +1,19 @@
 use std::ops::ControlFlow;
 
-use argon2::{Params, Argon2, Algorithm, Version};
+use argon2::{Algorithm, Argon2, Params, Version};
+#[cfg(feature = "cli")]
+use clap::Parser;
 use lazy_static::lazy_static;
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-#[cfg(feature = "cli")]
-use clap::Parser;
 use tos_common::{
-    config::VERSION,
-    crypto::ecdlp,
-    network::Network,
-    utils::detect_available_parallelism
+    config::VERSION, crypto::ecdlp, network::Network, utils::detect_available_parallelism,
 };
 
-#[cfg(feature = "cli")]
-use tos_common::prompt::{
-    default_logs_datetime_format,
-    LogLevel,
-    ModuleConfig
-};
 use crate::precomputed_tables;
+#[cfg(feature = "cli")]
+use tos_common::prompt::{default_logs_datetime_format, LogLevel, ModuleConfig};
 
 pub const DIR_PATH: &str = "wallets/";
 pub const XSWD_BIND_ADDRESS: &str = "0.0.0.0:44325";
@@ -41,7 +34,6 @@ lazy_static! {
     };
 }
 
-
 // This struct is used to configure the RPC Server
 // In case we want to enable it instead of starting
 // the XSWD Server
@@ -59,7 +51,7 @@ pub struct RPCConfig {
     pub rpc_password: Option<String>,
     /// Number of threads to use for the RPC Server
     #[clap(long)]
-    pub rpc_threads: Option<usize>
+    pub rpc_threads: Option<usize>,
 }
 
 // Functions Helpers
@@ -104,7 +96,7 @@ pub struct PrecomputedTablesConfig {
     #[serde(default = "default_precomputed_tables_l1")]
     pub precomputed_tables_l1: usize,
     /// Set the path to use for precomputed tables
-    /// 
+    ///
     /// By default, it will be from current directory.
     #[clap(long)]
     pub precomputed_tables_path: Option<String>,
@@ -146,7 +138,7 @@ pub struct LogConfig {
     #[serde(default)]
     pub disable_interactive_mode: bool,
     /// Log filename
-    /// 
+    ///
     /// By default filename is tos-wallet.log.
     /// File will be stored in logs directory, this is only the filename, not the full path.
     /// Log file is rotated every day and has the format YYYY-MM-DD.tos-wallet.log.
@@ -154,7 +146,7 @@ pub struct LogConfig {
     #[serde(default = "default_log_filename")]
     pub filename_log: String,
     /// Logs directory
-    /// 
+    ///
     /// By default it will be logs/ of the current directory.
     /// It must end with a / to be a valid folder.
     #[clap(long, default_value_t = default_logs_path())]
@@ -176,7 +168,156 @@ pub struct LogConfig {
 
 #[cfg(feature = "cli")]
 #[derive(Parser, Serialize, Deserialize, Clone)]
-#[clap(version = VERSION, about = "Tos.")]
+#[clap(
+    version = VERSION,
+    about = "TOS Wallet - Manage your TOS cryptocurrency wallet from command line",
+    long_about = r#"TOS Wallet - Non-Interactive Command Line Interface
+
+IMPORTANT: This wallet operates in NON-INTERACTIVE mode by default for automation and AI tools.
+You do NOT need to use interactive prompts. All commands can be executed with command-line arguments.
+
+═══════════════════════════════════════════════════════════════════════════════
+QUICK START GUIDE - NON-INTERACTIVE MODE
+═══════════════════════════════════════════════════════════════════════════════
+
+1. CREATE A NEW WALLET (non-interactive):
+   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "display_address"
+
+   This will:
+   - Automatically create a new wallet at ./wallets/my_wallet/ if it doesn't exist
+   - Encrypt it with password "mypass123"
+   - Display the wallet address
+   - Exit immediately
+
+   To also see the seed phrase:
+   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "seed"
+
+2. OPEN EXISTING WALLET AND SHOW ADDRESS:
+   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "address"
+
+3. GET WALLET BALANCE:
+   ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+       --wallet-path my_wallet --password mypass123 --exec "balance"
+
+4. SEND TRANSACTION (non-interactive):
+   ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+       --wallet-path my_wallet --password mypass123 \
+       --exec "transfer <asset> <recipient_address> <amount>"
+
+   Example:
+   ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+       --wallet-path my_wallet --password mypass123 \
+       --exec "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.5"
+
+5. RESTORE WALLET FROM SEED:
+   ./tos_wallet --network devnet --wallet-path restored_wallet --password newpass456 \
+       --seed "word1 word2 word3 ... word24" --exec "display_address"
+
+   Note: The --seed flag restores from an existing seed phrase (24 words)
+
+═══════════════════════════════════════════════════════════════════════════════
+PASSWORD OPTIONS (pick one):
+═══════════════════════════════════════════════════════════════════════════════
+
+Option 1: Direct password (quick, less secure):
+  --password mypassword
+
+Option 2: Password from environment variable (more secure):
+  export TOS_WALLET_PASSWORD="mypassword"
+  ./tos_wallet --password-from-env --wallet-path my_wallet --exec "balance"
+
+Option 3: Password from file (most secure):
+  echo "mypassword" > password.txt
+  chmod 600 password.txt
+  ./tos_wallet --password-file password.txt --wallet-path my_wallet --exec "balance"
+
+═══════════════════════════════════════════════════════════════════════════════
+AVAILABLE COMMANDS (use with --exec):
+═══════════════════════════════════════════════════════════════════════════════
+
+Wallet Management:
+  display_address           - Show wallet address (auto-creates wallet if needed)
+  address                   - Alias for display_address
+  seed                      - Display seed phrase (requires password)
+  balance                   - Show wallet balance (requires --daemon-address)
+
+Transactions:
+  transfer <asset> <address> <amount>      - Send asset to address (asset can be 'TOS' or asset hash)
+  history                                  - Show transaction history
+  nonce                                    - Show current nonce
+
+Asset Management:
+  list_assets               - List tracked assets
+  track_asset <hash>        - Track a new asset
+
+Advanced:
+  freeze <amount> <days>    - Freeze TOS to generate energy
+  unfreeze <tx_hash>        - Unfreeze previously frozen TOS
+  multisig                  - Manage multisig operations
+
+═══════════════════════════════════════════════════════════════════════════════
+NETWORK OPTIONS:
+═══════════════════════════════════════════════════════════════════════════════
+
+--network devnet          - Development network (default daemon: 127.0.0.1:8080)
+--network testnet         - Test network
+--network mainnet         - Main network (default)
+
+--daemon-address <url>    - Daemon RPC endpoint (default: http://127.0.0.1:8080)
+--offline-mode            - Work without connecting to daemon (limited functionality)
+
+═══════════════════════════════════════════════════════════════════════════════
+EXAMPLES FOR AI TOOLS:
+═══════════════════════════════════════════════════════════════════════════════
+
+# Create wallet, fund it, and send transaction (complete flow):
+
+# Step 1: Create new wallet (auto-creates on first command)
+./tos_wallet --network devnet --wallet-path sender_wallet --password pass123 --exec "display_address"
+
+# Step 2: Get wallet address (to receive funds)
+./tos_wallet --network devnet --wallet-path sender_wallet --password pass123 --exec "address"
+
+# Step 3: Check balance after mining/receiving funds
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path sender_wallet --password pass123 --exec "balance"
+
+# Step 4: Send 4 transactions to trigger parallel execution (devnet threshold = 4)
+for i in {1..4}; do
+    ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+        --wallet-path sender_wallet --password pass123 \
+        --exec "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.0"
+    sleep 0.3
+done
+
+# Step 5: Verify recipient balance
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path recipient_wallet --password pass456 --exec "balance"
+
+═══════════════════════════════════════════════════════════════════════════════
+BATCH MODE (JSON):
+═══════════════════════════════════════════════════════════════════════════════
+
+Create a JSON file (transfer.json):
+{
+  "command": "transfer",
+  "params": {
+    "asset": "TOS",
+    "address": "tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk",
+    "amount": "1.0"
+  }
+}
+
+Execute:
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 --json-file transfer.json
+
+═══════════════════════════════════════════════════════════════════════════════
+
+For interactive mode (with prompts), add --interactive flag.
+For more help on specific commands, use: help <command> in interactive mode.
+"#
+)]
 #[command(styles = tos_common::get_cli_styles())]
 pub struct Config {
     /// RPC Server configuration
@@ -273,7 +414,7 @@ pub struct Config {
     pub password_from_env: bool,
     /// Read password from file (more secure than --password)
     #[clap(long)]
-    pub password_file: Option<String>
+    pub password_file: Option<String>,
 }
 
 #[cfg(feature = "cli")]

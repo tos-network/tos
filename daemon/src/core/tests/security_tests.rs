@@ -9,11 +9,7 @@
 #[allow(unused)]
 mod security_tests {
     use std::sync::Arc;
-    use tos_common::{
-        block::calculate_merkle_root,
-        crypto::Hash,
-        transaction::Transaction,
-    };
+    use tos_common::{block::calculate_merkle_root, crypto::Hash, transaction::Transaction};
 
     // Helper: Create a mock transaction for testing
     // Since we're only testing merkle root calculation, we just need transactions with unique hashes
@@ -37,7 +33,11 @@ mod security_tests {
         let transactions: Vec<Arc<Transaction>> = vec![];
         let merkle_root = calculate_merkle_root(&transactions);
 
-        assert_eq!(merkle_root, Hash::zero(), "Empty transactions must produce zero merkle root");
+        assert_eq!(
+            merkle_root,
+            Hash::zero(),
+            "Empty transactions must produce zero merkle root"
+        );
         println!("✅ Empty transactions produce zero merkle root");
     }
 
@@ -50,13 +50,20 @@ mod security_tests {
         // Property 1: Empty list produces zero hash
         let empty: Vec<Arc<Transaction>> = vec![];
         let empty_root = calculate_merkle_root(&empty);
-        assert_eq!(empty_root, Hash::zero(), "Empty list must produce zero merkle root");
+        assert_eq!(
+            empty_root,
+            Hash::zero(),
+            "Empty list must produce zero merkle root"
+        );
         println!("✅ Property 1: Empty list produces zero merkle root");
 
         // Property 2: Merkle root calculation is deterministic
         // (tested by calling twice with same empty input)
         let empty_root2 = calculate_merkle_root(&empty);
-        assert_eq!(empty_root, empty_root2, "Merkle root calculation must be deterministic");
+        assert_eq!(
+            empty_root, empty_root2,
+            "Merkle root calculation must be deterministic"
+        );
         println!("✅ Property 2: Merkle root is deterministic");
 
         println!("\n=== Security Properties Verified ===");
@@ -74,14 +81,18 @@ mod security_tests {
         let header_merkle = Hash::zero();
 
         // VALID: Empty block with zero merkle root
-        assert_eq!(calculated_merkle, header_merkle,
-                   "Empty block with zero merkle root should be valid");
+        assert_eq!(
+            calculated_merkle, header_merkle,
+            "Empty block with zero merkle root should be valid"
+        );
         println!("✅ Valid: Empty block with zero merkle root");
 
         // INVALID: Empty block with non-zero merkle root (attack simulation)
         let fake_merkle = Hash::new([0xFF; 32]);
-        assert_ne!(calculated_merkle, fake_merkle,
-                   "Empty block with non-zero merkle root should be rejected");
+        assert_ne!(
+            calculated_merkle, fake_merkle,
+            "Empty block with non-zero merkle root should be rejected"
+        );
         println!("✅ Invalid: Empty block with non-zero merkle root detected");
 
         println!("\n=== Validation Logic Verified ===");
@@ -96,20 +107,28 @@ mod security_tests {
         // Attack 1: Malicious miner submits header with fake merkle root
         // The fix: add_new_block calculates merkle root from transactions and validates it
         let empty_txs: Vec<Arc<Transaction>> = vec![];
-        let legit_merkle = calculate_merkle_root(&empty_txs);  // Zero for empty
-        let fake_merkle = Hash::new([0xFF; 32]);  // Attacker's fake value
+        let legit_merkle = calculate_merkle_root(&empty_txs); // Zero for empty
+        let fake_merkle = Hash::new([0xFF; 32]); // Attacker's fake value
 
-        assert_ne!(legit_merkle, fake_merkle,
-                   "Fake merkle root must be different from calculated");
+        assert_ne!(
+            legit_merkle, fake_merkle,
+            "Fake merkle root must be different from calculated"
+        );
         println!("✅ Attack 1 prevented: Fake merkle root would be rejected");
 
         // Attack 2: Empty block bypass (was vulnerable)
         // Before fix: build_block_from_header returned empty block regardless of merkle root
         // After fix: build_block_from_header rejects non-zero merkle without transactions
-        assert_eq!(legit_merkle, Hash::zero(),
-                   "Legitimate empty block has zero merkle root");
-        assert_ne!(fake_merkle, Hash::zero(),
-                   "Fake non-zero merkle root is distinguishable");
+        assert_eq!(
+            legit_merkle,
+            Hash::zero(),
+            "Legitimate empty block has zero merkle root"
+        );
+        assert_ne!(
+            fake_merkle,
+            Hash::zero(),
+            "Fake non-zero merkle root is distinguishable"
+        );
         println!("✅ Attack 2 prevented: Empty block bypass fixed");
 
         println!("\n=== All Attack Scenarios Prevented ===");

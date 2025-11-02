@@ -134,7 +134,7 @@ mod boundary_tests {
         let interval = Interval::new(1, 101); // Size 101
         let (left, right) = interval.split_half();
 
-        assert_eq!(left.size(), 51);  // ceil(101/2)
+        assert_eq!(left.size(), 51); // ceil(101/2)
         assert_eq!(right.size(), 50); // floor(101/2)
     }
 
@@ -289,7 +289,7 @@ mod boundary_tests {
     fn test_exponential_split_validates_distribution() {
         // Test that exponential split gives larger children more space
         let interval = Interval::new(1, 10000);
-        let sizes = vec![100, 200, 400];  // Exponential growth
+        let sizes = vec![100, 200, 400]; // Exponential growth
 
         let splits = interval.split_exponential(&sizes);
 

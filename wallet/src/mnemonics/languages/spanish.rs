@@ -1630,5 +1630,5 @@ pub const SPANISH: Language<'static> = Language {
         "risa",
         "ritmo",
         "rito",
-    ]
+    ],
 };

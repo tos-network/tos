@@ -1,16 +1,19 @@
-mod header;
 mod block;
+mod compact;
+mod header;
+mod merkle;
 mod miner;
 mod version;
-mod compact;
-mod merkle;
 
-pub use header::BlockHeader;
 pub use block::Block;
-pub use miner::{MinerWork, Worker, Algorithm};
-pub use version::BlockVersion;
-pub use compact::{CompactBlock, ShortTxId, calculate_short_tx_id, MissingTransactionsRequest, MissingTransactionsResponse};
+pub use compact::{
+    calculate_short_tx_id, CompactBlock, MissingTransactionsRequest, MissingTransactionsResponse,
+    ShortTxId,
+};
+pub use header::BlockHeader;
 pub use merkle::calculate_merkle_root;
+pub use miner::{Algorithm, MinerWork, Worker};
+pub use version::BlockVersion;
 
 use crate::crypto::{Hash, HASH_SIZE};
 

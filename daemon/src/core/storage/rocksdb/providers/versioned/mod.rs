@@ -1,43 +1,61 @@
-use rocksdb::Direction;
-use log::{debug, trace, warn};
-use tos_common::{
-    block::TopoHeight,
-    serializer::RawBytes,
-    versioned_type::Versioned
-};
 use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{Column, IteratorMode},
-        RocksStorage,
-        VersionedProvider
-    }
+        RocksStorage, VersionedProvider,
+    },
 };
+use log::{debug, trace, warn};
+use rocksdb::Direction;
+use tos_common::{block::TopoHeight, serializer::RawBytes, versioned_type::Versioned};
 
+mod asset;
 mod balance;
+mod cache;
 mod contract;
+mod dag_order;
 mod multisig;
 mod nonce;
 mod registrations;
-mod asset;
-mod cache;
-mod dag_order;
 
 impl VersionedProvider for RocksStorage {}
 
 impl RocksStorage {
-    pub fn delete_versioned_at_topoheight(&mut self, column_pointer: Column, column_versioned: Column, topoheight: TopoHeight) -> Result<(), BlockchainError> {
+    pub fn delete_versioned_at_topoheight(
+        &mut self,
+        column_pointer: Column,
+        column_versioned: Column,
+        topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
         let prefix = topoheight.to_be_bytes();
-        for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(&self.db, self.snapshot.as_ref(), IteratorMode::WithPrefix(&prefix, Direction::Forward), column_versioned)? {
+        for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(
+            &self.db,
+            self.snapshot.as_ref(),
+            IteratorMode::WithPrefix(&prefix, Direction::Forward),
+            column_versioned,
+        )? {
             let (key, prev_topo) = res?;
 
-            Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &key)?;
-            let pointer = self.load_optional_from_disk::<_, TopoHeight>(column_pointer, &key[8..])?;
+            Self::remove_from_disk_internal(
+                &self.db,
+                self.snapshot.as_mut(),
+                column_versioned,
+                &key,
+            )?;
+            let pointer =
+                self.load_optional_from_disk::<_, TopoHeight>(column_pointer, &key[8..])?;
 
             if let Some(pointer) = pointer {
                 if pointer >= topoheight {
                     if let Some(prev_topo) = prev_topo {
-                        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &prev_topo.to_be_bytes(), false)?;
+                        Self::insert_into_disk_internal(
+                            &self.db,
+                            self.snapshot.as_mut(),
+                            column_pointer,
+                            &key[8..],
+                            &prev_topo.to_be_bytes(),
+                            false,
+                        )?;
                     } else {
                         // FIX: Don't immediately delete pointer, search for earlier versions first
                         // Use database iterator to scan backwards efficiently
@@ -56,15 +74,18 @@ impl RocksStorage {
                             &self.db,
                             self.snapshot.as_ref(),
                             IteratorMode::From(&start_key, Direction::Reverse),
-                            column_versioned
+                            column_versioned,
                         )? {
                             let (iter_key, _) = res?;
 
                             // Check if this key matches our account+asset (skip topoheight prefix)
                             if iter_key.len() >= 8 && &iter_key[8..] == account_asset_key {
                                 // Extract topoheight from key
-                                let iter_topo = u64::from_be_bytes(iter_key[0..8].try_into()
-                                    .map_err(|_| BlockchainError::CorruptedData)?);
+                                let iter_topo = u64::from_be_bytes(
+                                    iter_key[0..8]
+                                        .try_into()
+                                        .map_err(|_| BlockchainError::CorruptedData)?,
+                                );
 
                                 // Must be strictly less than the deleted topoheight
                                 if iter_topo < topoheight {
@@ -84,10 +105,22 @@ impl RocksStorage {
                             if log::log_enabled!(log::Level::Warn) {
                                 warn!("Balance pointer recovery: updated to topoheight {} after deleting {}", earlier_topo, topoheight);
                             }
-                            Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &earlier_topo.to_be_bytes(), false)?;
+                            Self::insert_into_disk_internal(
+                                &self.db,
+                                self.snapshot.as_mut(),
+                                column_pointer,
+                                &key[8..],
+                                &earlier_topo.to_be_bytes(),
+                                false,
+                            )?;
                         } else {
                             // No earlier version found, safe to delete pointer
-                            Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..])?;
+                            Self::remove_from_disk_internal(
+                                &self.db,
+                                self.snapshot.as_mut(),
+                                column_pointer,
+                                &key[8..],
+                            )?;
                         }
                     }
                 }
@@ -97,18 +130,41 @@ impl RocksStorage {
         Ok(())
     }
 
-    pub fn delete_versioned_above_topoheight(&mut self, column_pointer: Column, column_versioned: Column, topoheight: TopoHeight) -> Result<(), BlockchainError> {
+    pub fn delete_versioned_above_topoheight(
+        &mut self,
+        column_pointer: Column,
+        column_versioned: Column,
+        topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
         let start = topoheight.to_be_bytes();
-        for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(&self.db, self.snapshot.as_ref(), IteratorMode::From(&start, Direction::Forward), column_versioned)? {
+        for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(
+            &self.db,
+            self.snapshot.as_ref(),
+            IteratorMode::From(&start, Direction::Forward),
+            column_versioned,
+        )? {
             let (key, prev_topo) = res?;
 
-            Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &key)?;
-            let pointer = self.load_optional_from_disk::<_, TopoHeight>(column_pointer, &key[8..])?;
+            Self::remove_from_disk_internal(
+                &self.db,
+                self.snapshot.as_mut(),
+                column_versioned,
+                &key,
+            )?;
+            let pointer =
+                self.load_optional_from_disk::<_, TopoHeight>(column_pointer, &key[8..])?;
             if pointer.is_none_or(|v| v > topoheight) {
                 let filtered = prev_topo.filter(|v| *v <= topoheight);
                 if filtered != pointer {
                     if let Some(pointer) = filtered {
-                        Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &pointer.to_be_bytes(), false)?;
+                        Self::insert_into_disk_internal(
+                            &self.db,
+                            self.snapshot.as_mut(),
+                            column_pointer,
+                            &key[8..],
+                            &pointer.to_be_bytes(),
+                            false,
+                        )?;
                     } else {
                         // FIX: Same as delete_versioned_at_topoheight - use iterator to search for earlier versions
                         let account_asset_key = &key[8..];
@@ -124,15 +180,18 @@ impl RocksStorage {
                             &self.db,
                             self.snapshot.as_ref(),
                             IteratorMode::From(&start_key, Direction::Reverse),
-                            column_versioned
+                            column_versioned,
                         )? {
                             let (iter_key, _) = res?;
 
                             // Check if this key matches our account+asset (skip topoheight prefix)
                             if iter_key.len() >= 8 && &iter_key[8..] == account_asset_key {
                                 // Extract topoheight from key
-                                let iter_topo = u64::from_be_bytes(iter_key[0..8].try_into()
-                                    .map_err(|_| BlockchainError::CorruptedData)?);
+                                let iter_topo = u64::from_be_bytes(
+                                    iter_key[0..8]
+                                        .try_into()
+                                        .map_err(|_| BlockchainError::CorruptedData)?,
+                                );
 
                                 // Must be less than or equal to threshold
                                 if iter_topo <= topoheight {
@@ -151,9 +210,21 @@ impl RocksStorage {
                             if log::log_enabled!(log::Level::Warn) {
                                 warn!("Balance pointer recovery (delete_above): updated to topoheight {} after deleting above {}", earlier_topo, topoheight);
                             }
-                            Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..], &earlier_topo.to_be_bytes(), false)?;
+                            Self::insert_into_disk_internal(
+                                &self.db,
+                                self.snapshot.as_mut(),
+                                column_pointer,
+                                &key[8..],
+                                &earlier_topo.to_be_bytes(),
+                                false,
+                            )?;
                         } else {
-                            Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_pointer, &key[8..])?;
+                            Self::remove_from_disk_internal(
+                                &self.db,
+                                self.snapshot.as_mut(),
+                                column_pointer,
+                                &key[8..],
+                            )?;
                         }
                     }
                 }
@@ -163,7 +234,13 @@ impl RocksStorage {
         Ok(())
     }
 
-    pub fn delete_versioned_below_topoheight(&mut self, column_pointer: Column, column_versioned: Column, topoheight: TopoHeight, keep_last: bool) -> Result<(), BlockchainError> {
+    pub fn delete_versioned_below_topoheight(
+        &mut self,
+        column_pointer: Column,
+        column_versioned: Column,
+        topoheight: TopoHeight,
+        keep_last: bool,
+    ) -> Result<(), BlockchainError> {
         if keep_last {
             // P1 Optimization Phase 2: Two-phase approach for keep_last=true
             // Phase 1: Find all affected accounts (those with versions < topoheight)
@@ -171,14 +248,22 @@ impl RocksStorage {
             let mut affected_accounts: HashSet<Vec<u8>> = HashSet::new();
 
             // Scan versioned tree to find all entries below threshold
-            for res in Self::iter_owned_internal::<RawBytes, ()>(&self.db, self.snapshot.as_ref(), IteratorMode::Start, column_versioned)? {
+            for res in Self::iter_owned_internal::<RawBytes, ()>(
+                &self.db,
+                self.snapshot.as_ref(),
+                IteratorMode::Start,
+                column_versioned,
+            )? {
                 let (key, _) = res?;
                 // Key format: [topoheight(8)][account_key...]
-                let key_topo = u64::from_be_bytes(key[0..8].try_into()
-                    .map_err(|_| BlockchainError::CorruptedData)?);
+                let key_topo = u64::from_be_bytes(
+                    key[0..8]
+                        .try_into()
+                        .map_err(|_| BlockchainError::CorruptedData)?,
+                );
 
                 if key_topo >= topoheight {
-                    break;  // Keys are sorted, early exit optimization
+                    break; // Keys are sorted, early exit optimization
                 }
 
                 // Extract account key (without topoheight prefix)
@@ -194,7 +279,8 @@ impl RocksStorage {
             // Phase 2: Only walk version chains for affected accounts
             for account_key in affected_accounts {
                 // Load the current pointer for this account
-                let pointer: Option<TopoHeight> = self.load_optional_from_disk(column_pointer, &account_key)?;
+                let pointer: Option<TopoHeight> =
+                    self.load_optional_from_disk(column_pointer, &account_key)?;
 
                 if let Some(pointer) = pointer {
                     // We fetch the last version to take its previous topoheight
@@ -213,16 +299,29 @@ impl RocksStorage {
                         // Delete this version from DB if its below the threshold
                         prev_version = self.load_from_disk(column_versioned, &versioned_key)?;
                         if patched {
-                            Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &versioned_key)?;
+                            Self::remove_from_disk_internal(
+                                &self.db,
+                                self.snapshot.as_mut(),
+                                column_versioned,
+                                &versioned_key,
+                            )?;
                         } else if prev_version.is_some_and(|v| v < topoheight) {
                             if log::log_enabled!(log::Level::Trace) {
                                 trace!("Patching versioned data at topoheight {}", topoheight);
                             }
                             patched = true;
-                            let mut data: Versioned<RawBytes> = self.load_from_disk(column_versioned, &versioned_key)?;
+                            let mut data: Versioned<RawBytes> =
+                                self.load_from_disk(column_versioned, &versioned_key)?;
                             data.set_previous_topoheight(None);
 
-                            Self::insert_into_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &versioned_key, &data, false)?;
+                            Self::insert_into_disk_internal(
+                                &self.db,
+                                self.snapshot.as_mut(),
+                                column_versioned,
+                                &versioned_key,
+                                &data,
+                                false,
+                            )?;
                         }
                     }
                 }
@@ -231,17 +330,30 @@ impl RocksStorage {
             // P1 Optimization Phase 1: Fix BUG + early exit for keep_last=false
             // BUG FIX: Was scanning FROM topoheight FORWARD (deleting >= topoheight)
             // Correct: Scan from START and stop at topoheight (delete < topoheight)
-            for res in Self::iter_owned_internal::<RawBytes, ()>(&self.db, self.snapshot.as_ref(), IteratorMode::Start, column_versioned)? {
+            for res in Self::iter_owned_internal::<RawBytes, ()>(
+                &self.db,
+                self.snapshot.as_ref(),
+                IteratorMode::Start,
+                column_versioned,
+            )? {
                 let (key, _) = res?;
                 // Key format: [topoheight(8)][data...]
-                let key_topo = u64::from_be_bytes(key[0..8].try_into()
-                    .map_err(|_| BlockchainError::CorruptedData)?);
+                let key_topo = u64::from_be_bytes(
+                    key[0..8]
+                        .try_into()
+                        .map_err(|_| BlockchainError::CorruptedData)?,
+                );
 
                 if key_topo >= topoheight {
-                    break;  // Early exit: keys are sorted, stop when we reach threshold
+                    break; // Early exit: keys are sorted, stop when we reach threshold
                 }
 
-                Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column_versioned, &key)?;
+                Self::remove_from_disk_internal(
+                    &self.db,
+                    self.snapshot.as_mut(),
+                    column_versioned,
+                    &key,
+                )?;
             }
         }
 

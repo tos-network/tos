@@ -1,11 +1,11 @@
 // Compact Block P2P Packet Types
 // Implements bandwidth-efficient block propagation
 
+use std::borrow::Cow;
 use tos_common::{
     block::{CompactBlock, MissingTransactionsRequest, MissingTransactionsResponse},
-    serializer::{Serializer, Reader, ReaderError, Writer},
+    serializer::{Reader, ReaderError, Serializer, Writer},
 };
-use std::borrow::Cow;
 
 /// Compact block propagation packet
 /// Sent instead of full BlockPropagation to save bandwidth

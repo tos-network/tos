@@ -1,18 +1,11 @@
 mod deploy;
 mod invoke;
 
+use crate::serializer::*;
 use anyhow::Context;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
-use tos_vm::{
-    Chunk,
-    Module,
-    OpaqueWrapper,
-    Primitive,
-    ValueCell,
-    U256
-};
-use crate::serializer::*;
+use tos_vm::{Chunk, Module, OpaqueWrapper, Primitive, ValueCell, U256};
 
 pub use deploy::*;
 pub use invoke::*;
@@ -69,17 +62,17 @@ impl Serializer for ContractDeposit {
                 // Public deposit
                 let amount = reader.read_u64()?;
                 Ok(ContractDeposit(amount))
-            },
+            }
             1 => {
                 // Private deposits are no longer supported in development stage
                 Err(ReaderError::InvalidValue)
-            },
-            _ => Err(ReaderError::InvalidValue)
+            }
+            _ => Err(ReaderError::InvalidValue),
         }
     }
 
     fn size(&self) -> usize {
-        1 + 8  // type tag (1 byte) + u64 amount (8 bytes)
+        1 + 8 // type tag (1 byte) + u64 amount (8 bytes)
     }
 }
 
@@ -104,31 +97,31 @@ impl Serializer for Primitive {
             Primitive::U8(value) => {
                 writer.write_u8(1);
                 writer.write_u8(*value);
-            },
+            }
             Primitive::U16(value) => {
                 writer.write_u8(2);
                 writer.write_u16(*value);
-            },
+            }
             Primitive::U32(value) => {
                 writer.write_u8(3);
                 writer.write_u32(value);
-            },
+            }
             Primitive::U64(value) => {
                 writer.write_u8(4);
                 writer.write_u64(value);
-            },
+            }
             Primitive::U128(value) => {
                 writer.write_u8(5);
                 writer.write_u128(value);
-            },
+            }
             Primitive::U256(value) => {
                 writer.write_u8(6);
                 value.write(writer);
-            },
+            }
             Primitive::Boolean(value) => {
                 writer.write_u8(7);
                 writer.write_bool(*value);
-            },
+            }
             Primitive::String(value) => {
                 writer.write_u8(8);
                 let bytes = value.as_bytes();
@@ -139,7 +132,7 @@ impl Serializer for Primitive {
                 writer.write_u8(9);
                 range.0.write(writer);
                 range.1.write(writer);
-            },
+            }
             Primitive::Opaque(opaque) => {
                 writer.write_u8(10);
                 opaque.write(writer);
@@ -160,7 +153,7 @@ impl Serializer for Primitive {
             8 => {
                 let len = reader.read_u16()? as usize;
                 Primitive::String(reader.read_string_with_size(len)?)
-            },
+            }
             9 => {
                 let left = Primitive::read(reader)?;
                 if !left.is_number() {
@@ -179,9 +172,9 @@ impl Serializer for Primitive {
                 }
 
                 Primitive::Range(Box::new((left, right)))
-            },
+            }
             10 => Primitive::Opaque(OpaqueWrapper::read(reader)?),
-            _ => return Err(ReaderError::InvalidValue)
+            _ => return Err(ReaderError::InvalidValue),
         })
     }
 
@@ -197,7 +190,7 @@ impl Serializer for Primitive {
             Primitive::Boolean(_) => 1,
             Primitive::String(value) => 2 + value.as_bytes().len(),
             Primitive::Range(range) => range.0.size() + range.1.size(),
-            Primitive::Opaque(opaque) => opaque.size()
+            Primitive::Opaque(opaque) => opaque.size(),
         }
     }
 }
@@ -208,14 +201,14 @@ enum BuildState {
     /// Building an Object array, need to read `remaining` more ValueCells
     Object {
         values: Vec<ValueCell>,
-        remaining: usize
+        remaining: usize,
     },
     /// Building a Map, need to read `remaining` more key-value pairs
     /// `pending_key` holds a key waiting for its value to be read
     Map {
         map: IndexMap<ValueCell, ValueCell>,
         remaining: usize,
-        pending_key: Option<ValueCell>
+        pending_key: Option<ValueCell>,
     },
 }
 
@@ -228,7 +221,7 @@ impl Serializer for ValueCell {
             ValueCell::Default(value) => {
                 writer.write_u8(0);
                 value.write(writer);
-            },
+            }
             ValueCell::Bytes(bytes) => {
                 writer.write_u8(1);
                 let len = bytes.len() as u32;
@@ -242,7 +235,7 @@ impl Serializer for ValueCell {
                 for value in values.iter() {
                     value.write(writer);
                 }
-            },
+            }
             ValueCell::Map(map) => {
                 writer.write_u8(3);
                 let len = map.len() as u32;
@@ -279,7 +272,7 @@ impl Serializer for ValueCell {
             if depth > MAX_VALUE_CELL_DEPTH {
                 return Err(ReaderError::ExceedsMaxDepth {
                     max: MAX_VALUE_CELL_DEPTH,
-                    actual: depth
+                    actual: depth,
                 });
             }
 
@@ -290,7 +283,10 @@ impl Serializer for ValueCell {
                         // No parent container → this is the final result
                         return Ok(value);
                     }
-                    Some(BuildState::Object { mut values, remaining }) => {
+                    Some(BuildState::Object {
+                        mut values,
+                        remaining,
+                    }) => {
                         // Add value to Object array
                         values.push(value);
 
@@ -309,7 +305,11 @@ impl Serializer for ValueCell {
                             // Fall through to State 1 (read next value)
                         }
                     }
-                    Some(BuildState::Map { mut map, remaining, pending_key }) => {
+                    Some(BuildState::Map {
+                        mut map,
+                        remaining,
+                        pending_key,
+                    }) => {
                         match pending_key {
                             None => {
                                 // This value is a key, now wait for its value
@@ -411,7 +411,7 @@ impl Serializer for ValueCell {
                         // Loop back to State 1 (read first key)
                     }
                 }
-                _ => return Err(ReaderError::InvalidValue)
+                _ => return Err(ReaderError::InvalidValue),
             }
         }
     }
@@ -429,14 +429,14 @@ impl Serializer for ValueCell {
                     // u32 len
                     total += 4;
                     total += bytes.len();
-                },
+                }
                 ValueCell::Object(values) => {
                     // u32 len
                     total += 4;
                     for value in values {
                         stack.push(value);
                     }
-                },
+                }
                 ValueCell::Map(map) => {
                     // u32 len
                     total += 4;
@@ -544,8 +544,8 @@ impl Serializer for Module {
 
 #[cfg(test)]
 mod tests {
-    use crate::crypto::Hash;
     use super::*;
+    use crate::crypto::Hash;
 
     #[test]
     fn test_serde_module() {
@@ -574,10 +574,17 @@ mod tests {
         test_serde_cell(ValueCell::Default(Primitive::U64(42)));
         test_serde_cell(ValueCell::Default(Primitive::U128(42)));
         test_serde_cell(ValueCell::Default(Primitive::U256(42u64.into())));
-        test_serde_cell(ValueCell::Default(Primitive::Range(Box::new((Primitive::U128(42), Primitive::U128(420))))));
-        test_serde_cell(ValueCell::Default(Primitive::String("hello world!!!".to_owned())));
+        test_serde_cell(ValueCell::Default(Primitive::Range(Box::new((
+            Primitive::U128(42),
+            Primitive::U128(420),
+        )))));
+        test_serde_cell(ValueCell::Default(Primitive::String(
+            "hello world!!!".to_owned(),
+        )));
 
-        test_serde_cell(ValueCell::Default(Primitive::Opaque(OpaqueWrapper::new(Hash::zero()))));
+        test_serde_cell(ValueCell::Default(Primitive::Opaque(OpaqueWrapper::new(
+            Hash::zero(),
+        ))));
     }
 
     #[test]
@@ -588,11 +595,16 @@ mod tests {
             ValueCell::Default(Primitive::U64(42)),
             ValueCell::Default(Primitive::U64(42)),
             ValueCell::Default(Primitive::U64(42)),
-            ValueCell::Default(Primitive::U64(42))
+            ValueCell::Default(Primitive::U64(42)),
         ]));
-        test_serde_cell(ValueCell::Map(Box::new([
-            (ValueCell::Default(Primitive::U64(42)), ValueCell::Default(Primitive::String("Hello World!".to_owned())),)
-        ].into_iter().collect())));
+        test_serde_cell(ValueCell::Map(Box::new(
+            [(
+                ValueCell::Default(Primitive::U64(42)),
+                ValueCell::Default(Primitive::String("Hello World!".to_owned())),
+            )]
+            .into_iter()
+            .collect(),
+        )));
     }
 
     /// Test that depth limit is enforced to prevent stack overflow DoS
@@ -739,9 +751,7 @@ mod tests {
     #[test]
     fn test_value_cell_complex_nested() {
         // Create: Map{ "data" => Object([ U64(1), U64(2), Object([ U64(3) ]) ]) }
-        let inner = ValueCell::Object(vec![
-            ValueCell::Default(Primitive::U64(3)),
-        ]);
+        let inner = ValueCell::Object(vec![ValueCell::Default(Primitive::U64(3))]);
 
         let outer = ValueCell::Object(vec![
             ValueCell::Default(Primitive::U64(1)),

@@ -9,7 +9,7 @@ impl<'a> Writer<'a> {
     pub fn new(bytes: &'a mut Vec<u8>) -> Self {
         Self {
             len: bytes.len(),
-            bytes
+            bytes,
         }
     }
 
@@ -55,7 +55,7 @@ impl<'a> Writer<'a> {
         match opt {
             Some(v) => {
                 self.write_string(v);
-            },
+            }
             None => {
                 self.bytes.push(0);
             }

@@ -8,17 +8,14 @@
 
 #[cfg(test)]
 mod ghostdag_dag_tests {
-    use std::sync::Arc;
-    use std::collections::HashMap;
-    use tos_common::{
-        crypto::Hash,
-        tokio,
-    };
     use crate::core::{
         blockdag,
-        ghostdag::{BlueWorkType, TosGhostdagData},
         error::BlockchainError,
+        ghostdag::{BlueWorkType, TosGhostdagData},
     };
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tos_common::{crypto::Hash, tokio};
 
     // Mock provider with full GHOSTDAG data support
     struct DagMockProvider {
@@ -39,29 +36,41 @@ mod ghostdag_dag_tests {
 
     #[async_trait::async_trait]
     impl crate::core::storage::GhostdagDataProvider for DagMockProvider {
-        async fn get_ghostdag_blue_work(&self, hash: &Hash) -> Result<BlueWorkType, BlockchainError> {
-            self.ghostdag_data.get(hash.as_bytes())
+        async fn get_ghostdag_blue_work(
+            &self,
+            hash: &Hash,
+        ) -> Result<BlueWorkType, BlockchainError> {
+            self.ghostdag_data
+                .get(hash.as_bytes())
                 .map(|data| data.blue_work)
                 .ok_or_else(|| BlockchainError::BlockNotFound(hash.clone()))
         }
 
         async fn get_ghostdag_blue_score(&self, hash: &Hash) -> Result<u64, BlockchainError> {
-            self.ghostdag_data.get(hash.as_bytes())
+            self.ghostdag_data
+                .get(hash.as_bytes())
                 .map(|data| data.blue_score)
                 .ok_or_else(|| BlockchainError::BlockNotFound(hash.clone()))
         }
 
         async fn get_ghostdag_selected_parent(&self, hash: &Hash) -> Result<Hash, BlockchainError> {
-            self.ghostdag_data.get(hash.as_bytes())
+            self.ghostdag_data
+                .get(hash.as_bytes())
                 .map(|data| data.selected_parent.clone())
                 .ok_or_else(|| BlockchainError::BlockNotFound(hash.clone()))
         }
 
-        async fn get_ghostdag_mergeset_blues(&self, _hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+        async fn get_ghostdag_mergeset_blues(
+            &self,
+            _hash: &Hash,
+        ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
             unimplemented!("Not needed for these tests")
         }
 
-        async fn get_ghostdag_mergeset_reds(&self, _hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+        async fn get_ghostdag_mergeset_reds(
+            &self,
+            _hash: &Hash,
+        ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
             unimplemented!("Not needed for these tests")
         }
 
@@ -72,13 +81,20 @@ mod ghostdag_dag_tests {
             unimplemented!("Not needed for these tests")
         }
 
-        async fn get_ghostdag_data(&self, hash: &Hash) -> Result<Arc<TosGhostdagData>, BlockchainError> {
-            self.ghostdag_data.get(hash.as_bytes())
+        async fn get_ghostdag_data(
+            &self,
+            hash: &Hash,
+        ) -> Result<Arc<TosGhostdagData>, BlockchainError> {
+            self.ghostdag_data
+                .get(hash.as_bytes())
                 .cloned()
                 .ok_or_else(|| BlockchainError::BlockNotFound(hash.clone()))
         }
 
-        async fn get_ghostdag_compact_data(&self, _hash: &Hash) -> Result<crate::core::ghostdag::CompactGhostdagData, BlockchainError> {
+        async fn get_ghostdag_compact_data(
+            &self,
+            _hash: &Hash,
+        ) -> Result<crate::core::ghostdag::CompactGhostdagData, BlockchainError> {
             unimplemented!("Not needed for these tests")
         }
 
@@ -86,7 +102,11 @@ mod ghostdag_dag_tests {
             Ok(self.ghostdag_data.contains_key(hash.as_bytes()))
         }
 
-        async fn insert_ghostdag_data(&mut self, _hash: &Hash, _data: Arc<TosGhostdagData>) -> Result<(), BlockchainError> {
+        async fn insert_ghostdag_data(
+            &mut self,
+            _hash: &Hash,
+            _data: Arc<TosGhostdagData>,
+        ) -> Result<(), BlockchainError> {
             unimplemented!("Not needed for these tests")
         }
 
@@ -103,47 +123,58 @@ mod ghostdag_dag_tests {
 
         // Genesis A
         let a_bytes = [b'A'; 32];
-        provider.add_block(a_bytes, TosGhostdagData {
-            blue_score: 0,
-            blue_work: BlueWorkType::from(1000u64),
-            daa_score: 0,  // daa_score: genesis has daa_score of 0
-            selected_parent: Hash::zero(),
-            mergeset_blues: Arc::new(vec![]),
-            mergeset_reds: Arc::new(vec![]),
-            blues_anticone_sizes: Arc::new(HashMap::new()),
-            mergeset_non_daa: Arc::new(vec![]),
-        });
+        provider.add_block(
+            a_bytes,
+            TosGhostdagData {
+                blue_score: 0,
+                blue_work: BlueWorkType::from(1000u64),
+                daa_score: 0, // daa_score: genesis has daa_score of 0
+                selected_parent: Hash::zero(),
+                mergeset_blues: Arc::new(vec![]),
+                mergeset_reds: Arc::new(vec![]),
+                blues_anticone_sizes: Arc::new(HashMap::new()),
+                mergeset_non_daa: Arc::new(vec![]),
+            },
+        );
 
         // Block B
         let b_bytes = [b'B'; 32];
-        provider.add_block(b_bytes, TosGhostdagData {
-            blue_score: 1,
-            blue_work: BlueWorkType::from(2000u64),
-            daa_score: 1,  // daa_score: use same value as blue_score for test data
-            selected_parent: Hash::new(a_bytes),
-            mergeset_blues: Arc::new(vec![Hash::new(a_bytes)]),
-            mergeset_reds: Arc::new(vec![]),
-            blues_anticone_sizes: Arc::new(HashMap::new()),
-            mergeset_non_daa: Arc::new(vec![]),
-        });
+        provider.add_block(
+            b_bytes,
+            TosGhostdagData {
+                blue_score: 1,
+                blue_work: BlueWorkType::from(2000u64),
+                daa_score: 1, // daa_score: use same value as blue_score for test data
+                selected_parent: Hash::new(a_bytes),
+                mergeset_blues: Arc::new(vec![Hash::new(a_bytes)]),
+                mergeset_reds: Arc::new(vec![]),
+                blues_anticone_sizes: Arc::new(HashMap::new()),
+                mergeset_non_daa: Arc::new(vec![]),
+            },
+        );
 
         // Block C
         let c_bytes = [b'C'; 32];
-        provider.add_block(c_bytes, TosGhostdagData {
-            blue_score: 2,
-            blue_work: BlueWorkType::from(3000u64),
-            daa_score: 2,  // daa_score: use same value as blue_score for test data
-            selected_parent: Hash::new(b_bytes),
-            mergeset_blues: Arc::new(vec![Hash::new(b_bytes)]),
-            mergeset_reds: Arc::new(vec![]),
-            blues_anticone_sizes: Arc::new(HashMap::new()),
-            mergeset_non_daa: Arc::new(vec![]),
-        });
+        provider.add_block(
+            c_bytes,
+            TosGhostdagData {
+                blue_score: 2,
+                blue_work: BlueWorkType::from(3000u64),
+                daa_score: 2, // daa_score: use same value as blue_score for test data
+                selected_parent: Hash::new(b_bytes),
+                mergeset_blues: Arc::new(vec![Hash::new(b_bytes)]),
+                mergeset_reds: Arc::new(vec![]),
+                blues_anticone_sizes: Arc::new(HashMap::new()),
+                mergeset_non_daa: Arc::new(vec![]),
+            },
+        );
 
         let c_hash = Hash::new(c_bytes);
         let tips = vec![c_hash];
 
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
+        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
+            .await
+            .unwrap();
         assert_eq!(blue_score, 3, "Linear chain should have blue_score = 3");
     }
 
@@ -161,55 +192,67 @@ mod ghostdag_dag_tests {
 
         // Genesis A (blue_score=0, blue_work=1000)
         let a_bytes = [b'A'; 32];
-        provider.add_block(a_bytes, TosGhostdagData {
-            blue_score: 0,
-            blue_work: BlueWorkType::from(1000u64),
-            daa_score: 0,  // daa_score: genesis has daa_score of 0
-            selected_parent: Hash::zero(),
-            mergeset_blues: Arc::new(vec![]),
-            mergeset_reds: Arc::new(vec![]),
-            blues_anticone_sizes: Arc::new(HashMap::new()),
-            mergeset_non_daa: Arc::new(vec![]),
-        });
+        provider.add_block(
+            a_bytes,
+            TosGhostdagData {
+                blue_score: 0,
+                blue_work: BlueWorkType::from(1000u64),
+                daa_score: 0, // daa_score: genesis has daa_score of 0
+                selected_parent: Hash::zero(),
+                mergeset_blues: Arc::new(vec![]),
+                mergeset_reds: Arc::new(vec![]),
+                blues_anticone_sizes: Arc::new(HashMap::new()),
+                mergeset_non_daa: Arc::new(vec![]),
+            },
+        );
 
         // Block B (blue_score=1, blue_work=2000)
         let b_bytes = [b'B'; 32];
-        provider.add_block(b_bytes, TosGhostdagData {
-            blue_score: 1,
-            blue_work: BlueWorkType::from(2000u64),
-            daa_score: 1,  // daa_score: use same value as blue_score for test data
-            selected_parent: Hash::new(a_bytes),
-            mergeset_blues: Arc::new(vec![Hash::new(a_bytes)]),
-            mergeset_reds: Arc::new(vec![]),
-            blues_anticone_sizes: Arc::new(HashMap::new()),
-            mergeset_non_daa: Arc::new(vec![]),
-        });
+        provider.add_block(
+            b_bytes,
+            TosGhostdagData {
+                blue_score: 1,
+                blue_work: BlueWorkType::from(2000u64),
+                daa_score: 1, // daa_score: use same value as blue_score for test data
+                selected_parent: Hash::new(a_bytes),
+                mergeset_blues: Arc::new(vec![Hash::new(a_bytes)]),
+                mergeset_reds: Arc::new(vec![]),
+                blues_anticone_sizes: Arc::new(HashMap::new()),
+                mergeset_non_daa: Arc::new(vec![]),
+            },
+        );
 
         // Block C (blue_score=2, blue_work=3000)
         let c_bytes = [b'C'; 32];
-        provider.add_block(c_bytes, TosGhostdagData {
-            blue_score: 2,
-            blue_work: BlueWorkType::from(3000u64),
-            daa_score: 2,  // daa_score: use same value as blue_score for test data
-            selected_parent: Hash::new(b_bytes),
-            mergeset_blues: Arc::new(vec![Hash::new(b_bytes)]),
-            mergeset_reds: Arc::new(vec![]),
-            blues_anticone_sizes: Arc::new(HashMap::new()),
-            mergeset_non_daa: Arc::new(vec![]),
-        });
+        provider.add_block(
+            c_bytes,
+            TosGhostdagData {
+                blue_score: 2,
+                blue_work: BlueWorkType::from(3000u64),
+                daa_score: 2, // daa_score: use same value as blue_score for test data
+                selected_parent: Hash::new(b_bytes),
+                mergeset_blues: Arc::new(vec![Hash::new(b_bytes)]),
+                mergeset_reds: Arc::new(vec![]),
+                blues_anticone_sizes: Arc::new(HashMap::new()),
+                mergeset_non_daa: Arc::new(vec![]),
+            },
+        );
 
         // Block D (blue_score=1, blue_work=1500)
         let d_bytes = [b'D'; 32];
-        provider.add_block(d_bytes, TosGhostdagData {
-            blue_score: 1,
-            blue_work: BlueWorkType::from(1500u64),
-            daa_score: 1,  // daa_score: use same value as blue_score for test data
-            selected_parent: Hash::new(a_bytes),
-            mergeset_blues: Arc::new(vec![Hash::new(a_bytes)]),
-            mergeset_reds: Arc::new(vec![]),
-            blues_anticone_sizes: Arc::new(HashMap::new()),
-            mergeset_non_daa: Arc::new(vec![]),
-        });
+        provider.add_block(
+            d_bytes,
+            TosGhostdagData {
+                blue_score: 1,
+                blue_work: BlueWorkType::from(1500u64),
+                daa_score: 1, // daa_score: use same value as blue_score for test data
+                selected_parent: Hash::new(a_bytes),
+                mergeset_blues: Arc::new(vec![Hash::new(a_bytes)]),
+                mergeset_reds: Arc::new(vec![]),
+                blues_anticone_sizes: Arc::new(HashMap::new()),
+                mergeset_non_daa: Arc::new(vec![]),
+            },
+        );
 
         // Block E merges C and D
         // C has higher blue_work (3000 > 1500), so C should be selected parent
@@ -220,12 +263,22 @@ mod ghostdag_dag_tests {
         let tips = vec![c_hash, d_hash];
 
         // Find best tip (should be C with higher blue_work)
-        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter()).await.unwrap();
-        assert_eq!(*best_tip, c_hash_expected, "C should be selected (higher blue_work)");
+        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter())
+            .await
+            .unwrap();
+        assert_eq!(
+            *best_tip, c_hash_expected,
+            "C should be selected (higher blue_work)"
+        );
 
         // Calculate blue score for E
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
-        assert_eq!(blue_score, 4, "Merge block E should have blue_score = 4 (merging 2 tips)");
+        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
+            .await
+            .unwrap();
+        assert_eq!(
+            blue_score, 4,
+            "Merge block E should have blue_score = 4 (merging 2 tips)"
+        );
     }
 
     // Test 3: DAG with red blocks (K=3) - K-cluster violation
@@ -247,59 +300,71 @@ mod ghostdag_dag_tests {
 
         // Genesis 0
         let genesis_bytes = [0u8; 32];
-        provider.add_block(genesis_bytes, TosGhostdagData {
-            blue_score: 0,
-            blue_work: BlueWorkType::from(1000u64),
-            daa_score: 0,  // daa_score: genesis has daa_score of 0
-            selected_parent: Hash::zero(),
-            mergeset_blues: Arc::new(vec![]),
-            mergeset_reds: Arc::new(vec![]),
-            blues_anticone_sizes: Arc::new(HashMap::new()),
-            mergeset_non_daa: Arc::new(vec![]),
-        });
+        provider.add_block(
+            genesis_bytes,
+            TosGhostdagData {
+                blue_score: 0,
+                blue_work: BlueWorkType::from(1000u64),
+                daa_score: 0, // daa_score: genesis has daa_score of 0
+                selected_parent: Hash::zero(),
+                mergeset_blues: Arc::new(vec![]),
+                mergeset_reds: Arc::new(vec![]),
+                blues_anticone_sizes: Arc::new(HashMap::new()),
+                mergeset_non_daa: Arc::new(vec![]),
+            },
+        );
 
         // Block 1 (blue_score=1, blue_work=2000)
         let b1_bytes = [1u8; 32];
-        provider.add_block(b1_bytes, TosGhostdagData {
-            blue_score: 1,
-            blue_work: BlueWorkType::from(2000u64),
-            daa_score: 1,  // daa_score: use same value as blue_score for test data
-            selected_parent: Hash::new(genesis_bytes),
-            mergeset_blues: Arc::new(vec![Hash::new(genesis_bytes)]),
-            mergeset_reds: Arc::new(vec![]),
-            blues_anticone_sizes: Arc::new(HashMap::new()),
-            mergeset_non_daa: Arc::new(vec![]),
-        });
+        provider.add_block(
+            b1_bytes,
+            TosGhostdagData {
+                blue_score: 1,
+                blue_work: BlueWorkType::from(2000u64),
+                daa_score: 1, // daa_score: use same value as blue_score for test data
+                selected_parent: Hash::new(genesis_bytes),
+                mergeset_blues: Arc::new(vec![Hash::new(genesis_bytes)]),
+                mergeset_reds: Arc::new(vec![]),
+                blues_anticone_sizes: Arc::new(HashMap::new()),
+                mergeset_non_daa: Arc::new(vec![]),
+            },
+        );
 
         // Block 5 (merges 2,3,4 - all blue) (blue_score=5, blue_work=6000)
         let b5_bytes = [5u8; 32];
-        provider.add_block(b5_bytes, TosGhostdagData {
-            blue_score: 5,
-            blue_work: BlueWorkType::from(6000u64),
-            daa_score: 5,  // daa_score: use same value as blue_score for test data
-            selected_parent: Hash::new([4u8; 32]), // Assumes 4 is selected parent
-            mergeset_blues: Arc::new(vec![
-                Hash::new([4u8; 32]),
-                Hash::new([2u8; 32]),
-                Hash::new([3u8; 32]),
-            ]),
-            mergeset_reds: Arc::new(vec![]),
-            blues_anticone_sizes: Arc::new(HashMap::new()),
-            mergeset_non_daa: Arc::new(vec![]),
-        });
+        provider.add_block(
+            b5_bytes,
+            TosGhostdagData {
+                blue_score: 5,
+                blue_work: BlueWorkType::from(6000u64),
+                daa_score: 5, // daa_score: use same value as blue_score for test data
+                selected_parent: Hash::new([4u8; 32]), // Assumes 4 is selected parent
+                mergeset_blues: Arc::new(vec![
+                    Hash::new([4u8; 32]),
+                    Hash::new([2u8; 32]),
+                    Hash::new([3u8; 32]),
+                ]),
+                mergeset_reds: Arc::new(vec![]),
+                blues_anticone_sizes: Arc::new(HashMap::new()),
+                mergeset_non_daa: Arc::new(vec![]),
+            },
+        );
 
         // Block 9 (follows 6->7->8->9 chain) (blue_score=4, blue_work=2500)
         let b9_bytes = [9u8; 32];
-        provider.add_block(b9_bytes, TosGhostdagData {
-            blue_score: 4,
-            blue_work: BlueWorkType::from(2500u64),
-            daa_score: 4,  // daa_score: use same value as blue_score for test data
-            selected_parent: Hash::new([8u8; 32]),
-            mergeset_blues: Arc::new(vec![Hash::new([8u8; 32])]),
-            mergeset_reds: Arc::new(vec![]),
-            blues_anticone_sizes: Arc::new(HashMap::new()),
-            mergeset_non_daa: Arc::new(vec![]),
-        });
+        provider.add_block(
+            b9_bytes,
+            TosGhostdagData {
+                blue_score: 4,
+                blue_work: BlueWorkType::from(2500u64),
+                daa_score: 4, // daa_score: use same value as blue_score for test data
+                selected_parent: Hash::new([8u8; 32]),
+                mergeset_blues: Arc::new(vec![Hash::new([8u8; 32])]),
+                mergeset_reds: Arc::new(vec![]),
+                blues_anticone_sizes: Arc::new(HashMap::new()),
+                mergeset_non_daa: Arc::new(vec![]),
+            },
+        );
 
         // Block 10 merges 5 and 9
         // 5 has much higher blue_work (6000 vs 2500), so 5 is selected parent
@@ -309,13 +374,23 @@ mod ghostdag_dag_tests {
         let b5_hash_expected = Hash::new(b5_bytes);
         let tips = vec![b5_hash, b9_hash];
 
-        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter()).await.unwrap();
-        assert_eq!(*best_tip, b5_hash_expected, "Block 5 should be selected (higher blue_work)");
+        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter())
+            .await
+            .unwrap();
+        assert_eq!(
+            *best_tip, b5_hash_expected,
+            "Block 5 should be selected (higher blue_work)"
+        );
 
         // GHOSTDAG: blue_score = max(tips) + tips.len() = max(5,4) + 2 = 7
         // Note: This is the expected blue_score calculation, not the final GHOSTDAG blues/reds determination
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
-        assert_eq!(blue_score, 7, "Block 10 should have blue_score = 7 (merging 2 tips)");
+        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
+            .await
+            .unwrap();
+        assert_eq!(
+            blue_score, 7,
+            "Block 10 should have blue_score = 7 (merging 2 tips)"
+        );
     }
 
     // Test 4: Multiple tips with varying blue_work
@@ -334,27 +409,37 @@ mod ghostdag_dag_tests {
 
         let mut tips = Vec::new();
         for (hash_bytes, blue_work, blue_score) in tip_configs.iter() {
-            provider.add_block(*hash_bytes, TosGhostdagData {
-                blue_score: *blue_score,
-                blue_work: BlueWorkType::from(*blue_work),
-                daa_score: *blue_score,  // daa_score: use same value as blue_score for test data
-                selected_parent: Hash::new([0u8; 32]),
-                mergeset_blues: Arc::new(vec![]),
-                mergeset_reds: Arc::new(vec![]),
-                blues_anticone_sizes: Arc::new(HashMap::new()),
-                mergeset_non_daa: Arc::new(vec![]),
-            });
+            provider.add_block(
+                *hash_bytes,
+                TosGhostdagData {
+                    blue_score: *blue_score,
+                    blue_work: BlueWorkType::from(*blue_work),
+                    daa_score: *blue_score, // daa_score: use same value as blue_score for test data
+                    selected_parent: Hash::new([0u8; 32]),
+                    mergeset_blues: Arc::new(vec![]),
+                    mergeset_reds: Arc::new(vec![]),
+                    blues_anticone_sizes: Arc::new(HashMap::new()),
+                    mergeset_non_daa: Arc::new(vec![]),
+                },
+            );
             tips.push(Hash::new(*hash_bytes));
         }
 
         // Should select tip 2 with highest blue_work (7000)
-        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter()).await.unwrap();
+        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter())
+            .await
+            .unwrap();
         let expected = Hash::new([11u8; 32]);
         assert_eq!(*best_tip, expected, "Should select tip with blue_work=7000");
 
         // GHOSTDAG: blue_score = max(tips) + tips.len() = max(10,12,8,9,11) + 5 = 12 + 5 = 17
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
-        assert_eq!(blue_score, 17, "Should calculate blue_score = max + tips count (merging 5 tips)");
+        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
+            .await
+            .unwrap();
+        assert_eq!(
+            blue_score, 17,
+            "Should calculate blue_score = max + tips count (merging 5 tips)"
+        );
     }
 
     // Test 5: Sorting blocks by blue_work

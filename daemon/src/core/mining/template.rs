@@ -1,26 +1,23 @@
 // TOS Optimized Block Template Generator
 // Implements caching and optimizations for mining block template generation
 
-use std::sync::Arc;
-use std::time::Instant;
-use log::{debug, warn};
-use tos_common::{
-    block::{BlockHeader, EXTRA_NONCE_SIZE, get_combined_hash_for_tips},
-    crypto::{Hash, PublicKey},
-    config::TIPS_LIMIT,
-    time::get_current_time_in_millis,
-    network::Network,
+use super::{
+    cache::{BlockTemplateCache, GhostdagCache, TipSelectionCache},
+    stats::MiningStats,
 };
 use crate::core::{
-    error::BlockchainError,
-    storage::Storage,
+    blockdag, error::BlockchainError, hard_fork::get_version_at_height, storage::Storage,
     tx_selector::TxSelectorEntry,
-    blockdag,
-    hard_fork::get_version_at_height,
 };
-use super::{
-    cache::{GhostdagCache, BlockTemplateCache, TipSelectionCache},
-    stats::MiningStats,
+use log::{debug, warn};
+use std::sync::Arc;
+use std::time::Instant;
+use tos_common::{
+    block::{get_combined_hash_for_tips, BlockHeader, EXTRA_NONCE_SIZE},
+    config::TIPS_LIMIT,
+    crypto::{Hash, PublicKey},
+    network::Network,
+    time::get_current_time_in_millis,
 };
 
 /// Optimized block template generator with caching
@@ -153,7 +150,10 @@ impl BlockTemplateGenerator {
 
         // Find best tip by blue_work
         let mut best_tip = tips[0].clone();
-        let mut best_blue_work = self.get_ghostdag_data_cached(storage, &best_tip).await?.blue_work;
+        let mut best_blue_work = self
+            .get_ghostdag_data_cached(storage, &best_tip)
+            .await?
+            .blue_work;
 
         for tip in tips.iter().skip(1) {
             let data = self.get_ghostdag_data_cached(storage, tip).await?;
@@ -164,7 +164,10 @@ impl BlockTemplateGenerator {
         }
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Best tip selected by GHOSTDAG (blue_work={}): {}", best_blue_work, best_tip);
+            debug!(
+                "Best tip selected by GHOSTDAG (blue_work={}): {}",
+                best_blue_work, best_tip
+            );
         }
 
         // Validate other tips
@@ -178,7 +181,10 @@ impl BlockTemplateGenerator {
                     continue;
                 }
 
-                if !self.is_near_enough_from_main_chain(storage, &hash, current_height).await? {
+                if !self
+                    .is_near_enough_from_main_chain(storage, &hash, current_height)
+                    .await?
+                {
                     if log::log_enabled!(log::Level::Warn) {
                         warn!("Tip {} is not selected for mining: too far from mainchain at height: {}", hash, current_height);
                     }
@@ -190,7 +196,10 @@ impl BlockTemplateGenerator {
 
         if selected_tips.is_empty() {
             if log::log_enabled!(log::Level::Warn) {
-                warn!("No valid tips found for block template, using best tip {}", best_tip);
+                warn!(
+                    "No valid tips found for block template, using best tip {}",
+                    best_tip
+                );
             }
             selected_tips.push(best_tip);
         }
@@ -216,16 +225,23 @@ impl BlockTemplateGenerator {
         let mut tips: Vec<Hash> = tips_set.into_iter().collect();
 
         // Select and validate tips with caching
-        tips = self.select_and_validate_tips(storage, tips, current_height).await?;
+        tips = self
+            .select_and_validate_tips(storage, tips, current_height)
+            .await?;
 
         // Sort tips by blue work
         let mut sorted_tips = blockdag::sort_tips(storage, tips.into_iter()).await?;
         if sorted_tips.len() > TIPS_LIMIT {
             let dropped_tips = sorted_tips.drain(TIPS_LIMIT..);
             if log::log_enabled!(log::Level::Warn) {
-                warn!("Dropping tips {} because they are not in the first {} heavier tips",
-                      dropped_tips.map(|h| h.to_string()).collect::<Vec<String>>().join(", "),
-                      TIPS_LIMIT);
+                warn!(
+                    "Dropping tips {} because they are not in the first {} heavier tips",
+                    dropped_tips
+                        .map(|h| h.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                    TIPS_LIMIT
+                );
             }
         }
 
@@ -249,7 +265,8 @@ impl BlockTemplateGenerator {
         }
 
         // GHOSTDAG: Use blue_score instead of legacy height
-        let blue_score = blockdag::calculate_blue_score_at_tips(storage, sorted_tips.iter()).await?;
+        let blue_score =
+            blockdag::calculate_blue_score_at_tips(storage, sorted_tips.iter()).await?;
         let sorted_tips_vec: Vec<Hash> = sorted_tips.into_iter().collect();
         let version = get_version_at_height(&self.network, blue_score);
 
@@ -259,7 +276,7 @@ impl BlockTemplateGenerator {
             timestamp,
             extra_nonce,
             address,
-            Hash::zero()
+            Hash::zero(),
         );
 
         self.stats.record_template_generation(start.elapsed());
@@ -303,26 +320,30 @@ impl OptimizedTxSelector {
     /// Pre-computes and caches fee information for faster selection
     pub fn new<'a, I>(iter: I) -> Self
     where
-        I: Iterator<Item = (usize, &'a Arc<Hash>, &'a Arc<tos_common::transaction::Transaction>)>
+        I: Iterator<
+            Item = (
+                usize,
+                &'a Arc<Hash>,
+                &'a Arc<tos_common::transaction::Transaction>,
+            ),
+        >,
     {
-        let mut entries: Vec<TxSelectorEntry> = iter.map(|(size, hash, tx)| {
-            TxSelectorEntry {
+        let mut entries: Vec<TxSelectorEntry> = iter
+            .map(|(size, hash, tx)| TxSelectorEntry {
                 hash: unsafe { std::mem::transmute(hash) },
                 tx: unsafe { std::mem::transmute(tx) },
                 size,
-            }
-        }).collect();
+            })
+            .collect();
 
         // Sort by fee in descending order
         entries.sort_by(|a, b| {
-            b.tx.get_fee().cmp(&a.tx.get_fee())
+            b.tx.get_fee()
+                .cmp(&a.tx.get_fee())
                 .then_with(|| a.tx.get_nonce().cmp(&b.tx.get_nonce()))
         });
 
-        Self {
-            entries,
-            index: 0,
-        }
+        Self { entries, index: 0 }
     }
 
     /// Get the next transaction with highest fee

@@ -3,15 +3,9 @@ use std::ops::{Add, AddAssign, Sub, SubAssign};
 use curve25519_dalek::{RistrettoPoint, Scalar};
 use rand::rngs::OsRng;
 
-use crate::crypto::{
-    proofs::{G, PC_GENS},
-};
+use crate::crypto::proofs::{G, PC_GENS};
 
-use super::{
-    PublicKey,
-    CompressedCommitment,
-    CompressedHandle
-};
+use super::{CompressedCommitment, CompressedHandle, PublicKey};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PedersenOpening(Scalar);

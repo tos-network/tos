@@ -1,15 +1,11 @@
 // TOS Mining Cache Module
 // Caches GHOSTDAG calculations and block template data for improved performance
 
-use std::sync::Arc;
-use std::num::NonZeroUsize;
-use lru::LruCache;
-use tos_common::{
-    crypto::Hash,
-    tokio::sync::RwLock,
-    transaction::Transaction,
-};
 use crate::core::ghostdag::TosGhostdagData;
+use lru::LruCache;
+use std::num::NonZeroUsize;
+use std::sync::Arc;
+use tos_common::{crypto::Hash, tokio::sync::RwLock, transaction::Transaction};
 
 /// Cache for GHOSTDAG data to avoid repeated calculations during block template generation
 #[derive(Clone)]
@@ -192,7 +188,11 @@ impl TransactionCache {
 
     /// Get cached transactions for a block header hash
     /// Returns None if not found or expired
-    pub async fn get(&self, header_hash: &Hash, current_time: u64) -> Option<Vec<Arc<Transaction>>> {
+    pub async fn get(
+        &self,
+        header_hash: &Hash,
+        current_time: u64,
+    ) -> Option<Vec<Arc<Transaction>>> {
         let mut cache = self.cache.write().await;
 
         if let Some(cached) = cache.get(header_hash) {
@@ -210,13 +210,22 @@ impl TransactionCache {
     /// Cache transactions for a block header
     /// The header_hash should be the hash of the header BEFORE nonce is found
     /// This allows us to retrieve transactions when the miner submits the solved header
-    pub async fn put(&self, header_hash: Hash, transactions: Vec<Arc<Transaction>>, timestamp: u64, ttl_ms: u64) {
+    pub async fn put(
+        &self,
+        header_hash: Hash,
+        transactions: Vec<Arc<Transaction>>,
+        timestamp: u64,
+        ttl_ms: u64,
+    ) {
         let mut cache = self.cache.write().await;
-        cache.put(header_hash, CachedTransactions {
-            transactions,
-            timestamp,
-            ttl_ms,
-        });
+        cache.put(
+            header_hash,
+            CachedTransactions {
+                transactions,
+                timestamp,
+                ttl_ms,
+            },
+        );
     }
 
     /// Clear all cached transactions
@@ -251,7 +260,7 @@ mod tests {
         let data = Arc::new(TosGhostdagData::new(
             1,
             Default::default(),
-            1,  // daa_score: use same value as blue_score for test data
+            1, // daa_score: use same value as blue_score for test data
             Hash::new([0u8; 32]),
             vec![],
             vec![],
@@ -314,10 +323,7 @@ mod tests {
         let cache = TipSelectionCache::new(10);
 
         let tips_hash = Hash::new([1u8; 32]);
-        let tips = Arc::new(vec![
-            Hash::new([10u8; 32]),
-            Hash::new([20u8; 32]),
-        ]);
+        let tips = Arc::new(vec![Hash::new([10u8; 32]), Hash::new([20u8; 32])]);
 
         // Initially not in cache
         assert_eq!(cache.get(&tips_hash).await, None);

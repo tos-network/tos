@@ -1,7 +1,7 @@
 mod balance;
-mod nonce;
 mod energy;
+mod nonce;
 
-pub use balance::{VersionedBalance, BalanceType, AccountSummary, Balance};
-pub use nonce::{VersionedNonce, Nonce};
-pub use energy::{EnergyResource, FreezeDuration, FreezeRecord, EnergyLease};
+pub use balance::{AccountSummary, Balance, BalanceType, VersionedBalance};
+pub use energy::{EnergyLease, EnergyResource, FreezeDuration, FreezeRecord};
+pub use nonce::{Nonce, VersionedNonce};

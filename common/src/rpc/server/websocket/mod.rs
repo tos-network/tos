@@ -1,53 +1,34 @@
 mod handler;
 mod http_request;
 
-use std::{
-    collections::HashSet,
-    hash::{Hash, Hasher},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc
+pub use self::{handler::EventWebSocketHandler, http_request::HttpRequest};
+use crate::{
+    config::MAX_BLOCK_SIZE,
+    immutable::Immutable,
+    tokio::{
+        select,
+        sync::{
+            mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+            Mutex, RwLock,
+        },
+        time::{error::Elapsed, timeout},
     },
-    time::{Duration, Instant}
 };
-use actix_web::{
-    HttpRequest as ActixHttpRequest,
-    web::Payload,
-    HttpResponse
-};
-use actix_ws::{
-    AggregatedMessage,
-    AggregatedMessageStream,
-    CloseCode,
-    CloseReason,
-    Session
-};
+use actix_web::{web::Payload, HttpRequest as ActixHttpRequest, HttpResponse};
+use actix_ws::{AggregatedMessage, AggregatedMessageStream, CloseCode, CloseReason, Session};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use log::{debug, error, trace};
 use serde::Serialize;
 use serde_json::json;
-use crate::{
-    config::MAX_BLOCK_SIZE, immutable::Immutable, tokio::{
-        select,
-        sync::{
-            mpsc::{
-                unbounded_channel,
-                UnboundedReceiver,
-                UnboundedSender
-            },
-            Mutex,
-            RwLock
-        },
-        time::{
-            error::Elapsed,
-            timeout
-        }
-    }
-};
-pub use self::{
-    handler::EventWebSocketHandler,
-    http_request::HttpRequest
+use std::{
+    collections::HashSet,
+    hash::{Hash, Hasher},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
 };
 
 pub type WebSocketServerShared<H> = Arc<WebSocketServer<H>>;
@@ -86,16 +67,20 @@ pub struct WebSocketSession<H: WebSocketHandler + 'static> {
     server: WebSocketServerShared<H>,
     inner: Mutex<Option<Session>>,
     // Sender to send messages to the session
-    channel: UnboundedSender<InnerMessage>
+    channel: UnboundedSender<InnerMessage>,
 }
 
 impl<H> WebSocketSession<H>
 where
-    H: WebSocketHandler + 'static
+    H: WebSocketHandler + 'static,
 {
     // Send a text message to the session
-    pub async fn send_text<S: Into<String>>(self: &Arc<Self>, value: S) -> Result<(), WebSocketError> {
-        self.channel.send(InnerMessage::Text(value.into()))
+    pub async fn send_text<S: Into<String>>(
+        self: &Arc<Self>,
+        value: S,
+    ) -> Result<(), WebSocketError> {
+        self.channel
+            .send(InnerMessage::Text(value.into()))
             .map_err(|e| WebSocketError::ChannelClosed(e.to_string()))?;
 
         Ok(())
@@ -134,7 +119,8 @@ where
 
     // Close the session
     pub async fn close(&self, reason: Option<CloseReason>) -> Result<(), WebSocketError> {
-        self.channel.send(InnerMessage::Close(reason))
+        self.channel
+            .send(InnerMessage::Close(reason))
             .map_err(|_| WebSocketError::ChannelAlreadyClosed)?;
 
         Ok(())
@@ -163,21 +149,18 @@ where
 
 impl<H> PartialEq for WebSocketSession<H>
 where
-    H: WebSocketHandler + 'static
+    H: WebSocketHandler + 'static,
 {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl<H> Eq for WebSocketSession<H>
-where
-    H: WebSocketHandler + 'static
-{}
+impl<H> Eq for WebSocketSession<H> where H: WebSocketHandler + 'static {}
 
 impl<H> Hash for WebSocketSession<H>
 where
-    H: WebSocketHandler + 'static
+    H: WebSocketHandler + 'static,
 {
     fn hash<A: Hasher>(&self, state: &mut A) {
         self.id.hash(state);
@@ -194,12 +177,19 @@ pub trait WebSocketHandler: Sized + Sync + Send {
 
     // called when a new Session is added in websocket server
     // if an error is returned, maintaining the session is aborted
-    async fn on_connection(&self, _: &WebSocketSessionShared<Self>) -> Result<Option<actix_web::HttpResponse>, anyhow::Error> {
+    async fn on_connection(
+        &self,
+        _: &WebSocketSessionShared<Self>,
+    ) -> Result<Option<actix_web::HttpResponse>, anyhow::Error> {
         Ok(None)
     }
 
     // called when a new message is received
-    async fn on_message(&self, _: &WebSocketSessionShared<Self>, _: &[u8]) -> Result<(), anyhow::Error> {
+    async fn on_message(
+        &self,
+        _: &WebSocketSessionShared<Self>,
+        _: &[u8],
+    ) -> Result<(), anyhow::Error> {
         Ok(())
     }
 
@@ -212,15 +202,18 @@ pub trait WebSocketHandler: Sized + Sync + Send {
 pub struct WebSocketServer<H: WebSocketHandler + 'static + Send + Sync> {
     sessions: RwLock<HashSet<WebSocketSessionShared<H>>>,
     id_counter: AtomicU64,
-    handler: Immutable<H>
+    handler: Immutable<H>,
 }
 
-impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
+impl<H> WebSocketServer<H>
+where
+    H: WebSocketHandler + 'static + Send + Sync,
+{
     pub fn new(handler: impl Into<Immutable<H>>) -> WebSocketServerShared<H> {
         Arc::new(Self {
             sessions: RwLock::new(HashSet::new()),
             id_counter: AtomicU64::new(0),
-            handler: handler.into()
+            handler: handler.into(),
         })
     }
 
@@ -276,7 +269,11 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
     }
 
     // Handle a new WebSocket connection request, register it and start handling it
-    pub async fn handle_connection(self: &Arc<Self>, request: ActixHttpRequest, body: Payload) -> Result<HttpResponse, actix_web::Error> {
+    pub async fn handle_connection(
+        self: &Arc<Self>,
+        request: ActixHttpRequest,
+        body: Payload,
+    ) -> Result<HttpResponse, actix_web::Error> {
         debug!("Handling new WebSocket connection");
 
         let (response, session, stream) = actix_ws::handle(&request, body)?;
@@ -288,7 +285,7 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
             request,
             server: Arc::clone(&self),
             inner: Mutex::new(Some(session)),
-            channel: tx
+            channel: tx,
         });
 
         if log::log_enabled!(log::Level::Debug) {
@@ -319,13 +316,13 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
         }
 
         actix_rt::spawn(
-            Arc::clone(self)
-                .handle_ws_internal(
-                    session,
-                    stream.max_frame_size(MAX_BLOCK_SIZE)
-                        .aggregate_continuations(),
-                    rx
-                )
+            Arc::clone(self).handle_ws_internal(
+                session,
+                stream
+                    .max_frame_size(MAX_BLOCK_SIZE)
+                    .aggregate_continuations(),
+                rx,
+            ),
         );
         Ok(response)
     }
@@ -336,7 +333,11 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
     }
 
     // Delete a session from the server
-    pub async fn delete_session(self: &Arc<Self>, session: &WebSocketSessionShared<H>, reason: Option<CloseReason>) {
+    pub async fn delete_session(
+        self: &Arc<Self>,
+        session: &WebSocketSessionShared<H>,
+        reason: Option<CloseReason>,
+    ) {
         if log::log_enabled!(log::Level::Trace) {
             trace!("deleting session #{}", session.id);
         }
@@ -373,7 +374,12 @@ impl<H> WebSocketServer<H> where H: WebSocketHandler + 'static + Send + Sync {
     // Internal function to handle a WebSocket connection
     // This will send a ping every 5 seconds and close the connection if no pong is received within 30 seconds
     // It will also translate all messages to the handler
-    async fn handle_ws_internal(self: Arc<Self>, session: WebSocketSessionShared<H>, mut stream: AggregatedMessageStream, mut rx: UnboundedReceiver<InnerMessage>) {
+    async fn handle_ws_internal(
+        self: Arc<Self>,
+        session: WebSocketSessionShared<H>,
+        mut stream: AggregatedMessageStream,
+        mut rx: UnboundedReceiver<InnerMessage>,
+    ) {
         let mut interval = actix_rt::time::interval(KEEP_ALIVE_INTERVAL);
         let mut last_pong_received = Instant::now();
         let reason = loop {

@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-    use std::path::Path;
     use anyhow::Result;
+    use std::path::Path;
+    use std::process::Command;
 
     /// Test wallet batch mode functionality using Python script
     #[test]
@@ -19,8 +19,14 @@ mod tests {
             .current_dir(".")
             .output()?;
 
-        println!("Python test runner stdout: {}", String::from_utf8_lossy(&output.stdout));
-        println!("Python test runner stderr: {}", String::from_utf8_lossy(&output.stderr));
+        println!(
+            "Python test runner stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        println!(
+            "Python test runner stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         assert!(output.status.success(), "Python test runner failed");
 
@@ -42,8 +48,14 @@ mod tests {
             .current_dir(".")
             .output()?;
 
-        println!("Display address test stdout: {}", String::from_utf8_lossy(&output.stdout));
-        println!("Display address test stderr: {}", String::from_utf8_lossy(&output.stderr));
+        println!(
+            "Display address test stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        println!(
+            "Display address test stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         assert!(output.status.success(), "Display address test failed");
 
@@ -64,8 +76,14 @@ mod tests {
             .current_dir(".")
             .output()?;
 
-        println!("List commands test stdout: {}", String::from_utf8_lossy(&output.stdout));
-        println!("List commands test stderr: {}", String::from_utf8_lossy(&output.stderr));
+        println!(
+            "List commands test stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        println!(
+            "List commands test stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         assert!(output.status.success(), "List commands test failed");
 
@@ -76,7 +94,10 @@ mod tests {
     fn test_balance_commands() -> Result<()> {
         let script_path = Path::new("tests/test_balance_commands.py");
         if !script_path.exists() {
-            println!("Balance commands test script not found at {:?}", script_path);
+            println!(
+                "Balance commands test script not found at {:?}",
+                script_path
+            );
             println!("Skipping balance commands test");
             return Ok(());
         }
@@ -86,8 +107,14 @@ mod tests {
             .current_dir(".")
             .output()?;
 
-        println!("Balance commands test stdout: {}", String::from_utf8_lossy(&output.stdout));
-        println!("Balance commands test stderr: {}", String::from_utf8_lossy(&output.stderr));
+        println!(
+            "Balance commands test stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        println!(
+            "Balance commands test stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         assert!(output.status.success(), "Balance commands test failed");
 
@@ -108,8 +135,14 @@ mod tests {
             .current_dir(".")
             .output()?;
 
-        println!("Energy commands test stdout: {}", String::from_utf8_lossy(&output.stdout));
-        println!("Energy commands test stderr: {}", String::from_utf8_lossy(&output.stderr));
+        println!(
+            "Energy commands test stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        println!(
+            "Energy commands test stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         assert!(output.status.success(), "Energy commands test failed");
 
@@ -120,7 +153,10 @@ mod tests {
     fn test_transaction_commands() -> Result<()> {
         let script_path = Path::new("tests/test_transaction_commands.py");
         if !script_path.exists() {
-            println!("Transaction commands test script not found at {:?}", script_path);
+            println!(
+                "Transaction commands test script not found at {:?}",
+                script_path
+            );
             println!("Skipping transaction commands test");
             return Ok(());
         }
@@ -130,8 +166,14 @@ mod tests {
             .current_dir(".")
             .output()?;
 
-        println!("Transaction commands test stdout: {}", String::from_utf8_lossy(&output.stdout));
-        println!("Transaction commands test stderr: {}", String::from_utf8_lossy(&output.stderr));
+        println!(
+            "Transaction commands test stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        println!(
+            "Transaction commands test stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         assert!(output.status.success(), "Transaction commands test failed");
 
@@ -142,7 +184,10 @@ mod tests {
     fn test_utility_commands() -> Result<()> {
         let script_path = Path::new("tests/test_utility_commands.py");
         if !script_path.exists() {
-            println!("Utility commands test script not found at {:?}", script_path);
+            println!(
+                "Utility commands test script not found at {:?}",
+                script_path
+            );
             println!("Skipping utility commands test");
             return Ok(());
         }
@@ -152,11 +197,17 @@ mod tests {
             .current_dir(".")
             .output()?;
 
-        println!("Utility commands test stdout: {}", String::from_utf8_lossy(&output.stdout));
-        println!("Utility commands test stderr: {}", String::from_utf8_lossy(&output.stderr));
+        println!(
+            "Utility commands test stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        println!(
+            "Utility commands test stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         assert!(output.status.success(), "Utility commands test failed");
 
         Ok(())
     }
-} 
+}

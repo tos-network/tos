@@ -67,11 +67,12 @@ pub async fn calculate_daa_score<S: Storage>(
     let window_boundary_score = if parent_daa_score >= DAA_WINDOW_SIZE {
         parent_daa_score - DAA_WINDOW_SIZE
     } else {
-        0  // If we haven't reached window size yet, boundary is genesis
+        0 // If we haven't reached window size yet, boundary is genesis
     };
 
     // Find blocks in the DAA window using BFS from selected_parent
-    let window_blocks = find_daa_window_blocks(storage, selected_parent, window_boundary_score).await?;
+    let window_blocks =
+        find_daa_window_blocks(storage, selected_parent, window_boundary_score).await?;
 
     // Check which mergeset blues are outside the window
     let mut mergeset_non_daa = Vec::new();
@@ -191,7 +192,8 @@ pub async fn calculate_target_difficulty<S: Storage>(
     let _window_end_score = daa_score - 1;
 
     // Find blocks at these scores
-    let _window_start_block = find_block_at_daa_score(storage, selected_parent, window_start_score).await?;
+    let _window_start_block =
+        find_block_at_daa_score(storage, selected_parent, window_start_score).await?;
     let _window_end_block = selected_parent;
 
     // SECURITY FIX V-07: Use median-time-past for timestamp manipulation resistance
@@ -199,7 +201,8 @@ pub async fn calculate_target_difficulty<S: Storage>(
     let mut timestamps: Vec<u64> = Vec::new();
 
     // Get timestamps for blocks in the window
-    let window_blocks = find_daa_window_blocks(storage, selected_parent, window_start_score).await?;
+    let window_blocks =
+        find_daa_window_blocks(storage, selected_parent, window_start_score).await?;
     for block_hash in window_blocks.iter() {
         let header = storage.get_block_header_by_hash(block_hash).await?;
         timestamps.push(header.get_timestamp());
@@ -234,13 +237,16 @@ pub async fn calculate_target_difficulty<S: Storage>(
     let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
 
     // Get current difficulty
-    let current_difficulty = storage.get_difficulty_for_block_hash(selected_parent).await?;
+    let current_difficulty = storage
+        .get_difficulty_for_block_hash(selected_parent)
+        .await?;
 
     // Apply adjustment using U256 integer arithmetic (deterministic across platforms)
     // If actual_time < expected_time: blocks are too fast → increase difficulty
     // If actual_time > expected_time: blocks are too slow → decrease difficulty
     // Clamping to [0.25x, 4x] is handled inside apply_difficulty_adjustment
-    let new_difficulty = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time)?;
+    let new_difficulty =
+        apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time)?;
 
     Ok(new_difficulty)
 }
@@ -378,7 +384,7 @@ mod tests {
 
         // Simulate blocks coming 2x faster than expected (ratio = 2.0)
         let expected_time = 2016u64; // DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK
-        let actual_time = 1008u64;   // Half the expected time → 2x difficulty
+        let actual_time = 1008u64; // Half the expected time → 2x difficulty
 
         let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
@@ -401,7 +407,7 @@ mod tests {
 
         // Simulate blocks coming 2x slower than expected (ratio = 0.5)
         let expected_time = 1008u64; // Half of normal window
-        let actual_time = 2016u64;   // Double the expected time → 0.5x difficulty
+        let actual_time = 2016u64; // Double the expected time → 0.5x difficulty
 
         let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
@@ -414,7 +420,11 @@ mod tests {
         assert!(new_val < current_val, "Difficulty should decrease");
 
         // Check that it's exactly 0.5x (500)
-        assert_eq!(new_val.as_u64(), 500u64, "Difficulty should be exactly 0.5x");
+        assert_eq!(
+            new_val.as_u64(),
+            500u64,
+            "Difficulty should be exactly 0.5x"
+        );
     }
 
     #[test]
@@ -424,7 +434,7 @@ mod tests {
 
         // Simulate blocks at exactly expected rate (ratio = 1.0)
         let expected_time = 2016u64; // DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK
-        let actual_time = 2016u64;   // Same as expected → no change
+        let actual_time = 2016u64; // Same as expected → no change
 
         let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
@@ -444,7 +454,7 @@ mod tests {
 
         // Simulate blocks coming exactly 4x faster (should increase to exactly 4x)
         let expected_time = 2016u64;
-        let actual_time = 504u64;  // 2016/4 = 504 → 4x difficulty
+        let actual_time = 504u64; // 2016/4 = 504 → 4x difficulty
 
         let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
@@ -465,8 +475,8 @@ mod tests {
         let current_difficulty = Difficulty::from(1000u64);
 
         // Simulate blocks coming exactly 4x slower (should decrease to exactly 0.25x)
-        let expected_time = 504u64;  // Quarter of normal window
-        let actual_time = 2016u64;   // 4x the expected → 0.25x difficulty
+        let expected_time = 504u64; // Quarter of normal window
+        let actual_time = 2016u64; // 4x the expected → 0.25x difficulty
 
         let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
@@ -478,7 +488,11 @@ mod tests {
         assert!(new_val < current_val, "Difficulty should decrease");
 
         // Check that it's exactly 0.25x (250)
-        assert_eq!(new_val.as_u64(), 250u64, "Difficulty should be exactly 0.25x");
+        assert_eq!(
+            new_val.as_u64(),
+            250u64,
+            "Difficulty should be exactly 0.25x"
+        );
     }
 
     #[test]
@@ -488,19 +502,29 @@ mod tests {
 
         // Very high ratio (10x increase attempt - should be clamped to 4x)
         let expected_time = 2016u64;
-        let actual_time_fast = 201u64;  // 10x faster (2016/201 ≈ 10)
-        let result_high = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time_fast);
+        let actual_time_fast = 201u64; // 10x faster (2016/201 ≈ 10)
+        let result_high =
+            apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time_fast);
         assert!(result_high.is_ok());
         let new_diff_high = result_high.unwrap();
-        assert_eq!(new_diff_high.as_ref().as_u64(), 4000u64, "Should be clamped to 4x");
+        assert_eq!(
+            new_diff_high.as_ref().as_u64(),
+            4000u64,
+            "Should be clamped to 4x"
+        );
 
         // Very low ratio (10x decrease attempt - should be clamped to 0.25x)
         let expected_time_low = 201u64;
-        let actual_time_slow = 2016u64;  // 10x slower
-        let result_low = apply_difficulty_adjustment(&current_difficulty, expected_time_low, actual_time_slow);
+        let actual_time_slow = 2016u64; // 10x slower
+        let result_low =
+            apply_difficulty_adjustment(&current_difficulty, expected_time_low, actual_time_slow);
         assert!(result_low.is_ok());
         let new_diff_low = result_low.unwrap();
-        assert_eq!(new_diff_low.as_ref().as_u64(), 250u64, "Should be clamped to 0.25x");
+        assert_eq!(
+            new_diff_low.as_ref().as_u64(),
+            250u64,
+            "Should be clamped to 0.25x"
+        );
     }
 
     #[test]
@@ -510,7 +534,7 @@ mod tests {
 
         // Simulate 1.5x ratio: expected = 3, actual = 2
         let expected_time = 3000u64;
-        let actual_time = 2000u64;  // 3000/2000 = 1.5
+        let actual_time = 2000u64; // 3000/2000 = 1.5
 
         let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
@@ -519,10 +543,17 @@ mod tests {
         let current_val = current_difficulty.as_ref();
         let new_val = new_difficulty.as_ref();
 
-        assert!(new_val > current_val, "Difficulty should increase for large values");
+        assert!(
+            new_val > current_val,
+            "Difficulty should increase for large values"
+        );
 
         // Check that it's 1.5x (1_000_000_000 * 3000 / 2000 = 1_500_000_000)
-        assert_eq!(new_val.as_u64(), 1_500_000_000u64, "Difficulty should be exactly 1.5x");
+        assert_eq!(
+            new_val.as_u64(),
+            1_500_000_000u64,
+            "Difficulty should be exactly 1.5x"
+        );
     }
 
     #[test]
@@ -533,7 +564,10 @@ mod tests {
         let difficulty: Difficulty = varuint;
 
         // Verify the difficulty value
-        assert!(!difficulty.as_ref().is_zero(), "Difficulty should not be zero");
+        assert!(
+            !difficulty.as_ref().is_zero(),
+            "Difficulty should not be zero"
+        );
     }
 
     #[test]
@@ -589,23 +623,36 @@ mod tests {
         let actual_time_fast = 1000u64; // Blocks coming in 1000 seconds instead of 2016
         let ratio_fast = expected_time as f64 / actual_time_fast as f64;
 
-        assert!(ratio_fast > 1.0, "Ratio should be > 1.0 when blocks are too fast");
-        assert!(ratio_fast < MAX_DIFFICULTY_RATIO || ratio_fast > MAX_DIFFICULTY_RATIO,
-                "Testing ratio calculation");
+        assert!(
+            ratio_fast > 1.0,
+            "Ratio should be > 1.0 when blocks are too fast"
+        );
+        assert!(
+            ratio_fast < MAX_DIFFICULTY_RATIO || ratio_fast > MAX_DIFFICULTY_RATIO,
+            "Testing ratio calculation"
+        );
 
         // Scenario 2: Blocks too slow (actual_time > expected_time)
         let actual_time_slow = 4000u64; // Blocks coming in 4000 seconds instead of 2016
         let ratio_slow = expected_time as f64 / actual_time_slow as f64;
 
-        assert!(ratio_slow < 1.0, "Ratio should be < 1.0 when blocks are too slow");
-        assert!(ratio_slow > MIN_DIFFICULTY_RATIO || ratio_slow < MIN_DIFFICULTY_RATIO,
-                "Testing ratio calculation");
+        assert!(
+            ratio_slow < 1.0,
+            "Ratio should be < 1.0 when blocks are too slow"
+        );
+        assert!(
+            ratio_slow > MIN_DIFFICULTY_RATIO || ratio_slow < MIN_DIFFICULTY_RATIO,
+            "Testing ratio calculation"
+        );
 
         // Scenario 3: Blocks at expected rate
         let actual_time_normal = 2016u64;
         let ratio_normal = expected_time as f64 / actual_time_normal as f64;
 
-        assert_eq!(ratio_normal, 1.0, "Ratio should be 1.0 when blocks are at expected rate");
+        assert_eq!(
+            ratio_normal, 1.0,
+            "Ratio should be 1.0 when blocks are at expected rate"
+        );
     }
 
     #[test]
@@ -658,14 +705,17 @@ mod integration_tests {
 
             // Create genesis block
             let genesis_hash = Hash::zero();
-            blocks.insert(genesis_hash.clone(), MockBlockData {
-                hash: genesis_hash,
-                parents: vec![],
-                timestamp: 1600000000000,
-                difficulty: Difficulty::from(1000u64),
-                daa_score: 0,
-                blue_score: 0,
-            });
+            blocks.insert(
+                genesis_hash.clone(),
+                MockBlockData {
+                    hash: genesis_hash,
+                    parents: vec![],
+                    timestamp: 1600000000000,
+                    difficulty: Difficulty::from(1000u64),
+                    daa_score: 0,
+                    blue_score: 0,
+                },
+            );
 
             Self {
                 blocks: Arc::new(RwLock::new(blocks)),
@@ -683,12 +733,14 @@ mod integration_tests {
             }
 
             // Get parent with highest DAA score
-            let parent_daa_scores: Vec<u64> = parents.iter()
+            let parent_daa_scores: Vec<u64> = parents
+                .iter()
                 .filter_map(|p| blocks.get(p).map(|b| b.daa_score))
                 .collect();
 
             let max_parent_daa = parent_daa_scores.iter().max().copied().unwrap_or(0);
-            let max_parent_blue = parents.iter()
+            let max_parent_blue = parents
+                .iter()
                 .filter_map(|p| blocks.get(p).map(|b| b.blue_score))
                 .max()
                 .unwrap_or(0);
@@ -700,7 +752,8 @@ mod integration_tests {
             // Calculate difficulty based on DAA
             let difficulty = if daa_score < DAA_WINDOW_SIZE {
                 // Before window filled, use parent difficulty
-                parents.first()
+                parents
+                    .first()
                     .and_then(|p| blocks.get(p))
                     .map(|b| b.difficulty)
                     .unwrap_or(Difficulty::from(1000u64))
@@ -709,7 +762,8 @@ mod integration_tests {
                 let window_start_score = daa_score - DAA_WINDOW_SIZE;
 
                 // Find blocks in window
-                let window_blocks: Vec<&MockBlockData> = blocks.values()
+                let window_blocks: Vec<&MockBlockData> = blocks
+                    .values()
                     .filter(|b| b.daa_score >= window_start_score && b.daa_score < daa_score)
                     .collect();
 
@@ -717,12 +771,14 @@ mod integration_tests {
                     Difficulty::from(1000u64)
                 } else {
                     // Get timestamp range
-                    let min_timestamp = window_blocks.iter()
+                    let min_timestamp = window_blocks
+                        .iter()
                         .map(|b| b.timestamp)
                         .min()
                         .unwrap_or(timestamp - 2016000);
 
-                    let max_timestamp = window_blocks.iter()
+                    let max_timestamp = window_blocks
+                        .iter()
                         .map(|b| b.timestamp)
                         .max()
                         .unwrap_or(timestamp);
@@ -730,7 +786,8 @@ mod integration_tests {
                     let actual_time = max_timestamp.saturating_sub(min_timestamp);
                     let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK * 1000; // milliseconds
 
-                    let parent_difficulty = parents.first()
+                    let parent_difficulty = parents
+                        .first()
                         .and_then(|p| blocks.get(p))
                         .map(|b| b.difficulty)
                         .unwrap_or(Difficulty::from(1000u64));
@@ -750,14 +807,17 @@ mod integration_tests {
             let block_hash = hash(&hash_data);
 
             // Store block
-            blocks.insert(block_hash.clone(), MockBlockData {
-                hash: block_hash.clone(),
-                parents,
-                timestamp,
-                difficulty,
-                daa_score,
-                blue_score,
-            });
+            blocks.insert(
+                block_hash.clone(),
+                MockBlockData {
+                    hash: block_hash.clone(),
+                    parents,
+                    timestamp,
+                    difficulty,
+                    daa_score,
+                    blue_score,
+                },
+            );
 
             Ok(block_hash)
         }
@@ -783,33 +843,47 @@ mod integration_tests {
 
         for _ in 0..100 {
             current_timestamp += 1000; // 1 second in milliseconds
-            let block_hash = storage.add_block(vec![current_parent.clone()], current_timestamp)
+            let block_hash = storage
+                .add_block(vec![current_parent.clone()], current_timestamp)
                 .await
                 .expect("Should add block");
             current_parent = block_hash;
         }
 
-        let baseline_block = storage.get_block(&current_parent).await.expect("Should exist");
+        let baseline_block = storage
+            .get_block(&current_parent)
+            .await
+            .expect("Should exist");
         let baseline_difficulty = baseline_block.difficulty;
 
         if log::log_enabled!(log::Level::Info) {
-            log::info!("Baseline difficulty after 100 blocks: {:?}", baseline_difficulty);
+            log::info!(
+                "Baseline difficulty after 100 blocks: {:?}",
+                baseline_difficulty
+            );
         }
 
         // Create 100 blocks with 0.5-second intervals (fast blocks)
         for _ in 0..100 {
             current_timestamp += 500; // 0.5 seconds
-            let block_hash = storage.add_block(vec![current_parent.clone()], current_timestamp)
+            let block_hash = storage
+                .add_block(vec![current_parent.clone()], current_timestamp)
                 .await
                 .expect("Should add block");
             current_parent = block_hash;
         }
 
-        let fast_block = storage.get_block(&current_parent).await.expect("Should exist");
+        let fast_block = storage
+            .get_block(&current_parent)
+            .await
+            .expect("Should exist");
 
         // Since we haven't filled the DAA window, difficulty should stay the same
-        assert_eq!(fast_block.difficulty.as_ref(), baseline_difficulty.as_ref(),
-            "Difficulty should remain constant before DAA window is filled");
+        assert_eq!(
+            fast_block.difficulty.as_ref(),
+            baseline_difficulty.as_ref(),
+            "Difficulty should remain constant before DAA window is filled"
+        );
 
         if log::log_enabled!(log::Level::Info) {
             log::info!("DAA varying block times test passed");
@@ -833,23 +907,32 @@ mod integration_tests {
         // Create exactly DAA_WINDOW_SIZE blocks
         for i in 0..DAA_WINDOW_SIZE {
             current_timestamp += 1000; // 1 second
-            let block_hash = storage.add_block(vec![current_parent.clone()], current_timestamp)
+            let block_hash = storage
+                .add_block(vec![current_parent.clone()], current_timestamp)
                 .await
                 .expect("Should add block");
 
             let block = storage.get_block(&block_hash).await.expect("Should exist");
 
             // Verify DAA score increments correctly
-            assert_eq!(block.daa_score, i + 1,
-                "DAA score should increment by 1 for each block");
+            assert_eq!(
+                block.daa_score,
+                i + 1,
+                "DAA score should increment by 1 for each block"
+            );
 
             current_parent = block_hash;
         }
 
         // The block at exactly DAA_WINDOW_SIZE should still use parent difficulty
-        let boundary_block = storage.get_block(&current_parent).await.expect("Should exist");
-        assert_eq!(boundary_block.daa_score, DAA_WINDOW_SIZE,
-            "DAA score at boundary should equal window size");
+        let boundary_block = storage
+            .get_block(&current_parent)
+            .await
+            .expect("Should exist");
+        assert_eq!(
+            boundary_block.daa_score, DAA_WINDOW_SIZE,
+            "DAA score at boundary should equal window size"
+        );
 
         if log::log_enabled!(log::Level::Info) {
             log::info!("DAA window boundary test passed");
@@ -872,16 +955,23 @@ mod integration_tests {
 
         for _ in 0..50 {
             current_timestamp += 1000; // Exactly 1 second
-            let block_hash = storage.add_block(vec![current_parent.clone()], current_timestamp)
+            let block_hash = storage
+                .add_block(vec![current_parent.clone()], current_timestamp)
                 .await
                 .expect("Should add block");
             current_parent = block_hash;
         }
 
-        let stable_block = storage.get_block(&current_parent).await.expect("Should exist");
+        let stable_block = storage
+            .get_block(&current_parent)
+            .await
+            .expect("Should exist");
 
         if log::log_enabled!(log::Level::Info) {
-            log::info!("Stable difficulty after consistent blocks: {:?}", stable_block.difficulty);
+            log::info!(
+                "Stable difficulty after consistent blocks: {:?}",
+                stable_block.difficulty
+            );
         }
 
         // Scenario 2: Create a branch to test merging
@@ -890,23 +980,34 @@ mod integration_tests {
 
         for _ in 0..10 {
             branch_timestamp += 2000; // 2 seconds (slower)
-            let block_hash = storage.add_block(vec![current_parent.clone()], branch_timestamp)
+            let block_hash = storage
+                .add_block(vec![current_parent.clone()], branch_timestamp)
                 .await
                 .expect("Should add block");
             current_parent = block_hash;
         }
 
-        let slow_block = storage.get_block(&current_parent).await.expect("Should exist");
+        let slow_block = storage
+            .get_block(&current_parent)
+            .await
+            .expect("Should exist");
 
         if log::log_enabled!(log::Level::Info) {
-            log::info!("Difficulty after slower blocks: {:?}", slow_block.difficulty);
+            log::info!(
+                "Difficulty after slower blocks: {:?}",
+                slow_block.difficulty
+            );
         }
 
         // Both should have valid difficulties
-        assert!(!stable_block.difficulty.as_ref().is_zero(),
-            "Stable difficulty should be positive");
-        assert!(!slow_block.difficulty.as_ref().is_zero(),
-            "Slow difficulty should be positive");
+        assert!(
+            !stable_block.difficulty.as_ref().is_zero(),
+            "Stable difficulty should be positive"
+        );
+        assert!(
+            !slow_block.difficulty.as_ref().is_zero(),
+            "Slow difficulty should be positive"
+        );
 
         if log::log_enabled!(log::Level::Info) {
             log::info!("DAA difficulty adjustment scenarios test passed");
@@ -920,28 +1021,42 @@ mod integration_tests {
 
         // Verify that DAA window size is reasonable
         assert!(DAA_WINDOW_SIZE > 0, "DAA window size must be positive");
-        assert!(DAA_WINDOW_SIZE <= 10000, "DAA window size should be reasonable");
+        assert!(
+            DAA_WINDOW_SIZE <= 10000,
+            "DAA window size should be reasonable"
+        );
 
         // Verify target time is positive
-        assert!(TARGET_TIME_PER_BLOCK > 0, "Target block time must be positive");
+        assert!(
+            TARGET_TIME_PER_BLOCK > 0,
+            "Target block time must be positive"
+        );
     }
 
     /// Test difficulty ratio bounds
     #[test]
     fn test_difficulty_ratio_bounds() {
-        use super::{MIN_DIFFICULTY_RATIO, MAX_DIFFICULTY_RATIO};
+        use super::{MAX_DIFFICULTY_RATIO, MIN_DIFFICULTY_RATIO};
 
         // MIN_DIFFICULTY_RATIO should be less than MAX_DIFFICULTY_RATIO
-        assert!(MIN_DIFFICULTY_RATIO < MAX_DIFFICULTY_RATIO,
-            "Min ratio should be less than max ratio");
+        assert!(
+            MIN_DIFFICULTY_RATIO < MAX_DIFFICULTY_RATIO,
+            "Min ratio should be less than max ratio"
+        );
 
         // Both should be positive
         assert!(MIN_DIFFICULTY_RATIO > 0.0, "Min ratio must be positive");
         assert!(MAX_DIFFICULTY_RATIO > 0.0, "Max ratio must be positive");
 
         // Reasonable bounds
-        assert!(MIN_DIFFICULTY_RATIO >= 0.1, "Min ratio should not be too small");
-        assert!(MAX_DIFFICULTY_RATIO <= 10.0, "Max ratio should not be too large");
+        assert!(
+            MIN_DIFFICULTY_RATIO >= 0.1,
+            "Min ratio should not be too small"
+        );
+        assert!(
+            MAX_DIFFICULTY_RATIO <= 10.0,
+            "Max ratio should not be too large"
+        );
     }
 
     /// Test timestamp manipulation resistance (conceptual)
@@ -975,23 +1090,32 @@ mod integration_tests {
         // Filter blocks within DAA window
         // With DAA_WINDOW_SIZE=2016, blocks with score > 2020-2016=4 should be kept
         let window_start = CURRENT_DAA_SCORE.saturating_sub(DAA_WINDOW_SIZE);
-        let filtered: Vec<_> = BLOCK_DAA_SCORES.iter()
+        let filtered: Vec<_> = BLOCK_DAA_SCORES
+            .iter()
             .filter(|&&score| score > window_start)
             .collect();
 
         // All test scores [1000, 2000, 2010, 2019, 2020] are > 4, so all 5 should be kept
         // This test verifies the filtering logic works correctly
-        assert_eq!(filtered.len(), 5, "All blocks should be within DAA window (score > {})", window_start);
+        assert_eq!(
+            filtered.len(),
+            5,
+            "All blocks should be within DAA window (score > {})",
+            window_start
+        );
 
         // If we had a block with score <=4, it would be filtered out
         // Verify the window boundary is correct
-        assert_eq!(window_start, 4, "Window start should be CURRENT_DAA_SCORE - DAA_WINDOW_SIZE = 2020 - 2016 = 4");
+        assert_eq!(
+            window_start, 4,
+            "Window start should be CURRENT_DAA_SCORE - DAA_WINDOW_SIZE = 2020 - 2016 = 4"
+        );
     }
 
     /// Test difficulty adjustment bounds (conceptual)
     #[test]
     fn test_difficulty_adjustment_bounds_concept() {
-        use super::{MIN_DIFFICULTY_RATIO, MAX_DIFFICULTY_RATIO};
+        use super::{MAX_DIFFICULTY_RATIO, MIN_DIFFICULTY_RATIO};
 
         // Test that difficulty adjustments are bounded by ratios
         let current_difficulty = 1000.0;
@@ -1002,12 +1126,17 @@ mod integration_tests {
 
         // Maximum decrease (0.25x = 25%)
         let min_new_diff = current_difficulty * MIN_DIFFICULTY_RATIO;
-        assert_eq!(min_new_diff, 250.0, "Min difficulty should be 0.25x current");
+        assert_eq!(
+            min_new_diff, 250.0,
+            "Min difficulty should be 0.25x current"
+        );
 
         // Verify bounds are reasonable
         assert!(min_new_diff > 0.0, "Difficulty should never go to zero");
-        assert!(max_new_diff / current_difficulty <= MAX_DIFFICULTY_RATIO,
-            "Difficulty increase should be bounded");
+        assert!(
+            max_new_diff / current_difficulty <= MAX_DIFFICULTY_RATIO,
+            "Difficulty increase should be bounded"
+        );
     }
 }
 
@@ -1021,7 +1150,10 @@ mod daa_comprehensive_tests {
     fn test_daa_window_empty() {
         // Test behavior when DAA window is not yet full
         let daa_score = 0u64;
-        assert!(daa_score < DAA_WINDOW_SIZE, "Score should be below window size");
+        assert!(
+            daa_score < DAA_WINDOW_SIZE,
+            "Score should be below window size"
+        );
 
         // Window boundary should be 0 for early blocks
         let window_boundary = if daa_score >= DAA_WINDOW_SIZE {
@@ -1040,7 +1172,10 @@ mod daa_comprehensive_tests {
         assert_eq!(daa_score, DAA_WINDOW_SIZE);
 
         let window_boundary = daa_score - DAA_WINDOW_SIZE;
-        assert_eq!(window_boundary, 0, "Window should start at genesis when exactly full");
+        assert_eq!(
+            window_boundary, 0,
+            "Window should start at genesis when exactly full"
+        );
     }
 
     // Test 3: DAA window calculation edge cases - just past window size
@@ -1065,7 +1200,7 @@ mod daa_comprehensive_tests {
 
         // Simulate 4x slower blocks (should clamp to 0.25x)
         let expected_time = 504u64;
-        let actual_time = 2016u64;  // 4x slower
+        let actual_time = 2016u64; // 4x slower
 
         let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
@@ -1075,7 +1210,10 @@ mod daa_comprehensive_tests {
         let new_val = new_difficulty.as_ref();
 
         // New difficulty should be significantly less than current
-        assert!(new_val < current_val, "Difficulty should decrease with minimum ratio");
+        assert!(
+            new_val < current_val,
+            "Difficulty should decrease with minimum ratio"
+        );
 
         // Should be exactly 0.25x = 2500
         assert_eq!(new_val.as_u64(), 2500u64, "Should be clamped to 0.25x");
@@ -1089,7 +1227,7 @@ mod daa_comprehensive_tests {
 
         // Simulate 4x faster blocks (should clamp to 4x)
         let expected_time = 2016u64;
-        let actual_time = 504u64;  // 4x faster
+        let actual_time = 504u64; // 4x faster
 
         let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
         assert!(result.is_ok());
@@ -1099,7 +1237,10 @@ mod daa_comprehensive_tests {
         let new_val = new_difficulty.as_ref();
 
         // New difficulty should be significantly greater than current
-        assert!(new_val > current_val, "Difficulty should increase with maximum ratio");
+        assert!(
+            new_val > current_val,
+            "Difficulty should increase with maximum ratio"
+        );
 
         // Should be exactly 4x = 40000
         assert_eq!(new_val.as_u64(), 40000u64, "Should be clamped to 4x");
@@ -1120,7 +1261,10 @@ mod daa_comprehensive_tests {
             1
         };
 
-        assert_eq!(actual_time, 1, "Should use minimum time when timestamp goes backwards");
+        assert_eq!(
+            actual_time, 1,
+            "Should use minimum time when timestamp goes backwards"
+        );
 
         // Verify that division by this minimum doesn't cause issues
         let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
@@ -1131,7 +1275,10 @@ mod daa_comprehensive_tests {
 
         // But it should be clamped to MAX_DIFFICULTY_RATIO
         let clamped_ratio = ratio.max(MIN_DIFFICULTY_RATIO).min(MAX_DIFFICULTY_RATIO);
-        assert_eq!(clamped_ratio, MAX_DIFFICULTY_RATIO, "Extreme ratio should be clamped");
+        assert_eq!(
+            clamped_ratio, MAX_DIFFICULTY_RATIO,
+            "Extreme ratio should be clamped"
+        );
     }
 
     // Test 7: Timestamp manipulation resistance - extreme future timestamp
@@ -1147,16 +1294,25 @@ mod daa_comprehensive_tests {
         // Ratio will be very small (blocks appear to be very slow)
         let ratio = expected_time as f64 / actual_time as f64;
         assert!(ratio < 1.0, "Ratio should indicate blocks are too slow");
-        assert!(ratio < MIN_DIFFICULTY_RATIO, "Ratio should be below minimum before clamping");
+        assert!(
+            ratio < MIN_DIFFICULTY_RATIO,
+            "Ratio should be below minimum before clamping"
+        );
 
         // Should be clamped to MIN_DIFFICULTY_RATIO
         let clamped_ratio = ratio.max(MIN_DIFFICULTY_RATIO).min(MAX_DIFFICULTY_RATIO);
-        assert_eq!(clamped_ratio, MIN_DIFFICULTY_RATIO, "Extreme ratio should be clamped to minimum");
+        assert_eq!(
+            clamped_ratio, MIN_DIFFICULTY_RATIO,
+            "Extreme ratio should be clamped to minimum"
+        );
 
         // Verify the clamped ratio still works with difficulty adjustment
         let current_difficulty = Difficulty::from(10000u64);
         let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
-        assert!(result.is_ok(), "Clamped ratio should work with difficulty adjustment");
+        assert!(
+            result.is_ok(),
+            "Clamped ratio should work with difficulty adjustment"
+        );
     }
 
     // Test 8: Zero difficulty edge case
@@ -1191,7 +1347,10 @@ mod daa_comprehensive_tests {
         let current_val = large_difficulty.as_ref();
         let new_val = new_difficulty.as_ref();
 
-        assert!(new_val > current_val, "Large difficulty should still increase proportionally");
+        assert!(
+            new_val > current_val,
+            "Large difficulty should still increase proportionally"
+        );
     }
 
     // Test 10: Difficulty adjustment precision
@@ -1212,8 +1371,14 @@ mod daa_comprehensive_tests {
         let new_val = new_difficulty.as_ref().as_u64();
 
         // New value should be slightly higher than current
-        assert!(new_val > current_val, "Difficulty should increase with small positive ratio");
-        assert!(new_val <= current_val * 2, "Small ratio shouldn't cause dramatic change");
+        assert!(
+            new_val > current_val,
+            "Difficulty should increase with small positive ratio"
+        );
+        assert!(
+            new_val <= current_val * 2,
+            "Small ratio shouldn't cause dramatic change"
+        );
 
         // Should be exactly 1.01x = 1,010,000
         assert_eq!(new_val, 1_010_000u64, "Should be exactly 1.01x");

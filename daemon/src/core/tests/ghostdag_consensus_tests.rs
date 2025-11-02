@@ -6,16 +6,13 @@
 
 #[cfg(test)]
 mod ghostdag_consensus_tests {
-    use std::sync::Arc;
-    use tos_common::{
-        crypto::Hash,
-        tokio,
-    };
     use crate::core::{
         blockdag,
-        ghostdag::{BlueWorkType, CompactGhostdagData},
         error::BlockchainError,
+        ghostdag::{BlueWorkType, CompactGhostdagData},
     };
+    use std::sync::Arc;
+    use tos_common::{crypto::Hash, tokio};
 
     // Simple mock provider for basic testing
     struct SimpleMockProvider {
@@ -42,27 +39,41 @@ mod ghostdag_consensus_tests {
 
     #[async_trait::async_trait]
     impl crate::core::storage::GhostdagDataProvider for SimpleMockProvider {
-        async fn get_ghostdag_blue_work(&self, hash: &Hash) -> Result<BlueWorkType, BlockchainError> {
-            self.blue_work_map.get(hash.as_bytes())
+        async fn get_ghostdag_blue_work(
+            &self,
+            hash: &Hash,
+        ) -> Result<BlueWorkType, BlockchainError> {
+            self.blue_work_map
+                .get(hash.as_bytes())
                 .cloned()
                 .ok_or_else(|| BlockchainError::BlockNotFound(hash.clone()))
         }
 
         async fn get_ghostdag_blue_score(&self, hash: &Hash) -> Result<u64, BlockchainError> {
-            self.blue_score_map.get(hash.as_bytes())
+            self.blue_score_map
+                .get(hash.as_bytes())
                 .cloned()
                 .ok_or_else(|| BlockchainError::BlockNotFound(hash.clone()))
         }
 
-        async fn get_ghostdag_selected_parent(&self, _hash: &Hash) -> Result<Hash, BlockchainError> {
+        async fn get_ghostdag_selected_parent(
+            &self,
+            _hash: &Hash,
+        ) -> Result<Hash, BlockchainError> {
             unimplemented!("Not needed for these tests")
         }
 
-        async fn get_ghostdag_mergeset_blues(&self, _hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+        async fn get_ghostdag_mergeset_blues(
+            &self,
+            _hash: &Hash,
+        ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
             unimplemented!("Not needed for these tests")
         }
 
-        async fn get_ghostdag_mergeset_reds(&self, _hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+        async fn get_ghostdag_mergeset_reds(
+            &self,
+            _hash: &Hash,
+        ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
             unimplemented!("Not needed for these tests")
         }
 
@@ -73,11 +84,17 @@ mod ghostdag_consensus_tests {
             unimplemented!("Not needed for these tests")
         }
 
-        async fn get_ghostdag_data(&self, _hash: &Hash) -> Result<Arc<crate::core::ghostdag::TosGhostdagData>, BlockchainError> {
+        async fn get_ghostdag_data(
+            &self,
+            _hash: &Hash,
+        ) -> Result<Arc<crate::core::ghostdag::TosGhostdagData>, BlockchainError> {
             unimplemented!("Not needed for these tests")
         }
 
-        async fn get_ghostdag_compact_data(&self, _hash: &Hash) -> Result<CompactGhostdagData, BlockchainError> {
+        async fn get_ghostdag_compact_data(
+            &self,
+            _hash: &Hash,
+        ) -> Result<CompactGhostdagData, BlockchainError> {
             unimplemented!("Not needed for these tests")
         }
 
@@ -85,7 +102,11 @@ mod ghostdag_consensus_tests {
             Ok(true)
         }
 
-        async fn insert_ghostdag_data(&mut self, _hash: &Hash, _data: Arc<crate::core::ghostdag::TosGhostdagData>) -> Result<(), BlockchainError> {
+        async fn insert_ghostdag_data(
+            &mut self,
+            _hash: &Hash,
+            _data: Arc<crate::core::ghostdag::TosGhostdagData>,
+        ) -> Result<(), BlockchainError> {
             unimplemented!("Not needed for these tests")
         }
 
@@ -111,9 +132,14 @@ mod ghostdag_consensus_tests {
         provider.set_blue_work(tip2_bytes, BlueWorkType::from(2000u64));
 
         let tips = vec![tip1, tip2];
-        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter()).await.unwrap();
+        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter())
+            .await
+            .unwrap();
 
-        assert_eq!(*best_tip, tip2_expected, "Should select tip with highest blue_work");
+        assert_eq!(
+            *best_tip, tip2_expected,
+            "Should select tip with highest blue_work"
+        );
     }
 
     // Test 2: find_best_tip_by_blue_work - Single tip
@@ -127,7 +153,9 @@ mod ghostdag_consensus_tests {
         provider.set_blue_work(tip_bytes, BlueWorkType::from(1000u64));
 
         let tips = vec![tip];
-        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter()).await.unwrap();
+        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter())
+            .await
+            .unwrap();
 
         assert_eq!(*best_tip, tip_expected, "Should return the single tip");
     }
@@ -165,9 +193,14 @@ mod ghostdag_consensus_tests {
         provider.set_blue_work(tip3_bytes, BlueWorkType::from(200u64));
 
         let tips = vec![tip1, tip2, tip3];
-        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter()).await.unwrap();
+        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter())
+            .await
+            .unwrap();
 
-        assert_eq!(*best_tip, tip2_expected, "Should select tip2 with highest blue_work");
+        assert_eq!(
+            *best_tip, tip2_expected,
+            "Should select tip2 with highest blue_work"
+        );
     }
 
     // Test 5: calculate_blue_score_at_tips - Basic case
@@ -186,10 +219,15 @@ mod ghostdag_consensus_tests {
         provider.set_blue_score(tip2_bytes, 150);
 
         let tips = vec![tip1, tip2];
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
+        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
+            .await
+            .unwrap();
 
         // GHOSTDAG: blue_score = max(tips) + tips.len() = max(100, 150) + 2 = 152
-        assert_eq!(blue_score, 152, "Blue score should be max + tips count (merging 2 tips)");
+        assert_eq!(
+            blue_score, 152,
+            "Blue score should be max + tips count (merging 2 tips)"
+        );
     }
 
     // Test 6: calculate_blue_score_at_tips - Single tip
@@ -202,7 +240,9 @@ mod ghostdag_consensus_tests {
         provider.set_blue_score(tip_bytes, 100);
 
         let tips = vec![tip];
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
+        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
+            .await
+            .unwrap();
 
         // Expected: 100 + 1 = 101
         assert_eq!(blue_score, 101, "Blue score should be tip + 1");
@@ -214,7 +254,9 @@ mod ghostdag_consensus_tests {
         let provider = SimpleMockProvider::new();
 
         let tips: Vec<Hash> = vec![];
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
+        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
+            .await
+            .unwrap();
 
         // Expected: 0 (genesis case)
         assert_eq!(blue_score, 0, "Empty tips should return 0");
@@ -238,10 +280,15 @@ mod ghostdag_consensus_tests {
         provider.set_blue_score(tip3_bytes, 100);
 
         let tips = vec![tip1, tip2, tip3];
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
+        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
+            .await
+            .unwrap();
 
         // GHOSTDAG: blue_score = max(tips) + tips.len() = 100 + 3 = 103
-        assert_eq!(blue_score, 103, "Should handle same blue_score correctly (merging 3 tips)");
+        assert_eq!(
+            blue_score, 103,
+            "Should handle same blue_score correctly (merging 3 tips)"
+        );
     }
 
     // Test 9: Sorting by blue_work
@@ -302,13 +349,23 @@ mod ghostdag_consensus_tests {
 
         // Test 1: Find best tip
         let tips = vec![block2, block3];
-        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter()).await.unwrap();
-        assert_eq!(*best_tip, block2_expected, "Block2 should be selected (highest blue_work)");
+        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter())
+            .await
+            .unwrap();
+        assert_eq!(
+            *best_tip, block2_expected,
+            "Block2 should be selected (highest blue_work)"
+        );
 
         // Test 2: Calculate blue score for next block
         // GHOSTDAG: blue_score = max(tips) + tips.len() = max(2,2) + 2 = 4
-        let next_blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
-        assert_eq!(next_blue_score, 4, "Next block should have blue_score = 4 (merging 2 tips)");
+        let next_blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
+            .await
+            .unwrap();
+        assert_eq!(
+            next_blue_score, 4,
+            "Next block should have blue_score = 4 (merging 2 tips)"
+        );
     }
 
     // Test 11: Error handling - Unknown block
@@ -347,16 +404,26 @@ mod ghostdag_consensus_tests {
         }
 
         // Should find the tip with highest blue_work (i=49)
-        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter()).await.unwrap();
+        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter())
+            .await
+            .unwrap();
         let mut expected_bytes = [0u8; 32];
         expected_bytes[0] = 49;
         let expected_hash = Hash::new(expected_bytes);
-        assert_eq!(*best_tip, expected_hash, "Should handle many tips efficiently");
+        assert_eq!(
+            *best_tip, expected_hash,
+            "Should handle many tips efficiently"
+        );
 
         // Calculate blue score should also work
         // GHOSTDAG: blue_score = max(tips) + tips.len() = 49 + 50 = 99
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter()).await.unwrap();
-        assert_eq!(blue_score, 99, "Should calculate correctly for many tips (merging 50 tips)");
+        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
+            .await
+            .unwrap();
+        assert_eq!(
+            blue_score, 99,
+            "Should calculate correctly for many tips (merging 50 tips)"
+        );
     }
 
     #[test]

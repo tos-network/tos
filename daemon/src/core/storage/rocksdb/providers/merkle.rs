@@ -1,12 +1,9 @@
-use async_trait::async_trait;
-use tos_common::{
-    crypto::Hash,
-    block::TopoHeight
-};
 use crate::core::{
     error::BlockchainError,
-    storage::{MerkleHashProvider, RocksStorage}
+    storage::{MerkleHashProvider, RocksStorage},
 };
+use async_trait::async_trait;
+use tos_common::{block::TopoHeight, crypto::Hash};
 
 // Merkle Hash provider allow to give a Hash at a specific topoheight
 // The merkle hash only contains account balances
@@ -16,12 +13,19 @@ use crate::core::{
 #[async_trait]
 impl MerkleHashProvider for RocksStorage {
     // Get the merkle hash at a specific topoheight
-    async fn get_balances_merkle_hash_at_topoheight(&self, _: TopoHeight) -> Result<Hash, BlockchainError> {
+    async fn get_balances_merkle_hash_at_topoheight(
+        &self,
+        _: TopoHeight,
+    ) -> Result<Hash, BlockchainError> {
         Err(BlockchainError::UnsupportedOperation)
     }
 
     // Set the merkle hash at a specific topoheight
-    async fn set_balances_merkle_hash_at_topoheight(&mut self, _: TopoHeight, _: &Hash) -> Result<(), BlockchainError> {
+    async fn set_balances_merkle_hash_at_topoheight(
+        &mut self,
+        _: TopoHeight,
+        _: &Hash,
+    ) -> Result<(), BlockchainError> {
         Err(BlockchainError::UnsupportedOperation)
     }
 }

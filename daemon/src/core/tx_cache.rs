@@ -1,14 +1,7 @@
 use async_trait::async_trait;
-use tos_common::{
-    transaction::verify::ZKPCache,
-    crypto::Hash
-};
+use tos_common::{crypto::Hash, transaction::verify::ZKPCache};
 
-use super::{
-    error::BlockchainError,
-    mempool::Mempool,
-    storage::Storage
-};
+use super::{error::BlockchainError, mempool::Mempool, storage::Storage};
 
 pub struct TxCache<'a, S: Storage> {
     storage: &'a S,
@@ -21,7 +14,7 @@ impl<'a, S: Storage> TxCache<'a, S> {
         Self {
             storage,
             mempool,
-            disabled
+            disabled,
         }
     }
 }

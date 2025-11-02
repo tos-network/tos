@@ -4,10 +4,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tos_common::{
-    crypto::Hash,
-    tokio::sync::RwLock,
-};
+use tos_common::{crypto::Hash, tokio::sync::RwLock};
 
 /// Mining statistics for tracking block production and GHOSTDAG performance
 #[derive(Debug)]
@@ -116,7 +113,8 @@ impl RecentBlockTracker {
 
     #[allow(dead_code)]
     fn get_status(&self, hash: &Hash) -> Option<BlockStatus> {
-        self.blocks.iter()
+        self.blocks
+            .iter()
             .find(|(h, _, _)| h == hash)
             .map(|(_, _, status)| *status)
     }
@@ -124,7 +122,8 @@ impl RecentBlockTracker {
     /// Clean up old entries (older than 5 minutes)
     fn cleanup_old_entries(&mut self) {
         let now = Instant::now();
-        self.blocks.retain(|(_, time, _)| now.duration_since(*time) < Duration::from_secs(300));
+        self.blocks
+            .retain(|(_, time, _)| now.duration_since(*time) < Duration::from_secs(300));
     }
 }
 
@@ -169,7 +168,11 @@ impl MiningStats {
         }
 
         let mut tracker = self.recent_blocks.write().await;
-        let status = if is_blue { BlockStatus::AcceptedBlue } else { BlockStatus::AcceptedRed };
+        let status = if is_blue {
+            BlockStatus::AcceptedBlue
+        } else {
+            BlockStatus::AcceptedRed
+        };
         tracker.update_status(hash, status);
     }
 
@@ -183,19 +186,22 @@ impl MiningStats {
 
     /// Record block template generation time
     pub fn record_template_generation(&self, duration: Duration) {
-        self.template_generation_time_us.fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
+        self.template_generation_time_us
+            .fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
         self.templates_generated.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record GHOSTDAG calculation time
     pub fn record_ghostdag_calculation(&self, duration: Duration) {
-        self.ghostdag_calculation_time_us.fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
+        self.ghostdag_calculation_time_us
+            .fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
         self.ghostdag_calculations.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record transaction selection time and count
     pub fn record_tx_selection(&self, duration: Duration, tx_count: u64) {
-        self.tx_selection_time_us.fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
+        self.tx_selection_time_us
+            .fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
         self.tx_selections.fetch_add(1, Ordering::Relaxed);
         self.txs_selected.fetch_add(tx_count, Ordering::Relaxed);
     }
@@ -295,7 +301,8 @@ impl MiningStats {
         self.red_blocks.store(0, Ordering::Relaxed);
         self.template_generation_time_us.store(0, Ordering::Relaxed);
         self.templates_generated.store(0, Ordering::Relaxed);
-        self.ghostdag_calculation_time_us.store(0, Ordering::Relaxed);
+        self.ghostdag_calculation_time_us
+            .store(0, Ordering::Relaxed);
         self.ghostdag_calculations.store(0, Ordering::Relaxed);
         self.tx_selection_time_us.store(0, Ordering::Relaxed);
         self.tx_selections.store(0, Ordering::Relaxed);
@@ -362,17 +369,41 @@ impl std::fmt::Display for MiningStatsSnapshot {
         writeln!(f, "Mining Statistics:")?;
         writeln!(f, "  Uptime: {:?}", self.uptime)?;
         writeln!(f, "  Blocks Found: {}", self.blocks_found)?;
-        writeln!(f, "  Blocks Accepted: {} ({:.2}%)", self.blocks_accepted, self.acceptance_rate)?;
+        writeln!(
+            f,
+            "  Blocks Accepted: {} ({:.2}%)",
+            self.blocks_accepted, self.acceptance_rate
+        )?;
         writeln!(f, "  Blocks Rejected: {}", self.blocks_rejected)?;
-        writeln!(f, "  Blue Blocks: {} ({:.2}%)", self.blue_blocks, self.blue_rate)?;
-        writeln!(f, "  Red Blocks: {} ({:.2}%)", self.red_blocks, self.red_rate)?;
+        writeln!(
+            f,
+            "  Blue Blocks: {} ({:.2}%)",
+            self.blue_blocks, self.blue_rate
+        )?;
+        writeln!(
+            f,
+            "  Red Blocks: {} ({:.2}%)",
+            self.red_blocks, self.red_rate
+        )?;
         writeln!(f, "Performance:")?;
-        writeln!(f, "  Avg Template Generation: {:.2}ms", self.avg_template_generation_ms)?;
-        writeln!(f, "  Avg GHOSTDAG Calculation: {:.2}ms", self.avg_ghostdag_calculation_ms)?;
+        writeln!(
+            f,
+            "  Avg Template Generation: {:.2}ms",
+            self.avg_template_generation_ms
+        )?;
+        writeln!(
+            f,
+            "  Avg GHOSTDAG Calculation: {:.2}ms",
+            self.avg_ghostdag_calculation_ms
+        )?;
         writeln!(f, "  Avg TX Selection: {:.2}ms", self.avg_tx_selection_ms)?;
         writeln!(f, "  Avg TXs per Block: {:.1}", self.avg_txs_per_block)?;
         writeln!(f, "Cache Performance:")?;
-        writeln!(f, "  Hit Rate: {:.2}% ({} requests)", self.cache_hit_rate, self.total_cache_requests)?;
+        writeln!(
+            f,
+            "  Hit Rate: {:.2}% ({} requests)",
+            self.cache_hit_rate, self.total_cache_requests
+        )?;
         Ok(())
     }
 }

@@ -269,14 +269,20 @@ impl GhostdagDataProvider for TestGhostdagProvider {
             .ok_or_else(|| BlockchainError::BlockNotFound(hash.clone()))
     }
 
-    async fn get_ghostdag_mergeset_blues(&self, hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+    async fn get_ghostdag_mergeset_blues(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
         self.ghostdag_data
             .get(hash.as_bytes())
             .map(|data| data.mergeset_blues.clone())
             .ok_or_else(|| BlockchainError::BlockNotFound(hash.clone()))
     }
 
-    async fn get_ghostdag_mergeset_reds(&self, hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+    async fn get_ghostdag_mergeset_reds(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
         self.ghostdag_data
             .get(hash.as_bytes())
             .map(|data| data.mergeset_reds.clone())
@@ -293,7 +299,10 @@ impl GhostdagDataProvider for TestGhostdagProvider {
             .ok_or_else(|| BlockchainError::BlockNotFound(hash.clone()))
     }
 
-    async fn get_ghostdag_data(&self, hash: &Hash) -> Result<Arc<TosGhostdagData>, BlockchainError> {
+    async fn get_ghostdag_data(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<TosGhostdagData>, BlockchainError> {
         self.ghostdag_data
             .get(hash.as_bytes())
             .cloned()
@@ -311,7 +320,11 @@ impl GhostdagDataProvider for TestGhostdagProvider {
         Ok(self.ghostdag_data.contains_key(hash.as_bytes()))
     }
 
-    async fn insert_ghostdag_data(&mut self, _hash: &Hash, _data: Arc<TosGhostdagData>) -> Result<(), BlockchainError> {
+    async fn insert_ghostdag_data(
+        &mut self,
+        _hash: &Hash,
+        _data: Arc<TosGhostdagData>,
+    ) -> Result<(), BlockchainError> {
         unimplemented!("Insert not needed for JSON tests")
     }
 
@@ -337,7 +350,9 @@ impl GhostdagDataProvider for TestGhostdagProvider {
 /// let tests = load_all_json_tests("daemon/testdata/dags").await?;
 /// println!("Loaded {} test cases", tests.len());
 /// ```
-pub async fn load_all_json_tests<P: AsRef<Path>>(test_dir: P) -> Result<Vec<GhostdagTestCase>, Box<dyn std::error::Error>> {
+pub async fn load_all_json_tests<P: AsRef<Path>>(
+    test_dir: P,
+) -> Result<Vec<GhostdagTestCase>, Box<dyn std::error::Error>> {
     let test_dir = test_dir.as_ref();
 
     if !test_dir.exists() {
@@ -372,7 +387,11 @@ pub async fn load_all_json_tests<P: AsRef<Path>>(test_dir: P) -> Result<Vec<Ghos
     }
 
     if test_cases.is_empty() && !errors.is_empty() {
-        return Err(format!("No tests loaded successfully. Errors:\n{}", errors.join("\n")).into());
+        return Err(format!(
+            "No tests loaded successfully. Errors:\n{}",
+            errors.join("\n")
+        )
+        .into());
     }
 
     Ok(test_cases)
@@ -391,7 +410,9 @@ pub async fn load_all_json_tests<P: AsRef<Path>>(test_dir: P) -> Result<Vec<Ghos
 /// let test = load_json_test("daemon/testdata/dags/simple_chain.json").await?;
 /// println!("Loaded test: {}", test.name);
 /// ```
-pub async fn load_json_test<P: AsRef<Path>>(path: P) -> Result<GhostdagTestCase, Box<dyn std::error::Error>> {
+pub async fn load_json_test<P: AsRef<Path>>(
+    path: P,
+) -> Result<GhostdagTestCase, Box<dyn std::error::Error>> {
     let path = path.as_ref();
     let json_str = std::fs::read_to_string(path)?;
 
@@ -428,14 +449,22 @@ fn validate_test_case(test: &GhostdagTestCase) -> Result<(), Box<dyn std::error:
 
         // Validate hash format (should be 64 hex characters)
         if block.hash.len() != 64 {
-            return Err(format!("Invalid hash length for block {}: expected 64 hex chars, got {}",
-                block.id, block.hash.len()).into());
+            return Err(format!(
+                "Invalid hash length for block {}: expected 64 hex chars, got {}",
+                block.id,
+                block.hash.len()
+            )
+            .into());
         }
 
         // Validate parents reference existing blocks (except genesis)
         for parent_id in &block.parents {
             if !block_ids.contains(parent_id) {
-                return Err(format!("Block {} references unknown parent: {}", block.id, parent_id).into());
+                return Err(format!(
+                    "Block {} references unknown parent: {}",
+                    block.id, parent_id
+                )
+                .into());
             }
         }
     }
@@ -516,7 +545,9 @@ pub struct ComparisonResult {
 /// let result = execute_json_test(&test_case).await?;
 /// assert!(result.passed, "Test failed: {}", result.summary);
 /// ```
-pub async fn execute_json_test(test_case: &GhostdagTestCase) -> Result<TestResult, Box<dyn std::error::Error>> {
+pub async fn execute_json_test(
+    test_case: &GhostdagTestCase,
+) -> Result<TestResult, Box<dyn std::error::Error>> {
     let mut provider = TestGhostdagProvider::new();
     let mut block_results = Vec::new();
 
@@ -541,10 +572,12 @@ pub async fn execute_json_test(test_case: &GhostdagTestCase) -> Result<TestResul
             ghostdag.genesis_ghostdag_data()
         } else {
             // Regular block - resolve parent hashes
-            let parent_hashes: Vec<Hash> = block_def.parents
+            let parent_hashes: Vec<Hash> = block_def
+                .parents
                 .iter()
                 .map(|parent_id| {
-                    id_to_hash.get(parent_id)
+                    id_to_hash
+                        .get(parent_id)
                         .cloned()
                         .ok_or_else(|| format!("Unknown parent ID: {}", parent_id))
                 })
@@ -552,11 +585,22 @@ pub async fn execute_json_test(test_case: &GhostdagTestCase) -> Result<TestResul
 
             // For testing purposes, we'll use a simplified GHOSTDAG calculation
             // In a real implementation, this would use the full storage-backed GHOSTDAG
-            create_test_ghostdag_data(&block_def, &parent_hashes, &id_to_hash, &provider, test_case.config.k).await?
+            create_test_ghostdag_data(
+                &block_def,
+                &parent_hashes,
+                &id_to_hash,
+                &provider,
+                test_case.config.k,
+            )
+            .await?
         };
 
         // Register block with provider
-        provider.add_block(block_def.id.clone(), block_hash.clone(), actual_data.clone());
+        provider.add_block(
+            block_def.id.clone(),
+            block_hash.clone(),
+            actual_data.clone(),
+        );
 
         // Compare actual vs expected
         let block_result = compare_ghostdag_data(
@@ -574,11 +618,18 @@ pub async fn execute_json_test(test_case: &GhostdagTestCase) -> Result<TestResul
     let failed_count = block_results.iter().filter(|r| !r.passed).count();
 
     let summary = if passed {
-        format!("✓ Test '{}' passed: all {} blocks verified successfully",
-            test_case.name, block_results.len())
+        format!(
+            "✓ Test '{}' passed: all {} blocks verified successfully",
+            test_case.name,
+            block_results.len()
+        )
     } else {
-        format!("✗ Test '{}' failed: {} of {} blocks failed verification",
-            test_case.name, failed_count, block_results.len())
+        format!(
+            "✗ Test '{}' failed: {} of {} blocks failed verification",
+            test_case.name,
+            failed_count,
+            block_results.len()
+        )
     };
 
     Ok(TestResult {
@@ -613,20 +664,24 @@ async fn create_test_ghostdag_data(
         .ok_or_else(|| format!("Unknown selected parent: {}", expected.selected_parent))?;
 
     // Parse mergeset blues
-    let mergeset_blues: Vec<Hash> = expected.mergeset_blues
+    let mergeset_blues: Vec<Hash> = expected
+        .mergeset_blues
         .iter()
         .map(|id| {
-            id_to_hash.get(id)
+            id_to_hash
+                .get(id)
                 .cloned()
                 .ok_or_else(|| format!("Unknown blue block: {}", id))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
     // Parse mergeset reds
-    let mergeset_reds: Vec<Hash> = expected.mergeset_reds
+    let mergeset_reds: Vec<Hash> = expected
+        .mergeset_reds
         .iter()
         .map(|id| {
-            id_to_hash.get(id)
+            id_to_hash
+                .get(id)
                 .cloned()
                 .ok_or_else(|| format!("Unknown red block: {}", id))
         })
@@ -643,10 +698,12 @@ async fn create_test_ghostdag_data(
     }
 
     // Parse mergeset_non_daa
-    let mergeset_non_daa: Vec<Hash> = expected.mergeset_non_daa
+    let mergeset_non_daa: Vec<Hash> = expected
+        .mergeset_non_daa
         .iter()
         .map(|id| {
-            id_to_hash.get(id)
+            id_to_hash
+                .get(id)
                 .cloned()
                 .ok_or_else(|| format!("Unknown non-DAA block: {}", id))
         })
@@ -655,7 +712,7 @@ async fn create_test_ghostdag_data(
     Ok(TosGhostdagData::new(
         expected.blue_score,
         blue_work,
-        expected.blue_score,  // daa_score: use blue_score for test data
+        expected.blue_score, // daa_score: use blue_score for test data
         selected_parent,
         mergeset_blues,
         mergeset_reds,
@@ -741,8 +798,7 @@ fn parse_hash(hex: &str) -> Result<Hash, Box<dyn std::error::Error>> {
     }
 
     let mut bytes = [0u8; 32];
-    hex::decode_to_slice(hex, &mut bytes)
-        .map_err(|e| format!("Invalid hex string: {}", e))?;
+    hex::decode_to_slice(hex, &mut bytes).map_err(|e| format!("Invalid hex string: {}", e))?;
 
     Ok(Hash::new(bytes))
 }
@@ -801,27 +857,27 @@ mod tests {
             description: "A simple test".to_string(),
             config: GhostdagTestConfig {
                 k: 10,
-                genesis_hash: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+                genesis_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
                 version: None,
             },
-            blocks: vec![
-                BlockTestData {
-                    id: "genesis".to_string(),
-                    hash: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
-                    parents: vec![],
-                    difficulty: 1000,
-                    timestamp: None,
-                    expected: ExpectedGhostdagData {
-                        blue_score: 0,
-                        blue_work: "1000".to_string(),
-                        selected_parent: "genesis".to_string(),
-                        mergeset_blues: vec![],
-                        mergeset_reds: vec![],
-                        blues_anticone_sizes: HashMap::new(),
-                        mergeset_non_daa: vec![],
-                    },
+            blocks: vec![BlockTestData {
+                id: "genesis".to_string(),
+                hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                parents: vec![],
+                difficulty: 1000,
+                timestamp: None,
+                expected: ExpectedGhostdagData {
+                    blue_score: 0,
+                    blue_work: "1000".to_string(),
+                    selected_parent: "genesis".to_string(),
+                    mergeset_blues: vec![],
+                    mergeset_reds: vec![],
+                    blues_anticone_sizes: HashMap::new(),
+                    mergeset_non_daa: vec![],
                 },
-            ],
+            }],
             metadata: TestMetadata::default(),
         };
 
@@ -836,7 +892,7 @@ mod tests {
         let data = TosGhostdagData::new(
             1,
             BlueWorkType::from(1000u64),
-            1,  // daa_score: use same value as blue_score for test data
+            1, // daa_score: use same value as blue_score for test data
             Hash::new([0u8; 32]),
             vec![],
             vec![],
@@ -989,8 +1045,10 @@ mod tests {
 
                         for comparison in &block_result.comparisons {
                             let status = if comparison.matches { "✓" } else { "✗" };
-                            println!("    {} {}: expected={}, actual={}",
-                                status, comparison.field, comparison.expected, comparison.actual);
+                            println!(
+                                "    {} {}: expected={}, actual={}",
+                                status, comparison.field, comparison.expected, comparison.actual
+                            );
                         }
                     }
 

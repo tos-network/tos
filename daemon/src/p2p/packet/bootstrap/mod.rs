@@ -1,21 +1,19 @@
-mod step;
 mod block_metadata;
+mod step;
 
 use tos_common::serializer::*;
 
-pub use step::*;
 pub use block_metadata::BlockMetadata;
+pub use step::*;
 
 #[derive(Debug)]
 pub struct BootstrapChainRequest<'a> {
-    step: StepRequest<'a>
+    step: StepRequest<'a>,
 }
 
 impl<'a> BootstrapChainRequest<'a> {
     pub fn new(step: StepRequest<'a>) -> Self {
-        Self {
-            step
-        }
+        Self { step }
     }
 
     pub fn kind(&self) -> StepKind {
@@ -41,17 +39,14 @@ impl Serializer for BootstrapChainRequest<'_> {
     }
 }
 
-
 #[derive(Debug)]
 pub struct BootstrapChainResponse {
-    response: StepResponse
+    response: StepResponse,
 }
 
 impl BootstrapChainResponse {
     pub fn new(response: StepResponse) -> Self {
-        Self {
-            response
-        }
+        Self { response }
     }
 
     pub fn kind(&self) -> StepKind {

@@ -2,8 +2,8 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use tos_vm::Module;
 
-use crate::{crypto::Hash, serializer::*};
 use super::ContractDeposit;
+use crate::{crypto::Hash, serializer::*};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct InvokeConstructorPayload {
@@ -24,10 +24,10 @@ impl Serializer for DeployContractPayload {
         self.invoke.write(writer);
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> { 
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         Ok(Self {
             module: Module::read(reader)?,
-            invoke: Option::read(reader)?
+            invoke: Option::read(reader)?,
         })
     }
 
@@ -42,10 +42,10 @@ impl Serializer for InvokeConstructorPayload {
         self.deposits.write(writer);
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> { 
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         Ok(Self {
             max_gas: u64::read(reader)?,
-            deposits: IndexMap::read(reader)?
+            deposits: IndexMap::read(reader)?,
         })
     }
 

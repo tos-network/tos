@@ -10,7 +10,7 @@ mod property_tests {
     use tos_common::difficulty::Difficulty;
 
     use crate::core::{
-        ghostdag::{BlueWorkType, calc_work_from_difficulty, SortableBlock},
+        ghostdag::{calc_work_from_difficulty, BlueWorkType, SortableBlock},
         reachability::Interval,
     };
 
@@ -30,8 +30,11 @@ mod property_tests {
         ];
 
         for interval in test_cases {
-            assert!(interval.contains(interval),
-                "Interval {:?} should contain itself (reflexivity)", interval);
+            assert!(
+                interval.contains(interval),
+                "Interval {:?} should contain itself (reflexivity)",
+                interval
+            );
         }
     }
 
@@ -98,9 +101,14 @@ mod property_tests {
             let (left, right) = interval.split_half();
             let total_size = left.size() + right.size();
 
-            assert_eq!(total_size, original_size,
+            assert_eq!(
+                total_size,
+                original_size,
                 "Split should preserve total size: original={}, left={}, right={}",
-                original_size, left.size(), right.size());
+                original_size,
+                left.size(),
+                right.size()
+            );
         }
     }
 
@@ -117,9 +125,12 @@ mod property_tests {
             let (left, right) = interval.split_half();
 
             if !right.is_empty() {
-                assert!(left.end < right.start || right.is_empty(),
+                assert!(
+                    left.end < right.start || right.is_empty(),
                     "Split intervals should not overlap: left.end={}, right.start={}",
-                    left.end, right.start);
+                    left.end,
+                    right.start
+                );
             }
         }
     }
@@ -137,13 +148,21 @@ mod property_tests {
             let (left, right) = parent.split_half();
 
             if !left.is_empty() {
-                assert!(parent.contains(left),
-                    "Parent {:?} should contain left child {:?}", parent, left);
+                assert!(
+                    parent.contains(left),
+                    "Parent {:?} should contain left child {:?}",
+                    parent,
+                    left
+                );
             }
 
             if !right.is_empty() {
-                assert!(parent.contains(right),
-                    "Parent {:?} should contain right child {:?}", parent, right);
+                assert!(
+                    parent.contains(right),
+                    "Parent {:?} should contain right child {:?}",
+                    parent,
+                    right
+                );
             }
         }
     }
@@ -155,9 +174,7 @@ mod property_tests {
     #[test]
     fn prop_work_increases_with_difficulty() {
         // Property: Higher difficulty produces higher work
-        let difficulties = vec![
-            1u64, 10, 100, 1000, 10000, 100000,
-        ];
+        let difficulties = vec![1u64, 10, 100, 1000, 10000, 100000];
 
         let mut works = vec![];
         for &diff_val in &difficulties {
@@ -183,8 +200,11 @@ mod property_tests {
             let difficulty = Difficulty::from(diff_val);
             let work = calc_work_from_difficulty(&difficulty);
 
-            assert!(work > BlueWorkType::zero(),
-                "Work should be positive for difficulty {}", diff_val);
+            assert!(
+                work > BlueWorkType::zero(),
+                "Work should be positive for difficulty {}",
+                diff_val
+            );
         }
     }
 
@@ -197,9 +217,11 @@ mod property_tests {
         let sum_ab = work_a + work_b;
         let sum_ba = work_b + work_a;
 
-        assert_eq!(sum_ab, sum_ba,
+        assert_eq!(
+            sum_ab, sum_ba,
             "Work addition should be commutative: {} + {} = {} + {}",
-            work_a, work_b, work_b, work_a);
+            work_a, work_b, work_b, work_a
+        );
     }
 
     #[test]
@@ -212,9 +234,11 @@ mod property_tests {
         let sum_abc = (work_a + work_b) + work_c;
         let sum_abc2 = work_a + (work_b + work_c);
 
-        assert_eq!(sum_abc, sum_abc2,
+        assert_eq!(
+            sum_abc, sum_abc2,
             "Work addition should be associative: ({} + {}) + {} = {} + ({} + {})",
-            work_a, work_b, work_c, work_a, work_b, work_c);
+            work_a, work_b, work_c, work_a, work_b, work_c
+        );
     }
 
     #[test]
@@ -228,8 +252,11 @@ mod property_tests {
 
         for work in test_works {
             let sum = work + BlueWorkType::zero();
-            assert_eq!(sum, work,
-                "Zero should be identity element: {} + 0 = {}", work, work);
+            assert_eq!(
+                sum, work,
+                "Zero should be identity element: {} + 0 = {}",
+                work, work
+            );
         }
     }
 
@@ -263,8 +290,10 @@ mod property_tests {
         let block_c = SortableBlock::new(Hash::new([3u8; 32]), BlueWorkType::from(300u64));
 
         if block_a < block_b && block_b < block_c {
-            assert!(block_a < block_c,
-                "Ordering should be transitive: if A < B and B < C, then A < C");
+            assert!(
+                block_a < block_c,
+                "Ordering should be transitive: if A < B and B < C, then A < C"
+            );
         }
     }
 
@@ -278,8 +307,10 @@ mod property_tests {
         let block_b = SortableBlock::new(hash.clone(), work);
 
         if block_a <= block_b && block_b <= block_a {
-            assert_eq!(block_a, block_b,
-                "Ordering should be antisymmetric: if A <= B and B <= A, then A = B");
+            assert_eq!(
+                block_a, block_b,
+                "Ordering should be antisymmetric: if A <= B and B <= A, then A = B"
+            );
         }
     }
 
@@ -298,8 +329,10 @@ mod property_tests {
 
         // Verify sorted
         for i in 1..blocks.len() {
-            assert!(blocks[i].blue_work >= blocks[i-1].blue_work,
-                "After sorting, blocks should be in non-decreasing order");
+            assert!(
+                blocks[i].blue_work >= blocks[i - 1].blue_work,
+                "After sorting, blocks should be in non-decreasing order"
+            );
         }
     }
 
@@ -313,9 +346,12 @@ mod property_tests {
         let scores = vec![0u64, 1, 2, 3, 4, 5, 10, 20, 50, 100];
 
         for i in 1..scores.len() {
-            assert!(scores[i] >= scores[i-1],
+            assert!(
+                scores[i] >= scores[i - 1],
                 "Blue score should be monotonically increasing: {} >= {}",
-                scores[i], scores[i-1]);
+                scores[i],
+                scores[i - 1]
+            );
         }
     }
 
@@ -327,8 +363,11 @@ mod property_tests {
 
         for _ in 0..100 {
             let next_score = current_score + 1;
-            assert_eq!(next_score, current_score + 1,
-                "Blue score should increment by exactly 1");
+            assert_eq!(
+                next_score,
+                current_score + 1,
+                "Blue score should increment by exactly 1"
+            );
             current_score = next_score;
         }
     }
@@ -384,8 +423,7 @@ mod property_tests {
         ];
 
         for (hash_a, hash_b) in test_cases {
-            assert_ne!(hash_a, hash_b,
-                "Different hashes should be unequal");
+            assert_ne!(hash_a, hash_b, "Different hashes should be unequal");
         }
     }
 
@@ -399,12 +437,12 @@ mod property_tests {
         let k = 10u64;
 
         let test_cases = vec![
-            (0, true),   // 0 <= K
-            (5, true),   // 5 <= K
-            (10, true),  // 10 <= K
-            (11, false), // 11 > K
-            (15, false), // 15 > K
-            (100, false),// 100 > K
+            (0, true),    // 0 <= K
+            (5, true),    // 5 <= K
+            (10, true),   // 10 <= K
+            (11, false),  // 11 > K
+            (15, false),  // 15 > K
+            (100, false), // 100 > K
         ];
 
         for (anticone_size, expected_is_blue) in test_cases {
@@ -422,9 +460,15 @@ mod property_tests {
 
         for anticone_a in 0..=k {
             for anticone_b in 0..anticone_a {
-                assert!(anticone_b <= k,
+                assert!(
+                    anticone_b <= k,
                     "If {} <= K={} and {} < {}, then {} should also be <= K",
-                    anticone_a, k, anticone_b, anticone_a, anticone_b);
+                    anticone_a,
+                    k,
+                    anticone_b,
+                    anticone_a,
+                    anticone_b
+                );
             }
         }
     }
@@ -447,7 +491,10 @@ mod property_tests {
         for interval in test_cases {
             // Size is u64, so always non-negative, but we verify the calculation
             let size = interval.size();
-            assert!(size == interval.size(), "Size calculation should be consistent");
+            assert!(
+                size == interval.size(),
+                "Size calculation should be consistent"
+            );
         }
     }
 
@@ -466,8 +513,11 @@ mod property_tests {
                 let splits = interval.split_exact(&sizes);
                 let total_allocated: u64 = splits.iter().map(|s| s.size()).sum();
 
-                assert_eq!(total_allocated, interval.size(),
-                    "Sum of split sizes should equal original interval size");
+                assert_eq!(
+                    total_allocated,
+                    interval.size(),
+                    "Sum of split sizes should equal original interval size"
+                );
             }
         }
     }
@@ -484,8 +534,7 @@ mod property_tests {
         let work1 = calc_work_from_difficulty(&difficulty);
         let work2 = calc_work_from_difficulty(&difficulty);
 
-        assert_eq!(work1, work2,
-            "Equal difficulties should produce equal work");
+        assert_eq!(work1, work2, "Equal difficulties should produce equal work");
     }
 
     #[test]
@@ -529,8 +578,11 @@ mod property_tests {
 
         for interval in test_cases {
             if !interval.is_empty() {
-                assert!(interval.size() > 0,
-                    "Non-empty interval {:?} should have positive size", interval);
+                assert!(
+                    interval.size() > 0,
+                    "Non-empty interval {:?} should have positive size",
+                    interval
+                );
             }
         }
     }
@@ -564,9 +616,16 @@ mod property_tests {
             let sum_a = work_a + work_c;
             let sum_b = work_b + work_c;
 
-            assert!(sum_a > sum_b,
+            assert!(
+                sum_a > sum_b,
                 "Order should be preserved: if {} > {}, then {} + {} > {} + {}",
-                work_a, work_b, work_a, work_c, work_b, work_c);
+                work_a,
+                work_b,
+                work_a,
+                work_c,
+                work_b,
+                work_c
+            );
         }
     }
 }

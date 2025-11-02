@@ -1,23 +1,14 @@
+use super::{Reader, ReaderError, Serializer, Writer};
 use crate::crypto::{Hash, HASH_SIZE};
-use super::{Serializer, Writer, Reader, ReaderError};
-use std::{
-    borrow::Cow,
-    collections::{
-        BTreeSet,
-        HashMap,
-        HashSet
-    },
-    hash::Hash as StdHash,
-    net::{
-        IpAddr,
-        Ipv4Addr,
-        Ipv6Addr,
-        SocketAddr
-    },
-    sync::Arc
-};
 use indexmap::{IndexMap, IndexSet};
 use log::{error, warn};
+use std::{
+    borrow::Cow,
+    collections::{BTreeSet, HashMap, HashSet},
+    hash::Hash as StdHash,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
+};
 
 // Used for Tips storage
 impl Serializer for HashSet<Hash> {
@@ -31,9 +22,12 @@ impl Serializer for HashSet<Hash> {
         let total_size = reader.total_size();
         if total_size % HASH_SIZE != 0 {
             if log::log_enabled!(log::Level::Error) {
-                error!("Invalid size: {}, expected a multiple of 32 for hashes", total_size);
+                error!(
+                    "Invalid size: {}, expected a multiple of 32 for hashes",
+                    total_size
+                );
             }
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         let count = total_size / HASH_SIZE;
@@ -45,9 +39,13 @@ impl Serializer for HashSet<Hash> {
 
         if tips.len() != count {
             if log::log_enabled!(log::Level::Error) {
-                error!("Invalid size: received {} elements while sending {}", tips.len(), count);
+                error!(
+                    "Invalid size: received {} elements while sending {}",
+                    tips.len(),
+                    count
+                );
             }
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         Ok(tips)
@@ -70,9 +68,12 @@ impl Serializer for HashSet<Cow<'_, Hash>> {
         let total_size = reader.total_size();
         if total_size % 32 != 0 {
             if log::log_enabled!(log::Level::Error) {
-                error!("Invalid size: {}, expected a multiple of 32 for hashes", total_size);
+                error!(
+                    "Invalid size: {}, expected a multiple of 32 for hashes",
+                    total_size
+                );
             }
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         let count = total_size / 32;
@@ -84,9 +85,13 @@ impl Serializer for HashSet<Cow<'_, Hash>> {
 
         if tips.len() != count {
             if log::log_enabled!(log::Level::Error) {
-                error!("Invalid size: received {} elements while sending {}", tips.len(), count);
+                error!(
+                    "Invalid size: received {} elements while sending {}",
+                    tips.len(),
+                    count
+                );
             }
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         Ok(tips)
@@ -182,9 +187,12 @@ impl<T: Serializer + std::hash::Hash + Ord> Serializer for BTreeSet<T> {
         let count = reader.read_u16()?;
         if count > DEFAULT_MAX_ITEMS as u16 {
             if log::log_enabled!(log::Level::Warn) {
-                warn!("Received {} in BTreeSet while maximum is set to {}", count, DEFAULT_MAX_ITEMS);
+                warn!(
+                    "Received {} in BTreeSet while maximum is set to {}",
+                    count, DEFAULT_MAX_ITEMS
+                );
             }
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         let mut set = BTreeSet::new();
@@ -194,7 +202,7 @@ impl<T: Serializer + std::hash::Hash + Ord> Serializer for BTreeSet<T> {
                 if log::log_enabled!(log::Level::Error) {
                     error!("Value is duplicated in BTreeSet");
                 }
-                return Err(ReaderError::InvalidSize)
+                return Err(ReaderError::InvalidSize);
             }
         }
         Ok(set)
@@ -211,7 +219,7 @@ impl<T: Serializer + std::hash::Hash + Ord> Serializer for BTreeSet<T> {
         match self.first() {
             Some(first) => 2 + self.len() * first.size(),
             // If the set is empty, we still need to write the size (u16)
-            None => 2
+            None => 2,
         }
     }
 }
@@ -221,9 +229,12 @@ impl<T: Serializer + std::hash::Hash + Eq> Serializer for IndexSet<T> {
         let count = reader.read_u16()?;
         if count > DEFAULT_MAX_ITEMS as u16 {
             if log::log_enabled!(log::Level::Warn) {
-                warn!("Received {} in IndexSet while maximum is set to {}", count, DEFAULT_MAX_ITEMS);
+                warn!(
+                    "Received {} in IndexSet while maximum is set to {}",
+                    count, DEFAULT_MAX_ITEMS
+                );
             }
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         let mut set = IndexSet::new();
@@ -233,7 +244,7 @@ impl<T: Serializer + std::hash::Hash + Eq> Serializer for IndexSet<T> {
                 if log::log_enabled!(log::Level::Error) {
                     error!("Value is duplicated in IndexSet");
                 }
-                return Err(ReaderError::InvalidSize)
+                return Err(ReaderError::InvalidSize);
             }
         }
         Ok(set)
@@ -250,7 +261,7 @@ impl<T: Serializer + std::hash::Hash + Eq> Serializer for IndexSet<T> {
         match self.first() {
             Some(first) => 2 + self.len() * first.size(),
             // If the set is empty, we still need to write the size (u16)
-            None => 2
+            None => 2,
         }
     }
 }
@@ -303,7 +314,7 @@ impl<T: Serializer> Serializer for Option<T> {
         // 1 is for the bool written as a full byte
         match self {
             Some(value) => 1 + value.size(),
-            None => 1
+            None => 1,
         }
     }
 }
@@ -313,9 +324,12 @@ impl<T: Serializer> Serializer for Vec<T> {
         let count = reader.read_u16()?;
         if count > DEFAULT_MAX_ITEMS as u16 {
             if log::log_enabled!(log::Level::Warn) {
-                warn!("Received {} in Vec while maximum is set to {}", count, DEFAULT_MAX_ITEMS);
+                warn!(
+                    "Received {} in Vec while maximum is set to {}",
+                    count, DEFAULT_MAX_ITEMS
+                );
             }
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         let mut values = Vec::with_capacity(count as usize);
@@ -407,9 +421,7 @@ impl<const N: usize> Serializer for [u8; N] {
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let bytes = reader.read_bytes(N)?;
-        Ok(
-            bytes
-        )
+        Ok(bytes)
     }
 
     fn to_bytes(&self) -> Vec<u8> {
@@ -417,9 +429,11 @@ impl<const N: usize> Serializer for [u8; N] {
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self, ReaderError>
-        where Self: Sized {
+    where
+        Self: Sized,
+    {
         if bytes.len() != N {
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         let mut array = [0; N];
@@ -450,7 +464,7 @@ impl Serializer for SocketAddr {
         // 2 for the port (u16)
         match self.ip() {
             IpAddr::V4(_) => 1 + 4 + 2,
-            IpAddr::V6(_) => 1 + 16 + 2
+            IpAddr::V6(_) => 1 + 16 + 2,
         }
     }
 }
@@ -464,7 +478,7 @@ impl Serializer for IpAddr {
                 let c = reader.read_u8()?;
                 let d = reader.read_u8()?;
                 Ok(IpAddr::V4(Ipv4Addr::new(a, b, c, d)))
-            },
+            }
             1 => {
                 let a = reader.read_u16()?;
                 let b = reader.read_u16()?;
@@ -475,8 +489,8 @@ impl Serializer for IpAddr {
                 let g = reader.read_u16()?;
                 let h = reader.read_u16()?;
                 Ok(IpAddr::V6(Ipv6Addr::new(a, b, c, d, e, f, g, h)))
-            },
-            _ => Err(ReaderError::InvalidValue)
+            }
+            _ => Err(ReaderError::InvalidValue),
         }
     }
 
@@ -485,7 +499,7 @@ impl Serializer for IpAddr {
             IpAddr::V4(addr) => {
                 writer.write_u8(0);
                 writer.write_bytes(&addr.octets());
-            },
+            }
             IpAddr::V6(addr) => {
                 writer.write_u8(1);
                 writer.write_bytes(&addr.octets());
@@ -496,7 +510,7 @@ impl Serializer for IpAddr {
     fn size(&self) -> usize {
         match self {
             IpAddr::V4(_) => 1 + 4,
-            IpAddr::V6(_) => 1 + 16
+            IpAddr::V6(_) => 1 + 16,
         }
     }
 }
@@ -506,8 +520,7 @@ impl Serializer for () {
         Ok(())
     }
 
-    fn write(&self, _writer: &mut Writer) {
-    }
+    fn write(&self, _writer: &mut Writer) {}
 
     fn size(&self) -> usize {
         0

@@ -9,11 +9,7 @@ use tokio_tungstenite_wasm::Error as TungsteniteError;
 
 pub use http::JsonRPCClient;
 pub use websocket::{
-    WebSocketJsonRPCClientImpl,
-    WebSocketJsonRPCClient,
-    EventReceiver,
-    NoEvent,
-    InternalMessage
+    EventReceiver, InternalMessage, NoEvent, WebSocketJsonRPCClient, WebSocketJsonRPCClientImpl,
 };
 
 const JSON_RPC_VERSION: &str = "2.0";
@@ -81,5 +77,5 @@ pub enum JsonRPCError {
     #[error(transparent)]
     Any(#[from] anyhow::Error),
     #[error("Error while sending message '{}': {}", _0, _1)]
-    SendError(String, String)
+    SendError(String, String),
 }

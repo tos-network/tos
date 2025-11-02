@@ -138,9 +138,7 @@ impl ReindexContext {
 
             // Check for genesis (should never reach here with insufficient space)
             if parent_hash == current {
-                log::error!(
-                    "Reached genesis with insufficient space! This should never happen."
-                );
+                log::error!("Reached genesis with insufficient space! This should never happen.");
                 return Err(BlockchainError::InvalidReachability);
             }
 
@@ -174,13 +172,15 @@ impl ReindexContext {
                 // Notes:
                 // 1. required_allocation = subtree_size to double current interval capacity
                 // 2. This might be new_child itself (when new_child's parent is above root)
-                return self.reindex_intervals_earlier_than_root(
-                    storage,
-                    current,            // allocation_block: block that needs more space
-                    reindex_root,       // reindex_root: stable point in chain
-                    parent_hash,        // common_ancestor: parent of allocation_block
-                    subtree_size,       // required_allocation: amount needed (doubles capacity)
-                ).await;
+                return self
+                    .reindex_intervals_earlier_than_root(
+                        storage,
+                        current,      // allocation_block: block that needs more space
+                        reindex_root, // reindex_root: stable point in chain
+                        parent_hash,  // common_ancestor: parent of allocation_block
+                        subtree_size, // required_allocation: amount needed (doubles capacity)
+                    )
+                    .await;
             }
 
             // CRITICAL CHECK: Did we reach the reindex root without slack reclaim triggering?
@@ -276,10 +276,7 @@ impl ReindexContext {
 
                 // All children of `current` have calculated their subtree size.
                 // Sum them all together and add 1 to get the subtree size of `current`.
-                let subtree_sum: u64 = parent_children
-                    .iter()
-                    .map(|c| self.subtree_sizes[c])
-                    .sum();
+                let subtree_sum: u64 = parent_children.iter().map(|c| self.subtree_sizes[c]).sum();
                 self.subtree_sizes.insert(current.clone(), subtree_sum + 1);
             }
         }
@@ -320,10 +317,7 @@ impl ReindexContext {
 
             if !children.is_empty() {
                 // Get children's subtree sizes
-                let sizes: Vec<u64> = children
-                    .iter()
-                    .map(|c| self.subtree_sizes[c])
-                    .collect();
+                let sizes: Vec<u64> = children.iter().map(|c| self.subtree_sizes[c]).collect();
 
                 // ALIGNED WITH KASPA: Use entire parent capacity for children
                 // The interval of a block should *strictly* contain the intervals of its
@@ -401,16 +395,36 @@ impl ReindexContext {
         required_allocation: u64,
     ) -> Result<(), BlockchainError> {
         // The chosen child is: (i) child of common_ancestor; (ii) an ancestor of reindex_root
-        let chosen_child = get_next_chain_ancestor_unchecked(storage, &reindex_root, &common_ancestor).await?;
-        let block_interval = storage.get_reachability_data(&allocation_block).await?.interval;
+        let chosen_child =
+            get_next_chain_ancestor_unchecked(storage, &reindex_root, &common_ancestor).await?;
+        let block_interval = storage
+            .get_reachability_data(&allocation_block)
+            .await?
+            .interval;
         let chosen_interval = storage.get_reachability_data(&chosen_child).await?.interval;
 
         if block_interval.start < chosen_interval.start {
             // allocation_block is in the subtree before the chosen child
-            self.reclaim_interval_before(storage, allocation_block, common_ancestor, chosen_child, reindex_root, required_allocation).await
+            self.reclaim_interval_before(
+                storage,
+                allocation_block,
+                common_ancestor,
+                chosen_child,
+                reindex_root,
+                required_allocation,
+            )
+            .await
         } else {
             // allocation_block is in the subtree after the chosen child
-            self.reclaim_interval_after(storage, allocation_block, common_ancestor, chosen_child, reindex_root, required_allocation).await
+            self.reclaim_interval_after(
+                storage,
+                allocation_block,
+                common_ancestor,
+                chosen_child,
+                reindex_root,
+                required_allocation,
+            )
+            .await
         }
     }
 
@@ -437,8 +451,15 @@ impl ReindexContext {
             if current == reindex_root {
                 // Reached reindex root. Allocate new slack for the chain we just traversed
                 let offset = required_allocation + self.slack * path_len - slack_sum;
-                self.apply_interval_op_and_propagate(storage, &current, offset, Interval::increase_start).await?;
-                self.offset_siblings_before(storage, &allocation_block, &current, offset).await?;
+                self.apply_interval_op_and_propagate(
+                    storage,
+                    &current,
+                    offset,
+                    Interval::increase_start,
+                )
+                .await?;
+                self.offset_siblings_before(storage, &allocation_block, &current, offset)
+                    .await?;
 
                 // Set the slack for each chain block to be reserved below during the chain walk-down
                 path_slack_alloc = self.slack;
@@ -451,8 +472,10 @@ impl ReindexContext {
             if slack_sum >= required_allocation {
                 // Set offset to be just enough to satisfy required allocation
                 let offset = slack_before_current - (slack_sum - required_allocation);
-                self.apply_interval_op(storage, &current, offset, Interval::increase_start).await?;
-                self.offset_siblings_before(storage, &allocation_block, &current, offset).await?;
+                self.apply_interval_op(storage, &current, offset, Interval::increase_start)
+                    .await?;
+                self.offset_siblings_before(storage, &allocation_block, &current, offset)
+                    .await?;
 
                 break;
             }
@@ -475,8 +498,10 @@ impl ReindexContext {
 
             let slack_before_current = interval_remaining_before(storage, &current).await?.size();
             let offset = slack_before_current.saturating_sub(path_slack_alloc);
-            self.apply_interval_op(storage, &current, offset, Interval::increase_start).await?;
-            self.offset_siblings_before(storage, &allocation_block, &current, offset).await?;
+            self.apply_interval_op(storage, &current, offset, Interval::increase_start)
+                .await?;
+            self.offset_siblings_before(storage, &allocation_block, &current, offset)
+                .await?;
         }
 
         Ok(())
@@ -504,8 +529,15 @@ impl ReindexContext {
             if current == reindex_root {
                 // Reached reindex root. Allocate new slack for the chain we just traversed
                 let offset = required_allocation + self.slack * path_len - slack_sum;
-                self.apply_interval_op_and_propagate(storage, &current, offset, Interval::decrease_end).await?;
-                self.offset_siblings_after(storage, &allocation_block, &current, offset).await?;
+                self.apply_interval_op_and_propagate(
+                    storage,
+                    &current,
+                    offset,
+                    Interval::decrease_end,
+                )
+                .await?;
+                self.offset_siblings_after(storage, &allocation_block, &current, offset)
+                    .await?;
 
                 // Set the slack for each chain block to be reserved below during the chain walk-down
                 path_slack_alloc = self.slack;
@@ -518,8 +550,10 @@ impl ReindexContext {
             if slack_sum >= required_allocation {
                 // Set offset to be just enough to satisfy required allocation
                 let offset = slack_after_current - (slack_sum - required_allocation);
-                self.apply_interval_op(storage, &current, offset, Interval::decrease_end).await?;
-                self.offset_siblings_after(storage, &allocation_block, &current, offset).await?;
+                self.apply_interval_op(storage, &current, offset, Interval::decrease_end)
+                    .await?;
+                self.offset_siblings_after(storage, &allocation_block, &current, offset)
+                    .await?;
 
                 break;
             }
@@ -542,8 +576,10 @@ impl ReindexContext {
 
             let slack_after_current = interval_remaining_after(storage, &current).await?.size();
             let offset = slack_after_current.saturating_sub(path_slack_alloc);
-            self.apply_interval_op(storage, &current, offset, Interval::decrease_end).await?;
-            self.offset_siblings_after(storage, &allocation_block, &current, offset).await?;
+            self.apply_interval_op(storage, &current, offset, Interval::decrease_end)
+                .await?;
+            self.offset_siblings_after(storage, &allocation_block, &current, offset)
+                .await?;
         }
 
         Ok(())
@@ -562,18 +598,29 @@ impl ReindexContext {
         offset: u64,
     ) -> Result<(), BlockchainError> {
         let parent_hash = storage.get_reachability_data(current).await?.parent;
-        let children = storage.get_reachability_data(&parent_hash).await?.children.clone();
+        let children = storage
+            .get_reachability_data(&parent_hash)
+            .await?
+            .children
+            .clone();
 
         let (siblings_before, _) = Self::split_children(&children, current.clone())?;
 
         for sibling in siblings_before.iter().rev() {
             if *sibling == *allocation_block {
                 // We reached our final destination, allocate offset to allocation_block by increasing end and break
-                self.apply_interval_op_and_propagate(storage, allocation_block, offset, Interval::increase_end).await?;
+                self.apply_interval_op_and_propagate(
+                    storage,
+                    allocation_block,
+                    offset,
+                    Interval::increase_end,
+                )
+                .await?;
                 break;
             }
             // For non-allocation_block siblings offset the interval upwards in order to create space
-            self.apply_interval_op_and_propagate(storage, sibling, offset, Interval::increase).await?;
+            self.apply_interval_op_and_propagate(storage, sibling, offset, Interval::increase)
+                .await?;
         }
 
         Ok(())
@@ -592,18 +639,29 @@ impl ReindexContext {
         offset: u64,
     ) -> Result<(), BlockchainError> {
         let parent_hash = storage.get_reachability_data(current).await?.parent;
-        let children = storage.get_reachability_data(&parent_hash).await?.children.clone();
+        let children = storage
+            .get_reachability_data(&parent_hash)
+            .await?
+            .children
+            .clone();
 
         let (_, siblings_after) = Self::split_children(&children, current.clone())?;
 
         for sibling in siblings_after.iter() {
             if *sibling == *allocation_block {
                 // We reached our final destination, allocate offset to allocation_block by decreasing only start and break
-                self.apply_interval_op_and_propagate(storage, allocation_block, offset, Interval::decrease_start).await?;
+                self.apply_interval_op_and_propagate(
+                    storage,
+                    allocation_block,
+                    offset,
+                    Interval::decrease_start,
+                )
+                .await?;
                 break;
             }
             // For siblings before allocation_block offset the interval downwards to create space
-            self.apply_interval_op_and_propagate(storage, sibling, offset, Interval::decrease).await?;
+            self.apply_interval_op_and_propagate(storage, sibling, offset, Interval::decrease)
+                .await?;
         }
 
         Ok(())
@@ -671,13 +729,21 @@ impl ReindexContext {
         child: Hash,
         is_final_reindex_root: bool,
     ) -> Result<(), BlockchainError> {
-        let children = storage.get_reachability_data(&parent).await?.children.clone();
+        let children = storage
+            .get_reachability_data(&parent)
+            .await?
+            .children
+            .clone();
 
         // Split the `children` of `parent` to siblings before `child` and siblings after `child`
         let (siblings_before, siblings_after) = Self::split_children(&children, child.clone())?;
 
-        let siblings_before_subtrees_sum: u64 = self.tighten_intervals_before(storage, parent.clone(), siblings_before).await?;
-        let siblings_after_subtrees_sum: u64 = self.tighten_intervals_after(storage, parent.clone(), siblings_after).await?;
+        let siblings_before_subtrees_sum: u64 = self
+            .tighten_intervals_before(storage, parent.clone(), siblings_before)
+            .await?;
+        let siblings_after_subtrees_sum: u64 = self
+            .tighten_intervals_after(storage, parent.clone(), siblings_after)
+            .await?;
 
         self.expand_interval_to_chosen(
             storage,
@@ -686,7 +752,8 @@ impl ReindexContext {
             siblings_before_subtrees_sum,
             siblings_after_subtrees_sum,
             is_final_reindex_root,
-        ).await?;
+        )
+        .await?;
 
         Ok(())
     }
@@ -713,7 +780,7 @@ impl ReindexContext {
         // Allocate tight interval right after parent's start + slack
         let interval_before = Interval::new(
             parent_interval.start + self.slack,
-            parent_interval.start + self.slack + sum - 1
+            parent_interval.start + self.slack + sum - 1,
         );
 
         // Split the tight interval among siblings proportionally
@@ -751,7 +818,7 @@ impl ReindexContext {
         // Allocate tight interval right before parent's end - slack
         let interval_after = Interval::new(
             parent_interval.end - self.slack - sum,
-            parent_interval.end - self.slack - 1
+            parent_interval.end - self.slack - 1,
         );
 
         // Split the tight interval among siblings proportionally
@@ -801,7 +868,8 @@ impl ReindexContext {
             next time this method is called (next time the reindex root moves), `allocation` is likely to contain `current`.
             Note that below following the propagation we reassign the full `allocation` to `child`.
             */
-            let narrowed = Interval::new(allocation.start + self.slack, allocation.end - self.slack);
+            let narrowed =
+                Interval::new(allocation.start + self.slack, allocation.end - self.slack);
             let mut child_data = storage.get_reachability_data(&child).await?;
             child_data.interval = narrowed;
             storage.set_reachability_data(&child, &child_data).await?;
@@ -846,8 +914,8 @@ async fn is_strict_chain_ancestor_of<S: Storage>(
 /// Search result for binary search in ordered children
 #[allow(dead_code)]
 enum SearchOutput {
-    NotFound(usize),       // Position to insert at
-    Found(Hash, usize),    // Found hash and its index
+    NotFound(usize),    // Position to insert at
+    Found(Hash, usize), // Found hash and its index
 }
 
 /// Binary search for a descendant in an ordered list of children
@@ -860,7 +928,11 @@ async fn binary_search_descendant<S: Storage>(
     descendant: &Hash,
 ) -> Result<SearchOutput, BlockchainError> {
     // Get the unique endpoint for the descendant
-    let point = storage.get_reachability_data(descendant).await?.interval.end;
+    let point = storage
+        .get_reachability_data(descendant)
+        .await?
+        .interval
+        .end;
 
     // Pre-fetch all interval start points (avoids blocking inside binary search closure)
     let mut interval_starts = Vec::with_capacity(ordered_hashes.len());

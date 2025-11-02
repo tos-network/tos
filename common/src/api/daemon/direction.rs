@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::time::TimestampMillis;
 
@@ -12,7 +12,7 @@ pub enum Direction {
     // Because of desync, we may receive the object while sending it
     Out,
     // Cannot be updated
-    Both
+    Both,
 }
 
 impl Direction {
@@ -22,17 +22,17 @@ impl Direction {
                 Self::In => {
                     *self = Self::Both;
                     true
-                },
-                _ => false
+                }
+                _ => false,
             },
             Self::In => match direction {
                 Self::Out => {
                     *self = Self::Both;
                     true
-                },
-                _ => false
+                }
+                _ => false,
             },
-            _ => false
+            _ => false,
         }
     }
 }
@@ -43,18 +43,18 @@ impl Direction {
 pub enum TimedDirection {
     // We don't update it because it's In, we won't send back
     In {
-        received_at: TimestampMillis
+        received_at: TimestampMillis,
     },
     // Out can be updated with In to be transformed to Both
     // Because of desync, we may receive the object while sending it
     Out {
-        sent_at: TimestampMillis
+        sent_at: TimestampMillis,
     },
     // Cannot be updated
     Both {
         received_at: TimestampMillis,
         sent_at: TimestampMillis,
-    }
+    },
 }
 
 impl TimedDirection {
@@ -87,20 +87,20 @@ impl TimedDirection {
                         sent_at,
                     };
                     true
-                },
-                _ => false
+                }
+                _ => false,
             },
             Self::In { received_at } => match direction {
                 Self::Out { sent_at } => {
                     *self = Self::Both {
                         received_at,
-                        sent_at
+                        sent_at,
                     };
                     true
-                },
-                _ => false
+                }
+                _ => false,
             },
-            _ => false
+            _ => false,
         }
     }
 }

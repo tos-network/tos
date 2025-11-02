@@ -1,6 +1,9 @@
+use crate::core::{
+    error::BlockchainError,
+    storage::{CacheProvider, RocksStorage},
+};
 use async_trait::async_trait;
 use log::trace;
-use crate::core::{error::BlockchainError, storage::{CacheProvider, RocksStorage}};
 
 #[async_trait]
 impl CacheProvider for RocksStorage {

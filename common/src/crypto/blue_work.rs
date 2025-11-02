@@ -2,8 +2,8 @@
 //
 // U256 provides more than enough range for cumulative work calculations.
 
-use primitive_types::U256;
 use crate::serializer::{Reader, ReaderError, Serializer, Writer};
+use primitive_types::U256;
 
 /// Blue work type - cumulative proof-of-work for blue (selected) chain
 ///

@@ -1,11 +1,14 @@
-use actix_web::{dev::RequestHead, http::{Uri, header::HeaderMap}};
-use reqwest::{Method, Version};
 use actix_web::HttpRequest as ActixHttpRequest;
+use actix_web::{
+    dev::RequestHead,
+    http::{header::HeaderMap, Uri},
+};
+use reqwest::{Method, Version};
 
 // Copy of actix_web::HttpRequest
 // Its done to Copy it & save it in WebSocketSession
 pub struct HttpRequest {
-    head: RequestHead
+    head: RequestHead,
 }
 
 impl HttpRequest {
@@ -29,7 +32,7 @@ impl HttpRequest {
     /// Read the Request Version.
     #[inline]
     pub fn version(&self) -> Version {
-    self.head().version
+        self.head().version
     }
 
     #[inline]
@@ -42,7 +45,7 @@ impl HttpRequest {
 impl From<ActixHttpRequest> for HttpRequest {
     fn from(req: ActixHttpRequest) -> Self {
         Self {
-            head: req.head().clone()
+            head: req.head().clone(),
         }
     }
 }

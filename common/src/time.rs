@@ -1,6 +1,6 @@
 // A simple module to define the time types used in the project
 
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // Millis timestamps used to determine it using its type
 pub type TimestampMillis = u64;
@@ -11,7 +11,9 @@ pub type TimestampSeconds = u64;
 #[inline]
 pub fn get_current_time() -> Duration {
     let start = SystemTime::now();
-    let time = start.duration_since(UNIX_EPOCH).expect("Incorrect time returned from get_current_time");
+    let time = start
+        .duration_since(UNIX_EPOCH)
+        .expect("Incorrect time returned from get_current_time");
     time
 }
 

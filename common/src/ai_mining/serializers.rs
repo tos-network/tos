@@ -200,7 +200,7 @@ impl Serializer for AccountReputation {
         self.transaction_count.write(writer);
         self.stake_amount.write(writer);
         self.last_submission_time.write(writer);
-        self.reputation_score.write(writer);  // Now u64, no need for to_bits()
+        self.reputation_score.write(writer); // Now u64, no need for to_bits()
         self.total_rewards_earned.write(writer);
         self.successful_validations.write(writer);
         self.total_validations.write(writer);
@@ -212,7 +212,7 @@ impl Serializer for AccountReputation {
         let transaction_count = u64::read(reader)?;
         let stake_amount = u64::read(reader)?;
         let last_submission_time = u64::read(reader)?;
-        let reputation_score = u64::read(reader)?;  // Now u64, no need for from_bits()
+        let reputation_score = u64::read(reader)?; // Now u64, no need for from_bits()
         let total_rewards_earned = u64::read(reader)?;
         let successful_validations = u64::read(reader)?;
         let total_validations = u64::read(reader)?;

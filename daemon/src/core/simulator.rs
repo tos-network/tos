@@ -1,25 +1,17 @@
+use super::{
+    blockchain::{Blockchain, BroadcastOption},
+    storage::Storage,
+};
+use log::{error, info};
+use rand::{rngs::OsRng, Rng};
+use serde::{Deserialize, Serialize};
 use std::{
-    str::FromStr,
     fmt::{Display, Formatter},
+    str::FromStr,
     sync::Arc,
     time::Duration,
 };
-use serde::{Serialize, Deserialize};
-use log::{info, error};
-use rand::{rngs::OsRng, Rng};
-use tos_common::{
-    tokio::time::interval,
-    crypto::KeyPair,
-    config::TIPS_LIMIT,
-    block::Block
-};
-use super::{
-    blockchain::{
-        Blockchain,
-        BroadcastOption
-    },
-    storage::Storage
-};
+use tos_common::{block::Block, config::TIPS_LIMIT, crypto::KeyPair, tokio::time::interval};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Simulator {
@@ -39,7 +31,7 @@ impl FromStr for Simulator {
             "blockchain" | "0" => Self::Blockchain,
             "blockdag" | "1" => Self::BlockDag,
             "stress" | "2" => Self::Stress,
-            _ => return Err("Invalid simulator type".into())
+            _ => return Err("Invalid simulator type".into()),
         })
     }
 }
@@ -47,7 +39,7 @@ impl FromStr for Simulator {
 impl Serialize for Simulator {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer
+        S: serde::Serializer,
     {
         serializer.serialize_str(&self.to_string())
     }
@@ -56,7 +48,7 @@ impl Serialize for Simulator {
 impl<'a> Deserialize<'a> for Simulator {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'a>
+        D: serde::Deserializer<'a>,
     {
         let s = String::deserialize(deserializer)?;
         Simulator::from_str(&s).map_err(serde::de::Error::custom)
@@ -80,7 +72,7 @@ impl Simulator {
     pub async fn start<S: Storage>(&self, blockchain: Arc<Blockchain<S>>) {
         let millis_interval = match self {
             Self::Stress => 300,
-            _ => 5000
+            _ => 5000,
         };
 
         let mut interval = interval(Duration::from_millis(millis_interval));
@@ -99,16 +91,21 @@ impl Simulator {
             let blocks_count = match self {
                 Self::BlockDag => rng.gen_range(1..=TIPS_LIMIT),
                 Self::Stress => rng.gen_range(1..=10),
-                _ => 1
+                _ => 1,
             };
 
             // Generate blocks
-            let blocks = self.generate_blocks(blocks_count, &mut rng, &keys, &blockchain).await;
+            let blocks = self
+                .generate_blocks(blocks_count, &mut rng, &keys, &blockchain)
+                .await;
 
             // Add all blocks to the chain
             for block in blocks {
-                match blockchain.add_new_block(block, None, BroadcastOption::None, false).await {
-                    Ok(_) => {},
+                match blockchain
+                    .add_new_block(block, None, BroadcastOption::None, false)
+                    .await
+                {
+                    Ok(_) => {}
                     Err(e) => {
                         if log::log_enabled!(log::Level::Error) {
                             error!("Error while adding block: {}", e);
@@ -127,7 +124,13 @@ impl Simulator {
         }
     }
 
-    async fn generate_blocks(&self, max_blocks: usize, rng: &mut OsRng, keys: &Vec<KeyPair>, blockchain: &Arc<Blockchain<impl Storage>>) -> Vec<Block> {
+    async fn generate_blocks(
+        &self,
+        max_blocks: usize,
+        rng: &mut OsRng,
+        keys: &Vec<KeyPair>,
+        blockchain: &Arc<Blockchain<impl Storage>>,
+    ) -> Vec<Block> {
         info!("Adding simulated blocks");
         let n = rng.gen_range(1..=max_blocks);
         let mut blocks = Vec::with_capacity(n);
@@ -137,7 +140,7 @@ impl Simulator {
             match blockchain.mine_block(&selected_key.compress()).await {
                 Ok(block) => {
                     blocks.push(block);
-                },
+                }
                 Err(e) => {
                     if log::log_enabled!(log::Level::Error) {
                         error!("Error while mining block: {}", e);

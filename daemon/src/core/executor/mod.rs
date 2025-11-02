@@ -1,0 +1,5 @@
+// Executor module - handles parallel transaction execution
+
+pub mod parallel_executor;
+
+pub use parallel_executor::{get_optimal_parallelism, ParallelExecutor};

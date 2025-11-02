@@ -146,9 +146,9 @@ impl<const BPS: u64> Bps<BPS> {
     pub const fn max_block_parents() -> u8 {
         let val = (Self::ghostdag_k() / 2) as u8;
         if val < 10 {
-            10  // Minimum for DAG connectivity
+            10 // Minimum for DAG connectivity
         } else if val > 16 {
-            16  // Maximum to control validation complexity
+            16 // Maximum to control validation complexity
         } else {
             val
         }
@@ -175,9 +175,9 @@ impl<const BPS: u64> Bps<BPS> {
     pub const fn mergeset_size_limit() -> u64 {
         let val = Self::ghostdag_k() * 2;
         if val < 180 {
-            180  // Minimum merge capacity
+            180 // Minimum merge capacity
         } else if val > 512 {
-            512  // Storage complexity bound
+            512 // Storage complexity bound
         } else {
             val
         }
@@ -289,8 +289,7 @@ pub fn calculate_ghostdag_k(x: f64, delta: f64) -> u64 {
     assert!(x > 0.0, "Expected anticone size must be positive");
     assert!(delta > 0.0 && delta < 1.0, "Delta must be in range (0, 1)");
 
-    let (mut k, mut sigma, mut fraction, exp) =
-        (0u64, 0.0, 1.0, std::f64::consts::E.powf(-x));
+    let (mut k, mut sigma, mut fraction, exp) = (0u64, 0.0, 1.0, std::f64::consts::E.powf(-x));
 
     loop {
         sigma += exp * fraction;
@@ -298,7 +297,7 @@ pub fn calculate_ghostdag_k(x: f64, delta: f64) -> u64 {
             return k;
         }
         k += 1;
-        fraction *= x / k as f64;  // Computes x^k / k! incrementally
+        fraction *= x / k as f64; // Computes x^k / k! incrementally
     }
 }
 
@@ -380,15 +379,15 @@ mod tests {
         let one_bps_finality_time = OneBps::finality_depth() * OneBps::target_time_per_block();
         let ten_bps_finality_time = TenBps::finality_depth() * TenBps::target_time_per_block();
 
-        assert_eq!(one_bps_finality_time, 100_000);  // 100 seconds
-        assert_eq!(ten_bps_finality_time, 100_000);  // 100 seconds
+        assert_eq!(one_bps_finality_time, 100_000); // 100 seconds
+        assert_eq!(ten_bps_finality_time, 100_000); // 100 seconds
 
         // Coinbase maturity time: ~100 seconds
         let one_bps_maturity_time = OneBps::coinbase_maturity() * OneBps::target_time_per_block();
         let ten_bps_maturity_time = TenBps::coinbase_maturity() * TenBps::target_time_per_block();
 
-        assert_eq!(one_bps_maturity_time, 100_000);  // 100 seconds
-        assert_eq!(ten_bps_maturity_time, 100_000);  // 100 seconds
+        assert_eq!(one_bps_maturity_time, 100_000); // 100 seconds
+        assert_eq!(ten_bps_maturity_time, 100_000); // 100 seconds
     }
 
     #[test]
@@ -397,7 +396,11 @@ mod tests {
         // x = 2 * 2 * 1 = 4.0
         // Expected K ~9.7, mathematically calculated result may vary slightly
         let k = calculate_ghostdag_k(4.0, 0.001);
-        assert!(k >= 9 && k <= 11, "K should be around 9-11 for 1 BPS, got {}", k);
+        assert!(
+            k >= 9 && k <= 11,
+            "K should be around 9-11 for 1 BPS, got {}",
+            k
+        );
     }
 
     #[test]
@@ -406,7 +409,11 @@ mod tests {
         // x = 2 * 2 * 10 = 40.0
         // Expected K ~63.4
         let k = calculate_ghostdag_k(40.0, 0.001);
-        assert!(k >= 60 && k <= 65, "K should be around 60-65 for 10 BPS, got {}", k);
+        assert!(
+            k >= 60 && k <= 65,
+            "K should be around 60-65 for 10 BPS, got {}",
+            k
+        );
     }
 
     #[test]

@@ -1,53 +1,43 @@
+mod cache;
 mod opaque;
-mod random;
 mod output;
 mod provider;
-mod cache;
+mod random;
 
-use std::{
-    any::TypeId,
-    collections::{hash_map::Entry, HashMap, HashSet}
-};
-use anyhow::Context as AnyhowContext;
-use better_any::Tid;
-use indexmap::IndexMap;
-use log::{debug, info};
-use tos_builder::EnvironmentBuilder;
-use tos_vm::{
-    Context,
-    FnInstance,
-    FnParams,
-    FnReturnType,
-    OpaqueWrapper,
-    Primitive,
-    Type,
-    ValueCell
-};
 use crate::{
     block::{Block, TopoHeight},
-    config::{
-        FEE_PER_ACCOUNT_CREATION,
-        FEE_PER_BYTE_OF_EVENT_DATA
-    },
+    config::{FEE_PER_ACCOUNT_CREATION, FEE_PER_BYTE_OF_EVENT_DATA},
     crypto::{
         // Balance simplification: CiphertextValidityProof removed (not needed for plaintext balances)
         // proofs::CiphertextValidityProof,
         Address,
         Hash,
         PublicKey,
-        Signature
+        Signature,
     },
     serializer::Serializer,
     transaction::ContractDeposit,
-    versioned_type::VersionedState
+    versioned_type::VersionedState,
+};
+use anyhow::Context as AnyhowContext;
+use better_any::Tid;
+use indexmap::IndexMap;
+use log::{debug, info};
+use std::{
+    any::TypeId,
+    collections::{hash_map::Entry, HashMap, HashSet},
+};
+use tos_builder::EnvironmentBuilder;
+use tos_vm::{
+    Context, FnInstance, FnParams, FnReturnType, OpaqueWrapper, Primitive, Type, ValueCell,
 };
 
-pub use random::DeterministicRandom;
 pub use output::*;
+pub use random::DeterministicRandom;
 
+pub use cache::*;
 pub use opaque::*;
 pub use provider::*;
-pub use cache::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferOutput {
@@ -105,7 +95,7 @@ pub struct ContractEventTracker {
     // All the transfers made by all contracts
     pub transfers: HashMap<PublicKey, HashMap<Hash, u64>>,
     // All assets registered by all contracts
-    pub assets_created: HashSet<Hash>
+    pub assets_created: HashSet<Hash>,
 }
 
 // Build the environment for the contract
@@ -120,8 +110,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
     env.get_mut_function("println", None)
         .set_on_call(println_fn);
 
-    env.get_mut_function("debug", None)
-        .set_on_call(debug_fn);
+    env.get_mut_function("debug", None).set_on_call(debug_fn);
 
     // Opaque type but we provide getters
     // All opaque types not allowed as entry input
@@ -130,8 +119,10 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
 
     let random_type = Type::Opaque(env.register_opaque::<OpaqueRandom>("Random", false));
     let storage_type = Type::Opaque(env.register_opaque::<OpaqueStorage>("Storage", false));
-    let read_only_storage_type = Type::Opaque(env.register_opaque::<OpaqueReadOnlyStorage>("ReadOnlyStorage", false));
-    let memory_storage_type = Type::Opaque(env.register_opaque::<OpaqueMemoryStorage>("MemoryStorage", false));
+    let read_only_storage_type =
+        Type::Opaque(env.register_opaque::<OpaqueReadOnlyStorage>("ReadOnlyStorage", false));
+    let memory_storage_type =
+        Type::Opaque(env.register_opaque::<OpaqueMemoryStorage>("MemoryStorage", false));
     let asset_type = Type::Opaque(env.register_opaque::<Asset>("Asset", false));
 
     // All others opaque types accepted as input
@@ -152,7 +143,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             transaction,
             5,
-            Some(tx_type.clone())
+            Some(tx_type.clone()),
         );
         env.register_native_function(
             "nonce",
@@ -160,7 +151,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             transaction_nonce,
             5,
-            Some(Type::U64)
+            Some(Type::U64),
         );
         env.register_native_function(
             "hash",
@@ -168,7 +159,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             transaction_hash,
             5,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
         env.register_native_function(
             "source",
@@ -176,7 +167,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             transaction_source,
             5,
-            Some(address_type.clone())
+            Some(address_type.clone()),
         );
         env.register_native_function(
             "fee",
@@ -184,7 +175,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             transaction_fee,
             5,
-            Some(Type::U64)
+            Some(Type::U64),
         );
         env.register_native_function(
             "signature",
@@ -192,7 +183,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             transaction_signature,
             5,
-            Some(signature_type.clone())
+            Some(signature_type.clone()),
         );
     }
 
@@ -205,7 +196,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_current,
             5,
-            Some(block_type.clone())
+            Some(block_type.clone()),
         );
         env.register_native_function(
             "nonce",
@@ -213,7 +204,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_nonce,
             5,
-            Some(Type::U64)
+            Some(Type::U64),
         );
         env.register_native_function(
             "timestamp",
@@ -221,7 +212,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_timestamp,
             5,
-            Some(Type::U64)
+            Some(Type::U64),
         );
         env.register_native_function(
             "height",
@@ -229,7 +220,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_height,
             5,
-            Some(Type::U64)
+            Some(Type::U64),
         );
         env.register_native_function(
             "extra_nonce",
@@ -237,7 +228,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_extra_nonce,
             5,
-            Some(Type::Array(Box::new(Type::U8)))
+            Some(Type::Array(Box::new(Type::U8))),
         );
         env.register_native_function(
             "hash",
@@ -245,7 +236,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_hash,
             5,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
         env.register_native_function(
             "miner",
@@ -253,7 +244,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_miner,
             5,
-            Some(address_type.clone())
+            Some(address_type.clone()),
         );
         env.register_native_function(
             "version",
@@ -261,7 +252,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_version,
             5,
-            Some(Type::U8)
+            Some(Type::U8),
         );
         env.register_native_function(
             "tips",
@@ -269,7 +260,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_tips,
             5,
-            Some(Type::Array(Box::new(hash_type.clone())))
+            Some(Type::Array(Box::new(hash_type.clone()))),
         );
         env.register_native_function(
             "transactions_hashes",
@@ -277,7 +268,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_transactions_hashes,
             50,
-            Some(Type::Array(Box::new(hash_type.clone())))
+            Some(Type::Array(Box::new(hash_type.clone()))),
         );
         env.register_native_function(
             "transactions",
@@ -285,7 +276,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_transactions,
             250,
-            Some(Type::Array(Box::new(tx_type.clone())))
+            Some(Type::Array(Box::new(tx_type.clone()))),
         );
         env.register_native_function(
             "transactions_count",
@@ -293,7 +284,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             block_transactions_count,
             1,
-            Some(Type::U32)
+            Some(Type::U32),
         );
     }
 
@@ -306,7 +297,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             storage,
             5,
-            Some(storage_type.clone())
+            Some(storage_type.clone()),
         );
         env.register_native_function(
             "load",
@@ -314,7 +305,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("key", Type::Any)],
             storage_load::<P>,
             50,
-            Some(Type::Optional(Box::new(Type::Any)))
+            Some(Type::Optional(Box::new(Type::Any))),
         );
         env.register_native_function(
             "has",
@@ -322,7 +313,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("key", Type::Any)],
             storage_has::<P>,
             25,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
         env.register_native_function(
             "store",
@@ -330,7 +321,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("key", Type::Any), ("value", Type::Any)],
             storage_store::<P>,
             50,
-            Some(Type::Optional(Box::new(Type::Any)))
+            Some(Type::Optional(Box::new(Type::Any))),
         );
         env.register_native_function(
             "delete",
@@ -338,7 +329,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("key", Type::Any)],
             storage_delete::<P>,
             50,
-            Some(Type::Optional(Box::new(Type::Any)))
+            Some(Type::Optional(Box::new(Type::Any))),
         );
     }
 
@@ -351,7 +342,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("contract", hash_type.clone())],
             read_only_storage::<P>,
             15,
-            Some(Type::Optional(Box::new(read_only_storage_type.clone())))
+            Some(Type::Optional(Box::new(read_only_storage_type.clone()))),
         );
         env.register_native_function(
             "load",
@@ -359,7 +350,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("key", Type::Any)],
             read_only_storage_load::<P>,
             50,
-            Some(Type::Optional(Box::new(Type::Any)))
+            Some(Type::Optional(Box::new(Type::Any))),
         );
         env.register_native_function(
             "has",
@@ -367,7 +358,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("key", Type::Any)],
             read_only_storage_has::<P>,
             25,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
     }
 
@@ -380,7 +371,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             memory_storage,
             5,
-            Some(memory_storage_type.clone())
+            Some(memory_storage_type.clone()),
         );
         env.register_native_function(
             "load",
@@ -388,7 +379,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("key", Type::Any)],
             memory_storage_load::<P>,
             50,
-            Some(Type::Optional(Box::new(Type::Any)))
+            Some(Type::Optional(Box::new(Type::Any))),
         );
         env.register_native_function(
             "has",
@@ -396,7 +387,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("key", Type::Any)],
             memory_storage_has::<P>,
             25,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
         env.register_native_function(
             "store",
@@ -404,7 +395,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("key", Type::Any), ("value", Type::Any)],
             memory_storage_store::<P>,
             50,
-            Some(Type::Optional(Box::new(Type::Any)))
+            Some(Type::Optional(Box::new(Type::Any))),
         );
         env.register_native_function(
             "delete",
@@ -412,7 +403,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("key", Type::Any)],
             memory_storage_delete::<P>,
             50,
-            Some(Type::Optional(Box::new(Type::Any)))
+            Some(Type::Optional(Box::new(Type::Any))),
         );
     }
 
@@ -424,7 +415,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             address_is_mainnet,
             5,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
         env.register_native_function(
             "is_normal",
@@ -432,7 +423,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             address_is_normal,
             5,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
         env.register_native_function(
             "to_public_key_bytes",
@@ -440,7 +431,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             address_public_key_bytes,
             10,
-            Some(Type::Bytes)
+            Some(Type::Bytes),
         );
         env.register_static_function(
             "from_string",
@@ -448,7 +439,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("address", Type::String)],
             address_from_string,
             75,
-            Some(address_type.clone())
+            Some(address_type.clone()),
         );
     }
 
@@ -460,7 +451,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             hash_to_bytes_fn,
             5,
-            Some(Type::Bytes)
+            Some(Type::Bytes),
         );
         env.register_native_function(
             "to_array",
@@ -468,7 +459,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             hash_to_array_fn,
             5,
-            Some(Type::Array(Box::new(Type::U8)))
+            Some(Type::Array(Box::new(Type::U8))),
         );
         env.register_native_function(
             "to_u256",
@@ -476,7 +467,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             hash_to_u256_fn,
             5,
-            Some(Type::U256)
+            Some(Type::U256),
         );
         env.register_native_function(
             "to_hex",
@@ -484,7 +475,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             hash_to_hex_fn,
             20,
-            Some(Type::String)
+            Some(Type::String),
         );
         env.register_static_function(
             "from_bytes",
@@ -492,7 +483,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("bytes", Type::Bytes)],
             hash_from_bytes_fn,
             75,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
         env.register_static_function(
             "from_array",
@@ -500,7 +491,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("bytes", Type::Array(Box::new(Type::U8)))],
             hash_from_array_fn,
             75,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
         env.register_static_function(
             "from_u256",
@@ -508,7 +499,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("value", Type::U256)],
             hash_from_u256_fn,
             75,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
         env.register_static_function(
             "from_hex",
@@ -516,7 +507,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("hex", Type::String)],
             hash_from_hex_fn,
             75,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
         env.register_static_function(
             "blake3",
@@ -524,7 +515,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("input", Type::Array(Box::new(Type::U8)))],
             blake3_fn,
             3000,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
         env.register_static_function(
             "sha256",
@@ -532,7 +523,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("input", Type::Array(Box::new(Type::U8)))],
             sha256_fn,
             7500,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
         env.register_static_function(
             "zero",
@@ -540,7 +531,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             hash_zero_fn,
             1,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
         env.register_static_function(
             "max",
@@ -548,7 +539,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             hash_max_fn,
             1,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
     }
 
@@ -561,7 +552,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             random_fn,
             5,
-            Some(random_type.clone())
+            Some(random_type.clone()),
         );
         env.register_native_function(
             "next_u8",
@@ -569,7 +560,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             random_u8,
             5,
-            Some(Type::U8)
+            Some(Type::U8),
         );
         env.register_native_function(
             "next_u16",
@@ -577,7 +568,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             random_u16,
             5,
-            Some(Type::U16)
+            Some(Type::U16),
         );
         env.register_native_function(
             "next_u32",
@@ -585,7 +576,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             random_u32,
             5,
-            Some(Type::U32)
+            Some(Type::U32),
         );
         env.register_native_function(
             "next_u64",
@@ -593,7 +584,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             random_u64,
             5,
-            Some(Type::U64)
+            Some(Type::U64),
         );
         env.register_native_function(
             "next_u128",
@@ -601,7 +592,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             random_u128,
             5,
-            Some(Type::U128)
+            Some(Type::U128),
         );
         env.register_native_function(
             "next_u256",
@@ -609,7 +600,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             random_u256,
             5,
-            Some(Type::U256)
+            Some(Type::U256),
         );
         env.register_native_function(
             "next_bool",
@@ -617,7 +608,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             random_bool,
             5,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
     }
 
@@ -629,7 +620,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("id", Type::U64)],
             asset_get_by_id::<P>,
             1000,
-            Some(Type::Optional(Box::new(asset_type.clone())))
+            Some(Type::Optional(Box::new(asset_type.clone()))),
         );
         env.register_static_function(
             "create",
@@ -643,7 +634,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             ],
             asset_create::<P>,
             2500,
-            Some(Type::Optional(Box::new(asset_type.clone())))
+            Some(Type::Optional(Box::new(asset_type.clone()))),
         );
         env.register_static_function(
             "get_by_hash",
@@ -651,7 +642,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("hash", hash_type.clone())],
             asset_get_by_hash::<P>,
             500,
-            Some(Type::Optional(Box::new(asset_type.clone())))
+            Some(Type::Optional(Box::new(asset_type.clone()))),
         );
         env.register_native_function(
             "get_max_supply",
@@ -659,7 +650,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             asset_get_max_supply::<P>,
             5,
-            Some(Type::Optional(Box::new(Type::U64)))
+            Some(Type::Optional(Box::new(Type::U64))),
         );
         env.register_native_function(
             "get_supply",
@@ -667,7 +658,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             asset_get_supply::<P>,
             15,
-            Some(Type::U64)
+            Some(Type::U64),
         );
         env.register_native_function(
             "get_name",
@@ -675,7 +666,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             asset_get_name,
             5,
-            Some(Type::String)
+            Some(Type::String),
         );
         env.register_native_function(
             "get_ticker",
@@ -683,7 +674,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             asset_get_ticker,
             5,
-            Some(Type::String)
+            Some(Type::String),
         );
         env.register_native_function(
             "get_hash",
@@ -691,7 +682,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             asset_get_hash,
             5,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
         env.register_native_function(
             "mint",
@@ -699,7 +690,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("amount", Type::U64)],
             asset_mint::<P>,
             500,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
         env.register_native_function(
             "is_read_only",
@@ -707,7 +698,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             asset_is_read_only,
             5,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
         env.register_native_function(
             "get_contract_hash",
@@ -715,7 +706,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             asset_get_contract_hash::<P>,
             5,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
         env.register_native_function(
             "get_id",
@@ -723,7 +714,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             asset_get_contract_id::<P>,
             5,
-            Some(Type::Optional(Box::new(Type::U64)))
+            Some(Type::Optional(Box::new(Type::U64))),
         );
         env.register_native_function(
             "transfer_ownership",
@@ -731,7 +722,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("contract", hash_type.clone())],
             asset_transfer_ownership::<P>,
             250,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
     }
 
@@ -744,7 +735,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             get_contract_hash,
             5,
-            Some(hash_type.clone())
+            Some(hash_type.clone()),
         );
 
         // Retrieve the deposit for the given asset
@@ -754,7 +745,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("asset", hash_type.clone())],
             get_deposit_for_asset,
             5,
-            Some(Type::Optional(Box::new(Type::U64)))
+            Some(Type::Optional(Box::new(Type::U64))),
         );
 
         // Retrieve the balance for the given asset
@@ -764,7 +755,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("asset", hash_type.clone())],
             get_balance_for_asset::<P>,
             25,
-            Some(Type::U64)
+            Some(Type::U64),
         );
 
         env.register_native_function(
@@ -777,19 +768,16 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             ],
             transfer::<P>,
             500,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
 
         env.register_native_function(
             "burn",
             None,
-            vec![
-                ("amount", Type::U64),
-                ("asset", hash_type.clone()),
-            ],
+            vec![("amount", Type::U64), ("asset", hash_type.clone())],
             burn::<P>,
             500,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
     }
 
@@ -804,7 +792,7 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             ],
             signature_verify_fn,
             500,
-            Some(Type::Bool)
+            Some(Type::Bool),
         );
         env.register_static_function(
             "from_bytes",
@@ -812,20 +800,17 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![("bytes", Type::Array(Box::new(Type::U8)))],
             signature_from_bytes_fn,
             75,
-            Some(signature_type.clone())
+            Some(signature_type.clone()),
         );
     }
 
     env.register_native_function(
         "fire_event",
         None,
-        vec![
-            ("id", Type::U64),
-            ("data", Type::Any)
-        ],
+        vec![("id", Type::U64), ("data", Type::Any)],
         fire_event_fn,
         250,
-        None
+        None,
     );
 
     // Misc
@@ -835,11 +820,14 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             None,
             vec![
                 ("address", address_type.clone()),
-                ("asset", hash_type.clone())
+                ("asset", hash_type.clone()),
             ],
             get_account_balance_of::<P>,
             1000,
-            Some(Type::Optional(Box::new(Type::Tuples(vec![Type::U64, Type::U64]))))
+            Some(Type::Optional(Box::new(Type::Tuples(vec![
+                Type::U64,
+                Type::U64,
+            ])))),
         );
 
         env.register_native_function(
@@ -848,22 +836,29 @@ pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
             vec![],
             get_gas_usage,
             1,
-            Some(Type::U64)
+            Some(Type::U64),
         );
     }
 
     env
 }
 
-pub fn provider_from_context<'a, 'ty, 'r, P: ContractProvider>(context: &'a mut Context<'ty, 'r>) -> Result<&'a mut P, anyhow::Error> {
-    let data: &mut ContractProviderWrapper<P> = context.get_mut()
-        .context("Provider not initialized")?;
+pub fn provider_from_context<'a, 'ty, 'r, P: ContractProvider>(
+    context: &'a mut Context<'ty, 'r>,
+) -> Result<&'a mut P, anyhow::Error> {
+    let data: &mut ContractProviderWrapper<P> =
+        context.get_mut().context("Provider not initialized")?;
 
     Ok(data.0)
 }
 
-pub fn from_context<'a, 'ty, 'r, P: ContractProvider>(context: &'a mut Context<'ty, 'r>) -> Result<(&'a mut P, &'a mut ChainState<'ty>), anyhow::Error> {
-    let mut datas = context.get_many_mut([&ContractProviderWrapper::<P>::id(), &TypeId::of::<ChainState>()]);
+pub fn from_context<'a, 'ty, 'r, P: ContractProvider>(
+    context: &'a mut Context<'ty, 'r>,
+) -> Result<(&'a mut P, &'a mut ChainState<'ty>), anyhow::Error> {
+    let mut datas = context.get_many_mut([
+        &ContractProviderWrapper::<P>::id(),
+        &TypeId::of::<ChainState>(),
+    ]);
 
     let wrapper: &mut ContractProviderWrapper<P> = datas[0]
         .take()
@@ -884,7 +879,11 @@ pub fn from_context<'a, 'ty, 'r, P: ContractProvider>(context: &'a mut Context<'
 
 // Function helper to get the balance for the given asset
 // This will first check in our current changes, then in the previous execution cache
-pub fn get_balance_from_cache<'a, P: ContractProvider>(provider: &P, state: &'a mut ChainState, asset: Hash) -> Result<&'a mut Option<(VersionedState, u64)>, anyhow::Error> {
+pub fn get_balance_from_cache<'a, P: ContractProvider>(
+    provider: &P,
+    state: &'a mut ChainState,
+    asset: Hash,
+) -> Result<&'a mut Option<(VersionedState, u64)>, anyhow::Error> {
     Ok(match state.cache.balances.entry(asset.clone()) {
         Entry::Occupied(entry) => entry.into_mut(),
         Entry::Vacant(entry) => {
@@ -894,12 +893,21 @@ pub fn get_balance_from_cache<'a, P: ContractProvider>(provider: &P, state: &'a 
     })
 }
 
-pub fn get_balance_from_provider<P: ContractProvider>(provider: &P, topoheight: TopoHeight, contract: &Hash, asset: &Hash) -> Result<Option<(VersionedState, u64)>, anyhow::Error> {
+pub fn get_balance_from_provider<P: ContractProvider>(
+    provider: &P,
+    topoheight: TopoHeight,
+    contract: &Hash,
+    asset: &Hash,
+) -> Result<Option<(VersionedState, u64)>, anyhow::Error> {
     let balance = provider.get_contract_balance_for_asset(contract, asset, topoheight)?;
     Ok(balance.map(|(topoheight, balance)| (VersionedState::FetchedAt(topoheight), balance)))
 }
 
-pub fn get_optional_asset_from_cache<'a, P: ContractProvider>(provider: &P, state: &'a mut ChainState, asset: Hash) -> Result<&'a mut Option<AssetChanges>, anyhow::Error> {
+pub fn get_optional_asset_from_cache<'a, P: ContractProvider>(
+    provider: &P,
+    state: &'a mut ChainState,
+    asset: Hash,
+) -> Result<&'a mut Option<AssetChanges>, anyhow::Error> {
     Ok(match state.assets.entry(asset.clone()) {
         Entry::Occupied(entry) => entry.into_mut(),
         Entry::Vacant(entry) => {
@@ -909,45 +917,63 @@ pub fn get_optional_asset_from_cache<'a, P: ContractProvider>(provider: &P, stat
     })
 }
 
-pub fn get_asset_changes_for_hash<'a>(state: &'a ChainState, hash: &'a Hash) -> Result<&'a AssetChanges, anyhow::Error> {
-    state.assets.get(hash)
+pub fn get_asset_changes_for_hash<'a>(
+    state: &'a ChainState,
+    hash: &'a Hash,
+) -> Result<&'a AssetChanges, anyhow::Error> {
+    state
+        .assets
+        .get(hash)
         .map(|v| v.as_ref())
         .flatten()
         .context("Asset not found in cache")
 }
 
-pub fn get_asset_changes_for_hash_mut<'a>(state: &'a mut ChainState, hash: &'a Hash) -> Result<&'a mut AssetChanges, anyhow::Error> {
-    state.assets.get_mut(hash)
+pub fn get_asset_changes_for_hash_mut<'a>(
+    state: &'a mut ChainState,
+    hash: &'a Hash,
+) -> Result<&'a mut AssetChanges, anyhow::Error> {
+    state
+        .assets
+        .get_mut(hash)
         .map(|v| v.as_mut())
         .flatten()
         .context("Asset not found in cache")
 }
 
-pub fn get_asset_from_cache<'a, P: ContractProvider>(provider: &P, state: &'a mut ChainState, asset: Hash) -> Result<&'a mut AssetChanges, anyhow::Error> {
+pub fn get_asset_from_cache<'a, P: ContractProvider>(
+    provider: &P,
+    state: &'a mut ChainState,
+    asset: Hash,
+) -> Result<&'a mut AssetChanges, anyhow::Error> {
     get_optional_asset_from_cache(provider, state, asset)?
         .as_mut()
         .context("Asset not found for provided hash")
 }
 
-pub fn get_asset_from_provider<P: ContractProvider>(provider: &P, topoheight: TopoHeight, asset: &Hash) -> Result<Option<AssetChanges>, anyhow::Error> {
+pub fn get_asset_from_provider<P: ContractProvider>(
+    provider: &P,
+    topoheight: TopoHeight,
+    asset: &Hash,
+) -> Result<Option<AssetChanges>, anyhow::Error> {
     match provider.load_asset_data(asset, topoheight)? {
         Some((topo, data)) => {
-            let supply = provider.load_asset_supply(asset, topoheight)?
+            let supply = provider
+                .load_asset_supply(asset, topoheight)?
                 .map(|(topo, v)| (VersionedState::FetchedAt(topo), v));
 
             Ok(Some(AssetChanges {
                 data: (VersionedState::FetchedAt(topo), data),
-                supply
+                supply,
             }))
-        },
-        None => Ok(None)
+        }
+        None => Ok(None),
     }
 }
 
 fn fire_event_fn(_: FnInstance, mut params: FnParams, context: &mut Context) -> FnReturnType {
     let data = params.remove(1);
-    let id = params.remove(0)
-        .as_u64()?;
+    let id = params.remove(0).as_u64()?;
 
     let constant = data.into_owned()?;
 
@@ -956,8 +982,7 @@ fn fire_event_fn(_: FnInstance, mut params: FnParams, context: &mut Context) -> 
     context.increase_gas_usage(cost)?;
 
     let state: &mut ChainState = context.get_mut().context("chain state not found")?;
-    let entry = state.cache.events.entry(id)
-        .or_insert_with(Vec::new);
+    let entry = state.cache.events.entry(id).or_insert_with(Vec::new);
 
     entry.push(constant);
 
@@ -988,32 +1013,34 @@ fn debug_fn(_: FnInstance, params: FnParams, context: &mut Context) -> FnReturnT
 
 fn get_contract_hash(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
     let state: &ChainState = context.get().context("chain state not found")?;
-    Ok(Some(Primitive::Opaque(OpaqueWrapper::new(state.contract.clone())).into()))
+    Ok(Some(
+        Primitive::Opaque(OpaqueWrapper::new(state.contract.clone())).into(),
+    ))
 }
 
 fn get_deposit_for_asset(_: FnInstance, params: FnParams, context: &mut Context) -> FnReturnType {
     let param = params[0].as_ref()?;
-    let asset: &Hash = param
-        .as_opaque_type()
-        .context("invalid asset")?;
+    let asset: &Hash = param.as_opaque_type().context("invalid asset")?;
 
     let chain_state: &ChainState = context.get().context("chain state not found")?;
 
     // Balance simplification: All deposits are now plaintext
     let value = match chain_state.deposits.get(asset) {
         Some(deposit) => Primitive::U64(deposit.amount()).into(),
-        None => Default::default()
+        None => Default::default(),
     };
 
     Ok(Some(value))
 }
 
-fn get_balance_for_asset<P: ContractProvider>(_: FnInstance, mut params: FnParams, context: &mut Context) -> FnReturnType {
+fn get_balance_for_asset<P: ContractProvider>(
+    _: FnInstance,
+    mut params: FnParams,
+    context: &mut Context,
+) -> FnReturnType {
     let (provider, state) = from_context::<P>(context)?;
 
-    let asset: Hash = params.remove(0)
-        .into_owned()?
-        .into_opaque_type()?;
+    let asset: Hash = params.remove(0).into_owned()?.into_opaque_type()?;
 
     let balance = get_balance_from_cache(provider, state, asset)?
         .map(|(_, v)| Primitive::U64(v).into())
@@ -1022,22 +1049,20 @@ fn get_balance_for_asset<P: ContractProvider>(_: FnInstance, mut params: FnParam
     Ok(Some(balance))
 }
 
-fn transfer<P: ContractProvider>(_: FnInstance, mut params: FnParams, context: &mut Context) -> FnReturnType {
+fn transfer<P: ContractProvider>(
+    _: FnInstance,
+    mut params: FnParams,
+    context: &mut Context,
+) -> FnReturnType {
     if log::log_enabled!(log::Level::Debug) {
         debug!("Transfer called {:?}", params);
     }
 
-    let asset: Hash = params.remove(2)
-        .into_owned()?
-        .into_opaque_type()?;
+    let asset: Hash = params.remove(2).into_owned()?.into_opaque_type()?;
 
-    let amount = params.remove(1)
-        .into_owned()?
-        .to_u64()?;
+    let amount = params.remove(1).into_owned()?.to_u64()?;
 
-    let destination: Address = params.remove(0)
-        .into_owned()?
-        .into_opaque_type()?;
+    let destination: Address = params.remove(0).into_owned()?.into_opaque_type()?;
 
     if !destination.is_normal() {
         return Ok(Some(Primitive::Boolean(false).into()));
@@ -1056,7 +1081,9 @@ fn transfer<P: ContractProvider>(_: FnInstance, mut params: FnParams, context: &
         return Ok(Some(Primitive::Boolean(false).into()));
     }
 
-    let Some((mut balance_state, mut balance)) = get_balance_from_cache(provider, state, asset.clone())? else {
+    let Some((mut balance_state, mut balance)) =
+        get_balance_from_cache(provider, state, asset.clone())?
+    else {
         return Ok(Some(Primitive::Boolean(false).into()));
     };
 
@@ -1069,32 +1096,44 @@ fn transfer<P: ContractProvider>(_: FnInstance, mut params: FnParams, context: &
     balance -= amount;
     balance_state.mark_updated();
 
-    state.cache.balances.insert(asset.clone(), Some((balance_state, balance)));
+    state
+        .cache
+        .balances
+        .insert(asset.clone(), Some((balance_state, balance)));
 
     let key = destination.to_public_key();
-    state.tracker.transfers.entry(key.clone())
+    state
+        .tracker
+        .transfers
+        .entry(key.clone())
         .or_insert_with(HashMap::new)
         .entry(asset.clone())
         .and_modify(|v| *v += amount)
         .or_insert(amount);
 
     // Add the output
-    state.outputs.push(ContractOutput::Transfer { destination: key, amount, asset });
+    state.outputs.push(ContractOutput::Transfer {
+        destination: key,
+        amount,
+        asset,
+    });
 
     Ok(Some(Primitive::Boolean(true).into()))
 }
 
-fn burn<P: ContractProvider>(_: FnInstance, mut params: FnParams, context: &mut Context) -> FnReturnType {
+fn burn<P: ContractProvider>(
+    _: FnInstance,
+    mut params: FnParams,
+    context: &mut Context,
+) -> FnReturnType {
     let (provider, state) = from_context::<P>(context)?;
 
-    let asset: Hash = params.remove(1)
-        .into_owned()?
-        .into_opaque_type()?;
-    let amount = params.remove(0)
-        .into_owned()?
-        .to_u64()?;
+    let asset: Hash = params.remove(1).into_owned()?.into_opaque_type()?;
+    let amount = params.remove(0).into_owned()?.to_u64()?;
 
-    let Some((mut balance_state, mut balance)) = get_balance_from_cache(provider, state, asset.clone())? else {
+    let Some((mut balance_state, mut balance)) =
+        get_balance_from_cache(provider, state, asset.clone())?
+    else {
         return Ok(Some(Primitive::Boolean(false).into()));
     };
 
@@ -1108,7 +1147,10 @@ fn burn<P: ContractProvider>(_: FnInstance, mut params: FnParams, context: &mut 
     balance -= amount;
     balance_state.mark_updated();
 
-    state.cache.balances.insert(asset.clone(), Some((balance_state, balance)));
+    state
+        .cache
+        .balances
+        .insert(asset.clone(), Some((balance_state, balance)));
 
     // Add the output
     state.outputs.push(ContractOutput::Burn { asset, amount });
@@ -1116,22 +1158,25 @@ fn burn<P: ContractProvider>(_: FnInstance, mut params: FnParams, context: &mut 
     Ok(Some(Primitive::Boolean(true).into()))
 }
 
-fn get_account_balance_of<P: ContractProvider>(_: FnInstance, mut params: FnParams, context: &mut Context) -> FnReturnType {
+fn get_account_balance_of<P: ContractProvider>(
+    _: FnInstance,
+    mut params: FnParams,
+    context: &mut Context,
+) -> FnReturnType {
     let (provider, state) = from_context::<P>(context)?;
 
-    let asset: Hash = params.remove(1)
-        .into_owned()?
-        .into_opaque_type()?;
+    let asset: Hash = params.remove(1).into_owned()?.into_opaque_type()?;
 
-    let address: Address = params.remove(0)
-        .into_owned()?
-        .into_opaque_type()?;
+    let address: Address = params.remove(0).into_owned()?.into_opaque_type()?;
 
-    let balance = provider.get_account_balance_for_asset(address.get_public_key(), &asset, state.topoheight)?
-        .map(|(topoheight, balance_amount)| ValueCell::Object(vec![
-            Primitive::U64(topoheight).into(),
-            Primitive::U64(balance_amount).into()
-        ]))
+    let balance = provider
+        .get_account_balance_for_asset(address.get_public_key(), &asset, state.topoheight)?
+        .map(|(topoheight, balance_amount)| {
+            ValueCell::Object(vec![
+                Primitive::U64(topoheight).into(),
+                Primitive::U64(balance_amount).into(),
+            ])
+        })
         .unwrap_or_default();
 
     Ok(Some(balance))

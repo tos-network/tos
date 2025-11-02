@@ -239,7 +239,9 @@ mod extended_tests {
         let block_work = BlueWorkType::from(1000u64);
 
         for _ in 0..10000 {
-            total_work = total_work.checked_add(block_work).expect("Should not overflow");
+            total_work = total_work
+                .checked_add(block_work)
+                .expect("Should not overflow");
         }
 
         assert_eq!(total_work, BlueWorkType::from(10_000_000u64));
@@ -470,7 +472,7 @@ mod extended_tests {
 
         // At exactly k, should be valid
         assert!(!(anticone_k > k)); // Should pass
-        // At k+1, should be invalid
+                                    // At k+1, should be invalid
         assert!(anticone_k_plus_1 > k); // Should fail
     }
 

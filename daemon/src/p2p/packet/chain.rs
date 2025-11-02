@@ -1,35 +1,25 @@
+use crate::config::{
+    CHAIN_SYNC_REQUEST_MAX_BLOCKS, CHAIN_SYNC_RESPONSE_MAX_BLOCKS, CHAIN_SYNC_RESPONSE_MIN_BLOCKS,
+    CHAIN_SYNC_TOP_BLOCKS,
+};
 use indexmap::IndexSet;
 use log::debug;
-use tos_common::{
-    crypto::Hash,
-    serializer::{
-        Serializer,
-        Writer,
-        ReaderError,
-        Reader
-    },
-    config::TIPS_LIMIT
-};
-use crate::config::{
-    CHAIN_SYNC_REQUEST_MAX_BLOCKS,
-    CHAIN_SYNC_RESPONSE_MAX_BLOCKS,
-    CHAIN_SYNC_TOP_BLOCKS,
-    CHAIN_SYNC_RESPONSE_MIN_BLOCKS
-};
 use std::hash::{Hash as StdHash, Hasher};
+use tos_common::{
+    config::TIPS_LIMIT,
+    crypto::Hash,
+    serializer::{Reader, ReaderError, Serializer, Writer},
+};
 
 #[derive(Clone, Debug)]
 pub struct BlockId {
     hash: Hash,
-    topoheight: u64
+    topoheight: u64,
 }
 
 impl BlockId {
     pub fn new(hash: Hash, topoheight: u64) -> Self {
-        Self {
-            hash,
-            topoheight
-        }
+        Self { hash, topoheight }
     }
 
     pub fn get_hash(&self) -> &Hash {
@@ -79,14 +69,14 @@ pub struct ChainRequest {
     blocks: IndexSet<BlockId>,
     // Number of maximum block responses allowed
     // This allow, directly in the protocol, to change the response param based on hardware resources
-    accepted_response_size: u16
+    accepted_response_size: u16,
 }
 
 impl ChainRequest {
     pub fn new(blocks: IndexSet<BlockId>, accepted_response_size: u16) -> Self {
         Self {
             blocks,
-            accepted_response_size
+            accepted_response_size,
         }
     }
 
@@ -119,7 +109,7 @@ impl Serializer for ChainRequest {
             if log::log_enabled!(log::Level::Debug) {
                 debug!("Invalid chain request length: {}", len);
             }
-            return Err(ReaderError::InvalidValue)
+            return Err(ReaderError::InvalidValue);
         }
 
         let mut blocks = IndexSet::with_capacity(len as usize);
@@ -128,20 +118,25 @@ impl Serializer for ChainRequest {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Duplicated block id in chain request");
                 }
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         }
 
         let accepted_response_size = reader.read_u16()?;
         // Verify that the requested response size is in the protocol bounds
-        if accepted_response_size < CHAIN_SYNC_RESPONSE_MIN_BLOCKS as u16 || accepted_response_size > CHAIN_SYNC_RESPONSE_MAX_BLOCKS as u16 {
+        if accepted_response_size < CHAIN_SYNC_RESPONSE_MIN_BLOCKS as u16
+            || accepted_response_size > CHAIN_SYNC_RESPONSE_MAX_BLOCKS as u16
+        {
             if log::log_enabled!(log::Level::Debug) {
                 debug!("Invalid accepted response size: {}", accepted_response_size);
             }
-            return Err(ReaderError::InvalidValue)
+            return Err(ReaderError::InvalidValue);
         }
 
-        Ok(Self { blocks, accepted_response_size })
+        Ok(Self {
+            blocks,
+            accepted_response_size,
+        })
     }
 
     fn size(&self) -> usize {
@@ -152,15 +147,12 @@ impl Serializer for ChainRequest {
 #[derive(Debug)]
 pub struct CommonPoint {
     hash: Hash,
-    topoheight: u64
+    topoheight: u64,
 }
 
 impl CommonPoint {
     pub fn new(hash: Hash, topoheight: u64) -> Self {
-        Self {
-            hash,
-            topoheight
-        }
+        Self { hash, topoheight }
     }
 
     pub fn get_hash(&self) -> &Hash {
@@ -192,22 +184,27 @@ impl Serializer for CommonPoint {
 #[derive(Debug)]
 pub struct ChainResponse {
     // Common point between us and the peer
-    // This is based on the same DAG ordering for a block 
+    // This is based on the same DAG ordering for a block
     common_point: Option<CommonPoint>,
     // Lowest height of the blocks in the response
     lowest_height: Option<u64>,
     blocks: IndexSet<Hash>,
-    top_blocks: IndexSet<Hash>
+    top_blocks: IndexSet<Hash>,
 }
 
 impl ChainResponse {
-    pub fn new(common_point: Option<CommonPoint>, lowest_height: Option<u64>, blocks: IndexSet<Hash>, top_blocks: IndexSet<Hash>) -> Self {
+    pub fn new(
+        common_point: Option<CommonPoint>,
+        lowest_height: Option<u64>,
+        blocks: IndexSet<Hash>,
+        top_blocks: IndexSet<Hash>,
+    ) -> Self {
         debug_assert!(common_point.is_some() == lowest_height.is_some());
         Self {
             common_point,
             lowest_height,
             blocks,
-            top_blocks
+            top_blocks,
         }
     }
 
@@ -237,7 +234,7 @@ impl Serializer for ChainResponse {
         self.common_point.write(writer);
         // No need to write the blocks if we don't have a common point
         if self.common_point.is_none() {
-            return
+            return;
         }
 
         // Write the lowest height
@@ -260,7 +257,7 @@ impl Serializer for ChainResponse {
         let common_point = Option::read(reader)?;
         // No need to read the blocks if we don't have a common point
         if common_point.is_none() {
-            return Ok(Self::new(None, None, IndexSet::new(), IndexSet::new()))
+            return Ok(Self::new(None, None, IndexSet::new(), IndexSet::new()));
         }
 
         let lowest_height = reader.read_u64()?;
@@ -269,7 +266,7 @@ impl Serializer for ChainResponse {
             if log::log_enabled!(log::Level::Debug) {
                 debug!("Invalid chain response length: {}", len);
             }
-            return Err(ReaderError::InvalidValue)
+            return Err(ReaderError::InvalidValue);
         }
 
         let mut blocks: IndexSet<Hash> = IndexSet::with_capacity(len as usize);
@@ -279,7 +276,7 @@ impl Serializer for ChainResponse {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Invalid chain response duplicate block");
                 }
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         }
 
@@ -288,7 +285,7 @@ impl Serializer for ChainResponse {
             if log::log_enabled!(log::Level::Debug) {
                 debug!("Invalid chain response top blocks length: {}", len);
             }
-            return Err(ReaderError::InvalidValue)
+            return Err(ReaderError::InvalidValue);
         }
 
         let mut top_blocks: IndexSet<Hash> = IndexSet::with_capacity(len as usize);
@@ -298,16 +295,21 @@ impl Serializer for ChainResponse {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Invalid chain response duplicate top block");
                 }
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         }
 
-        Ok(Self::new(common_point, Some(lowest_height), blocks, top_blocks))
+        Ok(Self::new(
+            common_point,
+            Some(lowest_height),
+            blocks,
+            top_blocks,
+        ))
     }
 
     fn size(&self) -> usize {
         if self.common_point.is_none() {
-            return self.common_point.size()
+            return self.common_point.size();
         }
 
         let mut size = 0;

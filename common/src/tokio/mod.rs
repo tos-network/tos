@@ -16,9 +16,9 @@ mod thread_pool;
 #[cfg(feature = "tokio")]
 pub mod sync;
 
-use std::future::Future;
 use cfg_if::cfg_if;
 use log::trace;
+use std::future::Future;
 
 #[cfg(feature = "tokio")]
 pub use thread_pool::ThreadPool;
@@ -133,7 +133,7 @@ pub fn is_multi_threads_supported() -> bool {
             if log::log_enabled!(log::Level::Trace) {
                 trace!("multi threads supported: {}", supported);
             }
-        
+
             supported
         } else {
             false
@@ -223,7 +223,7 @@ where
         ))
     ))]
     if is_multi_threads_supported() {
-        return block_in_place_internal(f)
+        return block_in_place_internal(f);
     }
 
     trace!("direct call block in place");

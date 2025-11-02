@@ -10,9 +10,14 @@ peerlist-*.json
 build/
 data/
 logs/
+demo_ai_wallet/
+parallel_test_sender/
 test_*/
+wallet_receiver/
+wallet_sender/
 miner_wallet.db/
 publisher_wallet.db/
+final_test_wallet/
 
 
 # ignore all profiling files
@@ -20,7 +25,7 @@ flamegraph.svg
 perf.data
 perf.data.old
 
-# ignore generated files by Terminos
+# ignore generated files by TOS
 difficulty_dataset.csv
 precomputed_tables_*.bin
 mainnet*
@@ -30,6 +35,13 @@ devnet*
 wallet.dat
 miner_wallet.dat
 test_wallet*/
+final_test_wallet/
+parallel_test_sender/
+demo_ai_wallet/
+wallet_receiver/
+wallet_sender/
+*_wallet/
+wallet_*/
 test_export.csv
 transactions_2024.csv
 wallet_history.csv

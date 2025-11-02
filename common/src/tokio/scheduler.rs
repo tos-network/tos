@@ -1,12 +1,12 @@
+use futures::Stream;
+use pin_project_lite::pin_project;
 use std::{
     collections::VecDeque,
     fmt,
     future::Future,
     pin::Pin,
-    task::{Context, Poll}
+    task::{Context, Poll},
 };
-use futures::Stream;
-use pin_project_lite::pin_project;
 
 enum State<F: Future> {
     // New, not yet polled
@@ -62,7 +62,8 @@ impl<F: Future> Scheduler<F> {
 
     // How many futures are ready to be polled
     pub fn ready(&self) -> usize {
-        self.states.iter()
+        self.states
+            .iter()
             .filter(|v| matches!(v, State::Ready(_)))
             .count()
     }
@@ -106,8 +107,7 @@ impl<F: Future> Stream for Scheduler<F> {
         for state in this.states.iter_mut().take(n.unwrap_or(len)) {
             match state {
                 State::New(fut) => {
-                    let mut fut = fut.take()
-                        .expect("new future available");
+                    let mut fut = fut.take().expect("new future available");
 
                     // Try poll it, if its already ready, just mark it has such
                     // otherwise, we mark it has pending
@@ -117,12 +117,12 @@ impl<F: Future> Stream for Scheduler<F> {
                         // Mark it has polled
                         *state = State::Pending(fut);
                     }
-                },
+                }
                 State::Pending(fut) => {
                     if let Poll::Ready(output) = fut.as_mut().poll(cx) {
                         *state = State::Ready(output);
                     }
-                },
+                }
                 State::Ready(_) => {}
             }
         }
@@ -147,9 +147,9 @@ impl<F: Future> Stream for Scheduler<F> {
 mod tests {
     use std::time::Duration;
 
+    use super::*;
     use futures::StreamExt;
     use tokio::time::sleep;
-    use super::*;
 
     #[tokio::test]
     async fn test_scheduler() {

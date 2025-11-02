@@ -37,7 +37,7 @@ pub enum Bech32Error {
     #[error("Invalid checksum")]
     InvalidChecksum,
     #[error("Invalid index '{}': not found", _0)]
-    InvalidIndex(usize)
+    InvalidIndex(usize),
 }
 
 /// Compute a checksum for a vector of u8.
@@ -118,9 +118,9 @@ pub fn convert_bits(data: &[u8], from: u16, to: u16, pad: bool) -> Result<Vec<u8
             result.push(((acc << (to - bits)) & max_value) as u8);
         }
     } else if bits >= from {
-        return Err(Bech32Error::IllegalZeroPadding)
+        return Err(Bech32Error::IllegalZeroPadding);
     } else if (acc << (to - bits)) & max_value != 0 {
-        return Err(Bech32Error::NonZeroPadding)
+        return Err(Bech32Error::NonZeroPadding);
     }
 
     Ok(result)
@@ -129,34 +129,39 @@ pub fn convert_bits(data: &[u8], from: u16, to: u16, pad: bool) -> Result<Vec<u8
 /// Encode a human readable part and data into a bech32 string.
 pub fn encode(mut hrp: String, data: &[u8]) -> Result<String, Bech32Error> {
     if hrp.len() == 0 {
-        return Err(Bech32Error::HrpEmpty)
+        return Err(Bech32Error::HrpEmpty);
     }
 
     for value in hrp.bytes() {
         if value < 33 || value > 126 {
-            return Err(Bech32Error::HrpInvalidCharacter(value))
+            return Err(Bech32Error::HrpInvalidCharacter(value));
         }
     }
 
     if hrp.to_uppercase() != hrp && hrp.to_lowercase() != hrp {
-        return Err(Bech32Error::HrpMixCase)
+        return Err(Bech32Error::HrpMixCase);
     }
 
     hrp = hrp.to_lowercase();
     let mut combined: Vec<u8> = Vec::new();
     combined.extend(data);
     combined.extend(&create_checksum(&hrp, data));
-    
+
     let mut result: Vec<u8> = Vec::new();
     result.extend(hrp.bytes());
     result.extend(SEPARATOR.to_string().bytes());
 
     for value in combined.iter() {
         if *value > CHARSET.len() as u8 {
-            return Err(Bech32Error::InvalidValue(*value, CHARSET.len()))
+            return Err(Bech32Error::InvalidValue(*value, CHARSET.len()));
         }
 
-        result.push(CHARSET.bytes().nth(*value as usize).ok_or(Bech32Error::InvalidIndex(*value as usize))?);
+        result.push(
+            CHARSET
+                .bytes()
+                .nth(*value as usize)
+                .ok_or(Bech32Error::InvalidIndex(*value as usize))?,
+        );
     }
 
     let string = String::from_utf8(result)?;
@@ -166,31 +171,35 @@ pub fn encode(mut hrp: String, data: &[u8]) -> Result<String, Bech32Error> {
 /// Decode a bech32 string into a human readable part and data part.
 pub fn decode(bech: &str) -> Result<(String, Vec<u8>), Bech32Error> {
     if bech.to_uppercase() != *bech && bech.to_lowercase() != *bech {
-        return Err(Bech32Error::HrpMixCase)
+        return Err(Bech32Error::HrpMixCase);
     }
 
-    let pos = bech.rfind(SEPARATOR).ok_or(Bech32Error::SeparatorNotFound)?;
+    let pos = bech
+        .rfind(SEPARATOR)
+        .ok_or(Bech32Error::SeparatorNotFound)?;
     if pos < 1 || pos + 7 > bech.len() {
-        return Err(Bech32Error::SeparatorInvalidPosition(pos))
+        return Err(Bech32Error::SeparatorInvalidPosition(pos));
     }
 
     let hrp = bech[0..pos].to_owned();
     for value in hrp.bytes() {
         if value < 33 || value > 126 {
-            return Err(Bech32Error::HrpInvalidCharacter(value))
+            return Err(Bech32Error::HrpInvalidCharacter(value));
         }
     }
 
     let mut data: Vec<u8> = vec![];
     for i in pos + 1..bech.len() {
         let c = bech.chars().nth(i).ok_or(Bech32Error::InvalidIndex(i))?;
-        let value = CHARSET.find(c).ok_or(Bech32Error::HrpInvalidCharacter(c as u8))?;
+        let value = CHARSET
+            .find(c)
+            .ok_or(Bech32Error::HrpInvalidCharacter(c as u8))?;
 
         data.push(value as u8);
     }
 
     if !verify_checksum(&hrp, &data) {
-        return Err(Bech32Error::InvalidChecksum)
+        return Err(Bech32Error::InvalidChecksum);
     }
 
     for _ in 0..6 {

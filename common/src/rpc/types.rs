@@ -17,14 +17,14 @@ pub struct RpcRequest {
     pub jsonrpc: String,
     pub id: Option<Id>,
     pub method: String,
-    pub params: Option<Value>
+    pub params: Option<Value>,
 }
 
 #[derive(Serialize)]
 pub struct RpcResponse<'a> {
     pub jsonrpc: &'a str,
     pub id: Cow<'a, Option<Id>>,
-    pub result: Cow<'a, Value>
+    pub result: Cow<'a, Value>,
 }
 
 impl<'a> RpcResponse<'a> {
@@ -32,7 +32,7 @@ impl<'a> RpcResponse<'a> {
         Self {
             jsonrpc: JSON_RPC_VERSION,
             id,
-            result
+            result,
         }
     }
 }

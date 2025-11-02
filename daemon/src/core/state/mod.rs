@@ -1,46 +1,64 @@
-mod mempool_state;
 mod chain_state;
+mod mempool_state;
+pub mod parallel_apply_adapter;
+pub mod parallel_chain_state;
 
+pub use chain_state::{ApplicableChainState, ChainState, StorageReference};
 pub use mempool_state::MempoolState;
-pub use chain_state::{
-    ChainState,
-    ApplicableChainState,
-    StorageReference
-};
+pub use parallel_apply_adapter::ParallelApplyAdapter;
+pub use parallel_chain_state::ParallelChainState;
 
-use log::{trace, debug};
+use log::{debug, trace};
 use tos_common::{
     account::VersionedBalance,
+    block::{BlockVersion, TopoHeight},
     crypto::{Hash, PublicKey},
     transaction::{Reference, Transaction},
-    block::{TopoHeight, BlockVersion},
-    utils::format_tos
+    utils::format_tos,
 };
 
 use super::{
-    hard_fork,
     blockchain,
     error::BlockchainError,
-    storage::{AccountProvider, BalanceProvider, DagOrderProvider, PrunedTopoheightProvider}
+    hard_fork,
+    storage::{AccountProvider, BalanceProvider, DagOrderProvider, PrunedTopoheightProvider},
 };
 
 // Verify a transaction before adding it to mempool/chain state
 // We only verify the reference and the required fees
-pub (super) async fn pre_verify_tx<P: AccountProvider + BalanceProvider>(provider: &P, tx: &Transaction, stable_topoheight: TopoHeight, topoheight: TopoHeight, block_version: BlockVersion) -> Result<(), BlockchainError> {
+pub(super) async fn pre_verify_tx<P: AccountProvider + BalanceProvider>(
+    provider: &P,
+    tx: &Transaction,
+    stable_topoheight: TopoHeight,
+    topoheight: TopoHeight,
+    block_version: BlockVersion,
+) -> Result<(), BlockchainError> {
     if log::log_enabled!(log::Level::Debug) {
-        debug!("Pre-verify TX at topoheight {} and stable topoheight {}", topoheight, stable_topoheight);
+        debug!(
+            "Pre-verify TX at topoheight {} and stable topoheight {}",
+            topoheight, stable_topoheight
+        );
     }
     if !hard_fork::is_tx_version_allowed_in_block_version(tx.get_version(), block_version) {
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Invalid version {} in block {}", tx.get_version(), block_version);
+            debug!(
+                "Invalid version {} in block {}",
+                tx.get_version(),
+                block_version
+            );
         }
         return Err(BlockchainError::InvalidTxVersion);
     }
 
-    let required_fees = blockchain::estimate_required_tx_fees(provider, topoheight, tx, block_version).await?;
+    let required_fees =
+        blockchain::estimate_required_tx_fees(provider, topoheight, tx, block_version).await?;
     if required_fees > tx.get_fee() {
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Invalid fees: {} required, {} provided", format_tos(required_fees), format_tos(tx.get_fee()));
+            debug!(
+                "Invalid fees: {} required, {} provided",
+                format_tos(required_fees),
+                format_tos(tx.get_fee())
+            );
         }
         return Err(BlockchainError::InvalidTxFee(required_fees, tx.get_fee()));
     }
@@ -49,9 +67,15 @@ pub (super) async fn pre_verify_tx<P: AccountProvider + BalanceProvider>(provide
     // Verify that it is not a fake topoheight
     if topoheight < reference.topoheight {
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Invalid reference: topoheight {} is higher than chain {}", reference.topoheight, topoheight);
+            debug!(
+                "Invalid reference: topoheight {} is higher than chain {}",
+                reference.topoheight, topoheight
+            );
         }
-        return Err(BlockchainError::InvalidReferenceTopoheight(reference.topoheight, topoheight));
+        return Err(BlockchainError::InvalidReferenceTopoheight(
+            reference.topoheight,
+            topoheight,
+        ));
     }
 
     Ok(())
@@ -63,9 +87,23 @@ pub (super) async fn pre_verify_tx<P: AccountProvider + BalanceProvider>(provide
 // - If we should use the output balance for verification
 // - is it a new version created
 // - Versioned Balance to use for verification
-pub (super) async fn search_versioned_balance_for_reference<S: DagOrderProvider + BalanceProvider + PrunedTopoheightProvider>(storage: &S, key: &PublicKey, asset: &Hash, current_topoheight: TopoHeight, reference: &Reference, no_new: bool) -> Result<(bool, bool, VersionedBalance), BlockchainError> {
+pub(super) async fn search_versioned_balance_for_reference<
+    S: DagOrderProvider + BalanceProvider + PrunedTopoheightProvider,
+>(
+    storage: &S,
+    key: &PublicKey,
+    asset: &Hash,
+    current_topoheight: TopoHeight,
+    reference: &Reference,
+    no_new: bool,
+) -> Result<(bool, bool, VersionedBalance), BlockchainError> {
     if log::log_enabled!(log::Level::Trace) {
-        trace!("search versioned balance for {} at topoheight {}, reference: {}", key.as_address(storage.is_mainnet()), current_topoheight, reference.topoheight);
+        trace!(
+            "search versioned balance for {} at topoheight {}, reference: {}",
+            key.as_address(storage.is_mainnet()),
+            current_topoheight,
+            reference.topoheight
+        );
     }
     // Scenario A
     // TX A has reference topo 1000
@@ -94,11 +132,18 @@ pub (super) async fn search_versioned_balance_for_reference<S: DagOrderProvider 
     // Retrieve the block topoheight based on reference hash
     let pruned_topoheight = storage.get_pruned_topoheight().await?;
 
-    let reference_block_topo = if storage.is_block_topological_ordered(&reference.hash).await? {
+    let reference_block_topo = if storage
+        .is_block_topological_ordered(&reference.hash)
+        .await?
+    {
         let topo = storage.get_topo_height_for_hash(&reference.hash).await?;
         if topo == reference.topoheight {
             if log::log_enabled!(log::Level::Trace) {
-                trace!("reference topoheight {} is equal to block topoheight {}", reference.topoheight, topo);
+                trace!(
+                    "reference topoheight {} is equal to block topoheight {}",
+                    reference.topoheight,
+                    topo
+                );
             }
             topo
         } else if reference.topoheight < current_topoheight {
@@ -112,9 +157,15 @@ pub (super) async fn search_versioned_balance_for_reference<S: DagOrderProvider 
             }
             current_topoheight
         }
-    } else if pruned_topoheight.filter(|v| *v > reference.topoheight).is_some() {
+    } else if pruned_topoheight
+        .filter(|v| *v > reference.topoheight)
+        .is_some()
+    {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("reference topoheight {} is below pruned point, using the reference topoheight", reference.topoheight);
+            trace!(
+                "reference topoheight {} is below pruned point, using the reference topoheight",
+                reference.topoheight
+            );
         }
         reference.topoheight
     } else if reference.topoheight < current_topoheight {
@@ -124,7 +175,10 @@ pub (super) async fn search_versioned_balance_for_reference<S: DagOrderProvider 
         reference.topoheight
     } else {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("using current topoheight {} as reference", current_topoheight);
+            trace!(
+                "using current topoheight {} as reference",
+                current_topoheight
+            );
         }
         current_topoheight
     };
@@ -133,14 +187,20 @@ pub (super) async fn search_versioned_balance_for_reference<S: DagOrderProvider 
     let version;
     // We must verify the last "output" balance for the asset
     // Search the last output balance
-    let min_topo = reference.topoheight
+    let min_topo = reference
+        .topoheight
         .min(reference_block_topo)
         .min(current_topoheight);
 
     if log::log_enabled!(log::Level::Debug) {
-        debug!("Search output balance in range {} to {}", min_topo, current_topoheight);
+        debug!(
+            "Search output balance in range {} to {}",
+            min_topo, current_topoheight
+        );
     }
-    let last_output = storage.get_output_balance_in_range(key, asset, min_topo, current_topoheight).await?;
+    let last_output = storage
+        .get_output_balance_in_range(key, asset, min_topo, current_topoheight)
+        .await?;
     // We have a output balance
     if let Some((topo, v)) = last_output {
         if log::log_enabled!(log::Level::Trace) {
@@ -156,25 +216,35 @@ pub (super) async fn search_versioned_balance_for_reference<S: DagOrderProvider 
         } else if topo < reference.topoheight || topo < reference_block_topo {
             trace!("Reference is above last output balance");
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Scenario B: topo {} < reference {} or reference block topo {}", topo, reference.topoheight, reference_block_topo);
+                debug!(
+                    "Scenario B: topo {} < reference {} or reference block topo {}",
+                    topo, reference.topoheight, reference_block_topo
+                );
             }
 
-            version = storage.get_balance_at_maximum_topoheight(key, asset, topo.max(reference_block_topo)).await?
-            .map(|(topo, v)| {
-                if log::log_enabled!(log::Level::Trace) {
-                    trace!("Found balance at topoheight {}", topo);
-                }
-                v
-            });
+            version = storage
+                .get_balance_at_maximum_topoheight(key, asset, topo.max(reference_block_topo))
+                .await?
+                .map(|(topo, v)| {
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Found balance at topoheight {}", topo);
+                    }
+                    v
+                });
         } else {
             debug!("Scenario A (bis)");
             version = Some(v);
         }
     } else {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("No output balance found (Scenario B), looking with topo {}", reference_block_topo);
+            trace!(
+                "No output balance found (Scenario B), looking with topo {}",
+                reference_block_topo
+            );
         }
-        version = storage.get_balance_at_maximum_topoheight(key, asset, reference_block_topo).await?
+        version = storage
+            .get_balance_at_maximum_topoheight(key, asset, reference_block_topo)
+            .await?
             .map(|(topo, v)| {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!("Found balance at topoheight {}", topo);
@@ -191,7 +261,9 @@ pub (super) async fn search_versioned_balance_for_reference<S: DagOrderProvider 
     } else {
         // Scenario A
         debug!("Scenario A");
-        let (version, new) = storage.get_new_versioned_balance(key, asset, current_topoheight).await?;
+        let (version, new) = storage
+            .get_new_versioned_balance(key, asset, current_topoheight)
+            .await?;
         if new && no_new {
             return Err(BlockchainError::NoPreviousBalanceFound);
         }
@@ -199,5 +271,5 @@ pub (super) async fn search_versioned_balance_for_reference<S: DagOrderProvider 
         (true, version)
     };
 
-    Ok((use_output_balance, new_version,  version))
+    Ok((use_output_balance, new_version, version))
 }

@@ -1,13 +1,9 @@
-mod state;
-mod error;
 mod contract;
+mod error;
+mod state;
 mod zkp_cache;
 
-use std::{
-    borrow::Cow,
-    iter,
-    sync::Arc
-};
+use std::{borrow::Cow, iter, sync::Arc};
 
 use anyhow::anyhow;
 // Balance simplification: RangeProof removed
@@ -16,15 +12,13 @@ use indexmap::IndexMap;
 use log::{debug, trace};
 use tos_vm::ModuleValidator;
 
+use super::{payload::EnergyPayload, ContractDeposit, Transaction, TransactionType};
 use crate::{
     account::EnergyResource,
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     contract::ContractProvider,
     crypto::{
-        elgamal::{
-            DecompressionError,
-            PublicKey
-        },
+        elgamal::{DecompressionError, PublicKey},
         hash,
         proofs::ProofVerificationError,
         Hash,
@@ -32,26 +26,15 @@ use crate::{
     },
     serializer::Serializer,
     transaction::{
-        TxVersion,
-        EXTRA_DATA_LIMIT_SIZE,
-        EXTRA_DATA_LIMIT_SUM_SIZE,
-        MAX_DEPOSIT_PER_INVOKE_CALL,
-        MAX_MULTISIG_PARTICIPANTS,
-        MAX_TRANSFER_COUNT
-    }
-};
-use super::{
-    ContractDeposit,
-    Transaction,
-    TransactionType,
-    payload::EnergyPayload
+        TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_DEPOSIT_PER_INVOKE_CALL,
+        MAX_MULTISIG_PARTICIPANTS, MAX_TRANSFER_COUNT,
+    },
 };
 use contract::InvokeContract;
 
-pub use state::*;
 pub use error::*;
+pub use state::*;
 pub use zkp_cache::*;
-
 
 // Decompressed deposit ciphertext
 // Transaction deposits are stored in a compressed format
@@ -81,7 +64,9 @@ impl Transaction {
 
     /// Get the new output amounts for the sender
     /// Balance simplification: Returns plain u64 amounts instead of ciphertexts
-    pub fn get_expected_sender_outputs<'a>(&'a self) -> Result<Vec<(&'a Hash, u64)>, DecompressionError> {
+    pub fn get_expected_sender_outputs<'a>(
+        &'a self,
+    ) -> Result<Vec<(&'a Hash, u64)>, DecompressionError> {
         // This method previously collected sender output ciphertexts for each asset
         // With plaintext balances, no commitments or ciphertexts needed
         // Return empty vector for now (amounts are handled directly in apply())
@@ -111,14 +96,14 @@ impl Transaction {
     fn verify_invoke_contract<'a, E>(
         &self,
         deposits: &'a IndexMap<Hash, ContractDeposit>,
-        max_gas: u64
+        max_gas: u64,
     ) -> Result<(), VerificationError<E>> {
         if deposits.len() > MAX_DEPOSIT_PER_INVOKE_CALL {
             return Err(VerificationError::DepositCount);
         }
 
         if max_gas > MAX_GAS_USAGE_PER_TX {
-            return Err(VerificationError::MaxGasReached.into())
+            return Err(VerificationError::MaxGasReached.into());
         }
 
         // Validate all deposits are public with non-zero amounts
@@ -157,7 +142,7 @@ impl Transaction {
 
         // Balance simplification: All deposits are now plaintext
         // Basic validation is performed in verify_invoke_contract
-        let _ = (deposits, _source_decompressed, _dest_pubkey);  // Suppress unused warnings
+        let _ = (deposits, _source_decompressed, _dest_pubkey); // Suppress unused warnings
 
         Ok(())
     }
@@ -170,51 +155,63 @@ impl Transaction {
         // Balance simplification: No decompression needed for plaintext balances
 
         trace!("Pre-verifying transaction on state");
-        state.pre_verify_tx(&self).await
+        state
+            .pre_verify_tx(&self)
+            .await
             .map_err(VerificationError::State)?;
 
         // Atomically check and update nonce to prevent TOCTOU race condition
-        let success = state.compare_and_swap_nonce(
-            &self.source,
-            self.nonce,        // Expected value
-            self.nonce + 1     // New value
-        ).await.map_err(VerificationError::State)?;
+        let success = state
+            .compare_and_swap_nonce(
+                &self.source,
+                self.nonce,     // Expected value
+                self.nonce + 1, // New value
+            )
+            .await
+            .map_err(VerificationError::State)?;
 
         if !success {
             // CAS failed, get current nonce for error reporting
-            let current = state.get_account_nonce(&self.source).await
+            let current = state
+                .get_account_nonce(&self.source)
+                .await
                 .map_err(VerificationError::State)?;
             return Err(VerificationError::InvalidNonce(
                 tx_hash.clone(),
                 current,
-                self.nonce
+                self.nonce,
             ));
         }
 
         match &self.data {
             TransactionType::Transfers(_transfers) => {
                 // Balance simplification: No decompression needed
-            },
-            TransactionType::Burn(_) => {},
+            }
+            TransactionType::Burn(_) => {}
             TransactionType::MultiSig(payload) => {
                 let is_reset = payload.threshold == 0 && payload.participants.is_empty();
                 // If the multisig is reset, we need to check if it was already configured
-                if is_reset && state.get_multisig_state(&self.source).await.map_err(VerificationError::State)?.is_none() {
+                if is_reset
+                    && state
+                        .get_multisig_state(&self.source)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .is_none()
+                {
                     return Err(VerificationError::MultiSigNotConfigured);
                 }
-            },
+            }
             TransactionType::InvokeContract(payload) => {
-                self.verify_invoke_contract(
-                    &payload.deposits,
-                    payload.max_gas
-                )?;
+                self.verify_invoke_contract(&payload.deposits, payload.max_gas)?;
 
                 // We need to load the contract module if not already in cache
                 if !self.is_contract_available(state, &payload.contract).await? {
                     return Err(VerificationError::ContractNotFound);
                 }
 
-                let (module, environment) = state.get_contract_module_with_environment(&payload.contract).await
+                let (module, environment) = state
+                    .get_contract_module_with_environment(&payload.contract)
+                    .await
                     .map_err(VerificationError::State)?;
 
                 if !module.is_entry_chunk(payload.chunk_id as usize) {
@@ -223,56 +220,69 @@ impl Transaction {
 
                 let validator = ModuleValidator::new(module, environment);
                 for constant in payload.parameters.iter() {
-                    validator.verify_constant(&constant)
+                    validator
+                        .verify_constant(&constant)
                         .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
                 }
-            },
+            }
             TransactionType::DeployContract(payload) => {
                 if let Some(invoke) = payload.invoke.as_ref() {
-                    self.verify_invoke_contract(
-                        &invoke.deposits,
-                        invoke.max_gas
-                    )?;
+                    self.verify_invoke_contract(&invoke.deposits, invoke.max_gas)?;
                 }
 
-                let environment = state.get_environment().await
+                let environment = state
+                    .get_environment()
+                    .await
                     .map_err(VerificationError::State)?;
 
                 let validator = ModuleValidator::new(&payload.module, environment);
-                validator.verify()
+                validator
+                    .verify()
                     .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
-            },
-            TransactionType::Energy(payload) => {
-                match payload {
-                    EnergyPayload::FreezeTos { amount, duration } => {
-                        if *amount == 0 {
-                            return Err(VerificationError::AnyError(anyhow!("Freeze amount must be greater than zero")));
-                        }
+            }
+            TransactionType::Energy(payload) => match payload {
+                EnergyPayload::FreezeTos { amount, duration } => {
+                    if *amount == 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Freeze amount must be greater than zero"
+                        )));
+                    }
 
-                        if *amount % crate::config::COIN_VALUE != 0 {
-                            return Err(VerificationError::AnyError(anyhow!("Freeze amount must be a whole number of TOS")));
-                        }
+                    if *amount % crate::config::COIN_VALUE != 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Freeze amount must be a whole number of TOS"
+                        )));
+                    }
 
-                        if *amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
-                            return Err(VerificationError::AnyError(anyhow!("Freeze amount must be at least 1 TOS")));
-                        }
+                    if *amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Freeze amount must be at least 1 TOS"
+                        )));
+                    }
 
-                        if !duration.is_valid() {
-                            return Err(VerificationError::AnyError(anyhow!("Freeze duration must be between 3 and 180 days")));
-                        }
-                    },
-                    EnergyPayload::UnfreezeTos { amount } => {
-                        if *amount == 0 {
-                            return Err(VerificationError::AnyError(anyhow!("Unfreeze amount must be greater than zero")));
-                        }
+                    if !duration.is_valid() {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Freeze duration must be between 3 and 180 days"
+                        )));
+                    }
+                }
+                EnergyPayload::UnfreezeTos { amount } => {
+                    if *amount == 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Unfreeze amount must be greater than zero"
+                        )));
+                    }
 
-                        if *amount % crate::config::COIN_VALUE != 0 {
-                            return Err(VerificationError::AnyError(anyhow!("Unfreeze amount must be a whole number of TOS")));
-                        }
+                    if *amount % crate::config::COIN_VALUE != 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Unfreeze amount must be a whole number of TOS"
+                        )));
+                    }
 
-                        if *amount < crate::config::MIN_UNFREEZE_TOS_AMOUNT {
-                            return Err(VerificationError::AnyError(anyhow!("Unfreeze amount must be at least 1 TOS")));
-                        }
+                    if *amount < crate::config::MIN_UNFREEZE_TOS_AMOUNT {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Unfreeze amount must be at least 1 TOS"
+                        )));
                     }
                 }
             },
@@ -292,62 +302,72 @@ impl Transaction {
                     let asset = transfer.get_asset(); // Returns &Hash
                     let amount = transfer.get_amount();
                     let current = spending_per_asset.entry(asset).or_insert(0);
-                    *current = current.checked_add(amount)
+                    *current = current
+                        .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
-            },
+            }
             TransactionType::Burn(payload) => {
                 let current = spending_per_asset.entry(&payload.asset).or_insert(0);
-                *current = current.checked_add(payload.amount)
+                *current = current
+                    .checked_add(payload.amount)
                     .ok_or(VerificationError::Overflow)?;
-            },
+            }
             TransactionType::InvokeContract(payload) => {
                 // Add deposits
                 for (asset, deposit) in &payload.deposits {
-                    let amount = deposit.get_amount()
+                    let amount = deposit
+                        .get_amount()
                         .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
                     let current = spending_per_asset.entry(asset).or_insert(0);
-                    *current = current.checked_add(amount)
+                    *current = current
+                        .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
                 // Add max_gas to TOS spending
                 let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                *current = current.checked_add(payload.max_gas)
+                *current = current
+                    .checked_add(payload.max_gas)
                     .ok_or(VerificationError::Overflow)?;
-            },
+            }
             TransactionType::DeployContract(payload) => {
                 // Add BURN_PER_CONTRACT to TOS spending
                 let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                *current = current.checked_add(BURN_PER_CONTRACT)
+                *current = current
+                    .checked_add(BURN_PER_CONTRACT)
                     .ok_or(VerificationError::Overflow)?;
 
                 // If invoking constructor, add deposits and max_gas
                 if let Some(invoke) = &payload.invoke {
                     for (asset, deposit) in &invoke.deposits {
-                        let amount = deposit.get_amount()
+                        let amount = deposit
+                            .get_amount()
                             .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
                         let current = spending_per_asset.entry(asset).or_insert(0);
-                        *current = current.checked_add(amount)
+                        *current = current
+                            .checked_add(amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
                     // Add max_gas to TOS spending
                     let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                    *current = current.checked_add(invoke.max_gas)
+                    *current = current
+                        .checked_add(invoke.max_gas)
                         .ok_or(VerificationError::Overflow)?;
                 }
-            },
+            }
             TransactionType::Energy(payload) => {
                 match payload {
                     EnergyPayload::FreezeTos { amount, .. } => {
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current.checked_add(*amount)
+                        *current = current
+                            .checked_add(*amount)
                             .ok_or(VerificationError::Overflow)?;
-                    },
+                    }
                     EnergyPayload::UnfreezeTos { .. } => {
                         // Unfreeze doesn't spend, it releases frozen funds
                     }
                 }
-            },
+            }
             TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
                 // No asset spending for these types
             }
@@ -356,7 +376,8 @@ impl Transaction {
         // Add fee to TOS spending (unless using energy fee)
         if !self.get_fee_type().is_energy() {
             let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-            *current = current.checked_add(self.fee)
+            *current = current
+                .checked_add(self.fee)
                 .ok_or(VerificationError::Overflow)?;
         }
 
@@ -366,7 +387,9 @@ impl Transaction {
         // users from submitting sequential transactions that total more than their funds
         for (asset_hash, total_spending) in &spending_per_asset {
             // Use transaction's reference for balance check (pre-transaction state)
-            let current_balance = state.get_sender_balance(&self.source, asset_hash, &self.reference).await
+            let current_balance = state
+                .get_sender_balance(&self.source, asset_hash, &self.reference)
+                .await
                 .map_err(VerificationError::State)?;
 
             if *current_balance < *total_spending {
@@ -378,18 +401,20 @@ impl Transaction {
 
             // Deduct spending from balance immediately (matches old behavior)
             // This mutation updates mempool cached balances so subsequent txs see reduced funds
-            *current_balance = current_balance.checked_sub(*total_spending)
+            *current_balance = current_balance
+                .checked_sub(*total_spending)
                 .ok_or(VerificationError::Overflow)?;
         }
 
         // Credit unfrozen TOS immediately in verification state (mempool/ChainState)
         if let TransactionType::Energy(EnergyPayload::UnfreezeTos { amount }) = &self.data {
-            let balance = state.get_receiver_balance(
-                Cow::Borrowed(self.get_source()),
-                Cow::Borrowed(&TOS_ASSET)
-            ).await.map_err(VerificationError::State)?;
+            let balance = state
+                .get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Borrowed(&TOS_ASSET))
+                .await
+                .map_err(VerificationError::State)?;
 
-            *balance = balance.checked_add(*amount)
+            *balance = balance
+                .checked_add(*amount)
                 .ok_or(VerificationError::Overflow)?;
         }
 
@@ -402,8 +427,7 @@ impl Transaction {
         &'a self,
         tx_hash: &'a Hash,
         state: &mut B,
-    ) -> Result<(), VerificationError<E>>
-    {
+    ) -> Result<(), VerificationError<E>> {
         trace!("Pre-verifying transaction");
         if !self.has_valid_version_format() {
             return Err(VerificationError::InvalidFormat);
@@ -414,37 +438,46 @@ impl Transaction {
             if !matches!(self.data, TransactionType::Transfers(_)) {
                 return Err(VerificationError::InvalidFormat);
             }
-            
+
             // Validate that Energy fee type cannot be used for transfers to new addresses
             if let TransactionType::Transfers(transfers) = &self.data {
                 for transfer in transfers {
                     // Try to get the account nonce to check if account exists
                     // If account doesn't exist, this will fail with AccountNotFound error
-                    let _nonce = state.get_account_nonce(transfer.get_destination()).await
+                    let _nonce = state
+                        .get_account_nonce(transfer.get_destination())
+                        .await
                         .map_err(|_| VerificationError::InvalidFormat)?;
                 }
             }
         }
 
         trace!("Pre-verifying transaction on state");
-        state.pre_verify_tx(&self).await
+        state
+            .pre_verify_tx(&self)
+            .await
             .map_err(VerificationError::State)?;
 
         // Atomically check and update nonce to prevent TOCTOU race condition
-        let success = state.compare_and_swap_nonce(
-            &self.source,
-            self.nonce,        // Expected value
-            self.nonce + 1     // New value
-        ).await.map_err(VerificationError::State)?;
+        let success = state
+            .compare_and_swap_nonce(
+                &self.source,
+                self.nonce,     // Expected value
+                self.nonce + 1, // New value
+            )
+            .await
+            .map_err(VerificationError::State)?;
 
         if !success {
             // CAS failed, get current nonce for error reporting
-            let current = state.get_account_nonce(&self.source).await
+            let current = state
+                .get_account_nonce(&self.source)
+                .await
                 .map_err(VerificationError::State)?;
             return Err(VerificationError::InvalidNonce(
                 tx_hash.clone(),
                 current,
-                self.nonce
+                self.nonce,
             ));
         }
 
@@ -483,7 +516,7 @@ impl Transaction {
                 if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
                     return Err(VerificationError::TransactionExtraDataSize);
                 }
-            },
+            }
             TransactionType::Burn(payload) => {
                 let fee = self.fee;
                 let amount = payload.amount;
@@ -492,13 +525,14 @@ impl Transaction {
                     return Err(VerificationError::InvalidFormat);
                 }
 
-                let total = fee.checked_add(amount)
+                let total = fee
+                    .checked_add(amount)
                     .ok_or(VerificationError::InvalidFormat)?;
 
                 if total < fee || total < amount {
                     return Err(VerificationError::InvalidFormat);
                 }
-            },
+            }
             TransactionType::MultiSig(payload) => {
                 if payload.participants.len() > MAX_MULTISIG_PARTICIPANTS {
                     return Err(VerificationError::MultiSigParticipants);
@@ -522,22 +556,27 @@ impl Transaction {
 
                 let is_reset = payload.threshold == 0 && payload.participants.is_empty();
                 // If the multisig is reset, we need to check if it was already configured
-                if is_reset && state.get_multisig_state(&self.source).await.map_err(VerificationError::State)?.is_none() {
+                if is_reset
+                    && state
+                        .get_multisig_state(&self.source)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .is_none()
+                {
                     return Err(VerificationError::MultiSigNotConfigured);
                 }
-            },
+            }
             TransactionType::InvokeContract(payload) => {
-                self.verify_invoke_contract(
-                    &payload.deposits,
-                    payload.max_gas
-                )?;
+                self.verify_invoke_contract(&payload.deposits, payload.max_gas)?;
 
                 // We need to load the contract module if not already in cache
                 if !self.is_contract_available(state, &payload.contract).await? {
                     return Err(VerificationError::ContractNotFound);
                 }
 
-                let (module, environment) = state.get_contract_module_with_environment(&payload.contract).await
+                let (module, environment) = state
+                    .get_contract_module_with_environment(&payload.contract)
+                    .await
                     .map_err(VerificationError::State)?;
 
                 if !module.is_entry_chunk(payload.chunk_id as usize) {
@@ -546,28 +585,29 @@ impl Transaction {
 
                 let validator = ModuleValidator::new(module, environment);
                 for constant in payload.parameters.iter() {
-                    validator.verify_constant(&constant)
+                    validator
+                        .verify_constant(&constant)
                         .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
                 }
-            },
+            }
             TransactionType::DeployContract(payload) => {
                 if let Some(invoke) = payload.invoke.as_ref() {
-                    self.verify_invoke_contract(
-                        &invoke.deposits,
-                        invoke.max_gas
-                    )?;
+                    self.verify_invoke_contract(&invoke.deposits, invoke.max_gas)?;
                 }
 
-                let environment = state.get_environment().await
+                let environment = state
+                    .get_environment()
+                    .await
                     .map_err(VerificationError::State)?;
 
                 let validator = ModuleValidator::new(&payload.module, environment);
-                validator.verify()
+                validator
+                    .verify()
                     .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
-            },
+            }
             TransactionType::Energy(_) => {
                 // Energy transactions don't require special verification beyond basic checks
-            },
+            }
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
@@ -586,12 +626,18 @@ impl Transaction {
         }
 
         // 0.b Verify multisig
-        if let Some(config) = state.get_multisig_state(&self.source).await.map_err(VerificationError::State)? {
+        if let Some(config) = state
+            .get_multisig_state(&self.source)
+            .await
+            .map_err(VerificationError::State)?
+        {
             let Some(multisig) = self.get_multisig() else {
                 return Err(VerificationError::MultiSigNotFound);
             };
 
-            if (config.threshold as usize) != multisig.len() || multisig.len() > MAX_MULTISIG_PARTICIPANTS {
+            if (config.threshold as usize) != multisig.len()
+                || multisig.len() > MAX_MULTISIG_PARTICIPANTS
+            {
                 return Err(VerificationError::MultiSigParticipants);
             }
 
@@ -608,7 +654,10 @@ impl Transaction {
                 let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
                 if !sig.signature.verify(hash.as_bytes(), &decompressed) {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Multisig signature verification failed for participant {}", index);
+                        debug!(
+                            "Multisig signature verification failed for participant {}",
+                            index
+                        );
                     }
                     return Err(VerificationError::InvalidSignature);
                 }
@@ -638,14 +687,15 @@ impl Transaction {
         match &self.data {
             TransactionType::Transfers(_transfers) => {
                 // Transfer verification happens in spending_per_asset accumulation below
-            },
-            TransactionType::Burn(_payload) => {
-            },
+            }
+            TransactionType::Burn(_payload) => {}
             TransactionType::MultiSig(payload) => {
                 // Setup the multisig
-                state.set_multisig_state(&self.source, payload).await
+                state
+                    .set_multisig_state(&self.source, payload)
+                    .await
                     .map_err(VerificationError::State)?;
-            },
+            }
             TransactionType::InvokeContract(payload) => {
                 let dest_pubkey = PublicKey::from_hash(&payload.contract);
                 self.verify_contract_deposits(
@@ -653,7 +703,7 @@ impl Transaction {
                     &dest_pubkey,
                     &payload.deposits,
                 )?;
-            },
+            }
             TransactionType::DeployContract(payload) => {
                 // Verify that if we have a constructor, we must have an invoke, and vice-versa
                 if payload.invoke.is_none() != payload.module.get_chunk_id_of_hook(0).is_none() {
@@ -669,19 +719,25 @@ impl Transaction {
                     )?;
                 }
 
-                state.set_contract_module(tx_hash, &payload.module).await
+                state
+                    .set_contract_module(tx_hash, &payload.module)
+                    .await
                     .map_err(VerificationError::State)?;
-            },
+            }
             TransactionType::Energy(payload) => {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Energy transaction verification - payload: {:?}, fee: {}, nonce: {}",
-                           payload, self.fee, self.nonce);
+                    debug!(
+                        "Energy transaction verification - payload: {:?}, fee: {}, nonce: {}",
+                        payload, self.fee, self.nonce
+                    );
                 }
-            },
+            }
             TransactionType::AIMining(payload) => {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("AI Mining transaction verification - payload: {:?}, fee: {}, nonce: {}",
-                           payload, self.fee, self.nonce);
+                    debug!(
+                        "AI Mining transaction verification - payload: {:?}, fee: {}, nonce: {}",
+                        payload, self.fee, self.nonce
+                    );
                 }
             }
         }
@@ -700,60 +756,70 @@ impl Transaction {
                     let asset = transfer.get_asset();
                     let amount = transfer.get_amount();
                     let current = spending_per_asset.entry(asset).or_insert(0);
-                    *current = current.checked_add(amount)
+                    *current = current
+                        .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
-            },
+            }
             TransactionType::Burn(payload) => {
                 let current = spending_per_asset.entry(&payload.asset).or_insert(0);
-                *current = current.checked_add(payload.amount)
+                *current = current
+                    .checked_add(payload.amount)
                     .ok_or(VerificationError::Overflow)?;
-            },
+            }
             TransactionType::InvokeContract(payload) => {
                 for (asset, deposit) in &payload.deposits {
-                    let amount = deposit.get_amount()
+                    let amount = deposit
+                        .get_amount()
                         .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
                     let current = spending_per_asset.entry(asset).or_insert(0);
-                    *current = current.checked_add(amount)
+                    *current = current
+                        .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
                 // Add max_gas to TOS spending
                 let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                *current = current.checked_add(payload.max_gas)
+                *current = current
+                    .checked_add(payload.max_gas)
                     .ok_or(VerificationError::Overflow)?;
-            },
+            }
             TransactionType::DeployContract(payload) => {
                 // Add BURN_PER_CONTRACT to TOS spending
                 let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                *current = current.checked_add(BURN_PER_CONTRACT)
+                *current = current
+                    .checked_add(BURN_PER_CONTRACT)
                     .ok_or(VerificationError::Overflow)?;
 
                 if let Some(invoke) = &payload.invoke {
                     for (asset, deposit) in &invoke.deposits {
-                        let amount = deposit.get_amount()
+                        let amount = deposit
+                            .get_amount()
                             .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
                         let current = spending_per_asset.entry(asset).or_insert(0);
-                        *current = current.checked_add(amount)
+                        *current = current
+                            .checked_add(amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
                     // Add max_gas to TOS spending
                     let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                    *current = current.checked_add(invoke.max_gas)
+                    *current = current
+                        .checked_add(invoke.max_gas)
                         .ok_or(VerificationError::Overflow)?;
                 }
-            },
+            }
             TransactionType::Energy(payload) => {
                 match payload {
                     EnergyPayload::FreezeTos { amount, .. } => {
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current.checked_add(*amount)
+                        *current = current
+                            .checked_add(*amount)
                             .ok_or(VerificationError::Overflow)?;
-                    },
+                    }
                     EnergyPayload::UnfreezeTos { .. } => {
                         // Unfreeze doesn't spend, it releases frozen funds
                     }
                 }
-            },
+            }
             TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
                 // No asset spending for these types
             }
@@ -762,7 +828,8 @@ impl Transaction {
         // Add fee to TOS spending (unless using energy fee)
         if !self.get_fee_type().is_energy() {
             let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-            *current = current.checked_add(self.fee)
+            *current = current
+                .checked_add(self.fee)
                 .ok_or(VerificationError::Overflow)?;
         }
 
@@ -771,7 +838,9 @@ impl Transaction {
         // This ensures mempool verification reduces cached balances, preventing
         // users from submitting sequential transactions that total more than their funds
         for (asset_hash, total_spending) in &spending_per_asset {
-            let current_balance = state.get_sender_balance(&self.source, asset_hash, &self.reference).await
+            let current_balance = state
+                .get_sender_balance(&self.source, asset_hash, &self.reference)
+                .await
                 .map_err(VerificationError::State)?;
 
             if *current_balance < *total_spending {
@@ -783,17 +852,19 @@ impl Transaction {
 
             // Deduct spending from balance immediately (matches old behavior)
             // This mutation updates mempool cached balances so subsequent txs see reduced funds
-            *current_balance = current_balance.checked_sub(*total_spending)
+            *current_balance = current_balance
+                .checked_sub(*total_spending)
                 .ok_or(VerificationError::Overflow)?;
         }
 
         if let TransactionType::Energy(EnergyPayload::UnfreezeTos { amount }) = &self.data {
-            let balance = state.get_receiver_balance(
-                Cow::Borrowed(self.get_source()),
-                Cow::Borrowed(&TOS_ASSET)
-            ).await.map_err(VerificationError::State)?;
+            let balance = state
+                .get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Borrowed(&TOS_ASSET))
+                .await
+                .map_err(VerificationError::State)?;
 
-            *balance = balance.checked_add(*amount)
+            *balance = balance
+                .checked_add(*amount)
                 .ok_or(VerificationError::Overflow)?;
         }
 
@@ -808,7 +879,7 @@ impl Transaction {
     where
         H: AsRef<Hash> + 'a,
         B: BlockchainVerificationState<'a, E>,
-        C: ZKPCache<E>
+        C: ZKPCache<E>,
     {
         trace!("Verifying batch of transactions");
         for (tx, hash) in txs {
@@ -818,11 +889,16 @@ impl Transaction {
             // we don't need to spend time reverifying it again
             // because a TX is immutable, we can just verify the mutable parts
             // (balance & nonce related)
-            let dynamic_parts_only = cache.is_already_verified(hash).await
+            let dynamic_parts_only = cache
+                .is_already_verified(hash)
+                .await
                 .map_err(VerificationError::State)?;
             if dynamic_parts_only {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("TX {} is known from ZKPCache, verifying dynamic parts only", hash);
+                    debug!(
+                        "TX {} is known from ZKPCache, verifying dynamic parts only",
+                        hash
+                    );
                 }
                 tx.verify_dynamic_parts(hash, state).await?;
             } else {
@@ -845,17 +921,21 @@ impl Transaction {
     ) -> Result<(), VerificationError<E>>
     where
         B: BlockchainVerificationState<'a, E>,
-        C: ZKPCache<E>
+        C: ZKPCache<E>,
     {
-        let dynamic_parts_only = cache.is_already_verified(tx_hash).await
+        let dynamic_parts_only = cache
+            .is_already_verified(tx_hash)
+            .await
             .map_err(VerificationError::State)?;
         if dynamic_parts_only {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("TX {} is known from ZKPCache, verifying dynamic parts only", tx_hash);
+                debug!(
+                    "TX {} is known from ZKPCache, verifying dynamic parts only",
+                    tx_hash
+                );
             }
             self.verify_dynamic_parts(tx_hash, state).await?;
-        }
-        else {
+        } else {
             self.pre_verify(tx_hash, state).await?;
         };
 
@@ -874,7 +954,9 @@ impl Transaction {
     ) -> Result<(), VerificationError<E>> {
         trace!("Applying transaction data");
         // Update nonce
-        state.update_account_nonce(self.get_source(), self.nonce + 1).await
+        state
+            .update_account_nonce(self.get_source(), self.nonce + 1)
+            .await
             .map_err(VerificationError::State)?;
 
         // SECURITY FIX: Deduct sender balances BEFORE adding to receivers
@@ -888,63 +970,73 @@ impl Transaction {
                     let asset = transfer.get_asset(); // Returns &Hash
                     let amount = transfer.get_amount();
                     let current = spending_per_asset.entry(asset).or_insert(0);
-                    *current = current.checked_add(amount)
+                    *current = current
+                        .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
-            },
+            }
             TransactionType::Burn(payload) => {
                 let current = spending_per_asset.entry(&payload.asset).or_insert(0);
-                *current = current.checked_add(payload.amount)
+                *current = current
+                    .checked_add(payload.amount)
                     .ok_or(VerificationError::Overflow)?;
-            },
+            }
             TransactionType::InvokeContract(payload) => {
                 // Add deposits
                 for (asset, deposit) in &payload.deposits {
-                    let amount = deposit.get_amount()
+                    let amount = deposit
+                        .get_amount()
                         .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
                     let current = spending_per_asset.entry(asset).or_insert(0);
-                    *current = current.checked_add(amount)
+                    *current = current
+                        .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
                 // Add max_gas to TOS spending
                 let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                *current = current.checked_add(payload.max_gas)
+                *current = current
+                    .checked_add(payload.max_gas)
                     .ok_or(VerificationError::Overflow)?;
-            },
+            }
             TransactionType::DeployContract(payload) => {
                 // Add BURN_PER_CONTRACT to TOS spending
                 let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                *current = current.checked_add(BURN_PER_CONTRACT)
+                *current = current
+                    .checked_add(BURN_PER_CONTRACT)
                     .ok_or(VerificationError::Overflow)?;
 
                 // If invoking constructor, add deposits and max_gas
                 if let Some(invoke) = &payload.invoke {
                     for (asset, deposit) in &invoke.deposits {
-                        let amount = deposit.get_amount()
+                        let amount = deposit
+                            .get_amount()
                             .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
                         let current = spending_per_asset.entry(asset).or_insert(0);
-                        *current = current.checked_add(amount)
+                        *current = current
+                            .checked_add(amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
                     // Add max_gas to TOS spending
                     let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                    *current = current.checked_add(invoke.max_gas)
+                    *current = current
+                        .checked_add(invoke.max_gas)
                         .ok_or(VerificationError::Overflow)?;
                 }
-            },
+            }
             TransactionType::Energy(payload) => {
                 match payload {
                     EnergyPayload::FreezeTos { amount, .. } => {
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current.checked_add(*amount)
+                        *current = current
+                            .checked_add(*amount)
                             .ok_or(VerificationError::Overflow)?;
-                    },
+                    }
                     EnergyPayload::UnfreezeTos { .. } => {
                         // Unfreeze doesn't spend, it releases frozen funds
                         // Instead it will be added back to sender balance below
                     }
                 }
-            },
+            }
             TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
                 // No asset spending for these types
             }
@@ -953,11 +1045,14 @@ impl Transaction {
         // Add fee to TOS spending (unless using energy fee)
         if !self.get_fee_type().is_energy() {
             let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-            *current = current.checked_add(self.fee)
+            *current = current
+                .checked_add(self.fee)
                 .ok_or(VerificationError::Overflow)?;
 
             // Add fee to gas fee counter
-            state.add_gas_fee(self.fee).await
+            state
+                .add_gas_fee(self.fee)
+                .await
                 .map_err(VerificationError::State)?;
         }
 
@@ -969,11 +1064,15 @@ impl Transaction {
             // This is similar to XELIS line 1303-1306 in apply_with_partial_verify
             // Without this, internal_update_sender_echange will fail with "account not found" error
             // because the account was created with empty assets HashMap
-            let _ = state.get_sender_balance(&self.source, asset_hash, &self.reference).await
+            let _ = state
+                .get_sender_balance(&self.source, asset_hash, &self.reference)
+                .await
                 .map_err(VerificationError::State)?;
 
             // Track the spending in output_sum for final balance calculation
-            state.add_sender_output(&self.source, asset_hash, *total_spending).await
+            state
+                .add_sender_output(&self.source, asset_hash, *total_spending)
+                .await
                 .map_err(VerificationError::State)?;
         }
 
@@ -984,7 +1083,9 @@ impl Transaction {
                 let energy_cost = self.calculate_energy_cost();
 
                 // Get user's energy resource
-                let energy_resource = state.get_energy_resource(&self.source).await
+                let energy_resource = state
+                    .get_energy_resource(&self.source)
+                    .await
                     .map_err(VerificationError::State)?;
 
                 if let Some(mut energy_resource) = energy_resource {
@@ -994,15 +1095,21 @@ impl Transaction {
                     }
 
                     // Consume energy
-                    energy_resource.consume_energy(energy_cost)
+                    energy_resource
+                        .consume_energy(energy_cost)
                         .map_err(|_| VerificationError::InsufficientEnergy(energy_cost))?;
 
                     // Update energy resource in state
-                    state.set_energy_resource(&self.source, energy_resource).await
+                    state
+                        .set_energy_resource(&self.source, energy_resource)
+                        .await
                         .map_err(VerificationError::State)?;
 
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Consumed {} energy for transaction {}", energy_cost, tx_hash);
+                        debug!(
+                            "Consumed {} energy for transaction {}",
+                            energy_cost, tx_hash
+                        );
                     }
                 } else {
                     return Err(VerificationError::InsufficientEnergy(energy_cost));
@@ -1019,24 +1126,31 @@ impl Transaction {
                         .get_receiver_balance(
                             Cow::Borrowed(transfer.get_destination()),
                             Cow::Borrowed(transfer.get_asset()),
-                        ).await
+                        )
+                        .await
                         .map_err(VerificationError::State)?;
 
                     // Balance simplification: Add plain u64 amount to receiver's balance
                     let plain_amount = transfer.get_amount();
-                    *current_balance = current_balance.checked_add(plain_amount)
+                    *current_balance = current_balance
+                        .checked_add(plain_amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
-            },
+            }
             TransactionType::Burn(payload) => {
                 if payload.asset == TOS_ASSET {
-                    state.add_burned_coins(payload.amount).await
+                    state
+                        .add_burned_coins(payload.amount)
+                        .await
                         .map_err(VerificationError::State)?;
                 }
-            },
+            }
             TransactionType::MultiSig(payload) => {
-                state.set_multisig_state(&self.source, payload).await.map_err(VerificationError::State)?;
-            },
+                state
+                    .set_multisig_state(&self.source, payload)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
             TransactionType::InvokeContract(payload) => {
                 if self.is_contract_available(state, &payload.contract).await? {
                     self.invoke_contract(
@@ -1046,32 +1160,40 @@ impl Transaction {
                         &payload.deposits,
                         payload.parameters.iter().cloned(),
                         payload.max_gas,
-                        InvokeContract::Entry(payload.chunk_id)
-                    ).await?;
+                        InvokeContract::Entry(payload.chunk_id),
+                    )
+                    .await?;
                 } else {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Contract {} invoked from {} not available", payload.contract, tx_hash);
+                        debug!(
+                            "Contract {} invoked from {} not available",
+                            payload.contract, tx_hash
+                        );
                     }
 
                     // Nothing was spent, we must refund the gas and deposits
                     self.handle_gas(state, 0, payload.max_gas).await?;
                     self.refund_deposits(state, &payload.deposits).await?;
                 }
-            },
+            }
             TransactionType::DeployContract(payload) => {
-                state.set_contract_module(tx_hash, &payload.module).await
+                state
+                    .set_contract_module(tx_hash, &payload.module)
+                    .await
                     .map_err(VerificationError::State)?;
 
                 if let Some(invoke) = payload.invoke.as_ref() {
-                    let is_success = self.invoke_contract(
-                        tx_hash,
-                        state,
-                        tx_hash,
-                        &invoke.deposits,
-                        iter::empty(),
-                        invoke.max_gas,
-                        InvokeContract::Hook(0)
-                    ).await?;
+                    let is_success = self
+                        .invoke_contract(
+                            tx_hash,
+                            state,
+                            tx_hash,
+                            &invoke.deposits,
+                            iter::empty(),
+                            invoke.max_gas,
+                            InvokeContract::Hook(0),
+                        )
+                        .await?;
 
                     // if it has failed, we don't want to deploy the contract
                     // TODO: we must handle this carefully
@@ -1079,47 +1201,67 @@ impl Transaction {
                         if log::log_enabled!(log::Level::Debug) {
                             debug!("Contract deploy for {} failed", tx_hash);
                         }
-                        state.remove_contract_module(tx_hash).await
+                        state
+                            .remove_contract_module(tx_hash)
+                            .await
                             .map_err(VerificationError::State)?;
                     }
                 }
-            },
+            }
             TransactionType::Energy(payload) => {
                 // Handle energy operations (freeze/unfreeze TOS)
                 match payload {
                     EnergyPayload::FreezeTos { amount, duration } => {
                         // Get current energy resource for the account
-                        let energy_resource = state.get_energy_resource(&self.source).await
+                        let energy_resource = state
+                            .get_energy_resource(&self.source)
+                            .await
                             .map_err(VerificationError::State)?;
-                        
-                        let mut energy_resource = energy_resource.unwrap_or_else(EnergyResource::new);
-                        
+
+                        let mut energy_resource =
+                            energy_resource.unwrap_or_else(EnergyResource::new);
+
                         // Freeze TOS for energy - get topoheight from the blockchain state
                         let topoheight = state.get_block().get_blue_score() as u64; // Use blue_score for consensus
-                        energy_resource.freeze_tos_for_energy(*amount, duration.clone(), topoheight);
-                        
+                        energy_resource.freeze_tos_for_energy(
+                            *amount,
+                            duration.clone(),
+                            topoheight,
+                        );
+
                         // Update energy resource in state
-                        state.set_energy_resource(&self.source, energy_resource).await
+                        state
+                            .set_energy_resource(&self.source, energy_resource)
+                            .await
                             .map_err(VerificationError::State)?;
-                        
+
                         if log::log_enabled!(log::Level::Debug) {
                             debug!("FreezeTos applied: {} TOS frozen for {} duration, energy gained: {} units",
                                    amount, duration.name(), (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier());
                         }
-                    },
+                    }
                     EnergyPayload::UnfreezeTos { amount } => {
                         // Get current energy resource for the account
-                        let energy_resource = state.get_energy_resource(&self.source).await
+                        let energy_resource = state
+                            .get_energy_resource(&self.source)
+                            .await
                             .map_err(VerificationError::State)?;
 
                         if let Some(mut energy_resource) = energy_resource {
                             // Unfreeze TOS - get topoheight from the blockchain state
                             let topoheight = state.get_block().get_blue_score() as u64; // Use blue_score for consensus
-                            energy_resource.unfreeze_tos(*amount, topoheight)
-                                .map_err(|_| VerificationError::AnyError(anyhow::anyhow!("Invalid energy operation")))?;
+                            energy_resource
+                                .unfreeze_tos(*amount, topoheight)
+                                .map_err(|_| {
+                                    VerificationError::AnyError(anyhow::anyhow!(
+                                        "Invalid energy operation"
+                                    ))
+                                })?;
 
                             // Update energy resource in state
-                            state.set_energy_resource(&self.source, energy_resource).await
+                            state
+                                .set_energy_resource(&self.source, energy_resource)
+                                .await
                                 .map_err(VerificationError::State)?;
 
                             // NOTE: Balance refund is done in verify phase (verify_dynamic_parts/pre_verify)
@@ -1129,17 +1271,21 @@ impl Transaction {
                                 debug!("UnfreezeTos applied: {} TOS unfrozen (balance already refunded in verify phase)", amount);
                             }
                         } else {
-                            return Err(VerificationError::AnyError(anyhow::anyhow!("Invalid energy operation")));
+                            return Err(VerificationError::AnyError(anyhow::anyhow!(
+                                "Invalid energy operation"
+                            )));
                         }
                     }
                 }
-            },
+            }
             TransactionType::AIMining(payload) => {
                 // Handle AI Mining operations with full validation
                 use crate::ai_mining::AIMiningValidator;
 
                 // Get or create AI mining state
-                let mut ai_mining_state = state.get_ai_mining_state().await
+                let mut ai_mining_state = state
+                    .get_ai_mining_state()
+                    .await
                     .map_err(VerificationError::State)?
                     .unwrap_or_default();
 
@@ -1157,18 +1303,28 @@ impl Transaction {
                     );
 
                     // Validate and apply the AI mining operation
-                    validator.validate_and_apply(payload)
-                        .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("AI Mining validation failed: {}", e)))?;
+                    validator.validate_and_apply(payload).map_err(|e| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "AI Mining validation failed: {}",
+                            e
+                        ))
+                    })?;
 
                     // Update tasks and process completions
-                    validator.update_tasks()
-                        .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("AI Mining task update failed: {}", e)))?;
+                    validator.update_tasks().map_err(|e| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "AI Mining task update failed: {}",
+                            e
+                        ))
+                    })?;
 
                     validator.get_validation_summary()
                 };
 
                 // Save updated state back to blockchain
-                state.set_ai_mining_state(&ai_mining_state).await
+                state
+                    .set_ai_mining_state(&ai_mining_state)
+                    .await
                     .map_err(VerificationError::State)?;
 
                 if log::log_enabled!(log::Level::Debug) {
@@ -1182,7 +1338,12 @@ impl Transaction {
     }
 
     /// Assume the tx is valid, apply it to `state`. May panic if a ciphertext is ill-formed.
-    pub async fn apply_without_verify<'a, P: ContractProvider, E, B: BlockchainApplyState<'a, P, E>>(
+    pub async fn apply_without_verify<
+        'a,
+        P: ContractProvider,
+        E,
+        B: BlockchainApplyState<'a, P, E>,
+    >(
         self: &'a Arc<Self>,
         tx_hash: &'a Hash,
         state: &mut B,
@@ -1216,10 +1377,15 @@ impl Transaction {
     /// Verify only that the final sender balance is the expected one for each commitment
     /// Then apply ciphertexts to the state
     /// Checks done are: commitment eq proofs only
-    pub async fn apply_with_partial_verify<'a, P: ContractProvider, E, B: BlockchainApplyState<'a, P, E>>(
+    pub async fn apply_with_partial_verify<
+        'a,
+        P: ContractProvider,
+        E,
+        B: BlockchainApplyState<'a, P, E>,
+    >(
         self: &'a Arc<Self>,
         tx_hash: &'a Hash,
-        state: &mut B
+        state: &mut B,
     ) -> Result<(), VerificationError<E>> {
         trace!("apply with partial verify");
 

@@ -1,19 +1,11 @@
-use std::{
-    borrow::Cow,
-    collections::HashSet
+use crate::core::{
+    error::{BlockchainError, DiskContext},
+    storage::{ClientProtocolProvider, SledStorage, Tips},
 };
 use async_trait::async_trait;
 use log::trace;
-use tos_common::{
-    crypto::Hash,
-    serializer::Serializer
-};
-use crate::core::{
-    error::{BlockchainError, DiskContext},
-    storage::{
-        ClientProtocolProvider, SledStorage, Tips
-    }
-};
+use std::{borrow::Cow, collections::HashSet};
+use tos_common::{crypto::Hash, serializer::Serializer};
 
 #[async_trait]
 impl ClientProtocolProvider for SledStorage {
@@ -21,14 +13,27 @@ impl ClientProtocolProvider for SledStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get block executer for tx {}", tx);
         }
-        self.load_from_disk(&self.txs_executed, tx.as_bytes(), DiskContext::BlockExecutorForTx)
+        self.load_from_disk(
+            &self.txs_executed,
+            tx.as_bytes(),
+            DiskContext::BlockExecutorForTx,
+        )
     }
 
-    fn mark_tx_as_executed_in_block(&mut self, tx: &Hash, block: &Hash) -> Result<(), BlockchainError> {
+    fn mark_tx_as_executed_in_block(
+        &mut self,
+        tx: &Hash,
+        block: &Hash,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set tx {} executed in block {}", tx, block);
         }
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.txs_executed, tx.as_bytes(), block.as_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.txs_executed,
+            tx.as_bytes(),
+            block.as_bytes(),
+        )?;
         Ok(())
     }
 
@@ -36,7 +41,11 @@ impl ClientProtocolProvider for SledStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("remove tx {} executed", tx);
         }
-        Self::remove_from_disk_without_reading(self.snapshot.as_mut(), &self.txs_executed, tx.as_bytes())?;
+        Self::remove_from_disk_without_reading(
+            self.snapshot.as_mut(),
+            &self.txs_executed,
+            tx.as_bytes(),
+        )?;
 
         Ok(())
     }
@@ -53,7 +62,7 @@ impl ClientProtocolProvider for SledStorage {
             trace!("is tx {} executed in block {}", tx, block);
         }
         if let Ok(hash) = self.get_block_executor_for_tx(tx) {
-            return Ok(hash == *block)
+            return Ok(hash == *block);
         }
         Ok(false)
     }
@@ -72,7 +81,11 @@ impl ClientProtocolProvider for SledStorage {
         Ok(self.has_tx_blocks(tx)? && self.get_blocks_for_tx(tx)?.contains(block))
     }
 
-    fn add_block_linked_to_tx_if_not_present(&mut self, tx: &Hash, block: &Hash) -> Result<bool, BlockchainError> {
+    fn add_block_linked_to_tx_if_not_present(
+        &mut self,
+        tx: &Hash,
+        block: &Hash,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("add block {} linked to tx {} if not present", block, tx);
         }
@@ -84,7 +97,12 @@ impl ClientProtocolProvider for SledStorage {
 
         let insert = hashes.insert(Cow::Borrowed(block));
         if insert {
-            Self::insert_into_disk(self.snapshot.as_mut(), &self.tx_blocks, tx.as_bytes(), hashes.to_bytes())?;
+            Self::insert_into_disk(
+                self.snapshot.as_mut(),
+                &self.tx_blocks,
+                tx.as_bytes(),
+                hashes.to_bytes(),
+            )?;
         }
 
         Ok(insert)
@@ -101,7 +119,12 @@ impl ClientProtocolProvider for SledStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set blocks ({}) for tx {} ", blocks.len(), tx);
         }
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.tx_blocks, tx.as_bytes(), blocks.to_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.tx_blocks,
+            tx.as_bytes(),
+            blocks.to_bytes(),
+        )?;
         Ok(())
     }
 }

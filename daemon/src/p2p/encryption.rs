@@ -1,15 +1,10 @@
 use chacha20poly1305::{
-    aead::{
-        rand_core::OsError,
-        AeadInOut,
-        Buffer
-    },
-    ChaCha20Poly1305,
-    KeyInit
+    aead::{rand_core::OsError, AeadInOut, Buffer},
+    ChaCha20Poly1305, KeyInit,
 };
+use log::trace;
 use thiserror::Error;
 use tos_common::tokio::sync::Mutex;
-use log::trace;
 
 // This symetric key is used to encrypt/decrypt the data
 pub type EncryptionKey = [u8; 32];
@@ -35,13 +30,13 @@ pub struct Encryption {
     // Cipher using the peer key to decrypt packets
     peer_cipher: Mutex<Option<CipherState>>,
     // Is encryption mode ready
-    ready: bool
+    ready: bool,
 }
 
 pub enum CipherSide {
     Our,
     Peer,
-    Both
+    Both,
 }
 
 impl CipherSide {
@@ -73,7 +68,7 @@ pub enum EncryptionError {
     #[error("Not supported")]
     NotSupported,
     #[error(transparent)]
-    RngError(#[from] OsError)
+    RngError(#[from] OsError),
 }
 
 impl Encryption {
@@ -81,7 +76,7 @@ impl Encryption {
         Self {
             our_cipher: Mutex::new(None),
             peer_cipher: Mutex::new(None),
-            ready: false
+            ready: false,
         }
     }
 
@@ -122,14 +117,15 @@ impl Encryption {
         if log::log_enabled!(log::Level::Trace) {
             trace!("our cipher locked");
         }
-        let cipher_state = lock.as_mut()
-            .ok_or(EncryptionError::WriteNotReady)?;
+        let cipher_state = lock.as_mut().ok_or(EncryptionError::WriteNotReady)?;
 
         // fill our buffer
         cipher_state.nonce_buffer[0..8].copy_from_slice(&cipher_state.nonce.to_be_bytes());
 
         // Encrypt the packet
-        cipher_state.cipher.encrypt_in_place(&cipher_state.nonce_buffer.into(), &[], input)
+        cipher_state
+            .cipher
+            .encrypt_in_place(&cipher_state.nonce_buffer.into(), &[], input)
             .map_err(|_| EncryptionError::EncryptError)?;
 
         // Increment the nonce so we don't use the same nonce twice
@@ -148,14 +144,15 @@ impl Encryption {
         if log::log_enabled!(log::Level::Trace) {
             trace!("peer cipher locked");
         }
-        let cipher_state = lock.as_mut()
-            .ok_or(EncryptionError::ReadNotReady)?;
+        let cipher_state = lock.as_mut().ok_or(EncryptionError::ReadNotReady)?;
 
         // fill our buffer
         cipher_state.nonce_buffer[0..8].copy_from_slice(&cipher_state.nonce.to_be_bytes());
 
         // Decrypt packet
-        cipher_state.cipher.decrypt_in_place(&cipher_state.nonce_buffer.into(), &[], buf)
+        cipher_state
+            .cipher
+            .decrypt_in_place(&cipher_state.nonce_buffer.into(), &[], buf)
             .map_err(|_| EncryptionError::DecryptError)?;
 
         // Increment the nonce so we don't use the same nonce twice
@@ -164,8 +161,12 @@ impl Encryption {
         Ok(())
     }
 
-    fn create_or_update_state(state: &mut Option<CipherState>, key: EncryptionKey) -> Result<(), EncryptionError> {
-        let cipher = ChaCha20Poly1305::new_from_slice(&key).map_err(|_| EncryptionError::InvalidKey)?;
+    fn create_or_update_state(
+        state: &mut Option<CipherState>,
+        key: EncryptionKey,
+    ) -> Result<(), EncryptionError> {
+        let cipher =
+            ChaCha20Poly1305::new_from_slice(&key).map_err(|_| EncryptionError::InvalidKey)?;
         if let Some(cipher_state) = state.as_mut() {
             cipher_state.cipher = cipher;
             cipher_state.nonce = 0;
@@ -173,14 +174,18 @@ impl Encryption {
             *state = Some(CipherState {
                 nonce_buffer: [0; 12],
                 cipher,
-                nonce: 0
+                nonce: 0,
             });
         }
         Ok(())
     }
 
     // Rotate the key with a new one
-    pub async fn rotate_key(&self, new_key: EncryptionKey, side: CipherSide) -> Result<(), EncryptionError> {
+    pub async fn rotate_key(
+        &self,
+        new_key: EncryptionKey,
+        side: CipherSide,
+    ) -> Result<(), EncryptionError> {
         if side.is_our() {
             let mut lock = self.our_cipher.lock().await;
             Self::create_or_update_state(&mut lock, new_key)?;

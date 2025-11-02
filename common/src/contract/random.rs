@@ -22,13 +22,13 @@ impl DeterministicRandom {
             .update(transaction.as_bytes())
             .finalize_xof();
 
-        Self {
-            reader,
-        }
+        Self { reader }
     }
 
     pub fn fill(&mut self, buffer: &mut [u8]) -> Result<(), anyhow::Error> {
-        let pos = self.reader.position()
+        let pos = self
+            .reader
+            .position()
             .checked_add(buffer.len() as u64)
             .context("overflow")?;
 

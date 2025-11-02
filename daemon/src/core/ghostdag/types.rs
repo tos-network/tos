@@ -102,12 +102,12 @@ impl TosGhostdagData {
         Self {
             blue_score: 0,
             blue_work: BlueWorkType::zero(),
-            daa_score: 0,  // Will be calculated during GHOSTDAG processing
+            daa_score: 0, // Will be calculated during GHOSTDAG processing
             selected_parent,
             mergeset_blues: Arc::new(mergeset_blues),
             mergeset_reds: Arc::new(Vec::new()),
             blues_anticone_sizes: Arc::new(blues_anticone_sizes),
-            mergeset_non_daa: Arc::new(Vec::new()),  // Empty initially
+            mergeset_non_daa: Arc::new(Vec::new()), // Empty initially
         }
     }
 
@@ -118,7 +118,12 @@ impl TosGhostdagData {
 
     /// Add a blue block to the mergeset
     /// This is called during GHOSTDAG algorithm execution
-    pub fn add_blue(&mut self, block: Hash, anticone_size: KType, blues_anticone_sizes: &HashMap<Hash, KType>) {
+    pub fn add_blue(
+        &mut self,
+        block: Hash,
+        anticone_size: KType,
+        blues_anticone_sizes: &HashMap<Hash, KType>,
+    ) {
         // Make mutable copies if needed (Arc::make_mut for copy-on-write)
         let mergeset_blues = Arc::make_mut(&mut self.mergeset_blues);
         let self_blues_anticone_sizes = Arc::make_mut(&mut self.blues_anticone_sizes);
@@ -141,7 +146,12 @@ impl TosGhostdagData {
 
     /// Finalize GHOSTDAG data by calculating blue_score and blue_work
     /// This is called after all blues/reds have been determined
-    pub fn finalize(&mut self, parent_blue_score: u64, parent_blue_work: BlueWorkType, block_work: BlueWorkType) {
+    pub fn finalize(
+        &mut self,
+        parent_blue_score: u64,
+        parent_blue_work: BlueWorkType,
+        block_work: BlueWorkType,
+    ) {
         // Blue score = parent's blue score + number of blues in mergeset
         self.blue_score = parent_blue_score + self.mergeset_blues.len() as u64;
 
@@ -175,7 +185,9 @@ impl TosGhostdagData {
     /// Get the number of blocks that participate in DAA
     /// This is the total mergeset blues minus those outside the DAA window
     pub fn daa_contributing_blues_count(&self) -> usize {
-        self.mergeset_blues.len().saturating_sub(self.mergeset_non_daa.len())
+        self.mergeset_blues
+            .len()
+            .saturating_sub(self.mergeset_non_daa.len())
     }
 }
 
@@ -195,7 +207,7 @@ impl Default for TosGhostdagData {
             blue_score: 0,
             blue_work: BlueWorkType::zero(),
             daa_score: 0,
-            selected_parent: Hash::new([0u8; 32]),  // Zero hash
+            selected_parent: Hash::new([0u8; 32]), // Zero hash
             mergeset_blues: Arc::new(Vec::new()),
             mergeset_reds: Arc::new(Vec::new()),
             blues_anticone_sizes: Arc::new(HashMap::new()),

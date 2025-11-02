@@ -2,8 +2,8 @@
 // Implements GhostdagDataProvider trait for Sled backend
 
 use async_trait::async_trait;
-use std::sync::Arc;
 use log::trace;
+use std::sync::Arc;
 use tos_common::{crypto::Hash, serializer::Serializer};
 
 use crate::core::{
@@ -18,7 +18,11 @@ impl GhostdagDataProvider for SledStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag blue score for {}", hash);
         }
-        let compact: CompactGhostdagData = self.load_from_disk(&self.ghostdag_compact, hash.as_bytes(), DiskContext::GhostdagCompact)?;
+        let compact: CompactGhostdagData = self.load_from_disk(
+            &self.ghostdag_compact,
+            hash.as_bytes(),
+            DiskContext::GhostdagCompact,
+        )?;
         Ok(compact.blue_score)
     }
 
@@ -26,7 +30,11 @@ impl GhostdagDataProvider for SledStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag blue work for {}", hash);
         }
-        let compact: CompactGhostdagData = self.load_from_disk(&self.ghostdag_compact, hash.as_bytes(), DiskContext::GhostdagCompact)?;
+        let compact: CompactGhostdagData = self.load_from_disk(
+            &self.ghostdag_compact,
+            hash.as_bytes(),
+            DiskContext::GhostdagCompact,
+        )?;
         Ok(compact.blue_work)
     }
 
@@ -34,23 +42,41 @@ impl GhostdagDataProvider for SledStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag selected parent for {}", hash);
         }
-        let compact: CompactGhostdagData = self.load_from_disk(&self.ghostdag_compact, hash.as_bytes(), DiskContext::GhostdagCompact)?;
+        let compact: CompactGhostdagData = self.load_from_disk(
+            &self.ghostdag_compact,
+            hash.as_bytes(),
+            DiskContext::GhostdagCompact,
+        )?;
         Ok(compact.selected_parent)
     }
 
-    async fn get_ghostdag_mergeset_blues(&self, hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+    async fn get_ghostdag_mergeset_blues(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag mergeset blues for {}", hash);
         }
-        let data: TosGhostdagData = self.load_from_disk(&self.ghostdag_data, hash.as_bytes(), DiskContext::GhostdagData)?;
+        let data: TosGhostdagData = self.load_from_disk(
+            &self.ghostdag_data,
+            hash.as_bytes(),
+            DiskContext::GhostdagData,
+        )?;
         Ok(data.mergeset_blues)
     }
 
-    async fn get_ghostdag_mergeset_reds(&self, hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+    async fn get_ghostdag_mergeset_reds(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag mergeset reds for {}", hash);
         }
-        let data: TosGhostdagData = self.load_from_disk(&self.ghostdag_data, hash.as_bytes(), DiskContext::GhostdagData)?;
+        let data: TosGhostdagData = self.load_from_disk(
+            &self.ghostdag_data,
+            hash.as_bytes(),
+            DiskContext::GhostdagData,
+        )?;
         Ok(data.mergeset_reds)
     }
 
@@ -61,23 +87,41 @@ impl GhostdagDataProvider for SledStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag blues anticone sizes for {}", hash);
         }
-        let data: TosGhostdagData = self.load_from_disk(&self.ghostdag_data, hash.as_bytes(), DiskContext::GhostdagData)?;
+        let data: TosGhostdagData = self.load_from_disk(
+            &self.ghostdag_data,
+            hash.as_bytes(),
+            DiskContext::GhostdagData,
+        )?;
         Ok(data.blues_anticone_sizes)
     }
 
-    async fn get_ghostdag_data(&self, hash: &Hash) -> Result<Arc<TosGhostdagData>, BlockchainError> {
+    async fn get_ghostdag_data(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<TosGhostdagData>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag data for {}", hash);
         }
-        let data: TosGhostdagData = self.load_from_disk(&self.ghostdag_data, hash.as_bytes(), DiskContext::GhostdagData)?;
+        let data: TosGhostdagData = self.load_from_disk(
+            &self.ghostdag_data,
+            hash.as_bytes(),
+            DiskContext::GhostdagData,
+        )?;
         Ok(Arc::new(data))
     }
 
-    async fn get_ghostdag_compact_data(&self, hash: &Hash) -> Result<CompactGhostdagData, BlockchainError> {
+    async fn get_ghostdag_compact_data(
+        &self,
+        hash: &Hash,
+    ) -> Result<CompactGhostdagData, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag compact data for {}", hash);
         }
-        self.load_from_disk(&self.ghostdag_compact, hash.as_bytes(), DiskContext::GhostdagCompact)
+        self.load_from_disk(
+            &self.ghostdag_compact,
+            hash.as_bytes(),
+            DiskContext::GhostdagCompact,
+        )
     }
 
     async fn has_ghostdag_data(&self, hash: &Hash) -> Result<bool, BlockchainError> {
@@ -87,7 +131,11 @@ impl GhostdagDataProvider for SledStorage {
         self.contains_data(&self.ghostdag_data, hash)
     }
 
-    async fn insert_ghostdag_data(&mut self, hash: &Hash, data: Arc<TosGhostdagData>) -> Result<(), BlockchainError> {
+    async fn insert_ghostdag_data(
+        &mut self,
+        hash: &Hash,
+        data: Arc<TosGhostdagData>,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("insert ghostdag data for {}", hash);
         }
@@ -120,8 +168,16 @@ impl GhostdagDataProvider for SledStorage {
         }
 
         // Delete both full and compact data
-        Self::remove_from_disk::<TosGhostdagData>(self.snapshot.as_mut(), &self.ghostdag_data, hash.as_bytes())?;
-        Self::remove_from_disk::<CompactGhostdagData>(self.snapshot.as_mut(), &self.ghostdag_compact, hash.as_bytes())?;
+        Self::remove_from_disk::<TosGhostdagData>(
+            self.snapshot.as_mut(),
+            &self.ghostdag_data,
+            hash.as_bytes(),
+        )?;
+        Self::remove_from_disk::<CompactGhostdagData>(
+            self.snapshot.as_mut(),
+            &self.ghostdag_compact,
+            hash.as_bytes(),
+        )?;
 
         Ok(())
     }

@@ -1,14 +1,13 @@
-use async_trait::async_trait;
-use log::trace;
-use tos_common::{block::TopoHeight, crypto::Hash};
 use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{Column, IteratorMode},
-        DagOrderProvider,
-        RocksStorage
-    }
+        DagOrderProvider, RocksStorage,
+    },
 };
+use async_trait::async_trait;
+use log::trace;
+use tos_common::{block::TopoHeight, crypto::Hash};
 
 #[async_trait]
 impl DagOrderProvider for RocksStorage {
@@ -19,7 +18,11 @@ impl DagOrderProvider for RocksStorage {
         self.load_from_disk(Column::TopoByHash, hash)
     }
 
-    async fn set_topo_height_for_block(&mut self, hash: &Hash, topoheight: TopoHeight) -> Result<(), BlockchainError> {
+    async fn set_topo_height_for_block(
+        &mut self,
+        hash: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set topo height for block {} to {}", hash, topoheight);
         }
@@ -31,47 +34,57 @@ impl DagOrderProvider for RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("is block topological ordered {}", hash);
         }
-        let Some(topo_by_hash) = self.load_optional_from_disk::<_, TopoHeight>(Column::TopoByHash, hash)? else {
-            return Ok(false)
+        let Some(topo_by_hash) =
+            self.load_optional_from_disk::<_, TopoHeight>(Column::TopoByHash, hash)?
+        else {
+            return Ok(false);
         };
 
-        let Some(hash_at_topo) = self.load_optional_from_disk::<_, Hash>(Column::HashAtTopo, &topo_by_hash.to_be_bytes())? else {
-            return Ok(false)
+        let Some(hash_at_topo) = self
+            .load_optional_from_disk::<_, Hash>(Column::HashAtTopo, &topo_by_hash.to_be_bytes())?
+        else {
+            return Ok(false);
         };
 
         Ok(hash_at_topo == *hash)
     }
 
-    async fn get_hash_at_topo_height(&self, topoheight: TopoHeight) -> Result<Hash, BlockchainError> {
+    async fn get_hash_at_topo_height(
+        &self,
+        topoheight: TopoHeight,
+    ) -> Result<Hash, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get hash at topo height {}", topoheight);
         }
         self.load_from_disk(Column::HashAtTopo, &topoheight.to_be_bytes())
     }
 
-    async fn has_hash_at_topoheight(&self, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
+    async fn has_hash_at_topoheight(
+        &self,
+        topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("has hash at topo height {}", topoheight);
         }
         self.contains_data(Column::HashAtTopo, &topoheight.to_be_bytes())
     }
 
-
     // Fetch all the blocks orphaned in the DB
-    async fn get_orphaned_blocks<'a>(&'a self) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
+    async fn get_orphaned_blocks<'a>(
+        &'a self,
+    ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
         trace!("get orphaned blocks");
 
         let iter = self.iter_keys(Column::Blocks, IteratorMode::Start)?;
-        Ok(
-            iter.map(|key| {
+        Ok(iter
+            .map(|key| {
                 let hash = key?;
                 if self.contains_data(Column::TopoByHash, &hash)? {
-                    return Ok(None)
+                    return Ok(None);
                 }
 
                 Ok(Some(hash))
             })
-            .filter_map(Result::transpose)
-        )
+            .filter_map(Result::transpose))
     }
 }

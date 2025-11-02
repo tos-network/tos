@@ -15,7 +15,7 @@ impl Serializer for TopoHeightMetadata {
         Ok(Self {
             rewards,
             emitted_supply,
-            burned_supply
+            burned_supply,
         })
     }
 
@@ -26,8 +26,6 @@ impl Serializer for TopoHeightMetadata {
     }
 
     fn size(&self) -> usize {
-        self.rewards.size()
-        + self.emitted_supply.size()
-        + self.burned_supply.size()
+        self.rewards.size() + self.emitted_supply.size() + self.burned_supply.size()
     }
 }

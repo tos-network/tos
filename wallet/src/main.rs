@@ -1,73 +1,38 @@
-use std::{
-    fs::File,
-    io::Write,
-    ops::AddAssign,
-    path::Path,
-    sync::Arc,
-    time::Duration,
-    borrow::Cow
-};
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
+use clap::Parser;
 use indexmap::IndexSet;
 use log::{error, info, warn};
-use clap::Parser;
 use sha3::{Digest, Keccak256};
+use std::{
+    borrow::Cow, fs::File, io::Write, ops::AddAssign, path::Path, sync::Arc, time::Duration,
+};
 use tos_common::{
     ai_mining::{AIMiningPayload, DifficultyLevel},
     async_handler,
-    config::{
-        init,
-        TOS_ASSET
-    },
-    crypto::{
-        Address,
-        Hash,
-        Hashable,
-        Signature,
-        HASH_SIZE
-    },
+    config::{init, TOS_ASSET},
+    crypto::{Address, Hash, Hashable, Signature, HASH_SIZE},
     network::Network,
     prompt::{
-        argument::{
-            Arg,
-            ArgType,
-            ArgumentManager
-        },
-        command::{
-            Command,
-            CommandError,
-            CommandHandler,
-            CommandManager
-        },
-        Color,
-        Prompt,
-        PromptError
+        argument::{Arg, ArgType, ArgumentManager},
+        command::{Command, CommandError, CommandHandler, CommandManager},
+        Color, Prompt, PromptError,
     },
     serializer::Serializer,
     tokio,
     transaction::{
-        builder::{FeeBuilder, MultiSigBuilder, TransactionTypeBuilder, TransferBuilder, EnergyBuilder},
+        builder::{
+            EnergyBuilder, FeeBuilder, MultiSigBuilder, TransactionTypeBuilder, TransferBuilder,
+        },
         multisig::{MultiSig, SignatureId},
-        BurnPayload,
-
-        MultiSigPayload,
-        Transaction,
-        TxVersion
+        BurnPayload, MultiSigPayload, Transaction, TxVersion,
     },
-    utils::{
-        format_coin,
-        format_tos,
-        from_coin
-    }
+    utils::{format_coin, format_tos, from_coin},
 };
 use tos_wallet::{
     config::{Config, JsonBatchConfig, LogProgressTableGenerationReportFunction, DIR_PATH},
     entry::EntryData,
     precomputed_tables,
-    wallet::{
-        RecoverOption,
-        Wallet
-    }
+    wallet::{RecoverOption, Wallet},
 };
 
 #[cfg(feature = "network_handler")]
@@ -75,23 +40,16 @@ use tos_wallet::config::DEFAULT_DAEMON_ADDRESS;
 
 #[cfg(feature = "xswd")]
 use {
+    anyhow::Error,
+    tos_common::{
+        prompt::ShareablePrompt,
+        rpc::RpcRequest,
+        tokio::{spawn_task, sync::mpsc::UnboundedReceiver},
+    },
     tos_wallet::{
-        api::{
-            AuthConfig,
-            PermissionResult,
-            AppStateShared
-        },
+        api::{AppStateShared, AuthConfig, PermissionResult},
         wallet::XSWDEvent,
     },
-    tos_common::{
-        rpc::RpcRequest,
-        prompt::ShareablePrompt,
-        tokio::{
-            spawn_task,
-            sync::mpsc::UnboundedReceiver
-        }
-    },
-    anyhow::Error,
 };
 
 const ELEMENTS_PER_PAGE: usize = 10;
@@ -104,7 +62,7 @@ async fn get_required_arg<F, Fut>(
     name: &str,
     manager: &CommandManager,
     usage: &str,
-    interactive_fn: F
+    interactive_fn: F,
 ) -> Result<String, CommandError>
 where
     F: FnOnce() -> Fut,
@@ -124,12 +82,40 @@ where
     interactive_fn().await.map_err(|e| e.into())
 }
 
+/// Get a required argument with usage example for better error messages
+async fn get_required_arg_with_example<F, Fut>(
+    args: &mut ArgumentManager,
+    name: &str,
+    manager: &CommandManager,
+    usage: &str,
+    example: &str,
+    interactive_fn: F,
+) -> Result<String, CommandError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<String, PromptError>>,
+{
+    if args.has_argument(name) {
+        return Ok(args.get_value(name)?.to_string_value()?);
+    }
+
+    if manager.is_batch_mode() {
+        return Err(CommandError::MissingRequiredArgumentWithExample {
+            arg: name.to_string(),
+            usage: usage.to_string(),
+            example: example.to_string(),
+        });
+    }
+
+    interactive_fn().await.map_err(|e| e.into())
+}
+
 /// Get an optional argument from CLI or prompt in interactive mode
 async fn get_optional_arg<F, Fut>(
     args: &mut ArgumentManager,
     name: &str,
     manager: &CommandManager,
-    interactive_fn: F
+    interactive_fn: F,
 ) -> Result<Option<String>, CommandError>
 where
     F: FnOnce() -> Fut,
@@ -157,7 +143,7 @@ where
 async fn get_confirmation<F, Fut>(
     args: &mut ArgumentManager,
     manager: &CommandManager,
-    interactive_fn: F
+    interactive_fn: F,
 ) -> Result<bool, CommandError>
 where
     F: FnOnce() -> Fut,
@@ -198,7 +184,10 @@ async fn get_password(config: &Config, prompt: &Prompt) -> Result<String> {
             return Err(anyhow::anyhow!("Password file not found: {}", file));
         }
         if !path.is_file() {
-            return Err(anyhow::anyhow!("Password file path is not a file: {}", file));
+            return Err(anyhow::anyhow!(
+                "Password file path is not a file: {}",
+                file
+            ));
         }
 
         let pwd = std::fs::read_to_string(file)
@@ -213,7 +202,10 @@ async fn get_password(config: &Config, prompt: &Prompt) -> Result<String> {
 
         // Validate password is not just whitespace
         if pwd.trim().is_empty() {
-            return Err(anyhow::anyhow!("Password file contains only whitespace: {}", file));
+            return Err(anyhow::anyhow!(
+                "Password file contains only whitespace: {}",
+                file
+            ));
         }
 
         return Ok(pwd);
@@ -247,8 +239,10 @@ async fn main() -> Result<()> {
             }
 
             let mut file = File::create(path).context("Error while creating config file")?;
-            let json = serde_json::to_string_pretty(&config).context("Error while serializing config file")?;
-            file.write_all(json.as_bytes()).context("Error while writing config file")?;
+            let json = serde_json::to_string_pretty(&config)
+                .context("Error while serializing config file")?;
+            file.write_all(json.as_bytes())
+                .context("Error while writing config file")?;
             println!("Config file template generated at {}", path);
             return Ok(());
         }
@@ -256,7 +250,9 @@ async fn main() -> Result<()> {
         let file = File::open(path).context("Error while opening config file")?;
         config = serde_json::from_reader(file).context("Error while reading config file")?;
     } else if config.generate_config_template {
-        eprintln!("Provided config file path is required to generate the template with --config-file");
+        eprintln!(
+            "Provided config file path is required to generate the template with --config-file"
+        );
         return Ok(());
     }
 
@@ -273,7 +269,7 @@ async fn main() -> Result<()> {
         log_config.disable_file_log_date_based,
         log_config.disable_log_color,
         log_config.auto_compress_logs,
-        is_interactive,  // Changed: use is_interactive instead of !disable_interactive_mode
+        is_interactive, // Changed: use is_interactive instead of !disable_interactive_mode
         log_config.logs_modules.clone(),
         log_config.file_log_level.unwrap_or(log_config.log_level),
         !log_config.disable_ascii_art,
@@ -290,47 +286,83 @@ async fn main() -> Result<()> {
         }
 
         // check that username/password is not in param if bind address is not set
-        if config.rpc.rpc_bind_address.is_none() && (config.rpc.rpc_password.is_some() || config.rpc.rpc_username.is_some()) {
+        if config.rpc.rpc_bind_address.is_none()
+            && (config.rpc.rpc_password.is_some() || config.rpc.rpc_username.is_some())
+        {
             error!("Invalid parameters configuration for rpc password and username: RPC Server is not enabled");
-            return Ok(())
+            return Ok(());
         }
 
         // check that username/password is set together if bind address is set
-        if config.rpc.rpc_bind_address.is_some() && config.rpc.rpc_password.is_some() != config.rpc.rpc_username.is_some() {
+        if config.rpc.rpc_bind_address.is_some()
+            && config.rpc.rpc_password.is_some() != config.rpc.rpc_username.is_some()
+        {
             error!("Invalid parameters configuration: usernamd AND password must be provided");
-            return Ok(())
+            return Ok(());
         }
     }
 
     // Set batch mode based on command mode (not just exec mode)
-    let command_manager = CommandManager::new_with_batch_mode(prompt.clone(), config.is_command_mode());
+    let command_manager =
+        CommandManager::new_with_batch_mode(prompt.clone(), config.is_command_mode());
     command_manager.store_in_context(config.network)?;
 
     if let Some(path) = config.wallet_path.as_ref() {
         // Get password using our new helper function
         // Priority: CLI > File > Env > Interactive > Error
-        let password = get_password(&config, &prompt).await
+        let password = get_password(&config, &prompt)
+            .await
             .context("Failed to get wallet password")?;
 
-        let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(config.precomputed_tables.precomputed_tables_path.as_deref(), config.precomputed_tables.precomputed_tables_l1, LogProgressTableGenerationReportFunction, true).await?;
+        let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(
+            config.precomputed_tables.precomputed_tables_path.as_deref(),
+            config.precomputed_tables.precomputed_tables_l1,
+            LogProgressTableGenerationReportFunction,
+            true,
+        )
+        .await?;
         let p = Path::new(path);
         let wallet = if p.exists() && p.is_dir() && Path::new(&format!("{}/db", path)).exists() {
             if log::log_enabled!(log::Level::Info) {
                 info!("Opening wallet {}", path);
             }
-            Wallet::open(path, &password, config.network, precomputed_tables, config.n_decryption_threads, config.network_concurrency, config.light_mode)?
+            Wallet::open(
+                path,
+                &password,
+                config.network,
+                precomputed_tables,
+                config.n_decryption_threads,
+                config.network_concurrency,
+                config.light_mode,
+            )?
         } else {
             if log::log_enabled!(log::Level::Info) {
                 info!("Creating a new wallet at {}", path);
             }
-            Wallet::create(path, &password, config.seed.as_deref().map(RecoverOption::Seed), config.network, precomputed_tables, config.n_decryption_threads, config.network_concurrency, config.light_mode).await?
+            Wallet::create(
+                path,
+                &password,
+                config.seed.as_deref().map(RecoverOption::Seed),
+                config.network,
+                precomputed_tables,
+                config.n_decryption_threads,
+                config.network_concurrency,
+                config.light_mode,
+            )
+            .await?
         };
 
         command_manager.register_default_commands()?;
 
-        apply_config(config.clone(), &wallet, #[cfg(feature = "xswd")] &prompt).await;
+        apply_config(
+            config.clone(),
+            &wallet,
+            #[cfg(feature = "xswd")]
+            &prompt,
+        )
+        .await;
         setup_wallet_command_manager(wallet, &command_manager).await?;
-        
+
         // Execute based on mode
         if config.is_command_mode() {
             // Command mode: execute and exit
@@ -372,7 +404,14 @@ async fn main() -> Result<()> {
             }
         } else {
             // Interactive mode: start prompt loop
-            if let Err(e) = prompt.start(Duration::from_millis(1000), Box::new(async_handler!(prompt_message_builder)), Some(&command_manager)).await {
+            if let Err(e) = prompt
+                .start(
+                    Duration::from_millis(1000),
+                    Box::new(async_handler!(prompt_message_builder)),
+                    Some(&command_manager),
+                )
+                .await
+            {
                 if log::log_enabled!(log::Level::Error) {
                     error!("Error while running prompt: {:#}", e);
                 }
@@ -404,7 +443,14 @@ async fn main() -> Result<()> {
             }
         } else {
             // Interactive mode: allow create/open commands
-            if let Err(e) = prompt.start(Duration::from_millis(1000), Box::new(async_handler!(prompt_message_builder)), Some(&command_manager)).await {
+            if let Err(e) = prompt
+                .start(
+                    Duration::from_millis(1000),
+                    Box::new(async_handler!(prompt_message_builder)),
+                    Some(&command_manager),
+                )
+                .await
+            {
                 if log::log_enabled!(log::Level::Error) {
                     error!("Error while running prompt: {:#}", e);
                 }
@@ -427,9 +473,9 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
         "Open a wallet",
         vec![
             Arg::new("name", ArgType::String, "Wallet name to open"),
-            Arg::new("password", ArgType::String, "Password to unlock the wallet")
+            Arg::new("password", ArgType::String, "Password to unlock the wallet"),
         ],
-        CommandHandler::Async(async_handler!(open_wallet))
+        CommandHandler::Async(async_handler!(open_wallet)),
     ))?;
 
     manager.add_command(Command::with_optional_arguments(
@@ -437,10 +483,14 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
         "Create a new wallet",
         vec![
             Arg::new("name", ArgType::String, "Name for the new wallet"),
-            Arg::new("password", ArgType::String, "Password to protect the wallet"),
-            Arg::new("confirm_password", ArgType::String, "Confirm the password")
+            Arg::new(
+                "password",
+                ArgType::String,
+                "Password to protect the wallet",
+            ),
+            Arg::new("confirm_password", ArgType::String, "Confirm the password"),
         ],
-        CommandHandler::Async(async_handler!(create_wallet))
+        CommandHandler::Async(async_handler!(create_wallet)),
     ))?;
 
     manager.add_command(Command::with_optional_arguments(
@@ -448,10 +498,14 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
         "Recover a wallet using a seed",
         vec![
             Arg::new("name", ArgType::String, "Name for the recovered wallet"),
-            Arg::new("password", ArgType::String, "Password to protect the wallet"),
-            Arg::new("seed", ArgType::String, "Recovery seed phrase")
+            Arg::new(
+                "password",
+                ArgType::String,
+                "Password to protect the wallet",
+            ),
+            Arg::new("seed", ArgType::String, "Recovery seed phrase"),
         ],
-        CommandHandler::Async(async_handler!(recover_seed))
+        CommandHandler::Async(async_handler!(recover_seed)),
     ))?;
 
     manager.add_command(Command::with_optional_arguments(
@@ -459,10 +513,14 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
         "Recover a wallet using a private key",
         vec![
             Arg::new("name", ArgType::String, "Name for the recovered wallet"),
-            Arg::new("password", ArgType::String, "Password to protect the wallet"),
-            Arg::new("private_key", ArgType::String, "Private key for recovery")
+            Arg::new(
+                "password",
+                ArgType::String,
+                "Password to protect the wallet",
+            ),
+            Arg::new("private_key", ArgType::String, "Private key for recovery"),
         ],
-        CommandHandler::Async(async_handler!(recover_private_key))
+        CommandHandler::Async(async_handler!(recover_private_key)),
     ))?;
 
     manager.register_default_commands()?;
@@ -482,28 +540,35 @@ async fn xswd_handler(mut receiver: UnboundedReceiver<XSWDEvent>, prompt: Sharea
                 if callback.send(res).is_err() {
                     error!("Error while sending cancel response back to XSWD");
                 }
-            },
+            }
             XSWDEvent::RequestApplication(app_state, callback) => {
                 let prompt = prompt.clone();
                 let res = xswd_handle_request_application(&prompt, app_state).await;
                 if callback.send(res).is_err() {
                     error!("Error while sending application response back to XSWD");
                 }
-            },
+            }
             XSWDEvent::RequestPermission(app_state, request, callback) => {
                 let res = xswd_handle_request_permission(&prompt, app_state, request).await;
                 if callback.send(res).is_err() {
                     error!("Error while sending permission response back to XSWD");
                 }
-            },
+            }
             XSWDEvent::AppDisconnect(_) => {}
         };
     }
 }
 
 #[cfg(feature = "xswd")]
-async fn xswd_handle_request_application(prompt: &ShareablePrompt, app_state: AppStateShared) -> Result<PermissionResult, Error> {
-    let mut message = format!("XSWD: Application {} ({}) request access to your wallet", app_state.get_name(), app_state.get_id());
+async fn xswd_handle_request_application(
+    prompt: &ShareablePrompt,
+    app_state: AppStateShared,
+) -> Result<PermissionResult, Error> {
+    let mut message = format!(
+        "XSWD: Application {} ({}) request access to your wallet",
+        app_state.get_name(),
+        app_state.get_id()
+    );
     let permissions = app_state.get_permissions().lock().await;
     if !permissions.is_empty() {
         message += &format!("\r\nPermissions ({}):", permissions.len());
@@ -513,7 +578,13 @@ async fn xswd_handle_request_application(prompt: &ShareablePrompt, app_state: Ap
     }
 
     message += "\r\n(Y/N): ";
-    let accepted = prompt.read_valid_str_value(prompt.colorize_string(Color::Blue, &message), vec!["y", "n"]).await? == "y";
+    let accepted = prompt
+        .read_valid_str_value(
+            prompt.colorize_string(Color::Blue, &message),
+            vec!["y", "n"],
+        )
+        .await?
+        == "y";
     if accepted {
         Ok(PermissionResult::Accept)
     } else {
@@ -522,7 +593,11 @@ async fn xswd_handle_request_application(prompt: &ShareablePrompt, app_state: Ap
 }
 
 #[cfg(feature = "xswd")]
-async fn xswd_handle_request_permission(prompt: &ShareablePrompt, app_state: AppStateShared, request: RpcRequest) -> Result<PermissionResult, Error> {
+async fn xswd_handle_request_permission(
+    prompt: &ShareablePrompt,
+    app_state: AppStateShared,
+    request: RpcRequest,
+) -> Result<PermissionResult, Error> {
     let params = if let Some(params) = request.params {
         params.to_string()
     } else {
@@ -536,24 +611,39 @@ async fn xswd_handle_request_permission(prompt: &ShareablePrompt, app_state: App
         params
     );
 
-    let answer = prompt.read_valid_str_value(prompt.colorize_string(Color::Blue, &message), vec!["a", "d", "aa", "ad"]).await?;
+    let answer = prompt
+        .read_valid_str_value(
+            prompt.colorize_string(Color::Blue, &message),
+            vec!["a", "d", "aa", "ad"],
+        )
+        .await?;
     Ok(match answer.as_str() {
         "a" => PermissionResult::Accept,
         "d" => PermissionResult::Reject,
         "aa" => PermissionResult::AlwaysAccept,
         "ad" => PermissionResult::AlwaysReject,
-        _ => unreachable!()
+        _ => unreachable!(),
     })
 }
 
 // Apply the config passed in params
-async fn apply_config(config: Config, wallet: &Arc<Wallet>, #[cfg(feature = "xswd")] prompt: &ShareablePrompt) {
+async fn apply_config(
+    config: Config,
+    wallet: &Arc<Wallet>,
+    #[cfg(feature = "xswd")] prompt: &ShareablePrompt,
+) {
     #[cfg(feature = "network_handler")]
     if !config.network_handler.offline_mode {
         if log::log_enabled!(log::Level::Info) {
-            info!("Trying to connect to daemon at '{}'", config.network_handler.daemon_address);
+            info!(
+                "Trying to connect to daemon at '{}'",
+                config.network_handler.daemon_address
+            );
         }
-        if let Err(e) = wallet.set_online_mode(&config.network_handler.daemon_address, true).await {
+        if let Err(e) = wallet
+            .set_online_mode(&config.network_handler.daemon_address, true)
+            .await
+        {
             if log::log_enabled!(log::Level::Error) {
                 error!("Couldn't connect to daemon: {:#}", e);
             }
@@ -578,19 +668,29 @@ async fn apply_config(config: Config, wallet: &Arc<Wallet>, #[cfg(feature = "xsw
         }
 
         if let Some(address) = config.rpc.rpc_bind_address {
-            let auth_config = if let (Some(username), Some(password)) = (config.rpc.rpc_username, config.rpc.rpc_password) {
-                Some(AuthConfig {
-                    username,
-                    password
-                })
+            let auth_config = if let (Some(username), Some(password)) =
+                (config.rpc.rpc_username, config.rpc.rpc_password)
+            {
+                Some(AuthConfig { username, password })
             } else {
                 None
             };
 
             if log::log_enabled!(log::Level::Info) {
-                info!("Enabling RPC Server on {} {}", address, if auth_config.is_some() { "with authentication" } else { "without authentication" });
+                info!(
+                    "Enabling RPC Server on {} {}",
+                    address,
+                    if auth_config.is_some() {
+                        "with authentication"
+                    } else {
+                        "without authentication"
+                    }
+                );
             }
-            if let Err(e) = wallet.enable_rpc_server(address, auth_config, config.rpc.rpc_threads).await {
+            if let Err(e) = wallet
+                .enable_rpc_server(address, auth_config, config.rpc.rpc_threads)
+                .await
+            {
                 if log::log_enabled!(log::Level::Error) {
                     error!("Error while enabling RPC Server: {:#}", e);
                 }
@@ -603,7 +703,7 @@ async fn apply_config(config: Config, wallet: &Arc<Wallet>, #[cfg(feature = "xsw
                         let prompt = prompt.clone();
                         spawn_task("xswd-handler", xswd_handler(receiver, prompt));
                     }
-                },
+                }
                 Err(e) => {
                     if log::log_enabled!(log::Level::Error) {
                         error!("Error while enabling XSWD Server: {}", e);
@@ -615,7 +715,10 @@ async fn apply_config(config: Config, wallet: &Arc<Wallet>, #[cfg(feature = "xsw
 }
 
 // Function to build the CommandManager when a wallet is open
-async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &CommandManager) -> Result<(), CommandError> {
+async fn setup_wallet_command_manager(
+    wallet: Arc<Wallet>,
+    command_manager: &CommandManager,
+) -> Result<(), CommandError> {
     // Delete commands for opening a wallet
     command_manager.remove_command("open")?;
     command_manager.remove_command("recover_seed")?;
@@ -628,9 +731,9 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "Set a new password to open your wallet",
         vec![
             Arg::new("old_password", ArgType::String, "Current password"),
-            Arg::new("new_password", ArgType::String, "New password to set")
+            Arg::new("new_password", ArgType::String, "New password to set"),
         ],
-        CommandHandler::Async(async_handler!(change_password))
+        CommandHandler::Async(async_handler!(change_password)),
     ))?;
     command_manager.add_command(Command::with_arguments(
         "transfer",
@@ -638,13 +741,25 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         vec![
             Arg::new("asset", ArgType::String, "Asset name or hash (e.g., TOS)"),
             Arg::new("address", ArgType::String, "Recipient wallet address"),
-            Arg::new("amount", ArgType::String, "Amount to transfer (in atomic units)"),
+            Arg::new(
+                "amount",
+                ArgType::String,
+                "Amount to transfer (in atomic units)",
+            ),
         ],
         vec![
-            Arg::new("fee_type", ArgType::String, "Fee payment type: 'tos' or 'energy'"),
-            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
+            Arg::new(
+                "fee_type",
+                ArgType::String,
+                "Fee payment type: 'tos' or 'energy'",
+            ),
+            Arg::new(
+                "confirm",
+                ArgType::Bool,
+                "Confirm action (auto-confirms in command mode)",
+            ),
         ],
-        CommandHandler::Async(async_handler!(transfer))
+        CommandHandler::Async(async_handler!(transfer)),
     ))?;
     command_manager.add_command(Command::with_arguments(
         "transfer_all",
@@ -654,148 +769,220 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
             Arg::new("address", ArgType::String, "Recipient wallet address"),
         ],
         vec![
-            Arg::new("fee_type", ArgType::String, "Fee payment type: 'tos' or 'energy'"),
-            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
+            Arg::new(
+                "fee_type",
+                ArgType::String,
+                "Fee payment type: 'tos' or 'energy'",
+            ),
+            Arg::new(
+                "confirm",
+                ArgType::Bool,
+                "Confirm action (auto-confirms in command mode)",
+            ),
         ],
-        CommandHandler::Async(async_handler!(transfer_all))
+        CommandHandler::Async(async_handler!(transfer_all)),
     ))?;
     command_manager.add_command(Command::with_arguments(
         "burn",
         "Burn amount of asset",
         vec![
             Arg::new("asset", ArgType::String, "Asset name or hash to burn"),
-            Arg::new("amount", ArgType::String, "Amount to burn (permanently destroyed)"),
+            Arg::new(
+                "amount",
+                ArgType::String,
+                "Amount to burn (permanently destroyed)",
+            ),
         ],
-        vec![
-            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
-        ],
-        CommandHandler::Async(async_handler!(burn))
+        vec![Arg::new(
+            "confirm",
+            ArgType::Bool,
+            "Confirm action (auto-confirms in command mode)",
+        )],
+        CommandHandler::Async(async_handler!(burn)),
     ))?;
     command_manager.add_command(Command::new(
         "display_address",
         "Show your wallet address",
-        CommandHandler::Async(async_handler!(display_address))
+        CommandHandler::Async(async_handler!(display_address)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "balance",
         "Show the balance of requested asset; Asset must be tracked",
-        vec![Arg::new("asset", ArgType::Hash, "Asset hash to check balance (default: TOS)")],
-        CommandHandler::Async(async_handler!(balance))
+        vec![Arg::new(
+            "asset",
+            ArgType::Hash,
+            "Asset hash to check balance (default: TOS)",
+        )],
+        CommandHandler::Async(async_handler!(balance)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "history",
         "Show all your transactions",
-        vec![Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)")],
-        CommandHandler::Async(async_handler!(history))
+        vec![Arg::new(
+            "page",
+            ArgType::Number,
+            "Page number for pagination (default: 0)",
+        )],
+        CommandHandler::Async(async_handler!(history)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "transaction",
         "Show a specific transaction",
-        vec![Arg::new("hash", ArgType::Hash, "Transaction hash to display")],
-        CommandHandler::Async(async_handler!(transaction))
+        vec![Arg::new(
+            "hash",
+            ArgType::Hash,
+            "Transaction hash to display",
+        )],
+        CommandHandler::Async(async_handler!(transaction)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "seed",
         "Show seed of selected language",
         vec![
-            Arg::new("language", ArgType::Number, "Language ID for seed phrase display"),
-            Arg::new("password", ArgType::String, "Password to unlock seed phrase")
+            Arg::new(
+                "language",
+                ArgType::Number,
+                "Language ID for seed phrase display",
+            ),
+            Arg::new(
+                "password",
+                ArgType::String,
+                "Password to unlock seed phrase",
+            ),
         ],
-        CommandHandler::Async(async_handler!(seed))
+        CommandHandler::Async(async_handler!(seed)),
     ))?;
     command_manager.add_command(Command::new(
         "nonce",
         "Show current nonce",
-        CommandHandler::Async(async_handler!(nonce))
+        CommandHandler::Async(async_handler!(nonce)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "set_nonce",
         "Set new nonce",
-        vec![Arg::new("nonce", ArgType::String, "Transaction nonce (for manual ordering)")],
-        CommandHandler::Async(async_handler!(set_nonce))
+        vec![Arg::new(
+            "nonce",
+            ArgType::String,
+            "Transaction nonce (for manual ordering)",
+        )],
+        CommandHandler::Async(async_handler!(set_nonce)),
     ))?;
     command_manager.add_command(Command::new(
         "logout",
         "Logout from existing wallet",
-        CommandHandler::Async(async_handler!(logout)))
-    )?;
+        CommandHandler::Async(async_handler!(logout)),
+    ))?;
     command_manager.add_command(Command::new(
         "clear_tx_cache",
         "Clear the current TX cache",
-        CommandHandler::Async(async_handler!(clear_tx_cache))
+        CommandHandler::Async(async_handler!(clear_tx_cache)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "export_transactions",
         "Export all your transactions in a CSV file",
-        vec![Arg::new("filename", ArgType::String, "Output filename for CSV export")],
-        CommandHandler::Async(async_handler!(export_transactions_csv))
+        vec![Arg::new(
+            "filename",
+            ArgType::String,
+            "Output filename for CSV export",
+        )],
+        CommandHandler::Async(async_handler!(export_transactions_csv)),
     ))?;
     command_manager.add_command(Command::with_arguments(
         "freeze_tos",
         "Freeze TOS to get energy with duration-based rewards (3/7/14 days)",
         vec![
             Arg::new("amount", ArgType::String, "Amount of TOS to freeze"),
-            Arg::new("duration", ArgType::Number, "Freeze duration in days (3/7/14/30, longer = higher rewards)"),
+            Arg::new(
+                "duration",
+                ArgType::Number,
+                "Freeze duration in days (3/7/14/30, longer = higher rewards)",
+            ),
         ],
-        vec![
-            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
-        ],
-        CommandHandler::Async(async_handler!(freeze_tos))
+        vec![Arg::new(
+            "confirm",
+            ArgType::Bool,
+            "Confirm action (auto-confirms in command mode)",
+        )],
+        CommandHandler::Async(async_handler!(freeze_tos)),
     ))?;
     command_manager.add_command(Command::with_arguments(
         "unfreeze_tos",
         "Unfreeze TOS (release frozen TOS after lock period)",
-        vec![
-            Arg::new("amount", ArgType::String, "Amount of TOS to unfreeze"),
-        ],
-        vec![
-            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
-        ],
-        CommandHandler::Async(async_handler!(unfreeze_tos))
+        vec![Arg::new(
+            "amount",
+            ArgType::String,
+            "Amount of TOS to unfreeze",
+        )],
+        vec![Arg::new(
+            "confirm",
+            ArgType::Bool,
+            "Confirm action (auto-confirms in command mode)",
+        )],
+        CommandHandler::Async(async_handler!(unfreeze_tos)),
     ))?;
     command_manager.add_command(Command::new(
         "energy_info",
         "Show energy information and freeze records",
-        CommandHandler::Async(async_handler!(energy_info))
+        CommandHandler::Async(async_handler!(energy_info)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "set_asset_name",
         "Set the name of an asset",
         vec![
             Arg::new("asset", ArgType::Hash, "Asset hash to name"),
-            Arg::new("name", ArgType::String, "Display name for the asset")
+            Arg::new("name", ArgType::String, "Display name for the asset"),
         ],
-        CommandHandler::Async(async_handler!(set_asset_name))
+        CommandHandler::Async(async_handler!(set_asset_name)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "list_assets",
         "List all detected assets",
-        vec![Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)")],
-        CommandHandler::Async(async_handler!(list_assets))
+        vec![Arg::new(
+            "page",
+            ArgType::Number,
+            "Page number for pagination (default: 0)",
+        )],
+        CommandHandler::Async(async_handler!(list_assets)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "list_balances",
         "List all balances tracked",
-        vec![Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)")],
-        CommandHandler::Async(async_handler!(list_balances))
+        vec![Arg::new(
+            "page",
+            ArgType::Number,
+            "Page number for pagination (default: 0)",
+        )],
+        CommandHandler::Async(async_handler!(list_balances)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "list_tracked_assets",
         "List all assets marked as tracked",
-        vec![Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)")],
-        CommandHandler::Async(async_handler!(list_tracked_assets))
+        vec![Arg::new(
+            "page",
+            ArgType::Number,
+            "Page number for pagination (default: 0)",
+        )],
+        CommandHandler::Async(async_handler!(list_tracked_assets)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "track_asset",
         "Mark an asset hash as tracked",
-        vec![Arg::new("asset", ArgType::String, "Asset name or hash to track")],
-        CommandHandler::Async(async_handler!(track_asset))
+        vec![Arg::new(
+            "asset",
+            ArgType::String,
+            "Asset name or hash to track",
+        )],
+        CommandHandler::Async(async_handler!(track_asset)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "untrack_asset",
         "Remove an asset hash from being tracked",
-        vec![Arg::new("asset", ArgType::String, "Asset name or hash to untrack")],
-        CommandHandler::Async(async_handler!(untrack_asset))
+        vec![Arg::new(
+            "asset",
+            ArgType::String,
+            "Asset name or hash to untrack",
+        )],
+        CommandHandler::Async(async_handler!(untrack_asset)),
     ))?;
 
     #[cfg(feature = "network_handler")]
@@ -803,19 +990,32 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         command_manager.add_command(Command::with_optional_arguments(
             "online_mode",
             "Set your wallet in online mode",
-            vec![Arg::new("daemon_address", ArgType::String, "Daemon RPC address (e.g., 127.0.0.1:8080)")],
-            CommandHandler::Async(async_handler!(online_mode))
+            vec![Arg::new(
+                "daemon_address",
+                ArgType::String,
+                "Daemon RPC address (e.g., 127.0.0.1:8080)",
+            )],
+            CommandHandler::Async(async_handler!(online_mode)),
         ))?;
         command_manager.add_command(Command::new(
             "offline_mode",
             "Set your wallet in offline mode",
-            CommandHandler::Async(async_handler!(offline_mode))
+            CommandHandler::Async(async_handler!(offline_mode)),
         ))?;
         command_manager.add_command(Command::with_optional_arguments(
             "rescan",
             "Rescan balance and transactions",
-            vec![Arg::new("topoheight", ArgType::Number, "Starting topoheight for rescan (default: 0)")],
-            CommandHandler::Async(async_handler!(rescan))
+            vec![Arg::new(
+                "topoheight",
+                ArgType::Number,
+                "Starting topoheight for rescan (default: 0)",
+            )],
+            CommandHandler::Async(async_handler!(rescan)),
+        ))?;
+        command_manager.add_command(Command::new(
+            "sync_status",
+            "Show wallet synchronization status with daemon",
+            CommandHandler::Async(async_handler!(sync_status)),
         ))?;
     }
 
@@ -826,23 +1026,29 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
             "start_rpc_server",
             "Start the RPC Server",
             vec![
-                Arg::new("bind_address", ArgType::String, "Bind address for RPC server (e.g., 127.0.0.1:3000)"),
+                Arg::new(
+                    "bind_address",
+                    ArgType::String,
+                    "Bind address for RPC server (e.g., 127.0.0.1:3000)",
+                ),
                 Arg::new("username", ArgType::String, "RPC authentication username"),
-                Arg::new("password", ArgType::String, "RPC authentication password")
-            ], CommandHandler::Async(async_handler!(start_rpc_server))))?;
+                Arg::new("password", ArgType::String, "RPC authentication password"),
+            ],
+            CommandHandler::Async(async_handler!(start_rpc_server)),
+        ))?;
 
         command_manager.add_command(Command::new(
             "start_xswd",
             "Start the XSWD Server",
-            CommandHandler::Async(async_handler!(start_xswd)))
-        )?;
+            CommandHandler::Async(async_handler!(start_xswd)),
+        ))?;
 
         // Stop API Server (RPC or XSWD)
         command_manager.add_command(Command::new(
             "stop_api_server",
             "Stop the API (XSWD/RPC) Server",
-            CommandHandler::Async(async_handler!(stop_api_server)))
-        )?;
+            CommandHandler::Async(async_handler!(stop_api_server)),
+        ))?;
     }
 
     #[cfg(feature = "xswd")]
@@ -850,8 +1056,12 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         command_manager.add_command(Command::with_optional_arguments(
             "add_xswd_relayer",
             "Add a XSWD relayer to the wallet",
-            vec![Arg::new("app_data", ArgType::String, "Application data for XSWD relayer")],
-            CommandHandler::Async(async_handler!(add_xswd_relayer))
+            vec![Arg::new(
+                "app_data",
+                ArgType::String,
+                "Application data for XSWD relayer",
+            )],
+            CommandHandler::Async(async_handler!(add_xswd_relayer)),
         ))?;
     }
 
@@ -860,41 +1070,59 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "multisig_setup",
         "Setup a multisig",
         vec![
-            Arg::new("participants", ArgType::Number, "Total number of participants"),
-            Arg::new("threshold", ArgType::Number, "Required signatures (M-of-N threshold)"),
-            Arg::new("confirm", ArgType::Bool, "Confirm action (auto-confirms in command mode)")
+            Arg::new(
+                "participants",
+                ArgType::Number,
+                "Total number of participants",
+            ),
+            Arg::new(
+                "threshold",
+                ArgType::Number,
+                "Required signatures (M-of-N threshold)",
+            ),
+            Arg::new(
+                "confirm",
+                ArgType::Bool,
+                "Confirm action (auto-confirms in command mode)",
+            ),
         ],
-        CommandHandler::Async(async_handler!(multisig_setup))
+        CommandHandler::Async(async_handler!(multisig_setup)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "multisig_sign",
         "Sign a multisig transaction",
-        vec![
-            Arg::new("tx_hash", ArgType::Hash, "Transaction hash to sign")
-        ],
-        CommandHandler::Async(async_handler!(multisig_sign))
+        vec![Arg::new(
+            "tx_hash",
+            ArgType::Hash,
+            "Transaction hash to sign",
+        )],
+        CommandHandler::Async(async_handler!(multisig_sign)),
     ))?;
     command_manager.add_command(Command::new(
         "multisig_show",
         "Show the current state of multisig",
-        CommandHandler::Async(async_handler!(multisig_show))
+        CommandHandler::Async(async_handler!(multisig_show)),
     ))?;
 
     command_manager.add_command(Command::new(
         "tx_version",
         "See the current transaction version",
-        CommandHandler::Async(async_handler!(tx_version))
+        CommandHandler::Async(async_handler!(tx_version)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "set_tx_version",
         "Set the transaction version",
-        vec![Arg::new("version", ArgType::Number, "Transaction version number to use")],
-        CommandHandler::Async(async_handler!(set_tx_version))
+        vec![Arg::new(
+            "version",
+            ArgType::Number,
+            "Transaction version number to use",
+        )],
+        CommandHandler::Async(async_handler!(set_tx_version)),
     ))?;
     command_manager.add_command(Command::new(
         "status",
         "See the status of the wallet",
-        CommandHandler::Async(async_handler!(status))
+        CommandHandler::Async(async_handler!(status)),
     ))?;
 
     // AI Mining commands
@@ -902,31 +1130,51 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "ai_mining_history",
         "Show AI mining transaction history",
         vec![
-            Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)"),
-            Arg::new("limit", ArgType::Number, "Number of entries per page (default: 10)"),
-            Arg::new("type", ArgType::String, "Transaction type filter")
+            Arg::new(
+                "page",
+                ArgType::Number,
+                "Page number for pagination (default: 0)",
+            ),
+            Arg::new(
+                "limit",
+                ArgType::Number,
+                "Number of entries per page (default: 10)",
+            ),
+            Arg::new("type", ArgType::String, "Transaction type filter"),
         ],
-        CommandHandler::Async(async_handler!(ai_mining_history))
+        CommandHandler::Async(async_handler!(ai_mining_history)),
     ))?;
     command_manager.add_command(Command::new(
         "ai_mining_stats",
         "Show your AI mining statistics",
-        CommandHandler::Async(async_handler!(ai_mining_stats))
+        CommandHandler::Async(async_handler!(ai_mining_stats)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "ai_mining_tasks",
         "Show AI mining tasks you've published or participated in",
         vec![
-            Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)"),
-            Arg::new("status", ArgType::String, "Task status filter (e.g., active, completed)")
+            Arg::new(
+                "page",
+                ArgType::Number,
+                "Page number for pagination (default: 0)",
+            ),
+            Arg::new(
+                "status",
+                ArgType::String,
+                "Task status filter (e.g., active, completed)",
+            ),
         ],
-        CommandHandler::Async(async_handler!(ai_mining_tasks))
+        CommandHandler::Async(async_handler!(ai_mining_tasks)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "ai_mining_rewards",
         "Show AI mining rewards earned",
-        vec![Arg::new("page", ArgType::Number, "Page number for pagination (default: 0)")],
-        CommandHandler::Async(async_handler!(ai_mining_rewards))
+        vec![Arg::new(
+            "page",
+            ArgType::Number,
+            "Page number for pagination (default: 0)",
+        )],
+        CommandHandler::Async(async_handler!(ai_mining_rewards)),
     ))?;
 
     // AI Mining business commands
@@ -934,39 +1182,83 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
         "publish_task",
         "Publish a new AI mining task",
         vec![
-            Arg::new("description", ArgType::String, "Task description or requirements"),
-            Arg::new("reward", ArgType::Number, "Reward amount for task completion"),
-            Arg::new("difficulty", ArgType::String, "Difficulty level (e.g., easy, medium, hard)"),
-            Arg::new("deadline", ArgType::Number, "Deadline timestamp or duration")
+            Arg::new(
+                "description",
+                ArgType::String,
+                "Task description or requirements",
+            ),
+            Arg::new(
+                "reward",
+                ArgType::Number,
+                "Reward amount for task completion",
+            ),
+            Arg::new(
+                "difficulty",
+                ArgType::String,
+                "Difficulty level (e.g., easy, medium, hard)",
+            ),
+            Arg::new(
+                "deadline",
+                ArgType::Number,
+                "Deadline timestamp or duration",
+            ),
         ],
-        CommandHandler::Async(async_handler!(publish_task))
+        CommandHandler::Async(async_handler!(publish_task)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "submit_answer",
         "Submit answer to an AI mining task",
         vec![
             Arg::new("task_id", ArgType::String, "Task ID to submit answer for"),
-            Arg::new("answer_content", ArgType::String, "Answer content or solution"),
-            Arg::new("answer_hash", ArgType::String, "Hash of the answer for verification"),
-            Arg::new("stake", ArgType::Number, "Stake amount for answer submission")
+            Arg::new(
+                "answer_content",
+                ArgType::String,
+                "Answer content or solution",
+            ),
+            Arg::new(
+                "answer_hash",
+                ArgType::String,
+                "Hash of the answer for verification",
+            ),
+            Arg::new(
+                "stake",
+                ArgType::Number,
+                "Stake amount for answer submission",
+            ),
         ],
-        CommandHandler::Async(async_handler!(submit_answer))
+        CommandHandler::Async(async_handler!(submit_answer)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "validate_answer",
         "Validate a submitted answer",
         vec![
-            Arg::new("task_id", ArgType::String, "Task ID of the answer to validate"),
+            Arg::new(
+                "task_id",
+                ArgType::String,
+                "Task ID of the answer to validate",
+            ),
             Arg::new("answer_id", ArgType::String, "Answer ID to validate"),
-            Arg::new("score", ArgType::Number, "Validation score (0-100)")
+            Arg::new("score", ArgType::Number, "Validation score (0-100)"),
         ],
-        CommandHandler::Async(async_handler!(validate_answer))
+        CommandHandler::Async(async_handler!(validate_answer)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "register_miner",
         "Register as an AI miner",
         vec![Arg::new("fee", ArgType::Number, "Registration fee amount")],
-        CommandHandler::Async(async_handler!(register_miner))
+        CommandHandler::Async(async_handler!(register_miner)),
+    ))?;
+
+    // Help command for detailed command information
+    command_manager.add_command(Command::with_optional_arguments(
+        "help",
+        "Show detailed help for a specific command",
+        vec![Arg::new(
+            "command",
+            ArgType::String,
+            "Command name to get help for",
+        )],
+        CommandHandler::Async(async_handler!(show_command_help)),
     ))?;
 
     let mut context = command_manager.get_context().lock()?;
@@ -976,7 +1268,10 @@ async fn setup_wallet_command_manager(wallet: Arc<Wallet>, command_manager: &Com
 }
 
 // Function passed as param to prompt to build the prompt message shown
-async fn prompt_message_builder(prompt: &Prompt, command_manager: Option<&CommandManager>) -> Result<String, PromptError> {
+async fn prompt_message_builder(
+    prompt: &Prompt,
+    command_manager: Option<&CommandManager>,
+) -> Result<String, PromptError> {
     if let Some(manager) = command_manager {
         let context = manager.get_context().lock()?;
         if let Ok(wallet) = context.get::<Arc<Wallet>>() {
@@ -986,17 +1281,28 @@ async fn prompt_message_builder(prompt: &Prompt, command_manager: Option<&Comman
                 let addr = &wallet.get_address().to_string()[..8];
                 prompt.colorize_string(Color::Yellow, addr)
             };
-    
+
             let storage = wallet.get_storage().read().await;
             let topoheight_str = format!(
                 "{}: {}",
                 prompt.colorize_string(Color::Yellow, "TopoHeight"),
-                prompt.colorize_string(Color::Green, &format!("{}", storage.get_synced_topoheight().unwrap_or(0)))
+                prompt.colorize_string(
+                    Color::Green,
+                    &format!("{}", storage.get_synced_topoheight().unwrap_or(0))
+                )
             );
             let balance = format!(
                 "{}: {}",
                 prompt.colorize_string(Color::Yellow, "Balance"),
-                prompt.colorize_string(Color::Green, &format_tos(storage.get_plaintext_balance_for(&TOS_ASSET).await.unwrap_or(0))),
+                prompt.colorize_string(
+                    Color::Green,
+                    &format_tos(
+                        storage
+                            .get_plaintext_balance_for(&TOS_ASSET)
+                            .await
+                            .unwrap_or(0)
+                    )
+                ),
             );
             let status = if wallet.is_online().await {
                 prompt.colorize_string(Color::Green, "Online")
@@ -1008,34 +1314,35 @@ async fn prompt_message_builder(prompt: &Prompt, command_manager: Option<&Comman
                     "{} ",
                     prompt.colorize_string(Color::Red, &network.to_string())
                 )
-            } else { "".into() };
-    
-            return Ok(
-                format!(
-                    "{} | {} | {} | {} | {} {}{} ",
-                    prompt.colorize_string(Color::Blue, "Tos Wallet"),
-                    addr_str,
-                    topoheight_str,
-                    balance,
-                    status,
-                    network_str,
-                    prompt.colorize_string(Color::BrightBlack, ">>")
-                )
-            )
+            } else {
+                "".into()
+            };
+
+            return Ok(format!(
+                "{} | {} | {} | {} | {} {}{} ",
+                prompt.colorize_string(Color::Blue, "Tos Wallet"),
+                addr_str,
+                topoheight_str,
+                balance,
+                status,
+                network_str,
+                prompt.colorize_string(Color::BrightBlack, ">>")
+            ));
         }
     }
 
-    Ok(
-        format!(
-            "{} {} ",
-            prompt.colorize_string(Color::Blue, "Tos Wallet"),
-            prompt.colorize_string(Color::BrightBlack, ">>")
-        )
-    )
+    Ok(format!(
+        "{} {} ",
+        prompt.colorize_string(Color::Blue, "Tos Wallet"),
+        prompt.colorize_string(Color::BrightBlack, ">>")
+    ))
 }
 
 // Open a wallet based on the wallet name and its password
-async fn open_wallet(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn open_wallet(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("open", &args)?;
 
     let prompt = manager.get_prompt();
@@ -1050,19 +1357,21 @@ async fn open_wallet(manager: &CommandManager, mut args: ArgumentManager) -> Res
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("name".to_string()));
     } else {
-        let name = prompt.read_input("Wallet name: ", false)
-            .await.context("Error while reading wallet name")?;
+        let name = prompt
+            .read_input("Wallet name: ", false)
+            .await
+            .context("Error while reading wallet name")?;
 
         if name.is_empty() {
             manager.error("Wallet name cannot be empty");
-            return Ok(())
+            return Ok(());
         }
         format!("{}{}", DIR_PATH, name)
     };
 
     if !Path::new(&dir).is_dir() {
         manager.message("No wallet found with this name");
-        return Ok(())
+        return Ok(());
     }
 
     let password = if args.has_argument("password") {
@@ -1072,19 +1381,41 @@ async fn open_wallet(manager: &CommandManager, mut args: ArgumentManager) -> Res
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("password".to_string()));
     } else {
-        prompt.read_input("Password: ", true)
-            .await.context("Error while reading wallet password")?
+        prompt
+            .read_input("Password: ", true)
+            .await
+            .context("Error while reading wallet password")?
     };
 
     let wallet = {
         let context = manager.get_context().lock()?;
         let network = context.get::<Network>()?;
-        let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(config.precomputed_tables.precomputed_tables_path.as_deref(), config.precomputed_tables.precomputed_tables_l1, LogProgressTableGenerationReportFunction, true).await?;
-        Wallet::open(&dir, &password, *network, precomputed_tables, config.n_decryption_threads, config.network_concurrency, config.light_mode)?
+        let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(
+            config.precomputed_tables.precomputed_tables_path.as_deref(),
+            config.precomputed_tables.precomputed_tables_l1,
+            LogProgressTableGenerationReportFunction,
+            true,
+        )
+        .await?;
+        Wallet::open(
+            &dir,
+            &password,
+            *network,
+            precomputed_tables,
+            config.n_decryption_threads,
+            config.network_concurrency,
+            config.light_mode,
+        )?
     };
 
     manager.message("Wallet sucessfully opened");
-    apply_config(config, &wallet, #[cfg(feature = "xswd")] &prompt).await;
+    apply_config(
+        config,
+        &wallet,
+        #[cfg(feature = "xswd")]
+        &prompt,
+    )
+    .await;
 
     setup_wallet_command_manager(wallet, manager).await?;
 
@@ -1092,7 +1423,10 @@ async fn open_wallet(manager: &CommandManager, mut args: ArgumentManager) -> Res
 }
 
 // Create a wallet by requesting name, password
-async fn create_wallet(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn create_wallet(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("create", &args)?;
 
     let prompt = manager.get_prompt();
@@ -1107,19 +1441,21 @@ async fn create_wallet(manager: &CommandManager, mut args: ArgumentManager) -> R
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("name".to_string()));
     } else {
-        let name = prompt.read_input("Wallet name: ", false)
-            .await.context("Error while reading wallet name")?;
+        let name = prompt
+            .read_input("Wallet name: ", false)
+            .await
+            .context("Error while reading wallet name")?;
 
         if name.is_empty() {
             manager.error("Wallet name cannot be empty");
-            return Ok(())
+            return Ok(());
         }
         format!("{}{}", DIR_PATH, name)
     };
 
     if Path::new(&dir).is_dir() {
         manager.message("wallet already exists with this name");
-        return Ok(())
+        return Ok(());
     }
 
     // Handle password input with batch mode support
@@ -1130,14 +1466,18 @@ async fn create_wallet(manager: &CommandManager, mut args: ArgumentManager) -> R
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("password".to_string()));
     } else {
-        let password = prompt.read_input("Password: ", true)
-            .await.context("Error while reading password")?;
-        let confirm_password = prompt.read_input("Confirm Password: ", true)
-            .await.context("Error while reading password")?;
+        let password = prompt
+            .read_input("Password: ", true)
+            .await
+            .context("Error while reading password")?;
+        let confirm_password = prompt
+            .read_input("Confirm Password: ", true)
+            .await
+            .context("Error while reading password")?;
 
         if password != confirm_password {
             manager.message("Confirm password doesn't match password");
-            return Ok(())
+            return Ok(());
         }
         password
     };
@@ -1145,12 +1485,34 @@ async fn create_wallet(manager: &CommandManager, mut args: ArgumentManager) -> R
     let wallet = {
         let context = manager.get_context().lock()?;
         let network = context.get::<Network>()?;
-        let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(config.precomputed_tables.precomputed_tables_path.as_deref(), precomputed_tables::L1_FULL, LogProgressTableGenerationReportFunction, true).await?;
-        Wallet::create(&dir, &password, None, *network, precomputed_tables, config.n_decryption_threads, config.network_concurrency, config.light_mode).await?
+        let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(
+            config.precomputed_tables.precomputed_tables_path.as_deref(),
+            precomputed_tables::L1_FULL,
+            LogProgressTableGenerationReportFunction,
+            true,
+        )
+        .await?;
+        Wallet::create(
+            &dir,
+            &password,
+            None,
+            *network,
+            precomputed_tables,
+            config.n_decryption_threads,
+            config.network_concurrency,
+            config.light_mode,
+        )
+        .await?
     };
- 
+
     manager.message("Wallet sucessfully created");
-    apply_config(config, &wallet, #[cfg(feature = "xswd")] prompt).await;
+    apply_config(
+        config,
+        &wallet,
+        #[cfg(feature = "xswd")]
+        prompt,
+    )
+    .await;
 
     // Display the seed in prompt
     {
@@ -1159,8 +1521,10 @@ async fn create_wallet(manager: &CommandManager, mut args: ArgumentManager) -> R
             manager.message(format!("Seed: {}", seed));
             manager.message("IMPORTANT: Please save this seed phrase in a secure location.");
         } else {
-            prompt.read_input(format!("Seed: {}\r\nPress ENTER to continue", seed), false)
-                .await.context("Error while displaying seed")?;
+            prompt
+                .read_input(format!("Seed: {}\r\nPress ENTER to continue", seed), false)
+                .await
+                .context("Error while displaying seed")?;
         }
     }
 
@@ -1170,7 +1534,11 @@ async fn create_wallet(manager: &CommandManager, mut args: ArgumentManager) -> R
 }
 
 // Recover a wallet by requesting its seed or private key, name and password
-async fn recover_wallet(manager: &CommandManager, mut args: ArgumentManager, seed: bool) -> Result<(), CommandError> {
+async fn recover_wallet(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+    seed: bool,
+) -> Result<(), CommandError> {
     let prompt = manager.get_prompt();
     let config: Config = Config::parse();
     // Priority: command line args -> config file -> interactive prompt (only if not batch mode)
@@ -1182,19 +1550,21 @@ async fn recover_wallet(manager: &CommandManager, mut args: ArgumentManager, see
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("name".to_string()));
     } else {
-        let name = prompt.read_input("Wallet name: ", false)
-            .await.context("Error while reading wallet name")?;
+        let name = prompt
+            .read_input("Wallet name: ", false)
+            .await
+            .context("Error while reading wallet name")?;
 
         if name.is_empty() {
             manager.error("Wallet name cannot be empty");
-            return Ok(())
+            return Ok(());
         }
         format!("{}{}", DIR_PATH, name)
     };
 
     if Path::new(&dir).is_dir() {
         manager.message("Wallet already exists with this name");
-        return Ok(())
+        return Ok(());
     }
 
     let content = if seed {
@@ -1205,14 +1575,16 @@ async fn recover_wallet(manager: &CommandManager, mut args: ArgumentManager, see
         } else if manager.is_batch_mode() {
             return Err(CommandError::MissingArgument("seed".to_string()));
         } else {
-            prompt.read_input("Seed: ", false)
-                .await.context("Error while reading seed")?
+            prompt
+                .read_input("Seed: ", false)
+                .await
+                .context("Error while reading seed")?
         };
 
         let words_count = seed.split_whitespace().count();
         if words_count != 25 && words_count != 24 {
             manager.error("Seed must be 24 or 25 (checksum) words long");
-            return Ok(())
+            return Ok(());
         }
         seed
     } else {
@@ -1221,13 +1593,15 @@ async fn recover_wallet(manager: &CommandManager, mut args: ArgumentManager, see
         } else if manager.is_batch_mode() {
             return Err(CommandError::MissingArgument("private_key".to_string()));
         } else {
-            prompt.read_input("Private Key: ", false)
-                .await.context("Error while reading private key")?
+            prompt
+                .read_input("Private Key: ", false)
+                .await
+                .context("Error while reading private key")?
         };
 
         if private_key.len() != 64 {
             manager.error("Private key must be 64 characters long");
-            return Ok(())
+            return Ok(());
         }
         private_key
     };
@@ -1240,14 +1614,18 @@ async fn recover_wallet(manager: &CommandManager, mut args: ArgumentManager, see
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("password".to_string()));
     } else {
-        let password = prompt.read_input("Password: ", true)
-            .await.context("Error while reading password")?;
-        let confirm_password = prompt.read_input("Confirm Password: ", true)
-            .await.context("Error while reading password")?;
+        let password = prompt
+            .read_input("Password: ", true)
+            .await
+            .context("Error while reading password")?;
+        let confirm_password = prompt
+            .read_input("Confirm Password: ", true)
+            .await
+            .context("Error while reading password")?;
 
         if password != confirm_password {
             manager.message("Confirm password doesn't match password");
-            return Ok(())
+            return Ok(());
         }
         password
     };
@@ -1255,18 +1633,40 @@ async fn recover_wallet(manager: &CommandManager, mut args: ArgumentManager, see
     let wallet = {
         let context = manager.get_context().lock()?;
         let network = context.get::<Network>()?;
-        let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(config.precomputed_tables.precomputed_tables_path.as_deref(), config.precomputed_tables.precomputed_tables_l1, LogProgressTableGenerationReportFunction, true).await?;
+        let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(
+            config.precomputed_tables.precomputed_tables_path.as_deref(),
+            config.precomputed_tables.precomputed_tables_l1,
+            LogProgressTableGenerationReportFunction,
+            true,
+        )
+        .await?;
 
         let recover = if seed {
             RecoverOption::Seed(&content)
         } else {
             RecoverOption::PrivateKey(&content)
         };
-        Wallet::create(&dir, &password, Some(recover), *network, precomputed_tables, config.n_decryption_threads, config.network_concurrency, config.light_mode).await?
+        Wallet::create(
+            &dir,
+            &password,
+            Some(recover),
+            *network,
+            precomputed_tables,
+            config.n_decryption_threads,
+            config.network_concurrency,
+            config.light_mode,
+        )
+        .await?
     };
 
     manager.message("Wallet sucessfully recovered");
-    apply_config(config, &wallet, #[cfg(feature = "xswd")] prompt).await;
+    apply_config(
+        config,
+        &wallet,
+        #[cfg(feature = "xswd")]
+        prompt,
+    )
+    .await;
 
     setup_wallet_command_manager(wallet, manager).await?;
 
@@ -1278,13 +1678,19 @@ async fn recover_seed(manager: &CommandManager, args: ArgumentManager) -> Result
     recover_wallet(manager, args, true).await
 }
 
-async fn recover_private_key(manager: &CommandManager, args: ArgumentManager) -> Result<(), CommandError> {
+async fn recover_private_key(
+    manager: &CommandManager,
+    args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("recover_private_key", &args)?;
     recover_wallet(manager, args, false).await
 }
 
 // Set the asset name
-async fn set_asset_name(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn set_asset_name(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("set_asset_name", &args)?;
 
     let prompt = manager.get_prompt();
@@ -1296,10 +1702,9 @@ async fn set_asset_name(manager: &CommandManager, mut args: ArgumentManager) -> 
         "asset",
         manager,
         "set_asset_name <asset> <name>",
-        || async {
-            prompt.read_input("Asset ID: ", false).await
-        }
-    ).await?;
+        || async { prompt.read_input("Asset ID: ", false).await },
+    )
+    .await?;
 
     let asset = Hash::from_hex(&asset_str).context("Invalid asset hash")?;
 
@@ -1308,10 +1713,10 @@ async fn set_asset_name(manager: &CommandManager, mut args: ArgumentManager) -> 
         "name",
         manager,
         "set_asset_name <asset> <name>",
-        || async {
-            prompt.read_input("Asset name: ", false).await
-        }
-    ).await.context("Error while reading asset name")?;
+        || async { prompt.read_input("Asset name: ", false).await },
+    )
+    .await
+    .context("Error while reading asset name")?;
 
     let mut storage = wallet.get_storage().write().await;
     storage.set_asset_name(&asset, name).await?;
@@ -1319,7 +1724,10 @@ async fn set_asset_name(manager: &CommandManager, mut args: ArgumentManager) -> 
     Ok(())
 }
 
-async fn list_assets(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn list_assets(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
@@ -1334,7 +1742,7 @@ async fn list_assets(manager: &CommandManager, mut args: ArgumentManager) -> Res
 
     if count == 0 {
         manager.message("No assets found");
-        return Ok(())
+        return Ok(());
     }
 
     let mut max_pages = count / ELEMENTS_PER_PAGE;
@@ -1343,19 +1751,35 @@ async fn list_assets(manager: &CommandManager, mut args: ArgumentManager) -> Res
     }
 
     if page > max_pages {
-        return Err(CommandError::InvalidArgument(format!("Page must be less than maximum pages ({})", max_pages - 1)));
+        return Err(CommandError::InvalidArgument(format!(
+            "Page must be less than maximum pages ({})",
+            max_pages - 1
+        )));
     }
 
     manager.message(format!("Assets (page {}/{}):", page, max_pages));
-    for res in storage.get_assets_with_data().await?.skip(page * ELEMENTS_PER_PAGE).take(ELEMENTS_PER_PAGE) {
+    for res in storage
+        .get_assets_with_data()
+        .await?
+        .skip(page * ELEMENTS_PER_PAGE)
+        .take(ELEMENTS_PER_PAGE)
+    {
         let (asset, data) = res?;
-        manager.message(format!("{} ({} decimals): {}", asset, data.get_decimals(), data.get_name()));
+        manager.message(format!(
+            "{} ({} decimals): {}",
+            asset,
+            data.get_decimals(),
+            data.get_name()
+        ));
     }
 
     Ok(())
 }
 
-async fn list_balances(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn list_balances(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
@@ -1370,7 +1794,7 @@ async fn list_balances(manager: &CommandManager, mut args: ArgumentManager) -> R
 
     if count == 0 {
         manager.message("No balances found");
-        return Ok(())
+        return Ok(());
     }
 
     let mut max_pages = count / ELEMENTS_PER_PAGE;
@@ -1379,25 +1803,39 @@ async fn list_balances(manager: &CommandManager, mut args: ArgumentManager) -> R
     }
 
     if page > max_pages {
-        return Err(CommandError::InvalidArgument(format!("Page must be less than maximum pages ({})", max_pages - 1)));
+        return Err(CommandError::InvalidArgument(format!(
+            "Page must be less than maximum pages ({})",
+            max_pages - 1
+        )));
     }
 
     manager.message(format!("Balances (page {}/{}):", page, max_pages));
-    for res in storage.get_tracked_assets()?.skip(page * ELEMENTS_PER_PAGE).take(ELEMENTS_PER_PAGE) {
+    for res in storage
+        .get_tracked_assets()?
+        .skip(page * ELEMENTS_PER_PAGE)
+        .take(ELEMENTS_PER_PAGE)
+    {
         let asset = res?;
         if let Some(data) = storage.get_optional_asset(&asset).await? {
             let balance = storage.get_plaintext_balance_for(&asset).await?;
-            manager.message(format!("Balance for asset {} ({}): {}", data.get_name(), asset, format_coin(balance, data.get_decimals())));
+            manager.message(format!(
+                "Balance for asset {} ({}): {}",
+                data.get_name(),
+                asset,
+                format_coin(balance, data.get_decimals())
+            ));
         } else {
             manager.message(format!("No asset data for {}", asset));
         }
-
     }
 
     Ok(())
 }
 
-async fn list_tracked_assets(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn list_tracked_assets(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
@@ -1412,7 +1850,7 @@ async fn list_tracked_assets(manager: &CommandManager, mut args: ArgumentManager
     let count = storage.get_tracked_assets_count()?;
     if count == 0 {
         manager.message("No tracked assets found");
-        return Ok(())
+        return Ok(());
     }
 
     let mut max_pages = count / ELEMENTS_PER_PAGE;
@@ -1421,14 +1859,26 @@ async fn list_tracked_assets(manager: &CommandManager, mut args: ArgumentManager
     }
 
     if page > max_pages {
-        return Err(CommandError::InvalidArgument(format!("Page must be less than maximum pages ({})", max_pages - 1)));
+        return Err(CommandError::InvalidArgument(format!(
+            "Page must be less than maximum pages ({})",
+            max_pages - 1
+        )));
     }
 
     manager.message(format!("Assets (page {}/{}):", page, max_pages));
-    for res in storage.get_tracked_assets()?.skip(page * ELEMENTS_PER_PAGE).take(ELEMENTS_PER_PAGE) {
+    for res in storage
+        .get_tracked_assets()?
+        .skip(page * ELEMENTS_PER_PAGE)
+        .take(ELEMENTS_PER_PAGE)
+    {
         let asset = res?;
         if let Some(data) = storage.get_optional_asset(&asset).await? {
-            manager.message(format!("{} ({} decimals): {}", asset, data.get_decimals(), data.get_name()));
+            manager.message(format!(
+                "{} ({} decimals): {}",
+                asset,
+                data.get_decimals(),
+                data.get_name()
+            ));
         } else {
             manager.message(format!("No asset data for {}", asset));
         }
@@ -1437,7 +1887,10 @@ async fn list_tracked_assets(manager: &CommandManager, mut args: ArgumentManager
     Ok(())
 }
 
-async fn track_asset(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn track_asset(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("track_asset", &args)?;
 
     let context = manager.get_context().lock()?;
@@ -1450,16 +1903,23 @@ async fn track_asset(manager: &CommandManager, mut args: ArgumentManager) -> Res
         manager,
         "track_asset <asset>",
         || async {
-            prompt.read_input(
-                prompt.colorize_string(Color::BrightGreen, "Asset ID: "),
-                false
-            ).await
-        }
-    ).await?;
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::BrightGreen, "Asset ID: "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await?;
 
     let asset = Hash::from_hex(&asset_str).context("Invalid asset hash")?;
 
-    if wallet.track_asset(asset).await.context("Error while tracking asset")? {
+    if wallet
+        .track_asset(asset)
+        .await
+        .context("Error while tracking asset")?
+    {
         manager.message("Asset ID is already tracked!");
     } else {
         manager.message("Asset ID is now tracked");
@@ -1468,7 +1928,10 @@ async fn track_asset(manager: &CommandManager, mut args: ArgumentManager) -> Res
     Ok(())
 }
 
-async fn untrack_asset(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn untrack_asset(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("untrack_asset", &args)?;
 
     let context = manager.get_context().lock()?;
@@ -1481,18 +1944,25 @@ async fn untrack_asset(manager: &CommandManager, mut args: ArgumentManager) -> R
         manager,
         "untrack_asset <asset>",
         || async {
-            prompt.read_input(
-                prompt.colorize_string(Color::BrightGreen, "Asset ID: "),
-                false
-            ).await
-        }
-    ).await?;
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::BrightGreen, "Asset ID: "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await?;
 
     let asset = Hash::from_hex(&asset_str).context("Invalid asset hash")?;
 
     if asset == TOS_ASSET {
         manager.message("TOS asset cannot be untracked");
-    } else if wallet.untrack_asset(asset).await.context("Error while untracking asset")? {
+    } else if wallet
+        .untrack_asset(asset)
+        .await
+        .context("Error while untracking asset")?
+    {
         manager.message("Asset ID is not marked as tracked!");
     } else {
         manager.message("Asset ID is not tracked anymore");
@@ -1502,7 +1972,10 @@ async fn untrack_asset(manager: &CommandManager, mut args: ArgumentManager) -> R
 }
 
 // Change wallet password
-async fn change_password(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn change_password(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("change_password", &args)?;
 
     let context = manager.get_context().lock()?;
@@ -1515,7 +1988,11 @@ async fn change_password(manager: &CommandManager, mut args: ArgumentManager) ->
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("old_password".to_string()));
     } else {
-        prompt.read_input(prompt.colorize_string(Color::BrightRed, "Current Password: "), true)
+        prompt
+            .read_input(
+                prompt.colorize_string(Color::BrightRed, "Current Password: "),
+                true,
+            )
             .await
             .context("Error while asking old password")?
     };
@@ -1525,7 +2002,11 @@ async fn change_password(manager: &CommandManager, mut args: ArgumentManager) ->
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("new_password".to_string()));
     } else {
-        prompt.read_input(prompt.colorize_string(Color::BrightRed, "New Password: "), true)
+        prompt
+            .read_input(
+                prompt.colorize_string(Color::BrightRed, "New Password: "),
+                true,
+            )
             .await
             .context("Error while asking new password")?
     };
@@ -1536,58 +2017,89 @@ async fn change_password(manager: &CommandManager, mut args: ArgumentManager) ->
     Ok(())
 }
 
-async fn create_transaction_with_multisig(manager: &CommandManager, prompt: &Prompt, wallet: &Wallet, tx_type: TransactionTypeBuilder, payload: MultiSigPayload) -> Result<Transaction, CommandError> {
-    manager.message(format!("Multisig detected, you need to sign the transaction with {} keys.", payload.threshold));
+async fn create_transaction_with_multisig(
+    manager: &CommandManager,
+    prompt: &Prompt,
+    wallet: &Wallet,
+    tx_type: TransactionTypeBuilder,
+    payload: MultiSigPayload,
+) -> Result<Transaction, CommandError> {
+    manager.message(format!(
+        "Multisig detected, you need to sign the transaction with {} keys.",
+        payload.threshold
+    ));
 
     let mut storage = wallet.get_storage().write().await;
     let fee = FeeBuilder::default();
-    let mut state = wallet.create_transaction_state_with_storage(&storage, &tx_type, &fee, None).await
+    let mut state = wallet
+        .create_transaction_state_with_storage(&storage, &tx_type, &fee, None)
+        .await
         .context("Error while creating transaction state")?;
 
-    let mut unsigned = wallet.create_unsigned_transaction(&mut state, Some(payload.threshold), tx_type, fee, storage.get_tx_version().await?)
+    let mut unsigned = wallet
+        .create_unsigned_transaction(
+            &mut state,
+            Some(payload.threshold),
+            tx_type,
+            fee,
+            storage.get_tx_version().await?,
+        )
         .context("Error while building unsigned transaction")?;
 
     let mut multisig = MultiSig::new();
-    manager.message(format!("Transaction hash to sign: {}", unsigned.get_hash_for_multisig()));
+    manager.message(format!(
+        "Transaction hash to sign: {}",
+        unsigned.get_hash_for_multisig()
+    ));
 
     if payload.threshold == 1 {
-        let signature = prompt.read_input("Enter signature hexadecimal: ", false).await
+        let signature = prompt
+            .read_input("Enter signature hexadecimal: ", false)
+            .await
             .context("Error while reading signature")?;
         let signature = Signature::from_hex(&signature).context("Invalid signature")?;
 
         let id = if payload.participants.len() == 1 {
             0
         } else {
-            prompt.read("Enter signer ID: ").await
-            .context("Error while reading signer id")?
+            prompt
+                .read("Enter signer ID: ")
+                .await
+                .context("Error while reading signer id")?
         };
 
-        if !multisig.add_signature(SignatureId {
-            id,
-            signature
-        }) {
-            return Err(CommandError::InvalidArgument("Invalid signature".to_string()));
-        }        
+        if !multisig.add_signature(SignatureId { id, signature }) {
+            return Err(CommandError::InvalidArgument(
+                "Invalid signature".to_string(),
+            ));
+        }
     } else {
         manager.message("Participants available:");
         for (i, participant) in payload.participants.iter().enumerate() {
-            manager.message(format!("Participant #{}: {}", i, participant.as_address(wallet.get_network().is_mainnet())));
+            manager.message(format!(
+                "Participant #{}: {}",
+                i,
+                participant.as_address(wallet.get_network().is_mainnet())
+            ));
         }
-        
+
         manager.message("Please enter the signatures and signer IDs");
         for i in 0..payload.threshold {
-            let signature = prompt.read_input(format!("Enter signature #{} hexadecimal: ", i), false).await
+            let signature = prompt
+                .read_input(format!("Enter signature #{} hexadecimal: ", i), false)
+                .await
                 .context("Error while reading signature")?;
             let signature = Signature::from_hex(&signature).context("Invalid signature")?;
-    
-            let id = prompt.read("Enter signer ID for signature: ").await
+
+            let id = prompt
+                .read("Enter signer ID for signature: ")
+                .await
                 .context("Error while reading signer id")?;
-    
-            if !multisig.add_signature(SignatureId {
-                id,
-                signature
-            }) {
-                return Err(CommandError::InvalidArgument("Invalid signature".to_string()));
+
+            if !multisig.add_signature(SignatureId { id, signature }) {
+                return Err(CommandError::InvalidArgument(
+                    "Invalid signature".to_string(),
+                ));
             }
         }
     }
@@ -1597,7 +2109,10 @@ async fn create_transaction_with_multisig(manager: &CommandManager, prompt: &Pro
     let tx = unsigned.finalize(wallet.get_keypair());
     state.set_tx_hash_built(tx.hash());
 
-    state.apply_changes(&mut storage).await.context("Error while applying changes")?;
+    state
+        .apply_changes(&mut storage)
+        .await
+        .context("Error while applying changes")?;
 
     Ok(tx)
 }
@@ -1610,27 +2125,54 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // read address
-    let str_address = get_required_arg(
+    // Wait for wallet to sync before creating transaction (Issue 3: Option 2)
+    #[cfg(feature = "network_handler")]
+    {
+        if wallet.is_online().await {
+            if !wallet.is_synced().await.unwrap_or(false) {
+                manager.message("⏳ Waiting for wallet to synchronize...");
+                if let Err(e) = wallet.wait_for_sync(30).await {
+                    manager.error(format!("Sync timeout: {:#}", e));
+                    manager.message("Tip: Check sync status with 'sync_status' command");
+                    return Ok(());
+                }
+                manager.message("✓ Wallet synchronized");
+            }
+        }
+    }
+
+    // read address (with example for better error messages)
+    let str_address = get_required_arg_with_example(
         &mut args,
         "address",
         manager,
         "transfer <asset> <address> <amount> [fee_type] [confirm]",
+        "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.0 tos y",
         || async {
-            prompt.read_input(
-                prompt.colorize_string(Color::Green, "Address: "),
-                false
-            ).await
+            prompt
+                .read_input(prompt.colorize_string(Color::Green, "Address: "), false)
+                .await
+        },
+    )
+    .await
+    .context("Error while reading address")?;
+
+    let address = Address::from_string(&str_address).map_err(|_| {
+        CommandError::InvalidParameterWithExample {
+            param: "address".to_string(),
+            message: format!("'{}' is not a valid TOS address", str_address),
+            usage: "transfer <asset> <address> <amount> [fee_type] [confirm]".to_string(),
+            example: "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.0 tos y".to_string(),
         }
-    ).await.context("Error while reading address")?;
-    let address = Address::from_string(&str_address).context("Invalid address")?;
+    })?;
 
     let asset = {
-        let asset_str = get_required_arg(
+        let asset_str = get_required_arg_with_example(
             &mut args,
             "asset",
             manager,
             "transfer <asset> <address> <amount> [fee_type] [confirm]",
+            "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.0 tos y",
             || async {
                 prompt.read_input(
                     prompt.colorize_string(Color::Green, "Asset (default TOS): "),
@@ -1639,14 +2181,21 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
             }
         ).await?;
 
-        if asset_str.is_empty() {
+        // Handle empty or whitespace-only string as TOS default (Issue 2: Option 2)
+        if asset_str.is_empty() || asset_str.trim().is_empty() {
+            TOS_ASSET
+        } else if asset_str.to_uppercase() == "TOS" {
+            // Handle "TOS" as asset name without requiring track_asset
             TOS_ASSET
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while reading hash from hex")?
         } else {
             let storage = wallet.get_storage().read().await;
             storage.get_asset_by_name(&asset_str).await?
-                .context("No asset registered with given name")?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or run 'track_asset <hash>' first. For TOS, you can use \"TOS\" or the full hash.",
+                    asset_str
+                ))?
         }
     };
 
@@ -1654,37 +2203,56 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         let storage = wallet.get_storage().read().await;
         let balance = storage.get_plaintext_balance_for(&asset).await.unwrap_or(0);
         let asset = storage.get_asset(&asset).await?;
-        let multisig = storage.get_multisig_state().await.context("Error while reading multisig state")?;
+        let multisig = storage
+            .get_multisig_state()
+            .await
+            .context("Error while reading multisig state")?;
         (balance, asset, multisig.cloned())
     };
 
-    // read amount
-    let amount_str = get_required_arg(
+    // read amount (with example for better error messages)
+    let amount_str = get_required_arg_with_example(
         &mut args,
         "amount",
         manager,
         "transfer <asset> <address> <amount> [fee_type] [confirm]",
+        "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.0 tos y",
         || async {
-            prompt.read(
-                prompt.colorize_string(Color::Green, &format!("Amount (max: {}): ", format_coin(max_balance, asset_data.get_decimals())))
-            ).await
-        }
-    ).await.context("Error while reading amount")?;
+            prompt
+                .read(prompt.colorize_string(
+                    Color::Green,
+                    &format!(
+                        "Amount (max: {}): ",
+                        format_coin(max_balance, asset_data.get_decimals())
+                    ),
+                ))
+                .await
+        },
+    )
+    .await
+    .context("Error while reading amount")?;
 
-    let amount = from_coin(amount_str, asset_data.get_decimals()).context("Invalid amount")?;
+    let amount = from_coin(amount_str.clone(), asset_data.get_decimals()).ok_or_else(|| {
+        CommandError::InvalidParameterWithExample {
+            param: "amount".to_string(),
+            message: format!("'{}' is not a valid amount (use decimal format like 1.0, 0.5, etc.)", amount_str),
+            usage: "transfer <asset> <address> <amount> [fee_type] [confirm]".to_string(),
+            example: "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.0 tos y".to_string(),
+        }
+    })?;
 
     // Read fee_type parameter
-    let fee_type = if let Some(fee_type_str) = get_optional_arg(
-        &mut args,
-        "fee_type",
-        manager,
-        || async {
-            prompt.read_input(
-                prompt.colorize_string(Color::Green, "Fee type (tos/energy, optional): "),
-                false
-            ).await
-        }
-    ).await? {
+    let fee_type = if let Some(fee_type_str) =
+        get_optional_arg(&mut args, "fee_type", manager, || async {
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Fee type (tos/energy, optional): "),
+                    false,
+                )
+                .await
+        })
+        .await?
+    {
         match fee_type_str.to_lowercase().as_str() {
             "tos" => Some(tos_common::transaction::FeeType::TOS),
             "energy" => Some(tos_common::transaction::FeeType::Energy),
@@ -1705,31 +2273,37 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         }
     }
 
-    manager.message(format!("Sending {} of {} ({}) to {}", format_coin(amount, asset_data.get_decimals()), asset_data.get_name(), asset, address.to_string()));
+    manager.message(format!(
+        "Sending {} of {} ({}) to {}",
+        format_coin(amount, asset_data.get_decimals()),
+        asset_data.get_name(),
+        asset,
+        address.to_string()
+    ));
 
     // Get confirmation (required in command mode, prompts in interactive mode)
-    let confirmed = get_confirmation(
-        &mut args,
-        manager,
-        || async {
-            let message = format!(
-                "Send {} of {} ({}) to {}?\n(Y/N): ",
-                format_coin(amount, asset_data.get_decimals()),
-                asset_data.get_name(),
-                asset,
-                address.to_string()
-            );
-            let result = prompt.read_valid_str_value(
+    let confirmed = get_confirmation(&mut args, manager, || async {
+        let message = format!(
+            "Send {} of {} ({}) to {}?\n(Y/N): ",
+            format_coin(amount, asset_data.get_decimals()),
+            asset_data.get_name(),
+            asset,
+            address.to_string()
+        );
+        let result = prompt
+            .read_valid_str_value(
                 prompt.colorize_string(Color::Yellow, &message),
-                vec!["y", "n"]
-            ).await.context("Error while reading confirmation")?;
-            Ok(result == "y")
-        }
-    ).await?;
+                vec!["y", "n"],
+            )
+            .await
+            .context("Error while reading confirmation")?;
+        Ok(result == "y")
+    })
+    .await?;
 
     if !confirmed {
         manager.message("Transaction has been aborted");
-        return Ok(())
+        return Ok(());
     }
 
     manager.message("Building transaction...");
@@ -1740,20 +2314,25 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         extra_data: None,
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
-    
+
     // Create transaction with appropriate fee type
     let tx = if let Some(multisig) = multisig {
         create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
     } else {
         // Create transaction state and builder
         let storage = wallet.get_storage().read().await;
-        let mut state = wallet.create_transaction_state_with_storage(&storage, &tx_type, &FeeBuilder::default(), None).await
+        let mut state = wallet
+            .create_transaction_state_with_storage(&storage, &tx_type, &FeeBuilder::default(), None)
+            .await
             .context("Error while creating transaction state")?;
-        
+
         // Create transaction with fee type
-        let tx_version = storage.get_tx_version().await.context("Error while getting tx version")?;
+        let tx_version = storage
+            .get_tx_version()
+            .await
+            .context("Error while getting tx version")?;
         let threshold = None;
-        
+
         // Create a custom fee builder if energy fees are requested
         let fee_builder = if let Some(ref ft) = fee_type {
             if *ft == tos_common::transaction::FeeType::Energy {
@@ -1764,70 +2343,89 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         } else {
             FeeBuilder::default()
         };
-        
+
         // Create transaction builder with fee type
         let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
             tx_version,
             wallet.get_public_key().clone(),
             threshold,
             tx_type,
-            fee_builder
+            fee_builder,
         );
-        
+
         // Set fee type if specified
         if let Some(ref ft) = fee_type {
             builder = builder.with_fee_type(ft.clone());
         }
-        
+
         match builder.build(&mut state, wallet.get_keypair()) {
             Ok(tx) => {
-                manager.message(&format!("Transaction created with {} fees", match fee_type.as_ref().unwrap_or(&tos_common::transaction::FeeType::TOS) {
-                    tos_common::transaction::FeeType::TOS => "TOS",
-                    tos_common::transaction::FeeType::Energy => "Energy",
-                }));
+                manager.message(&format!(
+                    "Transaction created with {} fees",
+                    match fee_type
+                        .as_ref()
+                        .unwrap_or(&tos_common::transaction::FeeType::TOS)
+                    {
+                        tos_common::transaction::FeeType::TOS => "TOS",
+                        tos_common::transaction::FeeType::Energy => "Energy",
+                    }
+                ));
                 tx
-            },
+            }
             Err(e) => {
                 manager.error(&format!("Error while creating transaction: {}", e));
-                return Ok(())
+                return Ok(());
             }
         }
     };
-
 
     broadcast_tx(wallet, manager, tx).await;
     Ok(())
 }
 
 // Send the whole balance to a specified address
-async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn transfer_all(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("transfer_all", &args)?;
 
     let prompt = manager.get_prompt();
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // read address
-    let str_address = get_required_arg(
+    // read address (with example for better error messages)
+    let str_address = get_required_arg_with_example(
         &mut args,
         "address",
         manager,
         "transfer_all <asset> <address> [fee_type] [confirm]",
+        "transfer_all TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk tos y",
         || async {
-            prompt.read_input(
-                prompt.colorize_string(Color::Green, "Address: "),
-                false
-            ).await
+            prompt
+                .read_input(prompt.colorize_string(Color::Green, "Address: "), false)
+                .await
+        },
+    )
+    .await
+    .context("Error while reading address")?;
+
+    let address = Address::from_string(&str_address).map_err(|_| {
+        CommandError::InvalidParameterWithExample {
+            param: "address".to_string(),
+            message: format!("'{}' is not a valid TOS address", str_address),
+            usage: "transfer_all <asset> <address> [fee_type] [confirm]".to_string(),
+            example: "transfer_all TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk tos y".to_string(),
         }
-    ).await.context("Error while reading address")?;
-    let address = Address::from_string(&str_address).context("Invalid address")?;
+    })?;
 
     let asset = {
-        let asset_str = get_required_arg(
+        let asset_str = get_required_arg_with_example(
             &mut args,
             "asset",
             manager,
             "transfer_all <asset> <address> [fee_type] [confirm]",
+            "transfer_all TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk tos y",
             || async {
                 prompt.read_input(
                     prompt.colorize_string(Color::Green, "Asset (default TOS): "),
@@ -1836,29 +2434,34 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
             }
         ).await?;
 
-        if asset_str.is_empty() {
+        if asset_str.is_empty() || asset_str.trim().is_empty() {
+            TOS_ASSET
+        } else if asset_str.to_uppercase() == "TOS" {
             TOS_ASSET
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while reading hash from hex")?
         } else {
             let storage = wallet.get_storage().read().await;
             storage.get_asset_by_name(&asset_str).await?
-                .context("No asset registered with given name")?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or run 'track_asset <hash>' first. For TOS, you can use \"TOS\" or the full hash.",
+                    asset_str
+                ))?
         }
     };
-    
+
     // Read fee_type parameter
-    let fee_type = if let Some(fee_type_str) = get_optional_arg(
-        &mut args,
-        "fee_type",
-        manager,
-        || async {
-            prompt.read_input(
-                prompt.colorize_string(Color::Green, "Fee type (tos/energy, optional): "),
-                false
-            ).await
-        }
-    ).await? {
+    let fee_type = if let Some(fee_type_str) =
+        get_optional_arg(&mut args, "fee_type", manager, || async {
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Fee type (tos/energy, optional): "),
+                    false,
+                )
+                .await
+        })
+        .await?
+    {
         match fee_type_str.to_lowercase().as_str() {
             "tos" => Some(tos_common::transaction::FeeType::TOS),
             "energy" => Some(tos_common::transaction::FeeType::Energy),
@@ -1878,12 +2481,14 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
             return Ok(());
         }
     }
-    
+
     let (mut amount, asset_data, multisig) = {
         let storage = wallet.get_storage().read().await;
         let amount = storage.get_plaintext_balance_for(&asset).await.unwrap_or(0);
         let data = storage.get_asset(&asset).await?;
-        let multisig = storage.get_multisig_state().await
+        let multisig = storage
+            .get_multisig_state()
+            .await
             .context("Error while reading multisig state")?;
         (amount, data, multisig.cloned())
     };
@@ -1895,45 +2500,60 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
         extra_data: None,
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
-    
+
     // Estimate fees based on fee type
     let estimated_fees = if let Some(ref ft) = fee_type {
         if *ft == tos_common::transaction::FeeType::Energy {
             // For energy fees, we don't deduct from TOS balance
             0
         } else {
-            wallet.estimate_fees(tx_type.clone(), FeeBuilder::default()).await.context("Error while estimating fees")?
+            wallet
+                .estimate_fees(tx_type.clone(), FeeBuilder::default())
+                .await
+                .context("Error while estimating fees")?
         }
     } else {
-        wallet.estimate_fees(tx_type.clone(), FeeBuilder::default()).await.context("Error while estimating fees")?
+        wallet
+            .estimate_fees(tx_type.clone(), FeeBuilder::default())
+            .await
+            .context("Error while estimating fees")?
     };
 
     if asset == TOS_ASSET && fee_type.as_ref() != Some(&tos_common::transaction::FeeType::Energy) {
-        amount = amount.checked_sub(estimated_fees).context("Insufficient balance to pay fees")?;
+        amount = amount
+            .checked_sub(estimated_fees)
+            .context("Insufficient balance to pay fees")?;
     }
 
     let fee_display = if let Some(ref ft) = fee_type {
         match ft {
-            tos_common::transaction::FeeType::TOS => format!("TOS fees: {}", format_tos(estimated_fees)),
+            tos_common::transaction::FeeType::TOS => {
+                format!("TOS fees: {}", format_tos(estimated_fees))
+            }
             tos_common::transaction::FeeType::Energy => "Energy fees: 0 TOS".to_string(),
         }
     } else {
         format!("TOS fees: {}", format_tos(estimated_fees))
     };
-    
-    manager.message(format!("Sending {} of {} ({}) to {} ({})", format_coin(amount, asset_data.get_decimals()), asset_data.get_name(), asset, address, fee_display));
 
-    let confirmed = get_confirmation(
-        &mut args,
-        manager,
-        || async {
-            prompt.ask_confirmation().await
-        }
-    ).await.context("Error while confirming action")?;
+    manager.message(format!(
+        "Sending {} of {} ({}) to {} ({})",
+        format_coin(amount, asset_data.get_decimals()),
+        asset_data.get_name(),
+        asset,
+        address,
+        fee_display
+    ));
+
+    let confirmed = get_confirmation(&mut args, manager, || async {
+        prompt.ask_confirmation().await
+    })
+    .await
+    .context("Error while confirming action")?;
 
     if !confirmed {
         manager.message("Transaction has been aborted");
-        return Ok(())
+        return Ok(());
     }
 
     manager.message("Building transaction...");
@@ -1949,13 +2569,18 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
     } else {
         // Create transaction with appropriate fee type
         let storage = wallet.get_storage().read().await;
-        let mut state = wallet.create_transaction_state_with_storage(&storage, &tx_type, &FeeBuilder::default(), None).await
+        let mut state = wallet
+            .create_transaction_state_with_storage(&storage, &tx_type, &FeeBuilder::default(), None)
+            .await
             .context("Error while creating transaction state")?;
-        
+
         // Create transaction with fee type
-        let tx_version = storage.get_tx_version().await.context("Error while getting tx version")?;
+        let tx_version = storage
+            .get_tx_version()
+            .await
+            .context("Error while getting tx version")?;
         let threshold = None;
-        
+
         // Create a custom fee builder if energy fees are requested
         let fee_builder = if let Some(ref ft) = fee_type {
             if *ft == tos_common::transaction::FeeType::Energy {
@@ -1966,32 +2591,38 @@ async fn transfer_all(manager: &CommandManager, mut args: ArgumentManager) -> Re
         } else {
             FeeBuilder::default()
         };
-        
+
         // Create transaction builder with fee type
         let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
             tx_version,
             wallet.get_public_key().clone(),
             threshold,
             tx_type,
-            fee_builder
+            fee_builder,
         );
-        
+
         // Set fee type if specified
         if let Some(ref ft) = fee_type {
             builder = builder.with_fee_type(ft.clone());
         }
-        
+
         match builder.build(&mut state, wallet.get_keypair()) {
             Ok(tx) => {
-                manager.message(&format!("Transaction created with {} fees", match fee_type.as_ref().unwrap_or(&tos_common::transaction::FeeType::TOS) {
-                    tos_common::transaction::FeeType::TOS => "TOS",
-                    tos_common::transaction::FeeType::Energy => "Energy",
-                }));
+                manager.message(&format!(
+                    "Transaction created with {} fees",
+                    match fee_type
+                        .as_ref()
+                        .unwrap_or(&tos_common::transaction::FeeType::TOS)
+                    {
+                        tos_common::transaction::FeeType::TOS => "TOS",
+                        tos_common::transaction::FeeType::Energy => "Energy",
+                    }
+                ));
                 tx
-            },
+            }
             Err(e) => {
                 manager.error(&format!("Error while creating transaction: {}", e));
-                return Ok(())
+                return Ok(());
             }
         }
     };
@@ -2008,27 +2639,36 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
     let wallet: &Arc<Wallet> = context.get()?;
 
     let asset = {
-        let asset_str = get_required_arg(
+        let asset_str = get_required_arg_with_example(
             &mut args,
             "asset",
             manager,
             "burn <asset> <amount> [confirm]",
+            "burn TOS 10.0 y",
             || async {
-                prompt.read_input(
-                    prompt.colorize_string(Color::Green, "Asset (default TOS): "),
-                    false
-                ).await
-            }
-        ).await?;
+                prompt
+                    .read_input(
+                        prompt.colorize_string(Color::Green, "Asset (default TOS): "),
+                        false,
+                    )
+                    .await
+            },
+        )
+        .await?;
 
-        if asset_str.is_empty() {
+        if asset_str.is_empty() || asset_str.trim().is_empty() {
+            TOS_ASSET
+        } else if asset_str.to_uppercase() == "TOS" {
             TOS_ASSET
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while reading hash from hex")?
         } else {
             let storage = wallet.get_storage().read().await;
             storage.get_asset_by_name(&asset_str).await?
-                .context("No asset registered with given name")?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or run 'track_asset <hash>' first. For TOS, you can use \"TOS\" or the full hash.",
+                    asset_str
+                ))?
         }
     };
 
@@ -2036,56 +2676,82 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         let storage = wallet.get_storage().read().await;
         let balance = storage.get_plaintext_balance_for(&asset).await.unwrap_or(0);
         let data = storage.get_asset(&asset).await?;
-        let multisig = storage.get_multisig_state().await
+        let multisig = storage
+            .get_multisig_state()
+            .await
             .context("Error while reading multisig state")?;
         (balance, data, multisig.cloned())
     };
 
-    // read amount
-    let amount_str = get_required_arg(
+    // read amount (with example for better error messages)
+    let amount_str = get_required_arg_with_example(
         &mut args,
         "amount",
         manager,
         "burn <asset> <amount> [confirm]",
+        "burn TOS 10.0 y",
         || async {
-            prompt.read_input(
-                prompt.colorize_string(Color::Green, &format!("Amount (max: {}): ", format_coin(max_balance, asset_data.get_decimals()))),
-                false
-            ).await
-        }
-    ).await.context("Error while reading amount")?;
+            prompt
+                .read_input(
+                    prompt.colorize_string(
+                        Color::Green,
+                        &format!(
+                            "Amount (max: {}): ",
+                            format_coin(max_balance, asset_data.get_decimals())
+                        ),
+                    ),
+                    false,
+                )
+                .await
+        },
+    )
+    .await
+    .context("Error while reading amount")?;
 
-    let amount = from_coin(amount_str, asset_data.get_decimals()).context("Invalid amount")?;
-    manager.message(format!("Burning {} of {} ({})", format_coin(amount, asset_data.get_decimals()), asset_data.get_name(), asset));
-
-    let confirmed = get_confirmation(
-        &mut args,
-        manager,
-        || async {
-            prompt.ask_confirmation().await
+    let amount = from_coin(amount_str.clone(), asset_data.get_decimals()).ok_or_else(|| {
+        CommandError::InvalidParameterWithExample {
+            param: "amount".to_string(),
+            message: format!(
+                "'{}' is not a valid amount (use decimal format like 10.0, 0.5, etc.)",
+                amount_str
+            ),
+            usage: "burn <asset> <amount> [confirm]".to_string(),
+            example: "burn TOS 10.0 y".to_string(),
         }
-    ).await.context("Error while confirming action")?;
+    })?;
+    manager.message(format!(
+        "Burning {} of {} ({})",
+        format_coin(amount, asset_data.get_decimals()),
+        asset_data.get_name(),
+        asset
+    ));
+
+    let confirmed = get_confirmation(&mut args, manager, || async {
+        prompt.ask_confirmation().await
+    })
+    .await
+    .context("Error while confirming action")?;
 
     if !confirmed {
         manager.message("Transaction has been aborted");
-        return Ok(())
+        return Ok(());
     }
 
     manager.message("Building transaction...");
-    let payload = BurnPayload {
-        amount,
-        asset
-    };
+    let payload = BurnPayload { amount, asset };
 
     let tx_type = TransactionTypeBuilder::Burn(payload);
     let tx = if let Some(multisig) = multisig {
         create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
     } else {
-        match wallet.create_transaction(tx_type, FeeBuilder::default()).await {
+        match wallet
+            .create_transaction(tx_type, FeeBuilder::default())
+            .await
+        {
             Ok(tx) => tx,
             Err(e) => {
                 manager.error(&format!("Error while creating transaction: {}", e));
-                return Ok(())
+                return Ok(());
             }
         }
     };
@@ -2103,7 +2769,10 @@ async fn display_address(manager: &CommandManager, _: ArgumentManager) -> Result
 }
 
 // Show current balance for specified asset or list all non-zero balances
-async fn balance(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn balance(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let prompt = manager.get_prompt();
     let wallet: &Arc<Wallet> = context.get()?;
@@ -2112,20 +2781,29 @@ async fn balance(manager: &CommandManager, mut arguments: ArgumentManager) -> Re
     let asset = if arguments.has_argument("asset") {
         arguments.get_value("asset")?.to_hash()?
     } else if manager.is_batch_mode() {
-        TOS_ASSET  // Default to TOS in batch mode
+        TOS_ASSET // Default to TOS in batch mode
     } else {
-        prompt.read_hash(
-            prompt.colorize_string(Color::Green, "Asset (default TOS): ")
-        ).await.unwrap_or(TOS_ASSET)
+        prompt
+            .read_hash(prompt.colorize_string(Color::Green, "Asset (default TOS): "))
+            .await
+            .unwrap_or(TOS_ASSET)
     };
     let balance = storage.get_plaintext_balance_for(&asset).await?;
     let data = storage.get_asset(&asset).await?;
-    manager.message(format!("Balance for asset {} ({}): {}", data.get_name(), asset, format_coin(balance, data.get_decimals())));
+    manager.message(format!(
+        "Balance for asset {} ({}): {}",
+        data.get_name(),
+        asset,
+        format_coin(balance, data.get_decimals())
+    ));
     Ok(())
 }
 
 // Show all transactions
-async fn history(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn history(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let page = if arguments.has_argument("page") {
         arguments.get_value("page")?.to_number()? as usize
     } else {
@@ -2133,7 +2811,9 @@ async fn history(manager: &CommandManager, mut arguments: ArgumentManager) -> Re
     };
 
     if page == 0 {
-        return Err(CommandError::InvalidArgument("Page must be greater than 0".to_string()));
+        return Err(CommandError::InvalidArgument(
+            "Page must be greater than 0".to_string(),
+        ));
     }
 
     let context = manager.get_context().lock()?;
@@ -2144,7 +2824,7 @@ async fn history(manager: &CommandManager, mut arguments: ArgumentManager) -> Re
     // if we don't have any txs, no need proceed further
     if txs_len == 0 {
         manager.message("No transactions available");
-        return Ok(())
+        return Ok(());
     }
 
     let mut max_pages = txs_len / ELEMENTS_PER_PAGE;
@@ -2153,7 +2833,10 @@ async fn history(manager: &CommandManager, mut arguments: ArgumentManager) -> Re
     }
 
     if page > max_pages {
-        return Err(CommandError::InvalidArgument(format!("Page must be less than maximum pages ({})", max_pages)));
+        return Err(CommandError::InvalidArgument(format!(
+            "Page must be less than maximum pages ({})",
+            max_pages
+        )));
     }
 
     let transactions = storage.get_filtered_transactions(
@@ -2167,28 +2850,49 @@ async fn history(manager: &CommandManager, mut arguments: ArgumentManager) -> Re
         true,
         None,
         Some(ELEMENTS_PER_PAGE),
-        Some((page - 1) * ELEMENTS_PER_PAGE)
+        Some((page - 1) * ELEMENTS_PER_PAGE),
     )?;
 
-    manager.message(format!("{} Transactions (total {}) page {}/{}:", transactions.len(), txs_len, page, max_pages));
+    manager.message(format!(
+        "{} Transactions (total {}) page {}/{}:",
+        transactions.len(),
+        txs_len,
+        page,
+        max_pages
+    ));
     for tx in transactions {
-        manager.message(format!("- {}", tx.summary(wallet.get_network().is_mainnet(), &*storage).await?));
+        manager.message(format!(
+            "- {}",
+            tx.summary(wallet.get_network().is_mainnet(), &*storage)
+                .await?
+        ));
     }
 
     Ok(())
 }
 
-async fn transaction(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn transaction(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
     let storage = wallet.get_storage().read().await;
     let hash = arguments.get_value("hash")?.to_hash()?;
-    let tx = storage.get_transaction(&hash).context("Transaction not found")?;
-    manager.message(tx.summary(wallet.get_network().is_mainnet(), &*storage).await?);
+    let tx = storage
+        .get_transaction(&hash)
+        .context("Transaction not found")?;
+    manager.message(
+        tx.summary(wallet.get_network().is_mainnet(), &*storage)
+            .await?,
+    );
     Ok(())
 }
 
-async fn export_transactions_csv(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn export_transactions_csv(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let filename = arguments.get_value("filename")?.to_string_value()?;
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
@@ -2196,7 +2900,10 @@ async fn export_transactions_csv(manager: &CommandManager, mut arguments: Argume
     let transactions = storage.get_transactions()?;
     let mut file = File::create(&filename).context("Error while creating CSV file")?;
 
-    wallet.export_transactions_in_csv(&storage, transactions, &mut file).await.context("Error while exporting transactions to CSV")?;
+    wallet
+        .export_transactions_in_csv(&storage, transactions, &mut file)
+        .await
+        .context("Error while exporting transactions to CSV")?;
 
     manager.message(format!("Transactions have been exported to {}", filename));
     Ok(())
@@ -2213,7 +2920,10 @@ async fn clear_tx_cache(manager: &CommandManager, _: ArgumentManager) -> Result<
 
 // Set your wallet in online mode
 #[cfg(feature = "network_handler")]
-async fn online_mode(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn online_mode(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
     if wallet.is_online().await {
@@ -2225,7 +2935,10 @@ async fn online_mode(manager: &CommandManager, mut arguments: ArgumentManager) -
             DEFAULT_DAEMON_ADDRESS.to_string()
         };
 
-        wallet.set_online_mode(&daemon_address, true).await.context("Couldn't enable online mode")?;
+        wallet
+            .set_online_mode(&daemon_address, true)
+            .await
+            .context("Couldn't enable online mode")?;
         manager.message("Wallet is now online");
     }
     Ok(())
@@ -2239,7 +2952,10 @@ async fn offline_mode(manager: &CommandManager, _: ArgumentManager) -> Result<()
     if !wallet.is_online().await {
         manager.error("Wallet is already offline");
     } else {
-        wallet.set_offline_mode().await.context("Error on offline mode")?;
+        wallet
+            .set_offline_mode()
+            .await
+            .context("Error on offline mode")?;
         manager.message("Wallet is now offline");
     }
     Ok(())
@@ -2247,7 +2963,10 @@ async fn offline_mode(manager: &CommandManager, _: ArgumentManager) -> Result<()
 
 // Show current wallet address
 #[cfg(feature = "network_handler")]
-async fn rescan(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn rescan(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
     let topoheight = if arguments.has_argument("topoheight") {
@@ -2264,7 +2983,40 @@ async fn rescan(manager: &CommandManager, mut arguments: ArgumentManager) -> Res
     Ok(())
 }
 
-async fn seed(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+#[cfg(feature = "network_handler")]
+async fn sync_status(
+    manager: &CommandManager,
+    _arguments: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    match wallet.get_sync_progress().await {
+        Ok((wallet_topo, daemon_topo, percentage)) => {
+            if wallet_topo >= daemon_topo {
+                manager.message(format!(
+                    "✓ Wallet fully synchronized\n  Topoheight: {} / {} (100.0%)",
+                    wallet_topo, daemon_topo
+                ));
+            } else {
+                manager.message(format!(
+                    "⏳ Syncing in progress\n  Topoheight: {} / {} ({:.1}%)\n  Blocks remaining: {}",
+                    wallet_topo, daemon_topo, percentage, daemon_topo - wallet_topo
+                ));
+            }
+        }
+        Err(e) => {
+            manager.error(format!("Error checking sync status: {:#}", e));
+        }
+    }
+
+    Ok(())
+}
+
+async fn seed(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("seed", &arguments)?;
 
     let context = manager.get_context().lock()?;
@@ -2276,8 +3028,10 @@ async fn seed(manager: &CommandManager, mut arguments: ArgumentManager) -> Resul
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("password".to_string()));
     } else {
-        prompt.read_input("Password: ", true)
-            .await.context("Error while reading password")?
+        prompt
+            .read_input("Password: ", true)
+            .await
+            .context("Error while reading password")?
     };
 
     // check if password is valid
@@ -2293,10 +3047,16 @@ async fn seed(manager: &CommandManager, mut arguments: ArgumentManager) -> Resul
     if manager.is_batch_mode() {
         manager.message(format!("Seed: {}", seed));
     } else {
-        prompt.read_input(
-            prompt.colorize_string(Color::Green, &format!("Seed: {}\r\nPress ENTER to continue", seed)),
-            false
-        ).await.context("Error while printing seed")?;
+        prompt
+            .read_input(
+                prompt.colorize_string(
+                    Color::Green,
+                    &format!("Seed: {}\r\nPress ENTER to continue", seed),
+                ),
+                false,
+            )
+            .await
+            .context("Error while printing seed")?;
     }
     Ok(())
 }
@@ -2315,21 +3075,19 @@ async fn nonce(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comma
     Ok(())
 }
 
-async fn set_nonce(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn set_nonce(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("set_nonce", &args)?;
 
-    let value_str = get_required_arg(
-        &mut args,
-        "nonce",
-        manager,
-        "set_nonce <nonce>",
-        || async {
-            manager.get_prompt().read_input("New Nonce: ", false).await
-        }
-    ).await.context("Error while reading new nonce to set")?;
+    let value_str = get_required_arg(&mut args, "nonce", manager, "set_nonce <nonce>", || async {
+        manager.get_prompt().read_input("New Nonce: ", false).await
+    })
+    .await
+    .context("Error while reading new nonce to set")?;
 
-    let value = value_str.parse::<u64>()
-        .context("Invalid nonce number")?;
+    let value = value_str.parse::<u64>().context("Invalid nonce number")?;
 
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
@@ -2350,14 +3108,22 @@ async fn tx_version(manager: &CommandManager, _: ArgumentManager) -> Result<(), 
     Ok(())
 }
 
-async fn set_tx_version(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn set_tx_version(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let value: u8 = if args.has_argument("version") {
-        args.get_value("version")?.to_number()?.try_into()
+        args.get_value("version")?
+            .to_number()?
+            .try_into()
             .map_err(|_| CommandError::InvalidArgument("Invalid transaction version".to_string()))?
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("version".to_string()));
     } else {
-        manager.get_prompt().read("New Transaction Version: ".to_string()).await
+        manager
+            .get_prompt()
+            .read("New Transaction Version: ".to_string())
+            .await
             .context("Error while reading new transaction version to set")?
     };
 
@@ -2384,7 +3150,9 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
         manager.message(format!("Connected to: {}", api.get_client().get_target()));
 
         if is_online {
-            let info = api.get_info().await
+            let info = api
+                .get_info()
+                .await
                 .context("Error while getting network info")?;
 
             manager.message("--- Daemon status ---");
@@ -2394,9 +3162,15 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
             manager.message(format!("Pruned topoheight: {:?}", info.pruned_topoheight));
             manager.message(format!("Top block hash: {}", info.top_block_hash));
             manager.message(format!("Network: {}", info.network));
-            manager.message(format!("Emitted supply: {}", format_tos(info.emitted_supply)));
+            manager.message(format!(
+                "Emitted supply: {}",
+                format_tos(info.emitted_supply)
+            ));
             manager.message(format!("Burned supply: {}", format_tos(info.burned_supply)));
-            manager.message(format!("Circulating supply: {}", format_tos(info.circulating_supply)));
+            manager.message(format!(
+                "Circulating supply: {}",
+                format_tos(info.circulating_supply)
+            ));
             manager.message("---------------------");
         }
     }
@@ -2406,11 +3180,17 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
     if let Some(multisig) = multisig {
         manager.message("--- Multisig: ---");
         manager.message(format!("Threshold: {}", multisig.payload.threshold));
-        manager.message(format!("Participants ({}): {}", multisig.payload.participants.len(),
-            multisig.payload.participants.iter()
+        manager.message(format!(
+            "Participants ({}): {}",
+            multisig.payload.participants.len(),
+            multisig
+                .payload
+                .participants
+                .iter()
                 .map(|p| p.as_address(wallet.get_network().is_mainnet()).to_string())
-                .collect::<Vec<_>>().join(", ")
-            ));
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
         manager.message("---------------");
     } else {
         manager.message("No multisig state");
@@ -2425,15 +3205,61 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
         manager.message(format!("Unconfirmed nonce: {}", unconfirmed_nonce));
     }
     let network = wallet.get_network();
-    manager.message(format!("Synced topoheight: {}", storage.get_synced_topoheight()?));
+    manager.message(format!(
+        "Synced topoheight: {}",
+        storage.get_synced_topoheight()?
+    ));
     manager.message(format!("Network: {}", network));
     manager.message(format!("Wallet address: {}", wallet.get_address()));
 
     Ok(())
 }
 
+// Show detailed help for a specific command
+async fn show_command_help(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
+    let command_name = if arguments.has_argument("command") {
+        arguments.get_value("command")?.to_string_value()?
+    } else {
+        // If no command specified, show list of all commands
+        manager.message("Available commands:");
+        manager.message("Use 'help <command>' to get detailed help for a specific command.\n");
+
+        let commands = manager.get_commands().lock()?;
+        for command in commands.iter() {
+            manager.message(format!(
+                "  {} - {}",
+                command.get_name(),
+                command.get_description()
+            ));
+        }
+        return Ok(());
+    };
+
+    // Get and display detailed help for the specified command
+    match manager.get_command_help(&command_name) {
+        Ok(help_text) => {
+            manager.message(help_text);
+        }
+        Err(CommandError::CommandNotFound) => {
+            manager.error(format!("Command '{}' not found.", command_name));
+            manager.message("Use 'help' without arguments to see all available commands.");
+        }
+        Err(e) => {
+            manager.error(format!("Error getting help: {:#}", e));
+        }
+    }
+
+    Ok(())
+}
+
 // Show AI mining transaction history
-async fn ai_mining_history(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn ai_mining_history(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
@@ -2459,16 +3285,25 @@ async fn ai_mining_history(manager: &CommandManager, mut arguments: ArgumentMana
     let all_transactions = storage.get_transactions()?;
 
     // Filter for AI mining transactions
-    let ai_transactions: Vec<_> = all_transactions.iter()
+    let ai_transactions: Vec<_> = all_transactions
+        .iter()
         .filter(|tx| {
             if let EntryData::AIMining { payload, .. } = tx.get_entry() {
                 if let Some(ref filter) = filter_type {
                     match filter.to_lowercase().as_str() {
-                        "publish" | "publishtask" => matches!(payload, AIMiningPayload::PublishTask { .. }),
-                        "submit" | "submitanswer" => matches!(payload, AIMiningPayload::SubmitAnswer { .. }),
-                        "validate" | "validateanswer" => matches!(payload, AIMiningPayload::ValidateAnswer { .. }),
-                        "register" | "registerminer" => matches!(payload, AIMiningPayload::RegisterMiner { .. }),
-                        _ => true
+                        "publish" | "publishtask" => {
+                            matches!(payload, AIMiningPayload::PublishTask { .. })
+                        }
+                        "submit" | "submitanswer" => {
+                            matches!(payload, AIMiningPayload::SubmitAnswer { .. })
+                        }
+                        "validate" | "validateanswer" => {
+                            matches!(payload, AIMiningPayload::ValidateAnswer { .. })
+                        }
+                        "register" | "registerminer" => {
+                            matches!(payload, AIMiningPayload::RegisterMiner { .. })
+                        }
+                        _ => true,
                     }
                 } else {
                     true
@@ -2493,9 +3328,17 @@ async fn ai_mining_history(manager: &CommandManager, mut arguments: ArgumentMana
         return Ok(());
     }
 
-    let type_filter_str = filter_type.map(|t| format!(" (filtered by {})", t)).unwrap_or_default();
-    manager.message(format!("AI Mining Transaction History{} (page {}, showing {}-{} of {})",
-        type_filter_str, page, start_idx + 1, end_idx, total_count));
+    let type_filter_str = filter_type
+        .map(|t| format!(" (filtered by {})", t))
+        .unwrap_or_default();
+    manager.message(format!(
+        "AI Mining Transaction History{} (page {}, showing {}-{} of {})",
+        type_filter_str,
+        page,
+        start_idx + 1,
+        end_idx,
+        total_count
+    ));
     manager.message("=".repeat(80));
 
     let network = wallet.get_network();
@@ -2505,7 +3348,10 @@ async fn ai_mining_history(manager: &CommandManager, mut arguments: ArgumentMana
     }
 
     if end_idx < total_count {
-        manager.message(format!("Use 'ai_mining_history --page {}' to see more transactions", page + 1));
+        manager.message(format!(
+            "Use 'ai_mining_history --page {}' to see more transactions",
+            page + 1
+        ));
     }
 
     Ok(())
@@ -2525,33 +3371,48 @@ async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result
 
     // Analyze all AI mining transactions
     for tx in &all_transactions {
-        if let EntryData::AIMining { payload, outgoing, .. } = tx.get_entry() {
+        if let EntryData::AIMining {
+            payload, outgoing, ..
+        } = tx.get_entry()
+        {
             match payload {
-                AIMiningPayload::PublishTask { reward_amount, difficulty, .. } => {
+                AIMiningPayload::PublishTask {
+                    reward_amount,
+                    difficulty,
+                    ..
+                } => {
                     if *outgoing {
                         stats.tasks_published += 1;
                         stats.total_rewards_offered += reward_amount;
-                        stats.difficulty_breakdown.entry(format!("{:?}", difficulty)).or_insert(0).add_assign(1);
+                        stats
+                            .difficulty_breakdown
+                            .entry(format!("{:?}", difficulty))
+                            .or_insert(0)
+                            .add_assign(1);
                     }
-                },
+                }
                 AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
                     if *outgoing {
                         stats.answers_submitted += 1;
                         stats.total_staked += stake_amount;
                     }
-                },
-                AIMiningPayload::ValidateAnswer { validation_score, .. } => {
+                }
+                AIMiningPayload::ValidateAnswer {
+                    validation_score, ..
+                } => {
                     if *outgoing {
                         stats.validations_performed += 1;
                         stats.total_validation_score += *validation_score as u64;
                     }
-                },
-                AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                }
+                AIMiningPayload::RegisterMiner {
+                    registration_fee, ..
+                } => {
                     if *outgoing {
                         stats.registrations += 1;
                         stats.total_registration_fees += registration_fee;
                     }
-                },
+                }
             }
         }
     }
@@ -2564,14 +3425,26 @@ async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result
     manager.message("--- Activity Summary ---");
     manager.message(format!("Tasks Published: {}", stats.tasks_published));
     manager.message(format!("Answers Submitted: {}", stats.answers_submitted));
-    manager.message(format!("Validations Performed: {}", stats.validations_performed));
+    manager.message(format!(
+        "Validations Performed: {}",
+        stats.validations_performed
+    ));
     manager.message(format!("Miner Registrations: {}", stats.registrations));
     manager.message("");
 
     manager.message("--- Financial Summary ---");
-    manager.message(format!("Total Rewards Offered: {} TOS", format_tos(stats.total_rewards_offered)));
-    manager.message(format!("Total Amount Staked: {} TOS", format_tos(stats.total_staked)));
-    manager.message(format!("Total Registration Fees: {} TOS", format_tos(stats.total_registration_fees)));
+    manager.message(format!(
+        "Total Rewards Offered: {} TOS",
+        format_tos(stats.total_rewards_offered)
+    ));
+    manager.message(format!(
+        "Total Amount Staked: {} TOS",
+        format_tos(stats.total_staked)
+    ));
+    manager.message(format!(
+        "Total Registration Fees: {} TOS",
+        format_tos(stats.total_registration_fees)
+    ));
     if stats.validations_performed > 0 {
         let avg_score = stats.total_validation_score as f64 / stats.validations_performed as f64;
         manager.message(format!("Average Validation Score: {:.1}", avg_score));
@@ -2589,7 +3462,10 @@ async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result
 }
 
 // Show AI mining tasks this wallet has interacted with
-async fn ai_mining_tasks(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn ai_mining_tasks(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
@@ -2610,7 +3486,8 @@ async fn ai_mining_tasks(manager: &CommandManager, mut arguments: ArgumentManage
     let all_transactions = storage.get_transactions()?;
 
     // Filter for AI mining transactions
-    let mut ai_transactions: Vec<_> = all_transactions.iter()
+    let mut ai_transactions: Vec<_> = all_transactions
+        .iter()
         .filter(|tx| matches!(tx.get_entry(), EntryData::AIMining { .. }))
         .collect();
 
@@ -2630,56 +3507,96 @@ async fn ai_mining_tasks(manager: &CommandManager, mut arguments: ArgumentManage
         return Ok(());
     }
 
-    let status_filter_str = status_filter.map(|s| format!(" (filter: {})", s)).unwrap_or_default();
-    manager.message(format!("AI Mining Transaction History{} (page {}, showing {}-{} of {})",
-        status_filter_str, page, start_idx + 1, end_idx, total_count));
+    let status_filter_str = status_filter
+        .map(|s| format!(" (filter: {})", s))
+        .unwrap_or_default();
+    manager.message(format!(
+        "AI Mining Transaction History{} (page {}, showing {}-{} of {})",
+        status_filter_str,
+        page,
+        start_idx + 1,
+        end_idx,
+        total_count
+    ));
     manager.message("=".repeat(80));
 
     for tx in &ai_transactions[start_idx..end_idx] {
-        if let EntryData::AIMining { payload, outgoing, .. } = tx.get_entry() {
+        if let EntryData::AIMining {
+            payload, outgoing, ..
+        } = tx.get_entry()
+        {
             let direction = if *outgoing { "OUTGOING" } else { "INCOMING" };
 
             manager.message(format!("[{}] {}", direction, tx.get_hash()));
             manager.message(format!("  TopoHeight: {}", tx.get_topoheight()));
 
             match payload {
-                AIMiningPayload::PublishTask { task_id, reward_amount, difficulty, .. } => {
+                AIMiningPayload::PublishTask {
+                    task_id,
+                    reward_amount,
+                    difficulty,
+                    ..
+                } => {
                     manager.message(format!("  Type: Publish Task"));
                     manager.message(format!("  Task ID: {}", task_id));
                     manager.message(format!("  Reward: {} TOS", format_tos(*reward_amount)));
                     manager.message(format!("  Difficulty: {:?}", difficulty));
-                },
-                AIMiningPayload::SubmitAnswer { task_id, answer_hash, stake_amount, answer_content: _ } => {
+                }
+                AIMiningPayload::SubmitAnswer {
+                    task_id,
+                    answer_hash,
+                    stake_amount,
+                    answer_content: _,
+                } => {
                     manager.message(format!("  Type: Submit Answer"));
                     manager.message(format!("  Task ID: {}", task_id));
                     manager.message(format!("  Answer Hash: {}", answer_hash));
                     manager.message(format!("  Stake: {} TOS", format_tos(*stake_amount)));
-                },
-                AIMiningPayload::ValidateAnswer { task_id, answer_id, validation_score } => {
+                }
+                AIMiningPayload::ValidateAnswer {
+                    task_id,
+                    answer_id,
+                    validation_score,
+                } => {
                     manager.message(format!("  Type: Validate Answer"));
                     manager.message(format!("  Task ID: {}", task_id));
                     manager.message(format!("  Answer ID: {}", answer_id));
                     manager.message(format!("  Validation Score: {}", validation_score));
-                },
-                AIMiningPayload::RegisterMiner { miner_address, registration_fee } => {
+                }
+                AIMiningPayload::RegisterMiner {
+                    miner_address,
+                    registration_fee,
+                } => {
                     manager.message(format!("  Type: Register Miner"));
-                    manager.message(format!("  Miner Address: {}", miner_address.as_address(wallet.get_network().is_mainnet())));
-                    manager.message(format!("  Registration Fee: {} TOS", format_tos(*registration_fee)));
-                },
+                    manager.message(format!(
+                        "  Miner Address: {}",
+                        miner_address.as_address(wallet.get_network().is_mainnet())
+                    ));
+                    manager.message(format!(
+                        "  Registration Fee: {} TOS",
+                        format_tos(*registration_fee)
+                    ));
+                }
             }
             manager.message("");
         }
     }
 
     if end_idx < total_count {
-        manager.message(format!("Use 'ai_mining_tasks --page {}' to see more transactions", page + 1));
+        manager.message(format!(
+            "Use 'ai_mining_tasks --page {}' to see more transactions",
+            page + 1
+        ));
     }
 
     Ok(())
 }
 
 // Show AI mining rewards earned
-async fn ai_mining_rewards(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn ai_mining_rewards(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
@@ -2693,15 +3610,18 @@ async fn ai_mining_rewards(manager: &CommandManager, mut arguments: ArgumentMana
     let all_transactions = storage.get_transactions()?;
 
     // Find incoming transactions that could be rewards
-    let potential_rewards: Vec<_> = all_transactions.iter()
+    let potential_rewards: Vec<_> = all_transactions
+        .iter()
         .filter(|tx| {
             match tx.get_entry() {
                 EntryData::Incoming { transfers, .. } => {
                     // Look for TOS transfers that could be AI mining rewards
-                    transfers.iter().any(|transfer| transfer.get_asset() == &TOS_ASSET)
-                },
+                    transfers
+                        .iter()
+                        .any(|transfer| transfer.get_asset() == &TOS_ASSET)
+                }
                 EntryData::AIMining { outgoing, .. } => !outgoing, // Incoming AI mining transactions
-                _ => false
+                _ => false,
             }
         })
         .collect();
@@ -2720,8 +3640,13 @@ async fn ai_mining_rewards(manager: &CommandManager, mut arguments: ArgumentMana
         return Ok(());
     }
 
-    manager.message(format!("Potential AI Mining Rewards (page {}, showing {}-{} of {})",
-        page, start_idx + 1, end_idx, total_count));
+    manager.message(format!(
+        "Potential AI Mining Rewards (page {}, showing {}-{} of {})",
+        page,
+        start_idx + 1,
+        end_idx,
+        total_count
+    ));
     manager.message("Note: This includes all incoming TOS transfers and AI mining transactions");
     manager.message("=".repeat(80));
 
@@ -2740,25 +3665,34 @@ async fn ai_mining_rewards(manager: &CommandManager, mut arguments: ArgumentMana
                         total_rewards += transfer.get_amount();
                     }
                 }
-            },
+            }
             _ => {}
         }
     }
 
     if total_rewards > 0 {
         manager.message("");
-        manager.message(format!("Total TOS received in this page: {} TOS", format_tos(total_rewards)));
+        manager.message(format!(
+            "Total TOS received in this page: {} TOS",
+            format_tos(total_rewards)
+        ));
     }
 
     if end_idx < total_count {
-        manager.message(format!("Use 'ai_mining_rewards --page {}' to see more rewards", page + 1));
+        manager.message(format!(
+            "Use 'ai_mining_rewards --page {}' to see more rewards",
+            page + 1
+        ));
     }
 
     Ok(())
 }
 
 // AI Mining business commands implementation
-async fn publish_task(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn publish_task(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let wallet = {
         let context = manager.get_context().lock()?;
         context.get::<Arc<Wallet>>()?.clone()
@@ -2775,7 +3709,11 @@ async fn publish_task(manager: &CommandManager, mut arguments: ArgumentManager) 
         "intermediate" => DifficultyLevel::Intermediate,
         "advanced" => DifficultyLevel::Advanced,
         "expert" => DifficultyLevel::Expert,
-        _ => return Err(CommandError::InvalidArgument("difficulty must be: beginner, intermediate, advanced, or expert".to_string())),
+        _ => {
+            return Err(CommandError::InvalidArgument(
+                "difficulty must be: beginner, intermediate, advanced, or expert".to_string(),
+            ))
+        }
     };
 
     // Convert reward from TOS to nanoTOS
@@ -2786,7 +3724,10 @@ async fn publish_task(manager: &CommandManager, mut arguments: ArgumentManager) 
     if reward_nanos < min_reward || reward_nanos > max_reward {
         return Err(CommandError::InvalidArgument(format!(
             "Reward {} TOS is outside valid range [{}, {}] TOS for difficulty {:?}",
-            reward, min_reward / 1_000_000_000, max_reward / 1_000_000_000, difficulty
+            reward,
+            min_reward / 1_000_000_000,
+            max_reward / 1_000_000_000,
+            difficulty
         )));
     }
 
@@ -2805,7 +3746,9 @@ async fn publish_task(manager: &CommandManager, mut arguments: ArgumentManager) 
     };
 
     // Validate payload before creating transaction
-    ai_mining_payload.validate().map_err(|e| CommandError::InvalidArgument(e.to_string()))?;
+    ai_mining_payload
+        .validate()
+        .map_err(|e| CommandError::InvalidArgument(e.to_string()))?;
 
     // Create transaction type
     let tx_type = TransactionTypeBuilder::AIMining(ai_mining_payload);
@@ -2818,20 +3761,29 @@ async fn publish_task(manager: &CommandManager, mut arguments: ArgumentManager) 
     manager.message(format!("  Deadline: {}", deadline));
 
     // Build and submit transaction
-    match wallet.create_transaction(tx_type, FeeBuilder::default()).await {
+    match wallet
+        .create_transaction(tx_type, FeeBuilder::default())
+        .await
+    {
         Ok(tx) => {
             manager.message(format!("Transaction created successfully: {}", tx.hash()));
             manager.message("AI mining task published!");
         }
         Err(e) => {
-            return Err(CommandError::InvalidArgument(format!("Failed to create transaction: {}", e)));
+            return Err(CommandError::InvalidArgument(format!(
+                "Failed to create transaction: {}",
+                e
+            )));
         }
     }
 
     Ok(())
 }
 
-async fn submit_answer(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn submit_answer(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let wallet = {
         let context = manager.get_context().lock()?;
         context.get::<Arc<Wallet>>()?.clone()
@@ -2843,10 +3795,10 @@ async fn submit_answer(manager: &CommandManager, mut arguments: ArgumentManager)
     let stake = arguments.get_value("stake")?.to_number()? as u64;
 
     // Parse hashes
-    let task_id = Hash::from_hex(&task_id_str).map_err(|_|
-        CommandError::InvalidArgument("Invalid task_id format".to_string()))?;
-    let answer_hash = Hash::from_hex(&answer_hash_str).map_err(|_|
-        CommandError::InvalidArgument("Invalid answer_hash format".to_string()))?;
+    let task_id = Hash::from_hex(&task_id_str)
+        .map_err(|_| CommandError::InvalidArgument("Invalid task_id format".to_string()))?;
+    let answer_hash = Hash::from_hex(&answer_hash_str)
+        .map_err(|_| CommandError::InvalidArgument("Invalid answer_hash format".to_string()))?;
 
     // Convert stake from TOS to nanoTOS
     let stake_nanos = stake * 1_000_000_000;
@@ -2860,7 +3812,9 @@ async fn submit_answer(manager: &CommandManager, mut arguments: ArgumentManager)
     };
 
     // Validate payload before creating transaction
-    ai_mining_payload.validate().map_err(|e| CommandError::InvalidArgument(e.to_string()))?;
+    ai_mining_payload
+        .validate()
+        .map_err(|e| CommandError::InvalidArgument(e.to_string()))?;
 
     // Create transaction type
     let tx_type = TransactionTypeBuilder::AIMining(ai_mining_payload);
@@ -2871,20 +3825,29 @@ async fn submit_answer(manager: &CommandManager, mut arguments: ArgumentManager)
     manager.message(format!("  Stake: {} TOS", stake));
 
     // Build and submit transaction
-    match wallet.create_transaction(tx_type, FeeBuilder::default()).await {
+    match wallet
+        .create_transaction(tx_type, FeeBuilder::default())
+        .await
+    {
         Ok(tx) => {
             manager.message(format!("Transaction created successfully: {}", tx.hash()));
             manager.message("Answer submitted to AI mining task!");
         }
         Err(e) => {
-            return Err(CommandError::InvalidArgument(format!("Failed to create transaction: {}", e)));
+            return Err(CommandError::InvalidArgument(format!(
+                "Failed to create transaction: {}",
+                e
+            )));
         }
     }
 
     Ok(())
 }
 
-async fn validate_answer(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn validate_answer(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let wallet = {
         let context = manager.get_context().lock()?;
         context.get::<Arc<Wallet>>()?.clone()
@@ -2896,14 +3859,16 @@ async fn validate_answer(manager: &CommandManager, mut arguments: ArgumentManage
 
     // Validate score range
     if score > 100 {
-        return Err(CommandError::InvalidArgument("Score must be between 0 and 100".to_string()));
+        return Err(CommandError::InvalidArgument(
+            "Score must be between 0 and 100".to_string(),
+        ));
     }
 
     // Parse hashes
-    let task_id = Hash::from_hex(&task_id_str).map_err(|_|
-        CommandError::InvalidArgument("Invalid task_id format".to_string()))?;
-    let answer_id = Hash::from_hex(&answer_id_str).map_err(|_|
-        CommandError::InvalidArgument("Invalid answer_id format".to_string()))?;
+    let task_id = Hash::from_hex(&task_id_str)
+        .map_err(|_| CommandError::InvalidArgument("Invalid task_id format".to_string()))?;
+    let answer_id = Hash::from_hex(&answer_id_str)
+        .map_err(|_| CommandError::InvalidArgument("Invalid answer_id format".to_string()))?;
 
     // Create AI mining payload
     let ai_mining_payload = AIMiningPayload::ValidateAnswer {
@@ -2921,20 +3886,29 @@ async fn validate_answer(manager: &CommandManager, mut arguments: ArgumentManage
     manager.message(format!("  Score: {}/100", score));
 
     // Build and submit transaction
-    match wallet.create_transaction(tx_type, FeeBuilder::default()).await {
+    match wallet
+        .create_transaction(tx_type, FeeBuilder::default())
+        .await
+    {
         Ok(tx) => {
             manager.message(format!("Transaction created successfully: {}", tx.hash()));
             manager.message("Answer validation submitted!");
         }
         Err(e) => {
-            return Err(CommandError::InvalidArgument(format!("Failed to create transaction: {}", e)));
+            return Err(CommandError::InvalidArgument(format!(
+                "Failed to create transaction: {}",
+                e
+            )));
         }
     }
 
     Ok(())
 }
 
-async fn register_miner(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn register_miner(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     let (wallet, wallet_address) = {
         let context = manager.get_context().lock()?;
         let wallet = context.get::<Arc<Wallet>>()?.clone();
@@ -2961,13 +3935,19 @@ async fn register_miner(manager: &CommandManager, mut arguments: ArgumentManager
     manager.message(format!("  Registration Fee: {} TOS", fee));
 
     // Build and submit transaction
-    match wallet.create_transaction(tx_type, FeeBuilder::default()).await {
+    match wallet
+        .create_transaction(tx_type, FeeBuilder::default())
+        .await
+    {
         Ok(tx) => {
             manager.message(format!("Transaction created successfully: {}", tx.hash()));
             manager.message("AI miner registration submitted!");
         }
         Err(e) => {
-            return Err(CommandError::InvalidArgument(format!("Failed to create transaction: {}", e)));
+            return Err(CommandError::InvalidArgument(format!(
+                "Failed to create transaction: {}",
+                e
+            )));
         }
     }
 
@@ -2994,7 +3974,9 @@ async fn logout(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
         wallet.close().await;
     }
 
-    manager.remove_all_commands().context("Error while removing all commands")?;
+    manager
+        .remove_all_commands()
+        .context("Error while removing all commands")?;
     manager.remove_from_context::<Arc<Wallet>>()?;
 
     register_default_commands(manager).await?;
@@ -3007,13 +3989,19 @@ async fn logout(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
 async fn stop_api_server(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    wallet.stop_api_server().await.context("Error while stopping API Server")?;
+    wallet
+        .stop_api_server()
+        .await
+        .context("Error while stopping API Server")?;
     manager.message("API Server has been stopped");
     Ok(())
 }
 
 #[cfg(feature = "api_server")]
-async fn start_rpc_server(manager: &CommandManager, mut arguments: ArgumentManager) -> Result<(), CommandError> {
+async fn start_rpc_server(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("start_rpc_server", &arguments)?;
 
     let context = manager.get_context().lock()?;
@@ -3022,12 +4010,12 @@ async fn start_rpc_server(manager: &CommandManager, mut arguments: ArgumentManag
     let username = arguments.get_value("username")?.to_string_value()?;
     let password = arguments.get_value("password")?.to_string_value()?;
 
-    let auth_config = Some(AuthConfig {
-        username,
-        password
-    });
+    let auth_config = Some(AuthConfig { username, password });
 
-    wallet.enable_rpc_server(bind_address, auth_config, None).await.context("Error while enabling RPC Server")?;
+    wallet
+        .enable_rpc_server(bind_address, auth_config, None)
+        .await
+        .context("Error while enabling RPC Server")?;
     manager.message("RPC Server has been enabled");
     Ok(())
 }
@@ -3044,16 +4032,18 @@ async fn start_xswd(manager: &CommandManager, _: ArgumentManager) -> Result<(), 
             }
 
             manager.message("XSWD Server has been enabled");
-        },
-        Err(e) => manager.error(format!("Error while enabling XSWD Server: {}", e))
+        }
+        Err(e) => manager.error(format!("Error while enabling XSWD Server: {}", e)),
     };
 
     Ok(())
 }
 
-
 #[cfg(feature = "xswd")]
-async fn add_xswd_relayer(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn add_xswd_relayer(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
@@ -3062,13 +4052,15 @@ async fn add_xswd_relayer(manager: &CommandManager, mut args: ArgumentManager) -
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("app_data".to_string()));
     } else {
-        manager.get_prompt()
-            .read("App data").await
+        manager
+            .get_prompt()
+            .read("App data")
+            .await
             .context("Error while reading app data")?
     };
 
-    let app_data = serde_json::from_str(&app_data)
-        .context("Error while parsing app data as JSON")?;
+    let app_data =
+        serde_json::from_str(&app_data).context("Error while parsing app data as JSON")?;
 
     match wallet.add_xswd_relayer(app_data).await {
         Ok(receiver) => {
@@ -3078,15 +4070,18 @@ async fn add_xswd_relayer(manager: &CommandManager, mut args: ArgumentManager) -
             }
 
             manager.message("XSWD Server has been enabled");
-        },
-        Err(e) => manager.error(format!("Error while enabling XSWD Server: {}", e))
+        }
+        Err(e) => manager.error(format!("Error while enabling XSWD Server: {}", e)),
     };
 
     Ok(())
 }
 
 // Setup a multisig transaction (a multisig is present on chain, but this wallet is offline so can't sync it)
-async fn multisig_setup(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn multisig_setup(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
     let prompt = manager.get_prompt();
@@ -3102,9 +4097,13 @@ async fn multisig_setup(manager: &CommandManager, mut args: ArgumentManager) -> 
         manager.warn("An incorrect setup can lead to loss of funds.");
         manager.warn("Do you want to continue?");
 
-        if !prompt.ask_confirmation().await.context("Error while confirming action")? {
+        if !prompt
+            .ask_confirmation()
+            .await
+            .context("Error while confirming action")?
+        {
             manager.message("Transaction has been aborted");
-            return Ok(())
+            return Ok(());
         }
     }
 
@@ -3118,34 +4117,53 @@ async fn multisig_setup(manager: &CommandManager, mut args: ArgumentManager) -> 
         } else {
             "Participants count (min. 1): "
         };
-        prompt.read(msg)
-            .await.context("Error while reading participants count")?
+        prompt
+            .read(msg)
+            .await
+            .context("Error while reading participants count")?
     };
 
     if participants == 0 {
         let Some(multisig) = multisig else {
-            return Err(CommandError::InvalidArgument("Participants count must be greater than 0".to_string()));
+            return Err(CommandError::InvalidArgument(
+                "Participants count must be greater than 0".to_string(),
+            ));
         };
 
         if !manager.is_batch_mode() {
-            manager.warn("Participants count is 0, this will delete the multisig currently configured");
+            manager.warn(
+                "Participants count is 0, this will delete the multisig currently configured",
+            );
             manager.warn("Do you want to continue?");
         }
 
-        if !args.get_flag("confirm")? && !manager.is_batch_mode() && !prompt.ask_confirmation().await.context("Error while confirming action")? {
+        if !args.get_flag("confirm")?
+            && !manager.is_batch_mode()
+            && !prompt
+                .ask_confirmation()
+                .await
+                .context("Error while confirming action")?
+        {
             manager.message("Transaction has been aborted");
-            return Ok(())
+            return Ok(());
         }
 
         let payload = MultiSigBuilder {
             participants: IndexSet::new(),
-            threshold: 0
+            threshold: 0,
         };
 
-        let tx = create_transaction_with_multisig(manager, prompt, wallet, TransactionTypeBuilder::MultiSig(payload), multisig.payload).await?;
+        let tx = create_transaction_with_multisig(
+            manager,
+            prompt,
+            wallet,
+            TransactionTypeBuilder::MultiSig(payload),
+            multisig.payload,
+        )
+        .await?;
 
         broadcast_tx(wallet, manager, tx).await;
-        return Ok(())
+        return Ok(());
     }
 
     let threshold: u8 = if args.has_argument("threshold") {
@@ -3153,75 +4171,109 @@ async fn multisig_setup(manager: &CommandManager, mut args: ArgumentManager) -> 
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("threshold".to_string()));
     } else {
-        prompt.read("Threshold (min. 1): ")
-            .await.context("Error while reading threshold")?
+        prompt
+            .read("Threshold (min. 1): ")
+            .await
+            .context("Error while reading threshold")?
     };
 
     if threshold == 0 {
-        return Err(CommandError::InvalidArgument("Threshold must be greater than 0".to_string()));
+        return Err(CommandError::InvalidArgument(
+            "Threshold must be greater than 0".to_string(),
+        ));
     }
 
     if threshold > participants {
-        return Err(CommandError::InvalidArgument("Threshold must be less or equal to participants count".to_string()));
+        return Err(CommandError::InvalidArgument(
+            "Threshold must be less or equal to participants count".to_string(),
+        ));
     }
 
     if manager.is_batch_mode() {
-        return Err(CommandError::BatchModeError("multisig_setup command requires interactive mode to collect participant addresses".to_string()));
+        return Err(CommandError::BatchModeError(
+            "multisig_setup command requires interactive mode to collect participant addresses"
+                .to_string(),
+        ));
     }
 
     let mainnet = wallet.get_network().is_mainnet();
     let mut keys = IndexSet::with_capacity(participants as usize);
     for i in 0..participants {
-        let address: Address = prompt.read(format!("Participant #{} address: ", i + 1))
-            .await.context("Error while reading participant address")?;
+        let address: Address = prompt
+            .read(format!("Participant #{} address: ", i + 1))
+            .await
+            .context("Error while reading participant address")?;
 
         if address.is_mainnet() != mainnet {
-            return Err(CommandError::InvalidArgument("Participant address must be on the same network".to_string()));
+            return Err(CommandError::InvalidArgument(
+                "Participant address must be on the same network".to_string(),
+            ));
         }
 
         if !address.is_normal() {
-            return Err(CommandError::InvalidArgument("Participant address must be a normal address".to_string()));
+            return Err(CommandError::InvalidArgument(
+                "Participant address must be a normal address".to_string(),
+            ));
         }
 
         if address.get_public_key() == wallet.get_public_key() {
-            return Err(CommandError::InvalidArgument("Participant address cannot be the same as the wallet address".to_string()));
+            return Err(CommandError::InvalidArgument(
+                "Participant address cannot be the same as the wallet address".to_string(),
+            ));
         }
 
         if !keys.insert(address) {
-            return Err(CommandError::InvalidArgument("Participant address already exists".to_string()));
+            return Err(CommandError::InvalidArgument(
+                "Participant address already exists".to_string(),
+            ));
         }
     }
 
-    manager.message(format!("MultiSig payload ({} participants with threshold at {}):", participants, threshold));
+    manager.message(format!(
+        "MultiSig payload ({} participants with threshold at {}):",
+        participants, threshold
+    ));
     for key in keys.iter() {
         manager.message(format!("- {}", key));
     }
 
-    if !args.get_flag("confirm")? && !manager.is_batch_mode() && !prompt.ask_confirmation().await.context("Error while confirming action")? {
+    if !args.get_flag("confirm")?
+        && !manager.is_batch_mode()
+        && !prompt
+            .ask_confirmation()
+            .await
+            .context("Error while confirming action")?
+    {
         manager.message("Transaction has been aborted");
-        return Ok(())
+        return Ok(());
     }
 
     manager.message("Building transaction...");
 
     let multisig = {
         let storage = wallet.get_storage().read().await;
-        storage.get_multisig_state().await.context("Error while reading multisig state")?
+        storage
+            .get_multisig_state()
+            .await
+            .context("Error while reading multisig state")?
             .cloned()
     };
     let payload = MultiSigBuilder {
         participants: keys,
-        threshold
+        threshold,
     };
     let tx_type = TransactionTypeBuilder::MultiSig(payload);
     let tx = if let Some(multisig) = multisig {
         create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
     } else {
-        match wallet.create_transaction(tx_type, FeeBuilder::default()).await {
+        match wallet
+            .create_transaction(tx_type, FeeBuilder::default())
+            .await
+        {
             Ok(tx) => tx,
             Err(e) => {
                 manager.error(&format!("Error while creating transaction: {}", e));
-                return Ok(())
+                return Ok(());
             }
         }
     };
@@ -3231,7 +4283,10 @@ async fn multisig_setup(manager: &CommandManager, mut args: ArgumentManager) -> 
     Ok(())
 }
 
-async fn multisig_sign(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn multisig_sign(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("multisig_sign", &args)?;
 
     let context = manager.get_context().lock()?;
@@ -3243,14 +4298,25 @@ async fn multisig_sign(manager: &CommandManager, mut args: ArgumentManager) -> R
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("tx_hash".to_string()));
     } else {
-        prompt.read("Transaction hash: ").await.context("Error while reading transaction hash")?
+        prompt
+            .read("Transaction hash: ")
+            .await
+            .context("Error while reading transaction hash")?
     };
 
     let signature = wallet.sign_data(tx_hash.as_bytes());
     if manager.is_batch_mode() {
         manager.message(format!("Signature: {}", signature.to_hex()));
     } else {
-        prompt.read_input(format!("Signature: {}\r\nPress ENTER to continue", signature.to_hex()), false).await
+        prompt
+            .read_input(
+                format!(
+                    "Signature: {}\r\nPress ENTER to continue",
+                    signature.to_hex()
+                ),
+                false,
+            )
+            .await
             .context("Error while displaying signature")?;
     }
 
@@ -3261,12 +4327,22 @@ async fn multisig_show(manager: &CommandManager, _: ArgumentManager) -> Result<(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
     let storage = wallet.get_storage().read().await;
-    let multisig = storage.get_multisig_state().await.context("Error while reading multisig state")?;
+    let multisig = storage
+        .get_multisig_state()
+        .await
+        .context("Error while reading multisig state")?;
 
     if let Some(multisig) = multisig {
-        manager.message(format!("MultiSig payload ({} participants with threshold at {}):", multisig.payload.participants.len(), multisig.payload.threshold));
+        manager.message(format!(
+            "MultiSig payload ({} participants with threshold at {}):",
+            multisig.payload.participants.len(),
+            multisig.payload.threshold
+        ));
         for key in multisig.payload.participants.iter() {
-            manager.message(format!("- {}", key.as_address(wallet.get_network().is_mainnet())));
+            manager.message(format!(
+                "- {}",
+                key.as_address(wallet.get_network().is_mainnet())
+            ));
         }
     } else {
         manager.message("No multisig configured");
@@ -3290,7 +4366,8 @@ async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction
                 if log::log_enabled!(log::Level::Info) {
                     info!("Detected nonce conflict, attempting to sync nonce from blockchain");
                 }
-                manager.warn("Nonce conflict detected. Attempting to sync nonce from blockchain...");
+                manager
+                    .warn("Nonce conflict detected. Attempting to sync nonce from blockchain...");
 
                 #[cfg(feature = "network_handler")]
                 {
@@ -3302,21 +4379,30 @@ async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction
                             Ok(nonce_result) => {
                                 let blockchain_nonce = nonce_result.version.get_nonce();
                                 if log::log_enabled!(log::Level::Info) {
-                                    info!("Blockchain nonce: {}, topoheight: {}", blockchain_nonce, nonce_result.topoheight);
+                                    info!(
+                                        "Blockchain nonce: {}, topoheight: {}",
+                                        blockchain_nonce, nonce_result.topoheight
+                                    );
                                 }
 
                                 // Update local nonce to blockchain nonce
                                 let mut storage = wallet.get_storage().write().await;
                                 if let Err(nonce_err) = storage.set_nonce(blockchain_nonce) {
-                                    manager.error(format!("Failed to update nonce: {:#}", nonce_err));
+                                    manager
+                                        .error(format!("Failed to update nonce: {:#}", nonce_err));
                                 } else {
-                                    manager.message(format!("Nonce synced from blockchain: {}", blockchain_nonce));
+                                    manager.message(format!(
+                                        "Nonce synced from blockchain: {}",
+                                        blockchain_nonce
+                                    ));
 
                                     // Clear cache and unconfirmed balances to reflect correct state
                                     storage.clear_tx_cache();
                                     storage.delete_unconfirmed_balances().await;
 
-                                    manager.error("Please retry the transaction with the updated nonce");
+                                    manager.error(
+                                        "Please retry the transaction with the updated nonce",
+                                    );
                                     return;
                                 }
                             }
@@ -3324,7 +4410,10 @@ async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction
                                 if log::log_enabled!(log::Level::Warn) {
                                     warn!("Failed to query nonce from blockchain: {:#}", nonce_err);
                                 }
-                                manager.error(format!("Failed to sync nonce from blockchain: {:#}", nonce_err));
+                                manager.error(format!(
+                                    "Failed to sync nonce from blockchain: {:#}",
+                                    nonce_err
+                                ));
                             }
                         }
                     }
@@ -3348,72 +4437,106 @@ async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction
 }
 
 /// Freeze TOS to get energy with duration-based rewards
-async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn freeze_tos(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("freeze_tos", &args)?;
 
     let prompt = manager.get_prompt();
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // Get amount, duration, and confirm from arguments
-    let amount_str = get_required_arg(
+    // Get amount, duration, and confirm from arguments (with examples for better error messages)
+    let amount_str = get_required_arg_with_example(
         &mut args,
         "amount",
         manager,
         "freeze_tos <amount> <duration> [confirm]",
+        "freeze_tos 100.0 14 y",
         || async {
-            prompt.read_input(
-                prompt.colorize_string(Color::Green, "Amount (TOS): "),
-                false
-            ).await
-        }
-    ).await.context("Error while reading amount")?;
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Amount (TOS): "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await
+    .context("Error while reading amount")?;
 
-    let duration_str = get_required_arg(
+    let duration_str = get_required_arg_with_example(
         &mut args,
         "duration",
         manager,
         "freeze_tos <amount> <duration> [confirm]",
+        "freeze_tos 100.0 14 y",
         || async {
-            prompt.read_input(
-                prompt.colorize_string(Color::Green, "Duration (3/7/14 days): "),
-                false
-            ).await
-        }
-    ).await.context("Error while reading duration")?;
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Duration (3/7/14/30 days): "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await
+    .context("Error while reading duration")?;
 
-    let duration_num = duration_str.parse::<u64>()
-        .context("Invalid duration number")?;
+    let duration_num =
+        duration_str
+            .parse::<u64>()
+            .map_err(|_| CommandError::InvalidParameterWithExample {
+                param: "duration".to_string(),
+                message: format!(
+                    "'{}' is not a valid duration (must be a number: 3, 7, 14, or 30)",
+                    duration_str
+                ),
+                usage: "freeze_tos <amount> <duration> [confirm]".to_string(),
+                example: "freeze_tos 100.0 14 y".to_string(),
+            })?;
 
     // Parse amount
-    let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
+    let amount =
+        from_coin(&amount_str, 8).ok_or_else(|| CommandError::InvalidParameterWithExample {
+            param: "amount".to_string(),
+            message: format!(
+                "'{}' is not a valid amount (use decimal format like 100.0, 50.5, etc.)",
+                amount_str
+            ),
+            usage: "freeze_tos <amount> <duration> [confirm]".to_string(),
+            example: "freeze_tos 100.0 14 y".to_string(),
+        })?;
 
     // Parse duration (3-90 days)
     let duration = if duration_num >= 3 && duration_num <= 90 {
         tos_common::account::FreezeDuration::new(duration_num as u32)
             .map_err(|e| CommandError::InvalidArgument(e.to_string()))?
     } else {
-        return Err(CommandError::InvalidArgument("Duration must be between 3 and 90 days".to_string()));
+        return Err(CommandError::InvalidArgument(
+            "Duration must be between 3 and 90 days".to_string(),
+        ));
     };
 
     // Get confirmation
-    let confirmed = get_confirmation(
-        &mut args,
-        manager,
-        || async {
-            let message = format!(
-                "Freeze {} TOS for {:?} to get energy?\nReward multiplier: {}x\n(Y/N): ",
-                format_coin(amount, 8),
-                duration,
-                duration.reward_multiplier()
-            );
-            let result = prompt.read_valid_str_value(
+    let confirmed = get_confirmation(&mut args, manager, || async {
+        let message = format!(
+            "Freeze {} TOS for {:?} to get energy?\nReward multiplier: {}x\n(Y/N): ",
+            format_coin(amount, 8),
+            duration,
+            duration.reward_multiplier()
+        );
+        let result = prompt
+            .read_valid_str_value(
                 prompt.colorize_string(Color::Yellow, &message),
-                vec!["y", "n"]
-            ).await.context("Error while reading confirmation")?;
-            Ok(result == "y")
-        }
-    ).await?;
+                vec!["y", "n"],
+            )
+            .await
+            .context("Error while reading confirmation")?;
+        Ok(result == "y")
+    })
+    .await?;
 
     if !confirmed {
         manager.message("Freeze operation cancelled");
@@ -3422,22 +4545,19 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
 
     // Create freeze transaction
     let duration_clone = duration.clone();
-    let _payload = tos_common::transaction::EnergyPayload::FreezeTos {
-        amount,
-        duration,
-    };
+    let _payload = tos_common::transaction::EnergyPayload::FreezeTos { amount, duration };
 
     manager.message("Building transaction...");
-    
+
     // Create energy transaction builder with validated parameters
     let energy_builder = EnergyBuilder::freeze_tos(amount, duration_clone.clone());
-    
+
     // Validate the builder configuration before creating transaction
     if let Err(e) = energy_builder.validate() {
         manager.error(&format!("Invalid energy builder configuration: {}", e));
-        return Ok(())
+        return Ok(());
     }
-    
+
     let tx_type = TransactionTypeBuilder::Energy(energy_builder);
     let fee = FeeBuilder::default();
 
@@ -3445,7 +4565,7 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
         Ok(tx) => tx,
         Err(e) => {
             manager.error(&format!("Error while creating transaction: {}", e));
-            return Ok(())
+            return Ok(());
         }
     };
 
@@ -3453,7 +4573,10 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
     manager.message(format!("Freeze transaction created: {}", hash));
     manager.message(format!("Amount: {} TOS", format_coin(amount, 8)));
     manager.message(format!("Duration: {:?}", duration_clone));
-    manager.message(format!("Reward multiplier: {}x", duration_clone.reward_multiplier()));
+    manager.message(format!(
+        "Reward multiplier: {}x",
+        duration_clone.reward_multiplier()
+    ));
 
     // Update energy resource in storage
     let mut storage = wallet.get_storage().write().await;
@@ -3478,10 +4601,14 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
     };
 
     // Add energy from this freeze operation
-    let energy_gained = energy_resource.freeze_tos_for_energy(amount, duration_clone, current_topoheight);
+    let energy_gained =
+        energy_resource.freeze_tos_for_energy(amount, duration_clone, current_topoheight);
     storage.set_energy_resource(energy_resource).await?;
 
-    manager.message(format!("Energy gained: {} energy", format_coin(energy_gained, 8)));
+    manager.message(format!(
+        "Energy gained: {} energy",
+        format_coin(energy_gained, 8)
+    ));
 
     // Broadcast the transaction
     broadcast_tx(&wallet, manager, tx).await;
@@ -3490,45 +4617,62 @@ async fn freeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Resu
 }
 
 /// Unfreeze TOS (release frozen TOS after lock period)
-async fn unfreeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn unfreeze_tos(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.validate_batch_params("unfreeze_tos", &args)?;
 
     let prompt = manager.get_prompt();
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // Get amount and confirm from arguments
-    let amount_str = get_required_arg(
+    // Get amount and confirm from arguments (with example for better error messages)
+    let amount_str = get_required_arg_with_example(
         &mut args,
         "amount",
         manager,
         "unfreeze_tos <amount> [confirm]",
+        "unfreeze_tos 50.0 y",
         || async {
-            prompt.read_input(
-                prompt.colorize_string(Color::Green, "Amount (TOS): "),
-                false
-            ).await
-        }
-    ).await.context("Error while reading amount")?;
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Amount (TOS): "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await
+    .context("Error while reading amount")?;
 
-    let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
+    let amount =
+        from_coin(&amount_str, 8).ok_or_else(|| CommandError::InvalidParameterWithExample {
+            param: "amount".to_string(),
+            message: format!(
+                "'{}' is not a valid amount (use decimal format like 50.0, 25.5, etc.)",
+                amount_str
+            ),
+            usage: "unfreeze_tos <amount> [confirm]".to_string(),
+            example: "unfreeze_tos 50.0 y".to_string(),
+        })?;
 
     // Get confirmation
-    let confirmed = get_confirmation(
-        &mut args,
-        manager,
-        || async {
-            let message = format!(
-                "Unfreeze {} TOS?\nThis will remove the corresponding energy.\n(Y/N): ",
-                format_coin(amount, 8)
-            );
-            let result = prompt.read_valid_str_value(
+    let confirmed = get_confirmation(&mut args, manager, || async {
+        let message = format!(
+            "Unfreeze {} TOS?\nThis will remove the corresponding energy.\n(Y/N): ",
+            format_coin(amount, 8)
+        );
+        let result = prompt
+            .read_valid_str_value(
                 prompt.colorize_string(Color::Yellow, &message),
-                vec!["y", "n"]
-            ).await.context("Error while reading confirmation")?;
-            Ok(result == "y")
-        }
-    ).await?;
+                vec!["y", "n"],
+            )
+            .await
+            .context("Error while reading confirmation")?;
+        Ok(result == "y")
+    })
+    .await?;
 
     if !confirmed {
         manager.message("Unfreeze operation cancelled");
@@ -3536,21 +4680,19 @@ async fn unfreeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Re
     }
 
     // Create unfreeze transaction
-    let _payload = tos_common::transaction::EnergyPayload::UnfreezeTos {
-        amount,
-    };
+    let _payload = tos_common::transaction::EnergyPayload::UnfreezeTos { amount };
 
     manager.message("Building transaction...");
-    
+
     // Create energy transaction builder with validated parameters
     let energy_builder = EnergyBuilder::unfreeze_tos(amount);
-    
+
     // Validate the builder configuration before creating transaction
     if let Err(e) = energy_builder.validate() {
         manager.error(&format!("Invalid energy builder configuration: {}", e));
-        return Ok(())
+        return Ok(());
     }
-    
+
     let tx_type = TransactionTypeBuilder::Energy(energy_builder);
     let fee = FeeBuilder::default();
 
@@ -3559,7 +4701,7 @@ async fn unfreeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Re
         Ok(tx) => tx,
         Err(e) => {
             manager.error(&format!("Error while creating transaction: {}", e));
-            return Ok(())
+            return Ok(());
         }
     };
 
@@ -3587,7 +4729,10 @@ async fn unfreeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Re
         match energy_resource.unfreeze_tos(amount, current_topoheight) {
             Ok(energy_removed) => {
                 storage.set_energy_resource(energy_resource).await?;
-                manager.message(format!("Energy removed: {} energy", format_coin(energy_removed, 8)));
+                manager.message(format!(
+                    "Energy removed: {} energy",
+                    format_coin(energy_removed, 8)
+                ));
             }
             Err(e) => {
                 manager.warn(&format!("Could not update energy resource: {}", e));
@@ -3606,7 +4751,7 @@ async fn unfreeze_tos(manager: &CommandManager, mut args: ArgumentManager) -> Re
 async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    
+
     if !wallet.is_online().await {
         manager.error("Wallet is not connected to a daemon. Please enable online mode first.");
         return Ok(());
@@ -3616,38 +4761,77 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
     if let Some(handler) = network_handler.as_ref() {
         let api = handler.get_api();
         let address = wallet.get_address();
-        
-        match api.call(&"get_energy".to_string(), &tos_common::api::daemon::GetEnergyParams {
-            address: Cow::Borrowed(&address)
-        }).await {
+
+        match api
+            .call(
+                &"get_energy".to_string(),
+                &tos_common::api::daemon::GetEnergyParams {
+                    address: Cow::Borrowed(&address),
+                },
+            )
+            .await
+        {
             Ok(result) => {
-                let energy_result: tos_common::api::daemon::GetEnergyResult = serde_json::from_value(result)
-                    .context("Failed to parse energy result")?;
-                
+                let energy_result: tos_common::api::daemon::GetEnergyResult =
+                    serde_json::from_value(result).context("Failed to parse energy result")?;
+
                 manager.message(format!("Energy Information for {}:", address));
-                manager.message(format!("  Frozen TOS: {} TOS", format_tos(energy_result.frozen_tos)));
-                manager.message(format!("  Total Energy: {} units", energy_result.total_energy));
-                manager.message(format!("  Used Energy: {} units", energy_result.used_energy));
-                manager.message(format!("  Available Energy: {} units", energy_result.available_energy));
-                manager.message(format!("  Last Update: topoheight {}", energy_result.last_update));
-                
+                manager.message(format!(
+                    "  Frozen TOS: {} TOS",
+                    format_tos(energy_result.frozen_tos)
+                ));
+                manager.message(format!(
+                    "  Total Energy: {} units",
+                    energy_result.total_energy
+                ));
+                manager.message(format!(
+                    "  Used Energy: {} units",
+                    energy_result.used_energy
+                ));
+                manager.message(format!(
+                    "  Available Energy: {} units",
+                    energy_result.available_energy
+                ));
+                manager.message(format!(
+                    "  Last Update: topoheight {}",
+                    energy_result.last_update
+                ));
+
                 if !energy_result.freeze_records.is_empty() {
                     manager.message("  Freeze Records:");
                     for (i, record) in energy_result.freeze_records.iter().enumerate() {
-                        manager.message(format!("    Record {}: {} TOS for {} days", i + 1, format_tos(record.amount), record.duration));
-                        manager.message(format!("      Energy Gained: {} units", record.energy_gained));
-                        manager.message(format!("      Freeze Time: topoheight {}", record.freeze_topoheight));
-                        manager.message(format!("      Unlock Time: topoheight {}", record.unlock_topoheight));
-                        
+                        manager.message(format!(
+                            "    Record {}: {} TOS for {} days",
+                            i + 1,
+                            format_tos(record.amount),
+                            record.duration
+                        ));
+                        manager.message(format!(
+                            "      Energy Gained: {} units",
+                            record.energy_gained
+                        ));
+                        manager.message(format!(
+                            "      Freeze Time: topoheight {}",
+                            record.freeze_topoheight
+                        ));
+                        manager.message(format!(
+                            "      Unlock Time: topoheight {}",
+                            record.unlock_topoheight
+                        ));
+
                         if record.can_unlock {
                             manager.message(format!("      Status: ✅ Unlockable"));
                         } else {
-                            let remaining_days = record.remaining_blocks as f64 / (24.0 * 60.0 * 60.0);
-                            manager.message(format!("      Status: 🔒 Locked ({} days remaining)", remaining_days));
+                            let remaining_days =
+                                record.remaining_blocks as f64 / (24.0 * 60.0 * 60.0);
+                            manager.message(format!(
+                                "      Status: 🔒 Locked ({} days remaining)",
+                                remaining_days
+                            ));
                         }
                     }
                 }
-            },
+            }
             Err(e) => {
                 manager.error(format!("Failed to get energy information: {}", e));
             }
@@ -3660,7 +4844,11 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
 }
 
 /// Execute JSON batch command
-async fn execute_json_batch(command_manager: &CommandManager, json_content: &str, config: &Config) -> Result<(), anyhow::Error> {
+async fn execute_json_batch(
+    command_manager: &CommandManager,
+    json_content: &str,
+    config: &Config,
+) -> Result<(), anyhow::Error> {
     // Parse JSON
     let json_config: JsonBatchConfig = serde_json::from_str(json_content)
         .with_context(|| "Failed to parse JSON batch configuration")?;
@@ -3670,9 +4858,15 @@ async fn execute_json_batch(command_manager: &CommandManager, json_content: &str
     }
 
     // Verify wallet_path is provided (from CLI or JSON)
-    let _wallet_path = config.wallet_path.as_ref()
+    let _wallet_path = config
+        .wallet_path
+        .as_ref()
         .or(json_config.wallet_path.as_ref())
-        .ok_or_else(|| anyhow::anyhow!("No wallet path specified. Use --wallet-path or provide wallet_path in JSON"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "No wallet path specified. Use --wallet-path or provide wallet_path in JSON"
+            )
+        })?;
 
     // Verify password is provided through any supported method
     // Priority: CLI > File > Env > JSON
@@ -3695,7 +4889,10 @@ async fn execute_json_batch(command_manager: &CommandManager, json_content: &str
     // Note: The wallet is already loaded in main() using get_password()
     // This check only validates that password source was provided
 
-    match command_manager.handle_json_command(&json_config.command, &json_config.params).await {
+    match command_manager
+        .handle_json_command(&json_config.command, &json_config.params)
+        .await
+    {
         Ok(_) => {
             if log::log_enabled!(log::Level::Info) {
                 info!("JSON batch command executed successfully");
