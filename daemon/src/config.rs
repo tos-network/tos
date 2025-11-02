@@ -100,7 +100,7 @@ pub fn parallel_execution_enabled() -> bool {
     *PARALLEL_EXECUTION_ENABLED.get_or_init(|| {
         match env::var("TOS_PARALLEL_EXECUTION") {
             Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "True"),
-            Err(_) => false,  // Safe default: disabled
+            Err(_) => false, // Safe default: disabled
         }
     })
 }
@@ -112,7 +112,7 @@ pub fn parallel_test_mode_enabled() -> bool {
     *PARALLEL_EXECUTION_TEST_MODE.get_or_init(|| {
         match env::var("TOS_PARALLEL_TEST_MODE") {
             Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "True"),
-            Err(_) => false,  // Safe default: disabled
+            Err(_) => false, // Safe default: disabled
         }
     })
 }

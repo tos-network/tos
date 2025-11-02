@@ -5948,7 +5948,10 @@ impl<S: Storage> Blockchain<S> {
             Err(e) => {
                 // Error occurred during writes, rollback all changes
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("Error during parallel merge, rolling back all changes: {}", e);
+                    warn!(
+                        "Error during parallel merge, rolling back all changes: {}",
+                        e
+                    );
                 }
 
                 // Discard all buffered writes (apply=false)
