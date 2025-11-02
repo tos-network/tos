@@ -1,20 +1,14 @@
+use super::{
+    derive_shared_key_from_handle, derive_shared_key_from_opening, Cipher, CipherFormatError,
+    PlaintextData, Role, SharedKey, UnknownExtraDataFormat,
+};
 use crate::{
     api::DataElement,
     crypto::{
         elgamal::{CompressedHandle, PedersenOpening, PublicKey, RISTRETTO_COMPRESSED_SIZE},
-        PrivateKey
+        PrivateKey,
     },
-    serializer::*
-};
-use super::{
-    derive_shared_key_from_handle,
-    derive_shared_key_from_opening,
-    Cipher,
-    CipherFormatError,
-    PlaintextData,
-    Role,
-    SharedKey,
-    UnknownExtraDataFormat
+    serializer::*,
 };
 
 // New version of Extra Data due to the issue of commitment randomness reuse
@@ -50,7 +44,7 @@ impl ExtraData {
     pub fn estimate_size(data: &DataElement) -> usize {
         let cipher: UnknownExtraDataFormat = Cipher(data.to_bytes()).into();
         // 2 bytes of additional overhead because the extra data store
-        // the cipher size again 
+        // the cipher size again
         2 + cipher.size() + (RISTRETTO_COMPRESSED_SIZE * 2)
     }
 
@@ -63,21 +57,31 @@ impl ExtraData {
     }
 
     // Decrypt the message using the private key and the role to determine the correct handle to use.
-    pub fn decrypt(&self, private_key: &PrivateKey, role: Role) -> Result<PlaintextData, CipherFormatError> {
-        let handle = self.get_handle(role).decompress().map_err(|_| CipherFormatError)?;
+    pub fn decrypt(
+        &self,
+        private_key: &PrivateKey,
+        role: Role,
+    ) -> Result<PlaintextData, CipherFormatError> {
+        let handle = self
+            .get_handle(role)
+            .decompress()
+            .map_err(|_| CipherFormatError)?;
         let key = derive_shared_key_from_handle(private_key, &handle);
         self.decrypt_with_shared_key(&key)
     }
 
     // Decrypt the message using the shared key
-    pub fn decrypt_with_shared_key(&self, shared_key: &SharedKey) -> Result<PlaintextData, CipherFormatError> {
+    pub fn decrypt_with_shared_key(
+        &self,
+        shared_key: &SharedKey,
+    ) -> Result<PlaintextData, CipherFormatError> {
         Ok(self.cipher.clone().decrypt(shared_key)?)
     }
 }
 
 impl Serializer for ExtraData {
     fn write(&self, writer: &mut Writer) {
-        self.sender_handle.write(writer); 
+        self.sender_handle.write(writer);
         self.receiver_handle.write(writer);
         self.cipher.write(writer);
     }

@@ -1,5 +1,5 @@
-use tos_common::network::Network;
 use crate::core::error::BlockchainError;
+use tos_common::network::Network;
 
 pub trait NetworkProvider {
     // Get the network from cache

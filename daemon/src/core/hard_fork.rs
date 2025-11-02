@@ -1,12 +1,12 @@
+use super::bps::OneBps;
+use crate::config::{get_hard_forks, MILLIS_PER_SECOND};
 use anyhow::Result;
 use tos_common::{
     api::daemon::HardFork,
     block::{Algorithm, BlockVersion},
     network::Network,
-    transaction::TxVersion
+    transaction::TxVersion,
 };
-use crate::config::{get_hard_forks, MILLIS_PER_SECOND};
-use super::bps::OneBps;
 
 // Get the hard fork at a given height
 pub fn get_hard_fork_at_height(network: &Network, height: u64) -> Option<&HardFork> {
@@ -27,7 +27,7 @@ pub fn get_hard_fork_at_height(network: &Network, height: u64) -> Option<&HardFo
 pub fn has_hard_fork_at_height(network: &Network, height: u64) -> (bool, BlockVersion) {
     match get_hard_fork_at_height(network, height) {
         Some(hard_fork) => (hard_fork.height == height, hard_fork.version),
-        None => (false, BlockVersion::V0)
+        None => (false, BlockVersion::V0),
     }
 }
 
@@ -40,7 +40,7 @@ pub fn get_version_at_height(network: &Network, height: u64) -> BlockVersion {
 pub const fn get_pow_algorithm_for_version(version: BlockVersion) -> Algorithm {
     match version {
         BlockVersion::V0 => Algorithm::V1,
-        _ => Algorithm::V2
+        _ => Algorithm::V2,
     }
 }
 
@@ -60,10 +60,8 @@ pub const fn get_pow_algorithm_for_version(version: BlockVersion) -> Algorithm {
 // - Future BPS changes only require updating the type alias (e.g., TwoBps)
 pub const fn get_block_time_target_for_version(version: BlockVersion) -> u64 {
     match version {
-        BlockVersion::V0 => 60 * MILLIS_PER_SECOND,  // Legacy: 60 seconds
-        BlockVersion::V1
-        | BlockVersion::V2
-        | BlockVersion::V3 => OneBps::target_time_per_block(),  // 1000ms (1 BPS)
+        BlockVersion::V0 => 60 * MILLIS_PER_SECOND, // Legacy: 60 seconds
+        BlockVersion::V1 | BlockVersion::V2 | BlockVersion::V3 => OneBps::target_time_per_block(), // 1000ms (1 BPS)
     }
 }
 
@@ -74,7 +72,7 @@ pub fn is_version_matching_requirement(version: &str, req: &str) -> Result<bool>
     let r = semver::VersionReq::parse(req)?;
     let str_version = match version.split_once('-') {
         Some((v, _)) => v,
-        None => version
+        None => version,
     };
 
     let v = semver::Version::parse(str_version)?;
@@ -85,7 +83,10 @@ pub fn is_version_matching_requirement(version: &str, req: &str) -> Result<bool>
 // This function checks if a version is allowed at a given height
 pub fn is_version_allowed_at_height(network: &Network, height: u64, version: &str) -> Result<bool> {
     for hard_fork in get_hard_forks(network) {
-        if let Some(req) = hard_fork.version_requirement.filter(|_| hard_fork.height <= height) {
+        if let Some(req) = hard_fork
+            .version_requirement
+            .filter(|_| hard_fork.height <= height)
+        {
             let matches = is_version_matching_requirement(version, req)?;
             if !matches {
                 return Ok(false);
@@ -110,33 +111,60 @@ pub fn is_version_enabled_at_height(network: &Network, height: u64, version: Blo
 
 // This function checks if a transaction version is allowed in a block version
 #[inline(always)]
-pub const fn is_tx_version_allowed_in_block_version(tx_version: TxVersion, block_version: BlockVersion) -> bool {
+pub const fn is_tx_version_allowed_in_block_version(
+    tx_version: TxVersion,
+    block_version: BlockVersion,
+) -> bool {
     block_version.is_tx_version_allowed(tx_version)
 }
 
 #[cfg(test)]
 mod tests {
-    use tos_common::{
-        block::BlockVersion,
-        transaction::TxVersion
-    };
+    use tos_common::{block::BlockVersion, transaction::TxVersion};
 
     use super::*;
 
     #[test]
     fn test_version_matching_requirement() {
-        assert_eq!(is_version_matching_requirement("1.0.0-abcdef", ">=1.0.0").unwrap(), true);
-        assert_eq!(is_version_matching_requirement("1.0.0-999", ">=1.0.0").unwrap(), true);
-        assert_eq!(is_version_matching_requirement("1.0.0-abcdef999", ">=1.0.0").unwrap(), true);
-        assert_eq!(is_version_matching_requirement("1.0.0", ">=1.0.1").unwrap(), false);
-        assert_eq!(is_version_matching_requirement("1.0.0", "<1.0.1").unwrap(), true);
-        assert_eq!(is_version_matching_requirement("1.0.0", "<1.0.0").unwrap(), false);
-        
+        assert_eq!(
+            is_version_matching_requirement("1.0.0-abcdef", ">=1.0.0").unwrap(),
+            true
+        );
+        assert_eq!(
+            is_version_matching_requirement("1.0.0-999", ">=1.0.0").unwrap(),
+            true
+        );
+        assert_eq!(
+            is_version_matching_requirement("1.0.0-abcdef999", ">=1.0.0").unwrap(),
+            true
+        );
+        assert_eq!(
+            is_version_matching_requirement("1.0.0", ">=1.0.1").unwrap(),
+            false
+        );
+        assert_eq!(
+            is_version_matching_requirement("1.0.0", "<1.0.1").unwrap(),
+            true
+        );
+        assert_eq!(
+            is_version_matching_requirement("1.0.0", "<1.0.0").unwrap(),
+            false
+        );
+
         // Debug: Test specific versions
         println!("Testing version matching:");
-        println!("1.13.0 >= 1.13.0: {}", is_version_matching_requirement("1.13.0", ">=1.13.0").unwrap());
-        println!("1.18.0- >= 1.13.0: {}", is_version_matching_requirement("1.18.0-", ">=1.13.0").unwrap());
-        println!("1.18.0- >= 1.16.0: {}", is_version_matching_requirement("1.18.0-", ">=1.16.0").unwrap());
+        println!(
+            "1.13.0 >= 1.13.0: {}",
+            is_version_matching_requirement("1.13.0", ">=1.13.0").unwrap()
+        );
+        println!(
+            "1.18.0- >= 1.13.0: {}",
+            is_version_matching_requirement("1.18.0-", ">=1.13.0").unwrap()
+        );
+        println!(
+            "1.18.0- >= 1.16.0: {}",
+            is_version_matching_requirement("1.18.0-", ">=1.16.0").unwrap()
+        );
     }
 
     #[test]
@@ -149,7 +177,6 @@ mod tests {
             println!("Version {} allowed at height 0: {}", version, allowed);
             assert!(allowed);
         }
-
     }
 
     #[test]
@@ -175,58 +202,161 @@ mod tests {
     #[test]
     fn test_get_version_at_height() {
         // Mainnet
-        assert_eq!(get_version_at_height(&Network::Mainnet, 0), BlockVersion::V2);
-        assert_eq!(get_version_at_height(&Network::Mainnet, 435_000), BlockVersion::V2);
-        assert_eq!(get_version_at_height(&Network::Mainnet, 2_000_000), BlockVersion::V2);
+        assert_eq!(
+            get_version_at_height(&Network::Mainnet, 0),
+            BlockVersion::V2
+        );
+        assert_eq!(
+            get_version_at_height(&Network::Mainnet, 435_000),
+            BlockVersion::V2
+        );
+        assert_eq!(
+            get_version_at_height(&Network::Mainnet, 2_000_000),
+            BlockVersion::V2
+        );
 
         // Testnet - Updated for new devnet/testnet configuration: V1 at height 0 (1-second blocks)
-        assert_eq!(get_version_at_height(&Network::Testnet, 0), BlockVersion::V1);
-        assert_eq!(get_version_at_height(&Network::Testnet, 9), BlockVersion::V1);
-        assert_eq!(get_version_at_height(&Network::Testnet, 10), BlockVersion::V2);
-        assert_eq!(get_version_at_height(&Network::Testnet, 15), BlockVersion::V3);
+        assert_eq!(
+            get_version_at_height(&Network::Testnet, 0),
+            BlockVersion::V1
+        );
+        assert_eq!(
+            get_version_at_height(&Network::Testnet, 9),
+            BlockVersion::V1
+        );
+        assert_eq!(
+            get_version_at_height(&Network::Testnet, 10),
+            BlockVersion::V2
+        );
+        assert_eq!(
+            get_version_at_height(&Network::Testnet, 15),
+            BlockVersion::V3
+        );
     }
 
     #[test]
     fn test_get_pow_algorithm_for_version() {
-        assert_eq!(get_pow_algorithm_for_version(BlockVersion::V0), Algorithm::V1);
-        assert_eq!(get_pow_algorithm_for_version(BlockVersion::V1), Algorithm::V2);
+        assert_eq!(
+            get_pow_algorithm_for_version(BlockVersion::V0),
+            Algorithm::V1
+        );
+        assert_eq!(
+            get_pow_algorithm_for_version(BlockVersion::V1),
+            Algorithm::V2
+        );
     }
 
     #[test]
     fn test_is_tx_version_allowed_in_block_version() {
         // All block versions now support T0
-        assert!(is_tx_version_allowed_in_block_version(TxVersion::T0, BlockVersion::V0));
-        assert!(is_tx_version_allowed_in_block_version(TxVersion::T0, BlockVersion::V1));
-        assert!(is_tx_version_allowed_in_block_version(TxVersion::T0, BlockVersion::V2));
-        assert!(is_tx_version_allowed_in_block_version(TxVersion::T0, BlockVersion::V3));
+        assert!(is_tx_version_allowed_in_block_version(
+            TxVersion::T0,
+            BlockVersion::V0
+        ));
+        assert!(is_tx_version_allowed_in_block_version(
+            TxVersion::T0,
+            BlockVersion::V1
+        ));
+        assert!(is_tx_version_allowed_in_block_version(
+            TxVersion::T0,
+            BlockVersion::V2
+        ));
+        assert!(is_tx_version_allowed_in_block_version(
+            TxVersion::T0,
+            BlockVersion::V3
+        ));
     }
 
     #[test]
     fn test_version_enabled() {
         // Mainnet - V1 and V2 are enabled from height 0
-        assert!(is_version_enabled_at_height(&Network::Mainnet, 0, BlockVersion::V0));
-        assert!(is_version_enabled_at_height(&Network::Mainnet, 0, BlockVersion::V1));
-        assert!(is_version_enabled_at_height(&Network::Mainnet, 0, BlockVersion::V2));
+        assert!(is_version_enabled_at_height(
+            &Network::Mainnet,
+            0,
+            BlockVersion::V0
+        ));
+        assert!(is_version_enabled_at_height(
+            &Network::Mainnet,
+            0,
+            BlockVersion::V1
+        ));
+        assert!(is_version_enabled_at_height(
+            &Network::Mainnet,
+            0,
+            BlockVersion::V2
+        ));
 
-        assert!(is_version_enabled_at_height(&Network::Mainnet, 435_000, BlockVersion::V1));
-        assert!(is_version_enabled_at_height(&Network::Mainnet, 435_000, BlockVersion::V2));
-        assert!(is_version_enabled_at_height(&Network::Mainnet, 2_000_000, BlockVersion::V2));
+        assert!(is_version_enabled_at_height(
+            &Network::Mainnet,
+            435_000,
+            BlockVersion::V1
+        ));
+        assert!(is_version_enabled_at_height(
+            &Network::Mainnet,
+            435_000,
+            BlockVersion::V2
+        ));
+        assert!(is_version_enabled_at_height(
+            &Network::Mainnet,
+            2_000_000,
+            BlockVersion::V2
+        ));
 
         // V3 is not yet enabled
-        assert!(!is_version_enabled_at_height(&Network::Mainnet, 2_000_000, BlockVersion::V3));
+        assert!(!is_version_enabled_at_height(
+            &Network::Mainnet,
+            2_000_000,
+            BlockVersion::V3
+        ));
 
         // Testnet - Updated for new devnet/testnet configuration: V1 at height 0 (1-second blocks)
-        assert!(!is_version_enabled_at_height(&Network::Testnet, 0, BlockVersion::V0));
-        assert!(is_version_enabled_at_height(&Network::Testnet, 0, BlockVersion::V1));
-        assert!(!is_version_enabled_at_height(&Network::Testnet, 0, BlockVersion::V2));
+        assert!(!is_version_enabled_at_height(
+            &Network::Testnet,
+            0,
+            BlockVersion::V0
+        ));
+        assert!(is_version_enabled_at_height(
+            &Network::Testnet,
+            0,
+            BlockVersion::V1
+        ));
+        assert!(!is_version_enabled_at_height(
+            &Network::Testnet,
+            0,
+            BlockVersion::V2
+        ));
 
-        assert!(!is_version_enabled_at_height(&Network::Testnet, 9, BlockVersion::V0));
-        assert!(is_version_enabled_at_height(&Network::Testnet, 9, BlockVersion::V1));
-        assert!(!is_version_enabled_at_height(&Network::Testnet, 9, BlockVersion::V2));
+        assert!(!is_version_enabled_at_height(
+            &Network::Testnet,
+            9,
+            BlockVersion::V0
+        ));
+        assert!(is_version_enabled_at_height(
+            &Network::Testnet,
+            9,
+            BlockVersion::V1
+        ));
+        assert!(!is_version_enabled_at_height(
+            &Network::Testnet,
+            9,
+            BlockVersion::V2
+        ));
 
-        assert!(!is_version_enabled_at_height(&Network::Testnet, 10, BlockVersion::V0));
-        assert!(is_version_enabled_at_height(&Network::Testnet, 10, BlockVersion::V1));
-        assert!(is_version_enabled_at_height(&Network::Testnet, 10, BlockVersion::V2));
+        assert!(!is_version_enabled_at_height(
+            &Network::Testnet,
+            10,
+            BlockVersion::V0
+        ));
+        assert!(is_version_enabled_at_height(
+            &Network::Testnet,
+            10,
+            BlockVersion::V1
+        ));
+        assert!(is_version_enabled_at_height(
+            &Network::Testnet,
+            10,
+            BlockVersion::V2
+        ));
     }
 
     #[test]
@@ -234,12 +364,24 @@ mod tests {
         use super::super::bps::OneBps;
 
         // V0 kept at 60s for genesis compatibility
-        assert_eq!(get_block_time_target_for_version(BlockVersion::V0), 60 * MILLIS_PER_SECOND);
+        assert_eq!(
+            get_block_time_target_for_version(BlockVersion::V0),
+            60 * MILLIS_PER_SECOND
+        );
 
         // TIP-BPS: All subsequent versions use OneBps configuration (1 second blocks)
-        assert_eq!(get_block_time_target_for_version(BlockVersion::V1), OneBps::target_time_per_block());
-        assert_eq!(get_block_time_target_for_version(BlockVersion::V2), OneBps::target_time_per_block());
-        assert_eq!(get_block_time_target_for_version(BlockVersion::V3), OneBps::target_time_per_block());
+        assert_eq!(
+            get_block_time_target_for_version(BlockVersion::V1),
+            OneBps::target_time_per_block()
+        );
+        assert_eq!(
+            get_block_time_target_for_version(BlockVersion::V2),
+            OneBps::target_time_per_block()
+        );
+        assert_eq!(
+            get_block_time_target_for_version(BlockVersion::V3),
+            OneBps::target_time_per_block()
+        );
 
         // Verify OneBps is 1000ms (1 second)
         assert_eq!(OneBps::target_time_per_block(), 1000);

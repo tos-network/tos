@@ -1,38 +1,24 @@
-use std::{sync::Arc, borrow::Cow};
+use crate::{
+    api::XSWDAppId, error::WalletError, storage::Balance,
+    transaction_builder::TransactionBuilderState, wallet::Wallet,
+};
 use anyhow::Context as AnyContext;
 use cfg_if::cfg_if;
+use serde_json::{json, Value};
+use std::{borrow::Cow, sync::Arc};
 use tos_common::{
-    api::{
-        wallet::*,
-        DataElement,
-        DataHash,
-        SplitAddressParams,
-        SplitAddressResult
-    },
+    api::{wallet::*, DataElement, DataHash, SplitAddressParams, SplitAddressResult},
     async_handler,
-    config::{VERSION, TOS_ASSET},
+    config::{TOS_ASSET, VERSION},
     context::Context,
     crypto::{Hashable, KeyPair},
-    rpc::{
-        parse_params,
-        require_no_params,
-        InternalRpcError,
-        RPCHandler
-    },
+    rpc::{parse_params, require_no_params, InternalRpcError, RPCHandler},
     serializer::Serializer,
     transaction::{
         builder::{FeeBuilder, TransactionBuilder},
         extra_data::ExtraData,
-        multisig::{MultiSig, SignatureId}
+        multisig::{MultiSig, SignatureId},
     },
-};
-use serde_json::{Value, json};
-use crate::{
-    api::XSWDAppId,
-    error::WalletError,
-    storage::Balance,
-    transaction_builder::TransactionBuilderState,
-    wallet::Wallet
 };
 
 use log::{debug, info, warn};
@@ -57,10 +43,22 @@ pub fn register_methods(handler: &mut RPCHandler<Arc<Wallet>>) {
     handler.register_method("search_transaction", async_handler!(search_transaction));
     handler.register_method("dump_transaction", async_handler!(dump_transaction));
     handler.register_method("build_transaction", async_handler!(build_transaction));
-    handler.register_method("build_transaction_offline", async_handler!(build_transaction_offline));
-    handler.register_method("build_unsigned_transaction", async_handler!(build_unsigned_transaction));
-    handler.register_method("finalize_unsigned_transaction", async_handler!(finalize_unsigned_transaction));
-    handler.register_method("sign_unsigned_transaction", async_handler!(sign_unsigned_transaction));
+    handler.register_method(
+        "build_transaction_offline",
+        async_handler!(build_transaction_offline),
+    );
+    handler.register_method(
+        "build_unsigned_transaction",
+        async_handler!(build_unsigned_transaction),
+    );
+    handler.register_method(
+        "finalize_unsigned_transaction",
+        async_handler!(finalize_unsigned_transaction),
+    );
+    handler.register_method(
+        "sign_unsigned_transaction",
+        async_handler!(sign_unsigned_transaction),
+    );
 
     handler.register_method("clear_tx_cache", async_handler!(clear_tx_cache));
     handler.register_method("list_transactions", async_handler!(list_transactions));
@@ -69,7 +67,10 @@ pub fn register_methods(handler: &mut RPCHandler<Arc<Wallet>>) {
     handler.register_method("set_offline_mode", async_handler!(set_offline_mode));
     handler.register_method("sign_data", async_handler!(sign_data));
     handler.register_method("estimate_fees", async_handler!(estimate_fees));
-    handler.register_method("estimate_extra_data_size", async_handler!(estimate_extra_data_size));
+    handler.register_method(
+        "estimate_extra_data_size",
+        async_handler!(estimate_extra_data_size),
+    );
     handler.register_method("network_info", async_handler!(network_info));
     handler.register_method("decrypt_extra_data", async_handler!(decrypt_extra_data));
 
@@ -78,7 +79,10 @@ pub fn register_methods(handler: &mut RPCHandler<Arc<Wallet>>) {
     // It is restricted in XSWD context (each app access to their own trees), and open to everything in RPC
     // Keys and values can be anything
     handler.register_method("get_matching_keys", async_handler!(get_matching_keys));
-    handler.register_method("count_matching_entries", async_handler!(count_matching_entries));
+    handler.register_method(
+        "count_matching_entries",
+        async_handler!(count_matching_entries),
+    );
     handler.register_method("get_value_from_key", async_handler!(get_value_from_key));
     handler.register_method("store", async_handler!(store));
     handler.register_method("delete", async_handler!(delete));
@@ -142,7 +146,9 @@ async fn split_address(_: &Context, body: Value) -> Result<Value, InternalRpcErr
     let address = params.address;
 
     let (data, address) = address.extract_data();
-    let integrated_data = data.ok_or(InternalRpcError::InvalidParams("Address is not an integrated address"))?;
+    let integrated_data = data.ok_or(InternalRpcError::InvalidParams(
+        "Address is not an integrated address",
+    ))?;
     let size = integrated_data.size();
 
     Ok(json!(SplitAddressResult {
@@ -163,9 +169,7 @@ async fn estimate_extra_data_size(_: &Context, body: Value) -> Result<Value, Int
         }
     }
 
-    Ok(json!(EstimateExtraDataSizeResult {
-        size
-    }))
+    Ok(json!(EstimateExtraDataSizeResult { size }))
 }
 
 // Retrieve the network info
@@ -203,7 +207,8 @@ async fn decrypt_extra_data(context: &Context, body: Value) -> Result<Value, Int
         storage.get_tx_version().await?
     };
 
-    let data = wallet.decrypt_extra_data(params.extra_data.into_owned(), None, params.role, version)
+    let data = wallet
+        .decrypt_extra_data(params.extra_data.into_owned(), None, params.role, version)
         .context("Error while decrypting extra data")?;
 
     Ok(json!(data))
@@ -246,7 +251,10 @@ async fn has_balance(context: &Context, body: Value) -> Result<Value, InternalRp
     let wallet: &Arc<Wallet> = context.get()?;
     let storage = wallet.get_storage().read().await;
 
-    let exist = storage.has_balance_for(&asset).await.context("Error while checking if balance exists")?;
+    let exist = storage
+        .has_balance_for(&asset)
+        .await
+        .context("Error while checking if balance exists")?;
     Ok(json!(exist))
 }
 
@@ -256,7 +264,9 @@ async fn get_tracked_assets(context: &Context, body: Value) -> Result<Value, Int
     let wallet: &Arc<Wallet> = context.get()?;
     let maximum = if let Some(max) = params.maximum {
         if max > MAX_ASSETS {
-            return Err(InternalRpcError::InvalidParams("Maximum is bigger than limit"))
+            return Err(InternalRpcError::InvalidParams(
+                "Maximum is bigger than limit",
+            ));
         }
         max
     } else {
@@ -266,7 +276,8 @@ async fn get_tracked_assets(context: &Context, body: Value) -> Result<Value, Int
     // In case of a huge reorg, a tracked asset may be inexistant if the asset got removed temporarily
     // This must be taken in count
     let storage = wallet.get_storage().read().await;
-    let tracked_assets = storage.get_tracked_assets()?
+    let tracked_assets = storage
+        .get_tracked_assets()?
         .skip(params.skip.unwrap_or(0))
         .take(maximum)
         .collect::<Result<Vec<_>, _>>()?;
@@ -293,7 +304,9 @@ async fn get_assets(context: &Context, body: Value) -> Result<Value, InternalRpc
 
     let maximum = if let Some(max) = params.maximum {
         if max > MAX_ASSETS {
-            return Err(InternalRpcError::InvalidParams("Maximum is bigger than limit"))
+            return Err(InternalRpcError::InvalidParams(
+                "Maximum is bigger than limit",
+            ));
         }
         max
     } else {
@@ -301,7 +314,9 @@ async fn get_assets(context: &Context, body: Value) -> Result<Value, InternalRpc
     };
 
     let storage = wallet.get_storage().read().await;
-    let assets = storage.get_assets_with_data().await?
+    let assets = storage
+        .get_assets_with_data()
+        .await?
         .skip(params.skip.unwrap_or(0))
         .take(maximum)
         .collect::<Result<Vec<_>, _>>()?;
@@ -326,14 +341,18 @@ async fn get_transaction(context: &Context, body: Value) -> Result<Value, Intern
     let wallet: &Arc<Wallet> = context.get()?;
     let storage = wallet.get_storage().read().await;
     if !storage.has_transaction(&params.hash)? {
-        return Err(InternalRpcError::CustomStr(404, "Transaction is not found in wallet"))
+        return Err(InternalRpcError::CustomStr(
+            404,
+            "Transaction is not found in wallet",
+        ));
     }
 
     let transaction = storage.get_transaction(&params.hash)?;
 
-    Ok(json!(transaction.serializable(wallet.get_network().is_mainnet())))
+    Ok(json!(
+        transaction.serializable(wallet.get_network().is_mainnet())
+    ))
 }
-
 
 // Debug rpc method to perform a search across all entries for a transaction from the wallet storage using its hash
 async fn search_transaction(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -350,10 +369,11 @@ async fn search_transaction(context: &Context, body: Value) -> Result<Value, Int
             transaction: Some(transaction.serializable(wallet.get_network().is_mainnet())),
             index,
             is_raw_search: false
-        }))
+        }));
     }
 
-    let transaction = storage.search_transaction(&params.hash)?
+    let transaction = storage
+        .search_transaction(&params.hash)?
         .map(|transaction| transaction.serializable(wallet.get_network().is_mainnet()));
 
     Ok(json!(SearchTransactionResult {
@@ -380,11 +400,13 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
     let wallet: &Arc<Wallet> = context.get()?;
     // request ask to broadcast the TX but wallet is not connected to any daemon
     if !wallet.is_online().await && params.broadcast {
-        return Err(WalletError::NotOnlineMode)?
+        return Err(WalletError::NotOnlineMode)?;
     }
 
     if !params.broadcast && !params.tx_as_hex {
-        return Err(InternalRpcError::InvalidParams("Invalid params, should either be broadcasted, or returned in hex format"))
+        return Err(InternalRpcError::InvalidParams(
+            "Invalid params, should either be broadcasted, or returned in hex format",
+        ));
     }
 
     // create the TX
@@ -393,7 +415,7 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
     let mut storage = wallet.get_storage().write().await;
 
     if params.signers.len() > u8::MAX as usize {
-        return Err(InternalRpcError::InvalidParams("Too many signers"))
+        return Err(InternalRpcError::InvalidParams("Too many signers"));
     }
 
     let version = if let Some(v) = params.tx_version {
@@ -403,18 +425,28 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
     };
 
     let fee = params.fee.unwrap_or_default();
-    let mut state = wallet.create_transaction_state_with_storage(&storage, &params.tx_type, &fee, params.nonce).await?;
+    let mut state = wallet
+        .create_transaction_state_with_storage(&storage, &params.tx_type, &fee, params.nonce)
+        .await?;
 
     let tx = if params.signers.is_empty() {
         wallet.create_transaction_with(&mut state, None, version, params.tx_type, fee)?
     } else {
-        let builder = TransactionBuilder::new(version, wallet.get_public_key().clone(), Some(params.signers.len() as u8), params.tx_type, fee);
-        let mut unsigned = builder.build_unsigned(&mut state, wallet.get_keypair())
+        let builder = TransactionBuilder::new(
+            version,
+            wallet.get_public_key().clone(),
+            Some(params.signers.len() as u8),
+            params.tx_type,
+            fee,
+        );
+        let mut unsigned = builder
+            .build_unsigned(&mut state, wallet.get_keypair())
             .context("Error while building unsigned transaction")?;
 
         for signer in params.signers {
-            let keypair = KeyPair::from_private_key(signer.private_key)
-                .map_err(|_| InternalRpcError::InvalidParams("Invalid private key for multisig signer"))?;
+            let keypair = KeyPair::from_private_key(signer.private_key).map_err(|_| {
+                InternalRpcError::InvalidParams("Invalid private key for multisig signer")
+            })?;
             unsigned.sign_multisig(&keypair, signer.id);
         }
 
@@ -428,7 +460,10 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
     if params.broadcast {
         if let Err(e) = wallet.submit_transaction(&tx).await {
             if log::log_enabled!(log::Level::Warn) {
-                warn!("Clearing Tx cache & unconfirmed balances because of broadcasting error: {}", e);
+                warn!(
+                    "Clearing Tx cache & unconfirmed balances because of broadcasting error: {}",
+                    e
+                );
             }
             if log::log_enabled!(log::Level::Debug) {
                 debug!("TX HEX: {}", tx.to_hex());
@@ -439,7 +474,9 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
         }
     }
 
-    state.apply_changes(&mut storage).await
+    state
+        .apply_changes(&mut storage)
+        .await
         .context("Error while applying state changes")?;
 
     // returns the created TX and its hash
@@ -457,19 +494,26 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
 }
 
 // Build a transaction by giving the encrypted balances directly
-async fn build_transaction_offline(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+async fn build_transaction_offline(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
     let params: BuildTransactionOfflineParams = parse_params(body)?;
     let wallet: &Arc<Wallet> = context.get()?;
 
     // Create the state with the provided balances (plain u64)
-    let mut state = TransactionBuilderState::new(wallet.get_network().is_mainnet(), params.reference, params.nonce);
+    let mut state = TransactionBuilderState::new(
+        wallet.get_network().is_mainnet(),
+        params.reference,
+        params.nonce,
+    );
 
     for (hash, amount) in params.balances {
         state.add_balance(hash, Balance::new(amount));
     }
 
     if params.signers.len() > u8::MAX as usize {
-        return Err(InternalRpcError::InvalidParams("Too many signers"))
+        return Err(InternalRpcError::InvalidParams("Too many signers"));
     }
 
     let version = if let Some(v) = params.tx_version {
@@ -482,13 +526,21 @@ async fn build_transaction_offline(context: &Context, body: Value) -> Result<Val
     let tx = if params.signers.is_empty() {
         wallet.create_transaction_with(&mut state, None, version, params.tx_type, params.fee)?
     } else {
-        let builder = TransactionBuilder::new(version, wallet.get_public_key().clone(), Some(params.signers.len() as u8), params.tx_type, params.fee);
-        let mut unsigned = builder.build_unsigned(&mut state, wallet.get_keypair())
+        let builder = TransactionBuilder::new(
+            version,
+            wallet.get_public_key().clone(),
+            Some(params.signers.len() as u8),
+            params.tx_type,
+            params.fee,
+        );
+        let mut unsigned = builder
+            .build_unsigned(&mut state, wallet.get_keypair())
             .context("Error while building unsigned transaction")?;
 
         for signer in params.signers {
-            let keypair = KeyPair::from_private_key(signer.private_key)
-                .map_err(|_| InternalRpcError::InvalidParams("Invalid private key for multisig signer"))?;
+            let keypair = KeyPair::from_private_key(signer.private_key).map_err(|_| {
+                InternalRpcError::InvalidParams("Invalid private key for multisig signer")
+            })?;
             unsigned.sign_multisig(&keypair, signer.id);
         }
 
@@ -511,7 +563,10 @@ async fn build_transaction_offline(context: &Context, body: Value) -> Result<Val
     }))
 }
 
-async fn build_unsigned_transaction(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+async fn build_unsigned_transaction(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
     let params: BuildUnsignedTransactionParams = parse_params(body)?;
     let wallet: &Arc<Wallet> = context.get()?;
 
@@ -520,18 +575,31 @@ async fn build_unsigned_transaction(context: &Context, body: Value) -> Result<Va
     // So even if we have few requests building a TX, they wait for the previous one to be applied
     let mut storage = wallet.get_storage().write().await;
     let fee = params.fee.unwrap_or_default();
-    let mut state = wallet.create_transaction_state_with_storage(&storage, &params.tx_type, &fee, params.nonce).await?;
+    let mut state = wallet
+        .create_transaction_state_with_storage(&storage, &params.tx_type, &fee, params.nonce)
+        .await?;
 
     let version = storage.get_tx_version().await?;
-    let threshold = storage.get_multisig_state().await?
+    let threshold = storage
+        .get_multisig_state()
+        .await?
         .map(|state| state.payload.threshold);
 
     // Generate the TX
-    let builder = TransactionBuilder::new(version, wallet.get_public_key().clone(), threshold, params.tx_type, fee);
-    let unsigned = builder.build_unsigned(&mut state, wallet.get_keypair())
+    let builder = TransactionBuilder::new(
+        version,
+        wallet.get_public_key().clone(),
+        threshold,
+        params.tx_type,
+        fee,
+    );
+    let unsigned = builder
+        .build_unsigned(&mut state, wallet.get_keypair())
         .context("Error while building unsigned transaction")?;
 
-    state.apply_changes(&mut storage).await
+    state
+        .apply_changes(&mut storage)
+        .await
         .context("Error while applying state changes")?;
 
     // returns the created TX and its hash
@@ -549,17 +617,20 @@ async fn build_unsigned_transaction(context: &Context, body: Value) -> Result<Va
 
 // Finalize an unsigned transaction by signing it
 // Add the signatures to the transaction if a multisig is set
-async fn finalize_unsigned_transaction(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+async fn finalize_unsigned_transaction(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
     let params: FinalizeUnsignedTransactionParams = parse_params(body)?;
     let wallet: &Arc<Wallet> = context.get()?;
 
     let mut unsigned = params.unsigned;
     if params.signatures.is_empty() != unsigned.multisig().is_some() {
-        return Err(InternalRpcError::InvalidParams("Invalid signatures"))
+        return Err(InternalRpcError::InvalidParams("Invalid signatures"));
     }
 
     if unsigned.source() != wallet.get_public_key() {
-        return Err(InternalRpcError::InvalidParams("Invalid source"))
+        return Err(InternalRpcError::InvalidParams("Invalid source"));
     }
 
     let keypair = wallet.get_keypair();
@@ -574,14 +645,18 @@ async fn finalize_unsigned_transaction(context: &Context, body: Value) -> Result
     }
 
     let tx = unsigned.0.finalize(keypair);
-    
+
     let mut storage = wallet.get_storage().write().await;
-    let mut state = TransactionBuilderState::from_tx(&storage, &tx, wallet.get_network().is_mainnet()).await?;
+    let mut state =
+        TransactionBuilderState::from_tx(&storage, &tx, wallet.get_network().is_mainnet()).await?;
 
     if params.broadcast {
         if let Err(e) = wallet.submit_transaction(&tx).await {
             if log::log_enabled!(log::Level::Warn) {
-                warn!("Clearing Tx cache & unconfirmed balances because of broadcasting error: {}", e);
+                warn!(
+                    "Clearing Tx cache & unconfirmed balances because of broadcasting error: {}",
+                    e
+                );
             }
             if log::log_enabled!(log::Level::Debug) {
                 debug!("TX HEX: {}", tx.to_hex());
@@ -592,7 +667,9 @@ async fn finalize_unsigned_transaction(context: &Context, body: Value) -> Result
         }
     }
 
-    state.apply_changes(&mut storage).await
+    state
+        .apply_changes(&mut storage)
+        .await
         .context("Error while applying state changes")?;
 
     Ok(json!(TransactionResponse {
@@ -609,7 +686,10 @@ async fn finalize_unsigned_transaction(context: &Context, body: Value) -> Result
 }
 
 // Sign a unsigned transaction as a multisig member
-async fn sign_unsigned_transaction(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+async fn sign_unsigned_transaction(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
     let params: SignUnsignedTransactionParams = parse_params(body)?;
     let wallet: &Arc<Wallet> = context.get()?;
 
@@ -635,7 +715,9 @@ async fn clear_tx_cache(context: &Context, body: Value) -> Result<Value, Interna
 async fn estimate_fees(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: EstimateFeesParams = parse_params(body)?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let fees = wallet.estimate_fees(params.tx_type, FeeBuilder::default()).await?;
+    let fees = wallet
+        .estimate_fees(params.tx_type, FeeBuilder::default())
+        .await?;
 
     Ok(json!(fees))
 }
@@ -645,28 +727,31 @@ async fn list_transactions(context: &Context, body: Value) -> Result<Value, Inte
     let params: ListTransactionsParams = parse_params(body)?;
     if let Some(addr) = &params.address {
         if !addr.is_normal() {
-            return Err(InternalRpcError::InvalidParams("Address should be in normal format (not integrated address)"))
+            return Err(InternalRpcError::InvalidParams(
+                "Address should be in normal format (not integrated address)",
+            ));
         }
     }
 
     let wallet: &Arc<Wallet> = context.get()?;
     let storage = wallet.get_storage().read().await;
     let opt_key = params.address.map(|addr| addr.to_public_key());
-    
+
     let mainnet = wallet.get_network().is_mainnet();
-    let txs = storage.get_filtered_transactions(
-        opt_key.as_ref(),
-        params.asset.as_ref(),
-        params.min_topoheight,
-        params.max_topoheight,
-        params.accept_incoming,
-        params.accept_outgoing,
-        params.accept_coinbase,
-        params.accept_burn,
-        params.query.as_ref(),
-        params.limit,
-        params.skip,
-    )?
+    let txs = storage
+        .get_filtered_transactions(
+            opt_key.as_ref(),
+            params.asset.as_ref(),
+            params.min_topoheight,
+            params.max_topoheight,
+            params.accept_incoming,
+            params.accept_outgoing,
+            params.accept_coinbase,
+            params.accept_burn,
+            params.query.as_ref(),
+            params.limit,
+            params.skip,
+        )?
         .into_iter()
         .map(|tx| tx.serializable(mainnet))
         .collect::<Vec<_>>();
@@ -689,7 +774,9 @@ async fn set_online_mode(context: &Context, body: Value) -> Result<Value, Intern
 
     let wallet: &Arc<Wallet> = context.get()?;
     if wallet.is_online().await {
-        return Err(InternalRpcError::InvalidRequestStr("Wallet is already connected to a daemon"))
+        return Err(InternalRpcError::InvalidRequestStr(
+            "Wallet is already connected to a daemon",
+        ));
     }
 
     cfg_if! {
@@ -708,7 +795,9 @@ async fn set_offline_mode(context: &Context, body: Value) -> Result<Value, Inter
 
     let wallet: &Arc<Wallet> = context.get()?;
     if !wallet.is_online().await {
-        return Err(InternalRpcError::InvalidRequestStr("Wallet is already in offline mode"))
+        return Err(InternalRpcError::InvalidRequestStr(
+            "Wallet is already in offline mode",
+        ));
     }
 
     cfg_if! {
@@ -736,7 +825,7 @@ async fn get_tree_name(context: &Context, tree: String) -> Result<String, Intern
     // If the API is not used through XSWD, we don't need to prefix the tree name with the app id
 
     if !context.has::<&XSWDAppId>() {
-        return Ok(tree)
+        return Ok(tree);
     }
 
     // Retrieve the app data to get its id and to have section of trees between differents dApps
@@ -749,7 +838,9 @@ async fn get_matching_keys(context: &Context, body: Value) -> Result<Value, Inte
     let params: GetMatchingKeysParams = parse_params(body)?;
     if let Some(query) = &params.query {
         if query.is_for_element() {
-            return Err(InternalRpcError::InvalidParams("Invalid key query, should be a QueryValue"))
+            return Err(InternalRpcError::InvalidParams(
+                "Invalid key query, should be a QueryValue",
+            ));
         }
     }
 
@@ -829,7 +920,9 @@ async fn query_db(context: &Context, body: Value) -> Result<Value, InternalRpcEr
     let params: QueryDBParams = parse_params(body)?;
     if let Some(query) = &params.key {
         if query.is_for_element() {
-            return Err(InternalRpcError::InvalidParams("Invalid key query, should be a QueryValue"))
+            return Err(InternalRpcError::InvalidParams(
+                "Invalid key query, should be a QueryValue",
+            ));
         }
     }
 

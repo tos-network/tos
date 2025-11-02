@@ -1,12 +1,9 @@
-use serde::{Deserialize, Serialize};
 use crate::{
-    crypto::{
-        elgamal::CompressedPublicKey,
-        Hash
-    },
+    crypto::{elgamal::CompressedPublicKey, Hash},
     serializer::*,
-    transaction::extra_data::UnknownExtraDataFormat
+    transaction::extra_data::UnknownExtraDataFormat,
 };
+use serde::{Deserialize, Serialize};
 
 // TransferPayload is a public payload allowing to transfer an asset to another account
 // It contains the asset hash, the destination account, and the plaintext transfer amount
@@ -62,7 +59,14 @@ impl TransferPayload {
 
     // Take all data
     #[inline]
-    pub fn consume(self) -> (Hash, CompressedPublicKey, u64, Option<UnknownExtraDataFormat>) {
+    pub fn consume(
+        self,
+    ) -> (
+        Hash,
+        CompressedPublicKey,
+        u64,
+        Option<UnknownExtraDataFormat>,
+    ) {
         (self.asset, self.destination, self.amount, self.extra_data)
     }
 }
@@ -90,9 +94,6 @@ impl Serializer for TransferPayload {
     }
 
     fn size(&self) -> usize {
-        self.asset.size()
-        + self.destination.size()
-        + self.amount.size()
-        + self.extra_data.size()
+        self.asset.size() + self.destination.size() + self.amount.size() + self.extra_data.size()
     }
 }

@@ -5,8 +5,8 @@
 // interval concentration, etc.) will be added in later milestones.
 
 mod interval;
-mod store;
 mod reindex;
+mod store;
 mod tree;
 
 #[cfg(test)]
@@ -18,9 +18,9 @@ mod tests_comprehensive;
 pub use interval::Interval;
 pub use store::ReachabilityData;
 
-use tos_common::crypto::Hash;
 use crate::core::error::BlockchainError;
 use crate::core::storage::Storage;
+use tos_common::crypto::Hash;
 
 /// Binary search result for reachability queries
 #[allow(dead_code)]
@@ -101,7 +101,10 @@ impl TosReachability {
 
         // Otherwise, use future covering set to complete the DAG reachability test
         let this_data = storage.get_reachability_data(this).await?;
-        match self.binary_search_descendant(storage, &this_data.future_covering_set, queried).await? {
+        match self
+            .binary_search_descendant(storage, &this_data.future_covering_set, queried)
+            .await?
+        {
             SearchResult::Found(_, _) => Ok(true),
             SearchResult::NotFound(_) => Ok(false),
         }
@@ -128,7 +131,9 @@ impl TosReachability {
         let result = ordered_hashes.binary_search_by_key(&point, |hash| {
             // This is safe to unwrap in production since data inconsistency would be fatal
             futures::executor::block_on(async {
-                storage.get_reachability_data(hash).await
+                storage
+                    .get_reachability_data(hash)
+                    .await
                     .map(|data| data.interval.start)
                     .unwrap_or(0)
             })
@@ -138,7 +143,11 @@ impl TosReachability {
             Ok(i) => Ok(SearchResult::Found(ordered_hashes[i].clone(), i)),
             Err(i) => {
                 // `i` is where `point` was expected, so check if ordered_hashes[i-1] contains descendant
-                if i > 0 && self.is_chain_ancestor_of(storage, &ordered_hashes[i - 1], descendant).await? {
+                if i > 0
+                    && self
+                        .is_chain_ancestor_of(storage, &ordered_hashes[i - 1], descendant)
+                        .await?
+                {
                     Ok(SearchResult::Found(ordered_hashes[i - 1].clone(), i - 1))
                 } else {
                     Ok(SearchResult::NotFound(i))
@@ -151,7 +160,7 @@ impl TosReachability {
     pub fn genesis_reachability_data(&self) -> ReachabilityData {
         ReachabilityData {
             parent: self.genesis_hash.clone(), // Genesis is its own parent
-            interval: Interval::maximal(), // Genesis gets the maximal interval
+            interval: Interval::maximal(),     // Genesis gets the maximal interval
             height: 0,
             children: Vec::new(),
             future_covering_set: Vec::new(),
@@ -219,18 +228,25 @@ impl TosReachability {
 
             // Insert new_block into future_covering_set in sorted order by interval.start
             // Binary search to find insertion position
-            let insert_pos = merged_data.future_covering_set
+            let insert_pos = merged_data
+                .future_covering_set
                 .binary_search_by_key(&new_block_interval_start, |hash| {
                     futures::executor::block_on(async {
-                        storage.get_reachability_data(hash).await
+                        storage
+                            .get_reachability_data(hash)
+                            .await
                             .map(|data| data.interval.start)
                             .unwrap_or(0)
                     })
                 })
                 .unwrap_or_else(|pos| pos);
 
-            merged_data.future_covering_set.insert(insert_pos, new_block.clone());
-            storage.set_reachability_data(merged_block, &merged_data).await?;
+            merged_data
+                .future_covering_set
+                .insert(insert_pos, new_block.clone());
+            storage
+                .set_reachability_data(merged_block, &merged_data)
+                .await?;
         }
 
         Ok(())

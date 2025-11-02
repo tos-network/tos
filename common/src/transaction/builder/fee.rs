@@ -13,7 +13,7 @@ pub enum FeeBuilder {
     // set a direct value of how much fees you want to pay exactly
     Value(u64),
     // how much we want to pay above the calculated/needed fees.
-    Boost(u64)
+    Boost(u64),
 }
 
 impl Default for FeeBuilder {

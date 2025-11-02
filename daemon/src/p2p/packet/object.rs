@@ -1,23 +1,14 @@
-use tos_common::{
-    block::{
-        Block,
-        BlockHeader
-    },
-    crypto::{
-        Hash,
-        Hashable,
-        HASH_SIZE
-    },
-    immutable::Immutable,
-    serializer::{
-        Reader,
-        ReaderError,
-        Serializer,
-        Writer
-    },
-    transaction::Transaction
+use std::{
+    borrow::Cow,
+    fmt::{self, Display, Formatter},
 };
-use std::{borrow::Cow, fmt::{Display, Formatter, self}};
+use tos_common::{
+    block::{Block, BlockHeader},
+    crypto::{Hash, Hashable, HASH_SIZE},
+    immutable::Immutable,
+    serializer::{Reader, ReaderError, Serializer, Writer},
+    transaction::Transaction,
+};
 
 use crate::p2p::error::P2pError;
 
@@ -25,7 +16,7 @@ use crate::p2p::error::P2pError;
 pub enum ObjectRequest {
     Block(Immutable<Hash>),
     BlockHeader(Immutable<Hash>),
-    Transaction(Immutable<Hash>)
+    Transaction(Immutable<Hash>),
 }
 
 impl ObjectRequest {
@@ -33,7 +24,7 @@ impl ObjectRequest {
         match self {
             Self::Block(hash) => hash,
             Self::BlockHeader(hash) => hash,
-            Self::Transaction(hash) => hash
+            Self::Transaction(hash) => hash,
         }
     }
 }
@@ -44,11 +35,11 @@ impl Serializer for ObjectRequest {
             Self::Block(hash) => {
                 writer.write_u8(0);
                 writer.write_hash(hash);
-            },
+            }
             Self::BlockHeader(hash) => {
                 writer.write_u8(1);
                 writer.write_hash(hash);
-            },
+            }
             Self::Transaction(hash) => {
                 writer.write_u8(2);
                 writer.write_hash(hash);
@@ -62,7 +53,7 @@ impl Serializer for ObjectRequest {
             0 => ObjectRequest::Block(Immutable::read(reader)?),
             1 => ObjectRequest::BlockHeader(Immutable::read(reader)?),
             2 => ObjectRequest::Transaction(Immutable::read(reader)?),
-            _ => return Err(ReaderError::InvalidValue)
+            _ => return Err(ReaderError::InvalidValue),
         })
     }
 
@@ -76,7 +67,7 @@ impl Display for ObjectRequest {
         match self {
             Self::Block(hash) => write!(f, "ObjectRequest[type=Block, {}]", hash),
             Self::BlockHeader(hash) => write!(f, "ObjectRequest[type=BlockHeader, {}]", hash),
-            Self::Transaction(hash) => write!(f, "ObjectRequest[type=Transaction, {}]", hash)
+            Self::Transaction(hash) => write!(f, "ObjectRequest[type=Transaction, {}]", hash),
         }
     }
 }
@@ -86,7 +77,7 @@ pub enum OwnedObjectResponse {
     Block(Block, Hash),
     BlockHeader(BlockHeader, Hash),
     Transaction(Transaction, Hash),
-    NotFound(ObjectRequest)
+    NotFound(ObjectRequest),
 }
 
 impl OwnedObjectResponse {
@@ -102,8 +93,12 @@ impl OwnedObjectResponse {
     pub fn get_request(&self) -> ObjectRequest {
         match &self {
             Self::Block(_, hash) => ObjectRequest::Block(Immutable::Owned(hash.clone())),
-            Self::BlockHeader(_, hash) => ObjectRequest::BlockHeader(Immutable::Owned(hash.clone())),
-            Self::Transaction(_, hash) => ObjectRequest::Transaction(Immutable::Owned(hash.clone())),
+            Self::BlockHeader(_, hash) => {
+                ObjectRequest::BlockHeader(Immutable::Owned(hash.clone()))
+            }
+            Self::Transaction(_, hash) => {
+                ObjectRequest::Transaction(Immutable::Owned(hash.clone()))
+            }
             Self::NotFound(request) => request.clone(),
         }
     }
@@ -135,16 +130,20 @@ pub enum ObjectResponse<'a> {
     Block(Cow<'a, Block>),
     BlockHeader(Cow<'a, BlockHeader>),
     Transaction(Cow<'a, Transaction>),
-    NotFound(ObjectRequest)
+    NotFound(ObjectRequest),
 }
 
 impl ObjectResponse<'_> {
     pub fn get_request(&self) -> Cow<'_, ObjectRequest> {
         match &self {
             Self::Block(block) => Cow::Owned(ObjectRequest::Block(Immutable::Owned(block.hash()))),
-            Self::BlockHeader(header) => Cow::Owned(ObjectRequest::BlockHeader(Immutable::Owned(header.hash()))),
-            Self::Transaction(tx) => Cow::Owned(ObjectRequest::Transaction(Immutable::Owned(tx.hash()))),
-            Self::NotFound(request) => Cow::Borrowed(request)
+            Self::BlockHeader(header) => {
+                Cow::Owned(ObjectRequest::BlockHeader(Immutable::Owned(header.hash())))
+            }
+            Self::Transaction(tx) => {
+                Cow::Owned(ObjectRequest::Transaction(Immutable::Owned(tx.hash())))
+            }
+            Self::NotFound(request) => Cow::Borrowed(request),
         }
     }
 
@@ -156,17 +155,17 @@ impl ObjectResponse<'_> {
                 let block = block.into_owned();
                 let hash = block.hash();
                 OwnedObjectResponse::Block(block, hash)
-            },
+            }
             Self::BlockHeader(header) => {
                 let hash = header.hash();
                 OwnedObjectResponse::BlockHeader(header.into_owned(), hash)
-            },
+            }
             Self::Transaction(tx) => {
                 let tx = tx.into_owned();
                 let hash = tx.hash();
                 OwnedObjectResponse::Transaction(tx, hash)
-            },
-            ObjectResponse::NotFound(request) => OwnedObjectResponse::NotFound(request)
+            }
+            ObjectResponse::NotFound(request) => OwnedObjectResponse::NotFound(request),
         }
     }
 }
@@ -177,7 +176,7 @@ impl<'a> Serializer for ObjectResponse<'a> {
             Self::Block(block) => {
                 writer.write_u8(0);
                 block.write(writer);
-            },
+            }
             Self::BlockHeader(header) => {
                 writer.write_u8(1);
                 header.write(writer);
@@ -185,7 +184,7 @@ impl<'a> Serializer for ObjectResponse<'a> {
             Self::Transaction(transaction) => {
                 writer.write_u8(2);
                 transaction.write(writer);
-            },
+            }
             Self::NotFound(obj) => {
                 writer.write_u8(3);
                 obj.write(writer);
@@ -200,7 +199,7 @@ impl<'a> Serializer for ObjectResponse<'a> {
             1 => Self::BlockHeader(Cow::Owned(BlockHeader::read(reader)?)),
             2 => Self::Transaction(Cow::Owned(Transaction::read(reader)?)),
             3 => Self::NotFound(ObjectRequest::read(reader)?),
-            _ => return Err(ReaderError::InvalidValue)
+            _ => return Err(ReaderError::InvalidValue),
         })
     }
 
@@ -209,7 +208,7 @@ impl<'a> Serializer for ObjectResponse<'a> {
             Self::Block(block) => block.size(),
             Self::BlockHeader(header) => header.size(),
             Self::Transaction(transaction) => transaction.size(),
-            Self::NotFound(obj) => obj.size()
+            Self::NotFound(obj) => obj.size(),
         }
     }
 }

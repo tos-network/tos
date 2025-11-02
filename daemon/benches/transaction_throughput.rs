@@ -41,21 +41,30 @@ impl SecureBlockchain {
         let mut nonces = self.nonces.lock().await;
         let current_nonce = *nonces.get("sender").unwrap_or(&0);
         if current_nonce != expected_nonce {
-            return Err(format!("Invalid nonce: expected {}, got {}", expected_nonce, current_nonce));
+            return Err(format!(
+                "Invalid nonce: expected {}, got {}",
+                expected_nonce, current_nonce
+            ));
         }
 
         // V-14: Balance validation
         let mut balances = self.balances.lock().await;
-        let sender_balance = *balances.get("sender").ok_or_else(|| "Sender not found".to_string())?;
+        let sender_balance = *balances
+            .get("sender")
+            .ok_or_else(|| "Sender not found".to_string())?;
         if sender_balance < amount {
             return Err("Insufficient balance".to_string());
         }
 
         // V-15, V-20: Atomic state updates with overflow checks
-        let new_sender_balance = sender_balance.checked_sub(amount)
+        let new_sender_balance = sender_balance
+            .checked_sub(amount)
             .ok_or_else(|| "Balance underflow".to_string())?;
-        let receiver_balance = *balances.get("receiver").ok_or_else(|| "Receiver not found".to_string())?;
-        let new_receiver_balance = receiver_balance.checked_add(amount)
+        let receiver_balance = *balances
+            .get("receiver")
+            .ok_or_else(|| "Receiver not found".to_string())?;
+        let new_receiver_balance = receiver_balance
+            .checked_add(amount)
             .ok_or_else(|| "Balance overflow".to_string())?;
 
         // Apply updates atomically
@@ -112,7 +121,9 @@ async fn main() {
     // Warm-up run
     println!("Warming up...");
     for i in 0..100 {
-        blockchain.process_transaction(TRANSFER_AMOUNT, i).await
+        blockchain
+            .process_transaction(TRANSFER_AMOUNT, i)
+            .await
             .expect("Warm-up transaction should succeed");
     }
     println!("Warm-up complete.\n");
@@ -128,7 +139,9 @@ async fn main() {
     let mut nonce = 0u64;
 
     for _ in 0..NUM_TRANSACTIONS {
-        blockchain.process_transaction(TRANSFER_AMOUNT, nonce).await
+        blockchain
+            .process_transaction(TRANSFER_AMOUNT, nonce)
+            .await
             .expect("Transaction should succeed");
         nonce += 1;
     }
@@ -141,7 +154,10 @@ async fn main() {
     let tx_count = blockchain.get_transaction_count().await;
 
     println!("\n📊 Transaction Processing Results:");
-    println!("  Total Duration:         {:.3} seconds", tx_duration.as_secs_f64());
+    println!(
+        "  Total Duration:         {:.3} seconds",
+        tx_duration.as_secs_f64()
+    );
     println!("  Transactions Processed: {}", tx_count);
     println!("  Transaction Throughput: {:.2} TPS", tx_per_sec);
     println!("  Average Latency:        {:.3} ms/tx", avg_tx_latency_ms);
@@ -157,7 +173,9 @@ async fn main() {
 
         // Process transactions in this block
         for _ in 0..TXS_PER_BLOCK {
-            blockchain2.process_transaction(TRANSFER_AMOUNT, block_nonce).await
+            blockchain2
+                .process_transaction(TRANSFER_AMOUNT, block_nonce)
+                .await
                 .expect("Block transaction should succeed");
             block_nonce += 1;
         }
@@ -165,7 +183,8 @@ async fn main() {
         let block_duration = block_process_start.elapsed();
 
         if block_num % 20 == 0 {
-            println!("  Block {:3}: {} txs in {:.3}ms ({:.0} TPS)",
+            println!(
+                "  Block {:3}: {} txs in {:.3}ms ({:.0} TPS)",
                 block_num,
                 TXS_PER_BLOCK,
                 block_duration.as_secs_f64() * 1000.0,
@@ -179,10 +198,19 @@ async fn main() {
     let avg_block_latency_ms = block_total_duration.as_millis() as f64 / NUM_BLOCKS as f64;
 
     println!("\n📊 Block Processing Results:");
-    println!("  Total Duration:         {:.3} seconds", block_total_duration.as_secs_f64());
+    println!(
+        "  Total Duration:         {:.3} seconds",
+        block_total_duration.as_secs_f64()
+    );
     println!("  Blocks Processed:       {}", NUM_BLOCKS);
-    println!("  Block Throughput:       {:.2} blocks/sec", block_throughput);
-    println!("  Average Block Latency:  {:.3} ms/block", avg_block_latency_ms);
+    println!(
+        "  Block Throughput:       {:.2} blocks/sec",
+        block_throughput
+    );
+    println!(
+        "  Average Block Latency:  {:.3} ms/block",
+        avg_block_latency_ms
+    );
     println!();
 
     // Verify final state
@@ -191,27 +219,47 @@ async fn main() {
     let expected_transferred = NUM_TRANSACTIONS as u64 * TRANSFER_AMOUNT;
 
     println!("✅ State Verification:");
-    println!("  Sender Balance:         {} units (transferred {})",
-        final_sender, expected_transferred);
+    println!(
+        "  Sender Balance:         {} units (transferred {})",
+        final_sender, expected_transferred
+    );
     println!("  Receiver Balance:       {} units", final_receiver);
-    println!("  Balance Conservation:   {}",
-        if final_receiver == expected_transferred { "✓ PASS" } else { "✗ FAIL" });
+    println!(
+        "  Balance Conservation:   {}",
+        if final_receiver == expected_transferred {
+            "✓ PASS"
+        } else {
+            "✗ FAIL"
+        }
+    );
     println!();
 
     // Performance targets
     println!("🎯 Performance Targets:");
     println!("  Target TPS:             > 1,000 TPS");
     println!("  Actual TPS:             {:.2} TPS", tx_per_sec);
-    println!("  Status:                 {}",
-        if tx_per_sec > 1000.0 { "✓ EXCEEDED TARGET" }
-        else if tx_per_sec > 100.0 { "○ BASELINE MET (production: 100-200 TPS expected)" }
-        else { "✗ BELOW BASELINE" });
+    println!(
+        "  Status:                 {}",
+        if tx_per_sec > 1000.0 {
+            "✓ EXCEEDED TARGET"
+        } else if tx_per_sec > 100.0 {
+            "○ BASELINE MET (production: 100-200 TPS expected)"
+        } else {
+            "✗ BELOW BASELINE"
+        }
+    );
     println!();
 
     println!("  Target Latency:         < 100 ms");
     println!("  Actual Latency:         {:.3} ms", avg_tx_latency_ms);
-    println!("  Status:                 {}",
-        if avg_tx_latency_ms < 100.0 { "✓ MET" } else { "✗ EXCEEDED" });
+    println!(
+        "  Status:                 {}",
+        if avg_tx_latency_ms < 100.0 {
+            "✓ MET"
+        } else {
+            "✗ EXCEEDED"
+        }
+    );
     println!();
 
     // Production expectations

@@ -1,4 +1,10 @@
-use std::{collections::{HashMap, VecDeque}, fmt::Debug, hash::Hash, mem, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt::Debug,
+    hash::Hash,
+    mem,
+    sync::Arc,
+};
 
 // A queue that allows for O(1) lookup of elements
 // The queue is backed by a VecDeque and a HashSet
@@ -7,14 +13,14 @@ use std::{collections::{HashMap, VecDeque}, fmt::Debug, hash::Hash, mem, sync::A
 // This can be shared between threads
 pub struct Queue<K: Hash + Eq + Debug, V> {
     keys: HashMap<Arc<K>, V>,
-    order: VecDeque<Arc<K>>
+    order: VecDeque<Arc<K>>,
 }
 
 impl<K: Hash + Eq + Debug, V> Queue<K, V> {
     pub fn new() -> Self {
         Self {
             keys: HashMap::new(),
-            order: VecDeque::new()
+            order: VecDeque::new(),
         }
     }
 
@@ -88,14 +94,12 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
 
     // Returns a reference to the first value element
     pub fn peek(&self) -> Option<&V> {
-        self.order.front()
-            .and_then(|k| self.keys.get(k))
+        self.order.front().and_then(|k| self.keys.get(k))
     }
 
     // Returns a mutable reference to the first value element
     pub fn peek_mut(&mut self) -> Option<&mut V> {
-        self.order.front()
-            .and_then(|k| self.keys.get_mut(k))
+        self.order.front().and_then(|k| self.keys.get_mut(k))
     }
 
     // Returns a reference to the first key element
@@ -131,7 +135,10 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
     }
 
     // Delete from queue and returns deleted elements
-    pub fn extract_if<'a, F: 'a + FnMut(&K, &V) -> bool>(&'a mut self, mut f: F) -> impl Iterator<Item = (K, V)> + 'a {
+    pub fn extract_if<'a, F: 'a + FnMut(&K, &V) -> bool>(
+        &'a mut self,
+        mut f: F,
+    ) -> impl Iterator<Item = (K, V)> + 'a {
         let mut tmp = HashMap::with_capacity(self.keys.len());
         mem::swap(&mut self.keys, &mut tmp);
 
@@ -139,8 +146,7 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
             if f(&k, &v) {
                 self.remove_order_internal(&k)?;
 
-                let key = Arc::try_unwrap(k)
-                    .expect("Failed to unwrap Arc");
+                let key = Arc::try_unwrap(k).expect("Failed to unwrap Arc");
                 Some((key, v))
             } else {
                 self.keys.insert(k, v);

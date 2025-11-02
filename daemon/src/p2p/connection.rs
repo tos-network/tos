@@ -1,45 +1,39 @@
-use crate::config::{
-    PEER_TIMEOUT_DISCONNECT,
-    PEER_TIMEOUT_INIT_CONNECTION,
-    PEER_SEND_BYTES_TIMEOUT
-};
 use super::{
     diffie_hellman,
-    encryption::{Encryption, CipherSide},
+    encryption::{CipherSide, Encryption},
     error::P2pError,
     packet::Packet,
-    EncryptionKey
+    EncryptionKey,
 };
+use crate::config::{
+    PEER_SEND_BYTES_TIMEOUT, PEER_TIMEOUT_DISCONNECT, PEER_TIMEOUT_INIT_CONNECTION,
+};
+use chacha20poly1305::aead::Buffer;
+use human_bytes::human_bytes;
+use humantime::format_duration;
+use log::{debug, error, trace, warn};
+use metrics::counter;
 use std::{
     borrow::Cow,
     convert::TryInto,
     fmt::{Display, Error, Formatter},
     net::SocketAddr,
-    sync::atomic::{
-        AtomicBool,
-        AtomicUsize,
-        Ordering
-    },
-    time::Duration
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    time::Duration,
 };
-use chacha20poly1305::aead::Buffer;
-use human_bytes::human_bytes;
-use humantime::format_duration;
-use metrics::counter;
 use tos_common::{
+    serializer::{Reader, Serializer},
+    time::{get_current_time_in_seconds, TimestampSeconds},
     tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{
             tcp::{OwnedReadHalf, OwnedWriteHalf},
-            TcpStream
+            TcpStream,
         },
         sync::Mutex,
-        time::timeout
+        time::timeout,
     },
-    time::{TimestampSeconds, get_current_time_in_seconds},
-    serializer::{Reader, Serializer},
 };
-use log::{debug, error, trace, warn};
 
 type P2pResult<T> = Result<T, P2pError>;
 
@@ -52,7 +46,7 @@ pub enum State {
     // handshake received, not checked
     Handshake,
     // connection is ready
-    Success
+    Success,
 }
 
 pub struct Connection {
@@ -81,7 +75,7 @@ pub struct Connection {
     // How many key rotation we sent
     rotate_key_out: AtomicUsize,
     // Encryption state used for packets
-    encryption: Encryption
+    encryption: Encryption,
 }
 
 // We are rotating every 1GB sent
@@ -132,8 +126,10 @@ impl Connection {
         // Wait for the peer to receive its key
         let Packet::KeyExchange(peer_key) = timeout(
             Duration::from_millis(PEER_TIMEOUT_INIT_CONNECTION),
-            self.read_packet(buffer, 256)
-        ).await?? else {
+            self.read_packet(buffer, 256),
+        )
+        .await??
+        else {
             error!("Expected KeyExchange packet");
             return Err(P2pError::InvalidPacket);
         };
@@ -170,7 +166,13 @@ impl Connection {
     // (That's what TLS/SSL does with the CA, but it's not decentralized and it's not trustless)
     // A potential idea would be to hardcode seed nodes keys,
     // and each nodes share the key of other along the socket address
-    pub async fn exchange_keys(&mut self, keypair: &diffie_hellman::DHKeyPair, expected_key: Option<&diffie_hellman::PublicKey>, action: diffie_hellman::KeyVerificationAction, buffer: &mut [u8]) -> P2pResult<diffie_hellman::PublicKey> {
+    pub async fn exchange_keys(
+        &mut self,
+        keypair: &diffie_hellman::DHKeyPair,
+        expected_key: Option<&diffie_hellman::PublicKey>,
+        action: diffie_hellman::KeyVerificationAction,
+        buffer: &mut [u8],
+    ) -> P2pResult<diffie_hellman::PublicKey> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("Exchanging keys with {}", self.addr);
         }
@@ -193,8 +195,10 @@ impl Connection {
         // Wait for the peer to receive its key
         let Packet::KeyExchange(peer_dh_key) = timeout(
             Duration::from_millis(PEER_TIMEOUT_INIT_CONNECTION),
-            self.read_packet(buffer, 256)
-        ).await?? else {
+            self.read_packet(buffer, 256),
+        )
+        .await??
+        else {
             error!("Expected KeyExchange packet");
             return Err(P2pError::InvalidPacket);
         };
@@ -213,13 +217,13 @@ impl Connection {
                         if log::log_enabled!(log::Level::Warn) {
                             warn!("Expected Diffie-Hellman key from {} is different from the received key, ignoring", self.addr);
                         }
-                    },
+                    }
                     diffie_hellman::KeyVerificationAction::Reject => {
                         if log::log_enabled!(log::Level::Error) {
                             error!("Expected Diffie-Hellman key from {} is different from the received key", self.addr);
                         }
                         return Err(P2pError::InvalidDHKey);
-                    },
+                    }
                     diffie_hellman::KeyVerificationAction::Ignore => {
                         if log::log_enabled!(log::Level::Debug) {
                             debug!("Expected Diffie-Hellman key from {} is different from the received key, ignoring", self.addr);
@@ -251,8 +255,10 @@ impl Connection {
         // Wait for the shared key of the peer to receive
         let Packet::KeyExchange(peer_key) = timeout(
             Duration::from_millis(PEER_TIMEOUT_INIT_CONNECTION),
-            self.read_packet(buffer, 256)
-        ).await?? else {
+            self.read_packet(buffer, 256),
+        )
+        .await??
+        else {
             error!("Expected KeyExchange packet");
             return Err(P2pError::InvalidPacket);
         };
@@ -262,7 +268,9 @@ impl Connection {
         }
 
         // Now that we got the shared peer key, update our encryption state
-        self.encryption.rotate_key(peer_key.into_owned(), CipherSide::Peer).await?;
+        self.encryption
+            .rotate_key(peer_key.into_owned(), CipherSide::Peer)
+            .await?;
 
         if log::log_enabled!(log::Level::Trace) {
             trace!("Key exchange with {} successful", self.addr);
@@ -279,7 +287,10 @@ impl Connection {
     // Generate a new key and rotate the current key
     async fn rotate_key_packet(&self) -> P2pResult<Vec<u8>> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("rotating our encryption key for peer {}", self.get_address());
+            trace!(
+                "rotating our encryption key for peer {}",
+                self.get_address()
+            );
         }
         // Generate a new key to use
         let new_key = self.encryption.generate_key()?;
@@ -327,7 +338,11 @@ impl Connection {
     // This function will send the packet to the peer without flushing the stream
     // Packet length is ALWAYS sent in raw (not encrypted)
     // Otherwise, we can't know how much bytes to read for each ciphertext/packet
-    async fn send_packet_bytes_internal(&self, stream: &mut OwnedWriteHalf, packet: &[u8]) -> P2pResult<()> {
+    async fn send_packet_bytes_internal(
+        &self,
+        stream: &mut OwnedWriteHalf,
+        packet: &[u8],
+    ) -> P2pResult<()> {
         let packet_len = packet.len() as u32;
         counter!("tos_p2p_bytes_out_total").increment(packet_len as u64);
         stream.write_all(&packet_len.to_be_bytes()).await?;
@@ -339,7 +354,12 @@ impl Connection {
     // Send bytes to the tcp stream with a timeout
     // if an error occurs, the connection is closed
     pub async fn send_bytes(&self, packet: &mut impl Buffer) -> P2pResult<()> {
-        match timeout(Duration::from_millis(PEER_SEND_BYTES_TIMEOUT), self.send_bytes_internal(packet)).await {
+        match timeout(
+            Duration::from_millis(PEER_SEND_BYTES_TIMEOUT),
+            self.send_bytes_internal(packet),
+        )
+        .await
+        {
             Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => {
                 if log::log_enabled!(log::Level::Debug) {
@@ -350,7 +370,11 @@ impl Connection {
             }
             Err(e) => {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Failed to send bytes in requested time to {}: {}", self.get_address(), e);
+                    debug!(
+                        "Failed to send bytes in requested time to {}: {}",
+                        self.get_address(),
+                        e
+                    );
                 }
                 self.closed.store(true, Ordering::SeqCst);
                 Err(e.into())
@@ -373,24 +397,33 @@ impl Connection {
         if self.encryption.is_ready() {
             self.encryption.encrypt_packet(packet).await?;
             // Send the bytes in encrypted format
-            self.send_packet_bytes_internal(&mut stream, packet.as_ref()).await?;
+            self.send_packet_bytes_internal(&mut stream, packet.as_ref())
+                .await?;
 
             // Count the bytes sent with the current key
-            let sum = self.bytes_encrypted.fetch_add(packet.len(), Ordering::Relaxed) + packet.len();
+            let sum = self
+                .bytes_encrypted
+                .fetch_add(packet.len(), Ordering::Relaxed)
+                + packet.len();
             self.bytes_encrypted.store(sum, Ordering::Relaxed);
 
             // Rotate the key if necessary
             if sum >= ROTATE_EVERY_N_BYTES {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Rotating our encryption key with peer {}", self.get_address());
+                    debug!(
+                        "Rotating our encryption key with peer {}",
+                        self.get_address()
+                    );
                 }
                 let packet = self.rotate_key_packet().await?;
                 // Send the new key to the peer
-                self.send_packet_bytes_internal(&mut stream, &packet).await?;
+                self.send_packet_bytes_internal(&mut stream, &packet)
+                    .await?;
             }
         } else {
             // Send the bytes in raw format
-            self.send_packet_bytes_internal(&mut stream, packet.as_ref()).await?;
+            self.send_packet_bytes_internal(&mut stream, packet.as_ref())
+                .await?;
         }
 
         // Flush the stream
@@ -406,10 +439,15 @@ impl Connection {
         if size == 0 || size > max_size {
             if self.get_state() == State::Success {
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("Received invalid packet size: {} bytes (max: {} bytes) from peer {}", size, max_size, self.get_address());
+                    warn!(
+                        "Received invalid packet size: {} bytes (max: {} bytes) from peer {}",
+                        size,
+                        max_size,
+                        self.get_address()
+                    );
                 }
             }
-            return Err(P2pError::InvalidPacketSize)
+            return Err(P2pError::InvalidPacketSize);
         }
         if log::log_enabled!(log::Level::Trace) {
             trace!("Size received: {}", size);
@@ -424,9 +462,15 @@ impl Connection {
         let packet = Packet::read(&mut reader)?;
         if reader.total_read() != bytes.len() {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("read {:?} only {}/{} on bytes available from {}", packet, reader.total_read(), bytes.len(), self);
+                debug!(
+                    "read {:?} only {}/{} on bytes available from {}",
+                    packet,
+                    reader.total_read(),
+                    bytes.len(),
+                    self
+                );
             }
-            return Err(P2pError::InvalidPacketNotFullRead)
+            return Err(P2pError::InvalidPacketNotFullRead);
         }
 
         Ok(packet)
@@ -441,7 +485,12 @@ impl Connection {
 
     // Read the packet size, this is always sent in raw (not encrypted)
     // And packet size must be a u32 in big endian
-    async fn read_packet_size(&self, stream: &mut OwnedReadHalf, buf: &mut [u8], max_usize: u32) -> P2pResult<u32> {
+    async fn read_packet_size(
+        &self,
+        stream: &mut OwnedReadHalf,
+        buf: &mut [u8],
+        max_usize: u32,
+    ) -> P2pResult<u32> {
         let read = self.read_bytes_from_stream(stream, &mut buf[0..4]).await?;
         if read != 4 {
             if self.get_state() == State::Success {
@@ -450,7 +499,7 @@ impl Connection {
                     warn!("Read: {:?}", &buf[0..read]);
                 }
             }
-            return Err(P2pError::InvalidPacketSize)
+            return Err(P2pError::InvalidPacketSize);
         }
         let array: [u8; 4] = buf[0..4].try_into()?;
         let size = u32::from_be_bytes(array);
@@ -462,24 +511,27 @@ impl Connection {
                     warn!("Received invalid packet size: {} bytes from {}", size, self);
                 }
             }
-            return Err(P2pError::InvalidPacketSize)
+            return Err(P2pError::InvalidPacketSize);
         }
         Ok(size)
     }
 
     // Read all bytes until the the buffer is full with the requested size
     // This support fragmented packets and encryption
-    async fn read_all_bytes(&self, stream: &mut OwnedReadHalf, buf: &mut [u8], mut left: usize) -> P2pResult<Vec<u8>> {
+    async fn read_all_bytes(
+        &self,
+        stream: &mut OwnedReadHalf,
+        buf: &mut [u8],
+        mut left: usize,
+    ) -> P2pResult<Vec<u8>> {
         let buf_size = buf.len();
         // Allocate a vector to store the bytes read
         let mut bytes = Vec::with_capacity(left);
         while left > 0 {
-            let max = if buf_size > left {
-                left
-            } else {
-                buf_size
-            };
-            let read = self.read_bytes_from_stream(stream, &mut buf[0..max]).await?;
+            let max = if buf_size > left { left } else { buf_size };
+            let read = self
+                .read_bytes_from_stream(stream, &mut buf[0..max])
+                .await?;
             left -= read;
             bytes.extend(&buf[0..read]);
         }
@@ -497,7 +549,11 @@ impl Connection {
     // this function will wait until something is sent to the socket if it's in blocking mode
     // this return the size of data read & set in the buffer.
     // used to only lock one time the stream and read on it
-    async fn read_bytes_from_stream_internal(&self, stream: &mut OwnedReadHalf, buf: &mut [u8]) -> P2pResult<usize> {
+    async fn read_bytes_from_stream_internal(
+        &self,
+        stream: &mut OwnedReadHalf,
+        buf: &mut [u8],
+    ) -> P2pResult<usize> {
         let mut read = 0;
         let buf_len = buf.len();
         // Packet may have been fragmented, try to read it completely
@@ -519,7 +575,11 @@ impl Connection {
     // this return the size of data read & set in the buffer.
     // used to only lock one time the stream and read on it
     // on any error, it will considered as disconnected
-    async fn read_bytes_from_stream(&self, stream: &mut OwnedReadHalf, buf: &mut [u8]) -> P2pResult<usize> {
+    async fn read_bytes_from_stream(
+        &self,
+        stream: &mut OwnedReadHalf,
+        buf: &mut [u8],
+    ) -> P2pResult<usize> {
         match self.read_bytes_from_stream_internal(stream, buf).await {
             Ok(read) => Ok(read),
             Err(e) => {
@@ -547,7 +607,11 @@ impl Connection {
 
         // sometimes the peer is not removed on other peer side
         let mut stream = self.write.lock().await;
-        timeout(Duration::from_secs(PEER_TIMEOUT_DISCONNECT), stream.shutdown()).await??;
+        timeout(
+            Duration::from_secs(PEER_TIMEOUT_DISCONNECT),
+            stream.shutdown(),
+        )
+        .await??;
 
         Ok(())
     }

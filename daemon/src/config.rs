@@ -3,20 +3,18 @@ use tos_common::{
     api::daemon::{DevFeeThreshold, HardFork},
     block::BlockVersion,
     config::BYTES_PER_KB,
-    crypto::{
-        Address,
-        Hash,
-        PublicKey
-    },
+    crypto::{Address, Hash, PublicKey},
     difficulty::Difficulty,
     network::Network,
-    time::TimestampSeconds,
     static_assert,
+    time::TimestampSeconds,
 };
 
 // In case of potential forks, have a unique network id to not connect to others compatible chains
 pub const NETWORK_ID_SIZE: usize = 16;
-pub const NETWORK_ID: [u8; NETWORK_ID_SIZE] = [0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x6f, 0x73, 0x73, 0x6f, 0x6e, 0x69, 0x6d, 0x72, 0x65, 0x74];
+pub const NETWORK_ID: [u8; NETWORK_ID_SIZE] = [
+    0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x6f, 0x73, 0x73, 0x6f, 0x6e, 0x69, 0x6d, 0x72, 0x65, 0x74,
+];
 
 // bind addresses
 pub const DEFAULT_P2P_BIND_ADDRESS: &str = "0.0.0.0:2125";
@@ -124,9 +122,9 @@ pub fn parallel_test_mode_enabled() -> bool {
 
 // Minimum transactions required to trigger parallel execution (avoid overhead on small blocks)
 // Network-specific thresholds for different use cases:
-pub const MIN_TXS_FOR_PARALLEL_MAINNET: usize = 20;  // Production: Higher threshold for proven performance
-pub const MIN_TXS_FOR_PARALLEL_TESTNET: usize = 10;  // Testing: Medium threshold for realistic testing
-pub const MIN_TXS_FOR_PARALLEL_DEVNET: usize = 4;    // Development: Lower threshold for easier testing
+pub const MIN_TXS_FOR_PARALLEL_MAINNET: usize = 20; // Production: Higher threshold for proven performance
+pub const MIN_TXS_FOR_PARALLEL_TESTNET: usize = 10; // Testing: Medium threshold for realistic testing
+pub const MIN_TXS_FOR_PARALLEL_DEVNET: usize = 4; // Development: Lower threshold for easier testing
 
 /// Get minimum transaction count for parallel execution based on network type
 ///
@@ -168,7 +166,7 @@ pub const DEV_FEES: [DevFeeThreshold; 2] = [
     // Activated for 3M blocks
     DevFeeThreshold {
         height: 0,
-        fee_percentage: 10
+        fee_percentage: 10,
     },
     // Activated for the rest
     DevFeeThreshold {
@@ -176,8 +174,8 @@ pub const DEV_FEES: [DevFeeThreshold; 2] = [
         // 15 768 000 blocks * 1s block time / 60s / 60m / 24h / 365d ≈ 0.5 years
         // Note: TIP-1's 3s block proposal was deprecated, using 1s blocks
         height: 15_768_000,
-        fee_percentage: 5
-    }
+        fee_percentage: 5,
+    },
 ];
 // only 30% of reward for side block
 // This is to prevent spamming side blocks
@@ -305,20 +303,20 @@ const HARD_FORKS: [HardFork; 3] = [
         height: 0,
         version: BlockVersion::V0,
         changelog: "Initial version",
-        version_requirement: None
+        version_requirement: None,
     },
     HardFork {
         height: 0,
         version: BlockVersion::V1,
         changelog: "tos-hash v2",
-        version_requirement: None
+        version_requirement: None,
     },
     HardFork {
         height: 0,
         version: BlockVersion::V2,
         changelog: "MultiSig, P2P",
-        version_requirement: None
-    }
+        version_requirement: None,
+    },
 ];
 
 // Testnet / Stagenet / Devnet hard forks
@@ -328,20 +326,20 @@ const OTHERS_NETWORK_HARD_FORKS: [HardFork; 3] = [
         height: 0,
         version: BlockVersion::V1,
         changelog: "tos-hash v2, 1-second blocks",
-        version_requirement: None
+        version_requirement: None,
     },
     HardFork {
         height: 10,
         version: BlockVersion::V2,
         changelog: "MultiSig, P2P",
-        version_requirement: Some(">=1.16.0")
+        version_requirement: Some(">=1.16.0"),
     },
     HardFork {
         height: 15,
         version: BlockVersion::V3,
         changelog: "Smart Contracts",
-        version_requirement: Some(">=1.16.0")
-    }
+        version_requirement: Some(">=1.16.0"),
+    },
 ];
 
 // Mainnet seed nodes
@@ -359,7 +357,7 @@ const MAINNET_SEED_NODES: [&str; 7] = [
     // Great Britain
     "51.195.220.137:2125",
     // Canada
-    "66.70.179.137:2125"
+    "66.70.179.137:2125",
 ];
 
 // Testnet seed nodes
@@ -375,8 +373,14 @@ const TESTNET_GENESIS_BLOCK: &str = "0100000000000000000000000000000000000000000
 
 // Genesis block hash for both networks
 // It must be the same as the hash of the genesis block
-const MAINNET_GENESIS_BLOCK_HASH: Hash = Hash::new([125, 128, 19, 122, 147, 246, 47, 66, 57, 103, 85, 40, 152, 255, 81, 116, 36, 181, 100, 245, 104, 139, 242, 106, 2, 115, 76, 58, 136, 231, 211, 171]);
-const TESTNET_GENESIS_BLOCK_HASH: Hash = Hash::new([126, 75, 58, 199, 125, 227, 189, 220, 151, 221, 57, 169, 84, 28, 131, 20, 6, 150, 91, 156, 106, 138, 89, 155, 242, 31, 88, 90, 130, 109, 114, 181]);
+const MAINNET_GENESIS_BLOCK_HASH: Hash = Hash::new([
+    125, 128, 19, 122, 147, 246, 47, 66, 57, 103, 85, 40, 152, 255, 81, 116, 36, 181, 100, 245,
+    104, 139, 242, 106, 2, 115, 76, 58, 136, 231, 211, 171,
+]);
+const TESTNET_GENESIS_BLOCK_HASH: Hash = Hash::new([
+    126, 75, 58, 199, 125, 227, 189, 220, 151, 221, 57, 169, 84, 28, 131, 20, 6, 150, 91, 156, 106,
+    138, 89, 155, 242, 31, 88, 90, 130, 109, 114, 181,
+]);
 
 // Genesis block getter
 // This is necessary to prevent having the same Genesis Block for differents network
@@ -385,7 +389,7 @@ pub fn get_hex_genesis_block(network: &Network) -> Option<&str> {
     match network {
         Network::Mainnet => Some(MAINNET_GENESIS_BLOCK),
         Network::Testnet | Network::Stagenet => Some(TESTNET_GENESIS_BLOCK),
-        Network::Devnet => None
+        Network::Devnet => None,
     }
 }
 
@@ -401,7 +405,7 @@ pub fn get_genesis_block_hash(network: &Network) -> Option<&'static Hash> {
     match network {
         Network::Mainnet => Some(&MAINNET_GENESIS_BLOCK_HASH),
         Network::Testnet | Network::Stagenet => Some(&TESTNET_GENESIS_BLOCK_HASH),
-        Network::Devnet => None
+        Network::Devnet => None,
     }
 }
 

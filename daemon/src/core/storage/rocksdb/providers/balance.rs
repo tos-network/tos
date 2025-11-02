@@ -1,41 +1,34 @@
+use crate::core::{
+    error::BlockchainError,
+    storage::{
+        rocksdb::{AccountId, AssetId, Column, IteratorMode},
+        BalanceProvider, NetworkProvider, RocksStorage,
+    },
+};
 use async_trait::async_trait;
 use log::{trace, warn};
 use rocksdb::Direction;
 use tos_common::{
-    account::{
-        AccountSummary,
-        Balance,
-        BalanceType,
-        VersionedBalance
-    },
+    account::{AccountSummary, Balance, BalanceType, VersionedBalance},
     block::TopoHeight,
-    crypto::{
-        Hash,
-        PublicKey
-    },
+    crypto::{Hash, PublicKey},
     serializer::RawBytes,
-};
-use crate::core::{
-    error::BlockchainError,
-    storage::{
-        rocksdb::{
-            AccountId,
-            AssetId,
-            Column,
-            IteratorMode
-        },
-        BalanceProvider,
-        NetworkProvider,
-        RocksStorage
-    }
 };
 
 #[async_trait]
 impl BalanceProvider for RocksStorage {
     // Check if a balance exists for asset and key
-    async fn has_balance_for(&self, key: &PublicKey, asset: &Hash) -> Result<bool, BlockchainError> {
+    async fn has_balance_for(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("has balance for {} {}", key.as_address(self.is_mainnet()), asset);
+            trace!(
+                "has balance for {} {}",
+                key.as_address(self.is_mainnet()),
+                asset
+            );
         }
         let account_id = self.get_account_id(key)?;
         let asset_id = self.get_asset_id(asset)?;
@@ -45,9 +38,19 @@ impl BalanceProvider for RocksStorage {
     }
 
     // Check if a balance exists for asset and key at specific topoheight
-    async fn has_balance_at_exact_topoheight(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
+    async fn has_balance_at_exact_topoheight(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("has balance at exact topoheight {} for {} {}", topoheight, key.as_address(self.is_mainnet()), asset);
+            trace!(
+                "has balance at exact topoheight {} for {} {}",
+                topoheight,
+                key.as_address(self.is_mainnet()),
+                asset
+            );
         }
         let account_id = self.get_account_id(key)?;
         let asset_id = self.get_asset_id(asset)?;
@@ -57,9 +60,19 @@ impl BalanceProvider for RocksStorage {
     }
 
     // Get the balance at a specific topoheight for asset and key
-    async fn get_balance_at_exact_topoheight(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<VersionedBalance, BlockchainError> {
+    async fn get_balance_at_exact_topoheight(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<VersionedBalance, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("get balance at exact topoheight {} for {} {}", topoheight, key.as_address(self.is_mainnet()), asset);
+            trace!(
+                "get balance at exact topoheight {} for {} {}",
+                topoheight,
+                key.as_address(self.is_mainnet()),
+                asset
+            );
         }
         let account_id = self.get_account_id(key)?;
         let asset_id = self.get_asset_id(asset)?;
@@ -69,9 +82,19 @@ impl BalanceProvider for RocksStorage {
     }
 
     // Get the balance under or equal topoheight requested for asset and key
-    async fn get_balance_at_maximum_topoheight(&self, key: &PublicKey, asset: &Hash, maximum_topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedBalance)>, BlockchainError> {
+    async fn get_balance_at_maximum_topoheight(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+        maximum_topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, VersionedBalance)>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("get balance at maximum topoheight {} for {} {}", maximum_topoheight, key.as_address(self.is_mainnet()), asset);
+            trace!(
+                "get balance at maximum topoheight {} for {} {}",
+                maximum_topoheight,
+                key.as_address(self.is_mainnet()),
+                asset
+            );
         }
         let Some(account_id) = self.get_optional_account_id(key)? else {
             if log::log_enabled!(log::Level::Trace) {
@@ -81,20 +104,25 @@ impl BalanceProvider for RocksStorage {
         };
         let asset_id = self.get_asset_id(asset)?;
 
-        let versioned_key = Self::get_versioned_account_balance_key(account_id, asset_id, maximum_topoheight);
+        let versioned_key =
+            Self::get_versioned_account_balance_key(account_id, asset_id, maximum_topoheight);
         // Check if we have a balance at exact topoheight
         let mut topo = if self.contains_data(Column::VersionedBalances, &versioned_key)? {
             if log::log_enabled!(log::Level::Trace) {
                 trace!("using topoheight {}", maximum_topoheight);
             }
             Some(maximum_topoheight)
-        } else  {
+        } else {
             trace!("load latest version available");
             // skip the topoheight from the key, load the last topoheight
-            match self.load_optional_from_disk::<[u8], TopoHeight>(Column::Balances, &versioned_key[8..24])? {
+            match self.load_optional_from_disk::<[u8], TopoHeight>(
+                Column::Balances,
+                &versioned_key[8..24],
+            )? {
                 Some(pointer_topo) => {
                     // FIX: Defensive check - verify pointer points to existing data
-                    let pointer_key = Self::get_versioned_account_balance_key(account_id, asset_id, pointer_topo);
+                    let pointer_key =
+                        Self::get_versioned_account_balance_key(account_id, asset_id, pointer_topo);
                     if self.contains_data(Column::VersionedBalances, &pointer_key)? {
                         Some(pointer_topo)
                     } else {
@@ -111,13 +139,17 @@ impl BalanceProvider for RocksStorage {
                         // Use reverse iterator to scan backwards from maximum_topoheight
                         // This checks EVERY topoheight without gaps
                         let mut found_topo = None;
-                        let start_key = Self::get_versioned_account_balance_key(account_id, asset_id, maximum_topoheight);
+                        let start_key = Self::get_versioned_account_balance_key(
+                            account_id,
+                            asset_id,
+                            maximum_topoheight,
+                        );
 
                         for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(
                             &self.db,
                             self.snapshot.as_ref(),
                             IteratorMode::From(&start_key, Direction::Reverse),
-                            Column::VersionedBalances
+                            Column::VersionedBalances,
                         )? {
                             let (iter_key, _) = res?;
 
@@ -125,10 +157,14 @@ impl BalanceProvider for RocksStorage {
                             // Check if this key matches our account+asset
                             if iter_key.len() >= 24
                                 && &iter_key[8..16] == &account_id.to_be_bytes()
-                                && &iter_key[16..24] == &asset_id.to_be_bytes() {
+                                && &iter_key[16..24] == &asset_id.to_be_bytes()
+                            {
                                 // Extract topoheight from key
-                                let iter_topo = u64::from_be_bytes(iter_key[0..8].try_into()
-                                    .map_err(|_| BlockchainError::CorruptedData)?);
+                                let iter_topo = u64::from_be_bytes(
+                                    iter_key[0..8]
+                                        .try_into()
+                                        .map_err(|_| BlockchainError::CorruptedData)?,
+                                );
 
                                 // Must be <= maximum_topoheight
                                 if iter_topo <= maximum_topoheight {
@@ -147,16 +183,22 @@ impl BalanceProvider for RocksStorage {
                         found_topo
                     }
                 }
-                None => None
+                None => None,
             }
         };
 
         // Iterate over our linked list of versions
         while let Some(topoheight) = topo {
-            let versioned_key = Self::get_versioned_account_balance_key(account_id, asset_id, topoheight);
+            let versioned_key =
+                Self::get_versioned_account_balance_key(account_id, asset_id, topoheight);
             if topoheight <= maximum_topoheight {
                 if log::log_enabled!(log::Level::Trace) {
-                    trace!("versioned balance of {} asset {} found at {}", key.as_address(self.is_mainnet()), asset_id, topoheight);
+                    trace!(
+                        "versioned balance of {} asset {} found at {}",
+                        key.as_address(self.is_mainnet()),
+                        asset_id,
+                        topoheight
+                    );
                 }
                 let version = self.load_from_disk(Column::VersionedBalances, &versioned_key)?;
                 return Ok(Some((topoheight, version)));
@@ -169,9 +211,17 @@ impl BalanceProvider for RocksStorage {
     }
 
     // Get the last topoheight that the account has a balance
-    async fn get_last_topoheight_for_balance(&self, key: &PublicKey, asset: &Hash) -> Result<TopoHeight, BlockchainError> {
+    async fn get_last_topoheight_for_balance(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+    ) -> Result<TopoHeight, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("get last topoheight for balance {} {}", key.as_address(self.is_mainnet()), asset);
+            trace!(
+                "get last topoheight for balance {} {}",
+                key.as_address(self.is_mainnet()),
+                asset
+            );
         }
         let account_id = self.get_account_id(key)?;
         let asset_id = self.get_asset_id(asset)?;
@@ -187,23 +237,44 @@ impl BalanceProvider for RocksStorage {
     // But also if we have a balance at topoheight 50, the previous topoheight will also be 50
     // This must be called only to create a new versioned balance for the next topoheight as it's keeping changes from the balance at same topo
     // Bool return type is true if the balance is new (no previous balance found)
-    async fn get_new_versioned_balance(&self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<(VersionedBalance, bool), BlockchainError> {
+    async fn get_new_versioned_balance(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<(VersionedBalance, bool), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("get new versioned balance for {} {} at topoheight {}", key.as_address(self.is_mainnet()), asset, topoheight);
+            trace!(
+                "get new versioned balance for {} {} at topoheight {}",
+                key.as_address(self.is_mainnet()),
+                asset,
+                topoheight
+            );
         }
-        match self.get_balance_at_maximum_topoheight(key, asset, topoheight).await? {
+        match self
+            .get_balance_at_maximum_topoheight(key, asset, topoheight)
+            .await?
+        {
             Some((topo, mut version)) => {
                 if log::log_enabled!(log::Level::Trace) {
-                    trace!("Mark version as clean for {} {} at topoheight {}", key.as_address(self.is_mainnet()), asset, topo);
+                    trace!(
+                        "Mark version as clean for {} {} at topoheight {}",
+                        key.as_address(self.is_mainnet()),
+                        asset,
+                        topo
+                    );
                 }
                 // Mark it as clean
                 version.prepare_new(Some(topo));
                 Ok((version, false))
-            },
+            }
             // if its the first balance, then we return a zero balance
             None => {
                 if log::log_enabled!(log::Level::Trace) {
-                    trace!("no balance found, new version for {}", key.as_address(self.is_mainnet()));
+                    trace!(
+                        "no balance found, new version for {}",
+                        key.as_address(self.is_mainnet())
+                    );
                 }
                 Ok((VersionedBalance::zero(), true))
             }
@@ -211,38 +282,72 @@ impl BalanceProvider for RocksStorage {
     }
 
     // Search the highest balance where we have a outgoing TX
-    async fn get_output_balance_at_maximum_topoheight(&self, key: &PublicKey, asset: &Hash, maximum_topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedBalance)>, BlockchainError> {
+    async fn get_output_balance_at_maximum_topoheight(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+        maximum_topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, VersionedBalance)>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("get output balance at maximum topoheight {} for {} {}", maximum_topoheight, key.as_address(self.is_mainnet()), asset);
+            trace!(
+                "get output balance at maximum topoheight {} for {} {}",
+                maximum_topoheight,
+                key.as_address(self.is_mainnet()),
+                asset
+            );
         }
-        self.get_output_balance_in_range(key, asset, 0, maximum_topoheight).await
+        self.get_output_balance_in_range(key, asset, 0, maximum_topoheight)
+            .await
     }
 
     // Search the highest balance where we have a spending
     // To short-circuit the search, we stop if we go below the reference topoheight
-    async fn get_output_balance_in_range(&self, key: &PublicKey, asset: &Hash, minimum_topoheight: TopoHeight, maximum_topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedBalance)>, BlockchainError> {
+    async fn get_output_balance_in_range(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+        minimum_topoheight: TopoHeight,
+        maximum_topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, VersionedBalance)>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("get output balance in range {} - {} for {} {}", minimum_topoheight, maximum_topoheight, key.as_address(self.is_mainnet()), asset);
+            trace!(
+                "get output balance in range {} - {} for {} {}",
+                minimum_topoheight,
+                maximum_topoheight,
+                key.as_address(self.is_mainnet()),
+                asset
+            );
         }
         let account_id = self.get_account_id(key)?;
         let asset_id = self.get_asset_id(asset)?;
 
-        let versioned_key = Self::get_versioned_account_balance_key(account_id, asset_id, maximum_topoheight);
-        let Some(pointer) = self.load_optional_from_disk(Column::Balances, &versioned_key[8..])? else {
+        let versioned_key =
+            Self::get_versioned_account_balance_key(account_id, asset_id, maximum_topoheight);
+        let Some(pointer) = self.load_optional_from_disk(Column::Balances, &versioned_key[8..])?
+        else {
             if log::log_enabled!(log::Level::Trace) {
                 trace!("no balance pointer found");
             }
-            return Ok(None)
+            return Ok(None);
         };
 
-        let start_topo = if pointer > maximum_topoheight && self.contains_data(Column::VersionedBalances, &versioned_key)? {
+        let start_topo = if pointer > maximum_topoheight
+            && self.contains_data(Column::VersionedBalances, &versioned_key)?
+        {
             if log::log_enabled!(log::Level::Trace) {
-                trace!("balance found at topoheight {}, using it", maximum_topoheight);
+                trace!(
+                    "balance found at topoheight {}, using it",
+                    maximum_topoheight
+                );
             }
             maximum_topoheight
         } else {
             if log::log_enabled!(log::Level::Trace) {
-                trace!("balance not found at topoheight {}, using topoheight pointer {}", maximum_topoheight, pointer);
+                trace!(
+                    "balance not found at topoheight {}, using topoheight pointer {}",
+                    maximum_topoheight,
+                    pointer
+                );
             }
             pointer
         };
@@ -253,17 +358,27 @@ impl BalanceProvider for RocksStorage {
             if topoheight < minimum_topoheight {
                 // We reached the min, stop searching
                 if log::log_enabled!(log::Level::Trace) {
-                    trace!("balance reached minimum topoheight {}, stopping search", minimum_topoheight);
+                    trace!(
+                        "balance reached minimum topoheight {}, stopping search",
+                        minimum_topoheight
+                    );
                 }
                 break;
             }
 
-            let versioned_key = Self::get_versioned_account_balance_key(account_id, asset_id, topoheight);
-            let (prev_topo, balance_type): (Option<u64>, BalanceType) = self.load_from_disk(Column::VersionedBalances, &versioned_key)?;
+            let versioned_key =
+                Self::get_versioned_account_balance_key(account_id, asset_id, topoheight);
+            let (prev_topo, balance_type): (Option<u64>, BalanceType) =
+                self.load_from_disk(Column::VersionedBalances, &versioned_key)?;
 
             if topoheight <= maximum_topoheight && balance_type.contains_output() {
                 if log::log_enabled!(log::Level::Trace) {
-                    trace!("balance of {} asset {} is updated at {}", key.as_address(self.is_mainnet()), asset_id, topoheight);
+                    trace!(
+                        "balance of {} asset {} is updated at {}",
+                        key.as_address(self.is_mainnet()),
+                        asset_id,
+                        topoheight
+                    );
                 }
                 let version = self.load_from_disk(Column::VersionedBalances, &versioned_key)?;
                 return Ok(Some((topoheight, version)));
@@ -276,9 +391,17 @@ impl BalanceProvider for RocksStorage {
     }
 
     // Get the last balance of the account, this is based on the last topoheight (pointer) available
-    async fn get_last_balance(&self, key: &PublicKey, asset: &Hash) -> Result<(TopoHeight, VersionedBalance), BlockchainError> {
+    async fn get_last_balance(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+    ) -> Result<(TopoHeight, VersionedBalance), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("get last balance for {} {}", key.as_address(self.is_mainnet()), asset);
+            trace!(
+                "get last balance for {} {}",
+                key.as_address(self.is_mainnet()),
+                asset
+            );
         }
         let account_id = self.get_account_id(key)?;
         let asset_id = self.get_asset_id(asset)?;
@@ -286,16 +409,27 @@ impl BalanceProvider for RocksStorage {
         let key = Self::get_account_balance_key(account_id, asset_id);
         let topoheight = self.load_from_disk(Column::Balances, &key)?;
 
-        let versioned_key = Self::get_versioned_account_balance_key(account_id, asset_id, topoheight);
+        let versioned_key =
+            Self::get_versioned_account_balance_key(account_id, asset_id, topoheight);
         let versioned_balance = self.load_from_disk(Column::VersionedBalances, &versioned_key)?;
 
         Ok((topoheight, versioned_balance))
     }
 
     // Set the last topoheight for this asset and key to the requested topoheight
-    fn set_last_topoheight_for_balance(&mut self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight) -> Result<(), BlockchainError> {
+    fn set_last_topoheight_for_balance(
+        &mut self,
+        key: &PublicKey,
+        asset: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("set last topoheight for {} {} to {}", key.as_address(self.is_mainnet()), asset, topoheight);
+            trace!(
+                "set last topoheight for {} {} to {}",
+                key.as_address(self.is_mainnet()),
+                asset,
+                topoheight
+            );
         }
         let account_id = self.get_account_id(key)?;
         let asset_id = self.get_asset_id(asset)?;
@@ -306,45 +440,92 @@ impl BalanceProvider for RocksStorage {
 
     // Set the last balance of the account, update the last topoheight pointer for asset and key
     // This is same as `set_last_topoheight_for_balance` but will also update the versioned balance
-    async fn set_last_balance_to(&mut self, key: &PublicKey, asset: &Hash, topoheight: TopoHeight, version: &VersionedBalance) -> Result<(), BlockchainError> {
+    async fn set_last_balance_to(
+        &mut self,
+        key: &PublicKey,
+        asset: &Hash,
+        topoheight: TopoHeight,
+        version: &VersionedBalance,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("set last balance for {} {} to {}", key.as_address(self.is_mainnet()), asset, topoheight);
+            trace!(
+                "set last balance for {} {} to {}",
+                key.as_address(self.is_mainnet()),
+                asset,
+                topoheight
+            );
         }
         let account_id = self.get_account_id(key)?;
         let asset_id = self.get_asset_id(asset)?;
 
-        let versioned_key = Self::get_versioned_account_balance_key(account_id, asset_id, topoheight);
-        self.insert_into_disk(Column::Balances, &versioned_key[8..], &topoheight.to_be_bytes())?;
+        let versioned_key =
+            Self::get_versioned_account_balance_key(account_id, asset_id, topoheight);
+        self.insert_into_disk(
+            Column::Balances,
+            &versioned_key[8..],
+            &topoheight.to_be_bytes(),
+        )?;
         self.insert_into_disk(Column::VersionedBalances, &versioned_key, version)
     }
 
     // Set the balance at specific topoheight for asset and key
-    async fn set_balance_at_topoheight(&mut self, asset: &Hash, topoheight: TopoHeight, key: &PublicKey, balance: &VersionedBalance) -> Result<(), BlockchainError> {
+    async fn set_balance_at_topoheight(
+        &mut self,
+        asset: &Hash,
+        topoheight: TopoHeight,
+        key: &PublicKey,
+        balance: &VersionedBalance,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("set balance at topoheight {} for {} {}", topoheight, key.as_address(self.is_mainnet()), asset);
+            trace!(
+                "set balance at topoheight {} for {} {}",
+                topoheight,
+                key.as_address(self.is_mainnet()),
+                asset
+            );
         }
         let account_id = self.get_account_id(key)?;
         let asset_id = self.get_asset_id(asset)?;
 
-        let versioned_key = Self::get_versioned_account_balance_key(account_id, asset_id, topoheight);
+        let versioned_key =
+            Self::get_versioned_account_balance_key(account_id, asset_id, topoheight);
         self.insert_into_disk(Column::VersionedBalances, &versioned_key, balance)
     }
 
     // Get the account summary for a key and asset on the specified topoheight range
     // If None is returned, that means there was no changes that occured in the specified topoheight range
-    async fn get_account_summary_for(&self, key: &PublicKey, asset: &Hash, min_topoheight: TopoHeight, max_topoheight: TopoHeight) -> Result<Option<AccountSummary>, BlockchainError> {
+    async fn get_account_summary_for(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+        min_topoheight: TopoHeight,
+        max_topoheight: TopoHeight,
+    ) -> Result<Option<AccountSummary>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("get account summary for {} {} min topoheight {} max topoheight {}", key.as_address(self.is_mainnet()), asset, min_topoheight, max_topoheight);
+            trace!(
+                "get account summary for {} {} min topoheight {} max topoheight {}",
+                key.as_address(self.is_mainnet()),
+                asset,
+                min_topoheight,
+                max_topoheight
+            );
         }
         // first search if we have a valid balance at the maximum topoheight
-        if let Some((topo, version)) = self.get_balance_at_maximum_topoheight(key, asset, max_topoheight).await? {
+        if let Some((topo, version)) = self
+            .get_balance_at_maximum_topoheight(key, asset, max_topoheight)
+            .await?
+        {
             if topo < min_topoheight {
                 if log::log_enabled!(log::Level::Trace) {
-                    trace!("balance found at topoheight {} below min topoheight {}, skipping", topo, min_topoheight);
+                    trace!(
+                        "balance found at topoheight {} below min topoheight {}, skipping",
+                        topo,
+                        min_topoheight
+                    );
                 }
-                return Ok(None)
+                return Ok(None);
             }
-            
+
             let mut account = AccountSummary {
                 output_topoheight: None,
                 stable_topoheight: topo,
@@ -353,9 +534,14 @@ impl BalanceProvider for RocksStorage {
             // We have an output in it, we can return the account
             if version.contains_output() || version.get_previous_topoheight().is_none() {
                 if log::log_enabled!(log::Level::Trace) {
-                    trace!("account summary found for {} {} at topoheight {}", key.as_address(self.is_mainnet()), asset, topo);
+                    trace!(
+                        "account summary found for {} {} at topoheight {}",
+                        key.as_address(self.is_mainnet()),
+                        asset,
+                        topo
+                    );
                 }
-                return Ok(Some(account))
+                return Ok(Some(account));
             }
 
             let account_id = self.get_account_id(key)?;
@@ -364,11 +550,18 @@ impl BalanceProvider for RocksStorage {
             // We need to search through the whole history to see if we have a balance with output
             let mut previous = version.get_previous_topoheight();
             while let Some(topo) = previous {
-                let versioned_key = Self::get_versioned_account_balance_key(account_id, asset_id, topo);
-                let (previous_topo, balance_type): (Option<u64>, BalanceType) = self.load_from_disk(Column::VersionedBalances, &versioned_key)?;
+                let versioned_key =
+                    Self::get_versioned_account_balance_key(account_id, asset_id, topo);
+                let (previous_topo, balance_type): (Option<u64>, BalanceType) =
+                    self.load_from_disk(Column::VersionedBalances, &versioned_key)?;
                 if balance_type.contains_output() {
                     if log::log_enabled!(log::Level::Trace) {
-                        trace!("balance containing output found for {} {} at topoheight {}", key.as_address(self.is_mainnet()), asset, topo);
+                        trace!(
+                            "balance containing output found for {} {} at topoheight {}",
+                            key.as_address(self.is_mainnet()),
+                            asset,
+                            topo
+                        );
                     }
                     account.output_topoheight = Some(topo);
                     break;
@@ -377,7 +570,7 @@ impl BalanceProvider for RocksStorage {
                 previous = previous_topo;
             }
 
-            return Ok(Some(account))
+            return Ok(Some(account));
         }
 
         Ok(None)
@@ -386,9 +579,22 @@ impl BalanceProvider for RocksStorage {
     // Get the spendable balances for a key and asset on the specified topoheight (exclusive) range
     // Maximum 1024 entries per Vec<Balance>, Option<TopoHeight> is Some if we have others previous versions available and Vec is full.
     // It will stop at the first output balance found without including it
-    async fn get_spendable_balances_for(&self, key: &PublicKey, asset: &Hash, min_topoheight: TopoHeight, max_topoheight: TopoHeight, maximum: usize) -> Result<(Vec<Balance>, Option<TopoHeight>), BlockchainError> {
+    async fn get_spendable_balances_for(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+        min_topoheight: TopoHeight,
+        max_topoheight: TopoHeight,
+        maximum: usize,
+    ) -> Result<(Vec<Balance>, Option<TopoHeight>), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("get spendable balances for {} {} min topoheight {} max topoheight {}", key.as_address(self.is_mainnet()), asset, min_topoheight, max_topoheight);
+            trace!(
+                "get spendable balances for {} {} min topoheight {} max topoheight {}",
+                key.as_address(self.is_mainnet()),
+                asset,
+                min_topoheight,
+                max_topoheight
+            );
         }
         let account_id = self.get_account_id(key)?;
         let asset_id = self.get_asset_id(asset)?;
@@ -397,9 +603,13 @@ impl BalanceProvider for RocksStorage {
         let mut next_topo = Some(max_topoheight);
 
         // NOTE: the take is important here as we return it below
-        while let Some(topo) = next_topo.take().filter(|&t| t >= min_topoheight && balances.len() < maximum) {
+        while let Some(topo) = next_topo
+            .take()
+            .filter(|&t| t >= min_topoheight && balances.len() < maximum)
+        {
             let versioned_key = Self::get_versioned_account_balance_key(account_id, asset_id, topo);
-            let version = self.load_from_disk::<_, VersionedBalance>(Column::VersionedBalances, &versioned_key)?;
+            let version = self
+                .load_from_disk::<_, VersionedBalance>(Column::VersionedBalances, &versioned_key)?;
             let has_output = version.contains_output();
             let previous_topoheight = version.get_previous_topoheight();
 
@@ -408,7 +618,12 @@ impl BalanceProvider for RocksStorage {
             // We have an output in it, we can return the account
             if has_output {
                 if log::log_enabled!(log::Level::Trace) {
-                    trace!("output balance found for {} {} at topoheight {}", key.as_address(self.is_mainnet()), asset, topo);
+                    trace!(
+                        "output balance found for {} {} at topoheight {}",
+                        key.as_address(self.is_mainnet()),
+                        asset,
+                        topo
+                    );
                 }
                 break;
             }
@@ -429,7 +644,11 @@ impl RocksStorage {
         buffer
     }
 
-    pub fn get_versioned_account_balance_key(account: AccountId, asset: AssetId, topoheight: TopoHeight) -> [u8; 24] {
+    pub fn get_versioned_account_balance_key(
+        account: AccountId,
+        asset: AssetId,
+        topoheight: TopoHeight,
+    ) -> [u8; 24] {
         let mut buffer = [0; 24];
         buffer[0..8].copy_from_slice(&topoheight.to_be_bytes());
         buffer[8..16].copy_from_slice(&account.to_be_bytes());

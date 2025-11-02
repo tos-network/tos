@@ -1630,5 +1630,5 @@ pub const DUTCH: Language<'static> = Language {
         "zwiep",
         "zwijmel",
         "zworen",
-    ]
+    ],
 };

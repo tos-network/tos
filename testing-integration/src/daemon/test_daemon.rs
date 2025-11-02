@@ -50,17 +50,16 @@ impl TestDaemon {
     /// This allocates ports using the OS and creates a temporary directory
     /// that will be automatically cleaned up when the TestDaemon is dropped.
     pub fn new_random() -> Self {
-        let temp_dir = TempDir::new("tos_test_daemon")
-            .expect("Failed to create temp directory");
+        let temp_dir = TempDir::new("tos_test_daemon").expect("Failed to create temp directory");
 
         // Allocate random ports using OS
-        let rpc_listener = std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("Failed to bind RPC port");
+        let rpc_listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("Failed to bind RPC port");
         let rpc_port = rpc_listener.local_addr().unwrap().port();
         drop(rpc_listener);
 
-        let p2p_listener = std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("Failed to bind P2P port");
+        let p2p_listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("Failed to bind P2P port");
         let p2p_port = p2p_listener.local_addr().unwrap().port();
         drop(p2p_listener);
 
@@ -87,7 +86,9 @@ impl TestDaemon {
         // 4. Wait for initialization
         // 5. Return RPC client
 
-        unimplemented!("TestDaemon::start() requires daemon API refactoring - use MockStorage for MVP tests")
+        unimplemented!(
+            "TestDaemon::start() requires daemon API refactoring - use MockStorage for MVP tests"
+        )
     }
 
     /// Shutdown the daemon

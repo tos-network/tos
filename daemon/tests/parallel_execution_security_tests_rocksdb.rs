@@ -24,19 +24,18 @@
 
 use std::sync::Arc;
 use tos_common::{
-    config::{TOS_ASSET, COIN_VALUE},
-    crypto::{KeyPair, Hashable, Hash},
     block::{Block, BlockVersion, EXTRA_NONCE_SIZE},
+    config::{COIN_VALUE, TOS_ASSET},
+    crypto::{Hash, Hashable, KeyPair},
     immutable::Immutable,
 };
 use tos_daemon::core::{
-    storage::{BalanceProvider, NonceProvider},
     state::parallel_chain_state::ParallelChainState,
+    storage::{BalanceProvider, NonceProvider},
 };
 use tos_environment::Environment;
 use tos_testing_integration::utils::storage_helpers::{
-    create_test_rocksdb_storage,
-    setup_account_rocksdb,
+    create_test_rocksdb_storage, setup_account_rocksdb,
 };
 
 /// Helper to create a dummy block for ParallelChainState
@@ -46,18 +45,18 @@ fn create_dummy_block() -> Block {
     let miner = KeyPair::new().get_public_key().compress();
     let header = BlockHeader::new(
         BlockVersion::V0,
-        vec![],  // parents_by_level
-        0,       // blue_score
-        0,       // daa_score
-        0u64.into(),  // blue_work
-        Hash::zero(),  // pruning_point
-        0,       // timestamp
-        0,       // bits
-        [0u8; EXTRA_NONCE_SIZE],  // extra_nonce
-        miner,   // miner
-        Hash::zero(),  // hash_merkle_root
-        Hash::zero(),  // accepted_id_merkle_root
-        Hash::zero(),  // utxo_commitment
+        vec![],                  // parents_by_level
+        0,                       // blue_score
+        0,                       // daa_score
+        0u64.into(),             // blue_work
+        Hash::zero(),            // pruning_point
+        0,                       // timestamp
+        0,                       // bits
+        [0u8; EXTRA_NONCE_SIZE], // extra_nonce
+        miner,                   // miner
+        Hash::zero(),            // hash_merkle_root
+        Hash::zero(),            // accepted_id_merkle_root
+        Hash::zero(),            // utxo_commitment
     );
 
     Block::new(Immutable::Arc(Arc::new(header)), vec![])
@@ -122,8 +121,8 @@ async fn test_rocksdb_invalid_signature_setup() {
     let parallel_state = ParallelChainState::new(
         Arc::clone(&storage),
         environment,
-        0,  // stable_topoheight
-        1,  // topoheight
+        0, // stable_topoheight
+        1, // topoheight
         BlockVersion::V0,
         dummy_block,
         block_hash,
@@ -185,13 +184,22 @@ async fn test_rocksdb_receiver_balance_setup() {
     {
         let storage_read = storage.read().await;
 
-        let (_, alice_bal) = storage_read.get_last_balance(&alice_pubkey, &TOS_ASSET).await.unwrap();
+        let (_, alice_bal) = storage_read
+            .get_last_balance(&alice_pubkey, &TOS_ASSET)
+            .await
+            .unwrap();
         assert_eq!(alice_bal.get_balance(), 500 * COIN_VALUE);
 
-        let (_, bob_bal) = storage_read.get_last_balance(&bob_pubkey, &TOS_ASSET).await.unwrap();
+        let (_, bob_bal) = storage_read
+            .get_last_balance(&bob_pubkey, &TOS_ASSET)
+            .await
+            .unwrap();
         assert_eq!(bob_bal.get_balance(), 300 * COIN_VALUE);
 
-        let (_, charlie_bal) = storage_read.get_last_balance(&charlie_pubkey, &TOS_ASSET).await.unwrap();
+        let (_, charlie_bal) = storage_read
+            .get_last_balance(&charlie_pubkey, &TOS_ASSET)
+            .await
+            .unwrap();
         assert_eq!(charlie_bal.get_balance(), 200 * COIN_VALUE);
     }
 
@@ -249,7 +257,10 @@ async fn test_rocksdb_fee_deduction_setup() {
     {
         let storage_read = storage.read().await;
 
-        let (_, balance) = storage_read.get_last_balance(&alice_pubkey, &TOS_ASSET).await.unwrap();
+        let (_, balance) = storage_read
+            .get_last_balance(&alice_pubkey, &TOS_ASSET)
+            .await
+            .unwrap();
         assert_eq!(balance.get_balance(), 1000 * COIN_VALUE);
 
         let (_, nonce) = storage_read.get_last_nonce(&alice_pubkey).await.unwrap();
@@ -443,10 +454,7 @@ async fn test_burned_supply_limit() {
 
     // Burn max supply (should succeed)
     let result = parallel_state.add_burned_supply(MAX_BURNED_SUPPLY);
-    assert!(
-        result.is_ok(),
-        "Should allow burning up to max supply"
-    );
+    assert!(result.is_ok(), "Should allow burning up to max supply");
 
     let at_max = parallel_state.get_burned_supply();
     assert_eq!(
@@ -464,7 +472,10 @@ async fn test_burned_supply_limit() {
     // Verify error type
     if let Err(e) = result {
         assert!(
-            matches!(e, tos_daemon::core::error::BlockchainError::BurnedSupplyLimitExceeded),
+            matches!(
+                e,
+                tos_daemon::core::error::BlockchainError::BurnedSupplyLimitExceeded
+            ),
             "Should return BurnedSupplyLimitExceeded error, got: {:?}",
             e
         );
@@ -534,5 +545,8 @@ async fn test_fuzz_concurrent_counter_updates() {
         "Concurrent updates should accumulate correctly"
     );
 
-    println!("✓ Test passed: Concurrent counter updates work correctly (final value: {})", final_value);
+    println!(
+        "✓ Test passed: Concurrent counter updates work correctly (final value: {})",
+        final_value
+    );
 }

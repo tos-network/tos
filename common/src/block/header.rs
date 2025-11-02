@@ -2,36 +2,34 @@
 //
 // This is a BREAKING CHANGE from the legacy chain-based format.
 
-use std::fmt::{Display, Formatter, Error as FmtError};
-use serde::Deserialize;
-use log::debug;
+use super::{Algorithm, MinerWork, EXTRA_NONCE_SIZE};
 use crate::{
-    block::{BLOCK_WORK_SIZE, HEADER_WORK_SIZE, BlockVersion},
-    config::{TIPS_LIMIT, MAX_PARENT_LEVELS},
+    block::{BlockVersion, BLOCK_WORK_SIZE, HEADER_WORK_SIZE},
+    config::{MAX_PARENT_LEVELS, TIPS_LIMIT},
     crypto::{
-        elgamal::CompressedPublicKey,
-        hash,
-        pow_hash,
-        Hash,
-        Hashable,
-        BlueWorkType,
-        BlueWorkWriter,
-        BlueWorkReader,
-        HASH_SIZE
+        elgamal::CompressedPublicKey, hash, pow_hash, BlueWorkReader, BlueWorkType, BlueWorkWriter,
+        Hash, Hashable, HASH_SIZE,
     },
     serializer::{Reader, ReaderError, Serializer, Writer},
     time::TimestampMillis,
 };
+use log::debug;
+use serde::Deserialize;
+use std::fmt::{Display, Error as FmtError, Formatter};
 use tos_hash::Error as TosHashError;
-use super::{Algorithm, MinerWork, EXTRA_NONCE_SIZE};
 
 // Serialize the extra nonce in a hexadecimal string
-pub fn serialize_extra_nonce<S: serde::Serializer>(extra_nonce: &[u8; EXTRA_NONCE_SIZE], s: S) -> Result<S::Ok, S::Error> {
+pub fn serialize_extra_nonce<S: serde::Serializer>(
+    extra_nonce: &[u8; EXTRA_NONCE_SIZE],
+    s: S,
+) -> Result<S::Ok, S::Error> {
     s.serialize_str(&hex::encode(extra_nonce))
 }
 
 // Deserialize the extra nonce from a hexadecimal string
-pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<[u8; EXTRA_NONCE_SIZE], D::Error> {
+pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<[u8; EXTRA_NONCE_SIZE], D::Error> {
     let mut extra_nonce = [0u8; EXTRA_NONCE_SIZE];
     let hex = String::deserialize(deserializer)?;
 
@@ -39,9 +37,11 @@ pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(deserializer: D
     // EXTRA_NONCE_SIZE (32 bytes) = 64 hex chars. Allow up to 128 chars as safety margin.
     const MAX_HEX_LENGTH: usize = 128;
     if hex.len() > MAX_HEX_LENGTH {
-        return Err(serde::de::Error::custom(
-            format!("Invalid extraNonce hex string: length {} exceeds maximum {}", hex.len(), MAX_HEX_LENGTH)
-        ));
+        return Err(serde::de::Error::custom(format!(
+            "Invalid extraNonce hex string: length {} exceeds maximum {}",
+            hex.len(),
+            MAX_HEX_LENGTH
+        )));
     }
 
     let decoded = hex::decode(hex).map_err(serde::de::Error::custom)?;
@@ -49,9 +49,11 @@ pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(deserializer: D
     // SECURITY FIX: Validate length before copy_from_slice to prevent panic
     // An attacker could send malformed extraNonce with wrong length, causing node crash
     if decoded.len() != EXTRA_NONCE_SIZE {
-        return Err(serde::de::Error::custom(
-            format!("Invalid extraNonce length: expected {} bytes, got {}", EXTRA_NONCE_SIZE, decoded.len())
-        ));
+        return Err(serde::de::Error::custom(format!(
+            "Invalid extraNonce length: expected {} bytes, got {}",
+            EXTRA_NONCE_SIZE,
+            decoded.len()
+        )));
     }
 
     extra_nonce.copy_from_slice(&decoded);
@@ -77,12 +79,12 @@ pub struct BlockHeader {
     pub parents_by_level: Vec<Vec<Hash>>,
 
     // GHOSTDAG scores
-    pub blue_score: u64,      // Position in blue (selected) chain
-    pub daa_score: u64,       // Difficulty adjustment score
+    pub blue_score: u64,         // Position in blue (selected) chain
+    pub daa_score: u64,          // Difficulty adjustment score
     pub blue_work: BlueWorkType, // Cumulative blue work (U256)
 
     // Pruning
-    pub pruning_point: Hash,  // Reference to pruning point
+    pub pruning_point: Hash, // Reference to pruning point
 
     // Mining fields
     pub timestamp: TimestampMillis,
@@ -90,13 +92,13 @@ pub struct BlockHeader {
     #[serde(serialize_with = "serialize_extra_nonce")]
     #[serde(deserialize_with = "deserialize_extra_nonce")]
     pub extra_nonce: [u8; EXTRA_NONCE_SIZE],
-    pub bits: u32,            // Compact difficulty target
+    pub bits: u32, // Compact difficulty target
     pub miner: CompressedPublicKey,
 
     // Merkle roots
-    pub hash_merkle_root: Hash,          // Transactions merkle root
-    pub accepted_id_merkle_root: Hash,   // Accepted transactions merkle root
-    pub utxo_commitment: Hash,           // UTXO set commitment (for future use)
+    pub hash_merkle_root: Hash,        // Transactions merkle root
+    pub accepted_id_merkle_root: Hash, // Accepted transactions merkle root
+    pub utxo_commitment: Hash,         // UTXO set commitment (for future use)
 }
 
 impl BlockHeader {
@@ -147,7 +149,11 @@ impl BlockHeader {
     ) -> Self {
         Self {
             version,
-            parents_by_level: if parents.is_empty() { vec![] } else { vec![parents] },
+            parents_by_level: if parents.is_empty() {
+                vec![]
+            } else {
+                vec![parents]
+            },
             blue_score: 0,
             daa_score: 0,
             blue_work: BlueWorkType::zero(),
@@ -266,8 +272,12 @@ impl BlockHeader {
         bytes.extend(self.get_parents_hash().as_bytes()); // 9 + 32 = 41
         bytes.extend(self.hash_merkle_root.as_bytes()); // 41 + 32 = 73
 
-        debug_assert!(bytes.len() == HEADER_WORK_SIZE,
-            "Error, invalid header work size, got {} but expected {}", bytes.len(), HEADER_WORK_SIZE);
+        debug_assert!(
+            bytes.len() == HEADER_WORK_SIZE,
+            "Error, invalid header work size, got {} but expected {}",
+            bytes.len(),
+            HEADER_WORK_SIZE
+        );
 
         bytes
     }
@@ -286,8 +296,12 @@ impl BlockHeader {
         bytes.extend(self.extra_nonce);
         bytes.extend(self.miner.as_bytes());
 
-        debug_assert!(bytes.len() == BLOCK_WORK_SIZE,
-            "invalid block work size, got {} but expected {}", bytes.len(), BLOCK_WORK_SIZE);
+        debug_assert!(
+            bytes.len() == BLOCK_WORK_SIZE,
+            "invalid block work size, got {} but expected {}",
+            bytes.len(),
+            BLOCK_WORK_SIZE
+        );
 
         bytes
     }
@@ -374,7 +388,10 @@ impl Serializer for BlockHeader {
         // Reject headers with too many parent levels
         if levels_count as usize > MAX_PARENT_LEVELS {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Error, too many parent levels: {} > {}", levels_count, MAX_PARENT_LEVELS);
+                debug!(
+                    "Error, too many parent levels: {} > {}",
+                    levels_count, MAX_PARENT_LEVELS
+                );
             }
             return Err(ReaderError::InvalidValue);
         }
@@ -476,7 +493,8 @@ impl Hashable for BlockHeader {
 
 impl Display for BlockHeader {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), FmtError> {
-        let parents: Vec<String> = self.get_parents()
+        let parents: Vec<String> = self
+            .get_parents()
             .iter()
             .map(|h| format!("{}", h))
             .collect();
@@ -504,14 +522,8 @@ mod tests {
         let miner = KeyPair::new().get_public_key().compress();
         let parents = vec![Hash::zero()];
 
-        let header = BlockHeader::new_simple(
-            BlockVersion::V0,
-            parents,
-            0,
-            [0u8; 32],
-            miner,
-            Hash::zero(),
-        );
+        let header =
+            BlockHeader::new_simple(BlockVersion::V0, parents, 0, [0u8; 32], miner, Hash::zero());
 
         let serialized = header.to_bytes();
         assert!(serialized.len() == header.size());
@@ -523,15 +535,13 @@ mod tests {
     #[test]
     fn test_block_header_serialization() {
         let miner = KeyPair::new().get_public_key().compress();
-        let parents_by_level = vec![
-            vec![Hash::zero()],
-        ];
+        let parents_by_level = vec![vec![Hash::zero()]];
 
         let header = BlockHeader::new(
             BlockVersion::V0,
             parents_by_level,
-            100,  // blue_score
-            100,  // daa_score
+            100, // blue_score
+            100, // daa_score
             BlueWorkType::from(1000),
             Hash::zero(),
             1234567890,
@@ -557,8 +567,8 @@ mod tests {
         use primitive_types::U256;
         let miner = KeyPair::new().get_public_key().compress();
         let parents_by_level = vec![
-            vec![Hash::zero(), Hash::zero()],  // 2 direct parents
-            vec![Hash::zero()],                 // 1 grandparent
+            vec![Hash::zero(), Hash::zero()], // 2 direct parents
+            vec![Hash::zero()],               // 1 grandparent
         ];
 
         let header = BlockHeader::new(

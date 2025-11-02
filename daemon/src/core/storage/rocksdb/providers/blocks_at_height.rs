@@ -1,17 +1,13 @@
 use std::borrow::Cow;
 
+use crate::core::{
+    error::BlockchainError,
+    storage::{rocksdb::Column, BlocksAtHeightProvider, RocksStorage},
+};
 use async_trait::async_trait;
 use indexmap::IndexSet;
 use log::trace;
 use tos_common::crypto::Hash;
-use crate::core::{
-    error::BlockchainError,
-    storage::{
-        rocksdb::Column,
-        BlocksAtHeightProvider,
-        RocksStorage
-    }
-};
 
 #[async_trait]
 impl BlocksAtHeightProvider for RocksStorage {
@@ -24,7 +20,10 @@ impl BlocksAtHeightProvider for RocksStorage {
     }
 
     // Retrieve the blocks hashes at a specific blue_score (DAG depth position)
-    async fn get_blocks_at_blue_score(&self, blue_score: u64) -> Result<IndexSet<Hash>, BlockchainError> {
+    async fn get_blocks_at_blue_score(
+        &self,
+        blue_score: u64,
+    ) -> Result<IndexSet<Hash>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get blocks at blue_score {}", blue_score);
         }
@@ -33,7 +32,11 @@ impl BlocksAtHeightProvider for RocksStorage {
     }
 
     // Store the blocks hashes at a specific blue_score (DAG depth position)
-    async fn set_blocks_at_blue_score(&mut self, tips: &IndexSet<Hash>, blue_score: u64) -> Result<(), BlockchainError> {
+    async fn set_blocks_at_blue_score(
+        &mut self,
+        tips: &IndexSet<Hash>,
+        blue_score: u64,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set blocks at blue_score {}", blue_score);
         }
@@ -41,11 +44,16 @@ impl BlocksAtHeightProvider for RocksStorage {
     }
 
     // Append a block hash at a specific blue_score (DAG depth position)
-    async fn add_block_hash_at_blue_score(&mut self, hash: &Hash, blue_score: u64) -> Result<(), BlockchainError> {
+    async fn add_block_hash_at_blue_score(
+        &mut self,
+        hash: &Hash,
+        blue_score: u64,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("add block hash at blue_score {}", blue_score);
         }
-        let mut blocks: IndexSet<Cow<'_, Hash>> = self.load_optional_from_disk(Column::BlocksAtHeight, &blue_score.to_be_bytes())?
+        let mut blocks: IndexSet<Cow<'_, Hash>> = self
+            .load_optional_from_disk(Column::BlocksAtHeight, &blue_score.to_be_bytes())?
             .unwrap_or_default();
 
         if blocks.insert(Cow::Borrowed(hash)) {
@@ -59,12 +67,18 @@ impl BlocksAtHeightProvider for RocksStorage {
     }
 
     // Remove a block hash at a specific blue_score (DAG depth position)
-    async fn remove_block_hash_at_blue_score(&mut self, hash: &Hash, blue_score: u64) -> Result<(), BlockchainError> {
+    async fn remove_block_hash_at_blue_score(
+        &mut self,
+        hash: &Hash,
+        blue_score: u64,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("remove block hash at blue_score {}", blue_score);
         }
-        let Some(mut blocks): Option<IndexSet<Cow<'_, Hash>>> = self.load_optional_from_disk(Column::BlocksAtHeight, &blue_score.to_be_bytes())? else {
-            return Ok(())
+        let Some(mut blocks): Option<IndexSet<Cow<'_, Hash>>> =
+            self.load_optional_from_disk(Column::BlocksAtHeight, &blue_score.to_be_bytes())?
+        else {
+            return Ok(());
         };
 
         if blocks.shift_remove(&Cow::Borrowed(hash)) {

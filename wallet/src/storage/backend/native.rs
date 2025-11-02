@@ -1,1 +1,1 @@
-pub use sled::{Db, Tree, open};
+pub use sled::{open, Db, Tree};

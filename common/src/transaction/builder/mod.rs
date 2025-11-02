@@ -2,60 +2,37 @@
 //! Not really a 'builder' per say
 //! Intended to be used when creating a transaction before making the associated proofs and signature
 
-mod state;
 mod fee;
-mod unsigned;
 mod payload;
+mod state;
+mod unsigned;
 
+pub use fee::{FeeBuilder, FeeHelper};
 pub use state::AccountState;
-pub use fee::{FeeHelper, FeeBuilder};
 pub use unsigned::UnsignedTransaction;
 
-use indexmap::{IndexMap, IndexSet};
-use serde::{Deserialize, Serialize};
-use tos_vm::Module;
-use std::collections::HashSet;
+use super::{
+    extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
+    BurnPayload, ContractDeposit, DeployContractPayload, EnergyPayload, FeeType,
+    InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, Transaction, TransactionType,
+    TransferPayload, TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE,
+    MAX_MULTISIG_PARTICIPANTS, MAX_TRANSFER_COUNT,
+};
+use crate::ai_mining::AIMiningPayload;
 use crate::{
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     crypto::{
-        elgamal::{
-            CompressedPublicKey,
-            KeyPair,
-            RISTRETTO_COMPRESSED_SIZE
-        },
-        Hash,
-        HASH_SIZE,
-        SIGNATURE_SIZE
+        elgamal::{CompressedPublicKey, KeyPair, RISTRETTO_COMPRESSED_SIZE},
+        Hash, HASH_SIZE, SIGNATURE_SIZE,
     },
     serializer::Serializer,
-    utils::{calculate_tx_fee, calculate_energy_fee}
+    utils::{calculate_energy_fee, calculate_tx_fee},
 };
+use indexmap::{IndexMap, IndexSet};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use thiserror::Error;
-use super::{
-    extra_data::{
-        ExtraDataType,
-        PlaintextData,
-        UnknownExtraDataFormat
-    },
-    BurnPayload,
-    ContractDeposit,
-    DeployContractPayload,
-    EnergyPayload,
-    FeeType,
-    InvokeConstructorPayload,
-    InvokeContractPayload,
-    MultiSigPayload,
-    Transaction,
-    TransactionType,
-    TransferPayload,
-    TxVersion,
-    EXTRA_DATA_LIMIT_SIZE,
-    EXTRA_DATA_LIMIT_SUM_SIZE,
-    MAX_MULTISIG_PARTICIPANTS,
-    MAX_TRANSFER_COUNT
-};
-use crate::ai_mining::AIMiningPayload;
-
+use tos_vm::Module;
 
 pub use payload::*;
 
@@ -130,7 +107,13 @@ pub struct TransactionBuilder {
 }
 
 impl TransactionBuilder {
-    pub fn new(version: TxVersion, source: CompressedPublicKey, required_thresholds: Option<u8>, data: TransactionTypeBuilder, fee_builder: FeeBuilder) -> Self {
+    pub fn new(
+        version: TxVersion,
+        source: CompressedPublicKey,
+        required_thresholds: Option<u8>,
+        data: TransactionTypeBuilder,
+        fee_builder: FeeBuilder,
+    ) -> Self {
         Self {
             version,
             source,
@@ -182,8 +165,7 @@ impl TransactionBuilder {
         // Signature
         + SIGNATURE_SIZE
         // 1 for optional multisig bool (always included for T0)
-        + 1
-        ;
+        + 1;
 
         if let Some(threshold) = self.required_thresholds {
             // 1 for Multisig participants count byte
@@ -202,7 +184,11 @@ impl TransactionBuilder {
                     // Extra data byte flag
                     + 1;
 
-                    if let Some(extra_data) = transfer.extra_data.as_ref().or(transfer.destination.get_extra_data()) {
+                    if let Some(extra_data) = transfer
+                        .extra_data
+                        .as_ref()
+                        .or(transfer.destination.get_extra_data())
+                    {
                         // Balance simplification: Extra data is now always plaintext
                         size += ExtraDataType::estimate_size(extra_data, false);
                     }
@@ -211,11 +197,13 @@ impl TransactionBuilder {
             TransactionTypeBuilder::Burn(payload) => {
                 // Payload size
                 size += payload.size();
-            },
+            }
             TransactionTypeBuilder::MultiSig(payload) => {
                 // Payload size
-                size += payload.threshold.size() + 1 + (payload.participants.len() * RISTRETTO_COMPRESSED_SIZE);
-            },
+                size += payload.threshold.size()
+                    + 1
+                    + (payload.participants.len() * RISTRETTO_COMPRESSED_SIZE);
+            }
             TransactionTypeBuilder::InvokeContract(payload) => {
                 let payload_size = payload.contract.size()
                 + payload.max_gas.size()
@@ -228,7 +216,7 @@ impl TransactionBuilder {
 
                 let deposits_size = self.estimate_deposits_size(&payload.deposits);
                 size += deposits_size;
-            },
+            }
             TransactionTypeBuilder::DeployContract(payload) => {
                 // Module is in hex format, so we need to divide by 2 for its bytes size
                 // + 1 for the invoke option
@@ -237,27 +225,29 @@ impl TransactionBuilder {
                     let deposits_size = self.estimate_deposits_size(&invoke.deposits);
                     size += deposits_size + invoke.max_gas.size();
                 }
-            },
+            }
             TransactionTypeBuilder::Energy(payload) => {
                 // Convert EnergyBuilder to EnergyPayload for size calculation
                 let energy_payload = match payload {
-                    EnergyBuilder { amount, is_freeze: true, freeze_duration: Some(duration) } => {
-                        EnergyPayload::FreezeTos {
-                            amount: *amount,
-                            duration: duration.clone(),
-                        }
+                    EnergyBuilder {
+                        amount,
+                        is_freeze: true,
+                        freeze_duration: Some(duration),
+                    } => EnergyPayload::FreezeTos {
+                        amount: *amount,
+                        duration: duration.clone(),
                     },
-                    EnergyBuilder { amount, is_freeze: false, freeze_duration: None } => {
-                        EnergyPayload::UnfreezeTos {
-                            amount: *amount,
-                        }
-                    },
+                    EnergyBuilder {
+                        amount,
+                        is_freeze: false,
+                        freeze_duration: None,
+                    } => EnergyPayload::UnfreezeTos { amount: *amount },
                     _ => {
                         // This should not happen due to validation, but handle gracefully
                         EnergyPayload::UnfreezeTos { amount: 0 }
                     }
                 };
-                
+
                 // Payload size
                 size += energy_payload.size();
             }
@@ -283,42 +273,61 @@ impl TransactionBuilder {
     }
 
     // Estimate the fees for this TX
-    pub fn estimate_fees<B: FeeHelper>(&self, state: &mut B) -> Result<u64, GenerationError<B::Error>> {
+    pub fn estimate_fees<B: FeeHelper>(
+        &self,
+        state: &mut B,
+    ) -> Result<u64, GenerationError<B::Error>> {
         let calculated_fee = match self.fee_builder {
             // If the value is set, use it
             FeeBuilder::Value(value) => value,
             _ => {
                 // Compute the size and transfers count
                 let size = self.estimate_size();
-                let (transfers, new_addresses) = if let TransactionTypeBuilder::Transfers(transfers) = &self.data {
-                    let mut new_addresses = 0;
-                    for transfer in transfers {
-                        if !state.account_exists(&transfer.destination.get_public_key()).map_err(GenerationError::State)? {
-                            new_addresses += 1;
+                let (transfers, new_addresses) =
+                    if let TransactionTypeBuilder::Transfers(transfers) = &self.data {
+                        let mut new_addresses = 0;
+                        for transfer in transfers {
+                            if !state
+                                .account_exists(&transfer.destination.get_public_key())
+                                .map_err(GenerationError::State)?
+                            {
+                                new_addresses += 1;
+                            }
                         }
-                    }
 
-                    (transfers.len(), new_addresses)
-                } else {
-                    (0, 0)
-                };
+                        (transfers.len(), new_addresses)
+                    } else {
+                        (0, 0)
+                    };
 
                 // Check if we should use energy fees for transfer transactions
                 let expected_fee = if let Some(ref fee_type) = self.fee_type {
-                    if *fee_type == FeeType::Energy && matches!(self.data, TransactionTypeBuilder::Transfers(_)) {
+                    if *fee_type == FeeType::Energy
+                        && matches!(self.data, TransactionTypeBuilder::Transfers(_))
+                    {
                         // Use energy fee calculation for transfer transactions
                         let energy_fee = calculate_energy_fee(size, transfers, new_addresses);
                         println!("[ESTIMATE DEBUG] Energy fee calculation: size={}, transfers={}, new_addresses={}, energy_fee={}", size, transfers, new_addresses, energy_fee);
                         energy_fee
                     } else {
                         // Use regular TOS fee calculation
-                        calculate_tx_fee(size, transfers, new_addresses, self.required_thresholds.unwrap_or(0) as usize)
+                        calculate_tx_fee(
+                            size,
+                            transfers,
+                            new_addresses,
+                            self.required_thresholds.unwrap_or(0) as usize,
+                        )
                     }
                 } else {
                     // Default to TOS fees
-                    calculate_tx_fee(size, transfers, new_addresses, self.required_thresholds.unwrap_or(0) as usize)
+                    calculate_tx_fee(
+                        size,
+                        transfers,
+                        new_addresses,
+                        self.required_thresholds.unwrap_or(0) as usize,
+                    )
                 };
-                
+
                 match self.fee_builder {
                     // SAFE: f64 used for client-side fee estimation only
                     // Network only validates that fee is sufficient, not how it was calculated
@@ -326,7 +335,7 @@ impl TransactionBuilder {
                     FeeBuilder::Boost(boost) => expected_fee + boost,
                     _ => expected_fee,
                 }
-            },
+            }
         };
 
         Ok(calculated_fee)
@@ -363,8 +372,8 @@ impl TransactionBuilder {
                 if *asset == payload.asset {
                     cost += payload.amount
                 }
-            },
-            TransactionTypeBuilder::MultiSig(_) => {},
+            }
+            TransactionTypeBuilder::MultiSig(_) => {}
             TransactionTypeBuilder::InvokeContract(payload) => {
                 if let Some(deposit) = payload.deposits.get(asset) {
                     cost += deposit.amount;
@@ -373,7 +382,7 @@ impl TransactionBuilder {
                 if *asset == TOS_ASSET {
                     cost += payload.max_gas;
                 }
-            },
+            }
             TransactionTypeBuilder::DeployContract(payload) => {
                 if *asset == TOS_ASSET {
                     cost += BURN_PER_CONTRACT;
@@ -388,7 +397,7 @@ impl TransactionBuilder {
                         cost += invoke.max_gas;
                     }
                 }
-            },
+            }
             TransactionTypeBuilder::Energy(payload) => {
                 if *asset == TOS_ASSET {
                     cost += payload.amount;
@@ -398,15 +407,22 @@ impl TransactionBuilder {
                 // AI Mining operations may cost TOS for registration fees, stakes, rewards, etc.
                 if *asset == TOS_ASSET {
                     match payload {
-                        crate::ai_mining::AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        crate::ai_mining::AIMiningPayload::RegisterMiner {
+                            registration_fee,
+                            ..
+                        } => {
                             cost += *registration_fee;
                         }
-                        crate::ai_mining::AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        crate::ai_mining::AIMiningPayload::SubmitAnswer {
+                            stake_amount, ..
+                        } => {
                             cost += *stake_amount;
                             // Add answer content gas cost
                             cost += payload.calculate_content_gas_cost();
                         }
-                        crate::ai_mining::AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        crate::ai_mining::AIMiningPayload::PublishTask {
+                            reward_amount, ..
+                        } => {
                             cost += *reward_amount;
                             // Add description gas cost
                             cost += payload.calculate_description_gas_cost();
@@ -439,7 +455,10 @@ impl TransactionBuilder {
         self,
         state: &mut B,
         source_keypair: &KeyPair,
-    ) -> Result<Transaction, GenerationError<B::Error>> where for<'a> <B as FeeHelper>::Error: std::convert::From<&'a str> {
+    ) -> Result<Transaction, GenerationError<B::Error>>
+    where
+        for<'a> <B as FeeHelper>::Error: std::convert::From<&'a str>,
+    {
         let unsigned = self.build_unsigned(state, source_keypair)?;
         Ok(unsigned.finalize(source_keypair))
     }
@@ -448,10 +467,15 @@ impl TransactionBuilder {
         mut self,
         state: &mut B,
         _source_keypair: &KeyPair,
-    ) -> Result<UnsignedTransaction, GenerationError<B::Error>> where <B as FeeHelper>::Error: for<'a> std::convert::From<&'a str> {
+    ) -> Result<UnsignedTransaction, GenerationError<B::Error>>
+    where
+        <B as FeeHelper>::Error: for<'a> std::convert::From<&'a str>,
+    {
         // Validate that Energy fee type can only be used with Transfer transactions
         if let Some(fee_type) = &self.fee_type {
-            if *fee_type == FeeType::Energy && !matches!(self.data, TransactionTypeBuilder::Transfers(_)) {
+            if *fee_type == FeeType::Energy
+                && !matches!(self.data, TransactionTypeBuilder::Transfers(_))
+            {
                 return Err(GenerationError::InvalidEnergyFeeType);
             }
 
@@ -459,7 +483,10 @@ impl TransactionBuilder {
             if *fee_type == FeeType::Energy {
                 if let TransactionTypeBuilder::Transfers(transfers) = &self.data {
                     for transfer in transfers {
-                        if !state.is_account_registered(&transfer.destination.get_public_key()).map_err(GenerationError::State)? {
+                        if !state
+                            .is_account_registered(&transfer.destination.get_public_key())
+                            .map_err(GenerationError::State)?
+                        {
                             return Err(GenerationError::InvalidEnergyFeeForNewAddress);
                         }
                     }
@@ -472,7 +499,9 @@ impl TransactionBuilder {
 
         // Get the nonce
         let nonce = state.get_nonce().map_err(GenerationError::State)?;
-        state.update_nonce(nonce + 1).map_err(GenerationError::State)?;
+        state
+            .update_nonce(nonce + 1)
+            .map_err(GenerationError::State)?;
 
         // Get reference
         let reference = state.get_reference();
@@ -481,12 +510,17 @@ impl TransactionBuilder {
         let used_assets = self.data.used_assets();
         for asset in used_assets.iter() {
             let cost = self.get_transaction_cost(fee, asset);
-            let current_balance = state.get_account_balance(asset).map_err(GenerationError::State)?;
+            let current_balance = state
+                .get_account_balance(asset)
+                .map_err(GenerationError::State)?;
 
-            let new_balance = current_balance.checked_sub(cost)
-                .ok_or_else(|| GenerationError::InsufficientFunds((*asset).clone(), cost, current_balance))?;
+            let new_balance = current_balance.checked_sub(cost).ok_or_else(|| {
+                GenerationError::InsufficientFunds((*asset).clone(), cost, current_balance)
+            })?;
 
-            state.update_account_balance(asset, new_balance).map_err(GenerationError::State)?;
+            state
+                .update_account_balance(asset, new_balance)
+                .map_err(GenerationError::State)?;
         }
 
         // Determine fee type
@@ -538,18 +572,26 @@ impl TransactionBuilder {
                 let transfer_payloads: Vec<TransferPayload> = transfers
                     .iter()
                     .map(|transfer| {
-                        let _destination_pubkey = transfer.destination.get_public_key()
+                        let _destination_pubkey = transfer
+                            .destination
+                            .get_public_key()
                             .decompress()
-                            .map_err(|_| GenerationError::State("Invalid destination public key".into()))?;
+                            .map_err(|_| {
+                                GenerationError::State("Invalid destination public key".into())
+                            })?;
 
                         // Balance simplification: Extra data is now always plaintext (no encryption)
                         let extra_data = if let Some(ref extra_data) = transfer.extra_data {
                             let bytes = extra_data.to_bytes();
-                            let cipher: UnknownExtraDataFormat = ExtraDataType::Public(PlaintextData(bytes)).into();
+                            let cipher: UnknownExtraDataFormat =
+                                ExtraDataType::Public(PlaintextData(bytes)).into();
 
                             let cipher_size = cipher.size();
                             if cipher_size > EXTRA_DATA_LIMIT_SIZE {
-                                return Err(GenerationError::EncryptedExtraDataTooLarge(cipher_size, EXTRA_DATA_LIMIT_SIZE));
+                                return Err(GenerationError::EncryptedExtraDataTooLarge(
+                                    cipher_size,
+                                    EXTRA_DATA_LIMIT_SIZE,
+                                ));
                             }
                             Some(cipher)
                         } else {
@@ -559,25 +601,27 @@ impl TransactionBuilder {
                         Ok(TransferPayload::new(
                             transfer.asset.clone(),
                             transfer.destination.clone().to_public_key(),
-                            transfer.amount,  // Plaintext amount
+                            transfer.amount, // Plaintext amount
                             extra_data,
                         ))
                     })
                     .collect::<Result<Vec<_>, GenerationError<B::Error>>>()?;
 
                 TransactionType::Transfers(transfer_payloads)
-            },
+            }
             TransactionTypeBuilder::Burn(ref payload) => {
                 if payload.amount == 0 {
                     return Err(GenerationError::BurnZero);
                 }
                 TransactionType::Burn(payload.clone())
-            },
+            }
             TransactionTypeBuilder::MultiSig(ref payload) => {
                 if payload.participants.len() > MAX_MULTISIG_PARTICIPANTS {
                     return Err(GenerationError::MultiSigParticipants);
                 }
-                if payload.threshold as usize > payload.participants.len() || (payload.threshold == 0 && !payload.participants.is_empty()) {
+                if payload.threshold as usize > payload.participants.len()
+                    || (payload.threshold == 0 && !payload.participants.is_empty())
+                {
                     return Err(GenerationError::MultiSigThreshold);
                 }
 
@@ -594,10 +638,10 @@ impl TransactionBuilder {
                     participants: keys,
                     threshold: payload.threshold,
                 })
-            },
+            }
             TransactionTypeBuilder::InvokeContract(ref payload) => {
                 if payload.max_gas > MAX_GAS_USAGE_PER_TX {
-                    return Err(GenerationError::MaxGasReached)
+                    return Err(GenerationError::MaxGasReached);
                 }
 
                 let deposits = Self::build_deposits::<B::Error>(&payload.deposits)?;
@@ -609,7 +653,7 @@ impl TransactionBuilder {
                     parameters: payload.parameters.clone(),
                     deposits,
                 })
-            },
+            }
             TransactionTypeBuilder::DeployContract(ref payload) => {
                 let module = Module::from_hex(&payload.module)
                     .map_err(|_| GenerationError::InvalidModule)?;
@@ -633,29 +677,33 @@ impl TransactionBuilder {
                         None
                     },
                 })
-            },
+            }
             TransactionTypeBuilder::Energy(ref payload) => {
                 let energy_payload = match payload {
-                    EnergyBuilder { amount, is_freeze: true, freeze_duration: Some(duration) } => {
-                        EnergyPayload::FreezeTos {
-                            amount: *amount,
-                            duration: duration.clone(),
-                        }
+                    EnergyBuilder {
+                        amount,
+                        is_freeze: true,
+                        freeze_duration: Some(duration),
+                    } => EnergyPayload::FreezeTos {
+                        amount: *amount,
+                        duration: duration.clone(),
                     },
-                    EnergyBuilder { amount, is_freeze: false, freeze_duration: None } => {
-                        EnergyPayload::UnfreezeTos {
-                            amount: *amount,
-                        }
-                    },
+                    EnergyBuilder {
+                        amount,
+                        is_freeze: false,
+                        freeze_duration: None,
+                    } => EnergyPayload::UnfreezeTos { amount: *amount },
                     _ => {
-                        return Err(GenerationError::State("Invalid EnergyBuilder configuration".into()));
+                        return Err(GenerationError::State(
+                            "Invalid EnergyBuilder configuration".into(),
+                        ));
                     }
                 };
                 TransactionType::Energy(energy_payload)
-            },
+            }
             TransactionTypeBuilder::AIMining(ref payload) => {
                 TransactionType::AIMining(payload.clone())
-            },
+            }
         };
 
         let unsigned_tx = UnsignedTransaction::new_with_fee_type(
@@ -671,7 +719,6 @@ impl TransactionBuilder {
         Ok(unsigned_tx)
     }
 }
-
 
 impl TransactionTypeBuilder {
     // Get the assets used in the transaction
@@ -689,22 +736,22 @@ impl TransactionTypeBuilder {
             }
             TransactionTypeBuilder::Burn(payload) => {
                 consumed.insert(&payload.asset);
-            },
+            }
             TransactionTypeBuilder::InvokeContract(payload) => {
                 consumed.extend(payload.deposits.keys());
-            },
+            }
             TransactionTypeBuilder::AIMining(payload) => {
                 // AI Mining operations consume TOS asset
                 match payload {
-                    crate::ai_mining::AIMiningPayload::RegisterMiner { .. } |
-                    crate::ai_mining::AIMiningPayload::SubmitAnswer { .. } |
-                    crate::ai_mining::AIMiningPayload::PublishTask { .. } => {
+                    crate::ai_mining::AIMiningPayload::RegisterMiner { .. }
+                    | crate::ai_mining::AIMiningPayload::SubmitAnswer { .. }
+                    | crate::ai_mining::AIMiningPayload::PublishTask { .. } => {
                         consumed.insert(&TOS_ASSET);
                     }
                     _ => {}
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
 
         consumed
@@ -733,7 +780,7 @@ impl TransactionTypeBuilder {
                     }
                 }
             }
-            _ => {},
+            _ => {}
         }
 
         used_keys
@@ -747,73 +794,85 @@ mod tests {
     #[test]
     fn test_energy_fee_type_validation() {
         use super::super::FeeType;
-        
+
         // Test valid case: Energy fee with Transfer transaction
         let transfer_builder = TransactionTypeBuilder::Transfers(vec![]);
         let energy_fee = FeeType::Energy;
-        
+
         // This should not cause an error during construction
         let _ = TransactionBuilder::new(
             TxVersion::T0,
             CompressedPublicKey::new(curve25519_dalek::ristretto::CompressedRistretto::default()),
             None,
             transfer_builder,
-            FeeBuilder::Value(0)
-        ).with_fee_type(energy_fee.clone());
-        
+            FeeBuilder::Value(0),
+        )
+        .with_fee_type(energy_fee.clone());
+
         // Test invalid case: Energy fee with non-Transfer transaction
         let burn_builder = TransactionTypeBuilder::Burn(BurnPayload {
             asset: Hash::zero(),
             amount: 100,
         });
-        
+
         // This should cause an error when building
         let _builder = TransactionBuilder::new(
             TxVersion::T0,
             CompressedPublicKey::new(curve25519_dalek::ristretto::CompressedRistretto::default()),
             None,
             burn_builder.clone(),
-            FeeBuilder::Value(0)
-        ).with_fee_type(energy_fee.clone());
-        
+            FeeBuilder::Value(0),
+        )
+        .with_fee_type(energy_fee.clone());
+
         // The validation should happen during build_unsigned, but we'll test the logic directly
         // by checking that the fee_type validation is in place
         assert!(matches!(energy_fee, FeeType::Energy));
         assert!(matches!(burn_builder, TransactionTypeBuilder::Burn(_)));
-        
+
         // Verify that the validation logic is correct
         let fee_type = Some(FeeType::Energy);
         let is_transfer = matches!(burn_builder, TransactionTypeBuilder::Transfers(_));
         let should_fail = fee_type == Some(FeeType::Energy) && !is_transfer;
-        
-        assert!(should_fail, "Energy fee type should only be allowed with Transfer transactions");
+
+        assert!(
+            should_fail,
+            "Energy fee type should only be allowed with Transfer transactions"
+        );
     }
 
     #[test]
     fn test_energy_fee_for_new_address_validation() {
         use super::super::FeeType;
-        
+
         // Test that Energy fee type cannot be used for transfers to new addresses
         let energy_fee = FeeType::Energy;
-        
+
         // Create a transfer to a new address (non-existent account)
         // We'll use a simple test that validates the logic without complex type construction
         let transfer_to_new_address = TransactionTypeBuilder::Transfers(vec![]);
-        
+
         // This should cause an error when building due to new address validation
         let _builder = TransactionBuilder::new(
             TxVersion::T0,
             CompressedPublicKey::new(curve25519_dalek::ristretto::CompressedRistretto::default()),
             None,
             transfer_to_new_address.clone(),
-            FeeBuilder::Value(0)
-        ).with_fee_type(energy_fee.clone());
-        
+            FeeBuilder::Value(0),
+        )
+        .with_fee_type(energy_fee.clone());
+
         // Verify that the validation logic is correct
         let fee_type = Some(FeeType::Energy);
-        let is_transfer = matches!(transfer_to_new_address, TransactionTypeBuilder::Transfers(_));
+        let is_transfer = matches!(
+            transfer_to_new_address,
+            TransactionTypeBuilder::Transfers(_)
+        );
         let should_fail = fee_type == Some(FeeType::Energy) && is_transfer;
-        
-        assert!(should_fail, "Energy fee type should not be allowed for transfers to new addresses");
+
+        assert!(
+            should_fail,
+            "Energy fee type should not be allowed for transfers to new addresses"
+        );
     }
 }

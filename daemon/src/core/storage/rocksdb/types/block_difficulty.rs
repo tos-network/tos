@@ -4,7 +4,7 @@ use tos_common::{difficulty::Difficulty, serializer::*, varuint::VarUint};
 // Phase 2: Removed cumulative_difficulty field (use GHOSTDAG blue_work instead)
 pub struct BlockDifficulty {
     pub difficulty: Difficulty,
-    pub covariance: VarUint
+    pub covariance: VarUint,
 }
 
 impl Serializer for BlockDifficulty {
@@ -18,7 +18,8 @@ impl Serializer for BlockDifficulty {
         // Try to read old cumulative_difficulty field if present (V2 format)
         // We do this by checking if there's enough remaining data for cumulative_difficulty + covariance
         // If so, skip the cumulative_difficulty (16 bytes) and read covariance
-        let covariance = if reader.size() >= 16 + 1 { // 16 for u128, at least 1 for VarUint
+        let covariance = if reader.size() >= 16 + 1 {
+            // 16 for u128, at least 1 for VarUint
             // Likely V2 format with cumulative_difficulty - skip it
             reader.skip(16)?;
             VarUint::read(reader)?
@@ -29,7 +30,7 @@ impl Serializer for BlockDifficulty {
 
         Ok(Self {
             difficulty,
-            covariance
+            covariance,
         })
     }
 

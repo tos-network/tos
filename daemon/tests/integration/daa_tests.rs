@@ -8,13 +8,10 @@
 // 4. DAA window calculations work correctly
 // 5. Timestamp manipulation resistance works
 
-use crate::integration::test_helpers::{TestStorage, DAATestHarness};
+use crate::integration::test_helpers::{DAATestHarness, TestStorage};
 use tos_daemon::core::error::BlockchainError;
 use tos_daemon::core::ghostdag::daa::{
-    DAA_WINDOW_SIZE,
-    TARGET_TIME_PER_BLOCK,
-    MIN_DIFFICULTY_RATIO,
-    MAX_DIFFICULTY_RATIO,
+    DAA_WINDOW_SIZE, MAX_DIFFICULTY_RATIO, MIN_DIFFICULTY_RATIO, TARGET_TIME_PER_BLOCK,
 };
 
 /// Test 1: DAA with stable hashrate
@@ -37,7 +34,7 @@ async fn test_daa_stable_hashrate() -> Result<(), BlockchainError> {
 
     // Get initial and final difficulty
     let initial_diff = harness.get_difficulty(&blocks[0]).await?;
-    let final_diff = harness.get_difficulty(&blocks[blocks.len()-1]).await?;
+    let final_diff = harness.get_difficulty(&blocks[blocks.len() - 1]).await?;
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Initial difficulty: {:?}", initial_diff);
@@ -65,14 +62,21 @@ async fn test_daa_stable_hashrate() -> Result<(), BlockchainError> {
         log::info!("Difficulty ratio: {:.4}", ratio);
     }
 
-    assert!(ratio > 0.8 && ratio < 1.2,
-        "Difficulty should remain stable (0.8-1.2x) with consistent block times, got {:.4}x", ratio);
+    assert!(
+        ratio > 0.8 && ratio < 1.2,
+        "Difficulty should remain stable (0.8-1.2x) with consistent block times, got {:.4}x",
+        ratio
+    );
 
     // Verify DAA scores are monotonically increasing
-    for i in 0..blocks.len()-1 {
+    for i in 0..blocks.len() - 1 {
         let score1 = harness.get_daa_score(&blocks[i]).await?;
-        let score2 = harness.get_daa_score(&blocks[i+1]).await?;
-        assert_eq!(score2, score1 + 1, "DAA scores should increase by 1 for chain blocks");
+        let score2 = harness.get_daa_score(&blocks[i + 1]).await?;
+        assert_eq!(
+            score2,
+            score1 + 1,
+            "DAA scores should increase by 1 for chain blocks"
+        );
     }
 
     if log::log_enabled!(log::Level::Info) {
@@ -95,23 +99,33 @@ async fn test_daa_increasing_hashrate() -> Result<(), BlockchainError> {
     // NOTE: Creating 100 blocks, which is less than DAA_WINDOW_SIZE (2016)
     // Difficulty will NOT adjust until window is filled - this is expected behavior
     let baseline_blocks = 100;
-    harness.add_chain_blocks(baseline_blocks, TARGET_TIME_PER_BLOCK).await?;
+    harness
+        .add_chain_blocks(baseline_blocks, TARGET_TIME_PER_BLOCK)
+        .await?;
     let baseline_diff = harness.get_difficulty(harness.current_tip()).await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Baseline difficulty after {} blocks: {:?}", baseline_blocks, baseline_diff);
+        log::info!(
+            "Baseline difficulty after {} blocks: {:?}",
+            baseline_blocks,
+            baseline_diff
+        );
     }
 
     // Add blocks twice as fast (0.5 seconds intervals)
     // This simulates doubling of hashrate
     let fast_blocks_count = 100;
-    let fast_blocks = harness.add_chain_blocks(fast_blocks_count, TARGET_TIME_PER_BLOCK / 2).await?;
+    let fast_blocks = harness
+        .add_chain_blocks(fast_blocks_count, TARGET_TIME_PER_BLOCK / 2)
+        .await?;
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Added {} fast blocks (0.5s intervals)", fast_blocks_count);
     }
 
-    let new_diff = harness.get_difficulty(&fast_blocks[fast_blocks.len()-1]).await?;
+    let new_diff = harness
+        .get_difficulty(&fast_blocks[fast_blocks.len() - 1])
+        .await?;
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("New difficulty after fast blocks: {:?}", new_diff);
@@ -132,9 +146,13 @@ async fn test_daa_increasing_hashrate() -> Result<(), BlockchainError> {
 
     // Since we haven't filled the DAA window (need 2016 blocks), difficulty should stay constant
     // This verifies that the DAA correctly waits for a full window before adjusting
-    assert_eq!(new_val, baseline_val,
+    assert_eq!(
+        new_val,
+        baseline_val,
         "Difficulty should stay constant when DAA window not filled (need {} blocks, have {})",
-        DAA_WINDOW_SIZE, baseline_blocks + fast_blocks_count);
+        DAA_WINDOW_SIZE,
+        baseline_blocks + fast_blocks_count
+    );
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("✓ Test passed: Difficulty increases appropriately with faster blocks");
@@ -156,23 +174,33 @@ async fn test_daa_decreasing_hashrate() -> Result<(), BlockchainError> {
     // NOTE: Creating 100 blocks, which is less than DAA_WINDOW_SIZE (2016)
     // Difficulty will NOT adjust until window is filled - this is expected behavior
     let baseline_blocks = 100;
-    harness.add_chain_blocks(baseline_blocks, TARGET_TIME_PER_BLOCK).await?;
+    harness
+        .add_chain_blocks(baseline_blocks, TARGET_TIME_PER_BLOCK)
+        .await?;
     let baseline_diff = harness.get_difficulty(harness.current_tip()).await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Baseline difficulty after {} blocks: {:?}", baseline_blocks, baseline_diff);
+        log::info!(
+            "Baseline difficulty after {} blocks: {:?}",
+            baseline_blocks,
+            baseline_diff
+        );
     }
 
     // Add blocks twice as slow (2 seconds intervals)
     // This simulates halving of hashrate
     let slow_blocks_count = 100;
-    let slow_blocks = harness.add_chain_blocks(slow_blocks_count, TARGET_TIME_PER_BLOCK * 2).await?;
+    let slow_blocks = harness
+        .add_chain_blocks(slow_blocks_count, TARGET_TIME_PER_BLOCK * 2)
+        .await?;
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Added {} slow blocks (2s intervals)", slow_blocks_count);
     }
 
-    let new_diff = harness.get_difficulty(&slow_blocks[slow_blocks.len()-1]).await?;
+    let new_diff = harness
+        .get_difficulty(&slow_blocks[slow_blocks.len() - 1])
+        .await?;
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("New difficulty after slow blocks: {:?}", new_diff);
@@ -193,9 +221,13 @@ async fn test_daa_decreasing_hashrate() -> Result<(), BlockchainError> {
 
     // Since we haven't filled the DAA window (need 2016 blocks), difficulty should stay constant
     // This verifies that the DAA correctly waits for a full window before adjusting
-    assert_eq!(new_val, baseline_val,
+    assert_eq!(
+        new_val,
+        baseline_val,
         "Difficulty should stay constant when DAA window not filled (need {} blocks, have {})",
-        DAA_WINDOW_SIZE, baseline_blocks + slow_blocks_count);
+        DAA_WINDOW_SIZE,
+        baseline_blocks + slow_blocks_count
+    );
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("✓ Test passed: Difficulty decreases appropriately with slower blocks");
@@ -214,7 +246,10 @@ async fn test_daa_window_boundaries() -> Result<(), BlockchainError> {
     let mut harness = DAATestHarness::new(test_storage.storage).await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Testing DAA window boundaries (DAA_WINDOW_SIZE = {})", DAA_WINDOW_SIZE);
+        log::info!(
+            "Testing DAA window boundaries (DAA_WINDOW_SIZE = {})",
+            DAA_WINDOW_SIZE
+        );
     }
 
     // Test blocks below window size (< 2016)
@@ -225,21 +260,32 @@ async fn test_daa_window_boundaries() -> Result<(), BlockchainError> {
     }
 
     // DAA score should be monotonic
-    let score_1000 = harness.get_daa_score(&blocks_1000[blocks_1000.len()-1]).await?;
-    assert_eq!(score_1000, 1001, "DAA score at 1000 blocks should be 1001 (genesis + 1000)");
+    let score_1000 = harness
+        .get_daa_score(&blocks_1000[blocks_1000.len() - 1])
+        .await?;
+    assert_eq!(
+        score_1000, 1001,
+        "DAA score at 1000 blocks should be 1001 (genesis + 1000)"
+    );
 
     // Test block exactly at window size (= 2016)
     let blocks_to_2016 = (DAA_WINDOW_SIZE as usize) - 1000;
     let blocks_2016 = harness.add_chain_blocks(blocks_to_2016, 1).await?;
-    let block_2016_daa = harness.get_daa_score(&blocks_2016[blocks_2016.len()-1]).await?;
+    let block_2016_daa = harness
+        .get_daa_score(&blocks_2016[blocks_2016.len() - 1])
+        .await?;
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("DAA score at block 2016: {}", block_2016_daa);
     }
 
-    assert_eq!(block_2016_daa, DAA_WINDOW_SIZE + 1,
+    assert_eq!(
+        block_2016_daa,
+        DAA_WINDOW_SIZE + 1,
         "DAA score at window boundary should be {} (genesis + {})",
-        DAA_WINDOW_SIZE + 1, DAA_WINDOW_SIZE);
+        DAA_WINDOW_SIZE + 1,
+        DAA_WINDOW_SIZE
+    );
 
     // Test blocks well past window size
     harness.add_chain_blocks(1000, 1).await?;
@@ -256,6 +302,12 @@ async fn test_daa_window_boundaries() -> Result<(), BlockchainError> {
 fn test_daa_constants() {
     assert_eq!(DAA_WINDOW_SIZE, 2016, "DAA window size should be 2016");
     assert_eq!(TARGET_TIME_PER_BLOCK, 1, "Target time should be 1 second");
-    assert_eq!(MIN_DIFFICULTY_RATIO, 0.25, "Min difficulty ratio should be 0.25");
-    assert_eq!(MAX_DIFFICULTY_RATIO, 4.0, "Max difficulty ratio should be 4.0");
+    assert_eq!(
+        MIN_DIFFICULTY_RATIO, 0.25,
+        "Min difficulty ratio should be 0.25"
+    );
+    assert_eq!(
+        MAX_DIFFICULTY_RATIO, 4.0,
+        "Max difficulty ratio should be 4.0"
+    );
 }

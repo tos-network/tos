@@ -1,23 +1,12 @@
-use std::collections::HashSet;
+use crate::core::{
+    error::{BlockchainError, DiskContext},
+    storage::{sled::TXS_COUNT, ClientProtocolProvider, SledStorage, TransactionProvider},
+};
 use async_trait::async_trait;
 use log::trace;
+use std::collections::HashSet;
 use tos_common::{
-    crypto::Hash,
-    immutable::Immutable,
-    serializer::Serializer,
-    transaction::Transaction
-};
-use crate::core::{
-    error::{
-        BlockchainError,
-        DiskContext
-    },
-    storage::{
-        sled::TXS_COUNT,
-        ClientProtocolProvider,
-        SledStorage,
-        TransactionProvider
-    }
+    crypto::Hash, immutable::Immutable, serializer::Serializer, transaction::Transaction,
 };
 
 impl SledStorage {
@@ -28,18 +17,32 @@ impl SledStorage {
         } else {
             self.cache.transactions_count = count;
         }
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.extra, TXS_COUNT, &count.to_be_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.extra,
+            TXS_COUNT,
+            &count.to_be_bytes(),
+        )?;
         Ok(())
-    }    
+    }
 }
 
 #[async_trait]
 impl TransactionProvider for SledStorage {
-    async fn get_transaction(&self, hash: &Hash) -> Result<Immutable<Transaction>, BlockchainError> {
+    async fn get_transaction(
+        &self,
+        hash: &Hash,
+    ) -> Result<Immutable<Transaction>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get transaction for hash {}", hash);
         }
-        self.get_cacheable_arc_data(&self.transactions, &self.transactions_cache, hash, DiskContext::GetTransaction).await
+        self.get_cacheable_arc_data(
+            &self.transactions,
+            &self.transactions_cache,
+            hash,
+            DiskContext::GetTransaction,
+        )
+        .await
     }
 
     async fn get_transaction_size(&self, hash: &Hash) -> Result<usize, BlockchainError> {
@@ -53,15 +56,25 @@ impl TransactionProvider for SledStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("has transaction {}", hash);
         }
-        self.contains_data_cached(&self.transactions, &self.transactions_cache, hash).await
+        self.contains_data_cached(&self.transactions, &self.transactions_cache, hash)
+            .await
     }
 
     // Store a new transaction
-    async fn add_transaction(&mut self, hash: &Hash, transaction: &Transaction) -> Result<(), BlockchainError> {
+    async fn add_transaction(
+        &mut self,
+        hash: &Hash,
+        transaction: &Transaction,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("add transaction {}", hash);
         }
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.transactions, hash, transaction.to_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.transactions,
+            hash,
+            transaction.to_bytes(),
+        )?;
 
         Ok(())
     }
@@ -76,7 +89,9 @@ impl TransactionProvider for SledStorage {
         Ok(count)
     }
 
-    async fn get_unexecuted_transactions<'a>(&'a self) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
+    async fn get_unexecuted_transactions<'a>(
+        &'a self,
+    ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
         trace!("get unexecuted transactions");
         Ok(Self::iter_keys(self.snapshot.as_ref(), &self.transactions)
             .map(|res| {
@@ -88,12 +103,26 @@ impl TransactionProvider for SledStorage {
 
                 Ok(Some(tx_hash))
             })
-            .filter_map(Result::transpose)
-        )
+            .filter_map(Result::transpose))
     }
 
-    async fn delete_transaction(&mut self, hash: &Hash) -> Result<Immutable<Transaction>, BlockchainError> {
-        Self::delete_cacheable_data::<Hash, HashSet<Hash>>(self.snapshot.as_mut(), &self.tx_blocks, None, hash).await?;
-        Self::delete_arc_cacheable_data(self.snapshot.as_mut(), &self.transactions, self.cache.transactions_cache.as_mut(), hash).await
+    async fn delete_transaction(
+        &mut self,
+        hash: &Hash,
+    ) -> Result<Immutable<Transaction>, BlockchainError> {
+        Self::delete_cacheable_data::<Hash, HashSet<Hash>>(
+            self.snapshot.as_mut(),
+            &self.tx_blocks,
+            None,
+            hash,
+        )
+        .await?;
+        Self::delete_arc_cacheable_data(
+            self.snapshot.as_mut(),
+            &self.transactions,
+            self.cache.transactions_cache.as_mut(),
+            hash,
+        )
+        .await
     }
 }

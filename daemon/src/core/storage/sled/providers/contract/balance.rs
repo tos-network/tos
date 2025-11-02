@@ -1,80 +1,157 @@
+use crate::core::{
+    error::{BlockchainError, DiskContext},
+    storage::{ContractBalanceProvider, SledStorage, VersionedContractBalance},
+};
 use async_trait::async_trait;
 use tos_common::{
     block::TopoHeight,
     crypto::{Hash, HASH_SIZE},
-    serializer::Serializer
-};
-use crate::core::{
-    error::{BlockchainError, DiskContext},
-    storage::{
-        ContractBalanceProvider,
-        VersionedContractBalance,
-        SledStorage
-    }
+    serializer::Serializer,
 };
 
 #[async_trait]
 impl ContractBalanceProvider for SledStorage {
-    async fn has_contract_balance_for(&self, contract: &Hash, asset: &Hash) -> Result<bool, BlockchainError> {
+    async fn has_contract_balance_for(
+        &self,
+        contract: &Hash,
+        asset: &Hash,
+    ) -> Result<bool, BlockchainError> {
         let key = Self::get_contract_balance_key(contract, asset);
         self.contains_data(&self.contracts_balances, &key)
     }
 
-    async fn has_contract_balance_at_exact_topoheight(&self, contract: &Hash, asset: &Hash, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        let key = Self::get_versioned_key(Self::get_contract_balance_key(contract, asset), topoheight);
+    async fn has_contract_balance_at_exact_topoheight(
+        &self,
+        contract: &Hash,
+        asset: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError> {
+        let key =
+            Self::get_versioned_key(Self::get_contract_balance_key(contract, asset), topoheight);
         self.contains_data(&self.versioned_contracts_balances, &key)
     }
 
-    async fn get_contract_balance_at_exact_topoheight(&self, contract: &Hash, asset: &Hash, topoheight: TopoHeight) -> Result<VersionedContractBalance, BlockchainError> {
-        let key = Self::get_versioned_key(Self::get_contract_balance_key(contract, asset), topoheight);
-        self.load_from_disk(&self.versioned_contracts_balances, &key, DiskContext::ContractBalance)
+    async fn get_contract_balance_at_exact_topoheight(
+        &self,
+        contract: &Hash,
+        asset: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<VersionedContractBalance, BlockchainError> {
+        let key =
+            Self::get_versioned_key(Self::get_contract_balance_key(contract, asset), topoheight);
+        self.load_from_disk(
+            &self.versioned_contracts_balances,
+            &key,
+            DiskContext::ContractBalance,
+        )
     }
 
-    async fn get_contract_balance_at_maximum_topoheight(&self, contract: &Hash, asset: &Hash, topoheight: TopoHeight) -> Result<Option<(TopoHeight, VersionedContractBalance)>, BlockchainError> {
-        if let Some(topo) = self.get_last_topoheight_for_contract_balance(contract, asset).await? {
+    async fn get_contract_balance_at_maximum_topoheight(
+        &self,
+        contract: &Hash,
+        asset: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, VersionedContractBalance)>, BlockchainError> {
+        if let Some(topo) = self
+            .get_last_topoheight_for_contract_balance(contract, asset)
+            .await?
+        {
             let k = Self::get_contract_balance_key(contract, asset);
             let mut prev_topo = Some(topo);
             while let Some(topo) = prev_topo {
                 let key = Self::get_versioned_key(&k, topo);
                 if topo <= topoheight {
-                    let balance: VersionedContractBalance = self.load_from_disk(&self.versioned_contracts_balances, &key, DiskContext::ContractBalance)?;
+                    let balance: VersionedContractBalance = self.load_from_disk(
+                        &self.versioned_contracts_balances,
+                        &key,
+                        DiskContext::ContractBalance,
+                    )?;
                     return Ok(Some((topo, balance)));
                 }
 
-                prev_topo = self.load_from_disk(&self.versioned_contracts_balances, &key, DiskContext::ContractBalance)?;
+                prev_topo = self.load_from_disk(
+                    &self.versioned_contracts_balances,
+                    &key,
+                    DiskContext::ContractBalance,
+                )?;
             }
         }
 
         Ok(None)
     }
 
-    async fn get_contract_assets_for<'a>(&'a self, contract: &'a Hash) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
-        Ok(Self::scan_prefix(self.snapshot.as_ref(), &self.contracts_balances, contract.as_bytes())
-            .map(|res| {
-                let bytes = res?;
-                let hash = Hash::from_bytes(&bytes[HASH_SIZE..])?;
-                Ok(hash)
-            })
+    async fn get_contract_assets_for<'a>(
+        &'a self,
+        contract: &'a Hash,
+    ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
+        Ok(Self::scan_prefix(
+            self.snapshot.as_ref(),
+            &self.contracts_balances,
+            contract.as_bytes(),
+        )
+        .map(|res| {
+            let bytes = res?;
+            let hash = Hash::from_bytes(&bytes[HASH_SIZE..])?;
+            Ok(hash)
+        }))
+    }
+
+    async fn get_last_topoheight_for_contract_balance(
+        &self,
+        contract: &Hash,
+        asset: &Hash,
+    ) -> Result<Option<TopoHeight>, BlockchainError> {
+        self.load_optional_from_disk(
+            &self.contracts_balances,
+            &Self::get_contract_balance_key(contract, asset),
         )
     }
 
-    async fn get_last_topoheight_for_contract_balance(&self, contract: &Hash, asset: &Hash) -> Result<Option<TopoHeight>, BlockchainError> {
-        self.load_optional_from_disk(&self.contracts_balances, &Self::get_contract_balance_key(contract, asset))
-    }
-
-    async fn get_last_contract_balance(&self, contract: &Hash, asset: &Hash) -> Result<(TopoHeight, VersionedContractBalance), BlockchainError> {
-        let Some(topoheight) = self.get_last_topoheight_for_contract_balance(contract, asset).await? else {
+    async fn get_last_contract_balance(
+        &self,
+        contract: &Hash,
+        asset: &Hash,
+    ) -> Result<(TopoHeight, VersionedContractBalance), BlockchainError> {
+        let Some(topoheight) = self
+            .get_last_topoheight_for_contract_balance(contract, asset)
+            .await?
+        else {
             return Err(BlockchainError::NoContractBalance);
         };
 
-        let key = Self::get_versioned_key(Self::get_contract_balance_key(contract, asset), topoheight);
-        Ok((topoheight, self.load_from_disk(&self.versioned_contracts_balances, &key, DiskContext::ContractBalance)?))
+        let key =
+            Self::get_versioned_key(Self::get_contract_balance_key(contract, asset), topoheight);
+        Ok((
+            topoheight,
+            self.load_from_disk(
+                &self.versioned_contracts_balances,
+                &key,
+                DiskContext::ContractBalance,
+            )?,
+        ))
     }
 
-    async fn set_last_contract_balance_to(&mut self, contract: &Hash, asset: &Hash, topoheight: TopoHeight, balance: VersionedContractBalance) -> Result<(), BlockchainError> {
-        let key = Self::get_versioned_key(Self::get_contract_balance_key(contract, asset), topoheight);
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.versioned_contracts_balances, &key, balance.to_bytes())?;
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.contracts_balances, &Self::get_contract_balance_key(contract, asset), &topoheight.to_be_bytes())?;
+    async fn set_last_contract_balance_to(
+        &mut self,
+        contract: &Hash,
+        asset: &Hash,
+        topoheight: TopoHeight,
+        balance: VersionedContractBalance,
+    ) -> Result<(), BlockchainError> {
+        let key =
+            Self::get_versioned_key(Self::get_contract_balance_key(contract, asset), topoheight);
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.versioned_contracts_balances,
+            &key,
+            balance.to_bytes(),
+        )?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.contracts_balances,
+            &Self::get_contract_balance_key(contract, asset),
+            &topoheight.to_be_bytes(),
+        )?;
 
         Ok(())
     }

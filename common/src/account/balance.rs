@@ -1,14 +1,9 @@
-use std::fmt::Display;
-use serde::{Deserialize, Serialize};
 use crate::{
     block::TopoHeight,
-    serializer::{
-        Serializer,
-        ReaderError,
-        Reader,
-        Writer
-    }
+    serializer::{Reader, ReaderError, Serializer, Writer},
 };
+use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -19,7 +14,7 @@ pub enum BalanceType {
     // Only a spending was made from this
     Output,
     // We got both incoming and outgoing funds
-    Both
+    Both,
 }
 
 impl BalanceType {
@@ -33,7 +28,7 @@ impl Serializer for BalanceType {
         match self {
             BalanceType::Input => writer.write_u8(0),
             BalanceType::Output => writer.write_u8(1),
-            BalanceType::Both => writer.write_u8(2)
+            BalanceType::Both => writer.write_u8(2),
         }
     }
 
@@ -42,7 +37,7 @@ impl Serializer for BalanceType {
             0 => Ok(BalanceType::Input),
             1 => Ok(BalanceType::Output),
             2 => Ok(BalanceType::Both),
-            _ => Err(ReaderError::InvalidValue)
+            _ => Err(ReaderError::InvalidValue),
         }
     }
 
@@ -102,7 +97,7 @@ impl VersionedBalance {
     pub fn take_balance_with(self, output: bool) -> u64 {
         match self.output_balance {
             Some(balance) if output => balance,
-            _ => self.final_balance
+            _ => self.final_balance,
         }
     }
 
@@ -121,7 +116,7 @@ impl VersionedBalance {
     pub fn select_balance(&mut self, output: bool) -> (&mut u64, bool) {
         match self.output_balance {
             Some(ref mut balance) if output => (balance, true),
-            _ => (&mut self.final_balance, false)
+            _ => (&mut self.final_balance, false),
         }
     }
 
@@ -158,7 +153,12 @@ impl VersionedBalance {
     }
 
     pub fn consume(self) -> (u64, Option<u64>, BalanceType, Option<TopoHeight>) {
-        (self.final_balance, self.output_balance, self.balance_type, self.previous_topoheight)
+        (
+            self.final_balance,
+            self.output_balance,
+            self.balance_type,
+            self.previous_topoheight,
+        )
     }
 
     pub fn as_balance(self, topoheight: TopoHeight) -> Balance {
@@ -166,9 +166,8 @@ impl VersionedBalance {
             topoheight,
             output_balance: self.output_balance,
             final_balance: self.final_balance,
-            balance_type: self.balance_type
+            balance_type: self.balance_type,
         }
-
     }
 }
 
@@ -190,7 +189,7 @@ impl Balance {
             output_balance: self.output_balance,
             final_balance: self.final_balance,
             balance_type: self.balance_type,
-            previous_topoheight: None
+            previous_topoheight: None,
         };
         (self.topoheight, version)
     }
@@ -207,7 +206,7 @@ impl Serializer for Balance {
             topoheight,
             output_balance,
             final_balance,
-            balance_type
+            balance_type,
         })
     }
 
@@ -243,7 +242,7 @@ impl Serializer for AccountSummary {
 
         Ok(Self {
             output_topoheight,
-            stable_topoheight
+            stable_topoheight,
         })
     }
 
@@ -253,8 +252,7 @@ impl Serializer for AccountSummary {
     }
 
     fn size(&self) -> usize {
-        self.output_topoheight.size()
-        + self.stable_topoheight.size()
+        self.output_topoheight.size() + self.stable_topoheight.size()
     }
 }
 
@@ -266,7 +264,11 @@ impl Default for VersionedBalance {
 
 impl Display for VersionedBalance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Balance[{}, previous: {:?}]", self.final_balance, self.previous_topoheight)
+        write!(
+            f,
+            "Balance[{}, previous: {:?}]",
+            self.final_balance, self.previous_topoheight
+        )
     }
 }
 
@@ -288,7 +290,7 @@ impl Serializer for VersionedBalance {
             output_balance,
             final_balance,
             previous_topoheight,
-            balance_type
+            balance_type,
         })
     }
 
@@ -311,7 +313,6 @@ mod tests {
         let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).unwrap();
         assert_eq!(zero, zero_bis);
     }
-
 
     #[test]
     fn serde_versioned_balance_previous_topo() {

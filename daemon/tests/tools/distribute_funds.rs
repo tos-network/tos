@@ -5,22 +5,27 @@
 // Usage:
 //   cargo run --bin distribute_funds -- --accounts test_accounts.json
 
-use std::fs;
-use std::path::PathBuf;
+use anyhow::{bail, Context, Result};
 use clap::Parser;
-use anyhow::{Result, Context, bail};
+use log::info;
 use serde::Deserialize;
 use serde_json::json;
-use log::info;
+use std::fs;
+use std::path::PathBuf;
 
 use tos_common::{
     config::TOS_ASSET,
-    crypto::{Hash, Hashable, PublicKey, elgamal::{KeyPair, PrivateKey}},
+    crypto::{
+        elgamal::{KeyPair, PrivateKey},
+        Hash, Hashable, PublicKey,
+    },
     serializer::Serializer,
     transaction::{
-        Transaction,
-        builder::{TransactionBuilder, TransactionTypeBuilder, TransferBuilder, FeeBuilder, AccountState, FeeHelper},
-        FeeType, TxVersion, Reference,
+        builder::{
+            AccountState, FeeBuilder, FeeHelper, TransactionBuilder, TransactionTypeBuilder,
+            TransferBuilder,
+        },
+        FeeType, Reference, Transaction, TxVersion,
     },
 };
 
@@ -117,7 +122,11 @@ impl AccountState for TestAccountState {
         self.reference.clone()
     }
 
-    fn update_account_balance(&mut self, _asset: &Hash, new_balance: u64) -> Result<(), Self::Error> {
+    fn update_account_balance(
+        &mut self,
+        _asset: &Hash,
+        new_balance: u64,
+    ) -> Result<(), Self::Error> {
         self.balance = new_balance;
         Ok(())
     }
@@ -152,7 +161,8 @@ impl RpcClient {
     }
 
     fn next_id(&self) -> u64 {
-        self.request_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        self.request_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 
     async fn get_info(&self) -> Result<GetInfoResult> {
@@ -162,14 +172,18 @@ impl RpcClient {
             "method": "get_info"
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.daemon_url)
             .json(&request)
             .send()
             .await
             .context("Failed to send get_info request")?;
 
-        let body: serde_json::Value = response.json().await.context("Failed to parse get_info response")?;
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .context("Failed to parse get_info response")?;
 
         if let Some(error) = body.get("error") {
             bail!("RPC error: {}", error);
@@ -190,22 +204,25 @@ impl RpcClient {
             }
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.daemon_url)
             .json(&request)
             .send()
             .await
             .context("Failed to send get_balance request")?;
 
-        let body: serde_json::Value = response.json().await.context("Failed to parse get_balance response")?;
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .context("Failed to parse get_balance response")?;
 
         if let Some(error) = body.get("error") {
             bail!("RPC error: {}", error);
         }
 
-        let result: BalanceResult = serde_json::from_value(
-            body.get("result").context("No result in response")?.clone()
-        )?;
+        let result: BalanceResult =
+            serde_json::from_value(body.get("result").context("No result in response")?.clone())?;
 
         Ok(result.balance)
     }
@@ -222,14 +239,18 @@ impl RpcClient {
             }
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.daemon_url)
             .json(&request)
             .send()
             .await
             .context("Failed to send submit_transaction request")?;
 
-        let body: serde_json::Value = response.json().await.context("Failed to parse submit_transaction response")?;
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .context("Failed to parse submit_transaction response")?;
 
         if let Some(error) = body.get("error") {
             bail!("RPC error: {}", error);
@@ -250,8 +271,8 @@ async fn main() -> Result<()> {
     info!("");
 
     // Load accounts
-    let accounts_json = fs::read_to_string(&args.accounts)
-        .context("Failed to read test accounts file")?;
+    let accounts_json =
+        fs::read_to_string(&args.accounts).context("Failed to read test accounts file")?;
     let test_accounts: TestAccounts = serde_json::from_str(&accounts_json)?;
 
     if test_accounts.accounts.len() < 5 {
@@ -264,7 +285,10 @@ async fn main() -> Result<()> {
     let account_a = &test_accounts.accounts[0];
     let private_key_bytes = hex::decode(&account_a.private_key_hex)?;
     if private_key_bytes.len() != 32 {
-        bail!("Invalid private key length: {} bytes", private_key_bytes.len());
+        bail!(
+            "Invalid private key length: {} bytes",
+            private_key_bytes.len()
+        );
     }
     let mut key_array = [0u8; 32];
     key_array.copy_from_slice(&private_key_bytes);
@@ -278,12 +302,18 @@ async fn main() -> Result<()> {
     // Connect to daemon
     let rpc = RpcClient::new(args.daemon.clone());
     let chain_info = rpc.get_info().await?;
-    info!("Connected to daemon at topoheight {}", chain_info.topoheight);
+    info!(
+        "Connected to daemon at topoheight {}",
+        chain_info.topoheight
+    );
 
     // Check account A balance
     let balance_a = rpc.get_balance(&account_a.address).await?;
     let balance_tos = balance_a as f64 / 1_000_000_000_000.0;
-    info!("Account A balance: {:.6} TOS ({} nanoTOS)", balance_tos, balance_a);
+    info!(
+        "Account A balance: {:.6} TOS ({} nanoTOS)",
+        balance_tos, balance_a
+    );
 
     // Calculate total needed
     let recipients = &test_accounts.accounts[1..5]; // B, C, D, E
@@ -292,13 +322,23 @@ async fn main() -> Result<()> {
 
     info!("");
     info!("Distribution plan:");
-    info!("  Amount per recipient: {:.6} TOS", args.amount as f64 / 1_000_000_000_000.0);
-    info!("  Fee per transaction: {:.6} TOS", args.fee as f64 / 1_000_000_000_000.0);
+    info!(
+        "  Amount per recipient: {:.6} TOS",
+        args.amount as f64 / 1_000_000_000_000.0
+    );
+    info!(
+        "  Fee per transaction: {:.6} TOS",
+        args.fee as f64 / 1_000_000_000_000.0
+    );
     info!("  Total needed: {:.6} TOS", total_tos);
     info!("");
 
     if balance_a < total_needed {
-        bail!("Insufficient balance! Have {:.6} TOS, need {:.6} TOS", balance_tos, total_tos);
+        bail!(
+            "Insufficient balance! Have {:.6} TOS, need {:.6} TOS",
+            balance_tos,
+            total_tos
+        );
     }
 
     // Create reference
@@ -310,7 +350,8 @@ async fn main() -> Result<()> {
     // Send transactions
     let mut nonce = 0u64;
     for (i, recipient) in recipients.iter().enumerate() {
-        info!("Sending {:.6} TOS to {} ({})...",
+        info!(
+            "Sending {:.6} TOS to {} ({})...",
             args.amount as f64 / 1_000_000_000_000.0,
             recipient.name,
             recipient.address

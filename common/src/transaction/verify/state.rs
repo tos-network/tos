@@ -1,30 +1,18 @@
 use std::{borrow::Cow, collections::HashMap};
 
-use async_trait::async_trait;
-use indexmap::IndexMap;
-use tos_vm::{Environment, Module};
 use crate::{
     account::Nonce,
     block::{Block, BlockVersion},
     contract::{
-        AssetChanges,
-        ChainState,
-        ContractCache,
-        ContractEventTracker,
-        ContractOutput,
-        ContractProvider
+        AssetChanges, ChainState, ContractCache, ContractEventTracker, ContractOutput,
+        ContractProvider,
     },
-    crypto::{
-        elgamal::CompressedPublicKey,
-        Hash
-    },
-    transaction::{
-        ContractDeposit,
-        MultiSigPayload,
-        Reference,
-        Transaction
-    }
+    crypto::{elgamal::CompressedPublicKey, Hash},
+    transaction::{ContractDeposit, MultiSigPayload, Reference, Transaction},
 };
+use async_trait::async_trait;
+use indexmap::IndexMap;
+use tos_vm::{Environment, Module};
 
 /// This trait is used by the batch verification function.
 /// It is intended to represent a virtual snapshot of the current blockchain
@@ -37,10 +25,7 @@ pub trait BlockchainVerificationState<'a, E> {
     // type Error;
 
     /// Pre-verify the TX
-    async fn pre_verify_tx<'b>(
-        &'b mut self,
-        tx: &Transaction,
-    ) -> Result<(), E>;
+    async fn pre_verify_tx<'b>(&'b mut self, tx: &Transaction) -> Result<(), E>;
 
     /// Get the balance ciphertext for a receiver account
     async fn get_receiver_balance<'b>(
@@ -66,16 +51,13 @@ pub trait BlockchainVerificationState<'a, E> {
     ) -> Result<(), E>;
 
     /// Get the nonce of an account
-    async fn get_account_nonce(
-        &mut self,
-        account: &'a CompressedPublicKey
-    ) -> Result<Nonce, E>;
+    async fn get_account_nonce(&mut self, account: &'a CompressedPublicKey) -> Result<Nonce, E>;
 
     /// Apply a new nonce to an account
     async fn update_account_nonce(
         &mut self,
         account: &'a CompressedPublicKey,
-        new_nonce: Nonce
+        new_nonce: Nonce,
     ) -> Result<(), E>;
 
     /// Atomically compare and swap nonce to prevent race conditions
@@ -85,7 +67,7 @@ pub trait BlockchainVerificationState<'a, E> {
         &mut self,
         account: &'a CompressedPublicKey,
         expected: Nonce,
-        new_value: Nonce
+        new_value: Nonce,
     ) -> Result<bool, E>;
 
     /// Get the block version in which TX is executed
@@ -95,38 +77,31 @@ pub trait BlockchainVerificationState<'a, E> {
     async fn set_multisig_state(
         &mut self,
         account: &'a CompressedPublicKey,
-        config: &MultiSigPayload
+        config: &MultiSigPayload,
     ) -> Result<(), E>;
 
     /// Set the multisig state for an account
     async fn get_multisig_state(
         &mut self,
-        account: &'a CompressedPublicKey
+        account: &'a CompressedPublicKey,
     ) -> Result<Option<&MultiSigPayload>, E>;
 
     /// Get the environment
     async fn get_environment(&mut self) -> Result<&Environment, E>;
 
     /// Set the contract module
-    async fn set_contract_module(
-        &mut self,
-        hash: &'a Hash,
-        module: &'a Module
-    ) -> Result<(), E>;
+    async fn set_contract_module(&mut self, hash: &'a Hash, module: &'a Module) -> Result<(), E>;
 
     /// Load in the cache the contract module
     /// This is called before `get_contract_module_with_environment`
     /// Returns true if the module is available
-    async fn load_contract_module(
-        &mut self,
-        hash: &'a Hash
-    ) -> Result<bool, E>;
+    async fn load_contract_module(&mut self, hash: &'a Hash) -> Result<bool, E>;
 
     /// Get the contract module with the environment
     /// This is used to verify that all parameters are correct
     async fn get_contract_module_with_environment(
         &self,
-        hash: &'a Hash
+        hash: &'a Hash,
     ) -> Result<(&Module, &Environment), E>;
 }
 
@@ -140,7 +115,9 @@ pub struct ContractEnvironment<'a, P: ContractProvider> {
 }
 
 #[async_trait]
-pub trait BlockchainApplyState<'a, P: ContractProvider, E>: BlockchainVerificationState<'a, E> {
+pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
+    BlockchainVerificationState<'a, E>
+{
     /// Add burned Tos
     async fn add_burned_coins(&mut self, amount: u64) -> Result<(), E>;
 
@@ -160,7 +137,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>: BlockchainVerificati
     async fn set_contract_outputs(
         &mut self,
         tx_hash: &'a Hash,
-        outputs: Vec<ContractOutput>
+        outputs: Vec<ContractOutput>,
     ) -> Result<(), E>;
 
     /// Get the contract environment
@@ -170,7 +147,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>: BlockchainVerificati
         &'b mut self,
         contract: &'b Hash,
         deposits: &'b IndexMap<Hash, ContractDeposit>,
-        tx_hash: &'b Hash
+        tx_hash: &'b Hash,
     ) -> Result<(ContractEnvironment<'b, P>, ChainState<'b>), E>;
 
     /// Merge the contract cache with the stored one
@@ -179,28 +156,25 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>: BlockchainVerificati
         hash: &'a Hash,
         cache: ContractCache,
         tracker: ContractEventTracker,
-        assets: HashMap<Hash, Option<AssetChanges>>
+        assets: HashMap<Hash, Option<AssetChanges>>,
     ) -> Result<(), E>;
 
     /// Remove the contract module
     /// This will mark the contract
     /// as a None version
-    async fn remove_contract_module(
-        &mut self,
-        hash: &'a Hash
-    ) -> Result<(), E>;
+    async fn remove_contract_module(&mut self, hash: &'a Hash) -> Result<(), E>;
 
     /// Get the energy resource for an account
     async fn get_energy_resource(
         &mut self,
-        account: &'a CompressedPublicKey
+        account: &'a CompressedPublicKey,
     ) -> Result<Option<crate::account::EnergyResource>, E>;
 
     /// Set the energy resource for an account
     async fn set_energy_resource(
         &mut self,
         account: &'a CompressedPublicKey,
-        energy_resource: crate::account::EnergyResource
+        energy_resource: crate::account::EnergyResource,
     ) -> Result<(), E>;
 
     /// Get the AI mining state
@@ -209,6 +183,6 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>: BlockchainVerificati
     /// Set the AI mining state
     async fn set_ai_mining_state(
         &mut self,
-        state: &crate::ai_mining::AIMiningState
+        state: &crate::ai_mining::AIMiningState,
     ) -> Result<(), E>;
 }

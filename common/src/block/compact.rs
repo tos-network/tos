@@ -8,9 +8,9 @@
 // Receivers reconstruct the block from their mempool.
 
 use crate::{
-    block::{BlockHeader, Block},
+    block::{Block, BlockHeader},
     crypto::{Hash, Hashable},
-    serializer::{Serializer, Reader, ReaderError, Writer},
+    serializer::{Reader, ReaderError, Serializer, Writer},
     transaction::Transaction,
 };
 use siphasher::sip::SipHasher13;
@@ -303,25 +303,25 @@ mod tests {
         let miner = CompressedPublicKey::new(CompressedRistretto([1u8; 32]));
         let header = BlockHeader::new(
             BlockVersion::V0,
-            parents,                      // parents_by_level
-            100,                          // blue_score
-            100,                          // daa_score
-            U256::zero(),                 // blue_work
-            Hash::new([0u8; 32]),         // pruning_point
-            1234567890,                   // timestamp
-            0,                            // bits
-            [0u8; 32],                    // extra_nonce
-            miner,                        // miner
-            Hash::new([0u8; 32]),         // hash_merkle_root
-            Hash::new([0u8; 32]),         // accepted_id_merkle_root
-            Hash::new([0u8; 32])          // utxo_commitment
+            parents,              // parents_by_level
+            100,                  // blue_score
+            100,                  // daa_score
+            U256::zero(),         // blue_work
+            Hash::new([0u8; 32]), // pruning_point
+            1234567890,           // timestamp
+            0,                    // bits
+            [0u8; 32],            // extra_nonce
+            miner,                // miner
+            Hash::new([0u8; 32]), // hash_merkle_root
+            Hash::new([0u8; 32]), // accepted_id_merkle_root
+            Hash::new([0u8; 32]), // utxo_commitment
         );
 
         // Create empty compact block
         let compact_block = CompactBlock {
             header: header.clone(),
             nonce: 999,
-            short_tx_ids: vec![[1,2,3,4,5,6], [7,8,9,10,11,12]],
+            short_tx_ids: vec![[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]],
             prefilled_txs: vec![],
         };
 
@@ -337,7 +337,7 @@ mod tests {
         // Verify
         assert_eq!(deserialized.nonce, 999);
         assert_eq!(deserialized.short_tx_ids.len(), 2);
-        assert_eq!(deserialized.short_tx_ids[0], [1,2,3,4,5,6]);
-        assert_eq!(deserialized.short_tx_ids[1], [7,8,9,10,11,12]);
+        assert_eq!(deserialized.short_tx_ids[0], [1, 2, 3, 4, 5, 6]);
+        assert_eq!(deserialized.short_tx_ids[1], [7, 8, 9, 10, 11, 12]);
     }
 }

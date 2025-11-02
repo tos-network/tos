@@ -21,8 +21,11 @@ use tos_common::{
     serializer::{Reader, Serializer, Writer},
 };
 use tos_daemon::core::{
-    executor::{ParallelExecutor, get_optimal_parallelism},
-    storage::{sled::{SledStorage, StorageMode}, NetworkProvider},
+    executor::{get_optimal_parallelism, ParallelExecutor},
+    storage::{
+        sled::{SledStorage, StorageMode},
+        NetworkProvider,
+    },
 };
 use tos_environment::Environment;
 
@@ -60,7 +63,8 @@ async fn test_no_deadlock_on_parallel_state_creation() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
@@ -84,10 +88,14 @@ async fn test_no_deadlock_on_parallel_state_creation() {
                 BlockVersion::V0,
                 block,
                 block_hash,
-            )
-        ).await;
+            ),
+        )
+        .await;
 
-        assert!(result.is_ok(), "ParallelChainState::new() should not timeout");
+        assert!(
+            result.is_ok(),
+            "ParallelChainState::new() should not timeout"
+        );
         let parallel_state = result.unwrap();
         assert_eq!(parallel_state.get_burned_supply(), 0);
     }
@@ -109,7 +117,8 @@ async fn test_parallel_executor_no_deadlock_empty_batch() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
@@ -123,15 +132,17 @@ async fn test_parallel_executor_no_deadlock_empty_batch() {
         BlockVersion::V0,
         block,
         block_hash,
-    ).await;
+    )
+    .await;
 
     let executor = ParallelExecutor::new();
 
     // Execute empty batch with timeout to detect deadlock
     let result = timeout(
         Duration::from_secs(5),
-        executor.execute_batch(parallel_state, vec![])
-    ).await;
+        executor.execute_batch(parallel_state, vec![]),
+    )
+    .await;
 
     assert!(result.is_ok(), "Empty batch execution should not timeout");
     let results = result.unwrap();
@@ -148,7 +159,8 @@ async fn test_storage_lock_acquisition_time() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
 
@@ -158,8 +170,11 @@ async fn test_storage_lock_acquisition_time() {
     let read_duration = start.elapsed();
     drop(_read_guard);
 
-    assert!(read_duration < Duration::from_millis(10),
-            "Read lock acquisition took {:?}, expected < 10ms", read_duration);
+    assert!(
+        read_duration < Duration::from_millis(10),
+        "Read lock acquisition took {:?}, expected < 10ms",
+        read_duration
+    );
 
     // Measure write lock acquisition time
     let start = Instant::now();
@@ -167,8 +182,11 @@ async fn test_storage_lock_acquisition_time() {
     let write_duration = start.elapsed();
     drop(_write_guard);
 
-    assert!(write_duration < Duration::from_millis(10),
-            "Write lock acquisition took {:?}, expected < 10ms", write_duration);
+    assert!(
+        write_duration < Duration::from_millis(10),
+        "Write lock acquisition took {:?}, expected < 10ms",
+        write_duration
+    );
 }
 
 /// Test 4: Concurrent read lock acquisition (should not block each other)
@@ -181,7 +199,8 @@ async fn test_concurrent_read_locks() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
 
@@ -207,8 +226,12 @@ async fn test_concurrent_read_locks() {
     for result in results {
         let (task_id, is_mainnet, duration) = result.unwrap();
         assert!(!is_mainnet, "Task {} should see devnet", task_id);
-        assert!(duration < Duration::from_millis(50),
-                "Task {} took {:?}, expected < 50ms", task_id, duration);
+        assert!(
+            duration < Duration::from_millis(50),
+            "Task {} took {:?}, expected < 50ms",
+            task_id,
+            duration
+        );
     }
 }
 
@@ -222,7 +245,8 @@ async fn test_write_lock_blocks_reads() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
 
@@ -247,10 +271,16 @@ async fn test_write_lock_blocks_reads() {
         .expect("Read task should not timeout after write lock released")
         .unwrap();
 
-    assert!(read_duration >= Duration::from_millis(100),
-            "Read task should have been blocked for ~100ms, but took {:?}", read_duration);
-    assert!(read_duration < Duration::from_millis(200),
-            "Read task blocked too long: {:?}", read_duration);
+    assert!(
+        read_duration >= Duration::from_millis(100),
+        "Read task should have been blocked for ~100ms, but took {:?}",
+        read_duration
+    );
+    assert!(
+        read_duration < Duration::from_millis(200),
+        "Read task blocked too long: {:?}",
+        read_duration
+    );
 }
 
 /// Test 6: Parallel state creation under concurrent load
@@ -263,7 +293,8 @@ async fn test_parallel_state_creation_under_load() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
@@ -286,8 +317,9 @@ async fn test_parallel_state_creation_under_load() {
                     BlockVersion::V0,
                     block,
                     block_hash,
-                )
-            ).await;
+                ),
+            )
+            .await;
             (i, result.is_ok(), start.elapsed())
         });
         handles.push(handle);
@@ -300,8 +332,12 @@ async fn test_parallel_state_creation_under_load() {
     for result in results {
         let (task_id, success, duration) = result.unwrap();
         assert!(success, "Task {} should not timeout", task_id);
-        assert!(duration < Duration::from_secs(2),
-                "Task {} took {:?}, expected < 2s", task_id, duration);
+        assert!(
+            duration < Duration::from_secs(2),
+            "Task {} took {:?}, expected < 2s",
+            task_id,
+            duration
+        );
     }
 }
 
@@ -312,24 +348,35 @@ async fn test_optimal_parallelism() {
 
     // Verify parallelism is reasonable
     assert!(parallelism > 0, "Parallelism should be > 0");
-    assert!(parallelism <= 128, "Parallelism should be <= 128 (sanity check)");
+    assert!(
+        parallelism <= 128,
+        "Parallelism should be <= 128 (sanity check)"
+    );
 
     // Verify it matches CPU count
-    assert_eq!(parallelism, num_cpus::get(),
-               "Optimal parallelism should match CPU count");
+    assert_eq!(
+        parallelism,
+        num_cpus::get(),
+        "Optimal parallelism should match CPU count"
+    );
 
-    println!("Optimal parallelism: {} (CPU count: {})", parallelism, num_cpus::get());
+    println!(
+        "Optimal parallelism: {} (CPU count: {})",
+        parallelism,
+        num_cpus::get()
+    );
 }
 
 /// Test 8: Lock contention under high load (stress test)
 #[tokio::test]
 // MIGRATED TO ROCKSDB: Now uses RocksDB storage instead of Sled to avoid deadlock issues
 async fn test_high_concurrency_lock_stress() {
-    use tos_testing_integration::utils::storage_helpers::create_test_rocksdb_storage;
     use tos_daemon::core::storage::rocksdb::RocksStorage;
+    use tos_testing_integration::utils::storage_helpers::create_test_rocksdb_storage;
 
     // Create RocksDB storage (no deadlock risk)
-    let storage_arc: std::sync::Arc<tokio::sync::RwLock<RocksStorage>> = create_test_rocksdb_storage().await;
+    let storage_arc: std::sync::Arc<tokio::sync::RwLock<RocksStorage>> =
+        create_test_rocksdb_storage().await;
 
     // Spawn 100 concurrent read tasks
     let mut handles = vec![];
@@ -353,10 +400,9 @@ async fn test_high_concurrency_lock_stress() {
 
     // Wait for all tasks
     let start_all = Instant::now();
-    let results = timeout(
-        Duration::from_secs(30),
-        futures::future::join_all(handles)
-    ).await.expect("Stress test should complete within 30s");
+    let results = timeout(Duration::from_secs(30), futures::future::join_all(handles))
+        .await
+        .expect("Stress test should complete within 30s");
 
     let total_duration = start_all.elapsed();
 
@@ -373,6 +419,9 @@ async fn test_high_concurrency_lock_stress() {
     println!("Max read lock acquisition time: {:?}", max_read_duration);
 
     // Verify no excessive blocking
-    assert!(max_read_duration < Duration::from_secs(1),
-            "Max read duration {:?} exceeds 1s threshold", max_read_duration);
+    assert!(
+        max_read_duration < Duration::from_secs(1),
+        "Max read duration {:?} exceeds 1s threshold",
+        max_read_duration
+    );
 }

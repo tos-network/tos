@@ -1,37 +1,29 @@
 // Parallel Chain State - Simplified Arc-based architecture for parallel transaction execution
 // No lifetimes, DashMap for automatic concurrency control
 
+use crate::core::{error::BlockchainError, storage::Storage};
+use dashmap::DashMap;
 use std::{
     collections::HashMap,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
     marker::PhantomData,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 use tokio::sync::{RwLock, Semaphore};
-use dashmap::DashMap;
 use tos_common::{
     account::EnergyResource,
     ai_mining::AIMiningState,
     block::{Block, BlockVersion, TopoHeight},
     config::TOS_ASSET,
-    crypto::{Hash, PublicKey, Hashable},
+    crypto::{Hash, Hashable, PublicKey},
     transaction::{
-        Transaction,
-        TransferPayload,
-        BurnPayload,
-        InvokeContractPayload,
-        DeployContractPayload,
-        EnergyPayload,
-        MultiSigPayload,
+        BurnPayload, DeployContractPayload, EnergyPayload, InvokeContractPayload, MultiSigPayload,
+        Transaction, TransferPayload,
     },
 };
 use tos_environment::Environment;
-use crate::core::{
-    error::BlockchainError,
-    storage::Storage,
-};
 
 /// Account state cached in memory for parallel execution
 #[derive(Debug, Clone)]
@@ -242,23 +234,35 @@ impl<S: Storage> ParallelChainState<S> {
         }
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Loading account state from storage for {}", key.as_address(self.is_mainnet));
+            trace!(
+                "Loading account state from storage for {}",
+                key.as_address(self.is_mainnet)
+            );
         }
 
         // Acquire read lock and load nonce from storage
         // IMPORTANT: Semaphore must be acquired by CALLER before calling this method
         let storage = self.storage.read().await;
-        let nonce = match storage.get_nonce_at_maximum_topoheight(key, self.topoheight).await? {
+        let nonce = match storage
+            .get_nonce_at_maximum_topoheight(key, self.topoheight)
+            .await?
+        {
             Some((_, versioned_nonce)) => versioned_nonce.get_nonce(),
             None => 0, // New account
         };
 
         // Load multisig state from storage (reuse the same lock)
-        let multisig = match storage.get_multisig_at_maximum_topoheight_for(key, self.topoheight).await? {
+        let multisig = match storage
+            .get_multisig_at_maximum_topoheight_for(key, self.topoheight)
+            .await?
+        {
             Some((_, versioned_multisig)) => {
                 // Extract the inner Option<MultiSigPayload> from VersionedMultiSig
                 // VersionedMultiSig is Versioned<Option<Cow<'a, MultiSigPayload>>>
-                versioned_multisig.get().as_ref().map(|cow| cow.clone().into_owned())
+                versioned_multisig
+                    .get()
+                    .as_ref()
+                    .map(|cow| cow.clone().into_owned())
             }
             None => None,
         };
@@ -266,16 +270,19 @@ impl<S: Storage> ParallelChainState<S> {
         drop(storage);
 
         // Insert into cache with original values for modification tracking
-        self.accounts.insert(key.clone(), AccountState {
-            original_nonce: nonce,
-            nonce,
-            balances: HashMap::new(), // Balances loaded on-demand
-            original_balances: HashMap::new(),
-            original_multisig: multisig.clone(),
-            multisig,
-            original_energy: None, // Energy loaded on-demand
-            energy: None,
-        });
+        self.accounts.insert(
+            key.clone(),
+            AccountState {
+                original_nonce: nonce,
+                nonce,
+                balances: HashMap::new(), // Balances loaded on-demand
+                original_balances: HashMap::new(),
+                original_multisig: multisig.clone(),
+                multisig,
+                original_energy: None, // Energy loaded on-demand
+                energy: None,
+            },
+        );
 
         Ok(())
     }
@@ -299,14 +306,20 @@ impl<S: Storage> ParallelChainState<S> {
         }
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Loading balance from storage for {} asset {}",
-                   account.as_address(self.is_mainnet), asset);
+            trace!(
+                "Loading balance from storage for {} asset {}",
+                account.as_address(self.is_mainnet),
+                asset
+            );
         }
 
         // Acquire read lock and load balance from storage
         // IMPORTANT: Semaphore must be acquired by CALLER before calling this method
         let storage = self.storage.read().await;
-        let balance = match storage.get_balance_at_maximum_topoheight(account, asset, self.topoheight).await? {
+        let balance = match storage
+            .get_balance_at_maximum_topoheight(account, asset, self.topoheight)
+            .await?
+        {
             Some((_, versioned_balance)) => versioned_balance.get_balance(),
             None => 0, // No balance for this asset
         };
@@ -316,17 +329,16 @@ impl<S: Storage> ParallelChainState<S> {
         // Insert balance into account's balance map and track original value
         if let Some(mut account_entry) = self.accounts.get_mut(account) {
             account_entry.balances.insert(asset.clone(), balance);
-            account_entry.original_balances.insert(asset.clone(), balance);
+            account_entry
+                .original_balances
+                .insert(asset.clone(), balance);
         }
 
         Ok(())
     }
 
     /// Load energy resource from storage if not already cached
-    pub async fn ensure_energy_loaded(
-        &self,
-        account: &PublicKey,
-    ) -> Result<(), BlockchainError> {
+    pub async fn ensure_energy_loaded(&self, account: &PublicKey) -> Result<(), BlockchainError> {
         use log::trace;
 
         // First ensure account is loaded
@@ -340,8 +352,10 @@ impl<S: Storage> ParallelChainState<S> {
         }
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Loading energy resource from storage for {}",
-                   account.as_address(self.is_mainnet));
+            trace!(
+                "Loading energy resource from storage for {}",
+                account.as_address(self.is_mainnet)
+            );
         }
 
         // Acquire read lock and load energy from storage
@@ -405,14 +419,16 @@ impl<S: Storage> ParallelChainState<S> {
         self: Arc<Self>,
         tx: Arc<Transaction>,
     ) -> Result<TransactionResult, BlockchainError> {
-        use log::debug;
         use crate::core::state::ParallelApplyAdapter;
+        use log::debug;
 
         let tx_hash = tx.hash();
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Applying transaction {} at topoheight {} (adapter-based validation)",
-                   tx_hash, self.topoheight);
+            debug!(
+                "Applying transaction {} at topoheight {} (adapter-based validation)",
+                tx_hash, self.topoheight
+            );
         }
 
         // Create adapter for this transaction execution
@@ -456,7 +472,10 @@ impl<S: Storage> ParallelChainState<S> {
                 // SECURITY FIX: All staged mutations automatically discarded on failure
                 // (nonces, multisig, gas, burns stay unchanged when TX fails)
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Transaction {} validation failed (adapter): {:?}", tx_hash, e);
+                    debug!(
+                        "Transaction {} validation failed (adapter): {:?}",
+                        tx_hash, e
+                    );
                 }
 
                 Ok(TransactionResult {
@@ -479,7 +498,11 @@ impl<S: Storage> ParallelChainState<S> {
         use log::{debug, trace};
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Applying {} transfers from {}", transfers.len(), source.as_address(self.is_mainnet));
+            trace!(
+                "Applying {} transfers from {}",
+                transfers.len(),
+                source.as_address(self.is_mainnet)
+            );
         }
 
         for transfer in transfers {
@@ -493,20 +516,30 @@ impl<S: Storage> ParallelChainState<S> {
             // Check and deduct from source balance
             {
                 let mut account = self.accounts.get_mut(source).unwrap();
-                let src_balance = account.balances.get_mut(asset)
-                    .ok_or_else(|| {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("Source {} has no balance for asset {}", source.as_address(self.is_mainnet), asset);
-                        }
-                        BlockchainError::NoBalance(source.as_address(self.is_mainnet))
-                    })?;
+                let src_balance = account.balances.get_mut(asset).ok_or_else(|| {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Source {} has no balance for asset {}",
+                            source.as_address(self.is_mainnet),
+                            asset
+                        );
+                    }
+                    BlockchainError::NoBalance(source.as_address(self.is_mainnet))
+                })?;
 
                 if *src_balance < amount {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Insufficient funds: source {} has {} but needs {} for asset {}",
-                               source.as_address(self.is_mainnet), src_balance, amount, asset);
+                        debug!(
+                            "Insufficient funds: source {} has {} but needs {} for asset {}",
+                            source.as_address(self.is_mainnet),
+                            src_balance,
+                            amount,
+                            asset
+                        );
                     }
-                    return Err(BlockchainError::NoBalance(source.as_address(self.is_mainnet)));
+                    return Err(BlockchainError::NoBalance(
+                        source.as_address(self.is_mainnet),
+                    ));
                 }
 
                 *src_balance -= amount;
@@ -525,15 +558,24 @@ impl<S: Storage> ParallelChainState<S> {
                 *dest_balance = dest_balance.saturating_add(amount);
 
                 if log::log_enabled!(log::Level::Trace) {
-                    trace!("Credited {} of asset {} to {} (new balance: {})",
-                           amount, asset, destination.as_address(self.is_mainnet), *dest_balance);
+                    trace!(
+                        "Credited {} of asset {} to {} (new balance: {})",
+                        amount,
+                        asset,
+                        destination.as_address(self.is_mainnet),
+                        *dest_balance
+                    );
                 }
             }
 
             if log::log_enabled!(log::Level::Trace) {
-                trace!("Transferred {} of asset {} from {} to {}",
-                       amount, asset, source.as_address(self.is_mainnet),
-                       destination.as_address(self.is_mainnet));
+                trace!(
+                    "Transferred {} of asset {} from {} to {}",
+                    amount,
+                    asset,
+                    source.as_address(self.is_mainnet),
+                    destination.as_address(self.is_mainnet)
+                );
             }
         }
 
@@ -553,7 +595,12 @@ impl<S: Storage> ParallelChainState<S> {
         let amount = payload.amount;
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Burning {} of asset {} from {}", amount, asset, source.as_address(self.is_mainnet));
+            trace!(
+                "Burning {} of asset {} from {}",
+                amount,
+                asset,
+                source.as_address(self.is_mainnet)
+            );
         }
 
         // Load source balance from storage if not cached
@@ -562,15 +609,23 @@ impl<S: Storage> ParallelChainState<S> {
         // Check and deduct from source balance
         {
             let mut account = self.accounts.get_mut(source).unwrap();
-            let src_balance = account.balances.get_mut(asset)
+            let src_balance = account
+                .balances
+                .get_mut(asset)
                 .ok_or_else(|| BlockchainError::NoBalance(source.as_address(self.is_mainnet)))?;
 
             if *src_balance < amount {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Insufficient funds for burn: source {} has {} but needs {}",
-                           source.as_address(self.is_mainnet), src_balance, amount);
+                    debug!(
+                        "Insufficient funds for burn: source {} has {} but needs {}",
+                        source.as_address(self.is_mainnet),
+                        src_balance,
+                        amount
+                    );
                 }
-                return Err(BlockchainError::NoBalance(source.as_address(self.is_mainnet)));
+                return Err(BlockchainError::NoBalance(
+                    source.as_address(self.is_mainnet),
+                ));
             }
 
             *src_balance -= amount;
@@ -580,7 +635,12 @@ impl<S: Storage> ParallelChainState<S> {
         self.add_burned_supply(amount)?;
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Burned {} of asset {} from {}", amount, asset, source.as_address(self.is_mainnet));
+            debug!(
+                "Burned {} of asset {} from {}",
+                amount,
+                asset,
+                source.as_address(self.is_mainnet)
+            );
         }
 
         Ok(())
@@ -656,7 +716,10 @@ impl<S: Storage> ParallelChainState<S> {
         use log::{debug, info};
 
         if log::log_enabled!(log::Level::Info) {
-            info!("Committing parallel chain state changes to storage at topoheight {}", self.topoheight);
+            info!(
+                "Committing parallel chain state changes to storage at topoheight {}",
+                self.topoheight
+            );
         }
 
         // Write all account nonces (only modified ones)
@@ -665,8 +728,11 @@ impl<S: Storage> ParallelChainState<S> {
             // Only write if nonce was actually modified
             if entry.value().nonce != entry.value().original_nonce {
                 use tos_common::account::VersionedNonce;
-                let versioned_nonce = VersionedNonce::new(entry.value().nonce, Some(self.topoheight));
-                storage.set_last_nonce_to(entry.key(), self.topoheight, &versioned_nonce).await?;
+                let versioned_nonce =
+                    VersionedNonce::new(entry.value().nonce, Some(self.topoheight));
+                storage
+                    .set_last_nonce_to(entry.key(), self.topoheight, &versioned_nonce)
+                    .await?;
                 nonce_count += 1;
             }
         }
@@ -677,11 +743,18 @@ impl<S: Storage> ParallelChainState<S> {
             let account = entry.key();
             for (asset, balance) in &entry.value().balances {
                 // Only write if balance was actually modified
-                let original_balance = entry.value().original_balances.get(asset).copied().unwrap_or(0);
+                let original_balance = entry
+                    .value()
+                    .original_balances
+                    .get(asset)
+                    .copied()
+                    .unwrap_or(0);
                 if *balance != original_balance {
                     use tos_common::account::VersionedBalance;
                     let versioned_balance = VersionedBalance::new(*balance, Some(self.topoheight));
-                    storage.set_last_balance_to(account, asset, self.topoheight, &versioned_balance).await?;
+                    storage
+                        .set_last_balance_to(account, asset, self.topoheight, &versioned_balance)
+                        .await?;
                     balance_count += 1;
                 }
             }
@@ -696,8 +769,10 @@ impl<S: Storage> ParallelChainState<S> {
         }
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Committed {} nonces, {} balances, {} contracts",
-                   nonce_count, balance_count, contract_count);
+            debug!(
+                "Committed {} nonces, {} balances, {} contracts",
+                nonce_count, balance_count, contract_count
+            );
         }
 
         Ok(())
@@ -744,14 +819,20 @@ impl<S: Storage> ParallelChainState<S> {
     /// - Security Fix: SECURITY_FIX_PLAN.md Section S2
     /// - Called from: `blockchain.rs::execute_transactions_parallel()` lines 4535, 4544
     /// - Removed redundancy: `blockchain.rs::add_new_block()` lines 3422-3442 (commented out)
-    pub async fn reward_miner(&self, miner: &PublicKey, reward: u64) -> Result<(), BlockchainError> {
+    pub async fn reward_miner(
+        &self,
+        miner: &PublicKey,
+        reward: u64,
+    ) -> Result<(), BlockchainError> {
         use log::debug;
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Rewarding miner {} with {} TOS at topoheight {}",
-                   miner.as_address(self.is_mainnet),
-                   tos_common::utils::format_tos(reward),
-                   self.topoheight);
+            debug!(
+                "Rewarding miner {} with {} TOS at topoheight {}",
+                miner.as_address(self.is_mainnet),
+                tos_common::utils::format_tos(reward),
+                self.topoheight
+            );
         }
 
         // CONSENSUS FIX: Load existing balance from storage into accounts cache
@@ -766,17 +847,19 @@ impl<S: Storage> ParallelChainState<S> {
             *balance = balance.saturating_add(reward);
 
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Miner {} balance updated: {} → {} TOS (reward: {})",
-                       miner.as_address(self.is_mainnet),
-                       tos_common::utils::format_tos(old_balance),
-                       tos_common::utils::format_tos(*balance),
-                       tos_common::utils::format_tos(reward));
+                debug!(
+                    "Miner {} balance updated: {} → {} TOS (reward: {})",
+                    miner.as_address(self.is_mainnet),
+                    tos_common::utils::format_tos(old_balance),
+                    tos_common::utils::format_tos(*balance),
+                    tos_common::utils::format_tos(reward)
+                );
             }
         } else {
             // This should never happen because ensure_balance_loaded creates the entry
             // Use AccountNotFound error with miner's address
             return Err(BlockchainError::AccountNotFound(
-                miner.as_address(self.is_mainnet)
+                miner.as_address(self.is_mainnet),
             ));
         }
 
@@ -789,7 +872,8 @@ impl<S: Storage> ParallelChainState<S> {
     /// Returns iterator of (PublicKey, new_nonce)
     /// FIX: Only returns nonces that were actually modified (not just loaded)
     pub fn get_modified_nonces(&self) -> Vec<(PublicKey, u64)> {
-        self.accounts.iter()
+        self.accounts
+            .iter()
             .filter(|entry| entry.value().nonce != entry.value().original_nonce)
             .map(|entry| (entry.key().clone(), entry.value().nonce))
             .collect()
@@ -810,7 +894,12 @@ impl<S: Storage> ParallelChainState<S> {
             let account = entry.key();
             for (asset, balance) in &entry.value().balances {
                 // Only include if balance was actually modified
-                let original_balance = entry.value().original_balances.get(asset).copied().unwrap_or(0);
+                let original_balance = entry
+                    .value()
+                    .original_balances
+                    .get(asset)
+                    .copied()
+                    .unwrap_or(0);
                 if *balance != original_balance {
                     result.push(((account.clone(), asset.clone()), *balance));
                 }
@@ -824,7 +913,8 @@ impl<S: Storage> ParallelChainState<S> {
     /// SECURITY FIX #7: Return ALL accounts with modified multisig including None (deletions)
     /// FIX: Only returns multisig configurations that were actually modified (not just loaded)
     pub fn get_modified_multisigs(&self) -> Vec<(PublicKey, Option<MultiSigPayload>)> {
-        self.accounts.iter()
+        self.accounts
+            .iter()
             .filter(|entry| {
                 // Check if multisig was actually modified
                 // Compare using serialization since MultiSigPayload doesn't implement PartialEq
@@ -832,7 +922,7 @@ impl<S: Storage> ParallelChainState<S> {
                 let original_multisig = &entry.value().original_multisig;
 
                 match (current_multisig, original_multisig) {
-                    (None, None) => false, // Both None, not modified
+                    (None, None) => false,                     // Both None, not modified
                     (Some(_), None) | (None, Some(_)) => true, // Changed from Some to None or vice versa
                     (Some(current), Some(original)) => {
                         // Compare by serializing both (since MultiSigPayload doesn't impl PartialEq)
@@ -850,14 +940,15 @@ impl<S: Storage> ParallelChainState<S> {
     /// Get energy resources that were modified
     /// Only returns energy resources that were actually modified (not just loaded)
     pub fn get_modified_energy_resources(&self) -> Vec<(PublicKey, Option<EnergyResource>)> {
-        self.accounts.iter()
+        self.accounts
+            .iter()
             .filter(|entry| {
                 // Check if energy was actually modified
                 let current_energy = &entry.value().energy;
                 let original_energy = &entry.value().original_energy;
 
                 match (current_energy, original_energy) {
-                    (None, None) => false, // Both None, not modified
+                    (None, None) => false,                     // Both None, not modified
                     (Some(_), None) | (None, Some(_)) => true, // Changed from Some to None or vice versa
                     (Some(current), Some(original)) => {
                         // Compare by serializing both (since EnergyResource doesn't impl PartialEq)
@@ -876,7 +967,8 @@ impl<S: Storage> ParallelChainState<S> {
 
     /// Get nonce for an account (must be loaded first)
     pub fn get_nonce(&self, account: &PublicKey) -> u64 {
-        self.accounts.get(account)
+        self.accounts
+            .get(account)
             .map(|entry| entry.nonce)
             .unwrap_or(0)
     }
@@ -891,7 +983,8 @@ impl<S: Storage> ParallelChainState<S> {
     /// Get balance for an account and asset (must be loaded first)
     /// Returns 0 if balance not loaded
     pub fn get_balance(&self, account: &PublicKey, asset: &Hash) -> u64 {
-        self.accounts.get(account)
+        self.accounts
+            .get(account)
             .and_then(|entry| entry.balances.get(asset).copied())
             .unwrap_or(0)
     }
@@ -899,7 +992,11 @@ impl<S: Storage> ParallelChainState<S> {
     /// Get mutable reference to balance (must be loaded first)
     /// SAFETY: This returns a mutable reference through DashMap's RefMut
     /// The reference is valid as long as the RefMut guard is held
-    pub fn get_balance_mut(&self, account: &PublicKey, asset: &Hash) -> Result<u64, BlockchainError> {
+    pub fn get_balance_mut(
+        &self,
+        account: &PublicKey,
+        asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
         // This is a workaround for lifetime issues with DashMap
         // We return the value, not a reference, to avoid borrow checker issues
         Ok(self.get_balance(account, asset))
@@ -925,7 +1022,8 @@ impl<S: Storage> ParallelChainState<S> {
 
     /// Get multisig configuration for an account (must be loaded first)
     pub fn get_multisig(&self, account: &PublicKey) -> Option<MultiSigPayload> {
-        self.accounts.get(account)
+        self.accounts
+            .get(account)
             .and_then(|entry| entry.multisig.clone())
     }
 
@@ -938,7 +1036,8 @@ impl<S: Storage> ParallelChainState<S> {
 
     /// Get energy resource for an account (must be loaded first)
     pub fn get_energy_resource(&self, account: &PublicKey) -> Option<EnergyResource> {
-        self.accounts.get(account)
+        self.accounts
+            .get(account)
             .and_then(|entry| entry.energy.clone())
     }
 
@@ -951,7 +1050,11 @@ impl<S: Storage> ParallelChainState<S> {
 
     /// Get AI mining state (must be loaded first)
     pub async fn get_ai_mining_state(&self) -> Option<AIMiningState> {
-        self.ai_mining_state.read().await.as_ref().and_then(|s| s.clone())
+        self.ai_mining_state
+            .read()
+            .await
+            .as_ref()
+            .and_then(|s| s.clone())
     }
 
     /// Set AI mining state (must be loaded first)
@@ -994,40 +1097,38 @@ impl<S: Storage> ParallelChainState<S> {
 
         const MAX_BURNED_SUPPLY: u64 = 18_000_000_000_000_000; // 18M TOS
 
-        let result = self.burned_supply.fetch_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |current| {
-                // Check if adding would exceed max supply
-                if current >= MAX_BURNED_SUPPLY {
-                    error!(
-                        "CRITICAL: Cannot burn more supply! Total burned: {}, max allowed: {}",
-                        current, MAX_BURNED_SUPPLY
-                    );
-                    return None; // Reject update
-                }
-
-                let new_value = current.saturating_add(amount);
-
-                // Warn if approaching limit (90%)
-                if new_value > MAX_BURNED_SUPPLY * 90 / 100 {
-                    if log::log_enabled!(log::Level::Warn) {
-                        log::warn!(
-                            "Burned supply approaching limit: {} / {} ({}%)",
-                            new_value,
-                            MAX_BURNED_SUPPLY,
-                            new_value * 100 / MAX_BURNED_SUPPLY
+        let result =
+            self.burned_supply
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    // Check if adding would exceed max supply
+                    if current >= MAX_BURNED_SUPPLY {
+                        error!(
+                            "CRITICAL: Cannot burn more supply! Total burned: {}, max allowed: {}",
+                            current, MAX_BURNED_SUPPLY
                         );
+                        return None; // Reject update
                     }
-                }
 
-                Some(new_value.min(MAX_BURNED_SUPPLY))
-            }
-        );
+                    let new_value = current.saturating_add(amount);
+
+                    // Warn if approaching limit (90%)
+                    if new_value > MAX_BURNED_SUPPLY * 90 / 100 {
+                        if log::log_enabled!(log::Level::Warn) {
+                            log::warn!(
+                                "Burned supply approaching limit: {} / {} ({}%)",
+                                new_value,
+                                MAX_BURNED_SUPPLY,
+                                new_value * 100 / MAX_BURNED_SUPPLY
+                            );
+                        }
+                    }
+
+                    Some(new_value.min(MAX_BURNED_SUPPLY))
+                });
 
         match result {
             Ok(_) => Ok(()),
-            Err(_) => Err(BlockchainError::BurnedSupplyLimitExceeded)
+            Err(_) => Err(BlockchainError::BurnedSupplyLimitExceeded),
         }
     }
 
@@ -1038,23 +1139,21 @@ impl<S: Storage> ParallelChainState<S> {
     pub fn add_gas_fee(&self, amount: u64) {
         use log::error;
 
-        let old_value = self.gas_fee.fetch_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |current| {
-                let new_value = current.saturating_add(amount);
-                if new_value == u64::MAX && current != u64::MAX {
-                    // First time hitting max, log critical error
-                    error!(
-                        "CRITICAL: Gas fee counter saturated at u64::MAX! \
+        let old_value =
+            self.gas_fee
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    let new_value = current.saturating_add(amount);
+                    if new_value == u64::MAX && current != u64::MAX {
+                        // First time hitting max, log critical error
+                        error!(
+                            "CRITICAL: Gas fee counter saturated at u64::MAX! \
                          This should never happen in practice. \
                          Current: {}, attempted add: {}",
-                        current, amount
-                    );
-                }
-                Some(new_value)
-            }
-        );
+                            current, amount
+                        );
+                    }
+                    Some(new_value)
+                });
 
         if old_value.is_err() {
             error!("Failed to update gas fee counter (race condition)");

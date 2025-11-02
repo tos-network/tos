@@ -1,8 +1,6 @@
 //! Account setup and management utilities for tests
 
-use tos_common::{
-    crypto::{Hash, PublicKey},
-};
+use tos_common::crypto::{Hash, PublicKey};
 
 use crate::storage::MockStorage;
 use crate::TestResult;
@@ -23,12 +21,7 @@ use crate::TestResult;
 ///
 /// setup_account_mock(&storage, &account, 1000, 0);
 /// ```
-pub fn setup_account_mock(
-    storage: &MockStorage,
-    account: &PublicKey,
-    balance: u64,
-    nonce: u64,
-) {
+pub fn setup_account_mock(storage: &MockStorage, account: &PublicKey, balance: u64, nonce: u64) {
     storage.setup_account(account, balance, nonce);
 }
 
@@ -59,10 +52,7 @@ pub async fn get_balance_from_storage(
 }
 
 /// Get nonce from MockStorage
-pub async fn get_nonce_from_storage(
-    storage: &MockStorage,
-    account: &PublicKey,
-) -> TestResult<u64> {
+pub async fn get_nonce_from_storage(storage: &MockStorage, account: &PublicKey) -> TestResult<u64> {
     Ok(storage.get_nonce(account))
 }
 
@@ -80,20 +70,21 @@ pub async fn get_nonce_from_storage(
 /// // accounts[1] has balance 2000
 /// // accounts[2] has balance 3000
 /// ```
-pub fn setup_multiple_accounts(
-    storage: &MockStorage,
-    balances: Vec<u64>,
-) -> Vec<PublicKey> {
-    use tos_common::serializer::{Serializer, Reader};
+pub fn setup_multiple_accounts(storage: &MockStorage, balances: Vec<u64>) -> Vec<PublicKey> {
+    use tos_common::serializer::{Reader, Serializer};
 
-    balances.iter().enumerate().map(|(i, &balance)| {
-        // Create deterministic test accounts
-        let data = [i as u8; 32];
-        let mut reader = Reader::new(&data);
-        let account = tos_common::crypto::elgamal::CompressedPublicKey::read(&mut reader)
-            .expect("Failed to create test pubkey");
+    balances
+        .iter()
+        .enumerate()
+        .map(|(i, &balance)| {
+            // Create deterministic test accounts
+            let data = [i as u8; 32];
+            let mut reader = Reader::new(&data);
+            let account = tos_common::crypto::elgamal::CompressedPublicKey::read(&mut reader)
+                .expect("Failed to create test pubkey");
 
-        storage.setup_account(&account, balance, 0);
-        account
-    }).collect()
+            storage.setup_account(&account, balance, 0);
+            account
+        })
+        .collect()
 }

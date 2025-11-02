@@ -72,7 +72,9 @@ fn string_to_hash(s: &str) -> Hash {
 }
 
 /// Load and parse a reference format JSON test file
-fn load_reference_test<P: AsRef<Path>>(path: P) -> Result<ReferenceDag, Box<dyn std::error::Error>> {
+fn load_reference_test<P: AsRef<Path>>(
+    path: P,
+) -> Result<ReferenceDag, Box<dyn std::error::Error>> {
     let json_str = fs::read_to_string(path)?;
     let dag: ReferenceDag = serde_json::from_str(&json_str)?;
     Ok(dag)
@@ -95,7 +97,12 @@ fn validate_reference_test(
 
     // Validate each block
     for (idx, block_def) in dag_def.blocks.iter().enumerate() {
-        println!("\n--- Validating block {} ({}/{}) ---", block_def.id, idx + 1, dag_def.blocks.len());
+        println!(
+            "\n--- Validating block {} ({}/{}) ---",
+            block_def.id,
+            idx + 1,
+            dag_def.blocks.len()
+        );
 
         // Create hash for this block
         let block_hash = string_to_hash(&block_def.id);
@@ -110,14 +117,19 @@ fn validate_reference_test(
 
         // Verify expected_selected_parent exists
         if !id_to_hash.contains_key(&block_def.expected_selected_parent) {
-            return Err(format!("Block {}: Unknown selected parent {}",
-                block_def.id, block_def.expected_selected_parent).into());
+            return Err(format!(
+                "Block {}: Unknown selected parent {}",
+                block_def.id, block_def.expected_selected_parent
+            )
+            .into());
         }
 
         // Verify all expected blues exist
         for blue_id in &block_def.expected_blues {
             if !id_to_hash.contains_key(blue_id) {
-                return Err(format!("Block {}: Unknown blue block {}", block_def.id, blue_id).into());
+                return Err(
+                    format!("Block {}: Unknown blue block {}", block_def.id, blue_id).into(),
+                );
             }
         }
 
@@ -131,7 +143,10 @@ fn validate_reference_test(
         println!("✓ Block {} structure valid", block_def.id);
         println!("  - Parents: {}", block_def.parents.len());
         println!("  - Expected score: {}", block_def.expected_score);
-        println!("  - Expected selected parent: {}", block_def.expected_selected_parent);
+        println!(
+            "  - Expected selected parent: {}",
+            block_def.expected_selected_parent
+        );
         println!("  - Expected blues: {}", block_def.expected_blues.len());
         println!("  - Expected reds: {}", block_def.expected_reds.len());
     }
@@ -153,8 +168,7 @@ mod tests {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         println!("Loading reference format JSON tests from: {}", testdata_dir);
 
-        let entries = fs::read_dir(testdata_dir)
-            .expect("Failed to read testdata directory");
+        let entries = fs::read_dir(testdata_dir).expect("Failed to read testdata directory");
 
         let mut json_files = Vec::new();
         for entry in entries {
@@ -170,14 +184,19 @@ mod tests {
             }
         }
 
-        assert!(!json_files.is_empty(), "No reference format JSON test files found");
-        println!("Found {} reference format JSON test files", json_files.len());
+        assert!(
+            !json_files.is_empty(),
+            "No reference format JSON test files found"
+        );
+        println!(
+            "Found {} reference format JSON test files",
+            json_files.len()
+        );
 
         for path in json_files {
             let filename = path.file_name().unwrap().to_str().unwrap();
             println!("Verifying can load: {}", filename);
-            let dag = load_reference_test(&path)
-                .expect(&format!("Failed to load {}", filename));
+            let dag = load_reference_test(&path).expect(&format!("Failed to load {}", filename));
             println!("  ✓ K={}, {} blocks", dag.k, dag.blocks.len());
         }
     }
@@ -186,60 +205,48 @@ mod tests {
     async fn test_dag0_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag0.json", testdata_dir);
-        let dag = load_reference_test(&test_path)
-            .expect("Failed to load dag0.json");
-        validate_reference_test("dag0", &dag)
-            .expect("dag0 validation failed");
+        let dag = load_reference_test(&test_path).expect("Failed to load dag0.json");
+        validate_reference_test("dag0", &dag).expect("dag0 validation failed");
     }
 
     #[tokio::test]
     async fn test_dag1_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag1.json", testdata_dir);
-        let dag = load_reference_test(&test_path)
-            .expect("Failed to load dag1.json");
-        validate_reference_test("dag1", &dag)
-            .expect("dag1 validation failed");
+        let dag = load_reference_test(&test_path).expect("Failed to load dag1.json");
+        validate_reference_test("dag1", &dag).expect("dag1 validation failed");
     }
 
     #[tokio::test]
     async fn test_dag2_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag2.json", testdata_dir);
-        let dag = load_reference_test(&test_path)
-            .expect("Failed to load dag2.json");
-        validate_reference_test("dag2", &dag)
-            .expect("dag2 validation failed");
+        let dag = load_reference_test(&test_path).expect("Failed to load dag2.json");
+        validate_reference_test("dag2", &dag).expect("dag2 validation failed");
     }
 
     #[tokio::test]
     async fn test_dag3_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag3.json", testdata_dir);
-        let dag = load_reference_test(&test_path)
-            .expect("Failed to load dag3.json");
-        validate_reference_test("dag3", &dag)
-            .expect("dag3 validation failed");
+        let dag = load_reference_test(&test_path).expect("Failed to load dag3.json");
+        validate_reference_test("dag3", &dag).expect("dag3 validation failed");
     }
 
     #[tokio::test]
     async fn test_dag4_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag4.json", testdata_dir);
-        let dag = load_reference_test(&test_path)
-            .expect("Failed to load dag4.json");
-        validate_reference_test("dag4", &dag)
-            .expect("dag4 validation failed");
+        let dag = load_reference_test(&test_path).expect("Failed to load dag4.json");
+        validate_reference_test("dag4", &dag).expect("dag4 validation failed");
     }
 
     #[tokio::test]
     async fn test_dag5_json() {
         let testdata_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/dags");
         let test_path = format!("{}/dag5.json", testdata_dir);
-        let dag = load_reference_test(&test_path)
-            .expect("Failed to load dag5.json");
-        validate_reference_test("dag5", &dag)
-            .expect("dag5 validation failed");
+        let dag = load_reference_test(&test_path).expect("Failed to load dag5.json");
+        validate_reference_test("dag5", &dag).expect("dag5 validation failed");
     }
 
     #[test]
@@ -248,7 +255,9 @@ mod tests {
         println!("=== GHOSTDAG JSON TEST SUITE SUMMARY ===");
         println!();
         println!("This test suite validates reference format JSON files (dag*.json).");
-        println!("TOS native format files (simple_*.json) are tested in ghostdag_json_loader module.");
+        println!(
+            "TOS native format files (simple_*.json) are tested in ghostdag_json_loader module."
+        );
         println!();
         println!("Test Coverage:");
         println!("  [✓] test_load_all_json_tests - Verifies all dag*.json files can be loaded");

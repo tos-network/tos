@@ -16,7 +16,10 @@ use crate::core::{
 
 #[async_trait]
 impl ReachabilityDataProvider for RocksStorage {
-    async fn get_reachability_data(&self, hash: &Hash) -> Result<ReachabilityData, BlockchainError> {
+    async fn get_reachability_data(
+        &self,
+        hash: &Hash,
+    ) -> Result<ReachabilityData, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get reachability data for {}", hash);
         }
@@ -30,7 +33,11 @@ impl ReachabilityDataProvider for RocksStorage {
         self.contains_data(Column::ReachabilityData, hash)
     }
 
-    async fn set_reachability_data(&mut self, hash: &Hash, data: &ReachabilityData) -> Result<(), BlockchainError> {
+    async fn set_reachability_data(
+        &mut self,
+        hash: &Hash,
+        data: &ReachabilityData,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set reachability data for {}", hash);
         }

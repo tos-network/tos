@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
 use crate::{
-    serializer::{Serializer, Writer, Reader, ReaderError},
     account::FreezeDuration,
+    serializer::{Reader, ReaderError, Serializer, Writer},
 };
+use serde::{Deserialize, Serialize};
 
 /// Energy-related transaction payloads for Transfer operations only
 /// Enhanced with TRON-style freeze duration and reward multiplier system
@@ -53,7 +53,7 @@ impl EnergyPayload {
     /// FreezeTos and UnfreezeTos require small TOS fees to prevent abuse
     pub fn tos_fee(&self) -> u64 {
         use crate::config::FEE_PER_TRANSFER;
-        
+
         match self {
             // Small TOS fee to prevent frequent freeze/unfreeze abuse
             // Similar to TRON's bandwidth cost for freeze/unfreeze operations
@@ -90,7 +90,7 @@ impl EnergyPayload {
         match self {
             Self::FreezeTos { amount, duration } => {
                 Some((*amount / crate::config::COIN_VALUE) * duration.reward_multiplier())
-            },
+            }
             Self::UnfreezeTos { .. } => None,
         }
     }
@@ -147,7 +147,7 @@ mod tests {
             amount: 100000000, // 1 TOS
             duration,
         };
-        
+
         assert_eq!(payload.get_amount(), 100000000);
         assert_eq!(payload.get_duration(), Some(duration));
         assert_eq!(payload.calculate_energy_gain(), Some(14)); // 1 TOS * 14 = 14 transfers
@@ -155,10 +155,8 @@ mod tests {
 
     #[test]
     fn test_unfreeze_tos_payload_creation() {
-        let payload = EnergyPayload::UnfreezeTos {
-            amount: 500,
-        };
-        
+        let payload = EnergyPayload::UnfreezeTos { amount: 500 };
+
         assert_eq!(payload.get_amount(), 500);
         assert_eq!(payload.get_duration(), None);
         assert_eq!(payload.calculate_energy_gain(), None);
@@ -171,10 +169,8 @@ mod tests {
             amount: 1000,
             duration,
         };
-        let unfreeze_payload = EnergyPayload::UnfreezeTos {
-            amount: 500,
-        };
-        
+        let unfreeze_payload = EnergyPayload::UnfreezeTos { amount: 500 };
+
         assert_eq!(freeze_payload.energy_cost(), 0);
         assert_eq!(unfreeze_payload.energy_cost(), 0);
     }
@@ -186,19 +182,19 @@ mod tests {
             amount: 1000,
             duration,
         };
-        
+
         let mut bytes = Vec::new();
         let mut writer = crate::serializer::Writer::new(&mut bytes);
         payload.write(&mut writer);
-        
+
         let mut reader = crate::serializer::Reader::new(&bytes);
         let deserialized = EnergyPayload::read(&mut reader).unwrap();
-        
+
         match deserialized {
             EnergyPayload::FreezeTos { amount, duration } => {
                 assert_eq!(amount, 1000);
                 assert_eq!(duration, duration);
-            },
+            }
             _ => panic!("Expected FreezeTos payload"),
         }
     }
@@ -206,18 +202,22 @@ mod tests {
     #[test]
     fn test_different_duration_rewards() {
         let amounts = [100000000, 200000000, 300000000]; // 1, 2, 3 TOS
-        let durations = [FreezeDuration::new(3).unwrap(), FreezeDuration::new(7).unwrap(), FreezeDuration::new(14).unwrap()];
-        
+        let durations = [
+            FreezeDuration::new(3).unwrap(),
+            FreezeDuration::new(7).unwrap(),
+            FreezeDuration::new(14).unwrap(),
+        ];
+
         for amount in amounts {
             for duration in &durations {
                 let payload = EnergyPayload::FreezeTos {
                     amount,
                     duration: duration.clone(),
                 };
-                
+
                 let expected_energy = (amount / COIN_VALUE) * duration.reward_multiplier();
                 assert_eq!(payload.calculate_energy_gain(), Some(expected_energy));
             }
         }
     }
-} 
+}

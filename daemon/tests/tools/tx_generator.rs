@@ -14,24 +14,25 @@
 // Usage:
 //   cargo run --bin tx_generator -- --count 50 --daemon http://127.0.0.1:8080
 
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use anyhow::{Context, Result};
 use clap::Parser;
-use anyhow::{Result, Context};
-use log::{info, debug, warn, error};
-use tokio;
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio;
 
 use tos_common::{
     config::TOS_ASSET,
-    crypto::{Hash, Hashable, elgamal::KeyPair},
+    crypto::{elgamal::KeyPair, Hash, Hashable},
     network::Network,
     serializer::Serializer,
     transaction::{
-        Transaction,
-        builder::{TransactionBuilder, TransactionTypeBuilder, TransferBuilder, FeeBuilder, AccountState},
-        FeeType, TxVersion, Reference,
+        builder::{
+            AccountState, FeeBuilder, TransactionBuilder, TransactionTypeBuilder, TransferBuilder,
+        },
+        FeeType, Reference, Transaction, TxVersion,
     },
 };
 
@@ -124,7 +125,11 @@ impl AccountState for TestAccountState {
         self.reference.clone()
     }
 
-    fn update_account_balance(&mut self, _asset: &Hash, new_balance: u64) -> Result<(), Self::Error> {
+    fn update_account_balance(
+        &mut self,
+        _asset: &Hash,
+        new_balance: u64,
+    ) -> Result<(), Self::Error> {
         self.balance = new_balance;
         Ok(())
     }
@@ -138,7 +143,10 @@ impl AccountState for TestAccountState {
         Ok(())
     }
 
-    fn is_account_registered(&self, _key: &tos_common::crypto::PublicKey) -> Result<bool, Self::Error> {
+    fn is_account_registered(
+        &self,
+        _key: &tos_common::crypto::PublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true) // Assume all accounts are registered for testing
     }
 }
@@ -199,10 +207,15 @@ impl RpcClient {
     }
 
     fn next_id(&self) -> u64 {
-        self.request_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        self.request_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 
-    async fn call<T: for<'de> Deserialize<'de>>(&self, method: &str, params: serde_json::Value) -> Result<T> {
+    async fn call<T: for<'de> Deserialize<'de>>(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<T> {
         if log::log_enabled!(log::Level::Debug) {
             debug!("RPC Request: {} with params: {}", method, params);
         }
@@ -214,7 +227,8 @@ impl RpcClient {
             params,
         };
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.daemon_url)
             .json(&request)
             .send()
@@ -230,7 +244,8 @@ impl RpcClient {
             anyhow::bail!("RPC error {}: {}", error.code, error.message);
         }
 
-        rpc_response.result
+        rpc_response
+            .result
             .ok_or_else(|| anyhow::anyhow!("RPC response missing result"))
     }
 
@@ -242,7 +257,8 @@ impl RpcClient {
             "method": "get_info"
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.daemon_url)
             .json(&request)
             .send()
@@ -258,12 +274,14 @@ impl RpcClient {
             anyhow::bail!("RPC error {}: {}", error.code, error.message);
         }
 
-        rpc_response.result
+        rpc_response
+            .result
             .ok_or_else(|| anyhow::anyhow!("RPC response missing result"))
     }
 
     async fn submit_transaction(&self, tx_hex: String) -> Result<String> {
-        self.call("submit_transaction", json!({ "data": tx_hex })).await
+        self.call("submit_transaction", json!({ "data": tx_hex }))
+            .await
     }
 }
 
@@ -282,17 +300,22 @@ struct TransactionGenerator {
 impl TransactionGenerator {
     fn new(is_mainnet: bool, num_senders: usize) -> Self {
         info!("Generating {} sender keypairs...", num_senders);
-        let sender_keypairs: Vec<KeyPair> = (0..num_senders)
-            .map(|_| KeyPair::new())
-            .collect();
+        let sender_keypairs: Vec<KeyPair> = (0..num_senders).map(|_| KeyPair::new()).collect();
 
         let receiver_keypair = KeyPair::new();
 
         info!("Sender addresses:");
         for (i, kp) in sender_keypairs.iter().enumerate() {
-            info!("  Sender {}: {}", i, kp.get_public_key().to_address(is_mainnet));
+            info!(
+                "  Sender {}: {}",
+                i,
+                kp.get_public_key().to_address(is_mainnet)
+            );
         }
-        info!("Receiver address: {}", receiver_keypair.get_public_key().to_address(is_mainnet));
+        info!(
+            "Receiver address: {}",
+            receiver_keypair.get_public_key().to_address(is_mainnet)
+        );
 
         Self {
             is_mainnet,
@@ -308,13 +331,25 @@ impl TransactionGenerator {
 
     fn update_reference(&mut self, reference: Reference) {
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Updated reference to topoheight {} hash {}", reference.topoheight, reference.hash);
+            debug!(
+                "Updated reference to topoheight {} hash {}",
+                reference.topoheight, reference.hash
+            );
         }
         self.reference = reference;
     }
 
-    fn generate_transactions(&self, count: usize, amount: u64, fee: u64, different_senders: bool) -> Result<Vec<Transaction>> {
-        info!("Generating {} transactions (different_senders: {})...", count, different_senders);
+    fn generate_transactions(
+        &self,
+        count: usize,
+        amount: u64,
+        fee: u64,
+        different_senders: bool,
+    ) -> Result<Vec<Transaction>> {
+        info!(
+            "Generating {} transactions (different_senders: {})...",
+            count, different_senders
+        );
 
         let mut transactions = Vec::with_capacity(count);
         let initial_balance = 1_000_000_000_000u64; // 1M TOS = 1e15 nanoTOS
@@ -337,13 +372,21 @@ impl TransactionGenerator {
             };
 
             // Create account state
-            let mut state = TestAccountState::new(initial_balance, nonce, self.is_mainnet, self.reference.clone());
+            let mut state = TestAccountState::new(
+                initial_balance,
+                nonce,
+                self.is_mainnet,
+                self.reference.clone(),
+            );
 
             // Build transfer
             let transfer = TransferBuilder {
                 asset: TOS_ASSET,
                 amount,
-                destination: self.receiver_keypair.get_public_key().to_address(self.is_mainnet),
+                destination: self
+                    .receiver_keypair
+                    .get_public_key()
+                    .to_address(self.is_mainnet),
                 extra_data: None,
             };
 
@@ -384,8 +427,16 @@ impl TransactionSubmitter {
         Self { rpc_client }
     }
 
-    async fn submit_batch(&self, transactions: &[Transaction], batch_name: &str) -> Result<Duration> {
-        info!("Submitting batch '{}' with {} transactions...", batch_name, transactions.len());
+    async fn submit_batch(
+        &self,
+        transactions: &[Transaction],
+        batch_name: &str,
+    ) -> Result<Duration> {
+        info!(
+            "Submitting batch '{}' with {} transactions...",
+            batch_name,
+            transactions.len()
+        );
 
         let start = Instant::now();
         let mut submitted = 0;
@@ -401,12 +452,22 @@ impl TransactionSubmitter {
                 Ok(tx_hash) => {
                     submitted += 1;
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("  TX {}/{}: {} submitted successfully", i + 1, transactions.len(), tx_hash);
+                        debug!(
+                            "  TX {}/{}: {} submitted successfully",
+                            i + 1,
+                            transactions.len(),
+                            tx_hash
+                        );
                     }
                 }
                 Err(e) => {
                     errors += 1;
-                    warn!("  TX {}/{}: submission failed: {}", i + 1, transactions.len(), e);
+                    warn!(
+                        "  TX {}/{}: submission failed: {}",
+                        i + 1,
+                        transactions.len(),
+                        e
+                    );
                 }
             }
         }
@@ -414,8 +475,15 @@ impl TransactionSubmitter {
         let elapsed = start.elapsed();
         let tps = submitted as f64 / elapsed.as_secs_f64();
 
-        info!("Batch '{}' complete: {}/{} submitted, {} errors, {:.2} TPS, {:?} elapsed",
-              batch_name, submitted, transactions.len(), errors, tps, elapsed);
+        info!(
+            "Batch '{}' complete: {}/{} submitted, {} errors, {:.2} TPS, {:?} elapsed",
+            batch_name,
+            submitted,
+            transactions.len(),
+            errors,
+            tps,
+            elapsed
+        );
 
         Ok(elapsed)
     }
@@ -459,17 +527,25 @@ impl PerformanceTracker {
         println!("Total transactions generated: {}", self.total_transactions);
         println!("Total transactions submitted: {}", self.total_submitted);
         println!("Total errors:                 {}", self.total_errors);
-        println!("Success rate:                 {:.2}%",
-                 (self.total_submitted as f64 / self.total_transactions as f64) * 100.0);
+        println!(
+            "Success rate:                 {:.2}%",
+            (self.total_submitted as f64 / self.total_transactions as f64) * 100.0
+        );
         println!("Total duration:               {:?}", self.total_duration);
-        println!("Average TPS:                  {:.2}",
-                 self.total_submitted as f64 / self.total_duration.as_secs_f64());
+        println!(
+            "Average TPS:                  {:.2}",
+            self.total_submitted as f64 / self.total_duration.as_secs_f64()
+        );
 
         if !self.batch_durations.is_empty() {
-            let avg_batch = self.batch_durations.iter().sum::<Duration>() / self.batch_durations.len() as u32;
+            let avg_batch =
+                self.batch_durations.iter().sum::<Duration>() / self.batch_durations.len() as u32;
             let min_batch = self.batch_durations.iter().min().unwrap();
             let max_batch = self.batch_durations.iter().max().unwrap();
-            println!("Batch durations:              min={:?}, avg={:?}, max={:?}", min_batch, avg_batch, max_batch);
+            println!(
+                "Batch durations:              min={:?}, avg={:?}, max={:?}",
+                min_batch, avg_batch, max_batch
+            );
         }
         println!("{}", "=".repeat(70));
     }
@@ -525,7 +601,9 @@ async fn main() -> Result<()> {
 
     // Get chain info
     info!("Fetching chain info from daemon...");
-    let chain_info = rpc_client.get_info().await
+    let chain_info = rpc_client
+        .get_info()
+        .await
         .context("Failed to get chain info. Is the daemon running?")?;
 
     info!("Chain info:");
@@ -556,7 +634,7 @@ async fn main() -> Result<()> {
         args.count,
         args.amount,
         args.fee,
-        args.different_senders
+        args.different_senders,
     )?;
 
     // Create submitter and performance tracker
@@ -565,7 +643,10 @@ async fn main() -> Result<()> {
 
     // Submit transactions in batches
     let num_batches = (args.count + args.batch_size - 1) / args.batch_size;
-    info!("Submitting {} transactions in {} batches...", args.count, num_batches);
+    info!(
+        "Submitting {} transactions in {} batches...",
+        args.count, num_batches
+    );
     info!("");
 
     for (batch_idx, batch) in all_transactions.chunks(args.batch_size).enumerate() {
@@ -596,8 +677,10 @@ async fn main() -> Result<()> {
     info!("");
     info!("Transaction generation complete!");
     info!("Check daemon logs for parallel execution activity.");
-    info!("Look for blocks with {}+ transactions to trigger parallel path.",
-          20); // MIN_TXS_FOR_PARALLEL
+    info!(
+        "Look for blocks with {}+ transactions to trigger parallel path.",
+        20
+    ); // MIN_TXS_FOR_PARALLEL
 
     Ok(())
 }

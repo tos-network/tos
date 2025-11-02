@@ -10,40 +10,28 @@
 //
 // Phase 2-4: Contract, Energy, AI Mining support (future work)
 
-use std::{
-    borrow::Cow,
-    collections::HashMap,
-    sync::Arc,
-};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use indexmap::IndexMap;
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
 use tokio::sync::Semaphore;
 use tos_common::{
-    account::{Nonce, EnergyResource},
+    account::{EnergyResource, Nonce},
     ai_mining::AIMiningState,
     block::{Block, BlockVersion},
     contract::{
-        AssetChanges,
-        ChainState as ContractChainState,
-        ContractCache,
-        ContractEventTracker,
+        AssetChanges, ChainState as ContractChainState, ContractCache, ContractEventTracker,
         ContractOutput,
     },
     crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
     transaction::{
         verify::{BlockchainApplyState, BlockchainVerificationState, ContractEnvironment},
-        ContractDeposit,
-        MultiSigPayload,
-        Reference,
+        ContractDeposit, MultiSigPayload, Reference,
     },
 };
 use tos_vm::{Environment, Module};
 
-use crate::core::{
-    error::BlockchainError,
-    storage::Storage,
-};
+use crate::core::{error::BlockchainError, storage::Storage};
 
 use super::parallel_chain_state::ParallelChainState;
 
@@ -182,14 +170,19 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
 
         // SECURITY FIX: Commit burned supply (with overflow protection)
         if self.staged_burned_supply > 0 {
-            self.parallel_state.add_burned_supply(self.staged_burned_supply)?;
+            self.parallel_state
+                .add_burned_supply(self.staged_burned_supply)?;
         }
 
         Ok(())
     }
 
     /// Get or load balance into cache
-    async fn get_or_load_balance(&mut self, account: &PublicKey, asset: &Hash) -> Result<u64, BlockchainError> {
+    async fn get_or_load_balance(
+        &mut self,
+        account: &PublicKey,
+        asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
         let key = (account.clone(), asset.clone());
 
         if let Some(&balance) = self.balance_reads.get(&key) {
@@ -202,7 +195,9 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
 
         // Load from ParallelChainState
         self.parallel_state.ensure_account_loaded(account).await?;
-        self.parallel_state.ensure_balance_loaded(account, asset).await?;
+        self.parallel_state
+            .ensure_balance_loaded(account, asset)
+            .await?;
         let balance = self.parallel_state.get_balance(account, asset);
 
         // Cache it
@@ -213,7 +208,9 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
 
 /// Implement BlockchainVerificationState - provides read/write access to state
 #[async_trait]
-impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ParallelApplyAdapter<'a, S> {
+impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
+    for ParallelApplyAdapter<'a, S>
+{
     /// Pre-verify the transaction at state level
     ///
     /// SECURITY FIX: Delegate to the same pre_verify_tx helper that sequential path uses.
@@ -239,7 +236,8 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
             self.parallel_state.get_stable_topoheight(),
             self.parallel_state.get_topoheight(),
             self.parallel_state.get_block_version(),
-        ).await
+        )
+        .await
     }
 
     /// Get the balance for a receiver account
@@ -249,7 +247,9 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
         asset: Cow<'a, Hash>,
     ) -> Result<&'b mut u64, BlockchainError> {
         // Load balance into cache
-        let balance = self.get_or_load_balance(account.as_ref(), asset.as_ref()).await?;
+        let balance = self
+            .get_or_load_balance(account.as_ref(), asset.as_ref())
+            .await?;
 
         // Update cache with current value
         let key = (account.into_owned(), asset.into_owned());
@@ -289,7 +289,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
         if reference.topoheight > current_topo {
             return Err(BlockchainError::InvalidReferenceTopoheight(
                 reference.topoheight,
-                current_topo
+                current_topo,
             ));
         }
 
@@ -308,15 +308,18 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
                 asset,
                 current_topo,
                 reference,
-                false,  // no_new = false (we may create new versions)
-            ).await?;
+                false, // no_new = false (we may create new versions)
+            )
+            .await?;
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Reference validation for {}: use_output={}, new_version={}, balance={}",
-                   account.as_address(storage_guard.is_mainnet()),
-                   use_output_balance,
-                   new_version,
-                   versioned_balance.get_balance());
+            trace!(
+                "Reference validation for {}: use_output={}, new_version={}, balance={}",
+                account.as_address(storage_guard.is_mainnet()),
+                use_output_balance,
+                new_version,
+                versioned_balance.get_balance()
+            );
         }
 
         // Release storage lock before modifying balance cache
@@ -367,9 +370,14 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
         let new_sum = current_sum.saturating_add(output);
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("add_sender_output: account {} asset {} output {} (sum {} -> {})",
-                   account.as_address(self.parallel_state.is_mainnet()),
-                   asset, output, current_sum, new_sum);
+            trace!(
+                "add_sender_output: account {} asset {} output {} (sum {} -> {})",
+                account.as_address(self.parallel_state.is_mainnet()),
+                asset,
+                output,
+                current_sum,
+                new_sum
+            );
         }
 
         self.output_sums.insert(key, new_sum);
@@ -379,7 +387,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
     /// Get the nonce of an account
     async fn get_account_nonce(
         &mut self,
-        account: &'a PublicKey
+        account: &'a PublicKey,
     ) -> Result<Nonce, BlockchainError> {
         self.parallel_state.ensure_account_loaded(account).await?;
         Ok(self.parallel_state.get_nonce(account))
@@ -391,7 +399,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
     async fn update_account_nonce(
         &mut self,
         account: &'a PublicKey,
-        new_nonce: Nonce
+        new_nonce: Nonce,
     ) -> Result<(), BlockchainError> {
         // Stage the nonce update - will only be committed if TX succeeds
         self.staged_nonces.insert(account.clone(), new_nonce);
@@ -403,7 +411,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
         &mut self,
         account: &'a CompressedPublicKey,
         expected: Nonce,
-        new_value: Nonce
+        new_value: Nonce,
     ) -> Result<bool, BlockchainError> {
         let current_nonce = self.get_account_nonce(account).await?;
         if current_nonce == expected {
@@ -425,18 +433,19 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
     async fn set_multisig_state(
         &mut self,
         account: &'a PublicKey,
-        config: &MultiSigPayload
+        config: &MultiSigPayload,
     ) -> Result<(), BlockchainError> {
         self.parallel_state.ensure_account_loaded(account).await?;
         // Stage the multisig config update - will only be committed if TX succeeds
-        self.staged_multisig.insert(account.clone(), Some(config.clone()));
+        self.staged_multisig
+            .insert(account.clone(), Some(config.clone()));
         Ok(())
     }
 
     /// Get multisig configuration for an account
     async fn get_multisig_state(
         &mut self,
-        account: &'a PublicKey
+        account: &'a PublicKey,
     ) -> Result<Option<&MultiSigPayload>, BlockchainError> {
         self.parallel_state.ensure_account_loaded(account).await?;
 
@@ -457,7 +466,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
     async fn set_contract_module(
         &mut self,
         _hash: &'a Hash,
-        _module: &'a Module
+        _module: &'a Module,
     ) -> Result<(), BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
             "Contract deployment not yet supported in parallel execution (Phase 3)"
@@ -465,17 +474,14 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Parall
     }
 
     /// Load contract module into cache
-    async fn load_contract_module(
-        &mut self,
-        _hash: &'a Hash
-    ) -> Result<bool, BlockchainError> {
+    async fn load_contract_module(&mut self, _hash: &'a Hash) -> Result<bool, BlockchainError> {
         Ok(false)
     }
 
     /// Get contract module with environment
     async fn get_contract_module_with_environment(
         &self,
-        _hash: &'a Hash
+        _hash: &'a Hash,
     ) -> Result<(&Module, &Environment), BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
             "Contract execution not yet supported in parallel execution (Phase 3)"
@@ -491,7 +497,9 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
     /// This prevents burn manipulation where failed TX still counts toward total burns
     async fn add_burned_coins(&mut self, amount: u64) -> Result<(), BlockchainError> {
         // Stage the burned supply - will only be committed if TX succeeds
-        self.staged_burned_supply = self.staged_burned_supply.checked_add(amount)
+        self.staged_burned_supply = self
+            .staged_burned_supply
+            .checked_add(amount)
             .ok_or(BlockchainError::Overflow)?;
         Ok(())
     }
@@ -501,7 +509,9 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
     /// This prevents gas manipulation where failed TX still counts toward block gas
     async fn add_gas_fee(&mut self, amount: u64) -> Result<(), BlockchainError> {
         // Stage the gas fee - will only be committed if TX succeeds
-        self.staged_gas_fees = self.staged_gas_fees.checked_add(amount)
+        self.staged_gas_fees = self
+            .staged_gas_fees
+            .checked_add(amount)
             .ok_or(BlockchainError::Overflow)?;
         Ok(())
     }
@@ -525,7 +535,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
     async fn set_contract_outputs(
         &mut self,
         _tx_hash: &'a Hash,
-        _outputs: Vec<ContractOutput>
+        _outputs: Vec<ContractOutput>,
     ) -> Result<(), BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
             "Contract execution not yet supported in parallel execution (Phase 3)"
@@ -537,7 +547,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
         &'b mut self,
         _contract: &'b Hash,
         _deposits: &'b IndexMap<Hash, ContractDeposit>,
-        _tx_hash: &'b Hash
+        _tx_hash: &'b Hash,
     ) -> Result<(ContractEnvironment<'b, S>, ContractChainState<'b>), BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
             "Contract execution not yet supported in parallel execution (Phase 3)"
@@ -550,7 +560,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
         _hash: &'a Hash,
         _cache: ContractCache,
         _tracker: ContractEventTracker,
-        _assets: HashMap<Hash, Option<AssetChanges>>
+        _assets: HashMap<Hash, Option<AssetChanges>>,
     ) -> Result<(), BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
             "Contract execution not yet supported in parallel execution (Phase 3)"
@@ -558,10 +568,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
     }
 
     /// Remove contract module
-    async fn remove_contract_module(
-        &mut self,
-        _hash: &'a Hash
-    ) -> Result<(), BlockchainError> {
+    async fn remove_contract_module(&mut self, _hash: &'a Hash) -> Result<(), BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
             "Contract execution not yet supported in parallel execution (Phase 3)"
         )))
@@ -570,7 +577,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
     /// Get energy resource for an account
     async fn get_energy_resource(
         &mut self,
-        _account: &'a CompressedPublicKey
+        _account: &'a CompressedPublicKey,
     ) -> Result<Option<EnergyResource>, BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
             "Energy transactions not yet supported in parallel execution (Phase 3)"
@@ -581,7 +588,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
     async fn set_energy_resource(
         &mut self,
         _account: &'a CompressedPublicKey,
-        _energy_resource: EnergyResource
+        _energy_resource: EnergyResource,
     ) -> Result<(), BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
             "Energy transactions not yet supported in parallel execution (Phase 3)"
@@ -596,10 +603,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
     }
 
     /// Set AI mining state
-    async fn set_ai_mining_state(
-        &mut self,
-        _state: &AIMiningState
-    ) -> Result<(), BlockchainError> {
+    async fn set_ai_mining_state(&mut self, _state: &AIMiningState) -> Result<(), BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
             "AI mining transactions not yet supported in parallel execution (Phase 4)"
         )))

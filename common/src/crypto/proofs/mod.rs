@@ -1,11 +1,11 @@
 // Balance simplification: Proof implementations removed
 // This module now keeps essential cryptographic constants and error types
 
-use thiserror::Error;
 use super::elgamal::DecompressionError;
 use curve25519_dalek::{RistrettoPoint, Scalar};
 use lazy_static::lazy_static;
 use sha3::Sha3_512;
+use thiserror::Error;
 
 // Essential cryptographic constants still needed for signatures and Pedersen commitments
 
@@ -41,7 +41,6 @@ lazy_static! {
         }
     };
 }
-
 
 // Error types kept for backward compatibility
 

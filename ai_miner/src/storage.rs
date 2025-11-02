@@ -1,13 +1,13 @@
 use anyhow::Result;
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs;
-use log::{debug, info, warn};
 
 use tos_common::{
-    crypto::{Hash, PublicKey},
     ai_mining::{AIMiningPayload, DifficultyLevel},
+    crypto::{Hash, PublicKey},
     network::Network,
 };
 
@@ -116,7 +116,10 @@ impl StorageManager {
             }
         }
 
-        let storage_path = storage_dir.join(format!("ai_mining_{}.json", network.to_string().to_lowercase()));
+        let storage_path = storage_dir.join(format!(
+            "ai_mining_{}.json",
+            network.to_string().to_lowercase()
+        ));
 
         // Load existing state or create new one
         let state = if storage_path.exists() {
@@ -132,7 +135,10 @@ impl StorageManager {
                 }
                 Err(e) => {
                     if log::log_enabled!(log::Level::Warn) {
-                        warn!("Failed to parse existing state file: {}. Creating new state.", e);
+                        warn!(
+                            "Failed to parse existing state file: {}. Creating new state.",
+                            e
+                        );
                     }
                     let mut new_state = AIMiningState::default();
                     new_state.network = network;
@@ -166,7 +172,11 @@ impl StorageManager {
     }
 
     /// Register a new miner
-    pub async fn register_miner(&mut self, miner_address: &PublicKey, registration_fee: u64) -> Result<()> {
+    pub async fn register_miner(
+        &mut self,
+        miner_address: &PublicKey,
+        registration_fee: u64,
+    ) -> Result<()> {
         let miner_info = MinerInfo {
             miner_address: hex::encode(miner_address.as_bytes()),
             registration_fee,
@@ -180,13 +190,22 @@ impl StorageManager {
         self.state.miner_info = Some(miner_info);
         self.save().await?;
         if log::log_enabled!(log::Level::Info) {
-            info!("Registered miner: {}", hex::encode(miner_address.as_bytes()));
+            info!(
+                "Registered miner: {}",
+                hex::encode(miner_address.as_bytes())
+            );
         }
         Ok(())
     }
 
     /// Add a new task
-    pub async fn add_task(&mut self, task_id: &Hash, reward_amount: u64, difficulty: DifficultyLevel, deadline: u64) -> Result<()> {
+    pub async fn add_task(
+        &mut self,
+        task_id: &Hash,
+        reward_amount: u64,
+        difficulty: DifficultyLevel,
+        deadline: u64,
+    ) -> Result<()> {
         let task_info = TaskInfo {
             task_id: hex::encode(task_id.as_bytes()),
             reward_amount,
@@ -197,7 +216,9 @@ impl StorageManager {
             updated_at: chrono::Utc::now().timestamp() as u64,
         };
 
-        self.state.tasks.insert(hex::encode(task_id.as_bytes()), task_info);
+        self.state
+            .tasks
+            .insert(hex::encode(task_id.as_bytes()), task_info);
 
         // Increment task counter
         if let Some(ref mut miner) = self.state.miner_info {
@@ -232,20 +253,29 @@ impl StorageManager {
     }
 
     /// Add transaction record
-    pub async fn add_transaction(&mut self, metadata: &AIMiningTransactionMetadata, tx_hash: Option<Hash>) -> Result<()> {
+    pub async fn add_transaction(
+        &mut self,
+        metadata: &AIMiningTransactionMetadata,
+        tx_hash: Option<Hash>,
+    ) -> Result<()> {
         let payload_type = match &metadata.payload {
             AIMiningPayload::RegisterMiner { .. } => "RegisterMiner",
             AIMiningPayload::PublishTask { .. } => "PublishTask",
             AIMiningPayload::SubmitAnswer { .. } => "SubmitAnswer",
             AIMiningPayload::ValidateAnswer { .. } => "ValidateAnswer",
-        }.to_string();
+        }
+        .to_string();
 
         let record = TransactionRecord {
             tx_hash: tx_hash.as_ref().map(|h| hex::encode(h.as_bytes())),
             payload_type: payload_type.clone(),
             estimated_fee: metadata.estimated_fee,
             actual_fee: None,
-            status: if tx_hash.is_some() { TransactionStatus::Broadcast } else { TransactionStatus::Created },
+            status: if tx_hash.is_some() {
+                TransactionStatus::Broadcast
+            } else {
+                TransactionStatus::Created
+            },
             created_at: chrono::Utc::now().timestamp() as u64,
             confirmed_at: None,
             block_height: None,

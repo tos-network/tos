@@ -1,25 +1,22 @@
-use async_trait::async_trait;
-use log::trace;
-use tos_common::{
-    crypto::Hash,
-    immutable::Immutable,
-    transaction::Transaction
-};
 use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{Column, IteratorMode},
         sled::TXS_COUNT,
-        ClientProtocolProvider,
-        RocksStorage,
-        TransactionProvider
-    }
+        ClientProtocolProvider, RocksStorage, TransactionProvider,
+    },
 };
+use async_trait::async_trait;
+use log::trace;
+use tos_common::{crypto::Hash, immutable::Immutable, transaction::Transaction};
 
 #[async_trait]
 impl TransactionProvider for RocksStorage {
     // Get the transaction using its hash
-    async fn get_transaction(&self, hash: &Hash) -> Result<Immutable<Transaction>, BlockchainError> {
+    async fn get_transaction(
+        &self,
+        hash: &Hash,
+    ) -> Result<Immutable<Transaction>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get transaction {}", hash);
         }
@@ -44,11 +41,13 @@ impl TransactionProvider for RocksStorage {
 
     // Get all the unexecuted transactions
     // Those were not executed by the DAG
-    async fn get_unexecuted_transactions<'a>(&'a self) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
+    async fn get_unexecuted_transactions<'a>(
+        &'a self,
+    ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
         trace!("get unexecuted transactions");
         let iter = self.iter_keys(Column::Transactions, IteratorMode::Start)?;
-        Ok(
-            iter.map(|res| {
+        Ok(iter
+            .map(|res| {
                 let hash = res?;
 
                 if self.is_tx_executed_in_a_block(&hash)? {
@@ -57,8 +56,7 @@ impl TransactionProvider for RocksStorage {
 
                 Ok(Some(hash))
             })
-            .filter_map(Result::transpose)
-        )
+            .filter_map(Result::transpose))
     }
 
     // Check if the transaction exists
@@ -70,7 +68,11 @@ impl TransactionProvider for RocksStorage {
     }
 
     // Check if the transaction exists
-    async fn add_transaction(&mut self, hash: &Hash, transaction: &Transaction) -> Result<(), BlockchainError> {
+    async fn add_transaction(
+        &mut self,
+        hash: &Hash,
+        transaction: &Transaction,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("add transaction {}", hash);
         }
@@ -79,7 +81,10 @@ impl TransactionProvider for RocksStorage {
     }
 
     // Delete a transaction from the storage using its hash
-    async fn delete_transaction(&mut self, hash: &Hash) -> Result<Immutable<Transaction>, BlockchainError> {
+    async fn delete_transaction(
+        &mut self,
+        hash: &Hash,
+    ) -> Result<Immutable<Transaction>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("delete transaction {}", hash);
         }

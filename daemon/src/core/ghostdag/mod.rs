@@ -1,7 +1,7 @@
 // TOS GHOSTDAG Implementation
 
-pub mod types;
 pub mod daa;
+pub mod types;
 
 #[cfg(test)]
 mod tests_extended;
@@ -13,8 +13,10 @@ mod tests_comprehensive;
 // #[cfg(test)]
 // mod tests_integration;
 
+pub use daa::{
+    calculate_daa_score, calculate_target_difficulty, DAA_WINDOW_SIZE, TARGET_TIME_PER_BLOCK,
+};
 pub use types::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData};
-pub use daa::{calculate_daa_score, calculate_target_difficulty, DAA_WINDOW_SIZE, TARGET_TIME_PER_BLOCK};
 
 use anyhow::Result;
 use std::cmp::Ordering;
@@ -172,14 +174,14 @@ impl TosGhostdag {
     /// Create GHOSTDAG data for genesis block
     pub fn genesis_ghostdag_data(&self) -> TosGhostdagData {
         TosGhostdagData::new(
-            0,                      // blue_score
-            BlueWorkType::zero(),   // blue_work
-            0,                      // daa_score (genesis has daa_score = 0)
-            Hash::new([0u8; 32]),   // selected_parent (genesis has no parent - zero hash)
-            Vec::new(),             // mergeset_blues
-            Vec::new(),             // mergeset_reds
+            0,                                // blue_score
+            BlueWorkType::zero(),             // blue_work
+            0,                                // daa_score (genesis has daa_score = 0)
+            Hash::new([0u8; 32]),             // selected_parent (genesis has no parent - zero hash)
+            Vec::new(),                       // mergeset_blues
+            Vec::new(),                       // mergeset_reds
             std::collections::HashMap::new(), // blues_anticone_sizes
-            Vec::new(),             // mergeset_non_daa (empty for genesis)
+            Vec::new(),                       // mergeset_non_daa (empty for genesis)
         )
     }
 
@@ -248,7 +250,11 @@ impl TosGhostdag {
     /// 6. Calculate blue_work = parent.blue_work + sum(work of blues in mergeset)
     ///
     /// See: https://eprint.iacr.org/2018/104.pdf
-    pub async fn ghostdag<S: Storage>(&self, storage: &S, parents: &[Hash]) -> Result<TosGhostdagData, BlockchainError> {
+    pub async fn ghostdag<S: Storage>(
+        &self,
+        storage: &S,
+        parents: &[Hash],
+    ) -> Result<TosGhostdagData, BlockchainError> {
         // Genesis block special case
         if parents.is_empty() {
             return Ok(self.genesis_ghostdag_data());
@@ -263,19 +269,25 @@ impl TosGhostdag {
         }
 
         // Step 1: Find selected parent (parent with highest blue_work)
-        let selected_parent = self.find_selected_parent(storage, parents.iter().cloned()).await?;
+        let selected_parent = self
+            .find_selected_parent(storage, parents.iter().cloned())
+            .await?;
 
         // Step 2: Initialize new block data with selected parent as first blue
-        let mut new_block_data = TosGhostdagData::new_with_selected_parent(selected_parent.clone(), self.k);
+        let mut new_block_data =
+            TosGhostdagData::new_with_selected_parent(selected_parent.clone(), self.k);
 
         // Step 3: Get ordered mergeset (topologically sorted by blue_work)
-        let ordered_mergeset = self.ordered_mergeset_without_selected_parent(storage, selected_parent.clone(), parents).await?;
+        let ordered_mergeset = self
+            .ordered_mergeset_without_selected_parent(storage, selected_parent.clone(), parents)
+            .await?;
 
         // Step 4: Process each candidate block in topological order
         for candidate in ordered_mergeset {
             // Check if candidate can be blue without violating k-cluster
-            let (is_blue, anticone_size, blues_anticone_sizes) =
-                self.check_blue_candidate(storage, &new_block_data, &candidate).await?;
+            let (is_blue, anticone_size, blues_anticone_sizes) = self
+                .check_blue_candidate(storage, &new_block_data, &candidate)
+                .await?;
 
             if is_blue {
                 // No k-cluster violation - add as blue
@@ -290,7 +302,8 @@ impl TosGhostdag {
         // SECURITY FIX V-01: Use checked arithmetic to prevent overflow
         // blue_score = parent's blue_score + number of blues in mergeset
         let parent_data = storage.get_ghostdag_data(&selected_parent).await?;
-        let blue_score = parent_data.blue_score
+        let blue_score = parent_data
+            .blue_score
             .checked_add(new_block_data.mergeset_blues.len() as u64)
             .ok_or(BlockchainError::BlueScoreOverflow)?;
 
@@ -305,10 +318,13 @@ impl TosGhostdag {
             // Calculate work from difficulty
             let block_work = calc_work_from_difficulty(&difficulty);
             // Use checked addition for blue work accumulation
-            added_blue_work = added_blue_work.checked_add(block_work)
+            added_blue_work = added_blue_work
+                .checked_add(block_work)
                 .ok_or(BlockchainError::BlueWorkOverflow)?;
         }
-        let blue_work = parent_data.blue_work.checked_add(added_blue_work)
+        let blue_work = parent_data
+            .blue_work
+            .checked_add(added_blue_work)
             .ok_or(BlockchainError::BlueWorkOverflow)?;
 
         // Step 7: Calculate DAA score and identify mergeset_non_daa blocks
@@ -321,12 +337,9 @@ impl TosGhostdag {
             .cloned()
             .collect();
 
-        let (daa_score, mergeset_non_daa) = daa::calculate_daa_score(
-            storage,
-            &selected_parent,
-            &mergeset_blues_without_selected,
-        )
-        .await?;
+        let (daa_score, mergeset_non_daa) =
+            daa::calculate_daa_score(storage, &selected_parent, &mergeset_blues_without_selected)
+                .await?;
 
         // Set the mergeset_non_daa blocks
         new_block_data.set_mergeset_non_daa(mergeset_non_daa);
@@ -341,7 +354,11 @@ impl TosGhostdag {
     }
 
     /// Sort blocks by blue work (topological order)
-    async fn sort_blocks<S: Storage>(&self, storage: &S, blocks: Vec<Hash>) -> Result<Vec<Hash>, BlockchainError> {
+    async fn sort_blocks<S: Storage>(
+        &self,
+        storage: &S,
+        blocks: Vec<Hash>,
+    ) -> Result<Vec<Hash>, BlockchainError> {
         let mut sortable_blocks = Vec::with_capacity(blocks.len());
 
         for hash in blocks {
@@ -367,7 +384,8 @@ impl TosGhostdag {
         use std::collections::{HashSet, VecDeque};
 
         // Initialize BFS queue with non-selected parents
-        let mut queue: VecDeque<Hash> = parents.iter()
+        let mut queue: VecDeque<Hash> = parents
+            .iter()
             .filter(|&p| p != &selected_parent)
             .cloned()
             .collect();
@@ -393,11 +411,13 @@ impl TosGhostdag {
                 // If reachability data doesn't exist yet (during migration), fall back to blue_score heuristic
                 let is_in_past = match (
                     storage.has_reachability_data(parent).await,
-                    storage.has_reachability_data(&selected_parent).await
+                    storage.has_reachability_data(&selected_parent).await,
                 ) {
                     (Ok(true), Ok(true)) => {
                         // Both blocks have reachability data - use accurate DAG ancestry check
-                        self.reachability.is_dag_ancestor_of(storage, parent, &selected_parent).await?
+                        self.reachability
+                            .is_dag_ancestor_of(storage, parent, &selected_parent)
+                            .await?
                     }
                     _ => {
                         // Fall back to conservative heuristic for blocks without reachability data
@@ -408,7 +428,8 @@ impl TosGhostdag {
                         // This fallback is only used during initial sync before reachability data is populated.
                         // Primary code path uses accurate is_dag_ancestor_of() check above.
                         let parent_data = storage.get_ghostdag_data(parent).await?;
-                        let selected_parent_data = storage.get_ghostdag_data(&selected_parent).await?;
+                        let selected_parent_data =
+                            storage.get_ghostdag_data(&selected_parent).await?;
                         parent_data.blue_score + 50 < selected_parent_data.blue_score
                     }
                 };
@@ -489,15 +510,27 @@ impl TosGhostdag {
         // For each existing blue block, check if it's in the anticone of candidate
         for blue in new_block_data.mergeset_blues.iter() {
             // Get the blue anticone size for this blue block
-            let blue_anticone_size = self.blue_anticone_size(storage, blue, new_block_data).await?;
+            let blue_anticone_size = self
+                .blue_anticone_size(storage, blue, new_block_data)
+                .await?;
 
             // Check if blue and candidate are in each other's anticone
             // Two blocks are in each other's anticone if neither is an ancestor of the other
             let is_in_anticone = if storage.has_reachability_data(blue).await.unwrap_or(false)
-                && storage.has_reachability_data(candidate).await.unwrap_or(false) {
+                && storage
+                    .has_reachability_data(candidate)
+                    .await
+                    .unwrap_or(false)
+            {
                 // Use reachability data for accurate anticone check
-                !self.reachability.is_dag_ancestor_of(storage, blue, candidate).await?
-                    && !self.reachability.is_dag_ancestor_of(storage, candidate, blue).await?
+                !self
+                    .reachability
+                    .is_dag_ancestor_of(storage, blue, candidate)
+                    .await?
+                    && !self
+                        .reachability
+                        .is_dag_ancestor_of(storage, candidate, blue)
+                        .await?
             } else {
                 // Fallback: conservative assumption (all blues in anticone)
                 true
@@ -537,7 +570,11 @@ impl TosGhostdag {
         }
 
         // All checks passed - candidate can be blue
-        Ok((true, candidate_blue_anticone_size, candidate_blues_anticone_sizes))
+        Ok((
+            true,
+            candidate_blue_anticone_size,
+            candidate_blues_anticone_sizes,
+        ))
     }
 }
 
@@ -563,12 +600,12 @@ mod tests {
         let genesis_data = TosGhostdagData::new(
             0,
             BlueWorkType::zero(),
-            0,  // daa_score: genesis has daa_score of 0
-            Hash::new([0u8; 32]),  // Zero hash
+            0,                    // daa_score: genesis has daa_score of 0
+            Hash::new([0u8; 32]), // Zero hash
             Vec::new(),
             Vec::new(),
             std::collections::HashMap::new(),
-            Vec::new(),  // Empty mergeset_non_daa for genesis
+            Vec::new(), // Empty mergeset_non_daa for genesis
         );
 
         assert_eq!(genesis_data.blue_score, 0);
@@ -681,8 +718,14 @@ mod tests {
         let anticone_size_valid = 5;
         let anticone_size_invalid = 15;
 
-        assert!(anticone_size_valid <= k, "Valid anticone size should be ≤ k");
-        assert!(anticone_size_invalid > k, "Invalid anticone size should be > k");
+        assert!(
+            anticone_size_valid <= k,
+            "Valid anticone size should be ≤ k"
+        );
+        assert!(
+            anticone_size_invalid > k,
+            "Invalid anticone size should be > k"
+        );
     }
 
     /// Test 7: Blue/Red classification - boundary cases
@@ -696,11 +739,17 @@ mod tests {
         let blues_count = k as usize;
         let max_allowed_blues = (k + 1) as usize; // Including selected parent
 
-        assert!(blues_count < max_allowed_blues, "Should allow k blues + selected parent");
+        assert!(
+            blues_count < max_allowed_blues,
+            "Should allow k blues + selected parent"
+        );
 
         // Test that k+2 would exceed limit
         let too_many_blues = (k + 2) as usize;
-        assert!(too_many_blues > max_allowed_blues, "k+2 blues would violate limit");
+        assert!(
+            too_many_blues > max_allowed_blues,
+            "k+2 blues would violate limit"
+        );
     }
 
     /// Test 8: Genesis block special case
@@ -711,8 +760,8 @@ mod tests {
         let genesis_hash = Hash::new([0u8; 32]);
 
         // Use Arc for reachability (as in production code)
-        use std::sync::Arc;
         use crate::core::reachability::TosReachability;
+        use std::sync::Arc;
 
         let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
         let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
@@ -782,7 +831,10 @@ mod tests {
         let work_high = calc_work_from_difficulty(&diff_high);
 
         // Higher difficulty should produce higher work
-        assert!(work_high > work_low, "Higher difficulty should produce higher work");
+        assert!(
+            work_high > work_low,
+            "Higher difficulty should produce higher work"
+        );
     }
 
     /// Test 12: Zero difficulty edge case (V-06 Security Fix)
@@ -843,7 +895,7 @@ mod tests {
         let data = TosGhostdagData::new(
             blue_score,
             blue_work,
-            blue_score,  // daa_score: use same value as blue_score for test data
+            blue_score, // daa_score: use same value as blue_score for test data
             selected_parent.clone(),
             mergeset_blues.clone(),
             mergeset_reds.clone(),
@@ -899,7 +951,10 @@ mod tests {
         // Verify safe addition works
         let safe_work = BlueWorkType::from(1000u64);
         let safe_result = safe_work.checked_add(one_work);
-        assert!(safe_result.is_some(), "Safe blue work addition should succeed");
+        assert!(
+            safe_result.is_some(),
+            "Safe blue work addition should succeed"
+        );
     }
 
     /// Test V-03: K-cluster validation (basic test)
@@ -912,7 +967,10 @@ mod tests {
         let blues_count_invalid = (k + 2) as usize;
 
         assert!(blues_count_valid <= (k + 1) as usize, "Valid blues count");
-        assert!(blues_count_invalid > (k + 1) as usize, "Invalid blues count");
+        assert!(
+            blues_count_invalid > (k + 1) as usize,
+            "Invalid blues count"
+        );
     }
 
     /// Test V-05: No valid parents error detection
@@ -924,7 +982,10 @@ mod tests {
 
         // Test that we have parents
         let valid_parents = vec![Hash::new([1u8; 32])];
-        assert!(!valid_parents.is_empty(), "Valid parents should not be empty");
+        assert!(
+            !valid_parents.is_empty(),
+            "Valid parents should not be empty"
+        );
     }
 
     /// Test V-06: Zero difficulty protection
@@ -937,12 +998,19 @@ mod tests {
         let work = calc_work_from_difficulty(&zero_diff);
 
         // Should return max work for zero difficulty
-        assert_eq!(work, BlueWorkType::max_value(), "Zero difficulty should return max work");
+        assert_eq!(
+            work,
+            BlueWorkType::max_value(),
+            "Zero difficulty should return max work"
+        );
 
         // Test non-zero difficulty
         let normal_diff = Difficulty::from(1000u64);
         let normal_work = calc_work_from_difficulty(&normal_diff);
-        assert!(normal_work < BlueWorkType::max_value(), "Normal difficulty should return finite work");
+        assert!(
+            normal_work < BlueWorkType::max_value(),
+            "Normal difficulty should return finite work"
+        );
     }
 
     /// Test V-07: Timestamp validation
@@ -957,7 +1025,10 @@ mod tests {
         // Test invalid ordering
         let invalid_oldest = 2000u64;
         let invalid_newest = 1000u64;
-        assert!(invalid_newest < invalid_oldest, "Should detect invalid ordering");
+        assert!(
+            invalid_newest < invalid_oldest,
+            "Should detect invalid ordering"
+        );
     }
 
     /// Test V-07: Saturating subtraction for time span
@@ -972,7 +1043,10 @@ mod tests {
 
         // Test with reversed order (would underflow without saturation)
         let backwards_span = older.saturating_sub(newer);
-        assert_eq!(backwards_span, 0, "Saturating sub should return 0, not underflow");
+        assert_eq!(
+            backwards_span, 0,
+            "Saturating sub should return 0, not underflow"
+        );
     }
 
     /// Test V-02: Reachability interval size check

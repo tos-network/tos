@@ -1,13 +1,10 @@
-use async_trait::async_trait;
-use log::trace;
-use tos_common::{
-    contract::ContractOutput,
-    crypto::Hash
-};
 use crate::core::{
     error::BlockchainError,
-    storage::{rocksdb::Column, ContractOutputsProvider, RocksStorage}
+    storage::{rocksdb::Column, ContractOutputsProvider, RocksStorage},
 };
+use async_trait::async_trait;
+use log::trace;
+use tos_common::{contract::ContractOutput, crypto::Hash};
 
 #[async_trait]
 impl ContractOutputsProvider for RocksStorage {
@@ -20,7 +17,10 @@ impl ContractOutputsProvider for RocksStorage {
     }
 
     // Get the contract outputs for a transaction
-    async fn get_contract_outputs_for_tx(&self, tx_hash: &Hash) -> Result<Vec<ContractOutput>, BlockchainError> {
+    async fn get_contract_outputs_for_tx(
+        &self,
+        tx_hash: &Hash,
+    ) -> Result<Vec<ContractOutput>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get contract outputs for tx {}", tx_hash);
         }
@@ -28,7 +28,11 @@ impl ContractOutputsProvider for RocksStorage {
     }
 
     // Set the contract outputs for a transaction
-    async fn set_contract_outputs_for_tx(&mut self, tx_hash: &Hash, contract_output: &Vec<ContractOutput>) -> Result<(), BlockchainError> {
+    async fn set_contract_outputs_for_tx(
+        &mut self,
+        tx_hash: &Hash,
+        contract_output: &Vec<ContractOutput>,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set contract outputs for tx {}", tx_hash);
         }
@@ -36,7 +40,10 @@ impl ContractOutputsProvider for RocksStorage {
     }
 
     // Delete the contract outputs for a transaction
-    async fn delete_contract_outputs_for_tx(&mut self, tx_hash: &Hash) -> Result<(), BlockchainError> {
+    async fn delete_contract_outputs_for_tx(
+        &mut self,
+        tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("delete contract outputs for tx {}", tx_hash);
         }

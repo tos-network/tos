@@ -2,4 +2,4 @@
 
 pub mod parallel_executor;
 
-pub use parallel_executor::{ParallelExecutor, get_optimal_parallelism};
+pub use parallel_executor::{get_optimal_parallelism, ParallelExecutor};

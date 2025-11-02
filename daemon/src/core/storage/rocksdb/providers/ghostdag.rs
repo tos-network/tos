@@ -2,8 +2,8 @@
 // Implements GhostdagDataProvider trait for RocksDB backend
 
 use async_trait::async_trait;
-use std::sync::Arc;
 use log::trace;
+use std::sync::Arc;
 use tos_common::crypto::Hash;
 
 use crate::core::{
@@ -41,7 +41,10 @@ impl GhostdagDataProvider for RocksStorage {
         Ok(compact.selected_parent)
     }
 
-    async fn get_ghostdag_mergeset_blues(&self, hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+    async fn get_ghostdag_mergeset_blues(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag mergeset blues for {}", hash);
         }
@@ -49,7 +52,10 @@ impl GhostdagDataProvider for RocksStorage {
         Ok(data.mergeset_blues)
     }
 
-    async fn get_ghostdag_mergeset_reds(&self, hash: &Hash) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+    async fn get_ghostdag_mergeset_reds(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag mergeset reds for {}", hash);
         }
@@ -68,7 +74,10 @@ impl GhostdagDataProvider for RocksStorage {
         Ok(data.blues_anticone_sizes)
     }
 
-    async fn get_ghostdag_data(&self, hash: &Hash) -> Result<Arc<TosGhostdagData>, BlockchainError> {
+    async fn get_ghostdag_data(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<TosGhostdagData>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag data for {}", hash);
         }
@@ -76,7 +85,10 @@ impl GhostdagDataProvider for RocksStorage {
         Ok(Arc::new(data))
     }
 
-    async fn get_ghostdag_compact_data(&self, hash: &Hash) -> Result<CompactGhostdagData, BlockchainError> {
+    async fn get_ghostdag_compact_data(
+        &self,
+        hash: &Hash,
+    ) -> Result<CompactGhostdagData, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get ghostdag compact data for {}", hash);
         }
@@ -90,7 +102,11 @@ impl GhostdagDataProvider for RocksStorage {
         self.contains_data(Column::GhostdagData, hash)
     }
 
-    async fn insert_ghostdag_data(&mut self, hash: &Hash, data: Arc<TosGhostdagData>) -> Result<(), BlockchainError> {
+    async fn insert_ghostdag_data(
+        &mut self,
+        hash: &Hash,
+        data: Arc<TosGhostdagData>,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("insert ghostdag data for {}", hash);
         }

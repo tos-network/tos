@@ -14,19 +14,18 @@
 
 use std::sync::Arc;
 use tos_common::{
-    config::{TOS_ASSET, COIN_VALUE},
-    crypto::{KeyPair, Hashable, Hash},
     block::{Block, BlockVersion, EXTRA_NONCE_SIZE},
+    config::{COIN_VALUE, TOS_ASSET},
+    crypto::{Hash, Hashable, KeyPair},
     immutable::Immutable,
 };
 use tos_daemon::core::{
-    storage::{BalanceProvider, NonceProvider},
     state::parallel_chain_state::ParallelChainState,
+    storage::{BalanceProvider, NonceProvider},
 };
 use tos_environment::Environment;
 use tos_testing_integration::utils::storage_helpers::{
-    create_test_rocksdb_storage,
-    setup_account_rocksdb,
+    create_test_rocksdb_storage, setup_account_rocksdb,
 };
 
 /// Helper to create a dummy block for ParallelChainState
@@ -36,18 +35,18 @@ fn create_dummy_block() -> Block {
     let miner = KeyPair::new().get_public_key().compress();
     let header = BlockHeader::new(
         BlockVersion::V0,
-        vec![],  // parents_by_level
-        0,       // blue_score
-        0,       // daa_score
-        0u64.into(),  // blue_work
-        Hash::zero(),  // pruning_point
-        0,       // timestamp
-        0,       // bits
-        [0u8; EXTRA_NONCE_SIZE],  // extra_nonce
-        miner,   // miner
-        Hash::zero(),  // hash_merkle_root
-        Hash::zero(),  // accepted_id_merkle_root
-        Hash::zero(),  // utxo_commitment
+        vec![],                  // parents_by_level
+        0,                       // blue_score
+        0,                       // daa_score
+        0u64.into(),             // blue_work
+        Hash::zero(),            // pruning_point
+        0,                       // timestamp
+        0,                       // bits
+        [0u8; EXTRA_NONCE_SIZE], // extra_nonce
+        miner,                   // miner
+        Hash::zero(),            // hash_merkle_root
+        Hash::zero(),            // accepted_id_merkle_root
+        Hash::zero(),            // utxo_commitment
     );
 
     Block::new(Immutable::Arc(Arc::new(header)), vec![])
@@ -81,7 +80,11 @@ async fn test_empty_account_creation() {
             .get_last_balance(&alice_pubkey, &TOS_ASSET)
             .await
             .expect("Failed to get balance");
-        assert_eq!(balance.get_balance(), 0, "Empty account should have 0 balance");
+        assert_eq!(
+            balance.get_balance(),
+            0,
+            "Empty account should have 0 balance"
+        );
 
         let (_, nonce) = storage_read
             .get_last_nonce(&alice_pubkey)
@@ -159,8 +162,14 @@ async fn test_zero_value_transfer() {
     .await;
 
     // Step 4: Load balances from storage into ParallelChainState
-    parallel_state.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.expect("Failed to load Alice balance");
-    parallel_state.ensure_balance_loaded(&bob_pubkey, &TOS_ASSET).await.expect("Failed to load Bob balance");
+    parallel_state
+        .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+        .await
+        .expect("Failed to load Alice balance");
+    parallel_state
+        .ensure_balance_loaded(&bob_pubkey, &TOS_ASSET)
+        .await
+        .expect("Failed to load Bob balance");
 
     // Step 5: Simulate zero-value transfer (just nonce increment, no balance change)
     parallel_state.set_nonce(&alice_pubkey, 1);
@@ -175,7 +184,10 @@ async fn test_zero_value_transfer() {
     // Step 6: Commit state
     {
         let mut storage_write = storage.write().await;
-        parallel_state.commit(&mut *storage_write).await.expect("Failed to commit");
+        parallel_state
+            .commit(&mut *storage_write)
+            .await
+            .expect("Failed to commit");
     }
 
     println!("✓ Test passed: Zero-value transfer handled correctly");
@@ -235,7 +247,10 @@ async fn test_maximum_balance_values() {
     .await;
 
     // Step 5: Load large balance from storage into ParallelChainState
-    parallel_state.ensure_balance_loaded(&whale_pubkey, &TOS_ASSET).await.expect("Failed to load whale balance");
+    parallel_state
+        .ensure_balance_loaded(&whale_pubkey, &TOS_ASSET)
+        .await
+        .expect("Failed to load whale balance");
 
     // Step 5b: Verify large balance in parallel state
     let loaded_balance = parallel_state.get_balance(&whale_pubkey, &TOS_ASSET);
@@ -247,7 +262,10 @@ async fn test_maximum_balance_values() {
     // Step 6: Commit state
     {
         let mut storage_write = storage.write().await;
-        parallel_state.commit(&mut *storage_write).await.expect("Failed to commit");
+        parallel_state
+            .commit(&mut *storage_write)
+            .await
+            .expect("Failed to commit");
     }
 
     println!("✓ Test passed: Maximum balance values handled correctly");
@@ -306,7 +324,10 @@ async fn test_maximum_nonce_values() {
     .await;
 
     // Step 5: Load account (including nonce) from storage
-    parallel_state.ensure_account_loaded(&busy_pubkey).await.expect("Failed to load account");
+    parallel_state
+        .ensure_account_loaded(&busy_pubkey)
+        .await
+        .expect("Failed to load account");
 
     // Step 5b: Verify high nonce is loaded
     let loaded_nonce = parallel_state.get_nonce(&busy_pubkey);
@@ -324,7 +345,10 @@ async fn test_maximum_nonce_values() {
     // Step 6: Commit state
     {
         let mut storage_write = storage.write().await;
-        parallel_state.commit(&mut *storage_write).await.expect("Failed to commit");
+        parallel_state
+            .commit(&mut *storage_write)
+            .await
+            .expect("Failed to commit");
     }
 
     println!("✓ Test passed: Maximum nonce values handled correctly");
@@ -396,7 +420,10 @@ async fn test_multiple_empty_accounts() {
     // Step 6: Commit state
     {
         let mut storage_write = storage.write().await;
-        parallel_state.commit(&mut *storage_write).await.expect("Failed to commit");
+        parallel_state
+            .commit(&mut *storage_write)
+            .await
+            .expect("Failed to commit");
     }
 
     println!("✓ Test passed: Multiple empty accounts handled correctly");

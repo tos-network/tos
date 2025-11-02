@@ -41,9 +41,9 @@
 //! - Use TestDaemon which provides a real Storage instance
 //! - Use the full blockchain infrastructure, not this mock
 
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::RwLock;
 
 use tos_common::{
     config::TOS_ASSET,
@@ -124,11 +124,7 @@ impl MockStorage {
     ///
     /// Returns 0 if no nonce is set.
     pub fn get_nonce(&self, account: &PublicKey) -> u64 {
-        self.nonces
-            .read()
-            .get(account)
-            .copied()
-            .unwrap_or(0)
+        self.nonces.read().get(account).copied().unwrap_or(0)
     }
 
     /// Clear all state (for test cleanup)

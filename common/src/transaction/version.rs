@@ -5,7 +5,7 @@ use core::fmt;
 #[repr(u8)]
 pub enum TxVersion {
     // All operations: Burn, Transfer, Multisig, Deploy Contract, Invoke Contract, Energy
-    T0 = 0
+    T0 = 0,
 }
 
 impl Default for TxVersion {
@@ -48,7 +48,9 @@ impl Serializer for TxVersion {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError>
-        where Self: Sized {
+    where
+        Self: Sized,
+    {
         let id = reader.read_u8()?;
         Self::try_from(id).map_err(|_| ReaderError::InvalidValue)
     }
@@ -68,16 +70,21 @@ impl fmt::Display for TxVersion {
 
 impl serde::Serialize for TxVersion {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where S: serde::Serializer {
+    where
+        S: serde::Serializer,
+    {
         serializer.serialize_u8(*self as u8)
     }
 }
 
 impl<'de> serde::Deserialize<'de> for TxVersion {
     fn deserialize<D>(deserializer: D) -> Result<TxVersion, D::Error>
-        where D: serde::Deserializer<'de> {
+    where
+        D: serde::Deserializer<'de>,
+    {
         let value = u8::deserialize(deserializer)?;
-        TxVersion::try_from(value).map_err(|_| serde::de::Error::custom("Invalid value for TxVersion"))
+        TxVersion::try_from(value)
+            .map_err(|_| serde::de::Error::custom("Invalid value for TxVersion"))
     }
 }
 

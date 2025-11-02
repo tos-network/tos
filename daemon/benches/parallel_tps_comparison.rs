@@ -17,30 +17,31 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
-use tokio::runtime::Runtime;
 use tempdir::TempDir;
+use tokio::runtime::Runtime;
+use tokio::sync::RwLock;
 
 use tos_common::{
     block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
     config::TOS_ASSET,
-    crypto::{Hash, Hashable, elgamal::{KeyPair, CompressedPublicKey}},
+    crypto::{
+        elgamal::{CompressedPublicKey, KeyPair},
+        Hash, Hashable,
+    },
     immutable::Immutable,
     network::Network,
-    serializer::{Serializer, Writer, Reader},
+    serializer::{Reader, Serializer, Writer},
     transaction::{
-        Transaction,
         builder::{
-            TransactionBuilder, TransactionTypeBuilder, TransferBuilder,
-            FeeBuilder, AccountState,
+            AccountState, FeeBuilder, TransactionBuilder, TransactionTypeBuilder, TransferBuilder,
         },
-        FeeType, TxVersion, Reference,
+        FeeType, Reference, Transaction, TxVersion,
     },
 };
 use tos_daemon::core::{
-    storage::sled::{SledStorage, StorageMode},
-    state::parallel_chain_state::ParallelChainState,
     executor::ParallelExecutor,
+    state::parallel_chain_state::ParallelChainState,
+    storage::sled::{SledStorage, StorageMode},
 };
 use tos_environment::Environment;
 
@@ -74,8 +75,8 @@ fn create_minimal_block() -> Block {
     let miner = create_test_pubkey([0u8; 32]);
     let header = BlockHeader::new_simple(
         BlockVersion::V0,
-        vec![], // No parents
-        0, // timestamp
+        vec![],                  // No parents
+        0,                       // timestamp
         [0u8; EXTRA_NONCE_SIZE], // extra_nonce
         miner,
         Hash::zero(), // merkle root
@@ -107,7 +108,10 @@ impl BenchAccountState {
 impl tos_common::transaction::builder::FeeHelper for BenchAccountState {
     type Error = String;
 
-    fn account_exists(&self, _key: &tos_common::crypto::elgamal::CompressedPublicKey) -> Result<bool, Self::Error> {
+    fn account_exists(
+        &self,
+        _key: &tos_common::crypto::elgamal::CompressedPublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 }
@@ -128,7 +132,11 @@ impl AccountState for BenchAccountState {
         }
     }
 
-    fn update_account_balance(&mut self, _asset: &Hash, new_balance: u64) -> Result<(), Self::Error> {
+    fn update_account_balance(
+        &mut self,
+        _asset: &Hash,
+        new_balance: u64,
+    ) -> Result<(), Self::Error> {
         self.balance = new_balance;
         Ok(())
     }
@@ -142,7 +150,10 @@ impl AccountState for BenchAccountState {
         Ok(())
     }
 
-    fn is_account_registered(&self, _key: &tos_common::crypto::elgamal::CompressedPublicKey) -> Result<bool, Self::Error> {
+    fn is_account_registered(
+        &self,
+        _key: &tos_common::crypto::elgamal::CompressedPublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 }
@@ -165,7 +176,10 @@ fn generate_conflict_free_transactions(count: usize) -> Vec<Transaction> {
         let transfer = TransferBuilder {
             asset: TOS_ASSET,
             amount: 1000,
-            destination: receiver_keypair.get_public_key().compress().to_address(false),
+            destination: receiver_keypair
+                .get_public_key()
+                .compress()
+                .to_address(false),
             extra_data: None,
         };
 
@@ -208,7 +222,10 @@ fn generate_mixed_conflict_transactions(count: usize) -> Vec<Transaction> {
         let transfer = TransferBuilder {
             asset: TOS_ASSET,
             amount: 1000,
-            destination: receiver_keypair.get_public_key().compress().to_address(false),
+            destination: receiver_keypair
+                .get_public_key()
+                .compress()
+                .to_address(false),
             extra_data: None,
         };
 
@@ -314,8 +331,10 @@ fn print_performance_comparison(
     // SAFE: f64 for display formatting only
     let speedup_display = speedup as f64 / SCALE as f64;
 
-    println!("[{}] txs={} | Sequential: {}µs ({}tx/s) | Parallel: {}µs ({}tx/s) | Speedup: {:.2}x",
-        mode, tx_count, seq_micros, seq_tps, par_micros, par_tps, speedup_display);
+    println!(
+        "[{}] txs={} | Sequential: {}µs ({}tx/s) | Parallel: {}µs ({}tx/s) | Speedup: {:.2}x",
+        mode, tx_count, seq_micros, seq_tps, par_micros, par_tps, speedup_display
+    );
 }
 
 // ============================================================================
@@ -340,7 +359,8 @@ fn bench_sequential_10_txs(c: &mut Criterion) {
                     Network::Devnet,
                     1024 * 1024,
                     StorageMode::HighThroughput,
-                ).expect("storage");
+                )
+                .expect("storage");
 
                 let storage_arc = Arc::new(RwLock::new(storage));
                 let environment = Arc::new(Environment::new());
@@ -357,7 +377,8 @@ fn bench_sequential_10_txs(c: &mut Criterion) {
                     BlockVersion::V0,
                     block,
                     block_hash,
-                ).await;
+                )
+                .await;
 
                 let transactions = generate_conflict_free_transactions(10);
                 let _duration = execute_sequential(state, transactions).await;
@@ -389,7 +410,8 @@ fn bench_parallel_10_txs(c: &mut Criterion) {
                     Network::Devnet,
                     1024 * 1024,
                     StorageMode::HighThroughput,
-                ).expect("storage");
+                )
+                .expect("storage");
 
                 let storage_arc = Arc::new(RwLock::new(storage));
                 let environment = Arc::new(Environment::new());
@@ -405,7 +427,8 @@ fn bench_parallel_10_txs(c: &mut Criterion) {
                     BlockVersion::V0,
                     block,
                     block_hash,
-                ).await;
+                )
+                .await;
 
                 let transactions = generate_conflict_free_transactions(10);
                 let _duration = execute_parallel(state, transactions).await;
@@ -437,7 +460,8 @@ fn bench_sequential_100_txs(c: &mut Criterion) {
                     Network::Devnet,
                     1024 * 1024,
                     StorageMode::HighThroughput,
-                ).expect("storage");
+                )
+                .expect("storage");
 
                 let storage_arc = Arc::new(RwLock::new(storage));
                 let environment = Arc::new(Environment::new());
@@ -453,7 +477,8 @@ fn bench_sequential_100_txs(c: &mut Criterion) {
                     BlockVersion::V0,
                     block,
                     block_hash,
-                ).await;
+                )
+                .await;
 
                 let transactions = generate_conflict_free_transactions(100);
                 let _duration = execute_sequential(state, transactions).await;
@@ -485,7 +510,8 @@ fn bench_parallel_100_txs(c: &mut Criterion) {
                     Network::Devnet,
                     1024 * 1024,
                     StorageMode::HighThroughput,
-                ).expect("storage");
+                )
+                .expect("storage");
 
                 let storage_arc = Arc::new(RwLock::new(storage));
                 let environment = Arc::new(Environment::new());
@@ -501,7 +527,8 @@ fn bench_parallel_100_txs(c: &mut Criterion) {
                     BlockVersion::V0,
                     block,
                     block_hash,
-                ).await;
+                )
+                .await;
 
                 let transactions = generate_conflict_free_transactions(100);
                 let _duration = execute_parallel(state, transactions).await;
@@ -534,7 +561,8 @@ fn bench_conflict_ratio(c: &mut Criterion) {
                     Network::Devnet,
                     1024 * 1024,
                     StorageMode::HighThroughput,
-                ).expect("storage");
+                )
+                .expect("storage");
 
                 let storage_arc = Arc::new(RwLock::new(storage));
                 let environment = Arc::new(Environment::new());
@@ -550,7 +578,8 @@ fn bench_conflict_ratio(c: &mut Criterion) {
                     BlockVersion::V0,
                     block,
                     block_hash,
-                ).await;
+                )
+                .await;
 
                 let transactions = generate_mixed_conflict_transactions(50);
                 let _duration = execute_sequential(state, transactions).await;
@@ -569,7 +598,8 @@ fn bench_conflict_ratio(c: &mut Criterion) {
                     Network::Devnet,
                     1024 * 1024,
                     StorageMode::HighThroughput,
-                ).expect("storage");
+                )
+                .expect("storage");
 
                 let storage_arc = Arc::new(RwLock::new(storage));
                 let environment = Arc::new(Environment::new());
@@ -585,7 +615,8 @@ fn bench_conflict_ratio(c: &mut Criterion) {
                     BlockVersion::V0,
                     block,
                     block_hash,
-                ).await;
+                )
+                .await;
 
                 let transactions = generate_mixed_conflict_transactions(50);
                 let _duration = execute_parallel(state, transactions).await;
@@ -622,7 +653,8 @@ fn bench_tps_comparison(c: &mut Criterion) {
                             Network::Devnet,
                             1024 * 1024,
                             StorageMode::HighThroughput,
-                        ).expect("storage");
+                        )
+                        .expect("storage");
 
                         let storage_arc = Arc::new(RwLock::new(storage));
                         let environment = Arc::new(Environment::new());
@@ -638,7 +670,8 @@ fn bench_tps_comparison(c: &mut Criterion) {
                             BlockVersion::V0,
                             block,
                             block_hash,
-                        ).await;
+                        )
+                        .await;
 
                         let transactions = generate_conflict_free_transactions(count);
                         let _duration = execute_sequential(state, transactions).await;
@@ -662,7 +695,8 @@ fn bench_tps_comparison(c: &mut Criterion) {
                             Network::Devnet,
                             1024 * 1024,
                             StorageMode::HighThroughput,
-                        ).expect("storage");
+                        )
+                        .expect("storage");
 
                         let storage_arc = Arc::new(RwLock::new(storage));
                         let environment = Arc::new(Environment::new());
@@ -678,7 +712,8 @@ fn bench_tps_comparison(c: &mut Criterion) {
                             BlockVersion::V0,
                             block,
                             block_hash,
-                        ).await;
+                        )
+                        .await;
 
                         let transactions = generate_conflict_free_transactions(count);
                         let _duration = execute_parallel(state, transactions).await;

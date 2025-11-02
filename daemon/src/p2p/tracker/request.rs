@@ -1,14 +1,11 @@
 use std::{sync::Arc, time::Instant};
 
-use log::error;
-use tos_common::{
-    tokio::sync::broadcast,
-    crypto::Hash
-};
 use crate::p2p::{
     packet::{ObjectRequest, OwnedObjectResponse},
-    peer_list::Peer
+    peer_list::Peer,
 };
+use log::error;
+use tos_common::{crypto::Hash, tokio::sync::broadcast};
 
 pub type RequestCallback = broadcast::Sender<OwnedObjectResponse>;
 #[allow(dead_code)]
@@ -26,20 +23,27 @@ pub struct Request {
     group_id: Option<u64>,
     // Channel used as a callback to give the response
     // If None is sent, it means it got timed out / something went wrong
-    callback: RequestCallback
+    callback: RequestCallback,
 }
 
 impl Request {
     #[allow(dead_code)]
-    pub fn new(request: ObjectRequest, peer: Arc<Peer>, group_id: Option<u64>) -> (Self, RequestResponse) {
+    pub fn new(
+        request: ObjectRequest,
+        peer: Arc<Peer>,
+        group_id: Option<u64>,
+    ) -> (Self, RequestResponse) {
         let (callback, receiver) = broadcast::channel(1);
-        (Self {
-            request,
-            peer,
-            requested_at: None,
-            group_id,
-            callback
-        }, receiver)
+        (
+            Self {
+                request,
+                peer,
+                requested_at: None,
+                group_id,
+                callback,
+            },
+            receiver,
+        )
     }
 
     pub fn get_object(&self) -> &ObjectRequest {
@@ -74,7 +78,10 @@ impl Request {
     pub fn notify(self, msg: OwnedObjectResponse) {
         if self.callback.send(msg).is_err() {
             if log::log_enabled!(log::Level::Error) {
-                error!("Error while notifying about request {}: channel seems closed", self.request.get_hash());
+                error!(
+                    "Error while notifying about request {}: channel seems closed",
+                    self.request.get_hash()
+                );
             }
         }
     }

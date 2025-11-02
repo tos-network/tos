@@ -4,10 +4,10 @@ pub mod server;
 #[cfg(feature = "rpc-client")]
 pub mod client;
 
-mod types;
-mod rpc_handler;
 mod error;
+mod rpc_handler;
+mod types;
 
-pub use types::*;
 pub use error::*;
 pub use rpc_handler::*;
+pub use types::*;

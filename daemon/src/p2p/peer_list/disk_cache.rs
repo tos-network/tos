@@ -2,8 +2,8 @@ use std::net::IpAddr;
 
 use log::info;
 use sled::{Config, Db, Mode, Tree};
-use tos_common::serializer::{ReaderError, Serializer};
 use thiserror::Error;
+use tos_common::serializer::{ReaderError, Serializer};
 
 use super::PeerListEntry;
 
@@ -63,7 +63,9 @@ impl DiskCache {
 
     // Get a PeerListEntry using its IP address
     pub fn get_peerlist_entry(&self, peer: &IpAddr) -> Result<PeerListEntry, DiskError> {
-        let v = self.peerlist.get(peer.to_bytes())?
+        let v = self
+            .peerlist
+            .get(peer.to_bytes())?
             .map(|v| PeerListEntry::from_bytes(&v))
             .ok_or(DiskError::NotFound)??;
 
@@ -72,14 +74,15 @@ impl DiskCache {
 
     // Get all entries of peerlist
     // Returns an iterator to lazily load peers
-    pub fn get_peerlist_entries(&self) -> impl Iterator<Item = Result<(IpAddr, PeerListEntry), DiskError>> {
-        self.peerlist.iter()
-            .map(|r| {
-                let (k, v) = r?;
-                let ip = IpAddr::from_bytes(&k)?;
-                let entry = PeerListEntry::from_bytes(&v)?;
-                Ok((ip, entry))
-            })
+    pub fn get_peerlist_entries(
+        &self,
+    ) -> impl Iterator<Item = Result<(IpAddr, PeerListEntry), DiskError>> {
+        self.peerlist.iter().map(|r| {
+            let (k, v) = r?;
+            let ip = IpAddr::from_bytes(&k)?;
+            let entry = PeerListEntry::from_bytes(&v)?;
+            Ok((ip, entry))
+        })
     }
 
     // Remove a peer from the peerlist

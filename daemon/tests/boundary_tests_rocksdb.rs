@@ -16,19 +16,18 @@
 
 use std::sync::Arc;
 use tos_common::{
-    config::{TOS_ASSET, COIN_VALUE},
-    crypto::{KeyPair, Hashable, Hash},
     block::{Block, BlockVersion, EXTRA_NONCE_SIZE},
+    config::{COIN_VALUE, TOS_ASSET},
+    crypto::{Hash, Hashable, KeyPair},
     immutable::Immutable,
 };
 use tos_daemon::core::{
-    storage::{BalanceProvider, NonceProvider},
     state::parallel_chain_state::ParallelChainState,
+    storage::{BalanceProvider, NonceProvider},
 };
 use tos_environment::Environment;
 use tos_testing_integration::utils::storage_helpers::{
-    create_test_rocksdb_storage,
-    setup_account_rocksdb,
+    create_test_rocksdb_storage, setup_account_rocksdb,
 };
 
 /// Helper to create a dummy block for ParallelChainState
@@ -38,18 +37,18 @@ fn create_dummy_block() -> Block {
     let miner = KeyPair::new().get_public_key().compress();
     let header = BlockHeader::new(
         BlockVersion::V0,
-        vec![],  // parents_by_level
-        0,       // blue_score
-        0,       // daa_score
-        0u64.into(),  // blue_work
-        Hash::zero(),  // pruning_point
-        0,       // timestamp
-        0,       // bits
-        [0u8; EXTRA_NONCE_SIZE],  // extra_nonce
-        miner,   // miner
-        Hash::zero(),  // hash_merkle_root
-        Hash::zero(),  // accepted_id_merkle_root
-        Hash::zero(),  // utxo_commitment
+        vec![],                  // parents_by_level
+        0,                       // blue_score
+        0,                       // daa_score
+        0u64.into(),             // blue_work
+        Hash::zero(),            // pruning_point
+        0,                       // timestamp
+        0,                       // bits
+        [0u8; EXTRA_NONCE_SIZE], // extra_nonce
+        miner,                   // miner
+        Hash::zero(),            // hash_merkle_root
+        Hash::zero(),            // accepted_id_merkle_root
+        Hash::zero(),            // utxo_commitment
     );
 
     Block::new(Immutable::Arc(Arc::new(header)), vec![])
@@ -93,11 +92,13 @@ async fn test_balance_transition_to_zero() {
     .await;
 
     // Step 4: Load balance from storage (lazy loading)
-    parallel_state.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.expect("Failed to load balance");
+    parallel_state
+        .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+        .await
+        .expect("Failed to load balance");
 
     // Step 4b: Reduce balance to exactly zero
-    parallel_state
-        .set_balance(&alice_pubkey, &TOS_ASSET, 0);
+    parallel_state.set_balance(&alice_pubkey, &TOS_ASSET, 0);
 
     let final_balance = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
     assert_eq!(final_balance, 0, "Balance should be exactly zero");
@@ -105,7 +106,10 @@ async fn test_balance_transition_to_zero() {
     // Step 5: Commit and verify
     {
         let mut storage_write = storage.write().await;
-        parallel_state.commit(&mut *storage_write).await.expect("Failed to commit");
+        parallel_state
+            .commit(&mut *storage_write)
+            .await
+            .expect("Failed to commit");
     }
 
     // Step 6: Verify persisted zero balance
@@ -158,12 +162,14 @@ async fn test_balance_transition_from_zero() {
     .await;
 
     // Step 4: Load balance from storage (even if zero, need to initialize)
-    parallel_state.ensure_balance_loaded(&bob_pubkey, &TOS_ASSET).await.expect("Failed to load balance");
+    parallel_state
+        .ensure_balance_loaded(&bob_pubkey, &TOS_ASSET)
+        .await
+        .expect("Failed to load balance");
 
     // Step 4b: Add funds to zero balance account
     let new_balance = 500 * COIN_VALUE;
-    parallel_state
-        .set_balance(&bob_pubkey, &TOS_ASSET, new_balance);
+    parallel_state.set_balance(&bob_pubkey, &TOS_ASSET, new_balance);
 
     let final_balance = parallel_state.get_balance(&bob_pubkey, &TOS_ASSET);
     assert_eq!(final_balance, new_balance, "Balance should be updated");
@@ -171,7 +177,10 @@ async fn test_balance_transition_from_zero() {
     // Step 5: Commit and verify
     {
         let mut storage_write = storage.write().await;
-        parallel_state.commit(&mut *storage_write).await.expect("Failed to commit");
+        parallel_state
+            .commit(&mut *storage_write)
+            .await
+            .expect("Failed to commit");
     }
 
     // Step 6: Verify persisted positive balance
@@ -220,8 +229,8 @@ async fn test_nonce_sequential_boundary() {
         let parallel_state = ParallelChainState::new(
             Arc::clone(&storage),
             Arc::clone(&environment),
-            i,        // stable_topoheight
-            i + 1,    // topoheight
+            i,     // stable_topoheight
+            i + 1, // topoheight
             BlockVersion::V0,
             dummy_block,
             block_hash,
@@ -229,7 +238,10 @@ async fn test_nonce_sequential_boundary() {
         .await;
 
         // Load account from storage (lazy loading)
-        parallel_state.ensure_account_loaded(&alice_pubkey).await.expect("Failed to load account");
+        parallel_state
+            .ensure_account_loaded(&alice_pubkey)
+            .await
+            .expect("Failed to load account");
 
         // Increment nonce
         let current_nonce = parallel_state.get_nonce(&alice_pubkey);
@@ -301,27 +313,37 @@ async fn test_multiple_asset_types() {
     .await;
 
     // Step 5: Load TOS balance from storage (lazy loading)
-    parallel_state.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.expect("Failed to load balance");
+    parallel_state
+        .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+        .await
+        .expect("Failed to load balance");
 
     // Step 5b: Verify TOS asset
     let tos_balance = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
-    assert_eq!(tos_balance, 1000 * COIN_VALUE, "TOS balance should be correct");
+    assert_eq!(
+        tos_balance,
+        1000 * COIN_VALUE,
+        "TOS balance should be correct"
+    );
 
     // Step 6: Load custom asset (should be 0)
     let custom_balance = parallel_state.get_balance(&alice_pubkey, &custom_asset_hash);
     assert_eq!(custom_balance, 0, "Custom asset balance should be zero");
 
     // Step 7: Set custom asset balance
-    parallel_state
-        .set_balance(&alice_pubkey, &custom_asset_hash, 500);
+    parallel_state.set_balance(&alice_pubkey, &custom_asset_hash, 500);
 
     let updated_custom = parallel_state.get_balance(&alice_pubkey, &custom_asset_hash);
-    assert_eq!(updated_custom, 500, "Custom asset balance should be updated");
+    assert_eq!(
+        updated_custom, 500,
+        "Custom asset balance should be updated"
+    );
 
     // Step 8: Verify TOS balance unchanged
     let tos_balance_after = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
     assert_eq!(
-        tos_balance_after, 1000 * COIN_VALUE,
+        tos_balance_after,
+        1000 * COIN_VALUE,
         "TOS balance should remain unchanged"
     );
 
@@ -371,10 +393,12 @@ async fn test_cache_invalidation_on_reload() {
         .await;
 
         // Load balance from storage (lazy loading)
-        parallel_state1.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.expect("Failed to load balance");
-
         parallel_state1
-            .set_balance(&alice_pubkey, &TOS_ASSET, 500 * COIN_VALUE);
+            .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+            .await
+            .expect("Failed to load balance");
+
+        parallel_state1.set_balance(&alice_pubkey, &TOS_ASSET, 500 * COIN_VALUE);
 
         // Commit
         let mut storage_write = storage.write().await;
@@ -401,7 +425,10 @@ async fn test_cache_invalidation_on_reload() {
         .await;
 
         // Load balance from storage (lazy loading)
-        parallel_state2.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.expect("Failed to load balance");
+        parallel_state2
+            .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+            .await
+            .expect("Failed to load balance");
 
         let balance = parallel_state2.get_balance(&alice_pubkey, &TOS_ASSET);
         assert_eq!(
@@ -458,20 +485,24 @@ async fn test_same_account_multiple_operations() {
     .await;
 
     // Step 4: Load balance and account from storage (lazy loading)
-    parallel_state.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.expect("Failed to load balance");
-    parallel_state.ensure_account_loaded(&alice_pubkey).await.expect("Failed to load account");
+    parallel_state
+        .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+        .await
+        .expect("Failed to load balance");
+    parallel_state
+        .ensure_account_loaded(&alice_pubkey)
+        .await
+        .expect("Failed to load account");
 
     // Step 5: Perform multiple operations on same account
 
     // Operation 1: Deduct 100 TOS
     let balance1 = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
-    parallel_state
-        .set_balance(&alice_pubkey, &TOS_ASSET, balance1 - 100 * COIN_VALUE);
+    parallel_state.set_balance(&alice_pubkey, &TOS_ASSET, balance1 - 100 * COIN_VALUE);
 
     // Operation 2: Deduct another 200 TOS
     let balance2 = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
-    parallel_state
-        .set_balance(&alice_pubkey, &TOS_ASSET, balance2 - 200 * COIN_VALUE);
+    parallel_state.set_balance(&alice_pubkey, &TOS_ASSET, balance2 - 200 * COIN_VALUE);
 
     // Operation 3: Increment nonce twice
     let nonce1 = parallel_state.get_nonce(&alice_pubkey);
@@ -494,7 +525,10 @@ async fn test_same_account_multiple_operations() {
     // Step 7: Commit and verify
     {
         let mut storage_write = storage.write().await;
-        parallel_state.commit(&mut *storage_write).await.expect("Failed to commit");
+        parallel_state
+            .commit(&mut *storage_write)
+            .await
+            .expect("Failed to commit");
     }
 
     println!("✓ Test passed: Multiple operations on same account handled correctly");

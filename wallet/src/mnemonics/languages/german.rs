@@ -1630,5 +1630,5 @@ pub const GERMAN: Language<'static> = Language {
         "Zündung",
         "Zweck",
         "Zyklop",
-    ]
+    ],
 };

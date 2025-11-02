@@ -5,15 +5,13 @@
 // Usage:
 //   cargo run --bin setup_test_accounts -- --output test_accounts.json
 
+use anyhow::Result;
+use clap::Parser;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use clap::Parser;
-use anyhow::Result;
-use serde::{Serialize, Deserialize};
 
-use tos_common::{
-    crypto::elgamal::KeyPair,
-};
+use tos_common::crypto::elgamal::KeyPair;
 
 #[derive(Parser, Debug)]
 #[command(name = "setup_test_accounts")]
@@ -89,7 +87,9 @@ fn main() -> Result<()> {
     println!("✅ Keypairs saved to: {:?}", args.output);
     println!();
     println!("Next steps:");
-    println!("1. Start daemon: ./target/release/tos_daemon --network devnet --dir-path ~/tos_devnet/");
+    println!(
+        "1. Start daemon: ./target/release/tos_daemon --network devnet --dir-path ~/tos_devnet/"
+    );
     println!("2. Start miner: ./target/release/tos_miner --miner-address <Account A address> --daemon-address 127.0.0.1:8080");
     println!("3. Wait for ~300 blocks to mine (Account A will have 20+ TOS)");
     println!("4. Use tx_generator to transfer from A to B, C, D, E");

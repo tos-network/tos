@@ -67,15 +67,15 @@ impl AccountReputation {
 
         // Calculate base reputation score
         // base_reputation = age_score * 0.3 + history_score * 0.4 + stake_score * 0.3
-        let base_reputation_scaled =
-            (age_score_scaled * 3000) / SCALE +      // 30% weight
+        let base_reputation_scaled = (age_score_scaled * 3000) / SCALE +      // 30% weight
             (history_score_scaled * 4000) / SCALE +  // 40% weight
-            (stake_score_scaled * 3000) / SCALE;     // 30% weight
+            (stake_score_scaled * 3000) / SCALE; // 30% weight
 
         // 4. Validation accuracy bonus (up to +20% = 2000 scaled)
         let validation_bonus_scaled = if self.total_validations > 10 {
             // accuracy = successful / total
-            let accuracy_scaled = (self.successful_validations as u128 * SCALE) / self.total_validations as u128;
+            let accuracy_scaled =
+                (self.successful_validations as u128 * SCALE) / self.total_validations as u128;
             // bonus = max(accuracy - 0.8, 0.0) * 1.0 = max(accuracy - 8000, 0) / 10000 * 10000
             // Simplified: max(accuracy_scaled - 8000, 0)
             // Then cap at 2000 (representing 0.2)
@@ -89,10 +89,17 @@ impl AccountReputation {
         };
 
         // 5. Long-term participation bonus (account age > 90 days, extra +10% = 1000 scaled)
-        let long_term_bonus_scaled = if account_age_days > 90 { 1000u128 } else { 0u128 };
+        let long_term_bonus_scaled = if account_age_days > 90 {
+            1000u128
+        } else {
+            0u128
+        };
 
         // Calculate final reputation score (capped at SCALE = 10000)
-        self.reputation_score = ((base_reputation_scaled + validation_bonus_scaled + long_term_bonus_scaled).min(SCALE)) as u64;
+        self.reputation_score = ((base_reputation_scaled
+            + validation_bonus_scaled
+            + long_term_bonus_scaled)
+            .min(SCALE)) as u64;
         self.reputation_score
     }
 
@@ -249,10 +256,12 @@ impl AntiSybilDetector {
         }
 
         // 4. Reputation score check (scaled: 10000 = 1.0, 1000 = 0.1, 3000 = 0.3)
-        if reputation.reputation_score < 1000 {  // < 0.1
+        if reputation.reputation_score < 1000 {
+            // < 0.1
             risk_score += 0.5;
             details.push("Reputation score extremely low".to_string());
-        } else if reputation.reputation_score < 3000 {  // < 0.3
+        } else if reputation.reputation_score < 3000 {
+            // < 0.3
             risk_score += 0.2;
             details.push("Reputation score relatively low".to_string());
         }
@@ -317,30 +326,30 @@ pub fn calculate_secure_gas_cost(
 
     // 3. Difficulty multiplier (scaled by SCALE)
     let difficulty_multiplier_scaled = match difficulty {
-        DifficultyLevel::Beginner => 10000u128,   // 1.0 * SCALE
+        DifficultyLevel::Beginner => 10000u128,     // 1.0 * SCALE
         DifficultyLevel::Intermediate => 12000u128, // 1.2 * SCALE
-        DifficultyLevel::Advanced => 15000u128,    // 1.5 * SCALE
-        DifficultyLevel::Expert => 20000u128,      // 2.0 * SCALE
+        DifficultyLevel::Advanced => 15000u128,     // 1.5 * SCALE
+        DifficultyLevel::Expert => 20000u128,       // 2.0 * SCALE
     };
 
     // 4. Stake multiplier (scaled by SCALE)
     let stake_multiplier_scaled = if stake_amount < LOW_STAKE_THRESHOLD {
-        50000u128  // 5.0 * SCALE (LOW_STAKE_PENALTY_MULTIPLIER)
+        50000u128 // 5.0 * SCALE (LOW_STAKE_PENALTY_MULTIPLIER)
     } else if stake_amount < MEDIUM_STAKE_THRESHOLD {
-        20000u128  // 2.0 * SCALE (MEDIUM_STAKE_PENALTY_MULTIPLIER)
+        20000u128 // 2.0 * SCALE (MEDIUM_STAKE_PENALTY_MULTIPLIER)
     } else {
-        10000u128  // 1.0 * SCALE
+        10000u128 // 1.0 * SCALE
     };
 
     // 5. Reputation discount/penalty (scaled by SCALE)
     let reputation_modifier_scaled = if reputation.reputation_score >= HIGH_REPUTATION_THRESHOLD {
-        5000u128   // 0.5 * SCALE (HIGH_REPUTATION_DISCOUNT)
+        5000u128 // 0.5 * SCALE (HIGH_REPUTATION_DISCOUNT)
     } else if reputation.reputation_score >= MEDIUM_REPUTATION_THRESHOLD {
-        7000u128   // 0.7 * SCALE (MEDIUM_REPUTATION_DISCOUNT)
+        7000u128 // 0.7 * SCALE (MEDIUM_REPUTATION_DISCOUNT)
     } else if reputation.reputation_score < LOW_REPUTATION_THRESHOLD {
-        20000u128  // 2.0 * SCALE (LOW_REPUTATION_PENALTY)
+        20000u128 // 2.0 * SCALE (LOW_REPUTATION_PENALTY)
     } else {
-        10000u128  // 1.0 * SCALE
+        10000u128 // 1.0 * SCALE
     };
 
     // 6. Calculate final cost using u128 scaled arithmetic
@@ -381,18 +390,18 @@ pub fn calculate_final_reward(
 
     // 2. Scarcity bonus (scaled by SCALE)
     let scarcity_bonus_scaled = if validation_score >= HIGH_QUALITY_SCORE_THRESHOLD {
-        15000u128  // 1.5 * SCALE (HIGH_QUALITY_SCARCITY_BONUS)
+        15000u128 // 1.5 * SCALE (HIGH_QUALITY_SCARCITY_BONUS)
     } else if validation_score >= MEDIUM_QUALITY_SCORE_THRESHOLD {
-        12000u128  // 1.2 * SCALE (MEDIUM_QUALITY_SCARCITY_BONUS)
+        12000u128 // 1.2 * SCALE (MEDIUM_QUALITY_SCARCITY_BONUS)
     } else {
-        10000u128  // 1.0 * SCALE
+        10000u128 // 1.0 * SCALE
     };
 
     // 3. Long-term contributor bonus (scaled by SCALE)
     let loyalty_bonus_scaled = if reputation.reputation_score >= HIGH_REPUTATION_THRESHOLD {
-        11000u128  // 1.1 * SCALE (10% additional reward)
+        11000u128 // 1.1 * SCALE (10% additional reward)
     } else {
-        10000u128  // 1.0 * SCALE
+        10000u128 // 1.0 * SCALE
     };
 
     // Calculate final reward using u128 scaled arithmetic

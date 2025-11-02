@@ -1,15 +1,10 @@
-use std::fmt;
-use serde::{Serialize, Deserialize};
 use crate::{
-    crypto::Hash,
     block::TopoHeight,
-    serializer::{
-        Reader,
-        ReaderError,
-        Serializer,
-        Writer
-    }
+    crypto::Hash,
+    serializer::{Reader, ReaderError, Serializer, Writer},
 };
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Reference {
@@ -19,7 +14,11 @@ pub struct Reference {
 
 impl fmt::Display for Reference {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Reference[hash: {}, topoheight: {}]", self.hash, self.topoheight)
+        write!(
+            f,
+            "Reference[hash: {}, topoheight: {}]",
+            self.hash, self.topoheight
+        )
     }
 }
 
@@ -38,10 +37,7 @@ impl Serializer for Reference {
     fn read(reader: &mut Reader) -> Result<Reference, ReaderError> {
         let hash = Hash::read(reader)?;
         let topoheight = Reader::read(reader)?;
-        Ok(Reference {
-            hash,
-            topoheight
-        })
+        Ok(Reference { hash, topoheight })
     }
 
     fn size(&self) -> usize {

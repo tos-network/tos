@@ -1,4 +1,9 @@
-use std::{collections::VecDeque, future::Future, pin::Pin, task::{Context, Poll}};
+use std::{
+    collections::VecDeque,
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use futures::Stream;
 use pin_project_lite::pin_project;
@@ -12,7 +17,7 @@ pin_project! {
 impl<F: Future> Executor<F> {
     pub fn new() -> Self {
         Self {
-            futures: VecDeque::new()
+            futures: VecDeque::new(),
         }
     }
 
@@ -44,7 +49,7 @@ impl<F: Future> Stream for Executor<F> {
                 Poll::Ready(output) => {
                     this.futures.pop_front();
                     Poll::Ready(Some(output))
-                },
+                }
                 Poll::Pending => Poll::Pending,
             }
         } else {

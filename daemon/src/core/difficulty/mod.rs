@@ -13,18 +13,12 @@
 
 use log::trace;
 use tos_common::{
-    block::BlockVersion,
-    difficulty::Difficulty,
-    network::Network,
-    time::TimestampMillis,
-    varuint::VarUint
+    block::BlockVersion, difficulty::Difficulty, network::Network, time::TimestampMillis,
+    varuint::VarUint,
 };
 
-use crate::config::{
-    MINIMUM_HASHRATE,
-    MILLIS_PER_SECOND
-};
 use super::hard_fork::get_block_time_target_for_version;
+use crate::config::{MILLIS_PER_SECOND, MINIMUM_HASHRATE};
 
 mod v1;
 mod v2;
@@ -34,7 +28,14 @@ mod v2;
 // x_est_prev: The previous hashrate estime.
 // p_prev: The previous estimate covariance.
 // Returns the new state estimate and covariance
-fn kalman_filter(z: VarUint, x_est_prev: VarUint, p_prev: VarUint, shift: u64, left_shift: VarUint, process_noise_covar: VarUint) -> (VarUint, VarUint) {
+fn kalman_filter(
+    z: VarUint,
+    x_est_prev: VarUint,
+    p_prev: VarUint,
+    shift: u64,
+    left_shift: VarUint,
+    process_noise_covar: VarUint,
+) -> (VarUint, VarUint) {
     if log::log_enabled!(log::Level::Trace) {
         trace!("z: {}, x_est_prev: {}, p_prev: {}", z, x_est_prev, p_prev);
     }
@@ -57,7 +58,14 @@ fn kalman_filter(z: VarUint, x_est_prev: VarUint, p_prev: VarUint, shift: u64, l
     };
 
     if log::log_enabled!(log::Level::Trace) {
-        trace!("x_est_new: {}, p pred: {}, noise covar: {}, p_prev: {}, k: {}", x_est_new, p_pred, process_noise_covar, p_prev, k);
+        trace!(
+            "x_est_new: {}, p pred: {}, noise covar: {}, p_prev: {}, k: {}",
+            x_est_new,
+            p_pred,
+            process_noise_covar,
+            p_prev,
+            k
+        );
     }
     let p_new = ((left_shift - k) * p_pred) >> shift;
 
@@ -70,13 +78,32 @@ fn kalman_filter(z: VarUint, x_est_prev: VarUint, p_prev: VarUint, shift: u64, l
 // Calculate the required difficulty for the next block based on the solve time of the previous block
 // We are using a Kalman filter to estimate the hashrate and adjust the difficulty
 // This function will determine which algorithm to use based on the version
-pub fn calculate_difficulty(parent_timestamp: TimestampMillis, timestamp: TimestampMillis, previous_difficulty: Difficulty, p: VarUint, minimum_difficulty: Difficulty, version: BlockVersion) -> (Difficulty, VarUint) {
+pub fn calculate_difficulty(
+    parent_timestamp: TimestampMillis,
+    timestamp: TimestampMillis,
+    previous_difficulty: Difficulty,
+    p: VarUint,
+    minimum_difficulty: Difficulty,
+    version: BlockVersion,
+) -> (Difficulty, VarUint) {
     let solve_time = (timestamp - parent_timestamp).max(1);
 
     let block_time_target = get_block_time_target_for_version(version);
     match version {
-        BlockVersion::V0 => v1::calculate_difficulty(solve_time, previous_difficulty, p, minimum_difficulty, block_time_target),
-        _ => v2::calculate_difficulty(solve_time, previous_difficulty, p, minimum_difficulty, block_time_target),
+        BlockVersion::V0 => v1::calculate_difficulty(
+            solve_time,
+            previous_difficulty,
+            p,
+            minimum_difficulty,
+            block_time_target,
+        ),
+        _ => v2::calculate_difficulty(
+            solve_time,
+            previous_difficulty,
+            p,
+            minimum_difficulty,
+            block_time_target,
+        ),
     }
 }
 
@@ -85,7 +112,7 @@ pub fn calculate_difficulty(parent_timestamp: TimestampMillis, timestamp: Timest
 pub fn get_covariance_p(version: BlockVersion) -> VarUint {
     match version {
         BlockVersion::V0 => v1::P,
-        _ => v2::P
+        _ => v2::P,
     }
 }
 
@@ -107,13 +134,19 @@ pub const fn get_minimum_difficulty(_network: &Network, version: BlockVersion) -
 // Get minimum difficulty at hard fork
 // Only mainnet has hard fork difficulty adjustments
 // All networks use the same MINIMUM_HASHRATE for consistency
-pub const fn get_difficulty_at_hard_fork(network: &Network, version: BlockVersion) -> Option<Difficulty> {
+pub const fn get_difficulty_at_hard_fork(
+    network: &Network,
+    version: BlockVersion,
+) -> Option<Difficulty> {
     match network {
         Network::Mainnet => match version {
             BlockVersion::V0 | BlockVersion::V1 | BlockVersion::V2 => {
                 let block_time_target = get_block_time_target_for_version(version);
-                Some(get_difficulty_with_target(MINIMUM_HASHRATE, block_time_target))
-            },
+                Some(get_difficulty_with_target(
+                    MINIMUM_HASHRATE,
+                    block_time_target,
+                ))
+            }
             BlockVersion::V3 => None,
         },
         _ => None,
@@ -122,22 +155,33 @@ pub const fn get_difficulty_at_hard_fork(network: &Network, version: BlockVersio
 
 #[cfg(test)]
 mod tests {
+    use crate::config::{GIGA_HASH, HASH, KILO_HASH, MEGA_HASH};
     use tos_common::utils::format_hashrate;
-    use crate::config::{HASH, KILO_HASH, MEGA_HASH, GIGA_HASH};
 
     use super::*;
 
     #[test]
     fn test_difficulty_at_hard_fork() {
         // 200 H/s for V0 with 60s target = 200 * 60,000 / 1000 = 12,000
-        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V0).unwrap(), Difficulty::from_u64(MINIMUM_HASHRATE * 60));
+        assert_eq!(
+            get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V0).unwrap(),
+            Difficulty::from_u64(MINIMUM_HASHRATE * 60)
+        );
 
         // TIP-1 deprecated: V1/V2/V3 use 1s blocks
         // 200 H/s for V2 with 1s target = 200 * 1,000 / 1000 = 200
-        assert_eq!(get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V2).unwrap(), Difficulty::from_u64(1 * MINIMUM_HASHRATE));
+        assert_eq!(
+            get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V2).unwrap(),
+            Difficulty::from_u64(1 * MINIMUM_HASHRATE)
+        );
 
         // testnet returns None for all versions
-        for version in [BlockVersion::V0, BlockVersion::V1, BlockVersion::V2, BlockVersion::V3] {
+        for version in [
+            BlockVersion::V0,
+            BlockVersion::V1,
+            BlockVersion::V2,
+            BlockVersion::V3,
+        ] {
             assert!(get_difficulty_at_hard_fork(&Network::Testnet, version).is_none());
         }
     }

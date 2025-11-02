@@ -1,8 +1,4 @@
-use crate::{
-    contract::register_opaque_types,
-    crypto::Hash,
-    static_assert
-};
+use crate::{contract::register_opaque_types, crypto::Hash, static_assert};
 
 pub const VERSION: &str = env!("BUILD_VERSION");
 pub const TOS_ASSET: Hash = Hash::zero();
@@ -18,8 +14,7 @@ pub const TOS_ASSET: Hash = Hash::zero();
 // - Energy is gained by freezing TOS with duration-based multipliers
 // - Energy formula: 1 TOS × (2 × freeze_days) = energy units
 // - Example: 1 TOS frozen for 7 days = 14 energy = 14 free transfers
-pub const ENERGY_PER_TRANSFER: u64 = 1;           // Basic transfer (1 energy per transfer)
-
+pub const ENERGY_PER_TRANSFER: u64 = 1; // Basic transfer (1 energy per transfer)
 
 // TOS-based fee model constants
 pub const FEE_PER_KB: u64 = 10000;
@@ -116,7 +111,12 @@ pub fn init() {
     register_opaque_types();
 }
 
-
 // Static checks
-static_assert!(MAX_TRANSACTION_SIZE <= MAX_BLOCK_SIZE, "Max transaction size must be less than or equal to max block size");
-static_assert!(MAXIMUM_SUPPLY >= COIN_VALUE, "Maximum supply must be greater than or equal to coin value");
+static_assert!(
+    MAX_TRANSACTION_SIZE <= MAX_BLOCK_SIZE,
+    "Max transaction size must be less than or equal to max block size"
+);
+static_assert!(
+    MAXIMUM_SUPPLY >= COIN_VALUE,
+    "Maximum supply must be greater than or equal to coin value"
+);

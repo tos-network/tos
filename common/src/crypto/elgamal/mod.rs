@@ -1,8 +1,8 @@
-mod signature;
 mod pedersen;
+mod signature;
 
-pub use signature::*;
 pub use pedersen::*;
+pub use signature::*;
 
 pub use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT as G;
 
@@ -11,10 +11,7 @@ pub const RISTRETTO_COMPRESSED_SIZE: usize = 32;
 pub const SCALAR_SIZE: usize = 32;
 
 // Re-export curve25519_dalek types that are needed
-use curve25519_dalek::{
-    ristretto::CompressedRistretto,
-    RistrettoPoint
-};
+use curve25519_dalek::{ristretto::CompressedRistretto, RistrettoPoint};
 
 // Minimal types needed for Pedersen commitments and proofs
 // These were in compressed.rs and key.rs but we keep minimal versions here
@@ -36,7 +33,10 @@ impl CompressedCommitment {
     }
 
     pub fn decompress(&self) -> Result<PedersenCommitment, DecompressionError> {
-        let point = self.0.decompress().ok_or(DecompressionError::InvalidPoint)?;
+        let point = self
+            .0
+            .decompress()
+            .ok_or(DecompressionError::InvalidPoint)?;
         if point.is_identity() {
             return Err(DecompressionError::IdentityPoint);
         }
@@ -50,8 +50,10 @@ impl SerializerTrait for CompressedCommitment {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let bytes = reader.read_bytes::<[u8; RISTRETTO_COMPRESSED_SIZE]>(RISTRETTO_COMPRESSED_SIZE)?;
-        let compressed = CompressedRistretto::from_slice(&bytes).map_err(|_| ReaderError::InvalidValue)?;
+        let bytes =
+            reader.read_bytes::<[u8; RISTRETTO_COMPRESSED_SIZE]>(RISTRETTO_COMPRESSED_SIZE)?;
+        let compressed =
+            CompressedRistretto::from_slice(&bytes).map_err(|_| ReaderError::InvalidValue)?;
         Ok(Self(compressed))
     }
 
@@ -80,7 +82,10 @@ impl CompressedHandle {
     }
 
     pub fn decompress(&self) -> Result<DecryptHandle, DecompressionError> {
-        let point = self.0.decompress().ok_or(DecompressionError::InvalidPoint)?;
+        let point = self
+            .0
+            .decompress()
+            .ok_or(DecompressionError::InvalidPoint)?;
         if point.is_identity() {
             return Err(DecompressionError::IdentityPoint);
         }
@@ -94,8 +99,10 @@ impl SerializerTrait for CompressedHandle {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let bytes = reader.read_bytes::<[u8; RISTRETTO_COMPRESSED_SIZE]>(RISTRETTO_COMPRESSED_SIZE)?;
-        let compressed = CompressedRistretto::from_slice(&bytes).map_err(|_| ReaderError::InvalidValue)?;
+        let bytes =
+            reader.read_bytes::<[u8; RISTRETTO_COMPRESSED_SIZE]>(RISTRETTO_COMPRESSED_SIZE)?;
+        let compressed =
+            CompressedRistretto::from_slice(&bytes).map_err(|_| ReaderError::InvalidValue)?;
         Ok(Self(compressed))
     }
 
@@ -117,7 +124,10 @@ impl CompressedPublicKey {
     }
 
     pub fn decompress(&self) -> Result<PublicKey, DecompressionError> {
-        let point = self.0.decompress().ok_or(DecompressionError::InvalidPoint)?;
+        let point = self
+            .0
+            .decompress()
+            .ok_or(DecompressionError::InvalidPoint)?;
         if point.is_identity() {
             return Err(DecompressionError::IdentityPoint);
         }
@@ -163,15 +173,15 @@ pub enum DecompressionError {
 }
 
 // Implement IsIdentity trait for RistrettoPoint check
+use crate::{
+    crypto::{Address, AddressType, Hash},
+    serializer::{Reader, ReaderError, Serializer as SerializerTrait, Writer},
+};
 use curve25519_dalek::traits::IsIdentity;
 use curve25519_dalek::Scalar;
 use rand::rngs::OsRng;
-use zeroize::Zeroize;
 use sha3::Sha3_512;
-use crate::{
-    crypto::{Address, AddressType, Hash},
-    serializer::{Reader, ReaderError, Serializer as SerializerTrait, Writer}
-};
+use zeroize::Zeroize;
 
 // Minimal PrivateKey implementation (for signatures only, no encryption)
 #[derive(Clone, Zeroize, serde::Serialize, serde::Deserialize)]
@@ -202,7 +212,10 @@ impl PrivateKey {
     }
 
     pub fn from_hex(hex: &str) -> Result<Self, hex::FromHexError> {
-        let bytes: [u8; 32] = hex::decode(hex)?.as_slice().try_into().map_err(|_| hex::FromHexError::InvalidStringLength)?;
+        let bytes: [u8; 32] = hex::decode(hex)?
+            .as_slice()
+            .try_into()
+            .map_err(|_| hex::FromHexError::InvalidStringLength)?;
         Self::from_bytes(&bytes).map_err(|_| hex::FromHexError::InvalidStringLength)
     }
 
@@ -257,7 +270,10 @@ impl KeyPair {
         // Public key: P = H * private_key (standard Schnorr signature)
         let public_key = PublicKey::from_point((*H) * private_key.as_scalar());
 
-        Self { public_key, private_key }
+        Self {
+            public_key,
+            private_key,
+        }
     }
 
     pub fn from_private_key(private_key: PrivateKey) -> Result<Self, ()> {
@@ -271,7 +287,10 @@ impl KeyPair {
         // Public key: P = H * private_key (standard Schnorr signature)
         let public_key = PublicKey::from_point((*H) * private_key.as_scalar());
 
-        Ok(Self { public_key, private_key })
+        Ok(Self {
+            public_key,
+            private_key,
+        })
     }
 
     pub fn get_public_key(&self) -> &PublicKey {
@@ -316,7 +335,8 @@ impl SerializerTrait for CompressedPublicKey {
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let bytes = reader.read_bytes::<[u8; 32]>(32)?;
-        let compressed = CompressedRistretto::from_slice(&bytes).map_err(|_| ReaderError::InvalidValue)?;
+        let compressed =
+            CompressedRistretto::from_slice(&bytes).map_err(|_| ReaderError::InvalidValue)?;
         Ok(Self(compressed))
     }
 

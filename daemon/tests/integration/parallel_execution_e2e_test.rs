@@ -19,7 +19,9 @@ use tos_common::{
     serializer::{Serializer, Writer},
     time::TimestampMillis,
     transaction::{
-        builder::{AccountState, FeeBuilder, TransactionBuilder, TransactionTypeBuilder, TransferBuilder},
+        builder::{
+            AccountState, FeeBuilder, TransactionBuilder, TransactionTypeBuilder, TransferBuilder,
+        },
         FeeType, Transaction, TransactionType, TxVersion,
     },
     varuint::VarUint,
@@ -107,7 +109,11 @@ impl AccountState for MockAccountState {
     }
 
     fn get_account_balance(&self, asset: &Hash) -> Result<u64, Self::Error> {
-        Ok(self.balances.get(asset).copied().unwrap_or(1000 * COIN_VALUE))
+        Ok(self
+            .balances
+            .get(asset)
+            .copied()
+            .unwrap_or(1000 * COIN_VALUE))
     }
 
     fn get_reference(&self) -> tos_common::transaction::Reference {
@@ -117,7 +123,11 @@ impl AccountState for MockAccountState {
         }
     }
 
-    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64) -> Result<(), Self::Error> {
+    fn update_account_balance(
+        &mut self,
+        asset: &Hash,
+        new_balance: u64,
+    ) -> Result<(), Self::Error> {
         self.balances.insert(asset.clone(), new_balance);
         Ok(())
     }
@@ -153,8 +163,8 @@ struct TestStorage {
 
 impl TestStorage {
     fn new() -> Result<Self, BlockchainError> {
-        let temp_dir = TempDir::new("tos_test_parallel_e2e")
-            .map_err(|_e| BlockchainError::InvalidConfig)?;
+        let temp_dir =
+            TempDir::new("tos_test_parallel_e2e").map_err(|_e| BlockchainError::InvalidConfig)?;
 
         let storage = SledStorage::new(
             temp_dir.path().to_string_lossy().to_string(),
@@ -343,8 +353,14 @@ async fn test_parallel_execution_4_transactions() {
     let receiver_keypair = KeyPair::new();
     let receiver_pubkey = receiver_keypair.get_public_key().compress();
 
-    println!("Sender address: {}", sender_keypair.get_public_key().to_address(false));
-    println!("Receiver address: {}", receiver_keypair.get_public_key().to_address(false));
+    println!(
+        "Sender address: {}",
+        sender_keypair.get_public_key().to_address(false)
+    );
+    println!(
+        "Receiver address: {}",
+        receiver_keypair.get_public_key().to_address(false)
+    );
 
     // NOTE: In a real test, we would:
     // 1. Fund sender account through mining
@@ -362,9 +378,9 @@ async fn test_parallel_execution_4_transactions() {
         let tx = create_transfer_transaction(
             &sender_keypair,
             &receiver_pubkey,
-            1 * COIN_VALUE,  // 1.0 TOS per transaction
-            50,              // 50 nanoTOS fee
-            i,               // Nonce sequence: 0, 1, 2, 3
+            1 * COIN_VALUE, // 1.0 TOS per transaction
+            50,             // 50 nanoTOS fee
+            i,              // Nonce sequence: 0, 1, 2, 3
         )
         .expect("Failed to create transaction");
 
@@ -396,7 +412,10 @@ async fn test_parallel_execution_4_transactions() {
 
     // Verify MIN_TXS_FOR_PARALLEL_DEVNET = 4 (from config.rs)
     use tos_daemon::config::{get_min_txs_for_parallel, MIN_TXS_FOR_PARALLEL_DEVNET};
-    assert_eq!(MIN_TXS_FOR_PARALLEL_DEVNET, 4, "Devnet threshold should be 4");
+    assert_eq!(
+        MIN_TXS_FOR_PARALLEL_DEVNET, 4,
+        "Devnet threshold should be 4"
+    );
     assert_eq!(
         get_min_txs_for_parallel(&Network::Devnet),
         4,
@@ -423,14 +442,8 @@ async fn test_transaction_builder_with_nonce_sequence() {
     // Create 4 transactions with nonce sequence: 0, 1, 2, 3
     let mut transactions = Vec::new();
     for i in 0..4 {
-        let tx = create_transfer_transaction(
-            &sender,
-            &receiver_pubkey,
-            1 * COIN_VALUE,
-            50,
-            i,
-        )
-        .expect("Failed to create transaction");
+        let tx = create_transfer_transaction(&sender, &receiver_pubkey, 1 * COIN_VALUE, 50, i)
+            .expect("Failed to create transaction");
 
         // Verify nonce
         assert_eq!(tx.get_nonce(), i, "Nonce mismatch");
@@ -472,14 +485,8 @@ async fn test_block_creation_with_transactions() {
 
     let mut transactions = Vec::new();
     for i in 0..4 {
-        let tx = create_transfer_transaction(
-            &sender,
-            &receiver_pubkey,
-            1 * COIN_VALUE,
-            50,
-            i,
-        )
-        .expect("Failed to create transaction");
+        let tx = create_transfer_transaction(&sender, &receiver_pubkey, 1 * COIN_VALUE, 50, i)
+            .expect("Failed to create transaction");
         transactions.push(tx);
     }
 
@@ -508,8 +515,18 @@ async fn test_block_creation_with_transactions() {
 
     // Verify transaction hashes match
     for (i, (original, stored)) in transactions.iter().zip(stored_txs.iter()).enumerate() {
-        assert_eq!(original.hash(), stored.hash(), "Transaction {} hash mismatch", i);
-        assert_eq!(original.get_nonce(), stored.get_nonce(), "Transaction {} nonce mismatch", i);
+        assert_eq!(
+            original.hash(),
+            stored.hash(),
+            "Transaction {} hash mismatch",
+            i
+        );
+        assert_eq!(
+            original.get_nonce(),
+            stored.get_nonce(),
+            "Transaction {} nonce mismatch",
+            i
+        );
     }
     println!("✓ All transaction hashes and nonces verified");
 

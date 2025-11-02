@@ -22,8 +22,7 @@ use tos_daemon::core::{
     config::RocksDBConfig,
     state::parallel_chain_state::ParallelChainState,
     storage::{
-        rocksdb::RocksStorage,
-        AccountProvider, AssetProvider, BalanceProvider, NonceProvider,
+        rocksdb::RocksStorage, AccountProvider, AssetProvider, BalanceProvider, NonceProvider,
     },
 };
 
@@ -58,7 +57,12 @@ async fn setup_account(
         .await
         .unwrap();
     guard
-        .set_last_balance_to(account, &TOS_ASSET, 0, &VersionedBalance::new(balance, Some(0)))
+        .set_last_balance_to(
+            account,
+            &TOS_ASSET,
+            0,
+            &VersionedBalance::new(balance, Some(0)),
+        )
         .await
         .unwrap();
     guard
@@ -77,12 +81,7 @@ async fn test_rocksdb_no_deadlock() {
     let dir_path = temp_dir.path().to_string_lossy().to_string();
     let config = RocksDBConfig::default();
 
-    let mut storage = RocksStorage::new(
-        &dir_path,
-        Network::Devnet,
-        Some(1024 * 1024),
-        &config,
-    );
+    let mut storage = RocksStorage::new(&dir_path, Network::Devnet, Some(1024 * 1024), &config);
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
     println!("✓ RocksDB storage created");
@@ -92,8 +91,20 @@ async fn test_rocksdb_no_deadlock() {
     let alice = KeyPair::new();
     let bob = KeyPair::new();
 
-    setup_account(&storage, &alice.get_public_key().compress(), 100 * COIN_VALUE, 0).await;
-    setup_account(&storage, &bob.get_public_key().compress(), 50 * COIN_VALUE, 0).await;
+    setup_account(
+        &storage,
+        &alice.get_public_key().compress(),
+        100 * COIN_VALUE,
+        0,
+    )
+    .await;
+    setup_account(
+        &storage,
+        &bob.get_public_key().compress(),
+        50 * COIN_VALUE,
+        0,
+    )
+    .await;
     println!("✓ Accounts created");
 
     // Step 3: Verify balances
@@ -101,21 +112,13 @@ async fn test_rocksdb_no_deadlock() {
     {
         let guard = storage.read().await;
         let alice_balance = guard
-            .get_balance_at_exact_topoheight(
-                &alice.get_public_key().compress(),
-                &TOS_ASSET,
-                0,
-            )
+            .get_balance_at_exact_topoheight(&alice.get_public_key().compress(), &TOS_ASSET, 0)
             .await
             .unwrap();
         assert_eq!(alice_balance.get_balance(), 100 * COIN_VALUE);
 
         let bob_balance = guard
-            .get_balance_at_exact_topoheight(
-                &bob.get_public_key().compress(),
-                &TOS_ASSET,
-                0,
-            )
+            .get_balance_at_exact_topoheight(&bob.get_public_key().compress(), &TOS_ASSET, 0)
             .await
             .unwrap();
         assert_eq!(bob_balance.get_balance(), 50 * COIN_VALUE);
@@ -130,23 +133,23 @@ async fn test_rocksdb_no_deadlock() {
     let miner = KeyPair::new().get_public_key().compress();
     let dummy_header = BlockHeader::new(
         BlockVersion::V0,
-        vec![],  // parents_by_level
-        0,       // blue_score
-        0,       // daa_score
-        0u64.into(),  // blue_work
-        Hash::zero(),  // pruning_point
-        0,       // timestamp
-        0,       // bits
-        [0u8; EXTRA_NONCE_SIZE],  // extra_nonce
-        miner,   // miner
-        Hash::zero(),  // hash_merkle_root
-        Hash::zero(),  // accepted_id_merkle_root
-        Hash::zero(),  // utxo_commitment
+        vec![],                  // parents_by_level
+        0,                       // blue_score
+        0,                       // daa_score
+        0u64.into(),             // blue_work
+        Hash::zero(),            // pruning_point
+        0,                       // timestamp
+        0,                       // bits
+        [0u8; EXTRA_NONCE_SIZE], // extra_nonce
+        miner,                   // miner
+        Hash::zero(),            // hash_merkle_root
+        Hash::zero(),            // accepted_id_merkle_root
+        Hash::zero(),            // utxo_commitment
     );
 
     let dummy_block = Block::new(
         Immutable::Arc(Arc::new(dummy_header)),
-        vec![],  // transactions
+        vec![], // transactions
     );
 
     let block_hash = Hash::zero();
@@ -154,8 +157,8 @@ async fn test_rocksdb_no_deadlock() {
     let parallel_state = ParallelChainState::new(
         Arc::clone(&storage),
         environment,
-        0,  // stable_topoheight (previous)
-        1,  // topoheight
+        0, // stable_topoheight (previous)
+        1, // topoheight
         BlockVersion::V0,
         dummy_block,
         block_hash,
@@ -183,12 +186,7 @@ async fn test_rocksdb_concurrent_access() {
     let dir_path = temp_dir.path().to_string_lossy().to_string();
     let config = RocksDBConfig::default();
 
-    let mut storage = RocksStorage::new(
-        &dir_path,
-        Network::Devnet,
-        Some(1024 * 1024),
-        &config,
-    );
+    let mut storage = RocksStorage::new(&dir_path, Network::Devnet, Some(1024 * 1024), &config);
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
 

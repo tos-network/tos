@@ -34,10 +34,7 @@ use tos_common::{
 use tos_daemon::core::{
     executor::{get_optimal_parallelism, ParallelExecutor},
     state::{parallel_chain_state::ParallelChainState, ApplicableChainState},
-    storage::{
-        rocksdb::RocksStorage,
-        BalanceProvider, NonceProvider,
-    },
+    storage::{rocksdb::RocksStorage, BalanceProvider, NonceProvider},
 };
 
 use tos_environment::Environment;
@@ -241,14 +238,25 @@ async fn execute_sequential(
         .collect();
     println!("  [Sequential] ✓ Transactions hashed");
 
-    println!("  [Sequential] Applying {} transactions...", txs_with_hash.len());
+    println!(
+        "  [Sequential] Applying {} transactions...",
+        txs_with_hash.len()
+    );
     for (i, (tx, tx_hash)) in txs_with_hash.iter().enumerate() {
-        println!("  [Sequential]   Applying tx {}/{}...", i + 1, txs_with_hash.len());
+        println!(
+            "  [Sequential]   Applying tx {}/{}...",
+            i + 1,
+            txs_with_hash.len()
+        );
         let start = std::time::Instant::now();
         tx.apply_with_partial_verify(tx_hash, &mut chain_state)
             .await
             .unwrap();
-        println!("  [Sequential]   ✓ Tx {} applied in {:?}", i + 1, start.elapsed());
+        println!(
+            "  [Sequential]   ✓ Tx {} applied in {:?}",
+            i + 1,
+            start.elapsed()
+        );
     }
 
     println!("  [Sequential] Committing state changes...");
@@ -424,23 +432,45 @@ async fn test_parallel_matches_sequential_receive_then_spend() {
     let seq_snapshot = snapshot_accounts(&storage_seq, &accounts_seq).await;
     let par_snapshot = snapshot_accounts(&storage_par, &accounts_par).await;
 
-    println!("Sequential results: alice={}, bob={}, charlie={}",
-        seq_snapshot["alice"].0, seq_snapshot["bob"].0, seq_snapshot["charlie"].0);
-    println!("Parallel results:   alice={}, bob={}, charlie={}",
-        par_snapshot["alice"].0, par_snapshot["bob"].0, par_snapshot["charlie"].0);
+    println!(
+        "Sequential results: alice={}, bob={}, charlie={}",
+        seq_snapshot["alice"].0, seq_snapshot["bob"].0, seq_snapshot["charlie"].0
+    );
+    println!(
+        "Parallel results:   alice={}, bob={}, charlie={}",
+        par_snapshot["alice"].0, par_snapshot["bob"].0, par_snapshot["charlie"].0
+    );
 
     // Check that both execution paths produce same final balances
-    assert_eq!(seq_snapshot["alice"].0, par_snapshot["alice"].0, "Alice balance mismatch");
-    assert_eq!(seq_snapshot["bob"].0, par_snapshot["bob"].0, "Bob balance mismatch");
-    assert_eq!(seq_snapshot["charlie"].0, par_snapshot["charlie"].0, "Charlie balance mismatch");
+    assert_eq!(
+        seq_snapshot["alice"].0, par_snapshot["alice"].0,
+        "Alice balance mismatch"
+    );
+    assert_eq!(
+        seq_snapshot["bob"].0, par_snapshot["bob"].0,
+        "Bob balance mismatch"
+    );
+    assert_eq!(
+        seq_snapshot["charlie"].0, par_snapshot["charlie"].0,
+        "Charlie balance mismatch"
+    );
 
     // Verify expected balances
     // Alice: 100 - 30 - 0.00001 (fee) = 69.99999 TOS
-    assert_eq!(seq_snapshot["alice"].0, 100 * COIN_VALUE - 30 * COIN_VALUE - 10);
+    assert_eq!(
+        seq_snapshot["alice"].0,
+        100 * COIN_VALUE - 30 * COIN_VALUE - 10
+    );
     // Bob: 100 + 30 - 20 - 0.000005 (fee) = 109.999995 TOS
-    assert_eq!(seq_snapshot["bob"].0, 100 * COIN_VALUE + 30 * COIN_VALUE - 20 * COIN_VALUE - 5);
+    assert_eq!(
+        seq_snapshot["bob"].0,
+        100 * COIN_VALUE + 30 * COIN_VALUE - 20 * COIN_VALUE - 5
+    );
     // Charlie: 100 + 20 = 120 TOS
-    assert_eq!(seq_snapshot["charlie"].0, 100 * COIN_VALUE + 20 * COIN_VALUE);
+    assert_eq!(
+        seq_snapshot["charlie"].0,
+        100 * COIN_VALUE + 20 * COIN_VALUE
+    );
 
     println!("✓ All assertions passed!");
     println!("=== TEST COMPLETED SUCCESSFULLY (100x faster with genesis funding!) ===\n");
@@ -561,23 +591,42 @@ async fn test_parallel_matches_sequential_multiple_spends() {
     let seq_snapshot = snapshot_accounts(&storage_seq, &accounts_seq).await;
     let par_snapshot = snapshot_accounts(&storage_par, &accounts_par).await;
 
-    println!("Sequential results: alice={}, bob={}, charlie={}",
-        seq_snapshot["alice"].0, seq_snapshot["bob"].0, seq_snapshot["charlie"].0);
-    println!("Parallel results:   alice={}, bob={}, charlie={}",
-        par_snapshot["alice"].0, par_snapshot["bob"].0, par_snapshot["charlie"].0);
+    println!(
+        "Sequential results: alice={}, bob={}, charlie={}",
+        seq_snapshot["alice"].0, seq_snapshot["bob"].0, seq_snapshot["charlie"].0
+    );
+    println!(
+        "Parallel results:   alice={}, bob={}, charlie={}",
+        par_snapshot["alice"].0, par_snapshot["bob"].0, par_snapshot["charlie"].0
+    );
 
     // Check that both execution paths produce same final balances
-    assert_eq!(seq_snapshot["alice"].0, par_snapshot["alice"].0, "Alice balance mismatch");
-    assert_eq!(seq_snapshot["bob"].0, par_snapshot["bob"].0, "Bob balance mismatch");
-    assert_eq!(seq_snapshot["charlie"].0, par_snapshot["charlie"].0, "Charlie balance mismatch");
+    assert_eq!(
+        seq_snapshot["alice"].0, par_snapshot["alice"].0,
+        "Alice balance mismatch"
+    );
+    assert_eq!(
+        seq_snapshot["bob"].0, par_snapshot["bob"].0,
+        "Bob balance mismatch"
+    );
+    assert_eq!(
+        seq_snapshot["charlie"].0, par_snapshot["charlie"].0,
+        "Charlie balance mismatch"
+    );
 
     // Verify expected balances
     // Alice: 100 - 20 - 30 - 0.00001 - 0.00001 (fees) = 49.99998 TOS
-    assert_eq!(seq_snapshot["alice"].0, 100 * COIN_VALUE - 20 * COIN_VALUE - 30 * COIN_VALUE - 20);
+    assert_eq!(
+        seq_snapshot["alice"].0,
+        100 * COIN_VALUE - 20 * COIN_VALUE - 30 * COIN_VALUE - 20
+    );
     // Bob: 100 + 20 = 120 TOS
     assert_eq!(seq_snapshot["bob"].0, 100 * COIN_VALUE + 20 * COIN_VALUE);
     // Charlie: 100 + 30 = 130 TOS
-    assert_eq!(seq_snapshot["charlie"].0, 100 * COIN_VALUE + 30 * COIN_VALUE);
+    assert_eq!(
+        seq_snapshot["charlie"].0,
+        100 * COIN_VALUE + 30 * COIN_VALUE
+    );
 
     // Verify alice's nonce incremented twice
     assert_eq!(seq_snapshot["alice"].1, 2, "Alice nonce should be 2");

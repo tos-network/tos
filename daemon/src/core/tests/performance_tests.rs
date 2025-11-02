@@ -9,10 +9,10 @@
 
 #[cfg(test)]
 mod performance_tests {
+    use crate::core::ghostdag::{calc_work_from_difficulty, BlueWorkType, SortableBlock};
     use std::time::Instant;
     use tos_common::crypto::Hash;
     use tos_common::difficulty::Difficulty;
-    use crate::core::ghostdag::{calc_work_from_difficulty, BlueWorkType, SortableBlock};
 
     // Helper: Generate test hashes
     fn generate_hashes(count: usize) -> Vec<Hash> {
@@ -47,9 +47,7 @@ mod performance_tests {
         let mut blocks: Vec<SortableBlock> = hashes
             .into_iter()
             .enumerate()
-            .map(|(i, hash)| {
-                SortableBlock::new(hash, BlueWorkType::from(i as u64))
-            })
+            .map(|(i, hash)| SortableBlock::new(hash, BlueWorkType::from(i as u64)))
             .collect();
 
         let micros = measure("Sort 10 blocks", || {
@@ -57,7 +55,11 @@ mod performance_tests {
         });
 
         // Should complete in < 100 microseconds
-        assert!(micros < 100, "Sorting 10 blocks took {}μs (expected < 100μs)", micros);
+        assert!(
+            micros < 100,
+            "Sorting 10 blocks took {}μs (expected < 100μs)",
+            micros
+        );
     }
 
     // Note: This test is hardware-dependent and may fail on slower systems or under load.
@@ -69,9 +71,7 @@ mod performance_tests {
         let mut blocks: Vec<SortableBlock> = hashes
             .into_iter()
             .enumerate()
-            .map(|(i, hash)| {
-                SortableBlock::new(hash, BlueWorkType::from(i as u64))
-            })
+            .map(|(i, hash)| SortableBlock::new(hash, BlueWorkType::from(i as u64)))
             .collect();
 
         let micros = measure("Sort 100 blocks", || {
@@ -79,7 +79,11 @@ mod performance_tests {
         });
 
         // Should complete in < 1ms
-        assert!(micros < 1000, "Sorting 100 blocks took {}μs (expected < 1000μs)", micros);
+        assert!(
+            micros < 1000,
+            "Sorting 100 blocks took {}μs (expected < 1000μs)",
+            micros
+        );
     }
 
     // Note: This test is hardware-dependent and may fail on slower systems or under load.
@@ -91,9 +95,7 @@ mod performance_tests {
         let mut blocks: Vec<SortableBlock> = hashes
             .into_iter()
             .enumerate()
-            .map(|(i, hash)| {
-                SortableBlock::new(hash, BlueWorkType::from(i as u64))
-            })
+            .map(|(i, hash)| SortableBlock::new(hash, BlueWorkType::from(i as u64)))
             .collect();
 
         let micros = measure("Sort 1000 blocks", || {
@@ -101,7 +103,11 @@ mod performance_tests {
         });
 
         // Should complete in < 10ms
-        assert!(micros < 10_000, "Sorting 1000 blocks took {}μs (expected < 10ms)", micros);
+        assert!(
+            micros < 10_000,
+            "Sorting 1000 blocks took {}μs (expected < 10ms)",
+            micros
+        );
     }
 
     // ============================================================================
@@ -120,7 +126,11 @@ mod performance_tests {
         });
 
         // 1000 calculations should complete in < 1ms
-        assert!(micros < 1000, "1000 work calculations took {}μs (expected < 1ms)", micros);
+        assert!(
+            micros < 1000,
+            "1000 work calculations took {}μs (expected < 1ms)",
+            micros
+        );
         println!("  -> Average per calculation: {}ns", micros as f64);
     }
 
@@ -141,9 +151,12 @@ mod performance_tests {
         // Release: 100 calculations in < 150μs (allows some variance)
         const THRESHOLD: u128 = 150;
 
-        assert!(micros < THRESHOLD,
+        assert!(
+            micros < THRESHOLD,
             "100 work calculations took {}μs (expected < {}μs in release mode)",
-            micros, THRESHOLD);
+            micros,
+            THRESHOLD
+        );
     }
 
     #[test]
@@ -159,7 +172,11 @@ mod performance_tests {
         });
 
         // Should complete in < 500μs
-        assert!(micros < 500, "10,000 accumulations took {}μs (expected < 500μs)", micros);
+        assert!(
+            micros < 500,
+            "10,000 accumulations took {}μs (expected < 500μs)",
+            micros
+        );
         assert_eq!(total_work, BlueWorkType::from(1_000_000u64));
     }
 
@@ -184,8 +201,15 @@ mod performance_tests {
         });
 
         // Should complete in < 10ms
-        assert!(micros < 10_000, "1M comparisons took {}μs (expected < 10ms)", micros);
-        println!("  -> Average per comparison: {}ns", micros as f64 / 1_000_000.0);
+        assert!(
+            micros < 10_000,
+            "1M comparisons took {}μs (expected < 10ms)",
+            micros
+        );
+        println!(
+            "  -> Average per comparison: {}ns",
+            micros as f64 / 1_000_000.0
+        );
     }
 
     // ============================================================================
@@ -210,7 +234,11 @@ mod performance_tests {
         });
 
         // Should complete in < 1ms
-        assert!(micros < 1000, "100K splits took {}μs (expected < 1ms)", micros);
+        assert!(
+            micros < 1000,
+            "100K splits took {}μs (expected < 1ms)",
+            micros
+        );
     }
 
     // Note: This test is hardware-dependent and may fail on slower systems or under load.
@@ -230,7 +258,11 @@ mod performance_tests {
         });
 
         // Should complete in < 5ms
-        assert!(micros < 5000, "1M contains checks took {}μs (expected < 5ms)", micros);
+        assert!(
+            micros < 5000,
+            "1M contains checks took {}μs (expected < 5ms)",
+            micros
+        );
         println!("  -> Average per check: {}ns", micros as f64 / 1_000_000.0);
     }
 
@@ -251,7 +283,11 @@ mod performance_tests {
         });
 
         // Should complete in < 10ms
-        assert!(micros < 10_000, "10K split_exact took {}μs (expected < 10ms)", micros);
+        assert!(
+            micros < 10_000,
+            "10K split_exact took {}μs (expected < 10ms)",
+            micros
+        );
     }
 
     // Note: This test is hardware-dependent and may fail on slower systems or under load.
@@ -271,7 +307,11 @@ mod performance_tests {
         });
 
         // Should complete in < 50ms
-        assert!(micros < 50_000, "1K split_exponential took {}μs (expected < 50ms)", micros);
+        assert!(
+            micros < 50_000,
+            "1K split_exponential took {}μs (expected < 50ms)",
+            micros
+        );
     }
 
     // ============================================================================
@@ -290,7 +330,11 @@ mod performance_tests {
         });
 
         // Should complete in < 5ms
-        assert!(micros < 5000, "100K hash creations took {}μs (expected < 5ms)", micros);
+        assert!(
+            micros < 5000,
+            "100K hash creations took {}μs (expected < 5ms)",
+            micros
+        );
     }
 
     #[test]
@@ -306,8 +350,15 @@ mod performance_tests {
         });
 
         // Should complete in < 10ms
-        assert!(micros < 10_000, "1M hash comparisons took {}μs (expected < 10ms)", micros);
-        println!("  -> Average per comparison: {}ns", micros as f64 / 1_000_000.0);
+        assert!(
+            micros < 10_000,
+            "1M hash comparisons took {}μs (expected < 10ms)",
+            micros
+        );
+        println!(
+            "  -> Average per comparison: {}ns",
+            micros as f64 / 1_000_000.0
+        );
     }
 
     // ============================================================================
@@ -335,9 +386,17 @@ mod performance_tests {
         #[cfg(not(debug_assertions))]
         const THRESHOLD: u128 = 30_000;
 
-        assert!(micros < THRESHOLD,
+        assert!(
+            micros < THRESHOLD,
             "200K difficulty ops took {}μs (expected < {}μs in {} mode)",
-            micros, THRESHOLD, if cfg!(debug_assertions) { "debug" } else { "release" });
+            micros,
+            THRESHOLD,
+            if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
+            }
+        );
     }
 
     // ============================================================================
@@ -351,7 +410,9 @@ mod performance_tests {
     fn test_performance_simulated_block_processing() {
         // Simulate processing a block with 32 parents
         let hashes = generate_hashes(32);
-        let difficulties: Vec<Difficulty> = (1..=32).map(|i| Difficulty::from((i * 100) as u64)).collect();
+        let difficulties: Vec<Difficulty> = (1..=32)
+            .map(|i| Difficulty::from((i * 100) as u64))
+            .collect();
 
         let micros = measure("Simulated block processing (100 blocks)", || {
             for _ in 0..100 {
@@ -377,7 +438,11 @@ mod performance_tests {
         });
 
         // Should complete in < 50ms
-        assert!(micros < 50_000, "100 block simulations took {}μs (expected < 50ms)", micros);
+        assert!(
+            micros < 50_000,
+            "100 block simulations took {}μs (expected < 50ms)",
+            micros
+        );
         println!("  -> Average per block: {}μs", micros as f64 / 100.0);
     }
 
@@ -402,7 +467,11 @@ mod performance_tests {
         });
 
         // Should complete in < 5ms
-        assert!(micros < 5000, "1000 HashMap allocations took {}μs (expected < 5ms)", micros);
+        assert!(
+            micros < 5000,
+            "1000 HashMap allocations took {}μs (expected < 5ms)",
+            micros
+        );
     }
 
     // ============================================================================
@@ -423,9 +492,7 @@ mod performance_tests {
             let mut blocks: Vec<SortableBlock> = hashes
                 .into_iter()
                 .enumerate()
-                .map(|(i, hash)| {
-                    SortableBlock::new(hash, BlueWorkType::from(i as u64))
-                })
+                .map(|(i, hash)| SortableBlock::new(hash, BlueWorkType::from(i as u64)))
                 .collect();
 
             let start = Instant::now();
@@ -498,8 +565,16 @@ mod performance_tests {
 
         // Verify all critical operations are fast enough
         // Note: Thresholds relaxed for system variance in nanosecond measurements
-        assert!(work_calc_time < 50, "Work calculation too slow: {}ns", work_calc_time);
+        assert!(
+            work_calc_time < 50,
+            "Work calculation too slow: {}ns",
+            work_calc_time
+        );
         assert!(cmp_time < 10, "Block comparison too slow: {}ns", cmp_time);
-        assert!(contains_time < 10, "Interval contains too slow: {}ns", contains_time);
+        assert!(
+            contains_time < 10,
+            "Interval contains too slow: {}ns",
+            contains_time
+        );
     }
 }

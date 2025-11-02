@@ -12,11 +12,8 @@ use tos_common::{
 };
 use tos_daemon::core::storage::{BalanceProvider, NonceProvider};
 use tos_testing_integration::{
-    create_test_storage,
-    create_test_storage_with_accounts,
-    create_test_storage_with_tos_asset,
-    setup_account_safe,
-    flush_storage_and_wait,
+    create_test_storage, create_test_storage_with_accounts, create_test_storage_with_tos_asset,
+    flush_storage_and_wait, setup_account_safe,
 };
 
 fn create_test_pubkey(seed: u8) -> CompressedPublicKey {
@@ -49,8 +46,12 @@ async fn main() {
     let account_b = create_test_pubkey(2);
 
     // Setup accounts safely (includes internal delays)
-    setup_account_safe(&storage3, &account_a, 1000, 0).await.unwrap();
-    setup_account_safe(&storage3, &account_b, 2000, 0).await.unwrap();
+    setup_account_safe(&storage3, &account_a, 1000, 0)
+        .await
+        .unwrap();
+    setup_account_safe(&storage3, &account_b, 2000, 0)
+        .await
+        .unwrap();
 
     // CRITICAL: Always flush before parallel execution
     flush_storage_and_wait(&storage3).await;
@@ -59,8 +60,14 @@ async fn main() {
     // Verify accounts
     {
         let storage_read = storage3.read().await;
-        let (_, balance_a) = storage_read.get_last_balance(&account_a, &TOS_ASSET).await.unwrap();
-        let (_, balance_b) = storage_read.get_last_balance(&account_b, &TOS_ASSET).await.unwrap();
+        let (_, balance_a) = storage_read
+            .get_last_balance(&account_a, &TOS_ASSET)
+            .await
+            .unwrap();
+        let (_, balance_b) = storage_read
+            .get_last_balance(&account_b, &TOS_ASSET)
+            .await
+            .unwrap();
         println!("   Account A balance: {}", balance_a.get_balance());
         println!("   Account B balance: {}\n", balance_b.get_balance());
     }
@@ -75,14 +82,19 @@ async fn main() {
         (account_c.clone(), 5000, 0),
         (account_d.clone(), 10000, 5),
         (account_e.clone(), 15000, 10),
-    ]).await.unwrap();
+    ])
+    .await
+    .unwrap();
 
     println!("   Storage created with 3 accounts (already flushed)\n");
 
     // Verify accounts
     {
         let storage_read = storage4.read().await;
-        let (_, balance_c) = storage_read.get_last_balance(&account_c, &TOS_ASSET).await.unwrap();
+        let (_, balance_c) = storage_read
+            .get_last_balance(&account_c, &TOS_ASSET)
+            .await
+            .unwrap();
         let (_, nonce_d) = storage_read.get_last_nonce(&account_d).await.unwrap();
         println!("   Account C balance: {}", balance_c.get_balance());
         println!("   Account D nonce: {}\n", nonce_d.get_nonce());

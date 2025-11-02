@@ -11,7 +11,7 @@ use tos_common::crypto::Hash;
 use super::reindex::ReindexContext;
 
 /// Reachability reindex configuration constants
-pub const DEFAULT_REINDEX_DEPTH: u64 = 100;   // Reindex root stays ~100 blocks behind tip
+pub const DEFAULT_REINDEX_DEPTH: u64 = 100; // Reindex root stays ~100 blocks behind tip
 pub const DEFAULT_REINDEX_SLACK: u64 = 1 << 14; // 16384 blocks - reorg protection threshold
 
 /// Add a new block to the reachability tree with automatic reindexing
@@ -87,7 +87,9 @@ pub async fn add_tree_block<S: Storage>(
             future_covering_set: Vec::new(),
         };
 
-        storage.set_reachability_data(&new_block, &new_block_data).await?;
+        storage
+            .set_reachability_data(&new_block, &new_block_data)
+            .await?;
 
         // Step 2: Add new block as child of parent
         parent_data.children.push(new_block.clone());
@@ -97,7 +99,8 @@ pub async fn add_tree_block<S: Storage>(
         let reindex_root = get_reindex_root(storage).await?;
 
         let mut ctx = ReindexContext::new(DEFAULT_REINDEX_DEPTH, DEFAULT_REINDEX_SLACK);
-        ctx.reindex_intervals(storage, new_block.clone(), reindex_root).await?;
+        ctx.reindex_intervals(storage, new_block.clone(), reindex_root)
+            .await?;
 
         if log::log_enabled!(log::Level::Info) {
             log::info!("Reindexing completed successfully for block {}", new_block);
@@ -114,7 +117,9 @@ pub async fn add_tree_block<S: Storage>(
             future_covering_set: Vec::new(),
         };
 
-        storage.set_reachability_data(&new_block, &new_block_data).await?;
+        storage
+            .set_reachability_data(&new_block, &new_block_data)
+            .await?;
 
         // Add new block as child of parent
         parent_data.children.push(new_block);
@@ -217,7 +222,8 @@ async fn find_next_reindex_root<S: Storage>(
         if log::log_enabled!(log::Level::Info) {
             log::info!(
                 "Reorg detected: finding common ancestor between hint {} and current root {}",
-                hint, current
+                hint,
+                current
             );
         }
 
@@ -245,8 +251,12 @@ async fn find_next_reindex_root<S: Storage>(
         if log::log_enabled!(log::Level::Trace) {
             log::trace!(
                 "  loop[{}]: next={} (height {}), child={} (height {}), gap_before={}",
-                loop_count, next, storage.get_reachability_data(&next).await?.height,
-                child, child_height, hint_height - child_height
+                loop_count,
+                next,
+                storage.get_reachability_data(&next).await?.height,
+                child,
+                child_height,
+                hint_height - child_height
             );
         }
 
@@ -278,8 +288,10 @@ async fn find_next_reindex_root<S: Storage>(
     if log::log_enabled!(log::Level::Debug) {
         log::debug!(
             "find_next_reindex_root: returning (ancestor={} height {}, next={} height {})",
-            ancestor, storage.get_reachability_data(&ancestor).await?.height,
-            next, storage.get_reachability_data(&next).await?.height
+            ancestor,
+            storage.get_reachability_data(&ancestor).await?.height,
+            next,
+            storage.get_reachability_data(&next).await?.height
         );
     }
 
@@ -364,9 +376,13 @@ async fn get_next_chain_ancestor_unchecked_internal<S: Storage>(
         if log::log_enabled!(log::Level::Trace) {
             log::trace!(
                 "  child[{}] {} (height {}) interval [{}, {}) vs descendant [{}, {}): contains={}",
-                idx, child, child_data.height,
-                child_data.interval.start, child_data.interval.end,
-                descendant_data.interval.start, descendant_data.interval.end,
+                idx,
+                child,
+                child_data.height,
+                child_data.interval.start,
+                child_data.interval.end,
+                descendant_data.interval.start,
+                descendant_data.interval.end,
                 contains
             );
         }
@@ -381,7 +397,10 @@ async fn get_next_chain_ancestor_unchecked_internal<S: Storage>(
 
     log::error!(
         "get_next_chain_ancestor FAILED: no child of {} (height {}) contains {} (height {})",
-        ancestor, ancestor_data.height, descendant, descendant_data.height
+        ancestor,
+        ancestor_data.height,
+        descendant,
+        descendant_data.height
     );
     Err(BlockchainError::InvalidReachability)
 }
@@ -434,7 +453,8 @@ pub async fn try_advancing_reindex_root<S: Storage>(
         hint,
         DEFAULT_REINDEX_DEPTH,
         DEFAULT_REINDEX_SLACK,
-    ).await?;
+    )
+    .await?;
 
     // No update to root, return early
     if current == next {
@@ -480,7 +500,8 @@ pub async fn try_advancing_reindex_root<S: Storage>(
         }
 
         let mut ctx = ReindexContext::new(DEFAULT_REINDEX_DEPTH, DEFAULT_REINDEX_SLACK);
-        ctx.concentrate_interval(storage, ancestor.clone(), child.clone(), child == next).await?;
+        ctx.concentrate_interval(storage, ancestor.clone(), child.clone(), child == next)
+            .await?;
 
         ancestor = child;
     }

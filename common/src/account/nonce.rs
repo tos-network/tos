@@ -1,14 +1,9 @@
-use std::fmt::{self, Display, Formatter};
-use serde::{Deserialize, Serialize};
 use crate::{
     block::TopoHeight,
-    serializer::{
-        Reader,
-        ReaderError,
-        Serializer,
-        Writer
-    }
+    serializer::{Reader, ReaderError, Serializer, Writer},
 };
+use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display, Formatter};
 
 pub type Nonce = u64;
 
@@ -22,7 +17,7 @@ impl VersionedNonce {
     pub fn new(nonce: Nonce, previous_topoheight: Option<TopoHeight>) -> Self {
         Self {
             nonce,
-            previous_topoheight
+            previous_topoheight,
         }
     }
 
@@ -35,7 +30,7 @@ impl VersionedNonce {
     }
 
     pub fn get_previous_topoheight(&self) -> Option<TopoHeight> {
-        self.previous_topoheight        
+        self.previous_topoheight
     }
 
     pub fn set_previous_topoheight(&mut self, previous_topoheight: Option<TopoHeight>) {
@@ -55,7 +50,7 @@ impl Serializer for VersionedNonce {
 
         Ok(Self {
             nonce,
-            previous_topoheight
+            previous_topoheight,
         })
     }
 
@@ -66,6 +61,10 @@ impl Serializer for VersionedNonce {
 
 impl Display for VersionedNonce {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Nonce[{}, previous: {:?}", self.nonce, self.previous_topoheight)
+        write!(
+            f,
+            "Nonce[{}, previous: {:?}",
+            self.nonce, self.previous_topoheight
+        )
     }
 }

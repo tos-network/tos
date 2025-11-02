@@ -2,22 +2,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     account::Nonce,
-    crypto::{
-        elgamal::CompressedPublicKey,
-        Hash,
-        Hashable,
-        Signature,
-    },
-    serializer::*,
     ai_mining::AIMiningPayload,
+    crypto::{elgamal::CompressedPublicKey, Hash, Hashable, Signature},
+    serializer::*,
 };
 
 use multisig::MultiSig;
 
 pub mod builder;
-pub mod verify;
 pub mod extra_data;
 pub mod multisig;
+pub mod verify;
 
 mod payload;
 mod reference;
@@ -34,9 +29,9 @@ mod tests;
 // Optimized for real-world usage: covers 99%+ actual needs (exchange IDs, order info, etc.)
 // while preventing storage bloat and attack vectors
 pub const EXTRA_DATA_LIMIT_SIZE: usize = 128; // 128 bytes - balanced for security and usability
-// Maximum total size of payload across all transfers per transaction
+                                              // Maximum total size of payload across all transfers per transaction
 pub const EXTRA_DATA_LIMIT_SUM_SIZE: usize = EXTRA_DATA_LIMIT_SIZE * 32; // 4KB total limit
-// Maximum number of transfers per transaction
+                                                                         // Maximum number of transfers per transaction
 pub const MAX_TRANSFER_COUNT: usize = 255;
 // Maximum number of deposits per Invoke Call
 pub const MAX_DEPOSIT_PER_INVOKE_CALL: usize = 255;
@@ -90,7 +85,9 @@ impl Serializer for FeeType {
             _ => Err(ReaderError::InvalidValue),
         }
     }
-    fn size(&self) -> usize { 1 }
+    fn size(&self) -> usize {
+        1
+    }
 }
 
 // Transaction to be sent over the network
@@ -130,7 +127,7 @@ impl Transaction {
         nonce: Nonce,
         reference: Reference,
         multisig: Option<MultiSig>,
-        signature: Signature
+        signature: Signature,
     ) -> Self {
         Self {
             version,
@@ -197,7 +194,7 @@ impl Transaction {
     pub fn get_burned_amount(&self, asset: &Hash) -> Option<u64> {
         match &self.data {
             TransactionType::Burn(payload) if payload.asset == *asset => Some(payload.amount),
-            _ => None
+            _ => None,
         }
     }
 
@@ -212,22 +209,22 @@ impl Transaction {
                 for transfer in transfers {
                     assets.insert(transfer.get_asset());
                 }
-            },
+            }
             TransactionType::Burn(payload) => {
                 assets.insert(&payload.asset);
-            },
+            }
             TransactionType::InvokeContract(payload) => {
                 for (asset, _) in &payload.deposits {
                     assets.insert(asset);
                 }
-            },
+            }
             TransactionType::DeployContract(payload) => {
                 if let Some(invoke) = &payload.invoke {
                     for (asset, _) in &invoke.deposits {
                         assets.insert(asset);
                     }
                 }
-            },
+            }
             // Energy, MultiSig, and AIMining don't have explicit assets
             _ => {}
         }
@@ -242,7 +239,7 @@ impl Transaction {
         match &self.data {
             TransactionType::Transfers(transfers) => transfers.len(),
             TransactionType::InvokeContract(payload) => payload.deposits.len().max(1),
-            _ => 1
+            _ => 1,
         }
     }
 
@@ -263,10 +260,10 @@ impl Transaction {
                 let tx_size = self.size();
                 let output_count = transfers.len();
                 let new_addresses = 0; // This would need to be calculated from state
-                
+
                 use crate::utils::calculate_energy_fee;
                 calculate_energy_fee(tx_size, output_count, new_addresses)
-            },
+            }
             _ => 0, // Only transfer transactions can use energy fees
         }
     }
@@ -276,7 +273,7 @@ impl Transaction {
     pub fn get_signing_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         let mut writer = Writer::new(&mut buffer);
-        
+
         // T0 format: always include fee_type but NOT multisig (multisig participants sign without multisig field)
         self.version.write(&mut writer);
         self.source.write(&mut writer);
@@ -286,7 +283,7 @@ impl Transaction {
         self.nonce.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig - multisig participants sign without it
-        
+
         buffer
     }
 
@@ -295,7 +292,7 @@ impl Transaction {
     pub fn get_multisig_signing_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         let mut writer = Writer::new(&mut buffer);
-        
+
         // Multisig participants sign the transaction data without the multisig field
         // This matches the logic in UnsignedTransaction::write_no_signature
         self.version.write(&mut writer);
@@ -306,7 +303,7 @@ impl Transaction {
         self.nonce.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig field - it should not be part of the main signature
-        
+
         buffer
     }
 
@@ -330,23 +327,23 @@ impl Serializer for TransactionType {
                 for tx in txs {
                     tx.write(writer);
                 }
-            },
+            }
             TransactionType::MultiSig(payload) => {
                 writer.write_u8(2);
                 payload.write(writer);
-            },
+            }
             TransactionType::InvokeContract(payload) => {
                 writer.write_u8(3);
                 payload.write(writer);
-            },
+            }
             TransactionType::DeployContract(module) => {
                 writer.write_u8(4);
                 module.write(writer);
-            },
+            }
             TransactionType::Energy(payload) => {
                 writer.write_u8(5);
                 payload.write(writer);
-            },
+            }
             TransactionType::AIMining(payload) => {
                 writer.write_u8(6);
                 payload.write(writer);
@@ -359,11 +356,11 @@ impl Serializer for TransactionType {
             0 => {
                 let payload = BurnPayload::read(reader)?;
                 TransactionType::Burn(payload)
-            },
+            }
             1 => {
                 let txs_count = reader.read_u8()?;
                 if txs_count == 0 || txs_count > MAX_TRANSFER_COUNT as u8 {
-                    return Err(ReaderError::InvalidSize)
+                    return Err(ReaderError::InvalidSize);
                 }
 
                 let mut txs = Vec::with_capacity(txs_count as usize);
@@ -371,15 +368,13 @@ impl Serializer for TransactionType {
                     txs.push(TransferPayload::read(reader)?);
                 }
                 TransactionType::Transfers(txs)
-            },
+            }
             2 => TransactionType::MultiSig(MultiSigPayload::read(reader)?),
             3 => TransactionType::InvokeContract(InvokeContractPayload::read(reader)?),
             4 => TransactionType::DeployContract(DeployContractPayload::read(reader)?),
             5 => TransactionType::Energy(EnergyPayload::read(reader)?),
             6 => TransactionType::AIMining(AIMiningPayload::read(reader)?),
-            _ => {
-                return Err(ReaderError::InvalidValue)
-            }
+            _ => return Err(ReaderError::InvalidValue),
         })
     }
 
@@ -393,11 +388,11 @@ impl Serializer for TransactionType {
                     size += tx.size();
                 }
                 size
-            },
+            }
             TransactionType::MultiSig(payload) => {
                 // 1 byte for variant, 1 byte for threshold, 1 byte for count of participants
                 1 + 1 + payload.participants.iter().map(|p| p.size()).sum::<usize>()
-            },
+            }
             TransactionType::InvokeContract(payload) => payload.size(),
             TransactionType::DeployContract(module) => module.size(),
             TransactionType::Energy(payload) => payload.size(),
@@ -425,8 +420,7 @@ impl Serializer for Transaction {
     fn read(reader: &mut Reader) -> Result<Transaction, ReaderError> {
         let version = TxVersion::read(reader)?;
 
-        reader.context_mut()
-            .store(version);
+        reader.context_mut().store(version);
 
         let source = CompressedPublicKey::read(reader)?;
         let data = TransactionType::read(reader)?;
@@ -441,28 +435,20 @@ impl Serializer for Transaction {
         let signature = Signature::read(reader)?;
 
         Ok(Transaction::new(
-            version,
-            source,
-            data,
-            fee,
-            fee_type,
-            nonce,
-            reference,
-            multisig,
-            signature,
+            version, source, data, fee, fee_type, nonce, reference, multisig, signature,
         ))
     }
 
     fn size(&self) -> usize {
         // Version byte
         let mut size = 1
-        + self.source.size()
-        + self.data.size()
-        + self.fee.size()
-        + self.fee_type.size()
-        + self.nonce.size()
-        + self.reference.size()
-        + self.signature.size();
+            + self.source.size()
+            + self.data.size()
+            + self.fee.size()
+            + self.fee_type.size()
+            + self.nonce.size()
+            + self.reference.size()
+            + self.signature.size();
 
         // Always include multisig size for T0
         size += self.multisig.size();

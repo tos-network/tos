@@ -34,7 +34,7 @@ pub enum XSWDError {
     #[error("Application permissions are not signed")]
     ApplicationPermissionsNotSigned,
     #[error("Invalid signature for application data")]
-    InvalidSignatureForApplicationData
+    InvalidSignatureForApplicationData,
 }
 
 impl From<XSWDError> for InternalRpcError {

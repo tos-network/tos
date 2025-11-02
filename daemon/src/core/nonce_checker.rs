@@ -2,18 +2,14 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use log::trace;
-use tos_common::{
-    account::Nonce,
-    block::TopoHeight,
-    crypto::PublicKey
-};
+use tos_common::{account::Nonce, block::TopoHeight, crypto::PublicKey};
 
-use super::{storage::Storage, error::BlockchainError};
+use super::{error::BlockchainError, storage::Storage};
 
 struct AccountEntry {
     initial_nonce: Nonce,
     expected_nonce: Nonce,
-    used_nonces: IndexMap<Nonce, TopoHeight>
+    used_nonces: IndexMap<Nonce, TopoHeight>,
 }
 
 impl AccountEntry {
@@ -21,7 +17,7 @@ impl AccountEntry {
         Self {
             initial_nonce: nonce,
             expected_nonce: nonce,
-            used_nonces: IndexMap::new()
+            used_nonces: IndexMap::new(),
         }
     }
 
@@ -31,7 +27,12 @@ impl AccountEntry {
 
     pub fn insert_nonce_at_topoheight(&mut self, nonce: Nonce, topoheight: TopoHeight) -> bool {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("insert nonce {} at topoheight {}, (expected: {})", nonce, topoheight, self.expected_nonce);
+            trace!(
+                "insert nonce {} at topoheight {}, (expected: {})",
+                nonce,
+                topoheight,
+                self.expected_nonce
+            );
         }
 
         // Check if nonce was already used
@@ -64,7 +65,7 @@ pub struct NonceChecker {
 impl NonceChecker {
     pub fn new() -> Self {
         Self {
-            cache: HashMap::new()
+            cache: HashMap::new(),
         }
     }
 
@@ -84,9 +85,20 @@ impl NonceChecker {
 
     // Key may be cloned on first entry
     // Returns false if nonce is already used
-    pub async fn use_nonce<S: Storage>(&mut self, storage: &S, key: &PublicKey, nonce: Nonce, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
+    pub async fn use_nonce<S: Storage>(
+        &mut self,
+        storage: &S,
+        key: &PublicKey,
+        nonce: Nonce,
+        topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("use_nonce {} for {} at topoheight {}", nonce, key.as_address(storage.is_mainnet()), topoheight);
+            trace!(
+                "use_nonce {} for {} at topoheight {}",
+                nonce,
+                key.as_address(storage.is_mainnet()),
+                topoheight
+            );
         }
 
         match self.cache.get_mut(key) {
@@ -94,10 +106,15 @@ impl NonceChecker {
                 if !entry.insert_nonce_at_topoheight(nonce, topoheight) {
                     return Ok(false);
                 }
-            },
+            }
             None => {
                 // Nonce must follows in increasing order
-                let (_, version) = storage.get_nonce_at_maximum_topoheight(key, topoheight).await?.ok_or_else(|| BlockchainError::AccountNotFound(key.as_address(storage.is_mainnet())))?;
+                let (_, version) = storage
+                    .get_nonce_at_maximum_topoheight(key, topoheight)
+                    .await?
+                    .ok_or_else(|| {
+                        BlockchainError::AccountNotFound(key.as_address(storage.is_mainnet()))
+                    })?;
                 let stored_nonce = version.get_nonce();
 
                 let mut entry = AccountEntry::new(stored_nonce);
@@ -118,7 +135,10 @@ impl NonceChecker {
 
     // Get the next nonce needed for the account
     pub fn get_new_nonce(&self, key: &PublicKey, mainnet: bool) -> Result<u64, BlockchainError> {
-        let entry = self.cache.get(key).ok_or_else(|| BlockchainError::AccountNotFound(key.as_address(mainnet)))?;
+        let entry = self
+            .cache
+            .get(key)
+            .ok_or_else(|| BlockchainError::AccountNotFound(key.as_address(mainnet)))?;
         Ok(entry.expected_nonce)
     }
 }

@@ -1,19 +1,19 @@
 // Compact Block Reconstruction Logic
 // Reconstructs full blocks from compact blocks using mempool transactions
 
-use std::sync::Arc;
+use super::{error::BlockchainError, mempool::Mempool};
 use log::{debug, trace, warn};
+use std::sync::Arc;
+#[cfg(test)]
+use tos_common::crypto::Hash;
 use tos_common::{
-    block::{Block, CompactBlock, calculate_short_tx_id, MissingTransactionsRequest, MissingTransactionsResponse},
+    block::{
+        calculate_short_tx_id, Block, CompactBlock, MissingTransactionsRequest,
+        MissingTransactionsResponse,
+    },
     crypto::Hashable,
     immutable::Immutable,
     transaction::Transaction,
-};
-#[cfg(test)]
-use tos_common::crypto::Hash;
-use super::{
-    error::BlockchainError,
-    mempool::Mempool,
 };
 
 /// Result of compact block reconstruction attempt
@@ -25,7 +25,10 @@ pub enum ReconstructionResult {
     MissingTransactions(MissingTransactionsRequest),
 
     /// Too many missing transactions - should request full block instead
-    TooManyMissing { missing_count: usize, total_count: usize },
+    TooManyMissing {
+        missing_count: usize,
+        total_count: usize,
+    },
 }
 
 /// Compact block reconstructor
@@ -49,7 +52,10 @@ impl CompactBlockReconstructor {
     ) -> Result<ReconstructionResult, BlockchainError> {
         let block_hash = compact_block.header.hash();
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Attempting to reconstruct block {} from compact block", block_hash);
+            trace!(
+                "Attempting to reconstruct block {} from compact block",
+                block_hash
+            );
         }
 
         let total_tx_count = compact_block.short_tx_ids.len();
@@ -61,7 +67,10 @@ impl CompactBlockReconstructor {
                 transactions[index as usize] = Some(Arc::new(tx));
             } else {
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("Prefilled transaction index {} out of bounds (total: {})", index, total_tx_count);
+                    warn!(
+                        "Prefilled transaction index {} out of bounds (total: {})",
+                        index, total_tx_count
+                    );
                 }
                 return Err(BlockchainError::Any(anyhow::anyhow!(
                     "Prefilled transaction index out of bounds"
@@ -86,7 +95,11 @@ impl CompactBlockReconstructor {
                     transactions[index] = Some(sorted_tx.get_tx().clone());
                     found = true;
                     if log::log_enabled!(log::Level::Trace) {
-                        trace!("Matched short ID at index {} with mempool tx {}", index, tx_hash);
+                        trace!(
+                            "Matched short ID at index {} with mempool tx {}",
+                            index,
+                            tx_hash
+                        );
                     }
                     break;
                 }
@@ -102,7 +115,10 @@ impl CompactBlockReconstructor {
 
         debug!(
             "Block {} reconstruction: {}/{} transactions found in mempool ({:.1}% missing)",
-            block_hash, total_tx_count - missing_count, total_tx_count, missing_percentage
+            block_hash,
+            total_tx_count - missing_count,
+            total_tx_count,
+            missing_percentage
         );
 
         // Threshold: If more than 10% missing, request full block
@@ -121,7 +137,10 @@ impl CompactBlockReconstructor {
         // If we have missing transactions but under threshold, request them
         if !missing_indices.is_empty() {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Requesting {} missing transactions for block {}", missing_count, block_hash);
+                debug!(
+                    "Requesting {} missing transactions for block {}",
+                    missing_count, block_hash
+                );
             }
             let request = MissingTransactionsRequest {
                 block_hash: block_hash.clone(),
@@ -143,8 +162,7 @@ impl CompactBlockReconstructor {
 
         debug!(
             "Successfully reconstructed block {} with {} transactions",
-            block_hash,
-            total_tx_count
+            block_hash, total_tx_count
         );
 
         Ok(ReconstructionResult::Success(block))
@@ -164,13 +182,17 @@ impl CompactBlockReconstructor {
         if missing_txs_response.block_hash != block_hash {
             return Err(BlockchainError::Any(anyhow::anyhow!(
                 "Missing transactions response is for wrong block: expected {}, got {}",
-                block_hash, missing_txs_response.block_hash
+                block_hash,
+                missing_txs_response.block_hash
             )));
         }
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Completing reconstruction of block {} with {} missing transactions",
-                block_hash, missing_txs_response.transactions.len());
+            trace!(
+                "Completing reconstruction of block {} with {} missing transactions",
+                block_hash,
+                missing_txs_response.transactions.len()
+            );
         }
 
         let total_tx_count = compact_block.short_tx_ids.len();
@@ -235,7 +257,10 @@ impl CompactBlockReconstructor {
         );
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Completed reconstruction of block {} with all {} transactions", block_hash, total_tx_count);
+            debug!(
+                "Completed reconstruction of block {} with all {} transactions",
+                block_hash, total_tx_count
+            );
         }
 
         Ok(block)
@@ -257,7 +282,8 @@ impl CompactBlockReconstructor {
             if idx >= block_transactions.len() {
                 return Err(BlockchainError::Any(anyhow::anyhow!(
                     "Missing transaction index {} out of bounds (block has {} txs)",
-                    index, block_transactions.len()
+                    index,
+                    block_transactions.len()
                 )));
             }
 
@@ -307,7 +333,7 @@ mod tests {
             1234567890,
             [0u8; 32],
             miner,
-            Hash::zero()
+            Hash::zero(),
         );
 
         // Create block with empty transactions (would need real transactions for full test)
@@ -319,7 +345,8 @@ mod tests {
             missing_indices: vec![],
         };
 
-        let response = CompactBlockReconstructor::prepare_missing_transactions(request, &block).unwrap();
+        let response =
+            CompactBlockReconstructor::prepare_missing_transactions(request, &block).unwrap();
         assert_eq!(response.transactions.len(), 0);
     }
 }

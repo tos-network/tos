@@ -14,19 +14,15 @@
 
 use std::sync::Arc;
 use tos_common::{
-    config::{TOS_ASSET, COIN_VALUE},
-    crypto::{KeyPair, Hashable, Hash},
     block::{Block, BlockVersion, EXTRA_NONCE_SIZE},
+    config::{COIN_VALUE, TOS_ASSET},
+    crypto::{Hash, Hashable, KeyPair},
     immutable::Immutable,
 };
-use tos_daemon::core::{
-    storage::BalanceProvider,
-    state::parallel_chain_state::ParallelChainState,
-};
+use tos_daemon::core::{state::parallel_chain_state::ParallelChainState, storage::BalanceProvider};
 use tos_environment::Environment;
 use tos_testing_integration::utils::storage_helpers::{
-    create_test_rocksdb_storage,
-    setup_account_rocksdb,
+    create_test_rocksdb_storage, setup_account_rocksdb,
 };
 
 /// Helper to create a dummy block for testing
@@ -36,18 +32,18 @@ fn create_dummy_block(miner_key: &KeyPair) -> Block {
     let miner = miner_key.get_public_key().compress();
     let header = BlockHeader::new(
         BlockVersion::V0,
-        vec![],  // parents_by_level
-        0,       // blue_score
-        0,       // daa_score
-        0u64.into(),  // blue_work
-        Hash::zero(),  // pruning_point
-        0,       // timestamp
-        0,       // bits
-        [0u8; EXTRA_NONCE_SIZE],  // extra_nonce
-        miner,   // miner
-        Hash::zero(),  // hash_merkle_root
-        Hash::zero(),  // accepted_id_merkle_root
-        Hash::zero(),  // utxo_commitment
+        vec![],                  // parents_by_level
+        0,                       // blue_score
+        0,                       // daa_score
+        0u64.into(),             // blue_work
+        Hash::zero(),            // pruning_point
+        0,                       // timestamp
+        0,                       // bits
+        [0u8; EXTRA_NONCE_SIZE], // extra_nonce
+        miner,                   // miner
+        Hash::zero(),            // hash_merkle_root
+        Hash::zero(),            // accepted_id_merkle_root
+        Hash::zero(),            // utxo_commitment
     );
 
     Block::new(Immutable::Arc(Arc::new(header)), vec![])
@@ -82,7 +78,10 @@ async fn test_reward_immediate_availability_parallel_vs_sequential() {
         .await
         .expect("Failed to setup miner account");
 
-    println!("✓ Initial setup: Miner has {} TOS", initial_balance / COIN_VALUE);
+    println!(
+        "✓ Initial setup: Miner has {} TOS",
+        initial_balance / COIN_VALUE
+    );
 
     // Step 2: Create block and simulate reward
     let block = create_dummy_block(&miner);
@@ -95,8 +94,8 @@ async fn test_reward_immediate_availability_parallel_vs_sequential() {
     let parallel_state = ParallelChainState::new(
         Arc::clone(&storage),
         environment,
-        0,  // stable_topoheight
-        1,  // topoheight
+        0, // stable_topoheight
+        1, // topoheight
         BlockVersion::V0,
         block,
         block_hash,
@@ -136,7 +135,8 @@ async fn test_reward_immediate_availability_parallel_vs_sequential() {
             "Miner balance should be initial + reward"
         );
 
-        println!("✓ Final balance verified: {} TOS (initial {} + reward {})",
+        println!(
+            "✓ Final balance verified: {} TOS (initial {} + reward {})",
             final_balance.get_balance() / COIN_VALUE,
             initial_balance / COIN_VALUE,
             block_reward / COIN_VALUE
@@ -172,7 +172,10 @@ async fn test_reward_merge_not_overwrite() {
         .await
         .expect("Failed to setup miner account");
 
-    println!("✓ Miner has existing balance: {} TOS", existing_balance / COIN_VALUE);
+    println!(
+        "✓ Miner has existing balance: {} TOS",
+        existing_balance / COIN_VALUE
+    );
 
     // Step 2: Create block and award reward
     let block = create_dummy_block(&miner);
@@ -226,7 +229,10 @@ async fn test_reward_merge_not_overwrite() {
         println!("✓ Verified: Balance correctly merged");
         println!("  - Existing: {} TOS", existing_balance / COIN_VALUE);
         println!("  - Reward:   {} TOS", reward_amount / COIN_VALUE);
-        println!("  - Final:    {} TOS ✓", final_balance.get_balance() / COIN_VALUE);
+        println!(
+            "  - Final:    {} TOS ✓",
+            final_balance.get_balance() / COIN_VALUE
+        );
     }
 
     println!("✓ Test passed: Reward merge detection working");
@@ -260,9 +266,15 @@ async fn test_reward_transaction_order_equivalence() {
     let bob_pubkey = _bob.get_public_key().compress();
 
     // Setup initial balances
-    setup_account_rocksdb(&storage, &miner_pubkey, 1000 * COIN_VALUE, 0).await.unwrap();
-    setup_account_rocksdb(&storage, &alice_pubkey, 500 * COIN_VALUE, 0).await.unwrap();
-    setup_account_rocksdb(&storage, &bob_pubkey, 200 * COIN_VALUE, 0).await.unwrap();
+    setup_account_rocksdb(&storage, &miner_pubkey, 1000 * COIN_VALUE, 0)
+        .await
+        .unwrap();
+    setup_account_rocksdb(&storage, &alice_pubkey, 500 * COIN_VALUE, 0)
+        .await
+        .unwrap();
+    setup_account_rocksdb(&storage, &bob_pubkey, 200 * COIN_VALUE, 0)
+        .await
+        .unwrap();
 
     println!("✓ Setup 3 accounts with initial balances");
 
@@ -308,12 +320,14 @@ async fn test_reward_transaction_order_equivalence() {
 
         assert_eq!(
             miner_balance.get_balance(),
-            1050 * COIN_VALUE,  // 1000 initial + 50 reward
+            1050 * COIN_VALUE, // 1000 initial + 50 reward
             "Miner balance should include reward"
         );
 
-        println!("✓ Verified: Miner balance = {} TOS (includes reward)",
-            miner_balance.get_balance() / COIN_VALUE);
+        println!(
+            "✓ Verified: Miner balance = {} TOS (includes reward)",
+            miner_balance.get_balance() / COIN_VALUE
+        );
     }
 
     // TODO: Add sequential execution comparison when framework supports it
@@ -422,8 +436,12 @@ async fn test_developer_split_regression() {
     let miner_initial = 1000 * COIN_VALUE;
     let dev_initial = 500 * COIN_VALUE;
 
-    setup_account_rocksdb(&storage, &miner_pubkey, miner_initial, 0).await.unwrap();
-    setup_account_rocksdb(&storage, &dev_pubkey, dev_initial, 0).await.unwrap();
+    setup_account_rocksdb(&storage, &miner_pubkey, miner_initial, 0)
+        .await
+        .unwrap();
+    setup_account_rocksdb(&storage, &dev_pubkey, dev_initial, 0)
+        .await
+        .unwrap();
 
     println!("✓ Setup accounts:");
     println!("  - Miner:     {} TOS", miner_initial / COIN_VALUE);
@@ -431,8 +449,8 @@ async fn test_developer_split_regression() {
 
     // Step 2: Calculate expected reward split
     let total_reward = 100 * COIN_VALUE;
-    let miner_reward = 90 * COIN_VALUE;   // 90%
-    let dev_reward = 10 * COIN_VALUE;     // 10%
+    let miner_reward = 90 * COIN_VALUE; // 90%
+    let dev_reward = 10 * COIN_VALUE; // 10%
 
     println!("\n✓ Expected block reward split:");
     println!("  - Total:     {} TOS", total_reward / COIN_VALUE);
@@ -489,8 +507,14 @@ async fn test_developer_split_regression() {
 
         println!("  Miner balance:");
         println!("    - Initial:  {} TOS", miner_initial / COIN_VALUE);
-        println!("    - Reward:   {} TOS (fully applied)", miner_reward / COIN_VALUE);
-        println!("    - Final:    {} TOS ✓", miner_balance.get_balance() / COIN_VALUE);
+        println!(
+            "    - Reward:   {} TOS (fully applied)",
+            miner_reward / COIN_VALUE
+        );
+        println!(
+            "    - Final:    {} TOS ✓",
+            miner_balance.get_balance() / COIN_VALUE
+        );
 
         // Check developer balance
         let (_, dev_balance) = storage_read
@@ -504,14 +528,18 @@ async fn test_developer_split_regression() {
         println!("\n  Developer balance (current implementation):");
         println!("    - Initial:      {} TOS", dev_initial / COIN_VALUE);
         println!("    - Current:      {} TOS", current_dev / COIN_VALUE);
-        println!("    - Expected*:    {} TOS (when dev split implemented)",
-                 (dev_initial + dev_reward) / COIN_VALUE);
-        println!("    - Dev reward*:  {} TOS (not yet distributed)", dev_reward / COIN_VALUE);
+        println!(
+            "    - Expected*:    {} TOS (when dev split implemented)",
+            (dev_initial + dev_reward) / COIN_VALUE
+        );
+        println!(
+            "    - Dev reward*:  {} TOS (not yet distributed)",
+            dev_reward / COIN_VALUE
+        );
 
         // Verify developer balance unchanged (expected current behavior)
         assert_eq!(
-            current_dev,
-            dev_initial,
+            current_dev, dev_initial,
             "Developer balance unchanged (dev split not yet implemented)"
         );
 
@@ -549,8 +577,12 @@ async fn test_concurrent_reward_and_transfer() {
     let miner_initial = 1000 * COIN_VALUE;
     let alice_initial = 500 * COIN_VALUE;
 
-    setup_account_rocksdb(&storage, &miner_pubkey, miner_initial, 0).await.unwrap();
-    setup_account_rocksdb(&storage, &alice_pubkey, alice_initial, 0).await.unwrap();
+    setup_account_rocksdb(&storage, &miner_pubkey, miner_initial, 0)
+        .await
+        .unwrap();
+    setup_account_rocksdb(&storage, &alice_pubkey, alice_initial, 0)
+        .await
+        .unwrap();
 
     println!("✓ Setup accounts:");
     println!("  - Miner: {} TOS", miner_initial / COIN_VALUE);
@@ -597,8 +629,10 @@ async fn test_concurrent_reward_and_transfer() {
         let expected = miner_initial + reward;
         assert_eq!(miner_balance.get_balance(), expected);
 
-        println!("✓ Verified: Miner balance = {} TOS",
-            miner_balance.get_balance() / COIN_VALUE);
+        println!(
+            "✓ Verified: Miner balance = {} TOS",
+            miner_balance.get_balance() / COIN_VALUE
+        );
     }
 
     println!("✓ Test passed: Concurrent operations handled correctly");
@@ -652,8 +686,8 @@ async fn test_miner_reward_applied_once() {
     let parallel_state = ParallelChainState::new(
         Arc::clone(&storage),
         environment,
-        0,  // stable_topoheight
-        1,  // topoheight
+        0, // stable_topoheight
+        1, // topoheight
         BlockVersion::V0,
         block,
         block_hash,
@@ -692,9 +726,18 @@ async fn test_miner_reward_applied_once() {
         println!("\nVerification:");
         println!("  - Initial:          {} TOS", initial_balance / COIN_VALUE);
         println!("  - Block reward:     {} TOS", block_reward / COIN_VALUE);
-        println!("  - Expected (1x):    {} TOS", expected_balance / COIN_VALUE);
-        println!("  - Buggy (2x):       {} TOS (would fail)", double_reward_balance / COIN_VALUE);
-        println!("  - Actual:           {} TOS", final_balance.get_balance() / COIN_VALUE);
+        println!(
+            "  - Expected (1x):    {} TOS",
+            expected_balance / COIN_VALUE
+        );
+        println!(
+            "  - Buggy (2x):       {} TOS (would fail)",
+            double_reward_balance / COIN_VALUE
+        );
+        println!(
+            "  - Actual:           {} TOS",
+            final_balance.get_balance() / COIN_VALUE
+        );
 
         // CRITICAL ASSERTION: Reward applied exactly once
         assert_eq!(

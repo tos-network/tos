@@ -1,8 +1,8 @@
 // DAG Integration Tests
 // Tests full DAG operations with all components working together
 
-use tos_common::crypto::Hash;
 use std::collections::HashMap;
+use tos_common::crypto::Hash;
 
 /// Test 1: Full DAG with DAA - Create a chain of blocks and verify DAA
 #[tokio::test]
@@ -182,13 +182,16 @@ mod unit_tests {
         let genesis = Hash::new([0u8; 32]);
         let mut blocks = HashMap::new();
 
-        blocks.insert(genesis.clone(), MockBlock {
-            hash: genesis.clone(),
-            parents: vec![],
-            timestamp: 0,
-            difficulty: 100,
-            blue_score: 0,
-        });
+        blocks.insert(
+            genesis.clone(),
+            MockBlock {
+                hash: genesis.clone(),
+                parents: vec![],
+                timestamp: 0,
+                difficulty: 100,
+                blue_score: 0,
+            },
+        );
 
         let result = verify_dag_invariants(&blocks);
         assert!(result.is_ok());

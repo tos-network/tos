@@ -1,16 +1,11 @@
+use super::{CompressedPublicKey, PublicKey};
+use crate::{
+    crypto::proofs::H,
+    serializer::{Reader, ReaderError, Serializer, Writer},
+};
 use curve25519_dalek::{RistrettoPoint, Scalar};
 use serde::{de::Error, Serialize};
 use sha3::{Digest, Sha3_512};
-use crate::{
-    crypto::proofs::H,
-    serializer::{
-        Reader,
-        ReaderError,
-        Serializer,
-        Writer
-    }
-};
-use super::{CompressedPublicKey, PublicKey};
 
 // SCALAR_SIZE moved to parent module
 const SCALAR_SIZE: usize = 32;
@@ -37,7 +32,11 @@ impl Signature {
 }
 
 // Create a Scalar from Public Key, Hash of the message, and selected point
-pub fn hash_and_point_to_scalar(key: &CompressedPublicKey, message: &[u8], point: &RistrettoPoint) -> Scalar {
+pub fn hash_and_point_to_scalar(
+    key: &CompressedPublicKey,
+    message: &[u8],
+    point: &RistrettoPoint,
+) -> Scalar {
     let mut hasher = Sha3_512::new();
     hasher.update(key.as_bytes());
     hasher.update(message);
@@ -50,7 +49,7 @@ pub fn hash_and_point_to_scalar(key: &CompressedPublicKey, message: &[u8], point
 impl Serialize for Signature {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer
+        S: serde::Serializer,
     {
         serializer.serialize_str(&hex::encode(&self.to_bytes()))
     }
@@ -59,7 +58,7 @@ impl Serialize for Signature {
 impl<'de> serde::Deserialize<'de> for Signature {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>
+        D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
         Ok(Self::from_hex(&s).map_err(D::Error::custom)?)

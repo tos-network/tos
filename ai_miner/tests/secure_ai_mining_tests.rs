@@ -1,7 +1,5 @@
 use anyhow::Result;
-use tos_ai_miner::{
-    transaction_builder::AIMiningTransactionBuilder,
-};
+use tos_ai_miner::transaction_builder::AIMiningTransactionBuilder;
 use tos_common::{
     ai_mining::{
         calculate_base_reward, calculate_final_reward, calculate_secure_gas_cost, AIMiningPayload,
@@ -108,7 +106,10 @@ fn test_reputation_system() {
     assert_eq!(score, 10000);
     assert_eq!(reputation.reputation_score, 10000);
 
-    println!("✓ High reputation account score: {} (scaled, 10000 = 1.0)", score);
+    println!(
+        "✓ High reputation account score: {} (scaled, 10000 = 1.0)",
+        score
+    );
 
     // Test permission checks
     assert!(reputation.can_participate_in_difficulty(&DifficultyLevel::Beginner));
@@ -129,8 +130,7 @@ fn test_reputation_system() {
 
     println!(
         "✓ New account correctly restricted: score = {} (< {} minimum)",
-        new_score,
-        MIN_REPUTATION_FOR_BASIC
+        new_score, MIN_REPUTATION_FOR_BASIC
     );
 
     println!("=== Reputation System Test PASSED ===\n");

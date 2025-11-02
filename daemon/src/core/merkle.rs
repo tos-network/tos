@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 
-use tos_common::{crypto::{hash, Hash, HASH_SIZE}, serializer::Serializer};
+use tos_common::{
+    crypto::{hash, Hash, HASH_SIZE},
+    serializer::Serializer,
+};
 
 // This builder is used to build a merkle tree from a list of hashes
 // It uses a bottom-up approach to build the tree
@@ -8,30 +11,29 @@ use tos_common::{crypto::{hash, Hash, HASH_SIZE}, serializer::Serializer};
 // The resulting hash is then added to the list of hashes
 // This process is repeated until there is only one hash left
 pub struct MerkleBuilder<'a> {
-    hashes: Vec<Cow<'a, Hash>>
+    hashes: Vec<Cow<'a, Hash>>,
 }
 
 impl<'a> MerkleBuilder<'a> {
     // Create a new MerkleBuilder
     pub fn new() -> Self {
-        MerkleBuilder {
-            hashes: Vec::new()
-        }
+        MerkleBuilder { hashes: Vec::new() }
     }
 
     // Create a new MerkleBuilder with a given capacity
     pub fn with_capacity(capacity: usize) -> Self {
         MerkleBuilder {
-            hashes: Vec::with_capacity(capacity)
+            hashes: Vec::with_capacity(capacity),
         }
     }
 
     // Create a new MerkleBuilder from an iterator of hashes
     pub fn from_iter<I>(iter: I) -> Self
-        where I: IntoIterator<Item = &'a Hash>
+    where
+        I: IntoIterator<Item = &'a Hash>,
     {
         MerkleBuilder {
-            hashes: iter.into_iter().map(|hash| Cow::Borrowed(hash)).collect()
+            hashes: iter.into_iter().map(|hash| Cow::Borrowed(hash)).collect(),
         }
     }
 

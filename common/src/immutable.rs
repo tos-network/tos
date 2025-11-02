@@ -1,10 +1,10 @@
+use serde::{Deserialize, Serialize};
 use std::{
     fmt::{self, Display},
     hash::{Hash, Hasher},
     ops::Deref,
-    sync::Arc
+    sync::Arc,
 };
-use serde::{Serialize, Deserialize};
 
 use crate::serializer::*;
 
@@ -12,21 +12,21 @@ use crate::serializer::*;
 #[serde(untagged)]
 pub enum Immutable<T> {
     Owned(T),
-    Arc(Arc<T>)
+    Arc(Arc<T>),
 }
 
 impl<T> Immutable<T> {
     pub fn get_inner(&self) -> &T {
         match &self {
             Immutable::Owned(v) => v,
-            Immutable::Arc(v) => v
+            Immutable::Arc(v) => v,
         }
     }
 
     pub fn into_arc(self) -> Arc<T> {
         match self {
             Immutable::Owned(v) => Arc::new(v),
-            Immutable::Arc(v) => v
+            Immutable::Arc(v) => v,
         }
     }
 }
@@ -39,15 +39,15 @@ impl<T: Clone> Immutable<T> {
                 let arc = Arc::new(v.clone());
                 *self = Immutable::Arc(arc.clone());
                 arc
-            },
-            Immutable::Arc(v) => v.clone()
+            }
+            Immutable::Arc(v) => v.clone(),
         }
     }
 
     pub fn as_arc(&self) -> Arc<T> {
         match self {
             Immutable::Owned(v) => Arc::new(v.clone()),
-            Immutable::Arc(v) => v.clone()
+            Immutable::Arc(v) => v.clone(),
         }
     }
 
@@ -56,8 +56,8 @@ impl<T: Clone> Immutable<T> {
             Immutable::Owned(v) => v,
             Immutable::Arc(v) => match Arc::try_unwrap(v) {
                 Ok(v) => v,
-                Err(v) => v.as_ref().clone()
-            }
+                Err(v) => v.as_ref().clone(),
+            },
         }
     }
 
@@ -79,7 +79,6 @@ impl<T: PartialEq> PartialEq for Immutable<T> {
 }
 
 impl<T: Eq> Eq for Immutable<T> {}
-
 
 impl<T> AsRef<T> for Immutable<T> {
     fn as_ref(&self) -> &T {
@@ -103,7 +102,7 @@ impl<T> Deref for Immutable<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.get_inner()        
+        self.get_inner()
     }
 }
 
@@ -111,7 +110,7 @@ impl<T: fmt::Display> Display for Immutable<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Immutable::Owned(v) => write!(f, "{}", v),
-            Immutable::Arc(v) => write!(f, "{}", v)
+            Immutable::Arc(v) => write!(f, "{}", v),
         }
     }
 }

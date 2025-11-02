@@ -38,7 +38,7 @@ use tos_common::{
     asset::{AssetData, VersionedAssetData},
     block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
     config::{COIN_DECIMALS, COIN_VALUE, TOS_ASSET},
-    crypto::{elgamal::CompressedPublicKey, Hash, KeyPair, Hashable},
+    crypto::{elgamal::CompressedPublicKey, Hash, Hashable, KeyPair},
     immutable::Immutable,
     network::Network,
     versioned_type::Versioned,
@@ -48,8 +48,7 @@ use tos_daemon::core::{
     config::RocksDBConfig,
     state::parallel_chain_state::ParallelChainState,
     storage::{
-        rocksdb::RocksStorage,
-        AccountProvider, AssetProvider, BalanceProvider, NonceProvider,
+        rocksdb::RocksStorage, AccountProvider, AssetProvider, BalanceProvider, NonceProvider,
     },
 };
 
@@ -85,11 +84,20 @@ async fn setup_account(
 ) {
     let mut guard = storage.write().await;
     guard
-        .set_last_nonce_to(account, topoheight, &VersionedNonce::new(nonce, Some(topoheight)))
+        .set_last_nonce_to(
+            account,
+            topoheight,
+            &VersionedNonce::new(nonce, Some(topoheight)),
+        )
         .await
         .unwrap();
     guard
-        .set_last_balance_to(account, &TOS_ASSET, topoheight, &VersionedBalance::new(balance, Some(topoheight)))
+        .set_last_balance_to(
+            account,
+            &TOS_ASSET,
+            topoheight,
+            &VersionedBalance::new(balance, Some(topoheight)),
+        )
         .await
         .unwrap();
     guard
@@ -117,10 +125,7 @@ fn create_dummy_block() -> (Block, Hash) {
         Hash::zero(),
     );
 
-    let dummy_block = Block::new(
-        Immutable::Arc(Arc::new(dummy_header)),
-        vec![],
-    );
+    let dummy_block = Block::new(Immutable::Arc(Arc::new(dummy_header)), vec![]);
 
     let block_hash = dummy_block.hash();
     (dummy_block, block_hash)
@@ -167,12 +172,7 @@ async fn benchmark_storage_write_speed() {
     let dir_path = temp_dir.path().to_string_lossy().to_string();
     let config = RocksDBConfig::default();
 
-    let mut storage = RocksStorage::new(
-        &dir_path,
-        Network::Devnet,
-        Some(1024 * 1024),
-        &config,
-    );
+    let mut storage = RocksStorage::new(&dir_path, Network::Devnet, Some(1024 * 1024), &config);
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
 
@@ -195,20 +195,45 @@ async fn benchmark_storage_write_speed() {
     let accounts_per_sec = NUM_ACCOUNTS as f64 / elapsed.as_secs_f64();
     let avg_time_per_account = elapsed.as_micros() as f64 / NUM_ACCOUNTS as f64;
 
-    print_benchmark_result("Total accounts created", &NUM_ACCOUNTS.to_string(), "accounts");
-    print_benchmark_result("Total time", &format!("{:.3}", elapsed.as_secs_f64()), "seconds");
-    print_benchmark_result("Throughput", &format!("{:.2}", accounts_per_sec), "accounts/sec");
-    print_benchmark_result("Average time per account", &format!("{:.2}", avg_time_per_account), "microseconds");
+    print_benchmark_result(
+        "Total accounts created",
+        &NUM_ACCOUNTS.to_string(),
+        "accounts",
+    );
+    print_benchmark_result(
+        "Total time",
+        &format!("{:.3}", elapsed.as_secs_f64()),
+        "seconds",
+    );
+    print_benchmark_result(
+        "Throughput",
+        &format!("{:.2}", accounts_per_sec),
+        "accounts/sec",
+    );
+    print_benchmark_result(
+        "Average time per account",
+        &format!("{:.2}", avg_time_per_account),
+        "microseconds",
+    );
 
     println!("\n  Performance Analysis:");
     if accounts_per_sec > 20000.0 {
-        println!("    ✓ EXCELLENT: {}x faster than baseline (10,000 accounts/sec)", accounts_per_sec / 10000.0);
+        println!(
+            "    ✓ EXCELLENT: {}x faster than baseline (10,000 accounts/sec)",
+            accounts_per_sec / 10000.0
+        );
     } else if accounts_per_sec > 10000.0 {
         println!("    ✓ GOOD: Meets baseline performance");
     } else if accounts_per_sec > 5000.0 {
-        println!("    ⚠ ACCEPTABLE: {}x slower than baseline", 10000.0 / accounts_per_sec);
+        println!(
+            "    ⚠ ACCEPTABLE: {}x slower than baseline",
+            10000.0 / accounts_per_sec
+        );
     } else {
-        println!("    ✗ SLOW: {}x slower than baseline - investigate!", 10000.0 / accounts_per_sec);
+        println!(
+            "    ✗ SLOW: {}x slower than baseline - investigate!",
+            10000.0 / accounts_per_sec
+        );
     }
 
     print_benchmark_footer();
@@ -241,12 +266,7 @@ async fn benchmark_storage_read_speed() {
     let dir_path = temp_dir.path().to_string_lossy().to_string();
     let config = RocksDBConfig::default();
 
-    let mut storage = RocksStorage::new(
-        &dir_path,
-        Network::Devnet,
-        Some(1024 * 1024),
-        &config,
-    );
+    let mut storage = RocksStorage::new(&dir_path, Network::Devnet, Some(1024 * 1024), &config);
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
 
@@ -283,19 +303,36 @@ async fn benchmark_storage_read_speed() {
     let avg_time_per_read = elapsed.as_micros() as f64 / NUM_READS as f64;
 
     print_benchmark_result("Total reads performed", &NUM_READS.to_string(), "reads");
-    print_benchmark_result("Total time", &format!("{:.3}", elapsed.as_secs_f64()), "seconds");
+    print_benchmark_result(
+        "Total time",
+        &format!("{:.3}", elapsed.as_secs_f64()),
+        "seconds",
+    );
     print_benchmark_result("Throughput", &format!("{:.2}", reads_per_sec), "reads/sec");
-    print_benchmark_result("Average time per read", &format!("{:.2}", avg_time_per_read), "microseconds");
+    print_benchmark_result(
+        "Average time per read",
+        &format!("{:.2}", avg_time_per_read),
+        "microseconds",
+    );
 
     println!("\n  Performance Analysis:");
     if reads_per_sec > 100000.0 {
-        println!("    ✓ EXCELLENT: {}x faster than baseline (50,000 reads/sec)", reads_per_sec / 50000.0);
+        println!(
+            "    ✓ EXCELLENT: {}x faster than baseline (50,000 reads/sec)",
+            reads_per_sec / 50000.0
+        );
     } else if reads_per_sec > 50000.0 {
         println!("    ✓ GOOD: Meets baseline performance");
     } else if reads_per_sec > 25000.0 {
-        println!("    ⚠ ACCEPTABLE: {}x slower than baseline", 50000.0 / reads_per_sec);
+        println!(
+            "    ⚠ ACCEPTABLE: {}x slower than baseline",
+            50000.0 / reads_per_sec
+        );
     } else {
-        println!("    ✗ SLOW: {}x slower than baseline - investigate!", 50000.0 / reads_per_sec);
+        println!(
+            "    ✗ SLOW: {}x slower than baseline - investigate!",
+            50000.0 / reads_per_sec
+        );
     }
 
     print_benchmark_footer();
@@ -328,12 +365,7 @@ async fn benchmark_storage_update_speed() {
     let dir_path = temp_dir.path().to_string_lossy().to_string();
     let config = RocksDBConfig::default();
 
-    let mut storage = RocksStorage::new(
-        &dir_path,
-        Network::Devnet,
-        Some(1024 * 1024),
-        &config,
-    );
+    let mut storage = RocksStorage::new(&dir_path, Network::Devnet, Some(1024 * 1024), &config);
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
 
@@ -402,20 +434,45 @@ async fn benchmark_storage_update_speed() {
     let updates_per_sec = NUM_UPDATES as f64 / elapsed.as_secs_f64();
     let avg_time_per_update = elapsed.as_micros() as f64 / NUM_UPDATES as f64;
 
-    print_benchmark_result("Total updates performed", &NUM_UPDATES.to_string(), "updates");
-    print_benchmark_result("Total time", &format!("{:.3}", elapsed.as_secs_f64()), "seconds");
-    print_benchmark_result("Throughput", &format!("{:.2}", updates_per_sec), "updates/sec");
-    print_benchmark_result("Average time per update", &format!("{:.2}", avg_time_per_update), "microseconds");
+    print_benchmark_result(
+        "Total updates performed",
+        &NUM_UPDATES.to_string(),
+        "updates",
+    );
+    print_benchmark_result(
+        "Total time",
+        &format!("{:.3}", elapsed.as_secs_f64()),
+        "seconds",
+    );
+    print_benchmark_result(
+        "Throughput",
+        &format!("{:.2}", updates_per_sec),
+        "updates/sec",
+    );
+    print_benchmark_result(
+        "Average time per update",
+        &format!("{:.2}", avg_time_per_update),
+        "microseconds",
+    );
 
     println!("\n  Performance Analysis:");
     if updates_per_sec > 10000.0 {
-        println!("    ✓ EXCELLENT: {}x faster than baseline (5,000 updates/sec)", updates_per_sec / 5000.0);
+        println!(
+            "    ✓ EXCELLENT: {}x faster than baseline (5,000 updates/sec)",
+            updates_per_sec / 5000.0
+        );
     } else if updates_per_sec > 5000.0 {
         println!("    ✓ GOOD: Meets baseline performance");
     } else if updates_per_sec > 2500.0 {
-        println!("    ⚠ ACCEPTABLE: {}x slower than baseline", 5000.0 / updates_per_sec);
+        println!(
+            "    ⚠ ACCEPTABLE: {}x slower than baseline",
+            5000.0 / updates_per_sec
+        );
     } else {
-        println!("    ✗ SLOW: {}x slower than baseline - investigate!", 5000.0 / updates_per_sec);
+        println!(
+            "    ✗ SLOW: {}x slower than baseline - investigate!",
+            5000.0 / updates_per_sec
+        );
     }
 
     print_benchmark_footer();
@@ -449,16 +506,14 @@ async fn benchmark_concurrent_access_10_workers() {
     let dir_path = temp_dir.path().to_string_lossy().to_string();
     let config = RocksDBConfig::default();
 
-    let mut storage = RocksStorage::new(
-        &dir_path,
-        Network::Devnet,
-        Some(1024 * 1024),
-        &config,
-    );
+    let mut storage = RocksStorage::new(&dir_path, Network::Devnet, Some(1024 * 1024), &config);
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
 
-    println!("\n  Spawning {} workers performing {} operations each...", NUM_WORKERS, OPS_PER_WORKER);
+    println!(
+        "\n  Spawning {} workers performing {} operations each...",
+        NUM_WORKERS, OPS_PER_WORKER
+    );
 
     let start = Instant::now();
     let mut join_set = JoinSet::new();
@@ -482,7 +537,10 @@ async fn benchmark_concurrent_access_10_workers() {
                             &pubkey,
                             &TOS_ASSET,
                             0,
-                            &VersionedBalance::new((worker_id * 100 + i) as u64 * COIN_VALUE, Some(0)),
+                            &VersionedBalance::new(
+                                (worker_id * 100 + i) as u64 * COIN_VALUE,
+                                Some(0),
+                            ),
                         )
                         .await
                         .unwrap();
@@ -514,19 +572,36 @@ async fn benchmark_concurrent_access_10_workers() {
     print_benchmark_result("Number of workers", &NUM_WORKERS.to_string(), "workers");
     print_benchmark_result("Operations per worker", &OPS_PER_WORKER.to_string(), "ops");
     print_benchmark_result("Total operations", &TOTAL_OPS.to_string(), "ops");
-    print_benchmark_result("Total time", &format!("{:.3}", elapsed.as_secs_f64()), "seconds");
+    print_benchmark_result(
+        "Total time",
+        &format!("{:.3}", elapsed.as_secs_f64()),
+        "seconds",
+    );
     print_benchmark_result("Throughput", &format!("{:.2}", ops_per_sec), "ops/sec");
-    print_benchmark_result("Average time per op", &format!("{:.2}", avg_time_per_op), "microseconds");
+    print_benchmark_result(
+        "Average time per op",
+        &format!("{:.2}", avg_time_per_op),
+        "microseconds",
+    );
 
     println!("\n  Performance Analysis:");
     if ops_per_sec > 10000.0 {
-        println!("    ✓ EXCELLENT: {}x faster than baseline (5,000 ops/sec)", ops_per_sec / 5000.0);
+        println!(
+            "    ✓ EXCELLENT: {}x faster than baseline (5,000 ops/sec)",
+            ops_per_sec / 5000.0
+        );
     } else if ops_per_sec > 5000.0 {
         println!("    ✓ GOOD: Meets baseline performance");
     } else if ops_per_sec > 2500.0 {
-        println!("    ⚠ ACCEPTABLE: {}x slower than baseline", 5000.0 / ops_per_sec);
+        println!(
+            "    ⚠ ACCEPTABLE: {}x slower than baseline",
+            5000.0 / ops_per_sec
+        );
     } else {
-        println!("    ✗ SLOW: {}x slower than baseline - investigate!", 5000.0 / ops_per_sec);
+        println!(
+            "    ✗ SLOW: {}x slower than baseline - investigate!",
+            5000.0 / ops_per_sec
+        );
     }
 
     print_benchmark_footer();
@@ -560,16 +635,14 @@ async fn benchmark_concurrent_access_50_workers() {
     let dir_path = temp_dir.path().to_string_lossy().to_string();
     let config = RocksDBConfig::default();
 
-    let mut storage = RocksStorage::new(
-        &dir_path,
-        Network::Devnet,
-        Some(1024 * 1024),
-        &config,
-    );
+    let mut storage = RocksStorage::new(&dir_path, Network::Devnet, Some(1024 * 1024), &config);
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
 
-    println!("\n  Spawning {} workers performing {} operations each...", NUM_WORKERS, OPS_PER_WORKER);
+    println!(
+        "\n  Spawning {} workers performing {} operations each...",
+        NUM_WORKERS, OPS_PER_WORKER
+    );
 
     let start = Instant::now();
     let mut join_set = JoinSet::new();
@@ -592,7 +665,10 @@ async fn benchmark_concurrent_access_50_workers() {
                             &pubkey,
                             &TOS_ASSET,
                             0,
-                            &VersionedBalance::new((worker_id * 100 + i) as u64 * COIN_VALUE, Some(0)),
+                            &VersionedBalance::new(
+                                (worker_id * 100 + i) as u64 * COIN_VALUE,
+                                Some(0),
+                            ),
                         )
                         .await
                         .unwrap();
@@ -616,19 +692,36 @@ async fn benchmark_concurrent_access_50_workers() {
     print_benchmark_result("Number of workers", &NUM_WORKERS.to_string(), "workers");
     print_benchmark_result("Operations per worker", &OPS_PER_WORKER.to_string(), "ops");
     print_benchmark_result("Total operations", &TOTAL_OPS.to_string(), "ops");
-    print_benchmark_result("Total time", &format!("{:.3}", elapsed.as_secs_f64()), "seconds");
+    print_benchmark_result(
+        "Total time",
+        &format!("{:.3}", elapsed.as_secs_f64()),
+        "seconds",
+    );
     print_benchmark_result("Throughput", &format!("{:.2}", ops_per_sec), "ops/sec");
-    print_benchmark_result("Average time per op", &format!("{:.2}", avg_time_per_op), "microseconds");
+    print_benchmark_result(
+        "Average time per op",
+        &format!("{:.2}", avg_time_per_op),
+        "microseconds",
+    );
 
     println!("\n  Performance Analysis:");
     if ops_per_sec > 10000.0 {
-        println!("    ✓ EXCELLENT: {}x faster than baseline (5,000 ops/sec)", ops_per_sec / 5000.0);
+        println!(
+            "    ✓ EXCELLENT: {}x faster than baseline (5,000 ops/sec)",
+            ops_per_sec / 5000.0
+        );
     } else if ops_per_sec > 5000.0 {
         println!("    ✓ GOOD: Meets baseline performance");
     } else if ops_per_sec > 2500.0 {
-        println!("    ⚠ ACCEPTABLE: {}x slower than baseline", 5000.0 / ops_per_sec);
+        println!(
+            "    ⚠ ACCEPTABLE: {}x slower than baseline",
+            5000.0 / ops_per_sec
+        );
     } else {
-        println!("    ✗ SLOW: {}x slower than baseline - high contention detected!", 5000.0 / ops_per_sec);
+        println!(
+            "    ✗ SLOW: {}x slower than baseline - high contention detected!",
+            5000.0 / ops_per_sec
+        );
     }
 
     print_benchmark_footer();
@@ -662,16 +755,14 @@ async fn benchmark_concurrent_access_100_workers() {
     let dir_path = temp_dir.path().to_string_lossy().to_string();
     let config = RocksDBConfig::default();
 
-    let mut storage = RocksStorage::new(
-        &dir_path,
-        Network::Devnet,
-        Some(1024 * 1024),
-        &config,
-    );
+    let mut storage = RocksStorage::new(&dir_path, Network::Devnet, Some(1024 * 1024), &config);
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
 
-    println!("\n  Spawning {} workers performing {} operations each...", NUM_WORKERS, OPS_PER_WORKER);
+    println!(
+        "\n  Spawning {} workers performing {} operations each...",
+        NUM_WORKERS, OPS_PER_WORKER
+    );
 
     let start = Instant::now();
     let mut join_set = JoinSet::new();
@@ -694,7 +785,10 @@ async fn benchmark_concurrent_access_100_workers() {
                             &pubkey,
                             &TOS_ASSET,
                             0,
-                            &VersionedBalance::new((worker_id * 100 + i) as u64 * COIN_VALUE, Some(0)),
+                            &VersionedBalance::new(
+                                (worker_id * 100 + i) as u64 * COIN_VALUE,
+                                Some(0),
+                            ),
                         )
                         .await
                         .unwrap();
@@ -718,19 +812,36 @@ async fn benchmark_concurrent_access_100_workers() {
     print_benchmark_result("Number of workers", &NUM_WORKERS.to_string(), "workers");
     print_benchmark_result("Operations per worker", &OPS_PER_WORKER.to_string(), "ops");
     print_benchmark_result("Total operations", &TOTAL_OPS.to_string(), "ops");
-    print_benchmark_result("Total time", &format!("{:.3}", elapsed.as_secs_f64()), "seconds");
+    print_benchmark_result(
+        "Total time",
+        &format!("{:.3}", elapsed.as_secs_f64()),
+        "seconds",
+    );
     print_benchmark_result("Throughput", &format!("{:.2}", ops_per_sec), "ops/sec");
-    print_benchmark_result("Average time per op", &format!("{:.2}", avg_time_per_op), "microseconds");
+    print_benchmark_result(
+        "Average time per op",
+        &format!("{:.2}", avg_time_per_op),
+        "microseconds",
+    );
 
     println!("\n  Performance Analysis:");
     if ops_per_sec > 8000.0 {
-        println!("    ✓ EXCELLENT: {}x faster than baseline (3,000 ops/sec)", ops_per_sec / 3000.0);
+        println!(
+            "    ✓ EXCELLENT: {}x faster than baseline (3,000 ops/sec)",
+            ops_per_sec / 3000.0
+        );
     } else if ops_per_sec > 3000.0 {
         println!("    ✓ GOOD: Meets baseline performance under extreme load");
     } else if ops_per_sec > 1500.0 {
-        println!("    ⚠ ACCEPTABLE: {}x slower than baseline", 3000.0 / ops_per_sec);
+        println!(
+            "    ⚠ ACCEPTABLE: {}x slower than baseline",
+            3000.0 / ops_per_sec
+        );
     } else {
-        println!("    ✗ SLOW: {}x slower than baseline - severe contention!", 3000.0 / ops_per_sec);
+        println!(
+            "    ✗ SLOW: {}x slower than baseline - severe contention!",
+            3000.0 / ops_per_sec
+        );
     }
 
     print_benchmark_footer();
@@ -762,19 +873,17 @@ async fn benchmark_parallel_chain_state_creation() {
     let dir_path = temp_dir.path().to_string_lossy().to_string();
     let config = RocksDBConfig::default();
 
-    let mut storage = RocksStorage::new(
-        &dir_path,
-        Network::Devnet,
-        Some(1024 * 1024),
-        &config,
-    );
+    let mut storage = RocksStorage::new(&dir_path, Network::Devnet, Some(1024 * 1024), &config);
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
     let (dummy_block, block_hash) = create_dummy_block();
 
-    println!("\n  Creating {} ParallelChainState instances...", NUM_CREATIONS);
+    println!(
+        "\n  Creating {} ParallelChainState instances...",
+        NUM_CREATIONS
+    );
 
     let start = Instant::now();
     let mut states = Vec::new();
@@ -797,19 +906,40 @@ async fn benchmark_parallel_chain_state_creation() {
     let avg_time_per_creation = elapsed.as_micros() as f64 / NUM_CREATIONS as f64;
 
     print_benchmark_result("Total creations", &NUM_CREATIONS.to_string(), "instances");
-    print_benchmark_result("Total time", &format!("{:.3}", elapsed.as_secs_f64()), "seconds");
-    print_benchmark_result("Average creation time", &format!("{:.2}", avg_time_per_creation / 1000.0), "milliseconds");
-    print_benchmark_result("Throughput", &format!("{:.2}", creations_per_sec), "creations/sec");
+    print_benchmark_result(
+        "Total time",
+        &format!("{:.3}", elapsed.as_secs_f64()),
+        "seconds",
+    );
+    print_benchmark_result(
+        "Average creation time",
+        &format!("{:.2}", avg_time_per_creation / 1000.0),
+        "milliseconds",
+    );
+    print_benchmark_result(
+        "Throughput",
+        &format!("{:.2}", creations_per_sec),
+        "creations/sec",
+    );
 
     println!("\n  Performance Analysis:");
     if avg_time_per_creation / 1000.0 < 5.0 {
-        println!("    ✓ EXCELLENT: {}x faster than baseline (10ms)", 10.0 / (avg_time_per_creation / 1000.0));
+        println!(
+            "    ✓ EXCELLENT: {}x faster than baseline (10ms)",
+            10.0 / (avg_time_per_creation / 1000.0)
+        );
     } else if avg_time_per_creation / 1000.0 < 10.0 {
         println!("    ✓ GOOD: Meets baseline performance");
     } else if avg_time_per_creation / 1000.0 < 20.0 {
-        println!("    ⚠ ACCEPTABLE: {}x slower than baseline", (avg_time_per_creation / 1000.0) / 10.0);
+        println!(
+            "    ⚠ ACCEPTABLE: {}x slower than baseline",
+            (avg_time_per_creation / 1000.0) / 10.0
+        );
     } else {
-        println!("    ✗ SLOW: {}x slower than baseline - investigate!", (avg_time_per_creation / 1000.0) / 10.0);
+        println!(
+            "    ✗ SLOW: {}x slower than baseline - investigate!",
+            (avg_time_per_creation / 1000.0) / 10.0
+        );
     }
 
     print_benchmark_footer();
@@ -844,12 +974,7 @@ async fn benchmark_parallel_chain_state_commit() {
         let dir_path = temp_dir.path().to_string_lossy().to_string();
         let config = RocksDBConfig::default();
 
-        let mut storage = RocksStorage::new(
-            &dir_path,
-            Network::Devnet,
-            Some(1024 * 1024),
-            &config,
-        );
+        let mut storage = RocksStorage::new(&dir_path, Network::Devnet, Some(1024 * 1024), &config);
         register_tos_asset(&mut storage).await;
         let storage = Arc::new(RwLock::new(storage));
         let environment = Arc::new(Environment::new());
@@ -878,7 +1003,10 @@ async fn benchmark_parallel_chain_state_commit() {
 
             // Load and modify through ParallelChainState
             state.ensure_account_loaded(&pubkey).await.unwrap();
-            state.ensure_balance_loaded(&pubkey, &TOS_ASSET).await.unwrap();
+            state
+                .ensure_balance_loaded(&pubkey, &TOS_ASSET)
+                .await
+                .unwrap();
             state.set_nonce(&pubkey, _i as u64 + 1);
             #[allow(deprecated)]
             state.set_balance(&pubkey, &TOS_ASSET, (1000 - _i as u64) * COIN_VALUE);
@@ -899,29 +1027,38 @@ async fn benchmark_parallel_chain_state_commit() {
         print_benchmark_result(
             &format!("  Commit time (n={})", num_accounts),
             &format!("{:.2}", time_ms),
-            "milliseconds"
+            "milliseconds",
         );
         print_benchmark_result(
             &format!("  Time per account (n={})", num_accounts),
             &format!("{:.2}", time_per_account_us),
-            "microseconds"
+            "microseconds",
         );
         print_benchmark_result(
             &format!("  Throughput (n={})", num_accounts),
             &format!("{:.2}", commits_per_sec),
-            "commits/sec"
+            "commits/sec",
         );
 
         if num_accounts == 100 {
             println!("\n  Performance Analysis (100 accounts baseline):");
             if time_ms < 50.0 {
-                println!("    ✓ EXCELLENT: {}x faster than baseline (100ms)", 100.0 / time_ms);
+                println!(
+                    "    ✓ EXCELLENT: {}x faster than baseline (100ms)",
+                    100.0 / time_ms
+                );
             } else if time_ms < 100.0 {
                 println!("    ✓ GOOD: Meets baseline performance");
             } else if time_ms < 200.0 {
-                println!("    ⚠ ACCEPTABLE: {}x slower than baseline", time_ms / 100.0);
+                println!(
+                    "    ⚠ ACCEPTABLE: {}x slower than baseline",
+                    time_ms / 100.0
+                );
             } else {
-                println!("    ✗ SLOW: {}x slower than baseline - investigate!", time_ms / 100.0);
+                println!(
+                    "    ✗ SLOW: {}x slower than baseline - investigate!",
+                    time_ms / 100.0
+                );
             }
         }
     }
@@ -956,12 +1093,7 @@ async fn benchmark_account_loading() {
     let dir_path = temp_dir.path().to_string_lossy().to_string();
     let config = RocksDBConfig::default();
 
-    let mut storage = RocksStorage::new(
-        &dir_path,
-        Network::Devnet,
-        Some(1024 * 1024),
-        &config,
-    );
+    let mut storage = RocksStorage::new(&dir_path, Network::Devnet, Some(1024 * 1024), &config);
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
     let environment = Arc::new(Environment::new());
@@ -990,31 +1122,58 @@ async fn benchmark_account_loading() {
     .await;
 
     // Benchmark account loading (nonce + balance)
-    println!("  Loading {} accounts into ParallelChainState...", NUM_ACCOUNTS);
+    println!(
+        "  Loading {} accounts into ParallelChainState...",
+        NUM_ACCOUNTS
+    );
     let start = Instant::now();
     for account in &accounts {
         state.ensure_account_loaded(account).await.unwrap();
-        state.ensure_balance_loaded(account, &TOS_ASSET).await.unwrap();
+        state
+            .ensure_balance_loaded(account, &TOS_ASSET)
+            .await
+            .unwrap();
     }
     let elapsed = start.elapsed();
 
     let loads_per_sec = NUM_ACCOUNTS as f64 / elapsed.as_secs_f64();
     let avg_time_per_load = elapsed.as_micros() as f64 / NUM_ACCOUNTS as f64;
 
-    print_benchmark_result("Total accounts loaded", &NUM_ACCOUNTS.to_string(), "accounts");
-    print_benchmark_result("Total time", &format!("{:.3}", elapsed.as_secs_f64()), "seconds");
+    print_benchmark_result(
+        "Total accounts loaded",
+        &NUM_ACCOUNTS.to_string(),
+        "accounts",
+    );
+    print_benchmark_result(
+        "Total time",
+        &format!("{:.3}", elapsed.as_secs_f64()),
+        "seconds",
+    );
     print_benchmark_result("Throughput", &format!("{:.2}", loads_per_sec), "loads/sec");
-    print_benchmark_result("Average load time", &format!("{:.2}", avg_time_per_load), "microseconds");
+    print_benchmark_result(
+        "Average load time",
+        &format!("{:.2}", avg_time_per_load),
+        "microseconds",
+    );
 
     println!("\n  Performance Analysis:");
     if avg_time_per_load < 250.0 {
-        println!("    ✓ EXCELLENT: {}x faster than baseline (500us)", 500.0 / avg_time_per_load);
+        println!(
+            "    ✓ EXCELLENT: {}x faster than baseline (500us)",
+            500.0 / avg_time_per_load
+        );
     } else if avg_time_per_load < 500.0 {
         println!("    ✓ GOOD: Meets baseline performance");
     } else if avg_time_per_load < 1000.0 {
-        println!("    ⚠ ACCEPTABLE: {}x slower than baseline", avg_time_per_load / 500.0);
+        println!(
+            "    ⚠ ACCEPTABLE: {}x slower than baseline",
+            avg_time_per_load / 500.0
+        );
     } else {
-        println!("    ✗ SLOW: {}x slower than baseline - investigate!", avg_time_per_load / 500.0);
+        println!(
+            "    ✗ SLOW: {}x slower than baseline - investigate!",
+            avg_time_per_load / 500.0
+        );
     }
 
     // Test cache hit performance (should be much faster)
@@ -1022,12 +1181,19 @@ async fn benchmark_account_loading() {
     let cache_start = Instant::now();
     for account in &accounts {
         state.ensure_account_loaded(account).await.unwrap();
-        state.ensure_balance_loaded(account, &TOS_ASSET).await.unwrap();
+        state
+            .ensure_balance_loaded(account, &TOS_ASSET)
+            .await
+            .unwrap();
     }
     let cache_elapsed = cache_start.elapsed();
     let cache_time_per_load = cache_elapsed.as_micros() as f64 / NUM_ACCOUNTS as f64;
 
-    print_benchmark_result("Cache hit time per account", &format!("{:.2}", cache_time_per_load), "microseconds");
+    print_benchmark_result(
+        "Cache hit time per account",
+        &format!("{:.2}", cache_time_per_load),
+        "microseconds",
+    );
 
     println!("\n  Cache Effectiveness:");
     let speedup = avg_time_per_load / cache_time_per_load;

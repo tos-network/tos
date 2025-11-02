@@ -3,10 +3,7 @@ use thiserror::Error;
 
 use crate::{
     account::Nonce,
-    crypto::{
-        proofs::ProofVerificationError,    
-        Hash
-    }
+    crypto::{proofs::ProofVerificationError, Hash},
 };
 
 #[derive(Error, Debug)]
@@ -58,10 +55,7 @@ pub enum VerificationError<T> {
     #[error("Insufficient energy: required {0}")]
     InsufficientEnergy(u64),
     #[error("Insufficient funds: available {available}, required {required}")]
-    InsufficientFunds {
-        available: u64,
-        required: u64,
-    },
+    InsufficientFunds { available: u64, required: u64 },
     #[error("Arithmetic overflow during balance calculation")]
     Overflow,
 }

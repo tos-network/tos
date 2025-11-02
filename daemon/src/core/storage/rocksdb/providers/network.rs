@@ -1,13 +1,9 @@
-use tos_common::network::Network;
-use log::trace;
 use crate::core::{
     error::BlockchainError,
-    storage::{
-        rocksdb::Column,
-        NetworkProvider,
-        RocksStorage
-    }
+    storage::{rocksdb::Column, NetworkProvider, RocksStorage},
 };
+use log::trace;
+use tos_common::network::Network;
 
 impl NetworkProvider for RocksStorage {
     fn get_network(&self) -> Result<Network, BlockchainError> {

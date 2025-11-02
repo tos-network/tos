@@ -1,11 +1,20 @@
-use std::{collections::HashMap, pin::Pin, future::Future, fmt::Display, time::{Instant, Duration}, sync::{Mutex, PoisonError}, rc::Rc, str::FromStr};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    future::Future,
+    pin::Pin,
+    rc::Rc,
+    str::FromStr,
+    sync::{Mutex, PoisonError},
+    time::{Duration, Instant},
+};
 
-use crate::{config::VERSION, async_handler, context::Context};
+use crate::{async_handler, config::VERSION, context::Context};
 
-use super::{argument::*, ShareablePrompt, LogLevel};
+use super::{argument::*, LogLevel, ShareablePrompt};
 use anyhow::Error;
+use log::{error, info, warn};
 use thiserror::Error;
-use log::{info, warn, error};
 
 #[derive(Error, Debug)]
 pub enum CommandError {
@@ -31,15 +40,16 @@ pub enum CommandError {
     Any(#[from] Error),
     #[error("Poison Error: {}", _0)]
     PoisonError(String),
-    #[error("Missing required argument '{}' in batch mode. Use --{} <value>", _0, _0)]
+    #[error(
+        "Missing required argument '{}' in batch mode. Use --{} <value>",
+        _0,
+        _0
+    )]
     MissingArgument(String),
     #[error("Batch mode error: {}", _0)]
     BatchModeError(String),
     #[error("Missing required argument '{arg}' in command mode.\nUsage: {usage}\nUse --interactive to enable prompts.")]
-    MissingRequiredArgument {
-        arg: String,
-        usage: String,
-    },
+    MissingRequiredArgument { arg: String, usage: String },
     #[error("Missing required argument '{arg}' in command mode.\n\nUsage: {usage}\n\nExample:\n  {example}\n\nUse --interactive to enable prompts.")]
     MissingRequiredArgumentWithExample {
         arg: String,
@@ -56,7 +66,7 @@ pub enum CommandError {
     #[error("Missing confirmation for destructive operation.\nAdd '--confirm true' to proceed or '--confirm false' to cancel explicitly.")]
     MissingConfirmation,
     #[error("Password required in command mode.\nUse: --password <pwd> OR --password-file <path> OR --password-from-env OR set TOS_WALLET_PASSWORD environment variable.")]
-    PasswordRequired
+    PasswordRequired,
 }
 
 impl<T> From<PoisonError<T>> for CommandError {
@@ -66,11 +76,14 @@ impl<T> From<PoisonError<T>> for CommandError {
 }
 
 pub type SyncCommandCallback = fn(&CommandManager, ArgumentManager) -> Result<(), CommandError>;
-pub type AsyncCommandCallback = fn(&'_ CommandManager, ArgumentManager) -> Pin<Box<dyn Future<Output = Result<(), CommandError>> + '_>>;
+pub type AsyncCommandCallback = fn(
+    &'_ CommandManager,
+    ArgumentManager,
+) -> Pin<Box<dyn Future<Output = Result<(), CommandError>> + '_>>;
 
 pub enum CommandHandler {
     Sync(SyncCommandCallback),
-    Async(AsyncCommandCallback)
+    Async(AsyncCommandCallback),
 }
 
 pub struct Command {
@@ -78,7 +91,7 @@ pub struct Command {
     description: String,
     required_args: Vec<Arg>,
     optional_args: Vec<Arg>,
-    callback: CommandHandler
+    callback: CommandHandler,
 }
 
 impl Command {
@@ -88,48 +101,64 @@ impl Command {
             description: description.to_owned(),
             required_args: Vec::new(),
             optional_args: Vec::new(),
-            callback
+            callback,
         }
     }
 
-    pub fn with_optional_arguments(name: &str, description: &str, optional_args: Vec<Arg>, callback: CommandHandler) -> Self {
+    pub fn with_optional_arguments(
+        name: &str,
+        description: &str,
+        optional_args: Vec<Arg>,
+        callback: CommandHandler,
+    ) -> Self {
         Self {
             name: name.to_owned(),
             description: description.to_owned(),
             required_args: Vec::new(),
             optional_args,
-            callback
+            callback,
         }
     }
 
-    pub fn with_required_arguments(name: &str, description: &str, required_args: Vec<Arg>, callback: CommandHandler) -> Self {
+    pub fn with_required_arguments(
+        name: &str,
+        description: &str,
+        required_args: Vec<Arg>,
+        callback: CommandHandler,
+    ) -> Self {
         Self {
             name: name.to_owned(),
             description: description.to_owned(),
             required_args,
             optional_args: Vec::new(),
-            callback
+            callback,
         }
     }
 
-    pub fn with_arguments(name: &str, description: &str, required_args: Vec<Arg>, optional_args: Vec<Arg>, callback: CommandHandler) -> Self {
+    pub fn with_arguments(
+        name: &str,
+        description: &str,
+        required_args: Vec<Arg>,
+        optional_args: Vec<Arg>,
+        callback: CommandHandler,
+    ) -> Self {
         Self {
             name: name.to_owned(),
             description: description.to_owned(),
             required_args,
             optional_args,
-            callback
+            callback,
         }
     }
 
-    pub async fn execute(&self, manager: &CommandManager, values: ArgumentManager) -> Result<(), CommandError> {
+    pub async fn execute(
+        &self,
+        manager: &CommandManager,
+        values: ArgumentManager,
+    ) -> Result<(), CommandError> {
         match &self.callback {
-            CommandHandler::Sync(handler) => {
-                handler(manager, values)
-            },
-            CommandHandler::Async(handler) => {
-                handler(manager, values).await
-            },
+            CommandHandler::Sync(handler) => handler(manager, values),
+            CommandHandler::Async(handler) => handler(manager, values).await,
         }
     }
 
@@ -150,17 +179,24 @@ impl Command {
     }
 
     pub fn get_usage(&self) -> String {
-        let required_args: Vec<String> = self.get_required_args()
+        let required_args: Vec<String> = self
+            .get_required_args()
             .iter()
             .map(|arg| format!("<{}>", arg.get_name()))
             .collect();
 
-        let optional_args: Vec<String> = self.get_optional_args()
+        let optional_args: Vec<String> = self
+            .get_optional_args()
             .iter()
             .map(|arg| format!("[{}]", arg.get_name()))
             .collect();
 
-        format!("{} {}{}", self.get_name(), required_args.join(" "), optional_args.join(" "))
+        format!(
+            "{} {}{}",
+            self.get_name(),
+            required_args.join(" "),
+            optional_args.join(" ")
+        )
     }
 
     /// Get detailed help information for this command
@@ -179,7 +215,11 @@ impl Command {
         if !self.required_args.is_empty() {
             help.push_str("REQUIRED ARGUMENTS:\n");
             for arg in &self.required_args {
-                help.push_str(&format!("  <{}>  {}\n", arg.get_name(), arg.get_description()));
+                help.push_str(&format!(
+                    "  <{}>  {}\n",
+                    arg.get_name(),
+                    arg.get_description()
+                ));
             }
             help.push_str("\n");
         }
@@ -188,7 +228,11 @@ impl Command {
         if !self.optional_args.is_empty() {
             help.push_str("OPTIONAL ARGUMENTS:\n");
             for arg in &self.optional_args {
-                help.push_str(&format!("  [{}]  {}\n", arg.get_name(), arg.get_description()));
+                help.push_str(&format!(
+                    "  [{}]  {}\n",
+                    arg.get_name(),
+                    arg.get_description()
+                ));
             }
             help.push_str("\n");
         }
@@ -245,10 +289,36 @@ impl CommandManager {
     // - exit
     // - set_log_level
     pub fn register_default_commands(&self) -> Result<(), CommandError> {
-        self.add_command(Command::with_optional_arguments("help", "Show this help", vec![Arg::new("command", ArgType::String, "Command name to get help for")], CommandHandler::Async(async_handler!(help))))?;
-        self.add_command(Command::new("version", "Show the current version", CommandHandler::Sync(version)))?;
-        self.add_command(Command::new("exit", "Shutdown the application", CommandHandler::Sync(exit)))?;
-        self.add_command(Command::with_required_arguments("set_log_level", "Set the log level", vec![Arg::new("level", ArgType::String, "Log level (off/error/warn/info/debug/trace)")], CommandHandler::Sync(set_log_level)))?;
+        self.add_command(Command::with_optional_arguments(
+            "help",
+            "Show this help",
+            vec![Arg::new(
+                "command",
+                ArgType::String,
+                "Command name to get help for",
+            )],
+            CommandHandler::Async(async_handler!(help)),
+        ))?;
+        self.add_command(Command::new(
+            "version",
+            "Show the current version",
+            CommandHandler::Sync(version),
+        ))?;
+        self.add_command(Command::new(
+            "exit",
+            "Shutdown the application",
+            CommandHandler::Sync(exit),
+        ))?;
+        self.add_command(Command::with_required_arguments(
+            "set_log_level",
+            "Set the log level",
+            vec![Arg::new(
+                "level",
+                ArgType::String,
+                "Log level (off/error/warn/info/debug/trace)",
+            )],
+            CommandHandler::Sync(set_log_level),
+        ))?;
 
         Ok(())
     }
@@ -287,7 +357,10 @@ impl CommandManager {
 
     pub fn remove_command(&self, command_name: &str) -> Result<bool, CommandError> {
         let mut commands = self.commands.lock()?;
-        if let Some(index) = commands.iter().position(|cmd| cmd.get_name() == command_name) {
+        if let Some(index) = commands
+            .iter()
+            .position(|cmd| cmd.get_name() == command_name)
+        {
             commands.remove(index);
             Ok(true)
         } else {
@@ -302,7 +375,8 @@ impl CommandManager {
     /// Get detailed help for a specific command
     pub fn get_command_help(&self, command_name: &str) -> Result<String, CommandError> {
         let commands = self.commands.lock()?;
-        let command = commands.iter()
+        let command = commands
+            .iter()
             .find(|cmd| cmd.get_name() == command_name)
             .ok_or(CommandError::CommandNotFound)?;
 
@@ -310,10 +384,18 @@ impl CommandManager {
     }
 
     /// Handle command from JSON parameters
-    pub async fn handle_json_command(&self, command_name: &str, json_params: &std::collections::HashMap<String, serde_json::Value>) -> Result<(), CommandError> {
+    pub async fn handle_json_command(
+        &self,
+        command_name: &str,
+        json_params: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<(), CommandError> {
         let command = {
             let commands = self.commands.lock()?;
-            commands.iter().find(|command| *command.get_name() == *command_name).cloned().ok_or(CommandError::CommandNotFound)?
+            commands
+                .iter()
+                .find(|command| *command.get_name() == *command_name)
+                .cloned()
+                .ok_or(CommandError::CommandNotFound)?
         };
 
         // Create ArgumentManager from JSON params
@@ -328,21 +410,32 @@ impl CommandManager {
 
     pub async fn handle_command(&self, value: String) -> Result<(), CommandError> {
         let mut command_split = value.split_whitespace();
-        let command_name = command_split.next().ok_or(CommandError::ExpectedCommandName)?;
+        let command_name = command_split
+            .next()
+            .ok_or(CommandError::ExpectedCommandName)?;
         let command = {
             let commands = self.commands.lock()?;
-            commands.iter().find(|command| *command.get_name() == *command_name).cloned().ok_or(CommandError::CommandNotFound)?
+            commands
+                .iter()
+                .find(|command| *command.get_name() == *command_name)
+                .cloned()
+                .ok_or(CommandError::CommandNotFound)?
         };
         let mut arguments: HashMap<String, ArgValue> = HashMap::new();
         for arg in command.get_required_args() {
-            let arg_value = command_split.next().ok_or_else(|| CommandError::ExpectedRequiredArg(arg.get_name().to_owned()))?;
+            let arg_value = command_split
+                .next()
+                .ok_or_else(|| CommandError::ExpectedRequiredArg(arg.get_name().to_owned()))?;
             arguments.insert(arg.get_name().clone(), arg.get_type().to_value(arg_value)?);
         }
 
         // include all options args available
         for optional_arg in command.get_optional_args() {
             if let Some(arg_value) = command_split.next() {
-                arguments.insert(optional_arg.get_name().clone(), optional_arg.get_type().to_value(arg_value)?);
+                arguments.insert(
+                    optional_arg.get_name().clone(),
+                    optional_arg.get_type().to_value(arg_value)?,
+                );
             } else {
                 break;
             }
@@ -387,7 +480,11 @@ impl CommandManager {
     }
 
     /// Require a parameter in batch mode, throw error if missing
-    pub fn require_param(&self, args: &ArgumentManager, param_name: &str) -> Result<(), CommandError> {
+    pub fn require_param(
+        &self,
+        args: &ArgumentManager,
+        param_name: &str,
+    ) -> Result<(), CommandError> {
         if self.batch_mode && !args.has_argument(param_name) {
             return Err(CommandError::MissingArgument(param_name.to_string()));
         }
@@ -395,7 +492,11 @@ impl CommandManager {
     }
 
     /// Validate required parameters for batch mode
-    pub fn validate_batch_params(&self, command_name: &str, args: &ArgumentManager) -> Result<(), CommandError> {
+    pub fn validate_batch_params(
+        &self,
+        command_name: &str,
+        args: &ArgumentManager,
+    ) -> Result<(), CommandError> {
         if !self.batch_mode {
             return Ok(());
         }
@@ -404,77 +505,77 @@ impl CommandManager {
             "open" => {
                 self.require_param(args, "name")?;
                 self.require_param(args, "password")?;
-            },
+            }
             "create" => {
                 self.require_param(args, "name")?;
                 self.require_param(args, "password")?;
-            },
+            }
             "recover_seed" => {
                 self.require_param(args, "name")?;
                 self.require_param(args, "password")?;
                 self.require_param(args, "seed")?;
-            },
+            }
             "recover_private_key" => {
                 self.require_param(args, "name")?;
                 self.require_param(args, "password")?;
                 self.require_param(args, "private_key")?;
-            },
+            }
             "transfer" => {
                 self.require_param(args, "address")?;
                 self.require_param(args, "amount")?;
                 self.require_param(args, "asset")?;
-            },
+            }
             "transfer_all" => {
                 self.require_param(args, "address")?;
                 self.require_param(args, "asset")?;
-            },
+            }
             "burn" => {
                 self.require_param(args, "asset")?;
                 self.require_param(args, "amount")?;
-            },
+            }
             "change_password" => {
                 self.require_param(args, "old_password")?;
                 self.require_param(args, "new_password")?;
-            },
+            }
             "export_transactions" => {
                 self.require_param(args, "filename")?;
-            },
+            }
             "freeze_tos" => {
                 self.require_param(args, "amount")?;
                 self.require_param(args, "duration")?;
                 self.require_param(args, "confirm")?;
-            },
+            }
             "unfreeze_tos" => {
                 self.require_param(args, "amount")?;
                 self.require_param(args, "confirm")?;
-            },
+            }
             "set_asset_name" => {
                 self.require_param(args, "asset")?;
                 self.require_param(args, "name")?;
-            },
+            }
             "start_rpc_server" => {
                 self.require_param(args, "bind_address")?;
                 self.require_param(args, "username")?;
                 self.require_param(args, "password")?;
-            },
+            }
             "multisig_sign" => {
                 self.require_param(args, "tx_hash")?;
-            },
+            }
             "seed" => {
                 self.require_param(args, "password")?;
-            },
+            }
             "set_nonce" => {
                 self.require_param(args, "nonce")?;
-            },
+            }
             "track_asset" => {
                 self.require_param(args, "asset")?;
-            },
+            }
             "untrack_asset" => {
                 self.require_param(args, "asset")?;
-            },
+            }
             "set_tx_version" => {
                 self.require_param(args, "version")?;
-            },
+            }
             _ => {}
         }
         Ok(())
@@ -485,7 +586,10 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
     if args.has_argument("command") {
         let arg_value = args.get_value("command")?.to_string_value()?;
         let commands = manager.get_commands().lock()?;
-        let cmd = commands.iter().find(|command| *command.get_name() == *arg_value).ok_or(CommandError::CommandNotFound)?;
+        let cmd = commands
+            .iter()
+            .find(|command| *command.get_name() == *arg_value)
+            .ok_or(CommandError::CommandNotFound)?;
 
         // Display command name and description
         manager.message(&format!("Command: {}", cmd.get_name()));
@@ -506,7 +610,12 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
 
                 // If description exists, show it; otherwise show type hints
                 if !arg.get_description().is_empty() {
-                    manager.message(&format!("  <{}> ({}) - {}", arg.get_name(), type_str, arg.get_description()));
+                    manager.message(&format!(
+                        "  <{}> ({}) - {}",
+                        arg.get_name(),
+                        type_str,
+                        arg.get_description()
+                    ));
                 } else {
                     let type_hint = match arg.get_type() {
                         ArgType::Bool => "boolean (true/false/yes/no)",
@@ -534,7 +643,12 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
 
                 // If description exists, show it; otherwise show type hints
                 if !arg.get_description().is_empty() {
-                    manager.message(&format!("  [{}] ({}) - {}", arg.get_name(), type_str, arg.get_description()));
+                    manager.message(&format!(
+                        "  [{}] ({}) - {}",
+                        arg.get_name(),
+                        type_str,
+                        arg.get_description()
+                    ));
                 } else {
                     let type_hint = match arg.get_type() {
                         ArgType::Bool => "boolean (true/false/yes/no)",
@@ -558,16 +672,18 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
                 manager.message("    --exec \"transfer TOS recipient_address 1000\"");
                 manager.message("    --exec \"transfer TOS recipient_address 1000 energy\"");
                 manager.message("  Note: In command mode, confirmation is automatic unless --confirm false is specified");
-            },
+            }
             "freeze_tos" => {
                 manager.message("\nExamples:");
                 manager.message("  --exec \"freeze_tos 5000 30\"  # Freeze 5000 TOS for 30 days");
                 manager.message("  Duration options: 3, 7, 14, 30 days (longer = higher rewards)");
-            },
+            }
             "burn" => {
                 manager.message("\nExamples:");
-                manager.message("  --exec \"burn TOS 100\"  # Burn 100 TOS (auto-confirms in command mode)");
-            },
+                manager.message(
+                    "  --exec \"burn TOS 100\"  # Burn 100 TOS (auto-confirms in command mode)",
+                );
+            }
             _ => {}
         }
     } else {
@@ -590,7 +706,8 @@ fn version(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandEr
 
 fn set_log_level(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
     let arg_value = args.get_value("level")?.to_string_value()?;
-    let level = LogLevel::from_str(&arg_value).map_err(|e| CommandError::InvalidArgument(e.to_owned()))?;
+    let level =
+        LogLevel::from_str(&arg_value).map_err(|e| CommandError::InvalidArgument(e.to_owned()))?;
     log::set_max_level(level.into());
     manager.message(format!("Log level set to {}", level));
 

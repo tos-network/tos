@@ -6,11 +6,11 @@ pub mod stats;
 pub mod stratum;
 pub mod template;
 
-pub use cache::{GhostdagCache, BlockTemplateCache, TipSelectionCache, TransactionCache};
-pub use stats::{MiningStats, MiningStatsSnapshot, BlockStatus};
+pub use cache::{BlockTemplateCache, GhostdagCache, TipSelectionCache, TransactionCache};
+pub use stats::{BlockStatus, MiningStats, MiningStatsSnapshot};
 pub use stratum::{
-    StratumJob, StratumNotification, StratumShare, StratumShareResponse, StratumError,
-    block_header_to_stratum_job, create_stratum_notification, validate_stratum_share,
-    create_share_success, create_share_error,
+    block_header_to_stratum_job, create_share_error, create_share_success,
+    create_stratum_notification, validate_stratum_share, StratumError, StratumJob,
+    StratumNotification, StratumShare, StratumShareResponse,
 };
-pub use template::{BlockTemplateGenerator, OptimizedTxSelector, CacheStats};
+pub use template::{BlockTemplateGenerator, CacheStats, OptimizedTxSelector};

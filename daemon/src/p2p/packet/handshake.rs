@@ -1,21 +1,17 @@
-use log::debug;
-use tos_common::{
-    crypto::{Hash, BlueWorkType},
-    network::Network,
-    serializer::{Reader, ReaderError, Serializer, Writer},
-    time::TimestampSeconds
-};
 use crate::p2p::{
     connection::Connection,
-    peer_list::{
-        SharedPeerList,
-        Peer,
-        Rx,
-    }
+    peer_list::{Peer, Rx, SharedPeerList},
 };
+use log::debug;
 use std::{
     borrow::Cow,
-    fmt::{Display, Error, Formatter}
+    fmt::{Display, Error, Formatter},
+};
+use tos_common::{
+    crypto::{BlueWorkType, Hash},
+    network::Network,
+    serializer::{Reader, ReaderError, Serializer, Writer},
+    time::TimestampSeconds,
 };
 
 // this Handshake is the first data sent when connecting to the server
@@ -53,13 +49,28 @@ pub struct Handshake<'a> {
     blue_work: Cow<'a, BlueWorkType>,
     // By default it's true, and peer allow to be shared to others and/or through API
     // If false, we must not share it
-    can_be_shared: bool
+    can_be_shared: bool,
 } // Server reply with his own list of peers, but we remove all already known by requester for the response.
 
 impl<'a> Handshake<'a> {
     pub const MAX_LEN: usize = 16;
 
-    pub fn new(version: Cow<'a, String>, network: Network, node_tag: Cow<'a, Option<String>>, network_id: Cow<'a, [u8; 16]>, peer_id: u64, local_port: u16, utc_time: TimestampSeconds, topoheight: u64, height: u64, pruned_topoheight: Option<u64>, top_hash: Cow<'a, Hash>, genesis_hash: Cow<'a, Hash>, blue_work: Cow<'a, BlueWorkType>, can_be_shared: bool) -> Self {
+    pub fn new(
+        version: Cow<'a, String>,
+        network: Network,
+        node_tag: Cow<'a, Option<String>>,
+        network_id: Cow<'a, [u8; 16]>,
+        peer_id: u64,
+        local_port: u16,
+        utc_time: TimestampSeconds,
+        topoheight: u64,
+        height: u64,
+        pruned_topoheight: Option<u64>,
+        top_hash: Cow<'a, Hash>,
+        genesis_hash: Cow<'a, Hash>,
+        blue_work: Cow<'a, BlueWorkType>,
+        can_be_shared: bool,
+    ) -> Self {
         debug_assert!(version.len() > 0 && version.len() <= Handshake::MAX_LEN);
         // version cannot be greater than 16 chars
         if let Some(node_tag) = node_tag.as_ref() {
@@ -81,12 +92,18 @@ impl<'a> Handshake<'a> {
             top_hash,
             genesis_hash,
             blue_work,
-            can_be_shared
+            can_be_shared,
         }
     }
 
     // Create a new peer using its connection and this handshake packet
-    pub fn create_peer(self, connection: Connection, priority: bool, peer_list: SharedPeerList, propagate_txs: bool) -> (Peer, Rx) {
+    pub fn create_peer(
+        self,
+        connection: Connection,
+        priority: bool,
+        peer_list: SharedPeerList,
+        propagate_txs: bool,
+    ) -> (Peer, Rx) {
         Peer::new(
             connection,
             self.get_peer_id(),
@@ -101,7 +118,7 @@ impl<'a> Handshake<'a> {
             self.blue_work.into_owned(),
             peer_list,
             self.can_be_shared,
-            propagate_txs
+            propagate_txs,
         )
     }
 
@@ -187,7 +204,7 @@ impl Serializer for Handshake<'_> {
         // Daemon version
         let version = reader.read_string()?;
         if version.len() == 0 || version.len() > Handshake::MAX_LEN {
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         // Network
@@ -197,7 +214,7 @@ impl Serializer for Handshake<'_> {
         let node_tag = reader.read_optional_string()?;
         if let Some(tag) = &node_tag {
             if tag.len() > Handshake::MAX_LEN {
-                return Err(ReaderError::InvalidSize)
+                return Err(ReaderError::InvalidSize);
             }
         }
 
@@ -211,7 +228,7 @@ impl Serializer for Handshake<'_> {
         if let Some(pruned_topoheight) = &pruned_topoheight {
             if *pruned_topoheight == 0 {
                 debug!("Invalid pruned topoheight (0) in handshake packet");
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         }
         let top_hash = reader.read_hash()?;
@@ -219,7 +236,22 @@ impl Serializer for Handshake<'_> {
         let blue_work = BlueWorkType::read(reader)?;
         let can_be_shared = reader.read_bool()?;
 
-        Ok(Handshake::new(Cow::Owned(version), network, Cow::Owned(node_tag), Cow::Owned(network_id), peer_id, local_port, utc_time, topoheight, height, pruned_topoheight, Cow::Owned(top_hash), Cow::Owned(genesis_hash), Cow::Owned(blue_work), can_be_shared))
+        Ok(Handshake::new(
+            Cow::Owned(version),
+            network,
+            Cow::Owned(node_tag),
+            Cow::Owned(network_id),
+            peer_id,
+            local_port,
+            utc_time,
+            topoheight,
+            height,
+            pruned_topoheight,
+            Cow::Owned(top_hash),
+            Cow::Owned(genesis_hash),
+            Cow::Owned(blue_work),
+            can_be_shared,
+        ))
     }
 
     fn size(&self) -> usize {

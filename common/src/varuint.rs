@@ -1,11 +1,11 @@
-use std::{
-    fmt::{self, Display, Formatter},
-    ops::{Add, AddAssign, Div, Mul, Rem, Shl, ShlAssign, Shr, ShrAssign, Sub}
-};
+use crate::serializer::{Reader, ReaderError, Serializer, Writer};
 use log::debug;
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
-use crate::serializer::{Reader, ReaderError, Serializer, Writer};
+use std::{
+    fmt::{self, Display, Formatter},
+    ops::{Add, AddAssign, Div, Mul, Rem, Shl, ShlAssign, Shr, ShrAssign, Sub},
+};
 
 // This is like a variable length integer but up to U256
 // It is mostly used to save difficulty and cumulative difficulty on disk
@@ -248,18 +248,20 @@ impl Serialize for VarUint {
     }
 }
 
-impl <'de> Deserialize<'de> for VarUint {
+impl<'de> Deserialize<'de> for VarUint {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        Ok(VarUint::new(U256::from_dec_str(&s).map_err(serde::de::Error::custom)?))
+        Ok(VarUint::new(
+            U256::from_dec_str(&s).map_err(serde::de::Error::custom)?,
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use primitive_types::U256;
-    use crate::serializer::{Reader, Serializer};
     use super::VarUint;
+    use crate::serializer::{Reader, Serializer};
+    use primitive_types::U256;
 
     #[test]
     fn test_serde_0() {

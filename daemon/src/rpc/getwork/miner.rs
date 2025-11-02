@@ -3,7 +3,7 @@ use std::{fmt, sync::Arc};
 use indexmap::IndexSet;
 use tos_common::{
     crypto::{Hash, PublicKey},
-    time::{get_current_time_in_millis, TimestampMillis}
+    time::{get_current_time_in_millis, TimestampMillis},
 };
 
 pub struct Miner {
@@ -20,7 +20,7 @@ pub struct Miner {
     // blocks rejected since he is connected
     blocks_rejected: usize,
     // timestamp of the last invalid block received
-    last_invalid_block: TimestampMillis
+    last_invalid_block: TimestampMillis,
 }
 
 impl Miner {
@@ -32,7 +32,7 @@ impl Miner {
             name,
             blocks_accepted: IndexSet::new(),
             blocks_rejected: 0,
-            last_invalid_block: 0
+            last_invalid_block: 0,
         }
     }
 
@@ -64,12 +64,22 @@ impl Miner {
 
 impl fmt::Display for Miner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let valid_blocks = self.blocks_accepted.iter()
+        let valid_blocks = self
+            .blocks_accepted
+            .iter()
             .take(8)
             .map(|h| h.to_string())
             .collect::<Vec<_>>()
             .join(",");
 
-        write!(f, "Miner[address={}, name={}, accepted={} ({}), rejected={}]", self.key.as_address(self.mainnet), self.name, self.blocks_accepted.len(), valid_blocks, self.blocks_rejected)
+        write!(
+            f,
+            "Miner[address={}, name={}, accepted={} ({}), rejected={}]",
+            self.key.as_address(self.mainnet),
+            self.name,
+            self.blocks_accepted.len(),
+            valid_blocks,
+            self.blocks_rejected
+        )
     }
 }

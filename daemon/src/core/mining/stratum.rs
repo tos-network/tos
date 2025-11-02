@@ -2,11 +2,7 @@
 // Provides Stratum-compatible mining protocol for pool compatibility
 
 use serde::{Deserialize, Serialize};
-use tos_common::{
-    block::BlockHeader,
-    crypto::Hashable,
-    difficulty::Difficulty,
-};
+use tos_common::{block::BlockHeader, crypto::Hashable, difficulty::Difficulty};
 
 /// Stratum mining job for mining pools
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,7 +162,8 @@ pub fn block_header_to_stratum_job(
     let header_hash = header.hash().to_string();
 
     // Get previous block hash (first parent)
-    let prev_hash = header.get_parents()
+    let prev_hash = header
+        .get_parents()
         .first()
         .map(|h| h.to_string())
         .unwrap_or_else(|| "0".repeat(64));
@@ -181,7 +178,7 @@ pub fn block_header_to_stratum_job(
         job_id,
         header_hash,
         prev_hash,
-        coinbase: String::new(), // TOS doesn't use separate coinbase
+        coinbase: String::new(),     // TOS doesn't use separate coinbase
         merkle_branches: Vec::new(), // TOS doesn't need merkle branches
         version: header.get_version() as u8,
         nbits,
@@ -194,7 +191,10 @@ pub fn block_header_to_stratum_job(
 }
 
 /// Convert Stratum job to mining notification
-pub fn create_stratum_notification(job: StratumJob, notification_id: Option<u64>) -> StratumNotification {
+pub fn create_stratum_notification(
+    job: StratumJob,
+    notification_id: Option<u64>,
+) -> StratumNotification {
     StratumNotification {
         id: notification_id,
         method: "mining.notify".to_string(),
@@ -224,7 +224,10 @@ pub fn validate_stratum_share(share: &StratumShare) -> Result<(), StratumError> 
         // SECURITY FIX: Hard limit on input string length to prevent memory exhaustion DoS
         const MAX_EXTRA_NONCE2_HEX_LENGTH: usize = 128;
         if share.extra_nonce2.len() > MAX_EXTRA_NONCE2_HEX_LENGTH {
-            return Err(StratumError::new(20, "Invalid extra nonce2: hex string too long"));
+            return Err(StratumError::new(
+                20,
+                "Invalid extra nonce2: hex string too long",
+            ));
         }
 
         if hex::decode(&share.extra_nonce2).is_err() {
@@ -257,8 +260,8 @@ pub fn create_share_error(id: u64, error: StratumError) -> StratumShareResponse 
 mod tests {
     use super::*;
     use tos_common::{
-        crypto::{PublicKey, Hash},
-        block::{EXTRA_NONCE_SIZE, BlockHeader, BlockVersion},
+        block::{BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
+        crypto::{Hash, PublicKey},
     };
 
     #[test]
@@ -278,7 +281,7 @@ mod tests {
     #[test]
     fn test_block_header_to_stratum_job() {
         // Create a test public key - read from bytes using Serializer trait
-        use tos_common::serializer::{Serializer, Reader};
+        use tos_common::serializer::{Reader, Serializer};
         let mut reader = Reader::new(&[1u8; 32]);
         let address = PublicKey::read(&mut reader).expect("Failed to read public key");
 

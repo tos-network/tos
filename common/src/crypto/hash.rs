@@ -1,14 +1,17 @@
-use crate::{block::Algorithm, serializer::{Reader, ReaderError, Serializer, Writer}};
+use crate::{
+    block::Algorithm,
+    serializer::{Reader, ReaderError, Serializer, Writer},
+};
+use blake3::hash as blake3_hash;
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     convert::TryInto,
     fmt::{Display, Error, Formatter},
     hash::Hasher,
-    str::FromStr
+    str::FromStr,
 };
-use serde::de::Error as SerdeError;
-use serde::{Deserialize, Serialize};
-use blake3::hash as blake3_hash;
 
 pub use tos_hash::Error as TosHashError;
 use tos_hash::{v1, v2};
@@ -71,14 +74,15 @@ pub fn pow_hash(work: &[u8], algorithm: Algorithm) -> Result<Hash, TosHashError>
             let mut input = v1::AlignedInput::default();
             let slice = input.as_mut_slice()?;
             slice[..work.len()].copy_from_slice(work);
-        
+
             v1::tos_hash(slice, &mut scratchpad)
-        },
+        }
         Algorithm::V2 => {
             let mut scratchpad = v2::ScratchPad::default();
             v2::tos_hash(work, &mut scratchpad)
-        },
-    }.map(Hash::new)
+        }
+    }
+    .map(Hash::new)
 }
 
 impl Serializer for Hash {
@@ -116,7 +120,8 @@ impl Display for Hash {
 
 impl Serialize for Hash {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where S: serde::Serializer,
+    where
+        S: serde::Serializer,
     {
         serializer.serialize_str(&self.to_hex())
     }
@@ -124,14 +129,18 @@ impl Serialize for Hash {
 
 impl<'a> Deserialize<'a> for Hash {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where D: serde::Deserializer<'a> {
+    where
+        D: serde::Deserializer<'a>,
+    {
         let hex = String::deserialize(deserializer)?;
         if hex.len() != HASH_SIZE * 2 {
-            return Err(SerdeError::custom("Invalid hex length"))
+            return Err(SerdeError::custom("Invalid hex length"));
         }
 
         let decoded_hex = hex::decode(hex).map_err(SerdeError::custom)?;
-        let bytes: [u8; 32] = decoded_hex.try_into().map_err(|_| SerdeError::custom("Could not transform hex to bytes array for Hash"))?;
+        let bytes: [u8; 32] = decoded_hex
+            .try_into()
+            .map_err(|_| SerdeError::custom("Could not transform hex to bytes array for Hash"))?;
         Ok(Hash::new(bytes))
     }
 }

@@ -3,7 +3,7 @@ use log::trace;
 use tos_common::{
     block::{Block, BlockHeader, TopoHeight},
     crypto::Hash,
-    immutable::Immutable
+    immutable::Immutable,
 };
 
 use crate::core::{
@@ -11,12 +11,8 @@ use crate::core::{
     storage::{
         rocksdb::Column,
         sled::{TOP_HEIGHT, TOP_TOPO_HEIGHT},
-        BlockProvider,
-        DagOrderProvider,
-        DifficultyProvider,
-        RocksStorage,
-        StateProvider,
-    }
+        BlockProvider, DagOrderProvider, DifficultyProvider, RocksStorage, StateProvider,
+    },
 };
 
 #[async_trait]
@@ -24,7 +20,8 @@ impl StateProvider for RocksStorage {
     // Get the top block hash of the chain
     async fn get_top_block_hash(&self) -> Result<Hash, BlockchainError> {
         trace!("get top block hash");
-        self.get_hash_at_topo_height(self.get_top_topoheight().await?).await
+        self.get_hash_at_topo_height(self.get_top_topoheight().await?)
+            .await
     }
 
     // Get the top block of the chain, based on top block hash
@@ -35,7 +32,9 @@ impl StateProvider for RocksStorage {
     }
 
     // Get the top block header of the chain, based on top block hash
-    async fn get_top_block_header(&self) -> Result<(Immutable<BlockHeader>, Hash), BlockchainError> {
+    async fn get_top_block_header(
+        &self,
+    ) -> Result<(Immutable<BlockHeader>, Hash), BlockchainError> {
         trace!("get top block header");
         let hash = self.get_top_block_hash().await?;
         Ok((self.get_block_header_by_hash(&hash).await?, hash))

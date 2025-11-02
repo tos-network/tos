@@ -1,4 +1,4 @@
-pub const LOGO_ASCII: &str =r#"
+pub const LOGO_ASCII: &str = r#"
 T   O   S   T   O   S   T   O   S   T   O   S
   O   S   T   O   S   T   O   S   T   O   S  
 T   O   S   T   O   S   T   O   S   T   O   S

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tempdir::TempDir;
 use tos_common::{
     block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
-    crypto::{Hash, Hashable, elgamal::CompressedPublicKey},
+    crypto::{elgamal::CompressedPublicKey, Hash, Hashable},
     difficulty::Difficulty,
     immutable::Immutable,
     network::Network,
@@ -24,10 +24,7 @@ use tos_daemon::core::{
     reachability::TosReachability,
     storage::{
         sled::{SledStorage, StorageMode},
-        GhostdagDataProvider,
-        DifficultyProvider,
-        BlockProvider,
-        TipsProvider,
+        BlockProvider, DifficultyProvider, GhostdagDataProvider, TipsProvider,
     },
 };
 
@@ -47,21 +44,21 @@ fn create_test_pubkey(bytes: [u8; 32]) -> CompressedPublicKey {
 
 /// Test storage wrapper with automatic cleanup
 pub struct TestStorage {
-    _temp_dir: TempDir,  // Keep alive for automatic cleanup
+    _temp_dir: TempDir, // Keep alive for automatic cleanup
     pub storage: SledStorage,
 }
 
 impl TestStorage {
     /// Create a new test storage instance with temporary directory
     pub fn new() -> Result<Self, BlockchainError> {
-        let temp_dir = TempDir::new("tos_test_storage")
-            .map_err(|_e| BlockchainError::InvalidConfig)?;
+        let temp_dir =
+            TempDir::new("tos_test_storage").map_err(|_e| BlockchainError::InvalidConfig)?;
 
         let storage = SledStorage::new(
             temp_dir.path().to_string_lossy().to_string(),
-            Some(1024 * 1024),  // cache_size: 1MB
+            Some(1024 * 1024), // cache_size: 1MB
             Network::Devnet,
-            1024 * 1024,  // internal_cache_size: 1MB
+            1024 * 1024, // internal_cache_size: 1MB
             StorageMode::HighThroughput,
         )?;
 
@@ -184,7 +181,7 @@ impl DAATestHarness {
     pub async fn new(mut storage: SledStorage) -> Result<Self, BlockchainError> {
         // Create genesis block header first using new_simple()
         let genesis_header = BlockBuilder::new()
-            .with_timestamp(1600000000000)  // Fixed genesis timestamp (milliseconds)
+            .with_timestamp(1600000000000) // Fixed genesis timestamp (milliseconds)
             .with_parents(vec![])
             .build();
 
@@ -203,19 +200,25 @@ impl DAATestHarness {
         // Store genesis block with low difficulty for testing
         // Use difficulty=1 to avoid blue work overflow in long test chains
         let genesis_header_arc = Arc::new(genesis_header);
-        storage.save_block(
-            genesis_header_arc.clone(),
-            &[],
-            Difficulty::from(1u64),  // Low difficulty for testing
-            VarUint::from(0u64),
-            genesis_hash.clone().into(),
-        ).await?;
+        storage
+            .save_block(
+                genesis_header_arc.clone(),
+                &[],
+                Difficulty::from(1u64), // Low difficulty for testing
+                VarUint::from(0u64),
+                genesis_hash.clone().into(),
+            )
+            .await?;
 
         // Store genesis GHOSTDAG data
-        storage.insert_ghostdag_data(&genesis_hash, Arc::new(genesis_ghostdag_data)).await?;
+        storage
+            .insert_ghostdag_data(&genesis_hash, Arc::new(genesis_ghostdag_data))
+            .await?;
 
         // Initialize tips
-        storage.store_tips(&[genesis_hash.clone()].into_iter().collect()).await?;
+        storage
+            .store_tips(&[genesis_hash.clone()].into_iter().collect())
+            .await?;
 
         Ok(Self {
             storage,
@@ -248,10 +251,7 @@ impl DAATestHarness {
         let block_hash = header.hash();
 
         // Run GHOSTDAG algorithm to get DAA score and other data
-        let ghostdag_data = self.ghostdag.ghostdag(
-            &self.storage,
-            &parents,
-        ).await?;
+        let ghostdag_data = self.ghostdag.ghostdag(&self.storage, &parents).await?;
 
         // Calculate difficulty based on DAA
         use tos_daemon::core::ghostdag::calculate_target_difficulty;
@@ -259,20 +259,25 @@ impl DAATestHarness {
             &self.storage,
             &ghostdag_data.selected_parent,
             ghostdag_data.daa_score,
-        ).await?;
+        )
+        .await?;
 
         // Store block with calculated difficulty
         let header_arc = Arc::new(header);
-        self.storage.save_block(
-            header_arc.clone(),
-            &[],
-            difficulty,
-            VarUint::from(self.block_count),
-            block_hash.clone().into(),
-        ).await?;
+        self.storage
+            .save_block(
+                header_arc.clone(),
+                &[],
+                difficulty,
+                VarUint::from(self.block_count),
+                block_hash.clone().into(),
+            )
+            .await?;
 
         // Store GHOSTDAG data
-        self.storage.insert_ghostdag_data(&block_hash, Arc::new(ghostdag_data)).await?;
+        self.storage
+            .insert_ghostdag_data(&block_hash, Arc::new(ghostdag_data))
+            .await?;
 
         // Update tips
         let mut tips = self.storage.get_tips().await?;
@@ -305,7 +310,10 @@ impl DAATestHarness {
         let mut current_parent = self.current_tip.clone();
 
         // Get current timestamp from parent
-        let parent_header = self.storage.get_block_header_by_hash(&current_parent).await?;
+        let parent_header = self
+            .storage
+            .get_block_header_by_hash(&current_parent)
+            .await?;
         let mut current_timestamp = parent_header.get_timestamp();
 
         // Convert seconds to milliseconds
@@ -313,7 +321,9 @@ impl DAATestHarness {
 
         for _ in 0..count {
             current_timestamp += timestamp_delta_ms;
-            let hash = self.add_block(current_timestamp, vec![current_parent.clone()]).await?;
+            let hash = self
+                .add_block(current_timestamp, vec![current_parent.clone()])
+                .await?;
             hashes.push(hash.clone());
             current_parent = hash;
         }
@@ -342,7 +352,10 @@ impl DAATestHarness {
 
     /// Get GHOSTDAG data for a block
     #[allow(dead_code)]
-    pub async fn get_ghostdag_data(&self, hash: &Hash) -> Result<Arc<TosGhostdagData>, BlockchainError> {
+    pub async fn get_ghostdag_data(
+        &self,
+        hash: &Hash,
+    ) -> Result<Arc<TosGhostdagData>, BlockchainError> {
         self.storage.get_ghostdag_data(hash).await
     }
 
@@ -370,9 +383,7 @@ mod tests {
 
     #[test]
     fn test_block_builder() {
-        let block = BlockBuilder::new()
-            .with_timestamp(1234567890000)
-            .build();
+        let block = BlockBuilder::new().with_timestamp(1234567890000).build();
 
         assert_eq!(block.get_timestamp(), 1234567890000);
     }

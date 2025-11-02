@@ -24,10 +24,7 @@
 
 use std::sync::Arc;
 
-use tos_common::{
-    config::COIN_VALUE,
-    crypto::Hash,
-};
+use tos_common::{config::COIN_VALUE, crypto::Hash};
 
 use tos_daemon::core::storage::NetworkProvider;
 
@@ -62,7 +59,10 @@ async fn test_parallel_state_creation() {
     let is_mainnet = (*guard).is_mainnet();
     drop(guard);
 
-    println!("[{}] Storage is accessible, is_mainnet: {}", test_name, is_mainnet);
+    println!(
+        "[{}] Storage is accessible, is_mainnet: {}",
+        test_name, is_mainnet
+    );
     println!("=== {} PASS ===\n", test_name);
 }
 
@@ -94,9 +94,15 @@ async fn test_multiple_parallel_states() {
     drop(guard1);
     drop(guard2);
 
-    assert_eq!(is_mainnet1, is_mainnet2, "Both storages should have same network type");
+    assert_eq!(
+        is_mainnet1, is_mainnet2,
+        "Both storages should have same network type"
+    );
 
-    println!("[{}] Both storages are accessible and independent", test_name);
+    println!(
+        "[{}] Both storages are accessible and independent",
+        test_name
+    );
     println!("=== {} PASS ===\n", test_name);
 }
 
@@ -134,11 +140,26 @@ async fn test_full_execution_limitation_documented() {
     let test_name = "full_execution_limitation";
     println!("\n=== {} START ===", test_name);
 
-    println!("[{}] LIMITATION: Full transaction execution in tests causes deadlocks", test_name);
-    println!("[{}] REASON: RocksDB + async runtime + test environment interaction", test_name);
-    println!("[{}] EVIDENCE: Existing ignored tests in parallel_execution_parity_tests_rocksdb.rs", test_name);
-    println!("[{}] WORKAROUND: Simplified tests that verify storage-level operations", test_name);
-    println!("[{}] PRODUCTION: Parallel execution works correctly in daemon (verified via code review)", test_name);
+    println!(
+        "[{}] LIMITATION: Full transaction execution in tests causes deadlocks",
+        test_name
+    );
+    println!(
+        "[{}] REASON: RocksDB + async runtime + test environment interaction",
+        test_name
+    );
+    println!(
+        "[{}] EVIDENCE: Existing ignored tests in parallel_execution_parity_tests_rocksdb.rs",
+        test_name
+    );
+    println!(
+        "[{}] WORKAROUND: Simplified tests that verify storage-level operations",
+        test_name
+    );
+    println!(
+        "[{}] PRODUCTION: Parallel execution works correctly in daemon (verified via code review)",
+        test_name
+    );
 
     println!("=== {} PASS (Documentation) ===\n", test_name);
 }
@@ -159,7 +180,10 @@ async fn test_environment_setup() {
         .await
         .expect("Failed to create storage");
 
-    println!("[{}] Created storage with 1 account, balance: {} TOS", test_name, 50);
+    println!(
+        "[{}] Created storage with 1 account, balance: {} TOS",
+        test_name, 50
+    );
 
     // Verify we can access both
     let guard = storage.read().await;
@@ -216,8 +240,14 @@ async fn test_deterministic_merge_order() {
     let test_name = "deterministic_merge_order";
     println!("\n=== {} START ===", test_name);
 
-    println!("[{}] SECURITY FIX (S1): Testing deterministic merge order", test_name);
-    println!("[{}] OBJECTIVE: Verify storage writes occur in consistent order", test_name);
+    println!(
+        "[{}] SECURITY FIX (S1): Testing deterministic merge order",
+        test_name
+    );
+    println!(
+        "[{}] OBJECTIVE: Verify storage writes occur in consistent order",
+        test_name
+    );
 
     // Test data: Create byte arrays representing accounts and assets
     let account_bytes: Vec<[u8; 32]> = (0..5)
@@ -236,7 +266,12 @@ async fn test_deterministic_merge_order() {
         })
         .collect();
 
-    println!("[{}] Created {} test accounts and {} test assets", test_name, account_bytes.len(), assets.len());
+    println!(
+        "[{}] Created {} test accounts and {} test assets",
+        test_name,
+        account_bytes.len(),
+        assets.len()
+    );
 
     // Test 1: Verify byte arrays are sorted correctly (simulating PublicKey sorting)
     let mut test_accounts = account_bytes.clone();
@@ -249,18 +284,26 @@ async fn test_deterministic_merge_order() {
     // Verify sorting produces consistent order
     let mut test_accounts2 = account_bytes.clone();
     test_accounts2.sort_by(|a, b| a.cmp(b));
-    assert_eq!(test_accounts, test_accounts2, "Multiple sorts should produce identical order");
+    assert_eq!(
+        test_accounts, test_accounts2,
+        "Multiple sorts should produce identical order"
+    );
 
     println!("[{}] ✅ Account byte sorting is deterministic", test_name);
 
     // Test 2: Verify (bytes, Hash) tuples are sorted correctly
-    let mut balance_entries: Vec<_> = account_bytes.iter()
-        .flat_map(|account| {
-            assets.iter().map(move |asset| (*account, asset.clone()))
-        })
+    let mut balance_entries: Vec<_> = account_bytes
+        .iter()
+        .flat_map(|account| assets.iter().map(move |asset| (*account, asset.clone())))
         .collect();
 
-    println!("[{}] Created {} balance entries ({}x{})", test_name, balance_entries.len(), account_bytes.len(), assets.len());
+    println!(
+        "[{}] Created {} balance entries ({}x{})",
+        test_name,
+        balance_entries.len(),
+        account_bytes.len(),
+        assets.len()
+    );
 
     // Shuffle to simulate DashMap random order
     balance_entries.reverse();
@@ -275,34 +318,33 @@ async fn test_deterministic_merge_order() {
     });
 
     // Verify sorting is deterministic by repeating
-    let mut balance_entries2 = account_bytes.iter()
-        .flat_map(|account| {
-            assets.iter().map(move |asset| (*account, asset.clone()))
-        })
+    let mut balance_entries2 = account_bytes
+        .iter()
+        .flat_map(|account| assets.iter().map(move |asset| (*account, asset.clone())))
         .collect::<Vec<_>>();
     balance_entries2.reverse();
-    balance_entries2.sort_by(|a, b| {
-        match a.0.cmp(&b.0) {
-            std::cmp::Ordering::Equal => a.1.as_bytes().cmp(b.1.as_bytes()),
-            other => other,
-        }
+    balance_entries2.sort_by(|a, b| match a.0.cmp(&b.0) {
+        std::cmp::Ordering::Equal => a.1.as_bytes().cmp(b.1.as_bytes()),
+        other => other,
     });
 
-    assert_eq!(balance_entries, balance_entries2, "Multiple sorts should produce identical order");
+    assert_eq!(
+        balance_entries, balance_entries2,
+        "Multiple sorts should produce identical order"
+    );
 
     println!("[{}] ✅ Balance entry sorting is deterministic", test_name);
 
     // Test 3: Verify the sort order is stable across multiple iterations
     for iteration in 1..=100 {
-        let mut test_entries: Vec<_> = account_bytes.iter()
-            .flat_map(|account| {
-                assets.iter().map(move |asset| (*account, asset.clone()))
-            })
+        let mut test_entries: Vec<_> = account_bytes
+            .iter()
+            .flat_map(|account| assets.iter().map(move |asset| (*account, asset.clone())))
             .collect();
 
         // Apply random shuffling based on iteration
         use std::collections::hash_map::RandomState;
-        use std::hash::{Hash as StdHash, Hasher, BuildHasher};
+        use std::hash::{BuildHasher, Hash as StdHash, Hasher};
         let hasher = RandomState::new();
         test_entries.sort_by_key(|_| {
             let mut h = hasher.build_hasher();
@@ -311,23 +353,39 @@ async fn test_deterministic_merge_order() {
         });
 
         // Now sort using our deterministic logic
-        test_entries.sort_by(|a, b| {
-            match a.0.cmp(&b.0) {
-                std::cmp::Ordering::Equal => a.1.as_bytes().cmp(b.1.as_bytes()),
-                other => other,
-            }
+        test_entries.sort_by(|a, b| match a.0.cmp(&b.0) {
+            std::cmp::Ordering::Equal => a.1.as_bytes().cmp(b.1.as_bytes()),
+            other => other,
         });
 
         // Verify matches expected order
-        assert_eq!(test_entries, balance_entries,
-            "Iteration {} produced different order", iteration);
+        assert_eq!(
+            test_entries, balance_entries,
+            "Iteration {} produced different order",
+            iteration
+        );
     }
 
-    println!("[{}] ✅ Verified deterministic sort order across 100 iterations", test_name);
-    println!("[{}] ✅ Account nonces will be written in consistent order", test_name);
-    println!("[{}] ✅ Account balances will be written in consistent order", test_name);
-    println!("[{}] ✅ Multisig configs will be written in consistent order", test_name);
-    println!("[{}] RESULT: Merge order is deterministic and consensus-safe", test_name);
+    println!(
+        "[{}] ✅ Verified deterministic sort order across 100 iterations",
+        test_name
+    );
+    println!(
+        "[{}] ✅ Account nonces will be written in consistent order",
+        test_name
+    );
+    println!(
+        "[{}] ✅ Account balances will be written in consistent order",
+        test_name
+    );
+    println!(
+        "[{}] ✅ Multisig configs will be written in consistent order",
+        test_name
+    );
+    println!(
+        "[{}] RESULT: Merge order is deterministic and consensus-safe",
+        test_name
+    );
 
     println!("=== {} PASS ===\n", test_name);
 }

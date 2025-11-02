@@ -1,14 +1,9 @@
-use async_trait::async_trait;
-use log::{debug, trace};
 use crate::core::{
     error::BlockchainError,
-    storage::{
-        rocksdb::Snapshot,
-        CacheProvider,
-        CommitPointProvider,
-        RocksStorage
-    }
+    storage::{rocksdb::Snapshot, CacheProvider, CommitPointProvider, RocksStorage},
 };
+use async_trait::async_trait;
+use log::{debug, trace};
 
 #[async_trait]
 impl CommitPointProvider for RocksStorage {
@@ -29,7 +24,9 @@ impl CommitPointProvider for RocksStorage {
 
     async fn end_commit_point(&mut self, apply: bool) -> Result<(), BlockchainError> {
         trace!("end commit point");
-        let snapshot = self.snapshot.take()
+        let snapshot = self
+            .snapshot
+            .take()
             .ok_or(BlockchainError::CommitPointNotStarted)?;
 
         if apply {

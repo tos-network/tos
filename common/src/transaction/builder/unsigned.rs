@@ -1,27 +1,13 @@
-use serde::{Deserialize, Serialize};
 use crate::{
     account::Nonce,
-    crypto::{
-        elgamal::CompressedPublicKey,
-        hash,
-        Hash,
-        KeyPair,
-    },
-    serializer::{
-        Reader,
-        ReaderError,
-        Serializer,
-        Writer
-    },
+    crypto::{elgamal::CompressedPublicKey, hash, Hash, KeyPair},
+    serializer::{Reader, ReaderError, Serializer, Writer},
     transaction::{
         multisig::{MultiSig, SignatureId},
-        FeeType,
-        Reference,
-        Transaction,
-        TransactionType,
-        TxVersion
-    }
+        FeeType, Reference, Transaction, TransactionType, TxVersion,
+    },
 };
+use serde::{Deserialize, Serialize};
 
 // Used to build the final transaction
 // It can include the multi-signature logic
@@ -185,11 +171,11 @@ impl Serializer for UnsignedTransaction {
 
     fn size(&self) -> usize {
         self.version.size()
-        + self.source.size()
-        + self.data.size()
-        + self.fee.size()
-        + self.fee_type.size()
-        + self.nonce.size()
-        + self.reference.size()
+            + self.source.size()
+            + self.data.size()
+            + self.fee.size()
+            + self.fee_type.size()
+            + self.nonce.size()
+            + self.reference.size()
     }
 }

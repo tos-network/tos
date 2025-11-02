@@ -32,19 +32,18 @@
 
 use std::sync::Arc;
 use tos_common::{
-    config::{TOS_ASSET, COIN_VALUE},
-    crypto::{KeyPair, Hashable, Hash},
     block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
+    config::{COIN_VALUE, TOS_ASSET},
+    crypto::{Hash, Hashable, KeyPair},
     immutable::Immutable,
 };
 use tos_daemon::core::{
-    storage::{BalanceProvider, NonceProvider},
     state::parallel_chain_state::ParallelChainState,
+    storage::{BalanceProvider, NonceProvider},
 };
 use tos_environment::Environment;
 use tos_testing_integration::utils::storage_helpers::{
-    create_test_rocksdb_storage,
-    setup_account_rocksdb,
+    create_test_rocksdb_storage, setup_account_rocksdb,
 };
 
 /// Helper to create a dummy block for ParallelChainState
@@ -52,18 +51,18 @@ fn create_dummy_block() -> Block {
     let miner = KeyPair::new().get_public_key().compress();
     let header = BlockHeader::new(
         BlockVersion::V0,
-        vec![],  // parents_by_level
-        0,       // blue_score
-        0,       // daa_score
-        0u64.into(),  // blue_work
-        Hash::zero(),  // pruning_point
-        0,       // timestamp
-        0,       // bits
-        [0u8; EXTRA_NONCE_SIZE],  // extra_nonce
-        miner,   // miner
-        Hash::zero(),  // hash_merkle_root
-        Hash::zero(),  // accepted_id_merkle_root
-        Hash::zero(),  // utxo_commitment
+        vec![],                  // parents_by_level
+        0,                       // blue_score
+        0,                       // daa_score
+        0u64.into(),             // blue_work
+        Hash::zero(),            // pruning_point
+        0,                       // timestamp
+        0,                       // bits
+        [0u8; EXTRA_NONCE_SIZE], // extra_nonce
+        miner,                   // miner
+        Hash::zero(),            // hash_merkle_root
+        Hash::zero(),            // accepted_id_merkle_root
+        Hash::zero(),            // utxo_commitment
     );
 
     Block::new(Immutable::Arc(Arc::new(header)), vec![])
@@ -113,8 +112,8 @@ async fn test_balance_conflict_detection() {
     let parallel_state = ParallelChainState::new(
         Arc::clone(&storage),
         environment,
-        0,  // stable_topoheight
-        1,  // topoheight
+        0, // stable_topoheight
+        1, // topoheight
         BlockVersion::V0,
         dummy_block,
         block_hash,
@@ -127,11 +126,20 @@ async fn test_balance_conflict_detection() {
     // Operation 1: Load Alice's balance and deduct 100 TOS
     {
         println!("  - Operation 1: Loading balance and deducting 100 TOS");
-        parallel_state.ensure_account_loaded(&alice_pubkey).await.expect("Failed to load account");
-        parallel_state.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.expect("Failed to load balance");
+        parallel_state
+            .ensure_account_loaded(&alice_pubkey)
+            .await
+            .expect("Failed to load account");
+        parallel_state
+            .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+            .await
+            .expect("Failed to load balance");
 
         let original_balance = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
-        println!("    Original balance: {} TOS", original_balance / COIN_VALUE);
+        println!(
+            "    Original balance: {} TOS",
+            original_balance / COIN_VALUE
+        );
 
         // In real scenario, Transaction::apply_with_partial_verify would do this
         // For testing, we simulate the balance deduction
@@ -146,10 +154,16 @@ async fn test_balance_conflict_detection() {
     // Operation 2: Load Alice's balance (already in cache) and deduct another 200 TOS
     {
         println!("  - Operation 2: Loading balance and deducting 200 TOS");
-        parallel_state.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.expect("Failed to load balance");
+        parallel_state
+            .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+            .await
+            .expect("Failed to load balance");
 
         let current_balance = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
-        println!("    Current balance (after op1): {} TOS", current_balance / COIN_VALUE);
+        println!(
+            "    Current balance (after op1): {} TOS",
+            current_balance / COIN_VALUE
+        );
 
         let new_balance = current_balance - 200 * COIN_VALUE;
         #[allow(deprecated)]
@@ -162,14 +176,28 @@ async fn test_balance_conflict_detection() {
     // Step 5: Verify conflict detection via modified balances tracking
     println!("Step 5/6: Verifying conflict detection...");
     let modified_balances = parallel_state.get_modified_balances();
-    println!("  - Number of modified balances: {}", modified_balances.len());
+    println!(
+        "  - Number of modified balances: {}",
+        modified_balances.len()
+    );
 
-    assert_eq!(modified_balances.len(), 1, "Should detect exactly one modified balance (Alice's)");
+    assert_eq!(
+        modified_balances.len(),
+        1,
+        "Should detect exactly one modified balance (Alice's)"
+    );
 
     let ((modified_account, modified_asset), final_balance) = &modified_balances[0];
-    assert_eq!(*modified_account, alice_pubkey, "Modified account should be Alice");
+    assert_eq!(
+        *modified_account, alice_pubkey,
+        "Modified account should be Alice"
+    );
     assert_eq!(*modified_asset, TOS_ASSET, "Modified asset should be TOS");
-    assert_eq!(*final_balance, 700 * COIN_VALUE, "Final balance should be 700 TOS (1000 - 100 - 200)");
+    assert_eq!(
+        *final_balance,
+        700 * COIN_VALUE,
+        "Final balance should be 700 TOS (1000 - 100 - 200)"
+    );
 
     println!("  ✓ Conflict detected: Both operations modified Alice's balance");
     println!("  ✓ Final balance: {} TOS", final_balance / COIN_VALUE);
@@ -197,7 +225,10 @@ async fn test_balance_conflict_detection() {
             700 * COIN_VALUE,
             "Alice's final balance should be 700 TOS in storage"
         );
-        println!("  ✓ Storage state verified: {} TOS", alice_balance.get_balance() / COIN_VALUE);
+        println!(
+            "  ✓ Storage state verified: {} TOS",
+            alice_balance.get_balance() / COIN_VALUE
+        );
     }
 
     println!("✓ Test passed: Balance conflict detection working correctly\n");
@@ -247,8 +278,8 @@ async fn test_nonce_conflict_detection() {
     let parallel_state = ParallelChainState::new(
         Arc::clone(&storage),
         environment,
-        0,  // stable_topoheight
-        1,  // topoheight
+        0, // stable_topoheight
+        1, // topoheight
         BlockVersion::V0,
         dummy_block,
         block_hash,
@@ -259,7 +290,10 @@ async fn test_nonce_conflict_detection() {
     println!("Step 4/6: Simulating nonce conflict...");
 
     // Load Alice's account
-    parallel_state.ensure_account_loaded(&alice_pubkey).await.expect("Failed to load account");
+    parallel_state
+        .ensure_account_loaded(&alice_pubkey)
+        .await
+        .expect("Failed to load account");
 
     // Operation 1: Transaction with nonce 1
     {
@@ -281,11 +315,16 @@ async fn test_nonce_conflict_detection() {
 
         // In real system, this would fail validation because nonce != expected
         // For testing, we verify the conflict is detected via modified nonces
-        assert_eq!(current_nonce, 1, "Nonce should already be 1 (conflict detected)");
+        assert_eq!(
+            current_nonce, 1,
+            "Nonce should already be 1 (conflict detected)"
+        );
 
         // Attempting to set to same nonce again
         parallel_state.set_nonce(&alice_pubkey, 2);
-        println!("    Updated nonce: 2 (sequential execution would fail, but testing conflict tracking)");
+        println!(
+            "    Updated nonce: 2 (sequential execution would fail, but testing conflict tracking)"
+        );
     }
 
     // Step 5: Verify conflict detection via modified nonces tracking
@@ -293,10 +332,17 @@ async fn test_nonce_conflict_detection() {
     let modified_nonces = parallel_state.get_modified_nonces();
     println!("  - Number of modified nonces: {}", modified_nonces.len());
 
-    assert_eq!(modified_nonces.len(), 1, "Should detect exactly one modified nonce (Alice's)");
+    assert_eq!(
+        modified_nonces.len(),
+        1,
+        "Should detect exactly one modified nonce (Alice's)"
+    );
 
     let (modified_account, final_nonce) = &modified_nonces[0];
-    assert_eq!(*modified_account, alice_pubkey, "Modified account should be Alice");
+    assert_eq!(
+        *modified_account, alice_pubkey,
+        "Modified account should be Alice"
+    );
     assert_eq!(*final_nonce, 2, "Final nonce should be 2");
 
     println!("  ✓ Conflict detected: Both operations modified Alice's nonce");
@@ -325,7 +371,10 @@ async fn test_nonce_conflict_detection() {
             2,
             "Alice's final nonce should be 2 in storage"
         );
-        println!("  ✓ Storage state verified: nonce = {}", alice_nonce.get_nonce());
+        println!(
+            "  ✓ Storage state verified: nonce = {}",
+            alice_nonce.get_nonce()
+        );
     }
 
     println!("✓ Test passed: Nonce conflict detection working correctly\n");
@@ -381,8 +430,8 @@ async fn test_read_write_conflict_detection() {
     let parallel_state = ParallelChainState::new(
         Arc::clone(&storage),
         environment,
-        0,  // stable_topoheight
-        1,  // topoheight
+        0, // stable_topoheight
+        1, // topoheight
         BlockVersion::V0,
         dummy_block,
         block_hash,
@@ -393,14 +442,29 @@ async fn test_read_write_conflict_detection() {
     println!("Step 4/7: TX1 - Alice sends 100 TOS to Bob...");
     {
         // Load accounts and balances
-        parallel_state.ensure_account_loaded(&alice_pubkey).await.expect("Failed to load Alice");
-        parallel_state.ensure_account_loaded(&bob_pubkey).await.expect("Failed to load Bob");
-        parallel_state.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.expect("Failed to load Alice balance");
-        parallel_state.ensure_balance_loaded(&bob_pubkey, &TOS_ASSET).await.expect("Failed to load Bob balance");
+        parallel_state
+            .ensure_account_loaded(&alice_pubkey)
+            .await
+            .expect("Failed to load Alice");
+        parallel_state
+            .ensure_account_loaded(&bob_pubkey)
+            .await
+            .expect("Failed to load Bob");
+        parallel_state
+            .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+            .await
+            .expect("Failed to load Alice balance");
+        parallel_state
+            .ensure_balance_loaded(&bob_pubkey, &TOS_ASSET)
+            .await
+            .expect("Failed to load Bob balance");
 
         // Alice sends 100 TOS
         let alice_balance = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
-        println!("  - Alice balance before: {} TOS", alice_balance / COIN_VALUE);
+        println!(
+            "  - Alice balance before: {} TOS",
+            alice_balance / COIN_VALUE
+        );
         #[allow(deprecated)]
         parallel_state.set_balance(&alice_pubkey, &TOS_ASSET, alice_balance - 100 * COIN_VALUE);
 
@@ -417,21 +481,41 @@ async fn test_read_write_conflict_detection() {
     println!("Step 5/7: TX2 - Bob sends 200 TOS to Alice (READ-WRITE CONFLICT!)...");
     {
         // Load balances (Bob's balance was modified by TX1!)
-        parallel_state.ensure_balance_loaded(&bob_pubkey, &TOS_ASSET).await.expect("Failed to load Bob balance");
-        parallel_state.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.expect("Failed to load Alice balance");
+        parallel_state
+            .ensure_balance_loaded(&bob_pubkey, &TOS_ASSET)
+            .await
+            .expect("Failed to load Bob balance");
+        parallel_state
+            .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+            .await
+            .expect("Failed to load Alice balance");
 
         // Bob sends 200 TOS (reading Bob's balance that TX1 modified)
         let bob_balance = parallel_state.get_balance(&bob_pubkey, &TOS_ASSET);
-        println!("  - Bob balance (after TX1): {} TOS", bob_balance / COIN_VALUE);
-        assert_eq!(bob_balance, 600 * COIN_VALUE, "Bob should have 600 TOS after TX1");
+        println!(
+            "  - Bob balance (after TX1): {} TOS",
+            bob_balance / COIN_VALUE
+        );
+        assert_eq!(
+            bob_balance,
+            600 * COIN_VALUE,
+            "Bob should have 600 TOS after TX1"
+        );
 
         #[allow(deprecated)]
         parallel_state.set_balance(&bob_pubkey, &TOS_ASSET, bob_balance - 200 * COIN_VALUE);
 
         // Alice receives 200 TOS (reading Alice's balance that TX1 modified)
         let alice_balance = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
-        println!("  - Alice balance (after TX1): {} TOS", alice_balance / COIN_VALUE);
-        assert_eq!(alice_balance, 900 * COIN_VALUE, "Alice should have 900 TOS after TX1");
+        println!(
+            "  - Alice balance (after TX1): {} TOS",
+            alice_balance / COIN_VALUE
+        );
+        assert_eq!(
+            alice_balance,
+            900 * COIN_VALUE,
+            "Alice should have 900 TOS after TX1"
+        );
 
         #[allow(deprecated)]
         parallel_state.set_balance(&alice_pubkey, &TOS_ASSET, alice_balance + 200 * COIN_VALUE);
@@ -442,23 +526,43 @@ async fn test_read_write_conflict_detection() {
     // Step 6: Verify conflict detection via modified balances tracking
     println!("Step 6/7: Verifying conflict detection...");
     let modified_balances = parallel_state.get_modified_balances();
-    println!("  - Number of modified balances: {}", modified_balances.len());
+    println!(
+        "  - Number of modified balances: {}",
+        modified_balances.len()
+    );
 
-    assert_eq!(modified_balances.len(), 2, "Should detect 2 modified balances (Alice and Bob)");
+    assert_eq!(
+        modified_balances.len(),
+        2,
+        "Should detect 2 modified balances (Alice and Bob)"
+    );
 
     // Find Alice and Bob in modified balances
-    let alice_modified = modified_balances.iter()
+    let alice_modified = modified_balances
+        .iter()
         .find(|((account, _), _)| *account == alice_pubkey)
         .expect("Alice's balance should be modified");
-    let bob_modified = modified_balances.iter()
+    let bob_modified = modified_balances
+        .iter()
         .find(|((account, _), _)| *account == bob_pubkey)
         .expect("Bob's balance should be modified");
 
-    println!("  ✓ Alice final balance: {} TOS", alice_modified.1 / COIN_VALUE);
+    println!(
+        "  ✓ Alice final balance: {} TOS",
+        alice_modified.1 / COIN_VALUE
+    );
     println!("  ✓ Bob final balance: {} TOS", bob_modified.1 / COIN_VALUE);
 
-    assert_eq!(alice_modified.1, 1100 * COIN_VALUE, "Alice should have 1100 TOS (1000 - 100 + 200)");
-    assert_eq!(bob_modified.1, 400 * COIN_VALUE, "Bob should have 400 TOS (500 + 100 - 200)");
+    assert_eq!(
+        alice_modified.1,
+        1100 * COIN_VALUE,
+        "Alice should have 1100 TOS (1000 - 100 + 200)"
+    );
+    assert_eq!(
+        bob_modified.1,
+        400 * COIN_VALUE,
+        "Bob should have 400 TOS (500 + 100 - 200)"
+    );
 
     // Step 7: Commit and verify
     println!("Step 7/7: Committing state and verifying...");
@@ -526,10 +630,28 @@ async fn test_independent_transaction_isolation() {
     let charlie = KeyPair::new();
     let dave = KeyPair::new();
 
-    setup_account_rocksdb(&storage, &alice.get_public_key().compress(), 1000 * COIN_VALUE, 0).await.unwrap();
-    setup_account_rocksdb(&storage, &bob.get_public_key().compress(), 0, 0).await.unwrap();
-    setup_account_rocksdb(&storage, &charlie.get_public_key().compress(), 2000 * COIN_VALUE, 0).await.unwrap();
-    setup_account_rocksdb(&storage, &dave.get_public_key().compress(), 0, 0).await.unwrap();
+    setup_account_rocksdb(
+        &storage,
+        &alice.get_public_key().compress(),
+        1000 * COIN_VALUE,
+        0,
+    )
+    .await
+    .unwrap();
+    setup_account_rocksdb(&storage, &bob.get_public_key().compress(), 0, 0)
+        .await
+        .unwrap();
+    setup_account_rocksdb(
+        &storage,
+        &charlie.get_public_key().compress(),
+        2000 * COIN_VALUE,
+        0,
+    )
+    .await
+    .unwrap();
+    setup_account_rocksdb(&storage, &dave.get_public_key().compress(), 0, 0)
+        .await
+        .unwrap();
 
     // Step 3: Create ParallelChainState
     println!("Step 3/6: Creating ParallelChainState...");
@@ -539,8 +661,8 @@ async fn test_independent_transaction_isolation() {
     let parallel_state = ParallelChainState::new(
         Arc::clone(&storage),
         environment,
-        0,  // stable_topoheight
-        1,  // topoheight
+        0, // stable_topoheight
+        1, // topoheight
         BlockVersion::V0,
         dummy_block,
         block_hash,
@@ -556,10 +678,22 @@ async fn test_independent_transaction_isolation() {
         let alice_pubkey = alice.get_public_key().compress();
         let bob_pubkey = bob.get_public_key().compress();
 
-        parallel_state.ensure_account_loaded(&alice_pubkey).await.unwrap();
-        parallel_state.ensure_account_loaded(&bob_pubkey).await.unwrap();
-        parallel_state.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.unwrap();
-        parallel_state.ensure_balance_loaded(&bob_pubkey, &TOS_ASSET).await.unwrap();
+        parallel_state
+            .ensure_account_loaded(&alice_pubkey)
+            .await
+            .unwrap();
+        parallel_state
+            .ensure_account_loaded(&bob_pubkey)
+            .await
+            .unwrap();
+        parallel_state
+            .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+            .await
+            .unwrap();
+        parallel_state
+            .ensure_balance_loaded(&bob_pubkey, &TOS_ASSET)
+            .await
+            .unwrap();
 
         let alice_balance = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
         #[allow(deprecated)]
@@ -576,14 +710,30 @@ async fn test_independent_transaction_isolation() {
         let charlie_pubkey = charlie.get_public_key().compress();
         let dave_pubkey = dave.get_public_key().compress();
 
-        parallel_state.ensure_account_loaded(&charlie_pubkey).await.unwrap();
-        parallel_state.ensure_account_loaded(&dave_pubkey).await.unwrap();
-        parallel_state.ensure_balance_loaded(&charlie_pubkey, &TOS_ASSET).await.unwrap();
-        parallel_state.ensure_balance_loaded(&dave_pubkey, &TOS_ASSET).await.unwrap();
+        parallel_state
+            .ensure_account_loaded(&charlie_pubkey)
+            .await
+            .unwrap();
+        parallel_state
+            .ensure_account_loaded(&dave_pubkey)
+            .await
+            .unwrap();
+        parallel_state
+            .ensure_balance_loaded(&charlie_pubkey, &TOS_ASSET)
+            .await
+            .unwrap();
+        parallel_state
+            .ensure_balance_loaded(&dave_pubkey, &TOS_ASSET)
+            .await
+            .unwrap();
 
         let charlie_balance = parallel_state.get_balance(&charlie_pubkey, &TOS_ASSET);
         #[allow(deprecated)]
-        parallel_state.set_balance(&charlie_pubkey, &TOS_ASSET, charlie_balance - 1000 * COIN_VALUE);
+        parallel_state.set_balance(
+            &charlie_pubkey,
+            &TOS_ASSET,
+            charlie_balance - 1000 * COIN_VALUE,
+        );
 
         let dave_balance = parallel_state.get_balance(&dave_pubkey, &TOS_ASSET);
         #[allow(deprecated)]
@@ -593,9 +743,16 @@ async fn test_independent_transaction_isolation() {
     // Step 5: Verify isolation via modified balances tracking
     println!("Step 5/6: Verifying transaction isolation...");
     let modified_balances = parallel_state.get_modified_balances();
-    println!("  - Number of modified balances: {}", modified_balances.len());
+    println!(
+        "  - Number of modified balances: {}",
+        modified_balances.len()
+    );
 
-    assert_eq!(modified_balances.len(), 4, "Should track 4 modified balances (all accounts)");
+    assert_eq!(
+        modified_balances.len(),
+        4,
+        "Should track 4 modified balances (all accounts)"
+    );
 
     // Verify all accounts have correct final balances
     let alice_pubkey = alice.get_public_key().compress();
@@ -669,8 +826,12 @@ async fn test_conflict_resolution_with_miner_rewards() {
     let bob = KeyPair::new();
     let bob_pubkey = bob.get_public_key().compress();
 
-    setup_account_rocksdb(&storage, &alice_pubkey, 1000 * COIN_VALUE, 0).await.unwrap();
-    setup_account_rocksdb(&storage, &bob_pubkey, 0, 0).await.unwrap();
+    setup_account_rocksdb(&storage, &alice_pubkey, 1000 * COIN_VALUE, 0)
+        .await
+        .unwrap();
+    setup_account_rocksdb(&storage, &bob_pubkey, 0, 0)
+        .await
+        .unwrap();
 
     // Step 3: Create ParallelChainState
     println!("Step 3/7: Creating ParallelChainState...");
@@ -680,8 +841,8 @@ async fn test_conflict_resolution_with_miner_rewards() {
     let parallel_state = ParallelChainState::new(
         Arc::clone(&storage),
         environment,
-        0,  // stable_topoheight
-        1,  // topoheight
+        0, // stable_topoheight
+        1, // topoheight
         BlockVersion::V0,
         dummy_block,
         block_hash,
@@ -691,13 +852,28 @@ async fn test_conflict_resolution_with_miner_rewards() {
     // Step 4: Alice sends transaction (Alice → Bob: 100 TOS)
     println!("Step 4/7: Alice sends 100 TOS to Bob...");
     {
-        parallel_state.ensure_account_loaded(&alice_pubkey).await.unwrap();
-        parallel_state.ensure_account_loaded(&bob_pubkey).await.unwrap();
-        parallel_state.ensure_balance_loaded(&alice_pubkey, &TOS_ASSET).await.unwrap();
-        parallel_state.ensure_balance_loaded(&bob_pubkey, &TOS_ASSET).await.unwrap();
+        parallel_state
+            .ensure_account_loaded(&alice_pubkey)
+            .await
+            .unwrap();
+        parallel_state
+            .ensure_account_loaded(&bob_pubkey)
+            .await
+            .unwrap();
+        parallel_state
+            .ensure_balance_loaded(&alice_pubkey, &TOS_ASSET)
+            .await
+            .unwrap();
+        parallel_state
+            .ensure_balance_loaded(&bob_pubkey, &TOS_ASSET)
+            .await
+            .unwrap();
 
         let alice_balance = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
-        println!("  - Alice balance before TX: {} TOS", alice_balance / COIN_VALUE);
+        println!(
+            "  - Alice balance before TX: {} TOS",
+            alice_balance / COIN_VALUE
+        );
 
         #[allow(deprecated)]
         parallel_state.set_balance(&alice_pubkey, &TOS_ASSET, alice_balance - 100 * COIN_VALUE);
@@ -712,32 +888,52 @@ async fn test_conflict_resolution_with_miner_rewards() {
     // Step 5: Alice receives mining reward (50 TOS)
     println!("Step 5/7: Alice receives mining reward (50 TOS)...");
     {
-        parallel_state.reward_miner(&alice_pubkey, 50 * COIN_VALUE)
+        parallel_state
+            .reward_miner(&alice_pubkey, 50 * COIN_VALUE)
             .await
             .expect("Failed to reward miner");
 
         let alice_balance_after_reward = parallel_state.get_balance(&alice_pubkey, &TOS_ASSET);
-        println!("  - Alice balance after reward: {} TOS", alice_balance_after_reward / COIN_VALUE);
+        println!(
+            "  - Alice balance after reward: {} TOS",
+            alice_balance_after_reward / COIN_VALUE
+        );
         println!("  ✓ Mining reward applied: +50 TOS");
     }
 
     // Step 6: Verify conflict resolution
     println!("Step 6/7: Verifying conflict resolution...");
     let modified_balances = parallel_state.get_modified_balances();
-    println!("  - Number of modified balances: {}", modified_balances.len());
+    println!(
+        "  - Number of modified balances: {}",
+        modified_balances.len()
+    );
 
-    assert_eq!(modified_balances.len(), 2, "Should track 2 modified balances (Alice and Bob)");
+    assert_eq!(
+        modified_balances.len(),
+        2,
+        "Should track 2 modified balances (Alice and Bob)"
+    );
 
     // Find Alice's final balance
-    let alice_modified = modified_balances.iter()
+    let alice_modified = modified_balances
+        .iter()
         .find(|((account, _), _)| *account == alice_pubkey)
         .expect("Alice's balance should be modified");
 
     // Alice: 1000 (initial) - 100 (sent to Bob) + 50 (mining reward) = 950 TOS
-    assert_eq!(alice_modified.1, 950 * COIN_VALUE, "Alice should have 950 TOS");
-    println!("  ✓ Alice final balance: {} TOS (1000 - 100 + 50)", alice_modified.1 / COIN_VALUE);
+    assert_eq!(
+        alice_modified.1,
+        950 * COIN_VALUE,
+        "Alice should have 950 TOS"
+    );
+    println!(
+        "  ✓ Alice final balance: {} TOS (1000 - 100 + 50)",
+        alice_modified.1 / COIN_VALUE
+    );
 
-    let bob_modified = modified_balances.iter()
+    let bob_modified = modified_balances
+        .iter()
         .find(|((account, _), _)| *account == bob_pubkey)
         .expect("Bob's balance should be modified");
 

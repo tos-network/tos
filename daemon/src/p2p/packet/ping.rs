@@ -1,36 +1,18 @@
+use crate::{
+    config::P2P_PING_PEER_LIST_LIMIT,
+    core::{blockchain::Blockchain, ghostdag::BlueWorkType, storage::Storage},
+    p2p::{error::P2pError, is_local_address, Peer},
+    rpc::rpc::get_peer_entry,
+};
 use indexmap::IndexSet;
+use log::{debug, error, trace};
+use std::{borrow::Cow, fmt::Display, net::SocketAddr, sync::Arc};
 use tos_common::{
     api::daemon::{NotifyEvent, PeerPeerListUpdatedEvent, TimedDirection},
     crypto::Hash,
-    serializer::{
-        Reader,
-        ReaderError,
-        Serializer,
-        Writer
-    },
-    time::get_current_time_in_millis
+    serializer::{Reader, ReaderError, Serializer, Writer},
+    time::get_current_time_in_millis,
 };
-use crate::{
-    config::P2P_PING_PEER_LIST_LIMIT,
-    core::{
-        blockchain::Blockchain,
-        ghostdag::BlueWorkType,
-        storage::Storage
-    },
-    p2p::{
-        error::P2pError,
-        Peer,
-        is_local_address,
-    },
-    rpc::rpc::get_peer_entry
-};
-use std::{
-    fmt::Display,
-    borrow::Cow,
-    net::SocketAddr,
-    sync::Arc
-};
-use log::{error, trace, debug};
 
 /// GHOSTDAG Ping packet using blue_work for chain selection
 /// blue_work represents the cumulative work of all blue blocks in the GHOSTDAG consensus
@@ -41,23 +23,34 @@ pub struct Ping<'a> {
     height: u64,
     pruned_topoheight: Option<u64>,
     blue_work: BlueWorkType, // GHOSTDAG: Used for chain selection (replaces cumulative_difficulty)
-    peer_list: IndexSet<SocketAddr>
+    peer_list: IndexSet<SocketAddr>,
 }
 
 impl<'a> Ping<'a> {
     /// Create a new Ping packet with GHOSTDAG blue_work for chain selection
-    pub fn new(top_hash: Cow<'a, Hash>, topoheight: u64, height: u64, pruned_topoheight: Option<u64>, blue_work: BlueWorkType, peer_list: IndexSet<SocketAddr>) -> Self {
+    pub fn new(
+        top_hash: Cow<'a, Hash>,
+        topoheight: u64,
+        height: u64,
+        pruned_topoheight: Option<u64>,
+        blue_work: BlueWorkType,
+        peer_list: IndexSet<SocketAddr>,
+    ) -> Self {
         Self {
             top_hash,
             topoheight,
             height,
             pruned_topoheight,
             blue_work,
-            peer_list
+            peer_list,
         }
     }
 
-    pub async fn update_peer<S: Storage>(self, peer: &Arc<Peer>, blockchain: &Arc<Blockchain<S>>) -> Result<(), P2pError> {
+    pub async fn update_peer<S: Storage>(
+        self,
+        peer: &Arc<Peer>,
+        blockchain: &Arc<Blockchain<S>>,
+    ) -> Result<(), P2pError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("Updating {} with {}", peer, self);
         }
@@ -66,12 +59,15 @@ impl<'a> Ping<'a> {
         peer.set_height(self.height);
 
         if peer.is_pruned() && self.pruned_topoheight.is_none() {
-            return Err(P2pError::InvalidPrunedTopoHeightChange)
+            return Err(P2pError::InvalidPrunedTopoHeightChange);
         }
 
         if let Some(pruned_topoheight) = self.pruned_topoheight {
             if pruned_topoheight > self.topoheight {
-                return Err(P2pError::InvalidPrunedTopoHeight(pruned_topoheight, self.height))
+                return Err(P2pError::InvalidPrunedTopoHeight(
+                    pruned_topoheight,
+                    self.height,
+                ));
             }
 
             if let Some(old_pruned_topoheight) = peer.get_pruned_topoheight() {
@@ -79,7 +75,10 @@ impl<'a> Ping<'a> {
                     if log::log_enabled!(log::Level::Error) {
                         error!("Invalid protocol rules: pruned topoheight {} is less than old pruned topoheight {} in ping packet", pruned_topoheight, old_pruned_topoheight);
                     }
-                    return Err(P2pError::InvalidNewPrunedTopoHeight(pruned_topoheight, old_pruned_topoheight))
+                    return Err(P2pError::InvalidNewPrunedTopoHeight(
+                        pruned_topoheight,
+                        old_pruned_topoheight,
+                    ));
                 }
             }
         }
@@ -91,7 +90,11 @@ impl<'a> Ping<'a> {
             trace!("Locking RPC Server to notify PeerStateUpdated event");
             if let Some(rpc) = blockchain.get_rpc().read().await.as_ref() {
                 if rpc.is_event_tracked(&NotifyEvent::PeerStateUpdated).await {
-                    rpc.notify_clients_with(&NotifyEvent::PeerStateUpdated, get_peer_entry(peer).await).await;
+                    rpc.notify_clients_with(
+                        &NotifyEvent::PeerStateUpdated,
+                        get_peer_entry(peer).await,
+                    )
+                    .await;
                 }
             }
             trace!("End locking for PeerStateUpdated event");
@@ -99,28 +102,40 @@ impl<'a> Ping<'a> {
 
         if !self.peer_list.is_empty() {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Received a peer list ({:?}) for {}", self.peer_list, peer.get_outgoing_address());
+                debug!(
+                    "Received a peer list ({:?}) for {}",
+                    self.peer_list,
+                    peer.get_outgoing_address()
+                );
             }
             let mut shared_peers = peer.get_peers().lock().await;
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Our peer list is ({:?}) for {}", shared_peers, peer.get_outgoing_address());
+                debug!(
+                    "Our peer list is ({:?}) for {}",
+                    shared_peers,
+                    peer.get_outgoing_address()
+                );
             }
             let peer_addr = peer.get_connection().get_address();
             for addr in &self.peer_list {
                 if peer_addr == addr {
-                    return Err(P2pError::OwnSocketAddress(*addr))
+                    return Err(P2pError::OwnSocketAddress(*addr));
                 }
 
                 // Local addresses are not allowed
                 if is_local_address(&addr) {
-                    return Err(P2pError::LocalSocketAddress(*addr))
+                    return Err(P2pError::LocalSocketAddress(*addr));
                 }
 
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Adding {} for {} in ping packet", addr, peer.get_outgoing_address());
+                    debug!(
+                        "Adding {} for {} in ping packet",
+                        addr,
+                        peer.get_outgoing_address()
+                    );
                 }
                 let direction = TimedDirection::In {
-                    received_at: get_current_time_in_millis()
+                    received_at: get_current_time_in_millis(),
                 };
 
                 if let Some(origin) = shared_peers.get_mut(addr) {
@@ -128,9 +143,16 @@ impl<'a> Ping<'a> {
                         // prevent holding the lock below
                         let origin = *origin;
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("Received peer list: {:?}, our peerlist is: {:?}", self.peer_list, shared_peers);
+                            debug!(
+                                "Received peer list: {:?}, our peerlist is: {:?}",
+                                self.peer_list, shared_peers
+                            );
                         }
-                        return Err(P2pError::DuplicatedPeer(*addr, *peer.get_outgoing_address(), origin))
+                        return Err(P2pError::DuplicatedPeer(
+                            *addr,
+                            *peer.get_outgoing_address(),
+                            origin,
+                        ));
                     }
                 } else {
                     shared_peers.put(*addr, direction);
@@ -140,12 +162,16 @@ impl<'a> Ping<'a> {
             if peer.sharable() {
                 trace!("Locking RPC Server to notify PeerPeerListUpdated event");
                 if let Some(rpc) = blockchain.get_rpc().read().await.as_ref() {
-                    if rpc.is_event_tracked(&NotifyEvent::PeerPeerListUpdated).await {
+                    if rpc
+                        .is_event_tracked(&NotifyEvent::PeerPeerListUpdated)
+                        .await
+                    {
                         let value = PeerPeerListUpdatedEvent {
                             peer_id: peer.get_id(),
-                            peerlist: self.peer_list
+                            peerlist: self.peer_list,
                         };
-                        rpc.notify_clients_with(&NotifyEvent::PeerPeerListUpdated, value).await;
+                        rpc.notify_clients_with(&NotifyEvent::PeerPeerListUpdated, value)
+                            .await;
                     }
                 }
                 trace!("End locking for PeerPeerListUpdated event");
@@ -197,16 +223,19 @@ impl Serializer for Ping<'_> {
         if let Some(pruned_topoheight) = &pruned_topoheight {
             if *pruned_topoheight == 0 {
                 debug!("Invalid pruned topoheight (0) in ping packet");
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         }
         let blue_work = BlueWorkType::read(reader)?;
         let peers_len = reader.read_u8()? as usize;
         if peers_len > P2P_PING_PEER_LIST_LIMIT {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Too much peers sent in this ping packet: received {} while max is {}", peers_len, P2P_PING_PEER_LIST_LIMIT);
+                debug!(
+                    "Too much peers sent in this ping packet: received {} while max is {}",
+                    peers_len, P2P_PING_PEER_LIST_LIMIT
+                );
             }
-            return Err(ReaderError::InvalidValue)
+            return Err(ReaderError::InvalidValue);
         }
 
         let mut peer_list = IndexSet::with_capacity(peers_len);
@@ -216,11 +245,18 @@ impl Serializer for Ping<'_> {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Duplicated peer {} in ping packet", peer);
                 }
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         }
 
-        Ok(Self { top_hash, topoheight, height, pruned_topoheight, blue_work, peer_list })
+        Ok(Self {
+            top_hash,
+            topoheight,
+            height,
+            pruned_topoheight,
+            blue_work,
+            peer_list,
+        })
     }
 
     fn size(&self) -> usize {

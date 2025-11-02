@@ -1,9 +1,8 @@
+use super::{ExtraData, PlaintextData};
 use crate::{
     api::DataElement,
-    serializer::{Reader, ReaderError, Serializer, Writer}
+    serializer::{Reader, ReaderError, Serializer, Writer},
 };
-use super::{ExtraData, PlaintextData};
-
 
 // Versioned extra data
 pub enum ExtraDataType {
@@ -14,7 +13,7 @@ pub enum ExtraDataType {
     // store it as is
     Public(PlaintextData),
     // Can be anything
-    Proprietary(Vec<u8>)
+    Proprietary(Vec<u8>),
 }
 
 impl ExtraDataType {
@@ -37,11 +36,11 @@ impl Serializer for ExtraDataType {
             Self::Private(payload) => {
                 writer.write_u8(0);
                 payload.write(writer);
-            },
+            }
             Self::Public(payload) => {
                 writer.write_u8(1);
                 payload.0.write(writer);
-            },
+            }
             Self::Proprietary(payload) => {
                 writer.write_u8(2);
                 payload.write(writer);
@@ -58,8 +57,8 @@ impl Serializer for ExtraDataType {
                 let len = reader.read_u16()?;
                 let values = reader.read_bytes(len as usize)?;
                 Self::Proprietary(values)
-            },
-            _ => return Err(ReaderError::InvalidValue)
+            }
+            _ => return Err(ReaderError::InvalidValue),
         })
     }
 }

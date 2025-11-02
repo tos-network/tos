@@ -1,23 +1,29 @@
-use std::collections::{HashMap, HashSet};
+use crate::{
+    error::WalletError,
+    storage::{Balance, EncryptedStorage, TxCache},
+};
 use log::{debug, trace};
+use std::collections::{HashMap, HashSet};
 use tos_common::{
     crypto::{Hash, Hashable, PublicKey},
-    transaction::{builder::{AccountState, FeeHelper}, Reference, Transaction}
+    transaction::{
+        builder::{AccountState, FeeHelper},
+        Reference, Transaction,
+    },
 };
-use crate::{error::WalletError, storage::{Balance, EncryptedStorage, TxCache}};
 
 // State used to estimate fees for a transaction
 // Because fees can be higher if a destination account is not registered
 // We need to give this information during the estimation of fees
 pub struct EstimateFeesState {
     // this is containing the registered keys that we are aware of
-    registered_keys: HashSet<PublicKey>
+    registered_keys: HashSet<PublicKey>,
 }
 
 impl EstimateFeesState {
     pub fn new() -> Self {
         Self {
-            registered_keys: HashSet::new()
+            registered_keys: HashSet::new(),
         }
     }
 
@@ -89,14 +95,25 @@ impl TransactionBuilderState {
         self.balances.contains_key(asset)
     }
 
-    pub async fn from_tx(storage: &EncryptedStorage, transaction: &Transaction, mainnet: bool) -> Result<Self, WalletError> {
-        let mut state = Self::new(mainnet, transaction.get_reference().clone(), transaction.get_nonce());
-        let amounts = transaction.get_expected_sender_outputs()
+    pub async fn from_tx(
+        storage: &EncryptedStorage,
+        transaction: &Transaction,
+        mainnet: bool,
+    ) -> Result<Self, WalletError> {
+        let mut state = Self::new(
+            mainnet,
+            transaction.get_reference().clone(),
+            transaction.get_nonce(),
+        );
+        let amounts = transaction
+            .get_expected_sender_outputs()
             .map_err(|e| WalletError::Any(e.into()))?;
 
         for (asset, amount) in amounts {
             let (mut balance, _) = storage.get_unconfirmed_balance_for(asset).await?;
-            balance.amount = balance.amount.checked_sub(amount)
+            balance.amount = balance
+                .amount
+                .checked_sub(amount)
                 .ok_or_else(|| WalletError::Any(anyhow::anyhow!("Balance underflow")))?;
             state.add_balance(asset.clone(), balance);
         }
@@ -133,7 +150,10 @@ impl TransactionBuilderState {
     }
 
     // Apply the changes to the storage
-    pub async fn apply_changes(&mut self, storage: &mut EncryptedStorage) -> Result<(), WalletError> {
+    pub async fn apply_changes(
+        &mut self,
+        storage: &mut EncryptedStorage,
+    ) -> Result<(), WalletError> {
         trace!("Applying changes to storage");
 
         for (asset, balance) in self.balances.drain() {
@@ -155,7 +175,10 @@ impl TransactionBuilderState {
 
         // Lets verify if the last coinbase reward topoheight is still valid
         if let Some(stable_topoheight) = self.stable_topoheight {
-            if storage.get_last_coinbase_reward_topoheight().is_some_and(|h| h < stable_topoheight) {
+            if storage
+                .get_last_coinbase_reward_topoheight()
+                .is_some_and(|h| h < stable_topoheight)
+            {
                 storage.set_last_coinbase_reward_topoheight(None)?;
             }
         }
@@ -182,13 +205,23 @@ impl AccountState for TransactionBuilderState {
     }
 
     fn get_account_balance(&self, asset: &Hash) -> Result<u64, Self::Error> {
-        self.balances.get(asset).map(|b| b.amount).ok_or_else(|| WalletError::BalanceNotFound(asset.clone()))
+        self.balances
+            .get(asset)
+            .map(|b| b.amount)
+            .ok_or_else(|| WalletError::BalanceNotFound(asset.clone()))
     }
 
-    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64) -> Result<(), Self::Error> {
-        self.balances.insert(asset.clone(), Balance {
-            amount: new_balance,
-        });
+    fn update_account_balance(
+        &mut self,
+        asset: &Hash,
+        new_balance: u64,
+    ) -> Result<(), Self::Error> {
+        self.balances.insert(
+            asset.clone(),
+            Balance {
+                amount: new_balance,
+            },
+        );
         Ok(())
     }
 

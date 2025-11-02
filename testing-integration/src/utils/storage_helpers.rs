@@ -88,20 +88,17 @@ use tos_common::{
     account::{VersionedBalance, VersionedNonce},
     asset::{AssetData, VersionedAssetData},
     config::{COIN_DECIMALS, TOS_ASSET},
-    crypto::{elgamal::CompressedPublicKey, PublicKey, KeyPair},
-    versioned_type::Versioned,
+    crypto::{elgamal::CompressedPublicKey, KeyPair, PublicKey},
     network::Network,
+    versioned_type::Versioned,
 };
 use tos_daemon::core::{
     config::RocksDBConfig,
     error::BlockchainError,
     storage::{
-        sled::{SledStorage, StorageMode},
         rocksdb::RocksStorage,
-        AccountProvider,
-        AssetProvider,
-        BalanceProvider,
-        NonceProvider,
+        sled::{SledStorage, StorageMode},
+        AccountProvider, AssetProvider, BalanceProvider, NonceProvider,
     },
 };
 
@@ -153,7 +150,10 @@ pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<SledStorage>> {
             None,
         );
         let versioned: VersionedAssetData = Versioned::new(asset_data, Some(0));
-        storage_write.add_asset(&TOS_ASSET, 0, versioned).await.unwrap();
+        storage_write
+            .add_asset(&TOS_ASSET, 0, versioned)
+            .await
+            .unwrap();
     }
 
     storage_arc
@@ -196,7 +196,7 @@ pub async fn create_test_storage_with_tos_asset() -> Arc<tokio::sync::RwLock<Sle
 /// flush_storage_and_wait(&storage).await;
 /// ```
 pub async fn create_test_storage_with_accounts(
-    accounts: Vec<(PublicKey, u64, u64)>
+    accounts: Vec<(PublicKey, u64, u64)>,
 ) -> Result<Arc<tokio::sync::RwLock<SledStorage>>, BlockchainError> {
     let storage = create_test_storage().await;
 
@@ -260,11 +260,7 @@ pub async fn setup_account_safe(
         let mut storage_write = storage.write().await;
 
         storage_write
-            .set_last_nonce_to(
-                account,
-                0,
-                &VersionedNonce::new(nonce, Some(0)),
-            )
+            .set_last_nonce_to(account, 0, &VersionedNonce::new(nonce, Some(0)))
             .await?;
 
         storage_write
@@ -338,7 +334,8 @@ pub async fn flush_storage_and_wait(storage: &Arc<tokio::sync::RwLock<SledStorag
             // Force flush to disk (note: SledStorage may not expose flush())
             // As a workaround, we add a longer delay to let internal operations complete
             std::thread::sleep(std::time::Duration::from_millis(50));
-        }).await;
+        })
+        .await;
     }
 
     // Additional safety delay to let LRU caches settle
@@ -381,11 +378,7 @@ pub async fn setup_account_in_storage_legacy(
     let mut storage_write = storage.write().await;
 
     storage_write
-        .set_last_nonce_to(
-            account,
-            0,
-            &VersionedNonce::new(nonce, Some(0)),
-        )
+        .set_last_nonce_to(account, 0, &VersionedNonce::new(nonce, Some(0)))
         .await?;
 
     storage_write
@@ -437,19 +430,27 @@ mod tests {
         let storage = create_test_storage_with_accounts(vec![
             (account_a.clone(), 1000, 0),
             (account_b.clone(), 2000, 5),
-        ]).await.unwrap();
+        ])
+        .await
+        .unwrap();
 
         let storage_read = storage.read().await;
 
         // Verify account A
-        let (_, balance_a) = storage_read.get_last_balance(&account_a, &TOS_ASSET).await.unwrap();
+        let (_, balance_a) = storage_read
+            .get_last_balance(&account_a, &TOS_ASSET)
+            .await
+            .unwrap();
         assert_eq!(balance_a.get_balance(), 1000);
 
         let (_, nonce_a) = storage_read.get_last_nonce(&account_a).await.unwrap();
         assert_eq!(nonce_a.get_nonce(), 0);
 
         // Verify account B
-        let (_, balance_b) = storage_read.get_last_balance(&account_b, &TOS_ASSET).await.unwrap();
+        let (_, balance_b) = storage_read
+            .get_last_balance(&account_b, &TOS_ASSET)
+            .await
+            .unwrap();
         assert_eq!(balance_b.get_balance(), 2000);
 
         let (_, nonce_b) = storage_read.get_last_nonce(&account_b).await.unwrap();
@@ -462,12 +463,17 @@ mod tests {
         let account = create_test_pubkey(42);
 
         // Setup account safely
-        setup_account_safe(&storage, &account, 5000, 10).await.unwrap();
+        setup_account_safe(&storage, &account, 5000, 10)
+            .await
+            .unwrap();
 
         let storage_read = storage.read().await;
 
         // Verify balance
-        let (_, balance) = storage_read.get_last_balance(&account, &TOS_ASSET).await.unwrap();
+        let (_, balance) = storage_read
+            .get_last_balance(&account, &TOS_ASSET)
+            .await
+            .unwrap();
         assert_eq!(balance.get_balance(), 5000);
 
         // Verify nonce
@@ -480,14 +486,19 @@ mod tests {
         let storage = create_test_storage().await;
         let account = create_test_pubkey(99);
 
-        setup_account_safe(&storage, &account, 1000, 0).await.unwrap();
+        setup_account_safe(&storage, &account, 1000, 0)
+            .await
+            .unwrap();
 
         // Should not panic or deadlock
         flush_storage_and_wait(&storage).await;
 
         // Verify data is still accessible after flush
         let storage_read = storage.read().await;
-        let (_, balance) = storage_read.get_last_balance(&account, &TOS_ASSET).await.unwrap();
+        let (_, balance) = storage_read
+            .get_last_balance(&account, &TOS_ASSET)
+            .await
+            .unwrap();
         assert_eq!(balance.get_balance(), 1000);
     }
 }
@@ -545,7 +556,10 @@ pub async fn create_test_rocksdb_storage() -> Arc<tokio::sync::RwLock<RocksStora
         None,
     );
     let versioned: VersionedAssetData = Versioned::new(asset_data, Some(0));
-    storage.add_asset(&TOS_ASSET, 0, versioned).await.expect("Failed to register TOS asset");
+    storage
+        .add_asset(&TOS_ASSET, 0, versioned)
+        .await
+        .expect("Failed to register TOS asset");
 
     // Store temp_dir to prevent cleanup (move ownership)
     std::mem::forget(temp_dir);
@@ -697,7 +711,13 @@ pub async fn create_test_storage_with_funded_accounts(
 
     for _ in 0..count {
         let keypair = KeyPair::new();
-        setup_account_rocksdb(&storage, &keypair.get_public_key().compress(), balance_per_account, 0).await?;
+        setup_account_rocksdb(
+            &storage,
+            &keypair.get_public_key().compress(),
+            balance_per_account,
+            0,
+        )
+        .await?;
         keypairs.push(keypair);
     }
 
@@ -754,9 +774,9 @@ pub async fn fund_accounts_at_genesis(
 #[cfg(test)]
 mod rocksdb_tests {
     use super::*;
-    use tos_common::serializer::{Reader, Serializer};
-    use tos_common::crypto::KeyPair;
     use tos_common::config::COIN_VALUE;
+    use tos_common::crypto::KeyPair;
+    use tos_common::serializer::{Reader, Serializer};
 
     fn create_test_pubkey(seed: u8) -> CompressedPublicKey {
         let data = [seed; 32];
@@ -779,10 +799,15 @@ mod rocksdb_tests {
         let storage = create_test_rocksdb_storage().await;
         let account = create_test_pubkey(1);
 
-        setup_account_rocksdb(&storage, &account, 1000, 5).await.unwrap();
+        setup_account_rocksdb(&storage, &account, 1000, 5)
+            .await
+            .unwrap();
 
         let storage_read = storage.read().await;
-        let (_, balance) = storage_read.get_last_balance(&account, &TOS_ASSET).await.unwrap();
+        let (_, balance) = storage_read
+            .get_last_balance(&account, &TOS_ASSET)
+            .await
+            .unwrap();
         let (_, nonce) = storage_read.get_last_nonce(&account).await.unwrap();
 
         assert_eq!(balance.get_balance(), 1000);
@@ -794,17 +819,22 @@ mod rocksdb_tests {
         let account1 = create_test_pubkey(1);
         let account2 = create_test_pubkey(2);
 
-        let accounts = vec![
-            (account1.clone(), 1000, 0),
-            (account2.clone(), 2000, 3),
-        ];
+        let accounts = vec![(account1.clone(), 1000, 0), (account2.clone(), 2000, 3)];
 
-        let storage = create_test_rocksdb_storage_with_accounts(accounts).await.unwrap();
+        let storage = create_test_rocksdb_storage_with_accounts(accounts)
+            .await
+            .unwrap();
 
         let storage_read = storage.read().await;
 
-        let (_, balance1) = storage_read.get_last_balance(&account1, &TOS_ASSET).await.unwrap();
-        let (_, balance2) = storage_read.get_last_balance(&account2, &TOS_ASSET).await.unwrap();
+        let (_, balance1) = storage_read
+            .get_last_balance(&account1, &TOS_ASSET)
+            .await
+            .unwrap();
+        let (_, balance2) = storage_read
+            .get_last_balance(&account2, &TOS_ASSET)
+            .await
+            .unwrap();
         let (_, nonce2) = storage_read.get_last_nonce(&account2).await.unwrap();
 
         assert_eq!(balance1.get_balance(), 1000);
@@ -819,11 +849,16 @@ mod rocksdb_tests {
         let account = create_test_pubkey(99);
 
         // Setup account
-        setup_account_rocksdb(&storage, &account, 1000, 0).await.unwrap();
+        setup_account_rocksdb(&storage, &account, 1000, 0)
+            .await
+            .unwrap();
 
         // Immediately read from parallel context (would deadlock with sled!)
         let storage_read = storage.read().await;
-        let (_, balance) = storage_read.get_last_balance(&account, &TOS_ASSET).await.unwrap();
+        let (_, balance) = storage_read
+            .get_last_balance(&account, &TOS_ASSET)
+            .await
+            .unwrap();
         assert_eq!(balance.get_balance(), 1000);
 
         // No delays, no flush - RocksDB just works!
@@ -842,14 +877,20 @@ mod rocksdb_tests {
         let storage_read = storage.read().await;
         for keypair in keypairs.iter() {
             let pubkey = keypair.get_public_key().compress();
-            let (_, balance) = storage_read.get_last_balance(&pubkey, &TOS_ASSET).await.unwrap();
+            let (_, balance) = storage_read
+                .get_last_balance(&pubkey, &TOS_ASSET)
+                .await
+                .unwrap();
             assert_eq!(balance.get_balance(), 1000 * COIN_VALUE);
 
             let (_, nonce) = storage_read.get_last_nonce(&pubkey).await.unwrap();
             assert_eq!(nonce.get_nonce(), 0);
 
             // Verify account is registered
-            let reg_topoheight = storage_read.get_account_registration_topoheight(&pubkey).await.unwrap();
+            let reg_topoheight = storage_read
+                .get_account_registration_topoheight(&pubkey)
+                .await
+                .unwrap();
             assert_eq!(reg_topoheight, 0);
         }
     }
@@ -866,7 +907,10 @@ mod rocksdb_tests {
         let storage_read = storage.read().await;
         for keypair in keypairs.iter() {
             let pubkey = keypair.get_public_key().compress();
-            let (_, balance) = storage_read.get_last_balance(&pubkey, &TOS_ASSET).await.unwrap();
+            let (_, balance) = storage_read
+                .get_last_balance(&pubkey, &TOS_ASSET)
+                .await
+                .unwrap();
             assert_eq!(balance.get_balance(), 500 * COIN_VALUE);
         }
     }
@@ -881,11 +925,14 @@ mod rocksdb_tests {
         let charlie = KeyPair::new();
 
         // Fund specific accounts with different balances
-        fund_accounts_at_genesis(&storage, &[
-            (alice.get_public_key().compress(), 1000 * COIN_VALUE),
-            (bob.get_public_key().compress(), 2000 * COIN_VALUE),
-            (charlie.get_public_key().compress(), 500 * COIN_VALUE),
-        ])
+        fund_accounts_at_genesis(
+            &storage,
+            &[
+                (alice.get_public_key().compress(), 1000 * COIN_VALUE),
+                (bob.get_public_key().compress(), 2000 * COIN_VALUE),
+                (charlie.get_public_key().compress(), 500 * COIN_VALUE),
+            ],
+        )
         .await
         .unwrap();
 
@@ -914,18 +961,22 @@ mod rocksdb_tests {
     #[tokio::test]
     async fn test_fund_accounts_at_genesis_with_existing_storage() {
         // Create storage with initial accounts
-        let (storage, initial_keypairs) = create_test_storage_with_funded_accounts(2, 1000 * COIN_VALUE)
-            .await
-            .unwrap();
+        let (storage, initial_keypairs) =
+            create_test_storage_with_funded_accounts(2, 1000 * COIN_VALUE)
+                .await
+                .unwrap();
 
         // Add more accounts to the same storage
         let alice = KeyPair::new();
         let bob = KeyPair::new();
 
-        fund_accounts_at_genesis(&storage, &[
-            (alice.get_public_key().compress(), 5000 * COIN_VALUE),
-            (bob.get_public_key().compress(), 3000 * COIN_VALUE),
-        ])
+        fund_accounts_at_genesis(
+            &storage,
+            &[
+                (alice.get_public_key().compress(), 5000 * COIN_VALUE),
+                (bob.get_public_key().compress(), 3000 * COIN_VALUE),
+            ],
+        )
         .await
         .unwrap();
 
@@ -983,7 +1034,10 @@ mod rocksdb_tests {
         let storage_read = storage.read().await;
         for i in [0, 10, 25, 49] {
             let pubkey = keypairs[i].get_public_key().compress();
-            let (_, balance) = storage_read.get_last_balance(&pubkey, &TOS_ASSET).await.unwrap();
+            let (_, balance) = storage_read
+                .get_last_balance(&pubkey, &TOS_ASSET)
+                .await
+                .unwrap();
             assert_eq!(balance.get_balance(), 100 * COIN_VALUE);
         }
     }

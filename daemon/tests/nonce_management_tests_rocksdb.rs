@@ -18,19 +18,15 @@
 
 use std::sync::Arc;
 use tos_common::{
-    config::COIN_VALUE,
-    crypto::{KeyPair, Hashable, Hash},
     block::{Block, BlockVersion, EXTRA_NONCE_SIZE},
+    config::COIN_VALUE,
+    crypto::{Hash, Hashable, KeyPair},
     immutable::Immutable,
 };
-use tos_daemon::core::{
-    storage::NonceProvider,
-    state::parallel_chain_state::ParallelChainState,
-};
+use tos_daemon::core::{state::parallel_chain_state::ParallelChainState, storage::NonceProvider};
 use tos_environment::Environment;
 use tos_testing_integration::utils::storage_helpers::{
-    create_test_rocksdb_storage,
-    setup_account_rocksdb,
+    create_test_rocksdb_storage, setup_account_rocksdb,
 };
 
 /// Helper to create a dummy block for testing
@@ -40,18 +36,18 @@ fn create_dummy_block(miner_key: &KeyPair) -> Block {
     let miner = miner_key.get_public_key().compress();
     let header = BlockHeader::new(
         BlockVersion::V0,
-        vec![],  // parents_by_level
-        0,       // blue_score
-        0,       // daa_score
-        0u64.into(),  // blue_work
-        Hash::zero(),  // pruning_point
-        0,       // timestamp
-        0,       // bits
-        [0u8; EXTRA_NONCE_SIZE],  // extra_nonce
-        miner,   // miner
-        Hash::zero(),  // hash_merkle_root
-        Hash::zero(),  // accepted_id_merkle_root
-        Hash::zero(),  // utxo_commitment
+        vec![],                  // parents_by_level
+        0,                       // blue_score
+        0,                       // daa_score
+        0u64.into(),             // blue_work
+        Hash::zero(),            // pruning_point
+        0,                       // timestamp
+        0,                       // bits
+        [0u8; EXTRA_NONCE_SIZE], // extra_nonce
+        miner,                   // miner
+        Hash::zero(),            // hash_merkle_root
+        Hash::zero(),            // accepted_id_merkle_root
+        Hash::zero(),            // utxo_commitment
     );
 
     Block::new(Immutable::Arc(Arc::new(header)), vec![])
@@ -100,8 +96,8 @@ async fn test_nonce_increments_correctly() {
     let parallel_state = ParallelChainState::new(
         Arc::clone(&storage),
         environment,
-        0,  // stable_topoheight
-        1,  // topoheight
+        0, // stable_topoheight
+        1, // topoheight
         BlockVersion::V0,
         block,
         block_hash,
@@ -118,7 +114,10 @@ async fn test_nonce_increments_correctly() {
 
     let initial_nonce = parallel_state.get_nonce(&alice_pubkey);
     assert_eq!(initial_nonce, 0, "Initial nonce should be 0");
-    println!("✓ Step 3: Alice's account loaded, nonce = {}", initial_nonce);
+    println!(
+        "✓ Step 3: Alice's account loaded, nonce = {}",
+        initial_nonce
+    );
 
     // Step 4: Simulate transaction (increment nonce)
     let new_nonce = initial_nonce + 1;
@@ -128,8 +127,14 @@ async fn test_nonce_increments_correctly() {
     // Step 5: Verify nonce is tracked as modified
     let modified_nonces = parallel_state.get_modified_nonces();
     assert_eq!(modified_nonces.len(), 1, "Should have 1 modified nonce");
-    assert_eq!(modified_nonces[0].0, alice_pubkey, "Modified nonce should be Alice's");
-    assert_eq!(modified_nonces[0].1, new_nonce, "Modified nonce value should be 1");
+    assert_eq!(
+        modified_nonces[0].0, alice_pubkey,
+        "Modified nonce should be Alice's"
+    );
+    assert_eq!(
+        modified_nonces[0].1, new_nonce,
+        "Modified nonce value should be 1"
+    );
     println!("✓ Step 5: Nonce tracked as modified: {:?}", modified_nonces);
 
     // Step 6: Commit state to storage
@@ -155,7 +160,10 @@ async fn test_nonce_increments_correctly() {
             new_nonce,
             "Persisted nonce should match incremented value"
         );
-        println!("✓ Step 7: Nonce persisted correctly: {}", final_nonce.get_nonce());
+        println!(
+            "✓ Step 7: Nonce persisted correctly: {}",
+            final_nonce.get_nonce()
+        );
     }
 
     println!("✓ Test passed: Nonce increments correctly and persists\n");
@@ -226,7 +234,10 @@ async fn test_staged_nonces_not_committed_until_success() {
     // Increment nonce (staged in memory)
     let staged_nonce = initial_nonce + 1;
     parallel_state.set_nonce(&bob_pubkey, staged_nonce);
-    println!("✓ Step 4: Nonce staged to {} (not committed yet)", staged_nonce);
+    println!(
+        "✓ Step 4: Nonce staged to {} (not committed yet)",
+        staged_nonce
+    );
 
     // Step 5: Verify storage still shows original nonce
     {
@@ -241,12 +252,18 @@ async fn test_staged_nonces_not_committed_until_success() {
             5,
             "Storage should still show original nonce (not committed)"
         );
-        println!("✓ Step 5: Storage nonce = {} (unchanged, staged only)", storage_nonce.get_nonce());
+        println!(
+            "✓ Step 5: Storage nonce = {} (unchanged, staged only)",
+            storage_nonce.get_nonce()
+        );
     }
 
     // Step 6: Verify memory shows staged nonce
     let memory_nonce = parallel_state.get_nonce(&bob_pubkey);
-    assert_eq!(memory_nonce, staged_nonce, "Memory should show staged nonce");
+    assert_eq!(
+        memory_nonce, staged_nonce,
+        "Memory should show staged nonce"
+    );
     println!("✓ Step 6: Memory nonce = {} (staged)", memory_nonce);
 
     // Step 7: Commit state
@@ -272,7 +289,10 @@ async fn test_staged_nonces_not_committed_until_success() {
             staged_nonce,
             "Storage should now show committed nonce"
         );
-        println!("✓ Step 8: Storage nonce = {} (committed)", committed_nonce.get_nonce());
+        println!(
+            "✓ Step 8: Storage nonce = {} (committed)",
+            committed_nonce.get_nonce()
+        );
     }
 
     println!("✓ Test passed: Staged nonces not committed until success\n");
@@ -338,12 +358,18 @@ async fn test_nonce_rollback_on_failure() {
 
     let initial_nonce = parallel_state_1.get_nonce(&charlie_pubkey);
     assert_eq!(initial_nonce, 10, "Initial nonce should be 10");
-    println!("✓ Step 3: Charlie's account loaded, nonce = {}", initial_nonce);
+    println!(
+        "✓ Step 3: Charlie's account loaded, nonce = {}",
+        initial_nonce
+    );
 
     // Increment nonce (simulate transaction execution)
     let failed_nonce = initial_nonce + 1;
     parallel_state_1.set_nonce(&charlie_pubkey, failed_nonce);
-    println!("✓ Step 4: Nonce incremented to {} (simulating transaction)", failed_nonce);
+    println!(
+        "✓ Step 4: Nonce incremented to {} (simulating transaction)",
+        failed_nonce
+    );
 
     // Step 5: DO NOT COMMIT (simulate transaction failure)
     println!("✓ Step 5: Transaction FAILED - state NOT committed (rollback)");
@@ -362,7 +388,10 @@ async fn test_nonce_rollback_on_failure() {
             10,
             "Storage should still show original nonce after rollback"
         );
-        println!("✓ Step 6: Storage nonce = {} (rollback succeeded)", storage_nonce.get_nonce());
+        println!(
+            "✓ Step 6: Storage nonce = {} (rollback succeeded)",
+            storage_nonce.get_nonce()
+        );
     }
 
     // Step 7: Create new ParallelChainState (fresh instance)
@@ -389,8 +418,14 @@ async fn test_nonce_rollback_on_failure() {
         .expect("Failed to load Charlie account in new state");
 
     let final_nonce = parallel_state_2.get_nonce(&charlie_pubkey);
-    assert_eq!(final_nonce, 10, "Nonce should be original value after rollback");
-    println!("✓ Step 8: Charlie's nonce = {} (rollback successful)", final_nonce);
+    assert_eq!(
+        final_nonce, 10,
+        "Nonce should be original value after rollback"
+    );
+    println!(
+        "✓ Step 8: Charlie's nonce = {} (rollback successful)",
+        final_nonce
+    );
 
     println!("✓ Test passed: Nonce rollback on transaction failure works correctly\n");
 }
@@ -427,9 +462,15 @@ async fn test_concurrent_nonce_updates() {
     let bob_pubkey = bob.get_public_key().compress();
     let charlie_pubkey = charlie.get_public_key().compress();
 
-    setup_account_rocksdb(&storage, &alice_pubkey, 1000 * COIN_VALUE, 0).await.unwrap();
-    setup_account_rocksdb(&storage, &bob_pubkey, 2000 * COIN_VALUE, 5).await.unwrap();
-    setup_account_rocksdb(&storage, &charlie_pubkey, 3000 * COIN_VALUE, 10).await.unwrap();
+    setup_account_rocksdb(&storage, &alice_pubkey, 1000 * COIN_VALUE, 0)
+        .await
+        .unwrap();
+    setup_account_rocksdb(&storage, &bob_pubkey, 2000 * COIN_VALUE, 5)
+        .await
+        .unwrap();
+    setup_account_rocksdb(&storage, &charlie_pubkey, 3000 * COIN_VALUE, 10)
+        .await
+        .unwrap();
 
     println!("✓ Step 1: 3 accounts initialized:");
     println!("  - Alice: nonce = 0");
@@ -440,23 +481,34 @@ async fn test_concurrent_nonce_updates() {
     let block = create_dummy_block(&alice);
     let block_hash = block.hash();
 
-    let parallel_state = Arc::new(ParallelChainState::new(
-        Arc::clone(&storage),
-        environment,
-        0,
-        1,
-        BlockVersion::V0,
-        block,
-        block_hash,
-    )
-    .await);
+    let parallel_state = Arc::new(
+        ParallelChainState::new(
+            Arc::clone(&storage),
+            environment,
+            0,
+            1,
+            BlockVersion::V0,
+            block,
+            block_hash,
+        )
+        .await,
+    );
 
     println!("✓ Step 2: ParallelChainState created");
 
     // Step 3: Load all accounts
-    parallel_state.ensure_account_loaded(&alice_pubkey).await.unwrap();
-    parallel_state.ensure_account_loaded(&bob_pubkey).await.unwrap();
-    parallel_state.ensure_account_loaded(&charlie_pubkey).await.unwrap();
+    parallel_state
+        .ensure_account_loaded(&alice_pubkey)
+        .await
+        .unwrap();
+    parallel_state
+        .ensure_account_loaded(&bob_pubkey)
+        .await
+        .unwrap();
+    parallel_state
+        .ensure_account_loaded(&charlie_pubkey)
+        .await
+        .unwrap();
 
     println!("✓ Step 3: All accounts loaded");
 
@@ -502,7 +554,10 @@ async fn test_concurrent_nonce_updates() {
     println!("✓ Step 5: All nonces verified:");
     println!("  - Alice: {} ✓", parallel_state.get_nonce(&alice_pubkey));
     println!("  - Bob: {} ✓", parallel_state.get_nonce(&bob_pubkey));
-    println!("  - Charlie: {} ✓", parallel_state.get_nonce(&charlie_pubkey));
+    println!(
+        "  - Charlie: {} ✓",
+        parallel_state.get_nonce(&charlie_pubkey)
+    );
 
     // Step 6: Verify modification tracking
     let modified_nonces = parallel_state.get_modified_nonces();
@@ -602,8 +657,7 @@ async fn test_nonce_ordering_preserved() {
         parallel_state.set_nonce(&dave_pubkey, next_nonce);
 
         assert_eq!(
-            next_nonce,
-            *expected_nonce,
+            next_nonce, *expected_nonce,
             "Nonce should progress sequentially"
         );
         println!("  - Nonce: {} → {} ✓", current_nonce, next_nonce);
@@ -637,7 +691,10 @@ async fn test_nonce_ordering_preserved() {
             5,
             "Final committed nonce should be 5"
         );
-        println!("✓ Step 7: Final nonce in storage = {}", committed_nonce.get_nonce());
+        println!(
+            "✓ Step 7: Final nonce in storage = {}",
+            committed_nonce.get_nonce()
+        );
     }
 
     println!("✓ Test passed: Nonce ordering preserved correctly\n");

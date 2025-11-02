@@ -13,11 +13,18 @@ use crate::core::{
 
 #[async_trait]
 impl ReachabilityDataProvider for SledStorage {
-    async fn get_reachability_data(&self, hash: &Hash) -> Result<ReachabilityData, BlockchainError> {
+    async fn get_reachability_data(
+        &self,
+        hash: &Hash,
+    ) -> Result<ReachabilityData, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get reachability data for {}", hash);
         }
-        self.load_from_disk(&self.reachability_data, hash.as_bytes(), DiskContext::ReachabilityData)
+        self.load_from_disk(
+            &self.reachability_data,
+            hash.as_bytes(),
+            DiskContext::ReachabilityData,
+        )
     }
 
     async fn has_reachability_data(&self, hash: &Hash) -> Result<bool, BlockchainError> {
@@ -27,7 +34,11 @@ impl ReachabilityDataProvider for SledStorage {
         self.contains_data(&self.reachability_data, hash)
     }
 
-    async fn set_reachability_data(&mut self, hash: &Hash, data: &ReachabilityData) -> Result<(), BlockchainError> {
+    async fn set_reachability_data(
+        &mut self,
+        hash: &Hash,
+        data: &ReachabilityData,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set reachability data for {}", hash);
         }
@@ -48,7 +59,11 @@ impl ReachabilityDataProvider for SledStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("delete reachability data for {}", hash);
         }
-        Self::remove_from_disk::<ReachabilityData>(self.snapshot.as_mut(), &self.reachability_data, hash.as_bytes())?;
+        Self::remove_from_disk::<ReachabilityData>(
+            self.snapshot.as_mut(),
+            &self.reachability_data,
+            hash.as_bytes(),
+        )?;
         Ok(())
     }
 

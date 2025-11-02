@@ -1,7 +1,13 @@
 use async_trait::async_trait;
 use log::debug;
 
-use crate::{clear_caches, core::{error::BlockchainError, storage::{CacheProvider, SledStorage}}};
+use crate::{
+    clear_caches,
+    core::{
+        error::BlockchainError,
+        storage::{CacheProvider, SledStorage},
+    },
+};
 
 #[async_trait]
 impl CacheProvider for SledStorage {

@@ -1,11 +1,10 @@
+use log::{trace, warn};
 /// Storage lifecycle management with reference counting
 ///
 /// This module provides lifetime guards similar to Kaspa's DbLifetime pattern
 /// to ensure clean shutdown and prevent resource leaks in TOS storage backends.
-
 use std::sync::Weak;
 use tempdir::TempDir;
-use log::{warn, trace};
 
 /// Storage lifetime guard with reference counting
 #[derive(Default)]
@@ -54,7 +53,8 @@ impl<T> Drop for StorageLifetime<T> {
                 if log::log_enabled!(log::Level::Warn) {
                     warn!(
                         "Storage has {} strong reference(s), waiting 1 second (attempt {}/16)",
-                        count, i + 1
+                        count,
+                        i + 1
                     );
                 }
                 std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -78,8 +78,7 @@ impl<T> Drop for StorageLifetime<T> {
 
 /// Get a TOS-specific temporary directory for testing
 pub fn get_tos_tempdir() -> TempDir {
-    TempDir::new("tos-storage")
-        .expect("Failed to create temporary directory")
+    TempDir::new("tos-storage").expect("Failed to create temporary directory")
 }
 
 #[cfg(test)]

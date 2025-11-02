@@ -4,8 +4,8 @@
 
 #[cfg(test)]
 mod concurrency_tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
     use tokio;
     use tokio::sync::RwLock;
 
@@ -13,8 +13,8 @@ mod concurrency_tests {
     use tos_common::difficulty::Difficulty;
 
     use crate::core::{
-        ghostdag::{TosGhostdag, BlueWorkType, calc_work_from_difficulty, SortableBlock},
-        reachability::{TosReachability, Interval},
+        ghostdag::{calc_work_from_difficulty, BlueWorkType, SortableBlock, TosGhostdag},
+        reachability::{Interval, TosReachability},
     };
 
     // Test 1: Concurrent work calculations (CPU-bound operations)
@@ -46,7 +46,10 @@ mod concurrency_tests {
         // Verify work increases with difficulty
         results.sort_by_key(|(i, _)| *i);
         for i in 1..results.len() {
-            assert!(results[i].1 > results[i-1].1, "Work should increase with difficulty");
+            assert!(
+                results[i].1 > results[i - 1].1,
+                "Work should increase with difficulty"
+            );
         }
     }
 
@@ -115,9 +118,17 @@ mod concurrency_tests {
         // Verify classifications
         for (anticone_size, is_blue) in results {
             if anticone_size <= k {
-                assert!(is_blue, "Anticone size {} should be blue (K={})", anticone_size, k);
+                assert!(
+                    is_blue,
+                    "Anticone size {} should be blue (K={})",
+                    anticone_size, k
+                );
             } else {
-                assert!(!is_blue, "Anticone size {} should be red (K={})", anticone_size, k);
+                assert!(
+                    !is_blue,
+                    "Anticone size {} should be red (K={})",
+                    anticone_size, k
+                );
             }
         }
     }
@@ -150,8 +161,10 @@ mod concurrency_tests {
 
         // Verify sorting order
         for i in 1..blocks.len() {
-            assert!(blocks[i].blue_work >= blocks[i-1].blue_work,
-                "Blocks should be sorted by blue_work");
+            assert!(
+                blocks[i].blue_work >= blocks[i - 1].blue_work,
+                "Blocks should be sorted by blue_work"
+            );
         }
     }
 
@@ -183,8 +196,11 @@ mod concurrency_tests {
         }
 
         // Counter should be exactly 100
-        assert_eq!(counter.load(Ordering::SeqCst), 100,
-            "Atomic operations should be thread-safe");
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            100,
+            "Atomic operations should be thread-safe"
+        );
     }
 
     // Test 6: Stress test with many concurrent operations
@@ -256,7 +272,10 @@ mod concurrency_tests {
         // All creations should succeed
         for handle in handles {
             let result = handle.await;
-            assert!(result.is_ok(), "Concurrent GHOSTDAG creation should succeed");
+            assert!(
+                result.is_ok(),
+                "Concurrent GHOSTDAG creation should succeed"
+            );
         }
     }
 
@@ -310,7 +329,10 @@ mod concurrency_tests {
                 let are_equal = hash1 == hash2;
                 let bytes_equal = hash1.as_bytes() == hash2.as_bytes();
 
-                assert_eq!(are_equal, bytes_equal, "Hash comparison should be consistent");
+                assert_eq!(
+                    are_equal, bytes_equal,
+                    "Hash comparison should be consistent"
+                );
 
                 (hash1, hash2, are_equal)
             });
@@ -342,7 +364,10 @@ mod concurrency_tests {
 
                 // Verify work is non-zero (unless difficulty is max)
                 if diff_val > 0 {
-                    assert!(work > BlueWorkType::zero(), "Work should be > 0 for non-zero difficulty");
+                    assert!(
+                        work > BlueWorkType::zero(),
+                        "Work should be > 0 for non-zero difficulty"
+                    );
                 }
 
                 (diff_val, work)
@@ -361,8 +386,10 @@ mod concurrency_tests {
         // Verify work increases with difficulty
         results.sort_by_key(|(d, _)| *d);
         for i in 1..results.len() {
-            assert!(results[i].1 > results[i-1].1,
-                "Work should increase with difficulty");
+            assert!(
+                results[i].1 > results[i - 1].1,
+                "Work should increase with difficulty"
+            );
         }
     }
 }

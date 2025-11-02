@@ -13,8 +13,11 @@ use tos_common::{
     serializer::{Reader, Serializer, Writer},
 };
 use tos_daemon::core::{
-    executor::{ParallelExecutor, get_optimal_parallelism},
-    storage::{sled::{SledStorage, StorageMode}, NetworkProvider},
+    executor::{get_optimal_parallelism, ParallelExecutor},
+    storage::{
+        sled::{SledStorage, StorageMode},
+        NetworkProvider,
+    },
 };
 use tos_environment::Environment;
 
@@ -60,7 +63,8 @@ async fn test_parallel_chain_state_initialization() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Create parallel chain state
     // Wrap storage in Arc<RwLock<S>> to match new signature
@@ -71,12 +75,13 @@ async fn test_parallel_chain_state_initialization() {
     let parallel_state = tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
         storage_arc,
         environment,
-        0,  // stable_topoheight
-        1,  // topoheight
+        0, // stable_topoheight
+        1, // topoheight
         BlockVersion::V0,
         block,
         block_hash,
-    ).await;
+    )
+    .await;
 
     // Verify state initialization
     assert_eq!(parallel_state.get_burned_supply(), 0);
@@ -95,7 +100,8 @@ async fn test_parallel_executor_empty_batch() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
@@ -109,7 +115,8 @@ async fn test_parallel_executor_empty_batch() {
         BlockVersion::V0,
         block,
         block_hash,
-    ).await;
+    )
+    .await;
 
     // Execute empty batch
     let executor = ParallelExecutor::new();
@@ -129,7 +136,8 @@ async fn test_parallel_state_getters() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
@@ -143,20 +151,38 @@ async fn test_parallel_state_getters() {
         BlockVersion::V0,
         block,
         block_hash,
-    ).await;
+    )
+    .await;
 
     // Test getter methods
     let nonces = parallel_state.get_modified_nonces();
-    assert!(nonces.is_empty(), "Should have no modified nonces initially");
+    assert!(
+        nonces.is_empty(),
+        "Should have no modified nonces initially"
+    );
 
     let balances = parallel_state.get_modified_balances();
-    assert!(balances.is_empty(), "Should have no modified balances initially");
+    assert!(
+        balances.is_empty(),
+        "Should have no modified balances initially"
+    );
 
     let multisigs = parallel_state.get_modified_multisigs();
-    assert!(multisigs.is_empty(), "Should have no modified multisigs initially");
+    assert!(
+        multisigs.is_empty(),
+        "Should have no modified multisigs initially"
+    );
 
-    assert_eq!(parallel_state.get_gas_fee(), 0, "Should have zero gas fees initially");
-    assert_eq!(parallel_state.get_burned_supply(), 0, "Should have zero burned supply initially");
+    assert_eq!(
+        parallel_state.get_gas_fee(),
+        0,
+        "Should have zero gas fees initially"
+    );
+    assert_eq!(
+        parallel_state.get_burned_supply(),
+        0,
+        "Should have zero burned supply initially"
+    );
 }
 
 #[tokio::test]
@@ -178,27 +204,44 @@ async fn test_should_use_parallel_execution_threshold() {
     // Test threshold logic for parallel execution with network-specific thresholds
     use tos_common::network::Network;
     use tos_daemon::config::{
-        parallel_execution_enabled,
-        get_min_txs_for_parallel,
-        MIN_TXS_FOR_PARALLEL_MAINNET,
-        MIN_TXS_FOR_PARALLEL_TESTNET,
-        MIN_TXS_FOR_PARALLEL_DEVNET,
+        get_min_txs_for_parallel, parallel_execution_enabled, MIN_TXS_FOR_PARALLEL_DEVNET,
+        MIN_TXS_FOR_PARALLEL_MAINNET, MIN_TXS_FOR_PARALLEL_TESTNET,
     };
 
     // Test network-specific thresholds
-    assert_eq!(get_min_txs_for_parallel(&Network::Mainnet), MIN_TXS_FOR_PARALLEL_MAINNET);
-    assert_eq!(get_min_txs_for_parallel(&Network::Testnet), MIN_TXS_FOR_PARALLEL_TESTNET);
-    assert_eq!(get_min_txs_for_parallel(&Network::Devnet), MIN_TXS_FOR_PARALLEL_DEVNET);
+    assert_eq!(
+        get_min_txs_for_parallel(&Network::Mainnet),
+        MIN_TXS_FOR_PARALLEL_MAINNET
+    );
+    assert_eq!(
+        get_min_txs_for_parallel(&Network::Testnet),
+        MIN_TXS_FOR_PARALLEL_TESTNET
+    );
+    assert_eq!(
+        get_min_txs_for_parallel(&Network::Devnet),
+        MIN_TXS_FOR_PARALLEL_DEVNET
+    );
 
     // Test devnet threshold (lowest, for easier testing)
     let devnet_threshold = get_min_txs_for_parallel(&Network::Devnet);
-    let should_use_devnet = |tx_count: usize| -> bool {
-        parallel_execution_enabled() && tx_count >= devnet_threshold
-    };
+    let should_use_devnet =
+        |tx_count: usize| -> bool { parallel_execution_enabled() && tx_count >= devnet_threshold };
 
-    assert_eq!(should_use_devnet(0), false, "Empty batch should not use parallel");
-    assert_eq!(should_use_devnet(1), false, "Single tx should not use parallel");
-    assert_eq!(should_use_devnet(3), false, "Below devnet threshold should not use parallel");
+    assert_eq!(
+        should_use_devnet(0),
+        false,
+        "Empty batch should not use parallel"
+    );
+    assert_eq!(
+        should_use_devnet(1),
+        false,
+        "Single tx should not use parallel"
+    );
+    assert_eq!(
+        should_use_devnet(3),
+        false,
+        "Below devnet threshold should not use parallel"
+    );
 
     let expected = parallel_execution_enabled();
     assert_eq!(should_use_devnet(4), expected, "At devnet threshold (4)");
@@ -206,26 +249,53 @@ async fn test_should_use_parallel_execution_threshold() {
 
     // Test mainnet threshold (highest, for production)
     let mainnet_threshold = get_min_txs_for_parallel(&Network::Mainnet);
-    let should_use_mainnet = |tx_count: usize| -> bool {
-        parallel_execution_enabled() && tx_count >= mainnet_threshold
-    };
+    let should_use_mainnet =
+        |tx_count: usize| -> bool { parallel_execution_enabled() && tx_count >= mainnet_threshold };
 
     assert_eq!(should_use_mainnet(10), false, "Below mainnet threshold");
     assert_eq!(should_use_mainnet(19), false, "Below mainnet threshold");
-    assert_eq!(should_use_mainnet(20), expected, "At mainnet threshold (20)");
+    assert_eq!(
+        should_use_mainnet(20),
+        expected,
+        "At mainnet threshold (20)"
+    );
     assert_eq!(should_use_mainnet(100), expected, "Above mainnet threshold");
 
     // Verify threshold constants are reasonable
-    assert!(MIN_TXS_FOR_PARALLEL_DEVNET >= 2, "Devnet threshold should be >= 2");
-    assert!(MIN_TXS_FOR_PARALLEL_DEVNET <= 10, "Devnet threshold should be <= 10 for testing");
-    assert!(MIN_TXS_FOR_PARALLEL_TESTNET >= 5, "Testnet threshold should be >= 5");
-    assert!(MIN_TXS_FOR_PARALLEL_TESTNET <= 20, "Testnet threshold should be <= 20");
-    assert!(MIN_TXS_FOR_PARALLEL_MAINNET >= 10, "Mainnet threshold should be >= 10 to avoid overhead");
-    assert!(MIN_TXS_FOR_PARALLEL_MAINNET <= 100, "Mainnet threshold should be <= 100 for practical benefit");
+    assert!(
+        MIN_TXS_FOR_PARALLEL_DEVNET >= 2,
+        "Devnet threshold should be >= 2"
+    );
+    assert!(
+        MIN_TXS_FOR_PARALLEL_DEVNET <= 10,
+        "Devnet threshold should be <= 10 for testing"
+    );
+    assert!(
+        MIN_TXS_FOR_PARALLEL_TESTNET >= 5,
+        "Testnet threshold should be >= 5"
+    );
+    assert!(
+        MIN_TXS_FOR_PARALLEL_TESTNET <= 20,
+        "Testnet threshold should be <= 20"
+    );
+    assert!(
+        MIN_TXS_FOR_PARALLEL_MAINNET >= 10,
+        "Mainnet threshold should be >= 10 to avoid overhead"
+    );
+    assert!(
+        MIN_TXS_FOR_PARALLEL_MAINNET <= 100,
+        "Mainnet threshold should be <= 100 for practical benefit"
+    );
 
     // Verify ordering: devnet < testnet < mainnet
-    assert!(MIN_TXS_FOR_PARALLEL_DEVNET < MIN_TXS_FOR_PARALLEL_TESTNET, "Devnet < Testnet");
-    assert!(MIN_TXS_FOR_PARALLEL_TESTNET < MIN_TXS_FOR_PARALLEL_MAINNET, "Testnet < Mainnet");
+    assert!(
+        MIN_TXS_FOR_PARALLEL_DEVNET < MIN_TXS_FOR_PARALLEL_TESTNET,
+        "Devnet < Testnet"
+    );
+    assert!(
+        MIN_TXS_FOR_PARALLEL_TESTNET < MIN_TXS_FOR_PARALLEL_MAINNET,
+        "Testnet < Mainnet"
+    );
 }
 
 #[tokio::test]
@@ -241,7 +311,8 @@ async fn test_parallel_state_modification_simulation() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
@@ -255,14 +326,32 @@ async fn test_parallel_state_modification_simulation() {
         BlockVersion::V0,
         block,
         block_hash,
-    ).await;
+    )
+    .await;
 
     // Verify initial state is empty
-    assert_eq!(parallel_state.get_burned_supply(), 0, "Initial burned supply should be 0");
-    assert_eq!(parallel_state.get_gas_fee(), 0, "Initial gas fee should be 0");
-    assert!(parallel_state.get_modified_nonces().is_empty(), "Initial nonces should be empty");
-    assert!(parallel_state.get_modified_balances().is_empty(), "Initial balances should be empty");
-    assert!(parallel_state.get_modified_multisigs().is_empty(), "Initial multisigs should be empty");
+    assert_eq!(
+        parallel_state.get_burned_supply(),
+        0,
+        "Initial burned supply should be 0"
+    );
+    assert_eq!(
+        parallel_state.get_gas_fee(),
+        0,
+        "Initial gas fee should be 0"
+    );
+    assert!(
+        parallel_state.get_modified_nonces().is_empty(),
+        "Initial nonces should be empty"
+    );
+    assert!(
+        parallel_state.get_modified_balances().is_empty(),
+        "Initial balances should be empty"
+    );
+    assert!(
+        parallel_state.get_modified_multisigs().is_empty(),
+        "Initial multisigs should be empty"
+    );
 
     // Note: We cannot directly modify internal state without applying transactions
     // because the fields are private and protected by DashMap/AtomicU64
@@ -283,7 +372,8 @@ async fn test_parallel_executor_batch_size_verification() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
@@ -297,7 +387,8 @@ async fn test_parallel_executor_batch_size_verification() {
         BlockVersion::V0,
         block,
         block_hash,
-    ).await;
+    )
+    .await;
 
     // Test empty batch (already tested in test_parallel_executor_empty_batch)
     let executor = ParallelExecutor::new();
@@ -323,30 +414,40 @@ async fn test_parallel_state_network_caching() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc_dev = Arc::new(tokio::sync::RwLock::new(storage_dev));
     let environment = Arc::new(Environment::new());
 
     let (block, block_hash) = create_dummy_block();
-    let parallel_state_dev = tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
-        storage_arc_dev.clone(),
-        environment.clone(),
-        0,
-        1,
-        BlockVersion::V0,
-        block,
-        block_hash,
-    ).await;
+    let parallel_state_dev =
+        tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
+            storage_arc_dev.clone(),
+            environment.clone(),
+            0,
+            1,
+            BlockVersion::V0,
+            block,
+            block_hash,
+        )
+        .await;
 
     // Verify devnet is not mainnet (field is cached)
     // We cannot directly access private field, but we can verify it was created successfully
-    assert_eq!(parallel_state_dev.get_burned_supply(), 0, "Devnet state initialized");
+    assert_eq!(
+        parallel_state_dev.get_burned_supply(),
+        0,
+        "Devnet state initialized"
+    );
 
     // Verify storage itself knows it's Devnet
     {
         let storage_read = storage_arc_dev.read().await;
-        assert!(!storage_read.is_mainnet(), "Devnet storage should not be mainnet");
+        assert!(
+            !storage_read.is_mainnet(),
+            "Devnet storage should not be mainnet"
+        );
     }
 
     // Test with Mainnet
@@ -357,28 +458,38 @@ async fn test_parallel_state_network_caching() {
         Network::Mainnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc_main = Arc::new(tokio::sync::RwLock::new(storage_main));
 
     let (block2, block_hash2) = create_dummy_block();
-    let parallel_state_main = tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
-        storage_arc_main.clone(),
-        environment,
-        0,
-        1,
-        BlockVersion::V0,
-        block2,
-        block_hash2,
-    ).await;
+    let parallel_state_main =
+        tos_daemon::core::state::parallel_chain_state::ParallelChainState::new(
+            storage_arc_main.clone(),
+            environment,
+            0,
+            1,
+            BlockVersion::V0,
+            block2,
+            block_hash2,
+        )
+        .await;
 
     // Verify mainnet state initialized
-    assert_eq!(parallel_state_main.get_burned_supply(), 0, "Mainnet state initialized");
+    assert_eq!(
+        parallel_state_main.get_burned_supply(),
+        0,
+        "Mainnet state initialized"
+    );
 
     // Verify storage itself knows it's Mainnet
     {
         let storage_read = storage_arc_main.read().await;
-        assert!(storage_read.is_mainnet(), "Mainnet storage should be mainnet");
+        assert!(
+            storage_read.is_mainnet(),
+            "Mainnet storage should be mainnet"
+        );
     }
 }
 
@@ -410,7 +521,8 @@ async fn test_parallel_executor_parallelism_configuration() {
         Network::Devnet,
         1024 * 1024,
         StorageMode::HighThroughput,
-    ).unwrap();
+    )
+    .unwrap();
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
@@ -424,7 +536,8 @@ async fn test_parallel_executor_parallelism_configuration() {
         BlockVersion::V0,
         block,
         block_hash,
-    ).await;
+    )
+    .await;
 
     // Execute with default executor
     let results = executor_default.execute_batch(parallel_state, vec![]).await;

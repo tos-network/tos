@@ -7,7 +7,7 @@
 // - GHOSTDAG parameters
 // - Block validation
 
-use crate::core::bps::{OneBps, TenBps, calculate_ghostdag_k};
+use crate::core::bps::{calculate_ghostdag_k, OneBps, TenBps};
 use crate::core::hard_fork::get_block_time_target_for_version;
 use tos_common::block::BlockVersion;
 
@@ -17,9 +17,18 @@ fn test_bps_hard_fork_integration() {
     assert_eq!(get_block_time_target_for_version(BlockVersion::V0), 60_000);
 
     // V1/V2/V3 should use OneBps configuration (1 second blocks)
-    assert_eq!(get_block_time_target_for_version(BlockVersion::V1), OneBps::target_time_per_block());
-    assert_eq!(get_block_time_target_for_version(BlockVersion::V2), OneBps::target_time_per_block());
-    assert_eq!(get_block_time_target_for_version(BlockVersion::V3), OneBps::target_time_per_block());
+    assert_eq!(
+        get_block_time_target_for_version(BlockVersion::V1),
+        OneBps::target_time_per_block()
+    );
+    assert_eq!(
+        get_block_time_target_for_version(BlockVersion::V2),
+        OneBps::target_time_per_block()
+    );
+    assert_eq!(
+        get_block_time_target_for_version(BlockVersion::V3),
+        OneBps::target_time_per_block()
+    );
 
     // Verify OneBps is 1000ms
     assert_eq!(OneBps::target_time_per_block(), 1000);
@@ -62,22 +71,22 @@ fn test_bps_time_invariance() {
     let one_finality_time_ms = OneBps::finality_depth() * OneBps::target_time_per_block();
     let ten_finality_time_ms = TenBps::finality_depth() * TenBps::target_time_per_block();
 
-    assert_eq!(one_finality_time_ms, 100_000);  // 100 seconds
-    assert_eq!(ten_finality_time_ms, 100_000);  // 100 seconds
+    assert_eq!(one_finality_time_ms, 100_000); // 100 seconds
+    assert_eq!(ten_finality_time_ms, 100_000); // 100 seconds
 
     // Coinbase maturity should be ~100 seconds for both
     let one_maturity_time_ms = OneBps::coinbase_maturity() * OneBps::target_time_per_block();
     let ten_maturity_time_ms = TenBps::coinbase_maturity() * TenBps::target_time_per_block();
 
-    assert_eq!(one_maturity_time_ms, 100_000);  // 100 seconds
-    assert_eq!(ten_maturity_time_ms, 100_000);  // 100 seconds
+    assert_eq!(one_maturity_time_ms, 100_000); // 100 seconds
+    assert_eq!(ten_maturity_time_ms, 100_000); // 100 seconds
 
     // Pruning depth should be ~200 seconds for both
     let one_pruning_time_ms = OneBps::pruning_depth() * OneBps::target_time_per_block();
     let ten_pruning_time_ms = TenBps::pruning_depth() * TenBps::target_time_per_block();
 
-    assert_eq!(one_pruning_time_ms, 200_000);  // 200 seconds
-    assert_eq!(ten_pruning_time_ms, 200_000);  // 200 seconds
+    assert_eq!(one_pruning_time_ms, 200_000); // 200 seconds
+    assert_eq!(ten_pruning_time_ms, 200_000); // 200 seconds
 }
 
 #[test]
@@ -106,13 +115,21 @@ fn test_bps_calculate_ghostdag_k_accuracy() {
     // x = 2 * D * lambda = 2 * 2 * 1 = 4.0
     // Expected K ~9.7, mathematically calculated result may vary slightly
     let k_one_bps = calculate_ghostdag_k(4.0, 0.001);
-    assert!(k_one_bps >= 9 && k_one_bps <= 11, "K for 1 BPS should be 9-11, got {}", k_one_bps);
+    assert!(
+        k_one_bps >= 9 && k_one_bps <= 11,
+        "K for 1 BPS should be 9-11, got {}",
+        k_one_bps
+    );
 
     // For 10 BPS with D=2s, delta=0.001
     // x = 2 * D * lambda = 2 * 2 * 10 = 40.0
     // Expected K ~63.4, reference implementations use 124 (with safety margin)
     let k_ten_bps = calculate_ghostdag_k(40.0, 0.001);
-    assert!(k_ten_bps >= 60 && k_ten_bps <= 65, "K for 10 BPS should be 60-65, got {}", k_ten_bps);
+    assert!(
+        k_ten_bps >= 60 && k_ten_bps <= 65,
+        "K for 10 BPS should be 60-65, got {}",
+        k_ten_bps
+    );
 }
 
 #[test]
@@ -204,8 +221,8 @@ fn test_bps_type_safety() {
     // This test demonstrates type-level distinction between BPS configurations
     // OneBps and TenBps are distinct types, preventing accidental mixing
 
-    use std::any::TypeId;
     use crate::core::bps::Bps;
+    use std::any::TypeId;
 
     // OneBps and TenBps should have different TypeIds
     assert_ne!(TypeId::of::<Bps<1>>(), TypeId::of::<Bps<10>>());
@@ -235,10 +252,17 @@ fn test_bps_performance() {
 
     // Should complete very quickly (optimized to nothing)
     // On a modern CPU, 1M iterations should take < 1ms if properly optimized
-    println!("BPS parameter access: {:?} for {} iterations", duration, iterations);
+    println!(
+        "BPS parameter access: {:?} for {} iterations",
+        duration, iterations
+    );
 
     // Loose assertion - should be negligible
-    assert!(duration.as_millis() < 100, "BPS parameter access taking too long: {:?}", duration);
+    assert!(
+        duration.as_millis() < 100,
+        "BPS parameter access taking too long: {:?}",
+        duration
+    );
 }
 
 #[cfg(test)]

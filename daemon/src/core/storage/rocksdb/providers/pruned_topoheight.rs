@@ -1,15 +1,10 @@
+use crate::core::{
+    error::BlockchainError,
+    storage::{rocksdb::Column, sled::PRUNED_TOPOHEIGHT, PrunedTopoheightProvider, RocksStorage},
+};
 use async_trait::async_trait;
 use log::trace;
 use tos_common::block::TopoHeight;
-use crate::core::{
-    error::BlockchainError,
-    storage::{
-        rocksdb::Column,
-        sled::PRUNED_TOPOHEIGHT,
-        PrunedTopoheightProvider,
-        RocksStorage,
-    }
-};
 
 // This trait is used for pruning
 #[async_trait]
@@ -21,7 +16,10 @@ impl PrunedTopoheightProvider for RocksStorage {
     }
 
     // set the pruned topoheight on disk
-    async fn set_pruned_topoheight(&mut self, pruned_topoheight: Option<TopoHeight>) -> Result<(), BlockchainError> {
+    async fn set_pruned_topoheight(
+        &mut self,
+        pruned_topoheight: Option<TopoHeight>,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set pruned topoheight {:?}", pruned_topoheight);
         }

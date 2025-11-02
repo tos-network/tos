@@ -1,35 +1,20 @@
-use super::{
-    error::BlockchainError,
-    state::MempoolState,
-    storage::Storage,
-    TxCache
-};
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    mem,
-};
+use super::{error::BlockchainError, state::MempoolState, storage::Storage, TxCache};
 use dashmap::DashMap;
-use linked_hash_map::LinkedHashMap;
-use serde::{Serialize, Deserialize};
 use indexmap::IndexSet;
+use linked_hash_map::LinkedHashMap;
 use log::{debug, info, trace, warn};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, mem, sync::Arc};
 use tos_common::{
     account::Nonce,
     api::daemon::FeeRatesEstimated,
     block::{BlockVersion, TopoHeight},
     config::{BYTES_PER_KB, FEE_PER_KB},
-    crypto::{
-        Hash,
-        PublicKey
-    },
+    crypto::{Hash, PublicKey},
     network::Network,
     time::{get_current_time_in_seconds, TimestampSeconds},
-    transaction::{
-        MultiSigPayload,
-        Transaction
-    },
     tokio::sync::Mutex as TokioMutex,
+    transaction::{MultiSigPayload, Transaction},
 };
 use tos_vm::Environment;
 
@@ -39,7 +24,7 @@ use tos_vm::Environment;
 pub struct SortedTx {
     tx: Arc<Transaction>,
     first_seen: TimestampSeconds, // timestamp when the tx was added
-    size: usize
+    size: usize,
 }
 
 // This struct is used to keep nonce cache for a specific key for faster verification
@@ -59,7 +44,7 @@ pub struct AccountCache {
     // This is also used to verify the validity of the TX spendings
     balances: HashMap<Hash, u64>,
     // Expected multisig after all txs in this cache
-    multisig: Option<MultiSigPayload>
+    multisig: Option<MultiSigPayload>,
 }
 
 // Mempool is used to store all TXs waiting to be included in a block
@@ -106,37 +91,41 @@ impl Mempool {
                 high: FEE_PER_KB,
                 medium: FEE_PER_KB,
                 low: FEE_PER_KB,
-                default: FEE_PER_KB
+                default: FEE_PER_KB,
             };
         }
 
         // Sort descending by fee rate
         fee_rates.sort_by(|a, b| b.cmp(a));
 
-        let high: u64 = fee_rates[..high_priority_count]
-            .iter()
-            .sum::<u64>() / high_priority_count as u64;
+        let high: u64 =
+            fee_rates[..high_priority_count].iter().sum::<u64>() / high_priority_count as u64;
 
-        let medium: u64 = fee_rates[high_priority_count..(high_priority_count + normal_priority_count)]
+        let medium: u64 = fee_rates
+            [high_priority_count..(high_priority_count + normal_priority_count)]
             .iter()
-            .sum::<u64>() / normal_priority_count as u64;
+            .sum::<u64>()
+            / normal_priority_count as u64;
 
         let low: u64 = fee_rates[(high_priority_count + normal_priority_count)..]
             .iter()
-            .sum::<u64>() / (len - high_priority_count - normal_priority_count) as u64;
+            .sum::<u64>()
+            / (len - high_priority_count - normal_priority_count) as u64;
 
         FeeRatesEstimated {
             high,
             medium,
             low,
-            default: FEE_PER_KB
+            default: FEE_PER_KB,
         }
     }
 
     // Find the fee per kB rate estimation for the priority levels
     // For this, we need to get the median fee rate for each priority level
-    pub fn estimate_fee_rates(&self) -> Result<FeeRatesEstimated, BlockchainError> { 
-        let fee_rates: Vec<_> = self.txs.values()
+    pub fn estimate_fee_rates(&self) -> Result<FeeRatesEstimated, BlockchainError> {
+        let fee_rates: Vec<_> = self
+            .txs
+            .values()
             .map(SortedTx::get_fee_rate_per_kb)
             .collect();
 
@@ -144,15 +133,35 @@ impl Mempool {
     }
 
     // All checks are made in Blockchain before calling this function
-    pub async fn add_tx<S: Storage>(&mut self, storage: &S, environment: &Environment, stable_topoheight: TopoHeight, topoheight: TopoHeight, hash: Arc<Hash>, tx: Arc<Transaction>, size: usize, block_version: BlockVersion) -> Result<(), BlockchainError> {
-        let mut state = MempoolState::new(&self, storage, environment, stable_topoheight, topoheight, block_version, self.mainnet);
+    pub async fn add_tx<S: Storage>(
+        &mut self,
+        storage: &S,
+        environment: &Environment,
+        stable_topoheight: TopoHeight,
+        topoheight: TopoHeight,
+        hash: Arc<Hash>,
+        tx: Arc<Transaction>,
+        size: usize,
+        block_version: BlockVersion,
+    ) -> Result<(), BlockchainError> {
+        let mut state = MempoolState::new(
+            &self,
+            storage,
+            environment,
+            stable_topoheight,
+            topoheight,
+            block_version,
+            self.mainnet,
+        );
         let tx_cache = TxCache::new(storage, self, self.disable_zkp_cache);
         tx.verify(&hash, &mut state, &tx_cache).await?;
 
-        let (balances, multisig) = state.get_sender_cache(tx.get_source())
-            .ok_or_else(|| BlockchainError::AccountNotFound(tx.get_source().as_address(self.mainnet)))?;
+        let (balances, multisig) = state.get_sender_cache(tx.get_source()).ok_or_else(|| {
+            BlockchainError::AccountNotFound(tx.get_source().as_address(self.mainnet))
+        })?;
 
-        let balances = balances.into_iter()
+        let balances = balances
+            .into_iter()
             .map(|(asset, ciphertext)| (asset.clone(), ciphertext))
             .collect();
 
@@ -161,7 +170,13 @@ impl Mempool {
         if let Some(cache) = self.caches.get_mut(tx.get_source()) {
             // delete the TX if its in the range of already tracked nonces
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Cache found for owner {} with nonce range {}-{}, nonce = {}", tx.get_source().as_address(self.mainnet), cache.get_min(), cache.get_max(), nonce);
+                debug!(
+                    "Cache found for owner {} with nonce range {}-{}, nonce = {}",
+                    tx.get_source().as_address(self.mainnet),
+                    cache.get_min(),
+                    cache.get_max(),
+                    nonce
+                );
             }
             cache.update(nonce, hash.clone());
 
@@ -178,7 +193,7 @@ impl Mempool {
                 min: nonce,
                 txs,
                 balances,
-                multisig
+                multisig,
             };
             self.caches.insert(tx.get_source().clone(), cache);
         }
@@ -186,7 +201,7 @@ impl Mempool {
         let sorted_tx = SortedTx {
             size,
             first_seen: get_current_time_in_seconds(),
-            tx
+            tx,
         };
 
         // insert in map
@@ -198,11 +213,12 @@ impl Mempool {
     // Remove a TX using its hash from mempool
     // This will recalculate the cache bounds
     pub fn remove_tx(&mut self, hash: &Hash) -> Result<(), BlockchainError> {
-        let tx = self.txs.remove(hash)
+        let tx = self
+            .txs
+            .remove(hash)
             .ok_or_else(|| BlockchainError::TxNotFound(hash.clone()))?;
         // remove the tx hash from sorted txs
-        let key = tx.get_tx()
-            .get_source();
+        let key = tx.get_tx().get_source();
 
         // Should we remove the whole cache?
         // True if no other TXs available for account
@@ -226,7 +242,9 @@ impl Mempool {
                 let mut min: Option<u64> = None;
                 // Update cache bounds
                 for tx_hash in cache.txs.iter() {
-                    let tx = self.txs.get(tx_hash)
+                    let tx = self
+                        .txs
+                        .get(tx_hash)
                         .ok_or_else(|| BlockchainError::TxNotFound(hash.clone()))?;
 
                     let tx_nonce = tx.get_tx().get_nonce();
@@ -253,13 +271,20 @@ impl Mempool {
             }
         } else {
             if log::log_enabled!(log::Level::Warn) {
-                warn!("No cache found for owner {} while deleting TX {}", tx.get_tx().get_source().as_address(self.mainnet), hash);
+                warn!(
+                    "No cache found for owner {} while deleting TX {}",
+                    tx.get_tx().get_source().as_address(self.mainnet),
+                    hash
+                );
             }
         }
 
         if delete {
             if log::log_enabled!(log::Level::Trace) {
-                trace!("Removing empty nonce cache for owner {}", key.as_address(self.mainnet));
+                trace!(
+                    "Removing empty nonce cache for owner {}",
+                    key.as_address(self.mainnet)
+                );
             }
             self.caches.remove(key);
         }
@@ -289,7 +314,8 @@ impl Mempool {
     // Get a sorted TX from its hash
     // This is useful to get its size along the TX and its first seen
     pub fn get_sorted_tx(&self, hash: &Hash) -> Result<&SortedTx, BlockchainError> {
-        self.txs.get(hash)
+        self.txs
+            .get(hash)
             .ok_or_else(|| BlockchainError::TxNotFound(hash.clone()))
     }
 
@@ -302,7 +328,7 @@ impl Mempool {
     // Get a reference of TX from mempool using its hash
     pub fn view_tx<'a>(&'a self, hash: &Hash) -> Result<&'a Arc<Transaction>, BlockchainError> {
         if let Some(sorted_tx) = self.txs.get(hash) {
-            return Ok(sorted_tx.get_tx())
+            return Ok(sorted_tx.get_tx());
         }
 
         Err(BlockchainError::TxNotFound(hash.clone()))
@@ -357,7 +383,14 @@ impl Mempool {
     // Because of DAG reorg, we can't only check updated keys from new block,
     // as a block could be orphaned and the nonce order would change
     // So we need to check all keys from mempool and compare it from storage
-    pub async fn clean_up<S: Storage>(&mut self, storage: &S, environment: &Environment, stable_topoheight: TopoHeight, topoheight: TopoHeight, block_version: BlockVersion) -> Vec<(Arc<Hash>, SortedTx)> {
+    pub async fn clean_up<S: Storage>(
+        &mut self,
+        storage: &S,
+        environment: &Environment,
+        stable_topoheight: TopoHeight,
+        topoheight: TopoHeight,
+        block_version: BlockVersion,
+    ) -> Vec<(Arc<Hash>, SortedTx)> {
         trace!("Cleaning up mempool...");
 
         // All deleted sorted txs with their hashes
@@ -369,7 +402,10 @@ impl Mempool {
 
         for (key, mut cache) in caches {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Cleaning up mempool for owner {}", key.as_address(self.mainnet));
+                debug!(
+                    "Cleaning up mempool for owner {}",
+                    key.as_address(self.mainnet)
+                );
             }
             let nonce = match storage.get_last_nonce(&key).await {
                 Ok((_, version)) => version.get_nonce(),
@@ -387,7 +423,10 @@ impl Mempool {
                             deleted_transactions.push((tx, sorted_tx));
                         } else {
                             if log::log_enabled!(log::Level::Warn) {
-                                warn!("TX {} not found in mempool while deleting due to nonce error", tx);
+                                warn!(
+                                    "TX {} not found in mempool while deleting due to nonce error",
+                                    tx
+                                );
                             }
                         }
                     }
@@ -396,7 +435,13 @@ impl Mempool {
                 }
             };
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Owner {} has nonce {}, cache min: {}, max: {}", key.as_address(self.mainnet), nonce, cache.get_min(), cache.get_max());
+                debug!(
+                    "Owner {} has nonce {}, cache min: {}, max: {}",
+                    key.as_address(self.mainnet),
+                    nonce,
+                    cache.get_min(),
+                    cache.get_max()
+                );
             }
 
             let mut delete_cache = false;
@@ -413,12 +458,20 @@ impl Mempool {
                 for tx in cache.txs.drain(..) {
                     if let Some(sorted_tx) = self.txs.remove(&tx) {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("Deleting ghost TX {} with {} and nonce {}", tx, sorted_tx.get_tx().get_reference(), sorted_tx.get_tx().get_nonce());
+                            debug!(
+                                "Deleting ghost TX {} with {} and nonce {}",
+                                tx,
+                                sorted_tx.get_tx().get_reference(),
+                                sorted_tx.get_tx().get_nonce()
+                            );
                         }
                         deleted_transactions.push((tx, sorted_tx));
                     } else {
                         if log::log_enabled!(log::Level::Warn) {
-                            warn!("Ghost TX {} not found in mempool (orphaned due to nonce)", tx);
+                            warn!(
+                                "Ghost TX {} not found in mempool (orphaned due to nonce)",
+                                tx
+                            );
                         }
                     }
                 }
@@ -428,7 +481,11 @@ impl Mempool {
                 // Account nonce is above our min, which means some TXs are processed
                 // We must check the next ones
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Verifying TXs for owner {} with nonce < {}", key.as_address(self.mainnet), nonce);
+                    debug!(
+                        "Verifying TXs for owner {} with nonce < {}",
+                        key.as_address(self.mainnet),
+                        nonce
+                    );
                 }
                 // txs hashes to delete
                 let mut deleted_txs_hashes = IndexSet::with_capacity(cache.txs.len());
@@ -493,17 +550,32 @@ impl Mempool {
                     // If we have deleted a TX from this cache, we need to verify the rest of them
                     // If we don't have to delete the cache, and we didn't have any nonce collision
                     // We don't have to reverify each TXs. They must be valid
-                    let first_tx =  cache.txs.first()
-                        .and_then(|hash| self.txs.get(hash)
-                            .map(|tx| (tx, hash))
-                        );
+                    let first_tx = cache
+                        .txs
+                        .first()
+                        .and_then(|hash| self.txs.get(hash).map(|tx| (tx, hash)));
 
                     let tx_cache = TxCache::new(storage, &self, self.disable_zkp_cache);
                     if let Some((next_tx, tx_hash)) = first_tx {
-                        let mut state = MempoolState::new(&self, storage, environment, stable_topoheight, topoheight, block_version, self.mainnet);
-                        if let Err(e) = Transaction::verify(next_tx.get_tx(), &tx_hash, &mut state, &tx_cache).await {
+                        let mut state = MempoolState::new(
+                            &self,
+                            storage,
+                            environment,
+                            stable_topoheight,
+                            topoheight,
+                            block_version,
+                            self.mainnet,
+                        );
+                        if let Err(e) =
+                            Transaction::verify(next_tx.get_tx(), &tx_hash, &mut state, &tx_cache)
+                                .await
+                        {
                             if log::log_enabled!(log::Level::Warn) {
-                                warn!("Error while verifying TXs for source {}: {}", key.as_address(self.mainnet), e);
+                                warn!(
+                                    "Error while verifying TXs for source {}: {}",
+                                    key.as_address(self.mainnet),
+                                    e
+                                );
                             }
 
                             // We may have only one TX invalid, but because they are all linked to each others we delete the whole cache
@@ -511,7 +583,10 @@ impl Mempool {
                         }
                     } else {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("no next TX for {}, deleting cache", key.as_address(self.mainnet));
+                            debug!(
+                                "no next TX for {}, deleting cache",
+                                key.as_address(self.mainnet)
+                            );
                         }
                         delete_cache = true;
                     }
@@ -528,7 +603,11 @@ impl Mempool {
                 // now delete all necessary txs
                 for hash in deleted_txs_hashes {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Deleting TX {} for source {}", hash, key.as_address(self.mainnet));
+                        debug!(
+                            "Deleting TX {} for source {}",
+                            hash,
+                            key.as_address(self.mainnet)
+                        );
                     }
                     if let Some(sorted_tx) = self.txs.remove(&hash) {
                         deleted_transactions.push((hash, sorted_tx));
@@ -542,13 +621,19 @@ impl Mempool {
                 }
             } else {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("{} hasn't changed, skipping it", key.as_address(self.mainnet));
+                    debug!(
+                        "{} hasn't changed, skipping it",
+                        key.as_address(self.mainnet)
+                    );
                 }
             }
 
             if !delete_cache {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Re-injecting nonce cache for owner {}", key.as_address(self.mainnet));
+                    debug!(
+                        "Re-injecting nonce cache for owner {}",
+                        key.as_address(self.mainnet)
+                    );
                 }
                 self.caches.insert(key, cache);
             }
@@ -663,7 +748,13 @@ impl AccountCache {
         }
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("has tx with same nonce: {}, max: {}, min: {}, size: {}", nonce, self.max, self.min, self.txs.len());
+            trace!(
+                "has tx with same nonce: {}, max: {}, min: {}, size: {}",
+                nonce,
+                self.max,
+                self.min,
+                self.txs.len()
+            );
         }
         let index = ((nonce - self.min) % (self.max + 1 - self.min)) as usize;
         self.txs.get_index(index)
@@ -704,7 +795,13 @@ mod tests {
         assert_eq!(estimated.low, FEE_PER_KB);
         assert_eq!(estimated.default, FEE_PER_KB);
 
-        let fee_rates = vec![FEE_PER_KB * 2, FEE_PER_KB * 2, FEE_PER_KB * 3, FEE_PER_KB * 2, FEE_PER_KB * 1000];
+        let fee_rates = vec![
+            FEE_PER_KB * 2,
+            FEE_PER_KB * 2,
+            FEE_PER_KB * 3,
+            FEE_PER_KB * 2,
+            FEE_PER_KB * 1000,
+        ];
         let estimated = super::Mempool::internal_estimate_fee_rates(fee_rates);
         assert_eq!(estimated.high, FEE_PER_KB * 1000);
         assert_eq!(estimated.medium, (FEE_PER_KB as f64 * 2.5) as u64);

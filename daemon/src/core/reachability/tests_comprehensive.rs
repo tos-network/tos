@@ -59,11 +59,13 @@ mod comprehensive_tests {
     #[test]
     fn test_chain_ancestry_deep_chain() {
         // Deep chain: 100 blocks
-        let blocks: Vec<Hash> = (0u64..100).map(|i| {
-            let mut bytes = [0u8; 32];
-            bytes[0..8].copy_from_slice(&i.to_le_bytes());
-            Hash::new(bytes)
-        }).collect();
+        let blocks: Vec<Hash> = (0u64..100)
+            .map(|i| {
+                let mut bytes = [0u8; 32];
+                bytes[0..8].copy_from_slice(&i.to_le_bytes());
+                Hash::new(bytes)
+            })
+            .collect();
 
         // Block 0 should be ancestor of block 99
         assert_eq!(blocks.len(), 100);
@@ -155,10 +157,7 @@ mod comprehensive_tests {
             Hash::new([3u8; 32]),
             Hash::new([4u8; 32]),
         ];
-        let _side_path = vec![
-            Hash::new([10u8; 32]),
-            Hash::new([11u8; 32]),
-        ];
+        let _side_path = vec![Hash::new([10u8; 32]), Hash::new([11u8; 32])];
 
         assert!(true); // Placeholder
     }
@@ -459,8 +458,8 @@ mod comprehensive_tests {
         // Heights increase monotonically in a chain
         let heights = vec![0u64, 1, 2, 3, 4, 5];
         for i in 1..heights.len() {
-            assert!(heights[i] > heights[i-1]);
-            assert_eq!(heights[i], heights[i-1] + 1);
+            assert!(heights[i] > heights[i - 1]);
+            assert_eq!(heights[i], heights[i - 1] + 1);
         }
     }
 
@@ -606,12 +605,14 @@ mod comprehensive_tests {
     fn test_stress_many_children() {
         // Block with many children (100)
         let parent = Hash::new([0u8; 32]);
-        let children: Vec<Hash> = (1..=100).map(|i| {
-            let mut bytes = [0u8; 32];
-            bytes[0] = (i % 256) as u8;
-            bytes[1] = (i / 256) as u8;
-            Hash::new(bytes)
-        }).collect();
+        let children: Vec<Hash> = (1..=100)
+            .map(|i| {
+                let mut bytes = [0u8; 32];
+                bytes[0] = (i % 256) as u8;
+                bytes[1] = (i / 256) as u8;
+                Hash::new(bytes)
+            })
+            .collect();
 
         assert_eq!(children.len(), 100);
         for child in &children {
@@ -622,12 +623,14 @@ mod comprehensive_tests {
     #[test]
     fn test_stress_deep_chain() {
         // Very deep chain (1000 blocks)
-        let chain: Vec<Hash> = (0u64..1000).map(|i| {
-            let mut bytes = [0u8; 32];
-            let i_bytes = i.to_le_bytes();
-            bytes[0..8].copy_from_slice(&i_bytes);
-            Hash::new(bytes)
-        }).collect();
+        let chain: Vec<Hash> = (0u64..1000)
+            .map(|i| {
+                let mut bytes = [0u8; 32];
+                let i_bytes = i.to_le_bytes();
+                bytes[0..8].copy_from_slice(&i_bytes);
+                Hash::new(bytes)
+            })
+            .collect();
 
         assert_eq!(chain.len(), 1000);
         assert_ne!(chain[0], chain[999]);

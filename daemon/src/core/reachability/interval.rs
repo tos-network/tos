@@ -557,7 +557,10 @@ mod tests {
         assert_eq!(total_size, 1000);
 
         println!("Exponential splits: {:?}", splits);
-        println!("Sizes: {:?}", splits.iter().map(|s| s.size()).collect::<Vec<_>>());
+        println!(
+            "Sizes: {:?}",
+            splits.iter().map(|s| s.size()).collect::<Vec<_>>()
+        );
     }
 
     #[test]

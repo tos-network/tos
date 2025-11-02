@@ -5,8 +5,8 @@ use crate::{
     clear_caches,
     core::{
         error::BlockchainError,
-        storage::{SledStorage, VersionedCacheProvider}
-    }
+        storage::{SledStorage, VersionedCacheProvider},
+    },
 };
 
 #[async_trait]

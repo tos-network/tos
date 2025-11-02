@@ -1,44 +1,37 @@
 mod disk_cache;
 mod peer;
 
+use super::{error::P2pError, packet::Packet};
+use crate::{
+    config::{P2P_PEERLIST_RETRY_AFTER, PEER_FAIL_TO_CONNECT_LIMIT, PEER_TEMP_BAN_TIME_ON_CONNECT},
+    p2p::packet::PacketPeerDisconnected,
+};
+use bytes::Bytes;
+use futures::{stream, StreamExt};
+use humantime::format_duration;
+use log::{debug, error, info, trace};
+use metrics::gauge;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt::{self, Display, Formatter},
     net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc
+        Arc,
     },
-    time::Duration
+    time::Duration,
 };
-use futures::{stream, StreamExt};
-use humantime::format_duration;
-use metrics::gauge;
-use serde::{Serialize, Deserialize};
-use x25519_dalek::PublicKey;
-use bytes::Bytes;
-use log::{info, debug, trace, error};
 use tos_common::{
-    tokio::sync::{mpsc::Sender, RwLock},
     block::TopoHeight,
     serializer::{Reader, ReaderError, Serializer, Writer},
-    time::{get_current_time_in_seconds, TimestampSeconds}
+    time::{get_current_time_in_seconds, TimestampSeconds},
+    tokio::sync::{mpsc::Sender, RwLock},
 };
-use crate::{
-    config::{
-        PEER_FAIL_TO_CONNECT_LIMIT,
-        PEER_TEMP_BAN_TIME_ON_CONNECT,
-        P2P_PEERLIST_RETRY_AFTER
-    },
-    p2p::packet::PacketPeerDisconnected
-};
-use super::{
-    error::P2pError,
-    packet::Packet,
-};
+use x25519_dalek::PublicKey;
 
-pub use peer::*;
 pub use disk_cache::*;
+pub use peer::*;
 
 pub type SharedPeerList = Arc<PeerList>;
 
@@ -56,7 +49,7 @@ pub struct PeerList {
     // times its local port
     cache: DiskCache,
     // Same as P2P Server
-    // How many concurrent tasks at same time 
+    // How many concurrent tasks at same time
     stream_concurrency: usize,
     // How many outgoing peers we currently have connected
     outgoing_peers: AtomicUsize,
@@ -89,20 +82,23 @@ pub struct PeerListEntry {
     // public key used for the DH key exchange
     // It is optional because we want to create peerlist entries without a public key
     // for banlist etc
-    public_key: Option<PublicKey>
+    public_key: Option<PublicKey>,
 }
 
 impl PeerList {
-    pub fn new(capacity: usize, stream_concurrency: usize, filename: String, peer_disconnect_channel: Option<Sender<Arc<Peer>>>) -> Result<SharedPeerList, P2pError> {
-        Ok(Arc::new(
-            Self {
-                peers: RwLock::new(HashMap::with_capacity(capacity)),
-                peer_disconnect_channel,
-                cache: DiskCache::new(filename)?,
-                stream_concurrency,
-                outgoing_peers: AtomicUsize::new(0)
-            }
-        ))
+    pub fn new(
+        capacity: usize,
+        stream_concurrency: usize,
+        filename: String,
+        peer_disconnect_channel: Option<Sender<Arc<Peer>>>,
+    ) -> Result<SharedPeerList, P2pError> {
+        Ok(Arc::new(Self {
+            peers: RwLock::new(HashMap::with_capacity(capacity)),
+            peer_disconnect_channel,
+            cache: DiskCache::new(filename)?,
+            stream_concurrency,
+            outgoing_peers: AtomicUsize::new(0),
+        }))
     }
 
     // Clear the peerlist, this will overwrite the file on disk also
@@ -143,7 +139,9 @@ impl PeerList {
 
         let (peer, peers) = {
             let mut peers = self.peers.write().await;
-            let peer = peers.remove(&peer_id).ok_or(P2pError::PeerNotFoundById(peer_id))?;
+            let peer = peers
+                .remove(&peer_id)
+                .ok_or(P2pError::PeerNotFoundById(peer_id))?;
             let peers = peers.values().cloned().collect::<Vec<Arc<Peer>>>();
             (peer, peers)
         };
@@ -154,12 +152,14 @@ impl PeerList {
         gauge!("tos_p2p_peers_current").set(peers.len() as f64);
 
         let res = peer.signal_exit().await;
- 
+
         // If peer allows us to share it, we have to notify all peers that have this peer in common
         if notify && peer.sharable() {
             // now remove this peer from all peers that tracked it
             let addr = peer.get_outgoing_address();
-            let packet = Bytes::from(Packet::PeerDisconnected(PacketPeerDisconnected::new(*addr)).to_bytes());
+            let packet = Bytes::from(
+                Packet::PeerDisconnected(PacketPeerDisconnected::new(*addr)).to_bytes(),
+            );
 
             // Reference is Copy
             let packet = &packet;
@@ -273,7 +273,11 @@ impl PeerList {
             if log::log_enabled!(log::Level::Debug) {
                 debug!("Saving {} in stored peerlist", peer);
             }
-            let mut entry = PeerListEntry::new(Some(peer.get_local_port()), PeerListEntryState::Graylist, peer.is_out());
+            let mut entry = PeerListEntry::new(
+                Some(peer.get_local_port()),
+                PeerListEntryState::Graylist,
+                peer.is_out(),
+            );
             entry.set_first_seen(peer.get_connection().connected_on());
             entry.set_last_seen(get_current_time_in_seconds());
             entry.set_last_connection_try(None);
@@ -300,7 +304,9 @@ impl PeerList {
     }
 
     // Get stored peers locked
-    pub fn get_peerlist_entries(&self) -> impl Iterator<Item = Result<(IpAddr, PeerListEntry), DiskError>> {
+    pub fn get_peerlist_entries(
+        &self,
+    ) -> impl Iterator<Item = Result<(IpAddr, PeerListEntry), DiskError>> {
         self.cache.get_peerlist_entries()
     }
 
@@ -366,7 +372,10 @@ impl PeerList {
     // Returns the median topoheight of all peers
     pub async fn get_median_topoheight(&self, our_topoheight: Option<TopoHeight>) -> TopoHeight {
         let peers = self.peers.read().await;
-        let mut values = peers.values().map(|peer| peer.get_topoheight()).collect::<Vec<TopoHeight>>();
+        let mut values = peers
+            .values()
+            .map(|peer| peer.get_topoheight())
+            .collect::<Vec<TopoHeight>>();
         if let Some(our_topoheight) = our_topoheight {
             values.push(our_topoheight);
         }
@@ -390,7 +399,10 @@ impl PeerList {
     }
 
     // get a peer by its address
-    fn internal_get_peer_by_addr<'a>(peers: &'a HashMap<u64, Arc<Peer>>, addr: &SocketAddr) -> Option<&'a Arc<Peer>> {
+    fn internal_get_peer_by_addr<'a>(
+        peers: &'a HashMap<u64, Arc<Peer>>,
+        addr: &SocketAddr,
+    ) -> Option<&'a Arc<Peer>> {
         peers.values().find(|peer| {
             // check both SocketAddr (the outgoing and the incoming)
             peer.get_connection().get_address() == addr || peer.get_outgoing_address() == addr
@@ -426,8 +438,7 @@ impl PeerList {
                 // Temp ban is lower than current time, he is not banned anymore
                 .map(|temp_ban_until| temp_ban_until < get_current_time_in_seconds())
                 // We don't have a temp ban, so he is not banned
-                .unwrap_or(true)
-        )
+                .unwrap_or(true));
     }
 
     // Verify if the peer is whitelisted in the stored peerlist
@@ -435,7 +446,11 @@ impl PeerList {
         self.addr_has_state(ip, PeerListEntryState::Whitelist).await
     }
 
-    async fn addr_has_state(&self, ip: &IpAddr, state: PeerListEntryState) -> Result<bool, P2pError> {
+    async fn addr_has_state(
+        &self,
+        ip: &IpAddr,
+        state: PeerListEntryState,
+    ) -> Result<bool, P2pError> {
         if self.cache.has_peerlist_entry(ip)? {
             let entry = self.cache.get_peerlist_entry(ip)?;
             return Ok(*entry.get_state() == state);
@@ -445,13 +460,18 @@ impl PeerList {
     }
 
     // Set the state of a peer address
-    async fn set_state_to_address(&self, addr: &IpAddr, state: PeerListEntryState) -> Result<(), P2pError> {
+    async fn set_state_to_address(
+        &self,
+        addr: &IpAddr,
+        state: PeerListEntryState,
+    ) -> Result<(), P2pError> {
         if self.cache.has_peerlist_entry(addr)? {
             let mut entry = self.cache.get_peerlist_entry(addr)?;
             entry.set_state(state);
             self.cache.set_peerlist_entry(addr, entry)?;
         } else {
-            self.cache.set_peerlist_entry(addr, PeerListEntry::new(None, state, false))?;
+            self.cache
+                .set_peerlist_entry(addr, PeerListEntry::new(None, state, false))?;
         }
 
         Ok(())
@@ -476,7 +496,10 @@ impl PeerList {
         Ok(())
     }
 
-    fn get_list_with_state(&self, state: &PeerListEntryState) -> Result<Vec<(IpAddr, PeerListEntry)>, P2pError> {
+    fn get_list_with_state(
+        &self,
+        state: &PeerListEntryState,
+    ) -> Result<Vec<(IpAddr, PeerListEntry)>, P2pError> {
         let mut values = Vec::new();
         for res in self.cache.get_peerlist_entries() {
             let (ip, entry) = res?;
@@ -503,11 +526,15 @@ impl PeerList {
     // otherwise create a new PeerListEntry with state blacklist
     // disconnect the peer if present in peerlist
     pub async fn blacklist_address(&self, ip: &IpAddr) -> Result<(), P2pError> {
-        self.set_state_to_address(ip, PeerListEntryState::Blacklist).await?;
+        self.set_state_to_address(ip, PeerListEntryState::Blacklist)
+            .await?;
 
         let potential_peer = {
             let peers = self.peers.read().await;
-            peers.values().find(|peer| peer.get_connection().get_address().ip() == *ip).cloned()
+            peers
+                .values()
+                .find(|peer| peer.get_connection().get_address().ip() == *ip)
+                .cloned()
         };
 
         if let Some(peer) = potential_peer {
@@ -518,7 +545,12 @@ impl PeerList {
     }
 
     // temp ban a peer address for a duration in seconds
-    pub async fn temp_ban_address(&self, ip: &IpAddr, seconds: u64, close_peer: bool) -> Result<(), P2pError> {
+    pub async fn temp_ban_address(
+        &self,
+        ip: &IpAddr,
+        seconds: u64,
+        close_peer: bool,
+    ) -> Result<(), P2pError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("temp banning {} for {} seconds", ip, seconds);
         }
@@ -527,7 +559,10 @@ impl PeerList {
             entry.set_temp_ban_until(Some(get_current_time_in_seconds() + seconds));
             self.cache.set_peerlist_entry(ip, entry)?;
         } else {
-            self.cache.set_peerlist_entry(ip, PeerListEntry::new(None, PeerListEntryState::Graylist, false))?;
+            self.cache.set_peerlist_entry(
+                ip,
+                PeerListEntry::new(None, PeerListEntryState::Graylist, false),
+            )?;
         }
 
         if close_peer {
@@ -550,7 +585,8 @@ impl PeerList {
     // if this peer is already known, change its state to whitelist
     // otherwise create a new PeerListEntry with state whitelist
     pub async fn whitelist_address(&self, ip: &IpAddr) -> Result<(), P2pError> {
-        self.set_state_to_address(ip, PeerListEntryState::Whitelist).await
+        self.set_state_to_address(ip, PeerListEntryState::Whitelist)
+            .await
     }
 
     // Find a peer to connect to from the stored peerlist
@@ -560,13 +596,16 @@ impl PeerList {
     // We first check from known outgoing peers
     pub async fn find_peer_to_connect(&self) -> Result<Option<SocketAddr>, P2pError> {
         if let Some(peer) = self.find_peer_to_connect_internal(true).await? {
-            return Ok(Some(peer))
+            return Ok(Some(peer));
         }
 
         self.find_peer_to_connect_internal(false).await
     }
 
-    pub async fn find_peer_to_connect_internal(&self, out_success_only: bool) -> Result<Option<SocketAddr>, P2pError> {
+    pub async fn find_peer_to_connect_internal(
+        &self,
+        out_success_only: bool,
+    ) -> Result<Option<SocketAddr>, P2pError> {
         let peers = self.peers.read().await;
         let peerlist_entries = self.cache.get_peerlist_entries();
 
@@ -589,9 +628,23 @@ impl PeerList {
             }
 
             // If the peer is blacklisted or temp banned, skip it
-            if *entry.get_state() == PeerListEntryState::Blacklist || entry.get_temp_ban_until().map(|temp_ban_until| temp_ban_until > current_time).unwrap_or(false) {
+            if *entry.get_state() == PeerListEntryState::Blacklist
+                || entry
+                    .get_temp_ban_until()
+                    .map(|temp_ban_until| temp_ban_until > current_time)
+                    .unwrap_or(false)
+            {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Skipping {} because it's blacklisted or temp banned ({})", ip, format_duration(Duration::from_secs(entry.get_temp_ban_until().map(|v| v - current_time).unwrap_or(0))));
+                    debug!(
+                        "Skipping {} because it's blacklisted or temp banned ({})",
+                        ip,
+                        format_duration(Duration::from_secs(
+                            entry
+                                .get_temp_ban_until()
+                                .map(|v| v - current_time)
+                                .unwrap_or(0)
+                        ))
+                    );
                 }
                 continue;
             }
@@ -601,19 +654,25 @@ impl PeerList {
                 // Check if we can connect to it:
                 // - we haven't connected to him recently
                 // - he is not tempbanned
-                let try_connect =  entry.get_last_connection_try()
-                    .unwrap_or(0) + (entry.get_fail_count().max(1) as u64 * P2P_PEERLIST_RETRY_AFTER) <= current_time;
+                let try_connect = entry.get_last_connection_try().unwrap_or(0)
+                    + (entry.get_fail_count().max(1) as u64 * P2P_PEERLIST_RETRY_AFTER)
+                    <= current_time;
 
                 // Verify that we are not already connected to it
                 let not_in_peerlist = Self::internal_get_peer_by_addr(&peers, &addr).is_none();
 
                 if try_connect && not_in_peerlist {
                     // Store it if we don't have any whitelisted peer to connect to
-                    if potential_gray_peer.is_none() && *entry.get_state() == PeerListEntryState::Graylist {
+                    if potential_gray_peer.is_none()
+                        && *entry.get_state() == PeerListEntryState::Graylist
+                    {
                         potential_gray_peer = Some((ip, addr));
                     } else if *entry.get_state() == PeerListEntryState::Whitelist {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("Found peer to connect: {}, updating last connection try", addr);
+                            debug!(
+                                "Found peer to connect: {}, updating last connection try",
+                                addr
+                            );
                         }
                         entry.set_last_connection_try(Some(current_time));
                         self.cache.set_peerlist_entry(&ip, entry)?;
@@ -621,7 +680,10 @@ impl PeerList {
                     }
                 } else {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("{} can try to connect to {}: {}, not in peerlist: {}", entry, ip, try_connect, not_in_peerlist);
+                        debug!(
+                            "{} can try to connect to {}: {}, not in peerlist: {}",
+                            entry, ip, try_connect, not_in_peerlist
+                        );
                     }
                 }
             } else {
@@ -635,23 +697,33 @@ impl PeerList {
         Ok(match potential_gray_peer {
             Some((ip, addr)) => {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Found gray peer to connect: {}, updating last connection try", addr);
+                    debug!(
+                        "Found gray peer to connect: {}, updating last connection try",
+                        addr
+                    );
                 }
                 let mut entry = self.cache.get_peerlist_entry(&ip)?;
                 entry.set_last_connection_try(Some(current_time));
                 self.cache.set_peerlist_entry(&ip, entry)?;
                 Some(addr)
-            },
-            None => None
+            }
+            None => None,
         })
     }
 
-
     // increase the fail count of a peer
     // If tempban is allowed, and the fail count is at the limit, temp ban the peer
-    pub async fn increase_fail_count_for_peerlist_entry(&self, ip: &IpAddr, temp_ban: bool) -> Result<(), P2pError> {
+    pub async fn increase_fail_count_for_peerlist_entry(
+        &self,
+        ip: &IpAddr,
+        temp_ban: bool,
+    ) -> Result<(), P2pError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("increasing fail count for {}, allow temp ban: {}", ip, temp_ban);
+            trace!(
+                "increasing fail count for {}, allow temp ban: {}",
+                ip,
+                temp_ban
+            );
         }
         let mut entry = if self.cache.has_peerlist_entry(ip)? {
             self.cache.get_peerlist_entry(ip)?
@@ -666,16 +738,24 @@ impl PeerList {
             let mut fail_count = entry.get_fail_count();
             if fail_count == u8::MAX {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Removing {} from stored peerlist because fail count is at max", ip);
+                    debug!(
+                        "Removing {} from stored peerlist because fail count is at max",
+                        ip
+                    );
                 }
                 self.cache.remove_peerlist_entry(ip)?;
             } else {
                 // If we allow to temp ban, and the fail count is at the limit, temp ban the peer
                 if temp_ban && fail_count != 0 && fail_count % PEER_FAIL_TO_CONNECT_LIMIT == 0 {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Temp banning {} for failing too many times (count = {})", ip, fail_count);
+                        debug!(
+                            "Temp banning {} for failing too many times (count = {})",
+                            ip, fail_count
+                        );
                     }
-                    entry.set_temp_ban_until(Some(get_current_time_in_seconds() + PEER_TEMP_BAN_TIME_ON_CONNECT));
+                    entry.set_temp_ban_until(Some(
+                        get_current_time_in_seconds() + PEER_TEMP_BAN_TIME_ON_CONNECT,
+                    ));
                 }
 
                 fail_count += 1;
@@ -701,7 +781,10 @@ impl PeerList {
             return Ok(false);
         }
 
-        self.cache.set_peerlist_entry(&ip, PeerListEntry::new(Some(addr.port()), PeerListEntryState::Graylist, false))?;
+        self.cache.set_peerlist_entry(
+            &ip,
+            PeerListEntry::new(Some(addr.port()), PeerListEntryState::Graylist, false),
+        )?;
 
         Ok(true)
     }
@@ -717,7 +800,11 @@ impl PeerList {
     }
 
     // Store the public key of a peer in the stored peerlist
-    pub async fn store_dh_key_for_peer(&self, ip: &IpAddr, public_key: PublicKey) -> Result<(), P2pError> {
+    pub async fn store_dh_key_for_peer(
+        &self,
+        ip: &IpAddr,
+        public_key: PublicKey,
+    ) -> Result<(), P2pError> {
         let mut entry = if self.cache.has_peerlist_entry(ip)? {
             self.cache.get_peerlist_entry(ip)?
         } else {
@@ -742,7 +829,7 @@ impl PeerListEntry {
             local_port,
             temp_ban_until: None,
             state,
-            public_key: None
+            public_key: None,
         }
     }
 
@@ -842,7 +929,7 @@ impl Serializer for PeerListEntryState {
         match self {
             Self::Whitelist => writer.write_u8(0),
             Self::Graylist => writer.write_u8(1),
-            Self::Blacklist => writer.write_u8(2)
+            Self::Blacklist => writer.write_u8(2),
         }
     }
 
@@ -851,7 +938,7 @@ impl Serializer for PeerListEntryState {
             0 => Self::Whitelist,
             1 => Self::Graylist,
             2 => Self::Blacklist,
-            _ => return Err(ReaderError::InvalidValue)
+            _ => return Err(ReaderError::InvalidValue),
         })
     }
 }
@@ -893,7 +980,7 @@ impl Serializer for PeerListEntry {
             out_success,
             temp_ban_until,
             state,
-            public_key
+            public_key,
         })
     }
 }

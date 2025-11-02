@@ -16,19 +16,18 @@
 use std::sync::Arc;
 use std::time::Instant;
 use tos_common::{
-    config::{TOS_ASSET, COIN_VALUE},
-    crypto::{KeyPair, Hashable, Hash},
     block::{Block, BlockVersion, EXTRA_NONCE_SIZE},
+    config::{COIN_VALUE, TOS_ASSET},
+    crypto::{Hash, Hashable, KeyPair},
     immutable::Immutable,
 };
 use tos_daemon::core::{
-    storage::{BalanceProvider, NonceProvider},
     state::parallel_chain_state::ParallelChainState,
+    storage::{BalanceProvider, NonceProvider},
 };
 use tos_environment::Environment;
 use tos_testing_integration::utils::storage_helpers::{
-    create_test_rocksdb_storage,
-    setup_account_rocksdb,
+    create_test_rocksdb_storage, setup_account_rocksdb,
 };
 
 /// Helper to create a dummy block for ParallelChainState
@@ -38,18 +37,18 @@ fn create_dummy_block() -> Block {
     let miner = KeyPair::new().get_public_key().compress();
     let header = BlockHeader::new(
         BlockVersion::V0,
-        vec![],  // parents_by_level
-        0,       // blue_score
-        0,       // daa_score
-        0u64.into(),  // blue_work
-        Hash::zero(),  // pruning_point
-        0,       // timestamp
-        0,       // bits
-        [0u8; EXTRA_NONCE_SIZE],  // extra_nonce
-        miner,   // miner
-        Hash::zero(),  // hash_merkle_root
-        Hash::zero(),  // accepted_id_merkle_root
-        Hash::zero(),  // utxo_commitment
+        vec![],                  // parents_by_level
+        0,                       // blue_score
+        0,                       // daa_score
+        0u64.into(),             // blue_work
+        Hash::zero(),            // pruning_point
+        0,                       // timestamp
+        0,                       // bits
+        [0u8; EXTRA_NONCE_SIZE], // extra_nonce
+        miner,                   // miner
+        Hash::zero(),            // hash_merkle_root
+        Hash::zero(),            // accepted_id_merkle_root
+        Hash::zero(),            // utxo_commitment
     );
 
     Block::new(Immutable::Arc(Arc::new(header)), vec![])
@@ -109,8 +108,14 @@ async fn test_stress_100_accounts() {
     // Step 4: Load all accounts and verify
     let load_start = Instant::now();
     for (pubkey, expected_balance, expected_nonce) in &accounts {
-        parallel_state.ensure_balance_loaded(pubkey, &TOS_ASSET).await.expect("Failed to load balance");
-        parallel_state.ensure_account_loaded(pubkey).await.expect("Failed to load account");
+        parallel_state
+            .ensure_balance_loaded(pubkey, &TOS_ASSET)
+            .await
+            .expect("Failed to load balance");
+        parallel_state
+            .ensure_account_loaded(pubkey)
+            .await
+            .expect("Failed to load account");
 
         let balance = parallel_state.get_balance(pubkey, &TOS_ASSET);
         let nonce = parallel_state.get_nonce(pubkey);
@@ -193,13 +198,23 @@ async fn test_stress_500_accounts() {
     let load_start = Instant::now();
     for i in (0..500).step_by(10) {
         let (pubkey, expected_balance, expected_nonce) = &accounts[i];
-        parallel_state.ensure_balance_loaded(pubkey, &TOS_ASSET).await.expect("Failed to load balance");
-        parallel_state.ensure_account_loaded(pubkey).await.expect("Failed to load account");
+        parallel_state
+            .ensure_balance_loaded(pubkey, &TOS_ASSET)
+            .await
+            .expect("Failed to load balance");
+        parallel_state
+            .ensure_account_loaded(pubkey)
+            .await
+            .expect("Failed to load account");
 
         let balance = parallel_state.get_balance(pubkey, &TOS_ASSET);
         let nonce = parallel_state.get_nonce(pubkey);
 
-        assert_eq!(balance, *expected_balance, "Balance mismatch at index {}", i);
+        assert_eq!(
+            balance, *expected_balance,
+            "Balance mismatch at index {}",
+            i
+        );
         assert_eq!(nonce, *expected_nonce, "Nonce mismatch at index {}", i);
     }
     let load_time = load_start.elapsed();
@@ -283,13 +298,23 @@ async fn test_stress_1000_accounts() {
     let load_start = Instant::now();
     for i in (0..1000).step_by(10) {
         let (pubkey, expected_balance, expected_nonce) = &accounts[i];
-        parallel_state.ensure_balance_loaded(pubkey, &TOS_ASSET).await.expect("Failed to load balance");
-        parallel_state.ensure_account_loaded(pubkey).await.expect("Failed to load account");
+        parallel_state
+            .ensure_balance_loaded(pubkey, &TOS_ASSET)
+            .await
+            .expect("Failed to load balance");
+        parallel_state
+            .ensure_account_loaded(pubkey)
+            .await
+            .expect("Failed to load account");
 
         let balance = parallel_state.get_balance(pubkey, &TOS_ASSET);
         let nonce = parallel_state.get_nonce(pubkey);
 
-        assert_eq!(balance, *expected_balance, "Balance mismatch at index {}", i);
+        assert_eq!(
+            balance, *expected_balance,
+            "Balance mismatch at index {}",
+            i
+        );
         assert_eq!(nonce, *expected_nonce, "Nonce mismatch at index {}", i);
     }
     let load_time = load_start.elapsed();
@@ -373,8 +398,7 @@ async fn test_stress_concurrent_modifications() {
             // Modify balance (deduct 10 TOS)
             let current_balance = state_clone.get_balance(&pubkey, &TOS_ASSET);
             if current_balance >= 10 * COIN_VALUE {
-                state_clone
-                    .set_balance(&pubkey, &TOS_ASSET, current_balance - 10 * COIN_VALUE);
+                state_clone.set_balance(&pubkey, &TOS_ASSET, current_balance - 10 * COIN_VALUE);
             }
 
             // Increment nonce
@@ -448,8 +472,8 @@ async fn test_stress_rapid_state_cycles() {
         let parallel_state = ParallelChainState::new(
             Arc::clone(&storage),
             Arc::clone(&environment),
-            cycle,           // stable_topoheight
-            cycle + 1,       // topoheight
+            cycle,     // stable_topoheight
+            cycle + 1, // topoheight
             BlockVersion::V0,
             dummy_block,
             block_hash,

@@ -1,10 +1,10 @@
+use crate::core::{
+    error::BlockchainError,
+    storage::{sled::TIPS, SledStorage, Tips, TipsProvider},
+};
 use async_trait::async_trait;
 use log::trace;
 use tos_common::serializer::Serializer;
-use crate::core::{
-    error::BlockchainError,
-    storage::{sled::TIPS, SledStorage, Tips, TipsProvider}
-};
 
 #[async_trait]
 impl TipsProvider for SledStorage {
