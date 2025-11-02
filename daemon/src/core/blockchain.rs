@@ -85,7 +85,8 @@ use crate::{
         MILLIS_PER_SECOND, SIDE_BLOCK_REWARD_MAX_BLOCKS, PRUNE_SAFETY_LIMIT,
         SIDE_BLOCK_REWARD_PERCENT, SIDE_BLOCK_REWARD_MIN_PERCENT, STABLE_LIMIT,
         TIMESTAMP_IN_FUTURE_LIMIT, DEFAULT_CACHE_SIZE, MAX_ORPHANED_TRANSACTIONS,
-        PARALLEL_EXECUTION_ENABLED, get_min_txs_for_parallel,
+        get_min_txs_for_parallel,
+        parallel_execution_enabled, // runtime toggle
     },
     core::{
         config::Config,
@@ -3691,6 +3692,32 @@ impl<S: Storage> Blockchain<S> {
                 }
                 } // End of else block (sequential execution)
 
+                // ---------------------------------------------------------------------
+                // Debug-only parity check (parallel path only):
+                // Verify that the sum of per-TX fees equals the gas fee accumulated by
+                // the parallel execution path. This helps catch accidental divergence
+                // between "per-TX accounting" and "parallel-state aggregation".
+                // NOTE: This is NOT consensus-critical and only runs in debug builds.
+                // ---------------------------------------------------------------------
+                if self.should_use_parallel_execution(tx_count) && !has_unsupported_types {
+                    #[cfg(debug_assertions)]
+                    {
+                        let aggregated_gas = chain_state.get_gas_fee();
+                        if aggregated_gas != total_fees {
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!(
+                                    "Fees parity check failed for block {}: aggregated_gas={} total_fees={}",
+                                    hash, aggregated_gas, total_fees
+                                );
+                            }
+                        } else {
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Fees parity check OK for block {}: {}", hash, total_fees);
+                            }
+                        }
+                    }
+                }
+
                 // DAG FIX: Add fees and gas_fee to miner after transaction execution
                 // Base reward was already added before TX execution
                 let gas_fee = chain_state.get_gas_fee();
@@ -4477,14 +4504,19 @@ impl<S: Storage> Blockchain<S> {
     /// Determine if parallel execution should be used based on batch size
     ///
     /// Criteria:
-    /// 1. Feature flag enabled (PARALLEL_EXECUTION_ENABLED)
+    /// 1. Runtime toggle enabled (parallel_execution_enabled())
     /// 2. Batch size >= network-specific threshold (Mainnet: 20, Testnet: 10, Devnet: 4)
+    ///
+    /// Runtime toggle:
+    /// - Default: OFF (safer for mainnet)
+    /// - Enable: export TOS_PARALLEL_EXECUTION=1
     ///
     /// Returns true if parallel execution should be used, false for sequential execution
     #[allow(dead_code)]
     fn should_use_parallel_execution(&self, tx_count: usize) -> bool {
         let min_txs = get_min_txs_for_parallel(&self.network);
-        PARALLEL_EXECUTION_ENABLED && tx_count >= min_txs
+        // Safer default: only enable when the runtime toggle is ON
+        parallel_execution_enabled() && tx_count >= min_txs
     }
 
     /// Execute transactions in parallel using V3 architecture

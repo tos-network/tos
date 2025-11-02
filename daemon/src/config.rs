@@ -68,11 +68,59 @@ pub const TIMESTAMP_IN_FUTURE_LIMIT: TimestampSeconds = 10_000;
 // Using LRU eviction, oldest transactions are dropped when limit is reached
 pub const MAX_ORPHANED_TRANSACTIONS: usize = 10_000;
 
-// Parallel Execution Configuration
-// Enable parallel transaction execution (V3 implementation)
-pub const PARALLEL_EXECUTION_ENABLED: bool = true; // DEVNET TESTING: Enabled for performance validation
-// Enable parallel testing mode (run parallel alongside sequential, compare results)
-pub const PARALLEL_EXECUTION_TEST_MODE: bool = false; // Default: disabled
+// -----------------------------------------------------------------------------
+// Parallel Execution Configuration (runtime toggles)
+// -----------------------------------------------------------------------------
+//
+// We purposefully default to DISABLED in production builds and enable via
+// environment variables. This avoids accidentally turning on parallel execution
+// where it hasn't been validated.
+//
+// Environment variables:
+//   - TOS_PARALLEL_EXECUTION
+//       "1" | "true"  => enabled
+//       (unset/other) => disabled (default)
+//
+//   - TOS_PARALLEL_TEST_MODE
+//       "1" | "true"  => enabled (runs extra parity checks)
+//       (unset/other) => disabled (default)
+//
+// Rationale:
+// - Safer default for mainnet.
+// - Easy to turn on for dev/test environments without a rebuild.
+use std::env;
+
+lazy_static! {
+    /// Runtime toggle for parallel execution (default: OFF for safety)
+    /// Enable via: export TOS_PARALLEL_EXECUTION=1
+    static ref PARALLEL_EXECUTION_ENABLED: bool = {
+        match env::var("TOS_PARALLEL_EXECUTION") {
+            Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "True"),
+            Err(_) => false,  // Safe default: disabled
+        }
+    };
+
+    /// Runtime toggle for parallel test mode (default: OFF)
+    /// Enable via: export TOS_PARALLEL_TEST_MODE=1
+    static ref PARALLEL_EXECUTION_TEST_MODE: bool = {
+        match env::var("TOS_PARALLEL_TEST_MODE") {
+            Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "True"),
+            Err(_) => false,  // Safe default: disabled
+        }
+    };
+}
+
+/// Returns true if parallel execution is enabled at runtime.
+/// Zero-overhead access: cached at first call, ~1-2ns per subsequent call.
+pub fn parallel_execution_enabled() -> bool {
+    *PARALLEL_EXECUTION_ENABLED
+}
+
+/// Returns true if parallel test-mode is enabled at runtime.
+/// Zero-overhead access: cached at first call, ~1-2ns per subsequent call.
+pub fn parallel_test_mode_enabled() -> bool {
+    *PARALLEL_EXECUTION_TEST_MODE
+}
 
 // Minimum transactions required to trigger parallel execution (avoid overhead on small blocks)
 // Network-specific thresholds for different use cases:
