@@ -1,0 +1,137 @@
+[1m[32m   Compiling[0m tos_common v0.1.1 (/Users/tomisetsu/tos-network/tos/common)
+[1m[32m   Compiling[0m tos_daemon v0.1.1 (/Users/tomisetsu/tos-network/tos/daemon)
+[1m[32m   Compiling[0m tos_wallet v0.1.1 (/Users/tomisetsu/tos-network/tos/wallet)
+[1m[32m   Compiling[0m tos-testing-integration v0.1.1 (/Users/tomisetsu/tos-network/tos/testing-integration)
+[1m[32m    Finished[0m `bench` profile [optimized] target(s) in 1m 45s
+[1m[32m     Running[0m benches/parallel_tps_comparison.rs (target/release/deps/parallel_tps_comparison-e870c1bc39db53c4)
+Gnuplot not found, using plotters backend
+Benchmarking sequential_execution/10_txs
+Benchmarking sequential_execution/10_txs: Warming up for 3.0000 s
+Benchmarking sequential_execution/10_txs: Collecting 20 samples in estimated 6.1035 s (630 iterations)
+Benchmarking sequential_execution/10_txs: Analyzing
+sequential_execution/10_txs
+                        time:   [9.3435 ms 9.6740 ms 10.209 ms]
+                        thrpt:  [979.54  elem/s 1.0337 Kelem/s 1.0703 Kelem/s]
+                 change:
+                        time:   [+2.6701% +8.2942% +14.318%] (p = 0.01 < 0.05)
+                        thrpt:  [−12.525% −7.6590% −2.6007%]
+                        Performance has regressed.
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high mild
+
+Benchmarking parallel_execution/10_txs
+Benchmarking parallel_execution/10_txs: Warming up for 3.0000 s
+Benchmarking parallel_execution/10_txs: Collecting 20 samples in estimated 5.6553 s (630 iterations)
+Benchmarking parallel_execution/10_txs: Analyzing
+parallel_execution/10_txs
+                        time:   [8.7014 ms 8.8547 ms 9.0298 ms]
+                        thrpt:  [1.1074 Kelem/s 1.1293 Kelem/s 1.1492 Kelem/s]
+                 change:
+                        time:   [+1.8959% +5.4300% +9.0624%] (p = 0.01 < 0.05)
+                        thrpt:  [−8.3094% −5.1504% −1.8606%]
+                        Performance has regressed.
+
+Benchmarking sequential_execution/100_txs
+Benchmarking sequential_execution/100_txs: Warming up for 3.0000 s
+Benchmarking sequential_execution/100_txs: Collecting 10 samples in estimated 5.5873 s (440 iterations)
+Benchmarking sequential_execution/100_txs: Analyzing
+sequential_execution/100_txs
+                        time:   [12.367 ms 12.510 ms 12.685 ms]
+                        thrpt:  [7.8830 Kelem/s 7.9934 Kelem/s 8.0861 Kelem/s]
+                 change:
+                        time:   [−2.5172% −0.3317% +1.5091%] (p = 0.79 > 0.05)
+                        thrpt:  [−1.4866% +0.3328% +2.5822%]
+                        No change in performance detected.
+
+Benchmarking parallel_execution/100_txs
+Benchmarking parallel_execution/100_txs: Warming up for 3.0000 s
+Benchmarking parallel_execution/100_txs: Collecting 10 samples in estimated 5.1549 s (385 iterations)
+Benchmarking parallel_execution/100_txs: Analyzing
+parallel_execution/100_txs
+                        time:   [13.517 ms 13.664 ms 13.765 ms]
+                        thrpt:  [7.2648 Kelem/s 7.3185 Kelem/s 7.3978 Kelem/s]
+                 change:
+                        time:   [+0.9908% +2.3694% +3.6850%] (p = 0.00 < 0.05)
+                        thrpt:  [−3.5540% −2.3145% −0.9811%]
+                        Change within noise threshold.
+
+Benchmarking conflict_ratio_50pct/sequential_50_txs
+Benchmarking conflict_ratio_50pct/sequential_50_txs: Warming up for 3.0000 s
+Benchmarking conflict_ratio_50pct/sequential_50_txs: Collecting 10 samples in estimated 5.4192 s (605 iterations)
+Benchmarking conflict_ratio_50pct/sequential_50_txs: Analyzing
+conflict_ratio_50pct/sequential_50_txs
+                        time:   [8.7010 ms 8.7665 ms 8.8719 ms]
+                        thrpt:  [5.6358 Kelem/s 5.7035 Kelem/s 5.7464 Kelem/s]
+                 change:
+                        time:   [−5.6460% −3.1647% −0.5089%] (p = 0.04 < 0.05)
+                        thrpt:  [+0.5115% +3.2681% +5.9839%]
+                        Change within noise threshold.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking conflict_ratio_50pct/parallel_50_txs
+Benchmarking conflict_ratio_50pct/parallel_50_txs: Warming up for 3.0000 s
+Benchmarking conflict_ratio_50pct/parallel_50_txs: Collecting 10 samples in estimated 5.3343 s (605 iterations)
+Benchmarking conflict_ratio_50pct/parallel_50_txs: Analyzing
+conflict_ratio_50pct/parallel_50_txs
+                        time:   [9.1354 ms 9.2795 ms 9.3900 ms]
+                        thrpt:  [5.3248 Kelem/s 5.3882 Kelem/s 5.4732 Kelem/s]
+                 change:
+                        time:   [−2.5262% −0.5094% +1.8341%] (p = 0.68 > 0.05)
+                        thrpt:  [−1.8011% +0.5120% +2.5917%]
+                        No change in performance detected.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking tps_comparison/sequential/10_txs
+Benchmarking tps_comparison/sequential/10_txs: Warming up for 3.0000 s
+Benchmarking tps_comparison/sequential/10_txs: Collecting 10 samples in estimated 5.4092 s (605 iterations)
+Benchmarking tps_comparison/sequential/10_txs: Analyzing
+tps_comparison/sequential/10_txs
+                        time:   [36.360 µs 36.936 µs 37.283 µs]
+                        change: [−5.4338% +0.7622% +8.9777%] (p = 0.85 > 0.05)
+                        No change in performance detected.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) low mild
+Benchmarking tps_comparison/parallel/10_txs
+Benchmarking tps_comparison/parallel/10_txs: Warming up for 3.0000 s
+Benchmarking tps_comparison/parallel/10_txs: Collecting 10 samples in estimated 5.1548 s (605 iterations)
+Benchmarking tps_comparison/parallel/10_txs: Analyzing
+tps_comparison/parallel/10_txs
+                        time:   [5.8379 ms 5.9180 ms 6.0260 ms]
+                        change: [−7.8765% −4.1398% +0.1021%] (p = 0.08 > 0.05)
+                        No change in performance detected.
+Benchmarking tps_comparison/sequential/50_txs
+Benchmarking tps_comparison/sequential/50_txs: Warming up for 3.0000 s
+Benchmarking tps_comparison/sequential/50_txs: Collecting 10 samples in estimated 5.4101 s (605 iterations)
+Benchmarking tps_comparison/sequential/50_txs: Analyzing
+tps_comparison/sequential/50_txs
+                        time:   [110.43 µs 110.74 µs 111.12 µs]
+                        change: [−1.7604% +0.0116% +1.2417%] (p = 0.99 > 0.05)
+                        No change in performance detected.
+Benchmarking tps_comparison/parallel/50_txs
+Benchmarking tps_comparison/parallel/50_txs: Warming up for 3.0000 s
+Benchmarking tps_comparison/parallel/50_txs: Collecting 10 samples in estimated 5.1966 s (550 iterations)
+Benchmarking tps_comparison/parallel/50_txs: Analyzing
+tps_comparison/parallel/50_txs
+                        time:   [4.3285 ms 4.4527 ms 4.5172 ms]
+                        change: [−4.0239% −0.8566% +2.3780%] (p = 0.62 > 0.05)
+                        No change in performance detected.
+Benchmarking tps_comparison/sequential/100_txs
+Benchmarking tps_comparison/sequential/100_txs: Warming up for 3.0000 s
+Benchmarking tps_comparison/sequential/100_txs: Collecting 10 samples in estimated 5.5729 s (440 iterations)
+Benchmarking tps_comparison/sequential/100_txs: Analyzing
+tps_comparison/sequential/100_txs
+                        time:   [221.27 µs 222.16 µs 223.44 µs]
+                        change: [−1.0235% +0.6260% +2.0847%] (p = 0.47 > 0.05)
+                        No change in performance detected.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking tps_comparison/parallel/100_txs
+Benchmarking tps_comparison/parallel/100_txs: Warming up for 3.0000 s
+Benchmarking tps_comparison/parallel/100_txs: Collecting 10 samples in estimated 5.2078 s (385 iterations)
+Benchmarking tps_comparison/parallel/100_txs: Analyzing
+tps_comparison/parallel/100_txs
+                        time:   [4.4818 ms 4.5126 ms 4.5582 ms]
+                        change: [−3.1455% +1.0411% +4.5639%] (p = 0.65 > 0.05)
+                        No change in performance detected.
+
