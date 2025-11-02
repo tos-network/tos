@@ -1785,7 +1785,7 @@ async fn test_p04_overflow_protection() {
         panic!("Expected Transfers transaction");
     };
 
-    for transfer in transfers {
+    if let Some(transfer) = transfers.iter().next() {
         let current_balance = state
             .accounts
             .get_mut(&bob.keypair.get_public_key().compress())

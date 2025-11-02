@@ -43,8 +43,9 @@ impl EnergyFeeCalculator {
         // Energy cost for transfers (1 energy per transfer, regardless of size)
         energy_cost += output_count as u64 * ENERGY_PER_TRANSFER;
 
-        // Energy cost for new account activations (0 energy per new address)
-        energy_cost += new_addresses as u64 * 0;
+        // Energy cost for new account activations (currently 0 energy per new address)
+        // Note: Intentionally set to 0 for now, will be configured later if needed
+        let _ = new_addresses; // Suppress unused variable warning
 
         energy_cost
     }
