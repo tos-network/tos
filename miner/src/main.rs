@@ -385,36 +385,34 @@ async fn main() -> Result<()> {
 #[cfg(feature = "api_stats")]
 async fn broadcast_stats_task(broadcast_address: String) -> Result<()> {
     info!("Starting broadcast task");
+    // Start TCP listener
+    let listener = TcpListener::bind(broadcast_address).await?;
     loop {
-        // Start TCP listener
-        let listener = TcpListener::bind(broadcast_address).await?;
-        loop {
-            let (mut socket, _) = listener.accept().await?;
+        let (mut socket, _) = listener.accept().await?;
 
-            let blocks_found = BLOCKS_FOUND.load(Ordering::SeqCst);
-            let blocks_rejected = BLOCKS_REJECTED.load(Ordering::SeqCst);
-            let hashrate = HASHRATE.load(Ordering::SeqCst);
+        let blocks_found = BLOCKS_FOUND.load(Ordering::SeqCst);
+        let blocks_rejected = BLOCKS_REJECTED.load(Ordering::SeqCst);
+        let hashrate = HASHRATE.load(Ordering::SeqCst);
 
-            // Build JSON data
-            let data = serde_json::json!({
-                "accepted": blocks_found,
-                "rejected": blocks_rejected,
-                "hashrate": hashrate,
-                "hashrate_formatted": format_hashrate(hashrate as f64),
-            });
+        // Build JSON data
+        let data = serde_json::json!({
+            "accepted": blocks_found,
+            "rejected": blocks_rejected,
+            "hashrate": hashrate,
+            "hashrate_formatted": format_hashrate(hashrate as f64),
+        });
 
-            // Build HTTP response
-            let status_line = "HTTP/1.1 200 OK\r\n";
-            let content_type = "Content-Type: application/json\r\n";
-            let contents = data.to_string();
-            let length = contents.len();
-            let response =
-                format!("{status_line}{content_type}Content-Length: {length}\r\n\r\n{contents}");
+        // Build HTTP response
+        let status_line = "HTTP/1.1 200 OK\r\n";
+        let content_type = "Content-Type: application/json\r\n";
+        let contents = data.to_string();
+        let length = contents.len();
+        let response =
+            format!("{status_line}{content_type}Content-Length: {length}\r\n\r\n{contents}");
 
-            // Send HTTP repsonse and close socket
-            AsyncWriteExt::write_all(&mut socket, response.as_bytes()).await?;
-            socket.shutdown().await?;
-        }
+        // Send HTTP repsonse and close socket
+        AsyncWriteExt::write_all(&mut socket, response.as_bytes()).await?;
+        socket.shutdown().await?;
     }
 }
 
