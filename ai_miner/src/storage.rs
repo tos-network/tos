@@ -341,8 +341,9 @@ impl StorageManager {
 
     /// Clear all data (for testing or reset)
     pub async fn clear_all(&mut self) -> Result<()> {
+        let network = self.state.network;
         self.state = AIMiningState::default();
-        self.state.network = self.state.network; // Preserve network
+        self.state.network = network; // Preserve network
         self.save().await?;
         info!("Cleared all AI mining storage data");
         Ok(())
