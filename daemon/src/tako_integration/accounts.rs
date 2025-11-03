@@ -313,8 +313,8 @@ mod tests {
         let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
         let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
 
-        provider.set_balance(from, Hash::zero(), 10000);
-        provider.set_balance(to, Hash::zero(), 0);
+        provider.set_balance(from.clone(), Hash::zero(), 10000);
+        provider.set_balance(to.clone(), Hash::zero(), 0);
 
         let mut adapter = TosAccountAdapter::new(&provider, 100);
         let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 5000);
@@ -327,8 +327,8 @@ mod tests {
         let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
         let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
 
-        provider.set_balance(from, Hash::zero(), 1000);
-        provider.set_balance(to, Hash::zero(), 0);
+        provider.set_balance(from.clone(), Hash::zero(), 1000);
+        provider.set_balance(to.clone(), Hash::zero(), 0);
 
         let mut adapter = TosAccountAdapter::new(&provider, 100);
         let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 5000);
@@ -345,7 +345,7 @@ mod tests {
         let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
         let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
 
-        provider.set_balance(from, Hash::zero(), 10000);
+        provider.set_balance(from.clone(), Hash::zero(), 10000);
         // Don't add 'to' account
 
         let mut adapter = TosAccountAdapter::new(&provider, 100);
