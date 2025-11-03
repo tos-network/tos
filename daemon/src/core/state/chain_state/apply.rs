@@ -49,6 +49,7 @@ pub struct ApplicableChainState<'a, S: Storage> {
     contract_manager: ContractManager<'a>,
     burned_supply: u64,
     gas_fee: u64,
+    executor: std::sync::Arc<dyn tos_common::contract::ContractExecutor>,
 }
 
 #[async_trait]
@@ -364,6 +365,10 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             .set_ai_mining_state(self.inner.topoheight, state)
             .await
     }
+
+    fn get_contract_executor(&self) -> std::sync::Arc<dyn tos_common::contract::ContractExecutor> {
+        self.executor.clone()
+    }
 }
 
 impl<'a, S: Storage> Deref for ApplicableChainState<'a, S> {
@@ -402,6 +407,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         burned_supply: u64,
         block_hash: &'a Hash,
         block: &'a Block,
+        executor: std::sync::Arc<dyn tos_common::contract::ContractExecutor>,
     ) -> Self {
         Self {
             inner: ChainState::with(
@@ -421,6 +427,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             block_hash,
             block,
             gas_fee: 0,
+            executor,
         }
     }
 

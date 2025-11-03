@@ -54,9 +54,9 @@ use tos_vm::ValueCell;
 /// adapter.get(&contract_hash.as_bytes(), b"balance")?;
 /// adapter.set(&contract_hash.as_bytes(), b"balance", b"1000")?;
 /// ```
-pub struct TosStorageAdapter<'a, P: ContractProvider> {
+pub struct TosStorageAdapter<'a> {
     /// TOS contract provider (backend storage)
-    provider: &'a P,
+    provider: &'a (dyn ContractProvider + Send),
     /// Current contract being executed
     contract_hash: &'a Hash,
     /// Contract cache for this execution
@@ -65,7 +65,7 @@ pub struct TosStorageAdapter<'a, P: ContractProvider> {
     topoheight: TopoHeight,
 }
 
-impl<'a, P: ContractProvider> TosStorageAdapter<'a, P> {
+impl<'a> TosStorageAdapter<'a> {
     /// Create a new storage adapter
     ///
     /// # Arguments
@@ -75,7 +75,7 @@ impl<'a, P: ContractProvider> TosStorageAdapter<'a, P> {
     /// * `cache` - Contract cache for this execution
     /// * `topoheight` - Current topoheight for versioned reads
     pub fn new(
-        provider: &'a P,
+        provider: &'a (dyn ContractProvider + Send),
         contract_hash: &'a Hash,
         cache: &'a mut ContractCache,
         topoheight: TopoHeight,
@@ -123,7 +123,7 @@ impl<'a, P: ContractProvider> TosStorageAdapter<'a, P> {
     }
 }
 
-impl<'a, P: ContractProvider> StorageProvider for TosStorageAdapter<'a, P> {
+impl<'a> StorageProvider for TosStorageAdapter<'a> {
     fn get(&self, contract_hash: &[u8; 32], key: &[u8]) -> Result<Option<Vec<u8>>, EbpfError> {
         // Verify contract hash matches (for safety)
         if contract_hash != self.contract_hash.as_bytes() {

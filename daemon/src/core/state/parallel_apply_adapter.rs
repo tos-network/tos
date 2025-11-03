@@ -94,6 +94,9 @@ pub struct ParallelApplyAdapter<'a, S: Storage> {
     /// SECURITY FIX: Staged burned supply (not committed until success)
     /// Prevents burn manipulation where failed TX still counts toward total burns
     staged_burned_supply: u64,
+
+    /// Contract executor for executing contract bytecode
+    executor: std::sync::Arc<dyn tos_common::contract::ContractExecutor>,
 }
 
 impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
@@ -104,6 +107,7 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
         storage_semaphore: Arc<Semaphore>,
         block: &'a Block,
         block_hash: &'a Hash,
+        executor: std::sync::Arc<dyn tos_common::contract::ContractExecutor>,
     ) -> Self {
         Self {
             parallel_state,
@@ -117,6 +121,7 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
             staged_multisig: HashMap::new(),
             staged_gas_fees: 0,
             staged_burned_supply: 0,
+            executor,
         }
     }
 
@@ -607,6 +612,10 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
         Err(BlockchainError::Any(anyhow!(
             "AI mining transactions not yet supported in parallel execution (Phase 4)"
         )))
+    }
+
+    fn get_contract_executor(&self) -> std::sync::Arc<dyn tos_common::contract::ContractExecutor> {
+        self.executor.clone()
     }
 }
 

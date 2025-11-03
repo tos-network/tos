@@ -43,21 +43,21 @@ use tos_tbpf::error::EbpfError;
 /// // Load contract by hash (used during CPI)
 /// let bytecode = loader.load_contract(&contract_hash)?;
 /// ```
-pub struct TosContractLoaderAdapter<'a, S> {
+pub struct TosContractLoaderAdapter<'a> {
     /// TOS storage backend
-    storage: &'a S,
+    storage: &'a (dyn tos_common::contract::ContractProvider + Send),
     /// Current topoheight (for versioned reads)
     topoheight: TopoHeight,
 }
 
-impl<'a, S> TosContractLoaderAdapter<'a, S> {
+impl<'a> TosContractLoaderAdapter<'a> {
     /// Create a new contract loader adapter
     ///
     /// # Arguments
     ///
     /// * `storage` - TOS storage backend
     /// * `topoheight` - Current topoheight for versioned reads
-    pub fn new(storage: &'a S, topoheight: TopoHeight) -> Self {
+    pub fn new(storage: &'a (dyn tos_common::contract::ContractProvider + Send), topoheight: TopoHeight) -> Self {
         Self {
             storage,
             topoheight,
@@ -65,7 +65,7 @@ impl<'a, S> TosContractLoaderAdapter<'a, S> {
     }
 }
 
-impl<'a, S> ContractLoader for TosContractLoaderAdapter<'a, S> {
+impl<'a> ContractLoader for TosContractLoaderAdapter<'a> {
     fn load_contract(&self, contract_hash: &[u8; 32]) -> Result<Vec<u8>, EbpfError> {
         // Convert hash
         let _hash = <Hash as Serializer>::from_bytes(contract_hash).map_err(|e| {

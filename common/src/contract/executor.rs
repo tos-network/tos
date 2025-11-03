@@ -101,10 +101,10 @@ pub trait ContractExecutor: Send + Sync {
     /// - Bytecode is invalid or unsupported format
     /// - VM creation/initialization fails
     /// - Execution fails in unrecoverable way
-    async fn execute<P: ContractProvider + Send>(
+    async fn execute(
         &self,
         bytecode: &[u8],
-        provider: &mut P,
+        provider: &mut (dyn ContractProvider + Send),
         topoheight: TopoHeight,
         contract_hash: &Hash,
         block_hash: &Hash,
@@ -143,10 +143,10 @@ pub struct NoOpExecutor;
 
 #[async_trait]
 impl ContractExecutor for NoOpExecutor {
-    async fn execute<P: ContractProvider + Send>(
+    async fn execute(
         &self,
         _bytecode: &[u8],
-        _provider: &mut P,
+        _provider: &mut (dyn ContractProvider + Send),
         _topoheight: TopoHeight,
         _contract_hash: &Hash,
         _block_hash: &Hash,

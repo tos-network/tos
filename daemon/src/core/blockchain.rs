@@ -39,6 +39,7 @@ use crate::{
         rpc::{get_block_response, get_block_type_for_block},
         DaemonRpcServer, SharedDaemonRpcServer,
     },
+    tako_integration::TakoContractExecutor,
 };
 use anyhow::Error;
 use futures::{stream, TryStreamExt};
@@ -184,6 +185,8 @@ pub struct Blockchain<S: Storage> {
     disable_zkp_cache: bool,
     // Cache for block template transactions (supports block reconstruction from header)
     transaction_cache: crate::core::mining::TransactionCache,
+    // Contract executor for running smart contracts (TAKO VM)
+    executor: Arc<dyn tos_common::contract::ContractExecutor>,
 }
 
 impl<S: Storage> Blockchain<S> {
@@ -342,6 +345,7 @@ impl<S: Storage> Blockchain<S> {
             flush_db_every_n_blocks: config.flush_db_every_n_blocks,
             disable_zkp_cache: config.disable_zkp_cache,
             transaction_cache: crate::core::mining::TransactionCache::new(100, 60000), // 100 templates, 60s TTL
+            executor: Arc::new(TakoContractExecutor::new()),
         };
 
         // include genesis block
@@ -4025,6 +4029,7 @@ impl<S: Storage> Blockchain<S> {
                     past_burned_supply,
                     &hash,
                     &block,
+                    self.executor.clone(),
                 );
 
                 // DAG FIX: Add miner rewards BEFORE executing transactions
@@ -4197,6 +4202,7 @@ impl<S: Storage> Blockchain<S> {
                         past_burned_supply,
                         &hash,
                         &block,
+                        self.executor.clone(),
                     );
 
                     // SECURITY FIX S2: Removed redundant post-execution reward application

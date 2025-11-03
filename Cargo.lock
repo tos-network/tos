@@ -4431,24 +4431,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "tos-ast"
-version = "0.1.0"
-source = "git+https://github.com/tos-network/tos-vm?branch=dev#c2a38c4e10880d68a843b7f0538663cb30d5cf11"
-dependencies = [
- "indexmap 2.10.0",
- "tos-types",
-]
-
-[[package]]
 name = "tos-builder"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tos-vm?branch=dev#c2a38c4e10880d68a843b7f0538663cb30d5cf11"
 dependencies = [
  "anyhow",
  "log",
  "paste",
  "thiserror 2.0.12",
- "tos-ast",
  "tos-environment",
  "tos-types",
 ]
@@ -4456,7 +4445,6 @@ dependencies = [
 [[package]]
 name = "tos-bytecode"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tos-vm?branch=dev#c2a38c4e10880d68a843b7f0538663cb30d5cf11"
 dependencies = [
  "indexmap 2.10.0",
  "serde",
@@ -4466,7 +4454,6 @@ dependencies = [
 [[package]]
 name = "tos-environment"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tos-vm?branch=dev#c2a38c4e10880d68a843b7f0538663cb30d5cf11"
 dependencies = [
  "anyhow",
  "better_any",
@@ -4555,7 +4542,6 @@ dependencies = [
 [[package]]
 name = "tos-types"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tos-vm?branch=dev#c2a38c4e10880d68a843b7f0538663cb30d5cf11"
 dependencies = [
  "anyhow",
  "indexmap 2.10.0",
@@ -4569,11 +4555,11 @@ dependencies = [
 [[package]]
 name = "tos-vm"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tos-vm?branch=dev#c2a38c4e10880d68a843b7f0538663cb30d5cf11"
 dependencies = [
  "indexmap 2.10.0",
  "log",
  "thiserror 2.0.12",
+ "tos-builder",
  "tos-bytecode",
  "tos-environment",
  "tos-types",
@@ -4649,9 +4635,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite-wasm",
  "tokio_with_wasm",
- "tos-builder",
  "tos-hash",
- "tos-types",
  "tos-vm",
  "win32console",
  "zeroize",

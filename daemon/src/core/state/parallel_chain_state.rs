@@ -2,7 +2,7 @@
 // No lifetimes, DashMap for automatic concurrency control
 
 use crate::core::{error::BlockchainError, storage::Storage};
-use crate::tako_integration::MultiExecutor;
+use crate::tako_integration::TakoContractExecutor;
 use dashmap::DashMap;
 use std::{
     collections::HashMap,
@@ -177,11 +177,11 @@ pub struct ParallelChainState<S: Storage> {
     /// and future optimization roadmap.
     storage_semaphore: Arc<Semaphore>,
 
-    /// Contract executor for TAKO VM (eBPF) and TOS-VM (legacy)
+    /// Contract executor for TAKO VM (eBPF)
     ///
-    /// Uses MultiExecutor to automatically dispatch to the correct VM based on
-    /// bytecode format (ELF → TAKO, non-ELF → TOS-VM).
-    contract_executor: Arc<MultiExecutor>,
+    /// Uses TakoContractExecutor to execute eBPF contracts.
+    /// Legacy TOS-VM contracts are no longer supported.
+    contract_executor: Arc<dyn tos_common::contract::ContractExecutor>,
 }
 
 impl<S: Storage> ParallelChainState<S> {
@@ -198,8 +198,9 @@ impl<S: Storage> ParallelChainState<S> {
         // Cache network info to avoid repeated lock acquisition
         let is_mainnet = storage.read().await.is_mainnet();
 
-        // Initialize contract executor (MultiExecutor for both TAKO and TOS-VM)
-        let contract_executor = Arc::new(MultiExecutor::new());
+        // Initialize contract executor (TakoContractExecutor for eBPF contracts)
+        let contract_executor: Arc<dyn tos_common::contract::ContractExecutor> =
+            Arc::new(TakoContractExecutor::new());
 
         Arc::new(Self {
             storage,
@@ -238,9 +239,9 @@ impl<S: Storage> ParallelChainState<S> {
 
     /// Get contract executor
     ///
-    /// Returns the MultiExecutor that automatically dispatches to TAKO VM (eBPF)
-    /// or TOS-VM (legacy) based on bytecode format.
-    pub fn get_contract_executor(&self) -> &Arc<MultiExecutor> {
+    /// Returns the TAKO VM executor for eBPF contract execution.
+    /// Legacy TOS-VM contracts are no longer supported.
+    pub fn get_contract_executor(&self) -> &Arc<dyn tos_common::contract::ContractExecutor> {
         &self.contract_executor
     }
 
@@ -460,6 +461,7 @@ impl<S: Storage> ParallelChainState<S> {
             Arc::clone(&self.storage_semaphore),
             &self.block,
             &self.block_hash,
+            self.contract_executor.clone(),
         );
 
         // Call Transaction::apply_with_partial_verify() which performs:

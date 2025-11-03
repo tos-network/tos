@@ -44,23 +44,23 @@ use tos_tbpf::error::EbpfError;
 /// // Transfer from contract to user (native asset)
 /// adapter.transfer(&contract_address, &user_address, 1000)?;
 /// ```
-pub struct TosAccountAdapter<'a, P: ContractProvider> {
+pub struct TosAccountAdapter<'a> {
     /// TOS contract provider (backend)
-    provider: &'a P,
+    provider: &'a (dyn ContractProvider + Send),
     /// Current topoheight (for versioned reads)
     topoheight: TopoHeight,
     /// Native asset hash (TOS uses Hash::zero() for native tokens)
     native_asset: Hash,
 }
 
-impl<'a, P: ContractProvider> TosAccountAdapter<'a, P> {
+impl<'a> TosAccountAdapter<'a> {
     /// Create a new account adapter
     ///
     /// # Arguments
     ///
     /// * `provider` - TOS contract provider
     /// * `topoheight` - Current topoheight for versioned reads
-    pub fn new(provider: &'a P, topoheight: TopoHeight) -> Self {
+    pub fn new(provider: &'a (dyn ContractProvider + Send), topoheight: TopoHeight) -> Self {
         Self {
             provider,
             topoheight,
@@ -75,7 +75,7 @@ impl<'a, P: ContractProvider> TosAccountAdapter<'a, P> {
     /// * `provider` - TOS contract provider
     /// * `topoheight` - Current topoheight for versioned reads
     /// * `asset` - Asset hash to use for balance queries
-    pub fn new_with_asset(provider: &'a P, topoheight: TopoHeight, asset: Hash) -> Self {
+    pub fn new_with_asset(provider: &'a (dyn ContractProvider + Send), topoheight: TopoHeight, asset: Hash) -> Self {
         Self {
             provider,
             topoheight,
@@ -94,7 +94,7 @@ impl<'a, P: ContractProvider> TosAccountAdapter<'a, P> {
     }
 }
 
-impl<'a, P: ContractProvider> AccountProvider for TosAccountAdapter<'a, P> {
+impl<'a> AccountProvider for TosAccountAdapter<'a> {
     fn get_balance(&self, address: &[u8; 32]) -> Result<u64, EbpfError> {
         let pubkey = Self::address_to_pubkey(address)?;
 

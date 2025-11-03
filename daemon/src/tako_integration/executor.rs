@@ -123,9 +123,9 @@ impl TakoExecutor {
     /// - Execution fails (out of compute, invalid memory access, etc.)
     /// - Compute budget exceeds maximum
     #[allow(clippy::too_many_arguments)]
-    pub fn execute<P: ContractProvider>(
+    pub fn execute(
         bytecode: &[u8],
-        provider: &mut P,
+        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
         topoheight: TopoHeight,
         contract_hash: &Hash,
         block_hash: &Hash,
@@ -281,7 +281,7 @@ impl TakoExecutor {
     ///
     /// This is a convenience method for testing. Production code should use
     /// the full `execute()` method with proper blockchain state.
-    pub fn execute_simple<P: ContractProvider>(
+    pub fn execute_simple<P: ContractProvider + Send>(
         bytecode: &[u8],
         provider: &mut P,
         topoheight: TopoHeight,

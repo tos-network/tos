@@ -17,7 +17,7 @@ use crate::{
     transaction::Transaction,
 };
 use log::debug;
-use tos_types::{impl_opaque, register_opaque_json};
+use tos_vm::{impl_opaque, register_opaque_json};
 use tos_vm::{tid, traits::JSON_REGISTRY, OpaqueWrapper};
 
 pub use address::*;

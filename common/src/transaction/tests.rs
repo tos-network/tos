@@ -24,7 +24,8 @@ use crate::{
 use async_trait::async_trait;
 use indexmap::IndexSet;
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
-use tos_vm::{Chunk, Environment, Module};
+use tos_vm::Environment;
+use tos_vm::{Chunk, Module};
 
 // Create a newtype wrapper to avoid orphan rule violation
 #[derive(Debug, Clone)]

@@ -5,7 +5,8 @@ use crate::serializer::*;
 use anyhow::Context;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
-use tos_vm::{Chunk, Module, OpaqueWrapper, Primitive, ValueCell, U256};
+use tos_vm::{OpaqueWrapper, Primitive, ValueCell, U256};
+use tos_vm::{Chunk, Module};
 
 pub use deploy::*;
 pub use invoke::*;

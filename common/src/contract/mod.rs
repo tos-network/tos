@@ -29,7 +29,7 @@ use std::{
     any::TypeId,
     collections::{hash_map::Entry, HashMap, HashSet},
 };
-use tos_builder::EnvironmentBuilder;
+use tos_vm::EnvironmentBuilder;
 use tos_vm::{
     Context, FnInstance, FnParams, FnReturnType, OpaqueWrapper, Primitive, Type, ValueCell,
 };

@@ -12,7 +12,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
-use tos_vm::{Environment, Module};
+use tos_vm::Environment;
+use tos_vm::Module;
 
 /// This trait is used by the batch verification function.
 /// It is intended to represent a virtual snapshot of the current blockchain
@@ -185,4 +186,10 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         &mut self,
         state: &crate::ai_mining::AIMiningState,
     ) -> Result<(), E>;
+
+    /// Get the contract executor for executing contracts
+    /// This returns an Arc to the executor implementation (TAKO VM, TOS-VM, etc.)
+    /// that will be used to execute contract bytecode.
+    /// Using Arc avoids borrow conflicts when executor is used alongside mutable state access.
+    fn get_contract_executor(&self) -> std::sync::Arc<dyn crate::contract::ContractExecutor>;
 }

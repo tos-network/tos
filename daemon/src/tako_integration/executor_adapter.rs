@@ -58,10 +58,10 @@ impl Default for TakoContractExecutor {
 
 #[async_trait]
 impl ContractExecutor for TakoContractExecutor {
-    async fn execute<P: ContractProvider + Send>(
+    async fn execute(
         &self,
         bytecode: &[u8],
-        provider: &mut P,
+        provider: &mut (dyn ContractProvider + Send),
         topoheight: TopoHeight,
         contract_hash: &Hash,
         block_hash: &Hash,
