@@ -8,6 +8,7 @@ use tos_common::{
     block::TopoHeight,
     contract::{ContractCache, ContractProvider},
     crypto::Hash,
+    serializer::Serializer,
     versioned_type::VersionedState,
 };
 use tos_tbpf::error::EbpfError;
@@ -355,7 +356,7 @@ mod tests {
             key: &ValueCell,
             topoheight: TopoHeight,
         ) -> Result<Option<(TopoHeight, Option<ValueCell>)>, anyhow::Error> {
-            Ok(self.data.get(&(*contract, key.clone())).cloned())
+            Ok(self.data.get(&(contract.clone(), key.clone())).cloned())
         }
 
         fn load_data_latest_topoheight(
@@ -366,7 +367,7 @@ mod tests {
         ) -> Result<Option<TopoHeight>, anyhow::Error> {
             Ok(self
                 .data
-                .get(&(*contract, key.clone()))
+                .get(&(contract.clone(), key.clone()))
                 .map(|(topo, _)| *topo))
         }
 
@@ -376,7 +377,7 @@ mod tests {
             key: &ValueCell,
             topoheight: TopoHeight,
         ) -> Result<bool, anyhow::Error> {
-            Ok(self.data.contains_key(&(*contract, key.clone())))
+            Ok(self.data.contains_key(&(contract.clone(), key.clone())))
         }
 
         fn has_contract(&self, _contract: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
@@ -407,7 +408,7 @@ mod tests {
     fn test_storage_adapter_contract_isolation() {
         let provider = MockProvider::new();
         let contract_hash = Hash::zero();
-        let other_contract = Hash::from_bytes(&[1u8; 32]);
+        let other_contract = <Hash as Serializer>::from_bytes(&[1u8; 32]).unwrap();
         let mut cache = ContractCache::default();
         let topoheight = 100;
 

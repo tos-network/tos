@@ -200,7 +200,7 @@ mod tests {
         }
 
         fn set_balance(&mut self, pubkey: PublicKey, asset: Hash, balance: u64) {
-            self.balances.insert((pubkey, asset), balance);
+            self.balances.insert((pubkey.clone(), asset), balance);
             self.accounts.insert(pubkey, true);
         }
     }
@@ -221,7 +221,7 @@ mod tests {
             asset: &Hash,
             _topoheight: TopoHeight,
         ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
-            Ok(self.balances.get(&(*key, *asset)).map(|bal| (100, *bal)))
+            Ok(self.balances.get(&(key.clone(), asset.clone())).map(|bal| (100, *bal)))
         }
 
         fn asset_exists(&self, _asset: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
@@ -290,7 +290,7 @@ mod tests {
     fn test_get_balance_existing_account() {
         let mut provider = MockProvider::new();
         let pubkey = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        provider.set_balance(pubkey, Hash::zero(), 5000);
+        provider.set_balance(pubkey.clone(), Hash::zero(), 5000);
 
         let adapter = TosAccountAdapter::new(&provider, 100);
         let balance = adapter.get_balance(pubkey.as_bytes()).unwrap();
