@@ -47,6 +47,7 @@ mod executor;
 mod executor_adapter;
 mod tosvm_executor;
 mod multi_executor;
+mod error;
 
 pub use storage::TosStorageAdapter;
 pub use accounts::TosAccountAdapter;
@@ -55,3 +56,4 @@ pub use executor::{TakoExecutor, ExecutionResult};
 pub use executor_adapter::TakoContractExecutor;
 pub use tosvm_executor::TosVmExecutor;
 pub use multi_executor::MultiExecutor;
+pub use error::TakoExecutionError;

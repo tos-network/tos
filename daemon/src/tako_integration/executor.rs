@@ -37,9 +37,8 @@ use tos_common::{
     contract::{ContractCache, ContractProvider},
     crypto::Hash,
 };
-use anyhow::{anyhow, Result};
 
-use super::{TosAccountAdapter, TosContractLoaderAdapter, TosStorageAdapter};
+use super::{TosAccountAdapter, TosContractLoaderAdapter, TosStorageAdapter, TakoExecutionError};
 
 /// Default compute budget for contract execution (200,000 compute units)
 ///
@@ -135,19 +134,36 @@ impl TakoExecutor {
         tx_sender: &Hash, // Using Hash type for sender (32 bytes)
         input_data: &[u8],
         compute_budget: Option<u64>,
-    ) -> Result<ExecutionResult> {
+    ) -> Result<ExecutionResult, TakoExecutionError> {
+        use log::{debug, info, warn, error};
+
+        info!(
+            "TAKO VM execution starting: contract={}, compute_budget={}, bytecode_size={}",
+            contract_hash,
+            compute_budget.unwrap_or(DEFAULT_COMPUTE_BUDGET),
+            bytecode.len()
+        );
+
         // 1. Validate compute budget
         let compute_budget = compute_budget.unwrap_or(DEFAULT_COMPUTE_BUDGET);
         if compute_budget > MAX_COMPUTE_BUDGET {
-            return Err(anyhow!(
-                "Compute budget {} exceeds maximum {}",
-                compute_budget,
-                MAX_COMPUTE_BUDGET
-            ));
+            warn!(
+                "Compute budget validation failed: requested={}, maximum={}",
+                compute_budget, MAX_COMPUTE_BUDGET
+            );
+            return Err(TakoExecutionError::ComputeBudgetExceeded {
+                requested: compute_budget,
+                maximum: MAX_COMPUTE_BUDGET,
+            });
         }
 
         // 2. Validate ELF bytecode
-        tos_common::contract::validate_contract_bytecode(bytecode)?;
+        debug!("Validating ELF bytecode: size={} bytes", bytecode.len());
+        tos_common::contract::validate_contract_bytecode(bytecode)
+            .map_err(|e| {
+                error!("Bytecode validation failed: {:?}", e);
+                TakoExecutionError::invalid_bytecode("Invalid ELF format", Some(e))
+            })?;
 
         // 3. Create TOS adapters
         let mut cache = ContractCache::default();
@@ -161,12 +177,19 @@ impl TakoExecutor {
         let config = Config::default();
         let mut loader = BuiltinProgram::<InvokeContext>::new_loader(config.clone());
         tos_syscalls::register_syscalls(&mut loader)
-            .map_err(|e| anyhow!("Failed to register syscalls: {}", e))?;
+            .map_err(|e| TakoExecutionError::SyscallRegistrationFailed {
+                reason: "Syscall registration error".to_string(),
+                error_details: format!("{:?}", e),
+            })?;
         let loader = Arc::new(loader);
 
         // 5. Load executable
         let executable = Executable::load(bytecode, loader.clone())
-            .map_err(|e| anyhow!("Failed to load executable: {}", e))?;
+            .map_err(|e| TakoExecutionError::ExecutableLoadFailed {
+                reason: "ELF parsing failed".to_string(),
+                bytecode_size: bytecode.len(),
+                error_details: format!("{:?}", e),
+            })?;
 
         // 6. Create InvokeContext with TOS blockchain state
         let mut invoke_context = InvokeContext::new_with_state(
@@ -194,7 +217,11 @@ impl TakoExecutor {
             MemoryRegion::new_writable(stack.as_slice_mut(), ebpf::MM_STACK_START),
         ];
         let memory_mapping = MemoryMapping::new(regions, &config, executable.get_tbpf_version())
-            .map_err(|e| anyhow!("Failed to create memory mapping: {}", e))?;
+            .map_err(|e| TakoExecutionError::MemoryMappingFailed {
+                reason: "Memory region setup failed".to_string(),
+                stack_size: STACK_SIZE,
+                error_details: format!("{:?}", e),
+            })?;
 
         // 8. Create VM
         let mut vm = EbpfVm::new(
@@ -206,10 +233,15 @@ impl TakoExecutor {
         );
 
         // 9. Execute contract
+        debug!("Executing contract bytecode via TBPF VM");
         let (instruction_count, result) = vm.execute_program(&executable, true);
 
         // 10. Calculate compute units used
         let compute_units_used = compute_budget - invoke_context.get_remaining();
+        debug!(
+            "Execution complete: instructions={}, compute_units_used={}/{}",
+            instruction_count, compute_units_used, compute_budget
+        );
 
         // 11. Get return data (if any)
         let return_data = invoke_context
@@ -218,13 +250,30 @@ impl TakoExecutor {
 
         // 12. Process result
         match result {
-            ProgramResult::Ok(return_value) => Ok(ExecutionResult {
-                return_value,
-                instructions_executed: instruction_count,
-                compute_units_used,
-                return_data,
-            }),
-            ProgramResult::Err(err) => Err(anyhow!("Contract execution failed: {:?}", err)),
+            ProgramResult::Ok(return_value) => {
+                info!(
+                    "TAKO VM execution succeeded: return_value={}, instructions={}, compute_units={}, return_data_size={}",
+                    return_value,
+                    instruction_count,
+                    compute_units_used,
+                    return_data.as_ref().map(|d| d.len()).unwrap_or(0)
+                );
+                Ok(ExecutionResult {
+                    return_value,
+                    instructions_executed: instruction_count,
+                    compute_units_used,
+                    return_data,
+                })
+            }
+            ProgramResult::Err(err) => {
+                let execution_error = TakoExecutionError::from_ebpf_error(err, instruction_count, compute_units_used);
+                error!(
+                    "TAKO VM execution failed: category={}, error={}",
+                    execution_error.category(),
+                    execution_error.user_message()
+                );
+                Err(execution_error)
+            }
         }
     }
 
@@ -237,7 +286,7 @@ impl TakoExecutor {
         provider: &mut P,
         topoheight: TopoHeight,
         contract_hash: &Hash,
-    ) -> Result<ExecutionResult> {
+    ) -> Result<ExecutionResult, TakoExecutionError> {
         Self::execute(
             bytecode,
             provider,
