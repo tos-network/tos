@@ -13,8 +13,17 @@ autobenches = false
 
 [dependencies]
 tos_common = { path = "../common", features = ["prompt", "clap", "rpc-server", "tokio"] }
+
+# TOS-VM (temporary - will be removed after TAKO executor is stable)
 tos-environment = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
 tos-vm = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
+
+# TAKO VM - The new VM for TOS blockchain contracts
+# Will replace TOS-VM once stable
+tos-program-runtime = { path = "../../tako/program-runtime" }
+tos-syscalls = { path = "../../tako/syscalls" }
+tako-sdk = { path = "../../tako/sdk" }
+tos-tbpf = { path = "../../tos-tbpf" }
 
 # Database backends
 sled = "0.34.7"

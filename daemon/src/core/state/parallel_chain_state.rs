@@ -2,6 +2,7 @@
 // No lifetimes, DashMap for automatic concurrency control
 
 use crate::core::{error::BlockchainError, storage::Storage};
+use crate::tako_integration::MultiExecutor;
 use dashmap::DashMap;
 use std::{
     collections::HashMap,
@@ -175,6 +176,12 @@ pub struct ParallelChainState<S: Storage> {
     /// See struct-level documentation for detailed rationale, performance impact,
     /// and future optimization roadmap.
     storage_semaphore: Arc<Semaphore>,
+
+    /// Contract executor for TAKO VM (eBPF) and TOS-VM (legacy)
+    ///
+    /// Uses MultiExecutor to automatically dispatch to the correct VM based on
+    /// bytecode format (ELF → TAKO, non-ELF → TOS-VM).
+    contract_executor: Arc<MultiExecutor>,
 }
 
 impl<S: Storage> ParallelChainState<S> {
@@ -190,6 +197,9 @@ impl<S: Storage> ParallelChainState<S> {
     ) -> Arc<Self> {
         // Cache network info to avoid repeated lock acquisition
         let is_mainnet = storage.read().await.is_mainnet();
+
+        // Initialize contract executor (MultiExecutor for both TAKO and TOS-VM)
+        let contract_executor = Arc::new(MultiExecutor::new());
 
         Arc::new(Self {
             storage,
@@ -211,6 +221,8 @@ impl<S: Storage> ParallelChainState<S> {
             // SAFETY (S4): Semaphore = 1 prevents RocksDB deadlocks in async context
             // See struct-level documentation for detailed explanation and optimization roadmap
             storage_semaphore: Arc::new(Semaphore::new(1)),
+            // TAKO integration: Multi-executor for both eBPF and legacy contracts
+            contract_executor,
         })
     }
 
@@ -222,6 +234,14 @@ impl<S: Storage> ParallelChainState<S> {
     /// Get total gas fees
     pub fn get_gas_fee(&self) -> u64 {
         self.gas_fee.load(Ordering::Relaxed)
+    }
+
+    /// Get contract executor
+    ///
+    /// Returns the MultiExecutor that automatically dispatches to TAKO VM (eBPF)
+    /// or TOS-VM (legacy) based on bytecode format.
+    pub fn get_contract_executor(&self) -> &Arc<MultiExecutor> {
+        &self.contract_executor
     }
 
     /// Load account state from storage if not already cached

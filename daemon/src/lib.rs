@@ -7,3 +7,6 @@ pub mod config;
 pub mod core;
 pub mod p2p;
 pub mod rpc;
+
+// TAKO VM integration module
+pub mod tako_integration;

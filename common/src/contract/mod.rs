@@ -1,4 +1,6 @@
 mod cache;
+mod contract_type;
+mod executor;
 mod opaque;
 mod output;
 mod provider;
@@ -36,6 +38,8 @@ pub use output::*;
 pub use random::DeterministicRandom;
 
 pub use cache::*;
+pub use contract_type::*;
+pub use executor::*;
 pub use opaque::*;
 pub use provider::*;
 

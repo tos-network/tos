@@ -2,6 +2,7 @@ pub mod config;
 pub mod core;
 pub mod p2p;
 pub mod rpc;
+pub mod tako_integration;
 
 use crate::config::MILLIS_PER_SECOND;
 use anyhow::{Context as AnyContext, Result};

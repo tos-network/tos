@@ -13,6 +13,7 @@ build = "build.rs"
 
 [dependencies]
 tos-hash = { git = "https://github.com/tos-network/tos-hash", branch = "master" }
+# TOS-VM (temporary - will be removed after TAKO executor is stable)
 tos-vm = { git = "https://github.com/tos-network/tos-vm", branch = "dev", features = ["logging"] }
 tos-types = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
 tos-builder = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
