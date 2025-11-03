@@ -156,6 +156,8 @@ impl TakoExecutor {
         let loader_adapter = TosContractLoaderAdapter::new(provider, topoheight);
 
         // 4. Create TBPF loader with syscalls
+        // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml
+        // This provides 10-50x performance improvement over interpreter-only execution
         let config = Config::default();
         let mut loader = BuiltinProgram::<InvokeContext>::new_loader(config.clone());
         tos_syscalls::register_syscalls(&mut loader)

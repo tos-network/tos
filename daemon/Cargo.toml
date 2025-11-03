@@ -23,7 +23,7 @@ tos-vm = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
 tos-program-runtime = { path = "../../tako/program-runtime" }
 tos-syscalls = { path = "../../tako/syscalls" }
 tako-sdk = { path = "../../tako/sdk" }
-tos-tbpf = { path = "../../tos-tbpf" }
+tos-tbpf = { path = "../../tos-tbpf", features = ["jit"] }
 
 # Database backends
 sled = "0.34.7"
