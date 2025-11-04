@@ -60,6 +60,14 @@ impl ContractProvider for MockProvider {
     ) -> Result<bool> {
         Ok(true)
     }
+
+    fn load_contract_module(
+        &self,
+        _contract: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
 }
 
 impl ContractStorage for MockProvider {

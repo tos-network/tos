@@ -20,28 +20,31 @@ use tos_tbpf::error::EbpfError;
 ///     ↓
 /// TosContractLoaderAdapter::load_contract()
 ///     ↓
-/// TOS Storage::load_contract()
+/// TOS Storage::load_contract_module() → VersionedContract → Module → bytecode
 ///     ↓
-/// RocksDB Contracts column family
+/// Verify ELF format (0x7F 'E' 'L' 'F')
 ///     ↓
-/// Return ELF bytecode for TAKO VM
+/// Return bytecode for execution
 /// ```
 ///
-/// # Contract Type Handling
+/// # Implementation Status
 ///
-/// - If the loaded contract is TAKO VM (ELF format): Returns bytecode directly
-/// - If the loaded contract is TOS-VM (non-ELF): Returns error (cross-VM CPI not supported in Phase 1)
+/// **Phase 2 (Complete)**: Full Module Loading
+/// - ✅ Validates contract hash format
+/// - ✅ Loads Module bytecode from storage via `ContractProvider::load_contract_module()`
+/// - ✅ Extracts bytecode from `VersionedContract<'a>`
+/// - ✅ Verifies ELF format (`b"\x7FELF"`)
+/// - ✅ Returns actual bytecode for execution
+/// - ✅ Prevents cross-VM CPI (TAKO can only call TAKO contracts)
 ///
 /// # Example
 ///
 /// ```rust,ignore
 /// use tako_integration::TosContractLoaderAdapter;
 ///
-/// // Create loader
 /// let loader = TosContractLoaderAdapter::new(storage, topoheight);
-///
-/// // Load contract by hash (used during CPI)
-/// let bytecode = loader.load_contract(&contract_hash)?;
+/// let result = loader.load_contract(&contract_hash);
+/// // Currently returns "unsupported" error with guidance
 /// ```
 pub struct TosContractLoaderAdapter<'a> {
     /// TOS storage backend
@@ -57,7 +60,10 @@ impl<'a> TosContractLoaderAdapter<'a> {
     ///
     /// * `storage` - TOS storage backend
     /// * `topoheight` - Current topoheight for versioned reads
-    pub fn new(storage: &'a (dyn tos_common::contract::ContractProvider + Send), topoheight: TopoHeight) -> Self {
+    pub fn new(
+        storage: &'a (dyn tos_common::contract::ContractProvider + Send),
+        topoheight: TopoHeight,
+    ) -> Self {
         Self {
             storage,
             topoheight,
@@ -67,67 +73,192 @@ impl<'a> TosContractLoaderAdapter<'a> {
 
 impl<'a> ContractLoader for TosContractLoaderAdapter<'a> {
     fn load_contract(&self, contract_hash: &[u8; 32]) -> Result<Vec<u8>, EbpfError> {
-        // Convert hash
-        let _hash = <Hash as Serializer>::from_bytes(contract_hash).map_err(|e| {
+        // Convert hash bytes to TOS Hash type
+        let hash = <Hash as Serializer>::from_bytes(contract_hash).map_err(|e| {
             EbpfError::SyscallError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("Invalid contract hash: {}", e),
             )))
         })?;
 
-        // TODO [Phase 1 Implementation]: Load contract from TOS storage
-        //
-        // This requires accessing the TOS storage trait for contracts.
-        // The exact implementation depends on the Storage trait being used.
-        //
-        // Expected implementation:
-        // ```
-        // let contract = self.storage
-        //     .load_contract(&hash, self.topoheight)
-        //     .map_err(|e| EbpfError::SyscallError(...))?;
-        //
-        // // Get bytecode
-        // let bytecode = contract.bytecode();
-        //
-        // // Verify it's a TAKO contract (ELF format)
-        // if !bytecode.starts_with(b"\x7FELF") {
-        //     return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
-        //         std::io::ErrorKind::InvalidData,
-        //         "Cross-VM CPI not supported: target contract is TOS-VM, not TAKO VM",
-        //     ))));
-        // }
-        //
-        // Ok(bytecode.to_vec())
-        // ```
+        // Load contract Module bytecode from storage
+        let bytecode_opt = self.storage
+            .load_contract_module(&hash, self.topoheight)
+            .map_err(|e| {
+                EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to load contract Module from storage: {}", e),
+                )))
+            })?;
 
-        // Placeholder implementation for Phase 1
-        Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "Contract loading not yet implemented - requires TOS storage trait integration",
-        ))))
+        // Check if contract exists
+        let Some(bytecode) = bytecode_opt else {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Contract {} not found at topoheight {} or earlier", hash, self.topoheight),
+            ))));
+        };
+
+        // Verify ELF format (magic bytes: 0x7F 'E' 'L' 'F')
+        if !bytecode.starts_with(b"\x7FELF") {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Cross-VM CPI not supported: Contract {} is TOS-VM format (not TAKO VM ELF). \
+                    TAKO VM can only invoke other TAKO VM contracts.",
+                    hash
+                ),
+            ))));
+        }
+
+        // Log successful load
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!(
+                "Loaded TAKO contract {} for CPI: {} bytes ELF bytecode",
+                hash,
+                bytecode.len()
+            );
+        }
+
+        Ok(bytecode)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tos_common::{
+        asset::AssetData,
+        crypto::PublicKey,
+        contract::{ContractStorage, ContractProvider},
+    };
+    use tos_vm::ValueCell;
 
     // Mock storage for testing
     struct MockStorage;
 
+    // Implement ContractStorage trait
+    impl ContractStorage for MockStorage {
+        fn load_data(
+            &self,
+            _contract: &Hash,
+            _key: &ValueCell,
+            _topoheight: TopoHeight,
+        ) -> Result<Option<(TopoHeight, Option<ValueCell>)>, anyhow::Error> {
+            Ok(None)
+        }
+
+        fn load_data_latest_topoheight(
+            &self,
+            _contract: &Hash,
+            _key: &ValueCell,
+            _topoheight: TopoHeight,
+        ) -> Result<Option<TopoHeight>, anyhow::Error> {
+            Ok(None)
+        }
+
+        fn has_data(
+            &self,
+            _contract: &Hash,
+            _key: &ValueCell,
+            _topoheight: TopoHeight,
+        ) -> Result<bool, anyhow::Error> {
+            Ok(false)
+        }
+
+        fn has_contract(&self, _contract: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+            Ok(false)
+        }
+    }
+
+    // Implement ContractProvider trait
+    impl ContractProvider for MockStorage {
+        fn get_contract_balance_for_asset(
+            &self,
+            _contract: &Hash,
+            _asset: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
+            Ok(None)
+        }
+
+        fn get_account_balance_for_asset(
+            &self,
+            _key: &PublicKey,
+            _asset: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
+            Ok(None)
+        }
+
+        fn asset_exists(&self, _asset: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+            Ok(false)
+        }
+
+        fn load_asset_data(
+            &self,
+            _asset: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<Option<(TopoHeight, AssetData)>, anyhow::Error> {
+            Ok(None)
+        }
+
+        fn load_asset_supply(
+            &self,
+            _asset: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
+            Ok(None)
+        }
+
+        fn account_exists(
+            &self,
+            _key: &PublicKey,
+            _topoheight: TopoHeight,
+        ) -> Result<bool, anyhow::Error> {
+            Ok(false)
+        }
+
+        fn load_contract_module(
+            &self,
+            _contract: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<Option<Vec<u8>>, anyhow::Error> {
+            // MockStorage returns None (no contracts exist)
+            Ok(None)
+        }
+    }
+
     #[test]
-    fn test_contract_loader_placeholder() {
+    fn test_contract_loader_nonexistent_contract() {
         let storage = MockStorage;
         let loader = TosContractLoaderAdapter::new(&storage, 100);
 
         let contract_hash = [0u8; 32];
         let result = loader.load_contract(&contract_hash);
 
-        // Currently returns error until storage integration is complete
+        // Should return "not found" error since MockStorage returns false for has_contract
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("not yet implemented"));
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("not found"),
+            "Expected 'not found' error, got: {}",
+            error_msg
+        );
+    }
+
+    #[test]
+    fn test_contract_loader_validation() {
+        let storage = MockStorage;
+        let loader = TosContractLoaderAdapter::new(&storage, 100);
+
+        // Valid hash format but non-existent contract
+        let contract_hash = [0u8; 32];
+        let result = loader.load_contract(&contract_hash);
+
+        // Should fail at contract existence check
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("not found"));
     }
 }

@@ -8,7 +8,6 @@ use tos_common::{
     block::TopoHeight,
     contract::{ContractCache, ContractProvider},
     crypto::Hash,
-    serializer::Serializer,
     versioned_type::VersionedState,
 };
 use tos_tbpf::error::EbpfError;
@@ -98,7 +97,7 @@ impl<'a> TosStorageAdapter<'a> {
         // TOS-VM's ValueCell doesn't have a direct "bytes" type, so we use String
         // and convert via bincode
         match bincode::serialize(bytes) {
-            Ok(serialized) => {
+            Ok(_serialized) => {
                 // Store as opaque serialized data
                 // Note: This is a temporary solution. Long-term, we may want to add
                 // ValueCell::Bytes variant to TOS-VM.
@@ -286,6 +285,7 @@ mod tests {
     use tos_common::{
         contract::ContractCache,
         crypto::Hash,
+        serializer::Serializer,
     };
 
     // Mock ContractProvider for testing
@@ -346,6 +346,14 @@ mod tests {
             _topoheight: TopoHeight,
         ) -> Result<bool, anyhow::Error> {
             Ok(false)
+        }
+
+        fn load_contract_module(
+            &self,
+            _contract: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<Option<Vec<u8>>, anyhow::Error> {
+            Ok(None)
         }
     }
 
@@ -412,7 +420,7 @@ mod tests {
         let mut cache = ContractCache::default();
         let topoheight = 100;
 
-        let mut adapter = TosStorageAdapter::new(&provider, &contract_hash, &mut cache, topoheight);
+        let adapter = TosStorageAdapter::new(&provider, &contract_hash, &mut cache, topoheight);
 
         // Attempt to access different contract's storage
         let result = adapter.get(other_contract.as_bytes(), b"key");

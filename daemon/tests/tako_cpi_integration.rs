@@ -33,6 +33,7 @@ impl MockCpiProvider {
         }
     }
 
+    #[allow(dead_code)]
     fn with_balance(mut self, key: PublicKey, asset: Hash, amount: u64) -> Self {
         self.balances.insert((key, asset), amount);
         self
@@ -90,6 +91,14 @@ impl ContractProvider for MockCpiProvider {
     ) -> anyhow::Result<bool> {
         Ok(true)
     }
+
+    fn load_contract_module(
+        &self,
+        contract: &Hash,
+        _topoheight: TopoHeight,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        Ok(self.contracts.get(contract).cloned())
+    }
 }
 
 impl ContractStorage for MockCpiProvider {
@@ -136,11 +145,13 @@ impl ContractStorage for MockCpiProvider {
 }
 
 /// Contract loader implementation for CPI testing
+#[allow(dead_code)]
 struct MockContractLoader {
     callee_bytecode: Vec<u8>,
     callee_address: [u8; 32],
 }
 
+#[allow(dead_code)]
 impl MockContractLoader {
     fn new(callee_bytecode: Vec<u8>, callee_address: [u8; 32]) -> Self {
         Self {

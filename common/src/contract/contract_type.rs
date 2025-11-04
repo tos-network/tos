@@ -27,12 +27,13 @@ use anyhow::{anyhow, Result};
 ///
 /// ```
 /// # use tos_common::contract::validate_contract_bytecode;
-/// // Valid TAKO VM contract (ELF format)
-/// let valid_bytecode = b"\x7FELF\x02\x01\x01...";
-/// assert!(validate_contract_bytecode(valid_bytecode).is_ok());
+/// // Valid TAKO VM contract (ELF format with minimum 64 bytes)
+/// let mut valid_bytecode = vec![0x7F, b'E', b'L', b'F', 0x02, 0x01, 0x01, 0x00];
+/// valid_bytecode.extend_from_slice(&[0u8; 56]); // Pad to 64 bytes minimum
+/// assert!(validate_contract_bytecode(&valid_bytecode).is_ok());
 ///
 /// // Invalid bytecode (not ELF)
-/// let invalid_bytecode = b"\x00\x01\x02\x03...";
+/// let invalid_bytecode = b"\x00\x01\x02\x03";
 /// assert!(validate_contract_bytecode(invalid_bytecode).is_err());
 /// ```
 pub fn validate_contract_bytecode(bytecode: &[u8]) -> Result<()> {
@@ -134,8 +135,9 @@ mod tests {
         let result = validate_contract_bytecode(short_header);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("too short"));
-        assert!(result.unwrap_err().to_string().contains("ELF header"));
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("too short"));
+        assert!(error_msg.contains("ELF header"));
     }
 
     #[test]

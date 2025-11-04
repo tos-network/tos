@@ -19,15 +19,12 @@
 /// ```
 
 use std::sync::Arc;
-use tos_program_runtime::{
-    invoke_context::InvokeContext,
-    storage::{AccountProvider, ContractLoader, StorageProvider},
-};
+use tos_program_runtime::invoke_context::InvokeContext;
 use tos_tbpf::{
     aligned_memory::AlignedMemory,
     ebpf,
     elf::Executable,
-    error::{EbpfError, ProgramResult},
+    error::ProgramResult,
     memory_region::{MemoryMapping, MemoryRegion},
     program::BuiltinProgram,
     vm::{Config, ContextObject, EbpfVm},
@@ -132,7 +129,7 @@ impl TakoExecutor {
         block_height: u64,
         tx_hash: &Hash,
         tx_sender: &Hash, // Using Hash type for sender (32 bytes)
-        input_data: &[u8],
+        _input_data: &[u8], // Reserved for future use
         compute_budget: Option<u64>,
     ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, info, warn, error};
@@ -305,13 +302,12 @@ impl TakoExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    
     use tos_common::{
         asset::AssetData,
         crypto::{Hash, PublicKey},
-        serializer::Serializer,
     };
-    use tos_program_runtime::storage::{InMemoryStorage, NoOpAccounts, NoOpContractLoader};
+    use tos_program_runtime::storage::{InMemoryStorage, StorageProvider};
     use tos_vm::ValueCell;
 
     // Mock provider for testing
@@ -372,6 +368,14 @@ mod tests {
             _topoheight: TopoHeight,
         ) -> Result<bool, anyhow::Error> {
             Ok(true)
+        }
+
+        fn load_contract_module(
+            &self,
+            _contract: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<Option<Vec<u8>>, anyhow::Error> {
+            Ok(None)
         }
     }
 

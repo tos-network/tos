@@ -85,6 +85,14 @@ mod mock {
         ) -> Result<bool> {
             Ok(true)
         }
+
+        fn load_contract_module(
+            &self,
+            _contract: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<Option<Vec<u8>>> {
+            Ok(None)
+        }
     }
 
     impl tos_common::contract::ContractStorage for MockContractProvider {

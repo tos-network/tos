@@ -251,6 +251,14 @@ mod tests {
         ) -> Result<bool, anyhow::Error> {
             Ok(self.accounts.contains_key(key))
         }
+
+        fn load_contract_module(
+            &self,
+            _contract: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<Option<Vec<u8>>, anyhow::Error> {
+            Ok(None)
+        }
     }
 
     impl tos_common::contract::ContractStorage for MockProvider {
