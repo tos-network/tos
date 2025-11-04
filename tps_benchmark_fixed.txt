@@ -1,4 +1,0 @@
-[1m[32m   Compiling[0m tos_daemon v0.1.1 (/Users/tomisetsu/tos-network/tos/daemon)
-[1m[32m    Finished[0m `bench` profile [optimized] target(s) in 4.03s
-[1m[32m     Running[0m benches/parallel_tps_comparison.rs (target/release/deps/parallel_tps_comparison-e870c1bc39db53c4)
-Gnuplot not found, using plotters backend
