@@ -205,9 +205,8 @@ impl ContractProvider for SledStorage {
 
         // Get the VersionedContract from storage using the daemon's async ContractProvider
         use crate::core::storage::ContractProvider as DaemonContractProvider;
-        let versioned_contract_opt = try_block_on(
-            self.get_contract_at_maximum_topoheight_for(contract, topoheight)
-        )??;
+        let versioned_contract_opt =
+            try_block_on(self.get_contract_at_maximum_topoheight_for(contract, topoheight))??;
 
         let Some((found_topo, versioned)) = versioned_contract_opt else {
             return Ok(None);

@@ -470,7 +470,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     /// Set contract module (deploy contract)
     async fn set_contract_module(
         &mut self,
-        _hash: &'a Hash,
+        _hash: &Hash,
         _module: &'a Module,
     ) -> Result<(), BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
@@ -479,14 +479,14 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     }
 
     /// Load contract module into cache
-    async fn load_contract_module(&mut self, _hash: &'a Hash) -> Result<bool, BlockchainError> {
+    async fn load_contract_module(&mut self, _hash: &Hash) -> Result<bool, BlockchainError> {
         Ok(false)
     }
 
     /// Get contract module with environment
     async fn get_contract_module_with_environment(
         &self,
-        _hash: &'a Hash,
+        _hash: &Hash,
     ) -> Result<(&Module, &Environment), BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
             "Contract execution not yet supported in parallel execution (Phase 3)"
@@ -562,7 +562,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
     /// Merge contract state changes
     async fn merge_contract_changes(
         &mut self,
-        _hash: &'a Hash,
+        _hash: &Hash,
         _cache: ContractCache,
         _tracker: ContractEventTracker,
         _assets: HashMap<Hash, Option<AssetChanges>>,
@@ -573,7 +573,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
     }
 
     /// Remove contract module
-    async fn remove_contract_module(&mut self, _hash: &'a Hash) -> Result<(), BlockchainError> {
+    async fn remove_contract_module(&mut self, _hash: &Hash) -> Result<(), BlockchainError> {
         Err(BlockchainError::Any(anyhow!(
             "Contract execution not yet supported in parallel execution (Phase 3)"
         )))

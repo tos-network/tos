@@ -1,3 +1,8 @@
+mod accounts;
+mod error;
+mod executor;
+mod executor_adapter;
+mod loader;
 /// TAKO VM integration module for TOS blockchain.
 ///
 /// This module provides the adapter layer that bridges TOS blockchain's contract infrastructure
@@ -26,17 +31,11 @@
 /// - `executor`: Main TAKO execution engine with TOS integration
 /// - `executor_adapter`: ContractExecutor trait implementation for TAKO VM
 /// - `error`: Error types for TAKO VM execution
-
 mod storage;
-mod accounts;
-mod loader;
-mod executor;
-mod executor_adapter;
-mod error;
 
-pub use storage::TosStorageAdapter;
 pub use accounts::TosAccountAdapter;
-pub use loader::TosContractLoaderAdapter;
-pub use executor::{TakoExecutor, ExecutionResult};
-pub use executor_adapter::TakoContractExecutor;
 pub use error::TakoExecutionError;
+pub use executor::{ExecutionResult, TakoExecutor};
+pub use executor_adapter::TakoContractExecutor;
+pub use loader::TosContractLoaderAdapter;
+pub use storage::TosStorageAdapter;

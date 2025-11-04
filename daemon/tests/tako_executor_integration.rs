@@ -1,13 +1,11 @@
 /// TAKO VM Executor Integration Tests
 ///
 /// Tests the complete TAKO VM execution pipeline with real ELF contracts.
-
 use std::collections::HashMap;
-use std::sync::Arc;
 use tos_common::{
     asset::AssetData,
     block::TopoHeight,
-    contract::{ContractCache, ContractExecutor, ContractProvider, ContractStorage},
+    contract::{ContractExecutor, ContractProvider, ContractStorage},
     crypto::{Hash, PublicKey},
 };
 use tos_daemon::tako_integration::TakoContractExecutor;
@@ -27,6 +25,7 @@ impl MockProvider {
         }
     }
 
+    #[allow(dead_code)]
     fn with_balance(mut self, key: PublicKey, asset: Hash, amount: u64) -> Self {
         self.balances.insert((key, asset), amount);
         self
@@ -49,7 +48,10 @@ impl ContractProvider for MockProvider {
         asset: &Hash,
         _topoheight: TopoHeight,
     ) -> anyhow::Result<Option<(TopoHeight, u64)>> {
-        Ok(self.balances.get(&(key.clone(), asset.clone())).map(|&amount| (100, amount)))
+        Ok(self
+            .balances
+            .get(&(key.clone(), asset.clone()))
+            .map(|&amount| (100, amount)))
     }
 
     fn asset_exists(&self, _asset: &Hash, _topoheight: TopoHeight) -> anyhow::Result<bool> {
@@ -72,11 +74,7 @@ impl ContractProvider for MockProvider {
         Ok(None)
     }
 
-    fn account_exists(
-        &self,
-        _key: &PublicKey,
-        _topoheight: TopoHeight,
-    ) -> anyhow::Result<bool> {
+    fn account_exists(&self, _key: &PublicKey, _topoheight: TopoHeight) -> anyhow::Result<bool> {
         Ok(true)
     }
 
@@ -135,8 +133,8 @@ async fn test_tako_executor_hello_world() {
     // Load the hello-world ELF contract from test fixtures
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let contract_path = format!("{}/tests/fixtures/hello_world.so", manifest_dir);
-    let bytecode = std::fs::read(&contract_path)
-        .expect("Failed to load hello-world contract from fixtures");
+    let bytecode =
+        std::fs::read(&contract_path).expect("Failed to load hello-world contract from fixtures");
 
     // Create mock provider
     let mut provider = MockProvider::new();
@@ -145,24 +143,34 @@ async fn test_tako_executor_hello_world() {
     let executor = TakoContractExecutor::new();
 
     // Verify it recognizes ELF format
-    assert!(executor.supports_format(&bytecode), "Should recognize ELF format");
+    assert!(
+        executor.supports_format(&bytecode),
+        "Should recognize ELF format"
+    );
 
     // Execute the contract
-    let result = executor.execute(
-        &bytecode,
-        &mut provider,
-        100,                    // topoheight
-        &Hash::zero(),          // contract_hash
-        &Hash::zero(),          // block_hash
-        0,                      // block_height
-        &Hash::zero(),          // tx_hash
-        &Hash::zero(),          // tx_sender
-        200_000,                // max_gas
-        None,                   // parameters
-    ).await.expect("Execution should succeed");
+    let result = executor
+        .execute(
+            &bytecode,
+            &mut provider,
+            100,           // topoheight
+            &Hash::zero(), // contract_hash
+            &Hash::zero(), // block_hash
+            0,             // block_height
+            &Hash::zero(), // tx_hash
+            &Hash::zero(), // tx_sender
+            200_000,       // max_gas
+            None,          // parameters
+        )
+        .await
+        .expect("Execution should succeed");
 
     // Verify success
-    assert_eq!(result.exit_code, Some(0), "Contract should return success (0)");
+    assert_eq!(
+        result.exit_code,
+        Some(0),
+        "Contract should return success (0)"
+    );
     assert!(result.gas_used > 0, "Should have consumed some gas");
     assert!(result.gas_used <= 200_000, "Should not exceed gas limit");
 
@@ -178,14 +186,17 @@ async fn test_multi_executor_format_detection() {
     // Load ELF contract from test fixtures
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let contract_path = format!("{}/tests/fixtures/hello_world.so", manifest_dir);
-    let elf_bytecode = std::fs::read(&contract_path)
-        .expect("Failed to load hello-world contract from fixtures");
+    let elf_bytecode =
+        std::fs::read(&contract_path).expect("Failed to load hello-world contract from fixtures");
 
     // Create multi-executor
     let executor = TakoContractExecutor::new();
 
     // Should support ELF format
-    assert!(executor.supports_format(&elf_bytecode), "Should support ELF");
+    assert!(
+        executor.supports_format(&elf_bytecode),
+        "Should support ELF"
+    );
 
     println!("✅ Format detection working correctly!");
 }
@@ -195,25 +206,28 @@ async fn test_multi_executor_execution() {
     // Load ELF contract from test fixtures
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let contract_path = format!("{}/tests/fixtures/hello_world.so", manifest_dir);
-    let bytecode = std::fs::read(&contract_path)
-        .expect("Failed to load hello-world contract from fixtures");
+    let bytecode =
+        std::fs::read(&contract_path).expect("Failed to load hello-world contract from fixtures");
 
     let mut provider = MockProvider::new();
     let executor = TakoContractExecutor::new();
 
     // Execute via TakoContractExecutor (should auto-dispatch to TAKO)
-    let result = executor.execute(
-        &bytecode,
-        &mut provider,
-        100,
-        &Hash::zero(),
-        &Hash::zero(),
-        0,
-        &Hash::zero(),
-        &Hash::zero(),
-        200_000,
-        None,
-    ).await.expect("TakoContractExecutor should execute ELF contract");
+    let result = executor
+        .execute(
+            &bytecode,
+            &mut provider,
+            100,
+            &Hash::zero(),
+            &Hash::zero(),
+            0,
+            &Hash::zero(),
+            &Hash::zero(),
+            200_000,
+            None,
+        )
+        .await
+        .expect("TakoContractExecutor should execute ELF contract");
 
     assert_eq!(result.exit_code, Some(0), "Should succeed");
     assert!(result.gas_used > 0, "Should consume gas");
@@ -226,8 +240,8 @@ async fn test_multi_executor_execution() {
 async fn test_gas_metering() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let contract_path = format!("{}/tests/fixtures/hello_world.so", manifest_dir);
-    let bytecode = std::fs::read(&contract_path)
-        .expect("Failed to load hello-world contract from fixtures");
+    let bytecode =
+        std::fs::read(&contract_path).expect("Failed to load hello-world contract from fixtures");
 
     let mut provider = MockProvider::new();
     let executor = TakoContractExecutor::new();
@@ -236,23 +250,27 @@ async fn test_gas_metering() {
     let limits = vec![200_000, 500_000, 1_000_000];
 
     for limit in limits {
-        let result = executor.execute(
-            &bytecode,
-            &mut provider,
-            100,
-            &Hash::zero(),
-            &Hash::zero(),
-            0,
-            &Hash::zero(),
-            &Hash::zero(),
-            limit,
-            None,
-        ).await.expect("Should execute");
+        let result = executor
+            .execute(
+                &bytecode,
+                &mut provider,
+                100,
+                &Hash::zero(),
+                &Hash::zero(),
+                0,
+                &Hash::zero(),
+                &Hash::zero(),
+                limit,
+                None,
+            )
+            .await
+            .expect("Should execute");
 
         assert!(result.gas_used <= limit, "Should not exceed limit");
         assert!(result.gas_used > 0, "Should use some gas");
 
-        println!("✅ Gas limit {}: used {} ({}%)",
+        println!(
+            "✅ Gas limit {}: used {} ({}%)",
             limit,
             result.gas_used,
             (result.gas_used * 100) / limit
@@ -267,24 +285,26 @@ async fn test_contract_with_storage() {
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let contract_path = format!("{}/tests/fixtures/hello_world.so", manifest_dir);
-    let bytecode = std::fs::read(&contract_path)
-        .expect("Failed to load contract from fixtures");
+    let bytecode = std::fs::read(&contract_path).expect("Failed to load contract from fixtures");
 
     let mut provider = MockProvider::new();
     let executor = TakoContractExecutor::new();
 
-    let result = executor.execute(
-        &bytecode,
-        &mut provider,
-        100,
-        &Hash::zero(),
-        &Hash::zero(),
-        0,
-        &Hash::zero(),
-        &Hash::zero(),
-        200_000,
-        None,
-    ).await.expect("Should execute");
+    let result = executor
+        .execute(
+            &bytecode,
+            &mut provider,
+            100,
+            &Hash::zero(),
+            &Hash::zero(),
+            0,
+            &Hash::zero(),
+            &Hash::zero(),
+            200_000,
+            None,
+        )
+        .await
+        .expect("Should execute");
 
     // Verify basic execution
     assert_eq!(result.exit_code, Some(0));

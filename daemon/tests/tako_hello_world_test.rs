@@ -1,15 +1,14 @@
-/// Integration test for Hello World contract
-///
-/// This test verifies that the simplest TAKO contract can load and execute successfully.
-
-use tos_daemon::tako_integration::{TakoExecutor, ExecutionResult};
+use anyhow::Result;
 use tos_common::{
     asset::AssetData,
     block::TopoHeight,
     contract::{ContractProvider, ContractStorage},
     crypto::{Hash, PublicKey},
 };
-use anyhow::Result;
+/// Integration test for Hello World contract
+///
+/// This test verifies that the simplest TAKO contract can load and execute successfully.
+use tos_daemon::tako_integration::TakoExecutor;
 
 /// Mock provider for testing
 struct MockProvider;
@@ -53,11 +52,7 @@ impl ContractProvider for MockProvider {
         Ok(None)
     }
 
-    fn account_exists(
-        &self,
-        _key: &PublicKey,
-        _topoheight: TopoHeight,
-    ) -> Result<bool> {
+    fn account_exists(&self, _key: &PublicKey, _topoheight: TopoHeight) -> Result<bool> {
         Ok(true)
     }
 
@@ -131,8 +126,7 @@ fn test_hello_world_loads() {
 fn test_hello_world_executes() {
     // Load the contract
     let contract_path = "tests/fixtures/hello_world.so";
-    let bytecode = std::fs::read(contract_path)
-        .expect("Failed to read hello_world.so");
+    let bytecode = std::fs::read(contract_path).expect("Failed to read hello_world.so");
 
     println!("\n=== Hello World Execution Test ===");
     println!("Contract size: {} bytes", bytecode.len());
@@ -147,18 +141,16 @@ fn test_hello_world_executes() {
     println!("Executing contract...");
 
     // Execute the contract
-    let result = TakoExecutor::execute_simple(
-        &bytecode,
-        &mut provider,
-        topoheight,
-        &contract_hash,
-    );
+    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, topoheight, &contract_hash);
 
     match result {
         Ok(exec_result) => {
             println!("\n✅ Execution succeeded!");
             println!("  Return value: {}", exec_result.return_value);
-            println!("  Instructions executed: {}", exec_result.instructions_executed);
+            println!(
+                "  Instructions executed: {}",
+                exec_result.instructions_executed
+            );
             println!("  Compute units used: {}", exec_result.compute_units_used);
 
             if let Some(return_data) = &exec_result.return_data {
@@ -166,9 +158,18 @@ fn test_hello_world_executes() {
             }
 
             // Verify successful execution
-            assert_eq!(exec_result.return_value, 0, "Contract should return 0 for success");
-            assert!(exec_result.instructions_executed > 0, "Should execute some instructions");
-            assert!(exec_result.compute_units_used > 0, "Should use some compute units");
+            assert_eq!(
+                exec_result.return_value, 0,
+                "Contract should return 0 for success"
+            );
+            assert!(
+                exec_result.instructions_executed > 0,
+                "Should execute some instructions"
+            );
+            assert!(
+                exec_result.compute_units_used > 0,
+                "Should use some compute units"
+            );
 
             println!("\n✅ All assertions passed!");
         }
@@ -183,8 +184,7 @@ fn test_hello_world_executes() {
 #[test]
 fn test_hello_world_with_compute_budget() {
     let contract_path = "tests/fixtures/hello_world.so";
-    let bytecode = std::fs::read(contract_path)
-        .expect("Failed to read hello_world.so");
+    let bytecode = std::fs::read(contract_path).expect("Failed to read hello_world.so");
 
     let mut provider = MockProvider;
     let contract_hash = Hash::zero();
@@ -216,8 +216,14 @@ fn test_hello_world_with_compute_budget() {
         match result {
             Ok(exec_result) => {
                 println!("  ✓ Success with budget {}", budget);
-                println!("    Compute used: {}/{}", exec_result.compute_units_used, budget);
-                assert!(exec_result.compute_units_used <= budget, "Should not exceed budget");
+                println!(
+                    "    Compute used: {}/{}",
+                    exec_result.compute_units_used, budget
+                );
+                assert!(
+                    exec_result.compute_units_used <= budget,
+                    "Should not exceed budget"
+                );
             }
             Err(e) => {
                 println!("  ✗ Failed with budget {}: {}", budget, e);
@@ -237,10 +243,8 @@ fn test_hello_world_vs_cpi_callee() {
     let hello_path = "tests/fixtures/hello_world.so";
     let callee_path = "tests/fixtures/cpi_callee.so";
 
-    let hello_bytecode = std::fs::read(hello_path)
-        .expect("Failed to read hello_world.so");
-    let callee_bytecode = std::fs::read(callee_path)
-        .expect("Failed to read cpi_callee.so");
+    let hello_bytecode = std::fs::read(hello_path).expect("Failed to read hello_world.so");
+    let callee_bytecode = std::fs::read(callee_path).expect("Failed to read cpi_callee.so");
 
     println!("Hello World: {} bytes", hello_bytecode.len());
     println!("CPI Callee:  {} bytes", callee_bytecode.len());
@@ -250,21 +254,13 @@ fn test_hello_world_vs_cpi_callee() {
 
     // Test hello world
     println!("\nExecuting Hello World...");
-    let hello_result = TakoExecutor::execute_simple(
-        &hello_bytecode,
-        &mut provider,
-        100,
-        &contract_hash,
-    );
+    let hello_result =
+        TakoExecutor::execute_simple(&hello_bytecode, &mut provider, 100, &contract_hash);
 
     // Test CPI callee
     println!("Executing CPI Callee...");
-    let callee_result = TakoExecutor::execute_simple(
-        &callee_bytecode,
-        &mut provider,
-        100,
-        &contract_hash,
-    );
+    let callee_result =
+        TakoExecutor::execute_simple(&callee_bytecode, &mut provider, 100, &contract_hash);
 
     match (hello_result, callee_result) {
         (Ok(hello), Ok(callee)) => {

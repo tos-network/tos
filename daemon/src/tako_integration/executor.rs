@@ -17,8 +17,12 @@
 /// 5. Execute in TBPF VM
 /// 6. Process execution results
 /// ```
-
 use std::sync::Arc;
+use tos_common::{
+    block::TopoHeight,
+    contract::{ContractCache, ContractProvider},
+    crypto::Hash,
+};
 use tos_program_runtime::invoke_context::InvokeContext;
 use tos_tbpf::{
     aligned_memory::AlignedMemory,
@@ -29,13 +33,8 @@ use tos_tbpf::{
     program::BuiltinProgram,
     vm::{Config, ContextObject, EbpfVm},
 };
-use tos_common::{
-    block::TopoHeight,
-    contract::{ContractCache, ContractProvider},
-    crypto::Hash,
-};
 
-use super::{TosAccountAdapter, TosContractLoaderAdapter, TosStorageAdapter, TakoExecutionError};
+use super::{TakoExecutionError, TosAccountAdapter, TosContractLoaderAdapter, TosStorageAdapter};
 
 /// Default compute budget for contract execution (200,000 compute units)
 ///
@@ -128,11 +127,11 @@ impl TakoExecutor {
         block_hash: &Hash,
         block_height: u64,
         tx_hash: &Hash,
-        tx_sender: &Hash, // Using Hash type for sender (32 bytes)
+        tx_sender: &Hash,   // Using Hash type for sender (32 bytes)
         _input_data: &[u8], // Reserved for future use
         compute_budget: Option<u64>,
     ) -> Result<ExecutionResult, TakoExecutionError> {
-        use log::{debug, info, warn, error};
+        use log::{debug, error, info, warn};
 
         info!(
             "TAKO VM execution starting: contract={}, compute_budget={}, bytecode_size={}",
@@ -156,11 +155,10 @@ impl TakoExecutor {
 
         // 2. Validate ELF bytecode
         debug!("Validating ELF bytecode: size={} bytes", bytecode.len());
-        tos_common::contract::validate_contract_bytecode(bytecode)
-            .map_err(|e| {
-                error!("Bytecode validation failed: {:?}", e);
-                TakoExecutionError::invalid_bytecode("Invalid ELF format", Some(e))
-            })?;
+        tos_common::contract::validate_contract_bytecode(bytecode).map_err(|e| {
+            error!("Bytecode validation failed: {:?}", e);
+            TakoExecutionError::invalid_bytecode("Invalid ELF format", Some(e))
+        })?;
 
         // 3. Create TOS adapters
         let mut cache = ContractCache::default();
@@ -173,20 +171,22 @@ impl TakoExecutor {
         // This provides 10-50x performance improvement over interpreter-only execution
         let config = Config::default();
         let mut loader = BuiltinProgram::<InvokeContext>::new_loader(config.clone());
-        tos_syscalls::register_syscalls(&mut loader)
-            .map_err(|e| TakoExecutionError::SyscallRegistrationFailed {
+        tos_syscalls::register_syscalls(&mut loader).map_err(|e| {
+            TakoExecutionError::SyscallRegistrationFailed {
                 reason: "Syscall registration error".to_string(),
                 error_details: format!("{:?}", e),
-            })?;
+            }
+        })?;
         let loader = Arc::new(loader);
 
         // 5. Load executable
-        let executable = Executable::load(bytecode, loader.clone())
-            .map_err(|e| TakoExecutionError::ExecutableLoadFailed {
+        let executable = Executable::load(bytecode, loader.clone()).map_err(|e| {
+            TakoExecutionError::ExecutableLoadFailed {
                 reason: "ELF parsing failed".to_string(),
                 bytecode_size: bytecode.len(),
                 error_details: format!("{:?}", e),
-            })?;
+            }
+        })?;
 
         // 6. Create InvokeContext with TOS blockchain state
         let mut invoke_context = InvokeContext::new_with_state(
@@ -263,7 +263,8 @@ impl TakoExecutor {
                 })
             }
             ProgramResult::Err(err) => {
-                let execution_error = TakoExecutionError::from_ebpf_error(err, instruction_count, compute_units_used);
+                let execution_error =
+                    TakoExecutionError::from_ebpf_error(err, instruction_count, compute_units_used);
                 error!(
                     "TAKO VM execution failed: category={}, error={}",
                     execution_error.category(),
@@ -289,12 +290,12 @@ impl TakoExecutor {
             provider,
             topoheight,
             contract_hash,
-            &Hash::zero(),   // block_hash
-            0,               // block_height
-            &Hash::zero(),   // tx_hash
-            &Hash::zero(),   // tx_sender
-            &[],             // input_data
-            None,            // compute_budget (use default)
+            &Hash::zero(), // block_hash
+            0,             // block_height
+            &Hash::zero(), // tx_hash
+            &Hash::zero(), // tx_sender
+            &[],           // input_data
+            None,          // compute_budget (use default)
         )
     }
 }
@@ -302,7 +303,7 @@ impl TakoExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use tos_common::{
         asset::AssetData,
         crypto::{Hash, PublicKey},
@@ -342,7 +343,11 @@ mod tests {
             Ok(Some((100, 1000000)))
         }
 
-        fn asset_exists(&self, _asset: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+        fn asset_exists(
+            &self,
+            _asset: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<bool, anyhow::Error> {
             Ok(true)
         }
 
@@ -420,7 +425,11 @@ mod tests {
             }
         }
 
-        fn has_contract(&self, _contract: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+        fn has_contract(
+            &self,
+            _contract: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<bool, anyhow::Error> {
             Ok(true)
         }
     }
@@ -453,12 +462,8 @@ mod tests {
         let mut provider = MockProvider::new();
         let invalid_bytecode = b"not an ELF file";
 
-        let result = TakoExecutor::execute_simple(
-            invalid_bytecode,
-            &mut provider,
-            100,
-            &Hash::zero(),
-        );
+        let result =
+            TakoExecutor::execute_simple(invalid_bytecode, &mut provider, 100, &Hash::zero());
 
         assert!(result.is_err());
         let err = result.unwrap_err();

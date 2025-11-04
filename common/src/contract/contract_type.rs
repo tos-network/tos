@@ -2,7 +2,6 @@
 ///
 /// This module validates that contract bytecode is in the correct ELF format
 /// for execution by TAKO VM. TOS blockchain only supports TAKO VM contracts.
-
 use anyhow::{anyhow, Result};
 
 /// Validates that contract bytecode is a valid ELF binary for TAKO VM
@@ -107,7 +106,10 @@ mod tests {
         let result = validate_contract_bytecode(invalid);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid contract format"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid contract format"));
     }
 
     #[test]

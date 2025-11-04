@@ -33,9 +33,9 @@ use tos_vm::Environment;
 
 use super::{ChainState, Echange, StorageReference};
 
-struct ContractManager<'a> {
-    outputs: HashMap<&'a Hash, Vec<ContractOutput>>,
-    caches: HashMap<&'a Hash, ContractCache>,
+struct ContractManager {
+    outputs: HashMap<Hash, Vec<ContractOutput>>,
+    caches: HashMap<Hash, ContractCache>,
     // global assets cache
     assets: HashMap<Hash, Option<AssetChanges>>,
     tracker: ContractEventTracker,
@@ -46,7 +46,7 @@ pub struct ApplicableChainState<'a, S: Storage> {
     inner: ChainState<'a, S>,
     block_hash: &'a Hash,
     block: &'a Block,
-    contract_manager: ContractManager<'a>,
+    contract_manager: ContractManager,
     burned_supply: u64,
     gas_fee: u64,
     executor: std::sync::Arc<dyn tos_common::contract::ContractExecutor>,
@@ -149,19 +149,19 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
 
     async fn set_contract_module(
         &mut self,
-        hash: &'a Hash,
+        hash: &Hash,
         module: &'a tos_vm::Module,
     ) -> Result<(), BlockchainError> {
         self.inner.set_contract_module(hash, module).await
     }
 
-    async fn load_contract_module(&mut self, hash: &'a Hash) -> Result<bool, BlockchainError> {
+    async fn load_contract_module(&mut self, hash: &Hash) -> Result<bool, BlockchainError> {
         self.inner.load_contract_module(hash).await
     }
 
     async fn get_contract_module_with_environment(
         &self,
-        hash: &'a Hash,
+        hash: &Hash,
     ) -> Result<(&tos_vm::Module, &Environment), BlockchainError> {
         self.inner.get_contract_module_with_environment(hash).await
     }
@@ -204,7 +204,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         tx_hash: &'a Hash,
         outputs: Vec<ContractOutput>,
     ) -> Result<(), BlockchainError> {
-        match self.contract_manager.outputs.entry(tx_hash) {
+        match self.contract_manager.outputs.entry(tx_hash.clone()) {
             Entry::Occupied(mut o) => {
                 o.get_mut().extend(outputs);
             }
@@ -312,20 +312,13 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
 
     async fn merge_contract_changes(
         &mut self,
-        hash: &'a Hash,
+        hash: &Hash,
         cache: ContractCache,
         tracker: ContractEventTracker,
         assets: HashMap<Hash, Option<AssetChanges>>,
     ) -> Result<(), BlockchainError> {
-        match self.contract_manager.caches.entry(hash) {
-            Entry::Occupied(mut o) => {
-                let current = o.get_mut();
-                *current = cache;
-            }
-            Entry::Vacant(e) => {
-                e.insert(cache);
-            }
-        };
+        // Insert or update cache (no memory leak!)
+        self.contract_manager.caches.insert(hash.clone(), cache);
 
         self.contract_manager.tracker = tracker;
         self.contract_manager.assets = assets;
@@ -333,7 +326,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         Ok(())
     }
 
-    async fn remove_contract_module(&mut self, hash: &'a Hash) -> Result<(), BlockchainError> {
+    async fn remove_contract_module(&mut self, hash: &Hash) -> Result<(), BlockchainError> {
         self.remove_contract_module_internal(hash).await
     }
 
@@ -437,7 +430,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
     }
 
     // Get the contracts cache
-    pub fn get_contracts_cache(&self) -> &HashMap<&Hash, ContractCache> {
+    pub fn get_contracts_cache(&self) -> &HashMap<Hash, ContractCache> {
         &self.contract_manager.caches
     }
 
@@ -458,7 +451,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
 
     async fn remove_contract_module_internal(
         &mut self,
-        hash: &'a Hash,
+        hash: &Hash,
     ) -> Result<(), BlockchainError> {
         let (state, contract) = self
             .inner

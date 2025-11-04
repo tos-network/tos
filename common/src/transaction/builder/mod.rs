@@ -787,6 +787,39 @@ impl TransactionTypeBuilder {
     }
 }
 
+/// Compute the deterministic contract address that will be generated
+/// when deploying the given bytecode from the given deployer.
+///
+/// This allows pre-computing the contract address before deployment,
+/// enabling counterfactual deployment patterns and knowing the contract
+/// address before creating the deployment transaction.
+///
+/// # Arguments
+/// * `deployer` - The public key of the deployer
+/// * `bytecode` - The contract bytecode (WASM/ELF)
+///
+/// # Returns
+/// The deterministic 32-byte contract address
+///
+/// # Example
+/// ```
+/// use tos_common::transaction::builder::compute_contract_address;
+/// use tos_common::crypto::elgamal::CompressedPublicKey;
+/// use tos_common::serializer::Serializer;
+///
+/// let deployer_pubkey = CompressedPublicKey::from_bytes(&[1u8; 32]).unwrap();
+/// let bytecode = b"my contract bytecode";
+///
+/// // Pre-compute address before deployment
+/// let contract_address = compute_contract_address(&deployer_pubkey, bytecode);
+///
+/// // Now you can send funds to this address before deploying!
+/// // The contract will be deployed to this exact address
+/// ```
+pub fn compute_contract_address(deployer: &CompressedPublicKey, bytecode: &[u8]) -> Hash {
+    crate::crypto::compute_deterministic_contract_address(deployer, bytecode)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

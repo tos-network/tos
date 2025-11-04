@@ -2,7 +2,6 @@
 ///
 /// Provides detailed, structured error types for better debugging and user feedback.
 /// Each error variant includes context and actionable information.
-
 use thiserror::Error;
 use tos_tbpf::error::EbpfError;
 
@@ -11,10 +10,7 @@ use tos_tbpf::error::EbpfError;
 pub enum TakoExecutionError {
     /// Compute budget validation failed
     #[error("Compute budget {requested} exceeds maximum allowed {maximum}")]
-    ComputeBudgetExceeded {
-        requested: u64,
-        maximum: u64,
-    },
+    ComputeBudgetExceeded { requested: u64, maximum: u64 },
 
     /// Invalid ELF bytecode
     #[error("Invalid contract bytecode: {reason}")]
@@ -74,17 +70,11 @@ pub enum TakoExecutionError {
 
     /// Stack overflow during execution
     #[error("Stack overflow: depth {depth} exceeds maximum {max_depth}")]
-    StackOverflow {
-        depth: usize,
-        max_depth: usize,
-    },
+    StackOverflow { depth: usize, max_depth: usize },
 
     /// Invalid instruction encountered
     #[error("Invalid instruction at PC {program_counter}: opcode {opcode:#x}")]
-    InvalidInstruction {
-        program_counter: u64,
-        opcode: u8,
-    },
+    InvalidInstruction { program_counter: u64, opcode: u8 },
 
     /// CPI (Cross-Program Invocation) failed
     #[error("CPI invocation failed: {reason}")]
@@ -135,7 +125,7 @@ impl TakoExecutionError {
         // Check if it's a stack overflow
         if reason.contains("CallDepthExceeded") || reason.contains("stack") {
             return Self::StackOverflow {
-                depth: 0, // Would need to extract from error
+                depth: 0,      // Would need to extract from error
                 max_depth: 64, // Default max depth
             };
         }
@@ -166,13 +156,22 @@ impl TakoExecutionError {
                     reason
                 )
             }
-            Self::ExecutionFailed { reason, instruction_count, compute_units_used, .. } => {
+            Self::ExecutionFailed {
+                reason,
+                instruction_count,
+                compute_units_used,
+                ..
+            } => {
                 format!(
                     "Contract execution failed after {} instructions ({} compute units): {}",
                     instruction_count, compute_units_used, reason
                 )
             }
-            Self::OutOfComputeUnits { used, budget, instruction_count } => {
+            Self::OutOfComputeUnits {
+                used,
+                budget,
+                instruction_count,
+            } => {
                 format!(
                     "Contract ran out of compute units. Used {} of {} available after {} instructions. \
                      Consider optimizing your contract or requesting more compute units.",
@@ -193,12 +192,13 @@ impl TakoExecutionError {
                     depth, max_depth
                 )
             }
-            Self::CpiInvocationFailed { reason, callee_address, .. } => {
+            Self::CpiInvocationFailed {
+                reason,
+                callee_address,
+                ..
+            } => {
                 if let Some(addr) = callee_address {
-                    format!(
-                        "Failed to invoke contract at {}: {}",
-                        addr, reason
-                    )
+                    format!("Failed to invoke contract at {}: {}", addr, reason)
                 } else {
                     format!("Cross-program invocation failed: {}", reason)
                 }

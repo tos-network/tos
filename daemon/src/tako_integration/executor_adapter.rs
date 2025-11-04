@@ -14,7 +14,6 @@
 ///     ↓ executes
 /// eBPF Contract
 /// ```
-
 use async_trait::async_trait;
 use log::{debug, trace};
 use tos_common::{
@@ -82,10 +81,7 @@ impl ContractExecutor for TakoContractExecutor {
         let input_data = parameters.unwrap_or_default();
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!(
-                "TAKO executor: Input data size: {} bytes",
-                input_data.len()
-            );
+            trace!("TAKO executor: Input data size: {} bytes", input_data.len());
         }
 
         // Execute via TAKO VM

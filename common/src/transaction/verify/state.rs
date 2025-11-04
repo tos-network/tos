@@ -91,18 +91,18 @@ pub trait BlockchainVerificationState<'a, E> {
     async fn get_environment(&mut self) -> Result<&Environment, E>;
 
     /// Set the contract module
-    async fn set_contract_module(&mut self, hash: &'a Hash, module: &'a Module) -> Result<(), E>;
+    async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;
 
     /// Load in the cache the contract module
     /// This is called before `get_contract_module_with_environment`
     /// Returns true if the module is available
-    async fn load_contract_module(&mut self, hash: &'a Hash) -> Result<bool, E>;
+    async fn load_contract_module(&mut self, hash: &Hash) -> Result<bool, E>;
 
     /// Get the contract module with the environment
     /// This is used to verify that all parameters are correct
     async fn get_contract_module_with_environment(
         &self,
-        hash: &'a Hash,
+        hash: &Hash,
     ) -> Result<(&Module, &Environment), E>;
 }
 
@@ -154,7 +154,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     /// Merge the contract cache with the stored one
     async fn merge_contract_changes(
         &mut self,
-        hash: &'a Hash,
+        hash: &Hash,
         cache: ContractCache,
         tracker: ContractEventTracker,
         assets: HashMap<Hash, Option<AssetChanges>>,
@@ -163,7 +163,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     /// Remove the contract module
     /// This will mark the contract
     /// as a None version
-    async fn remove_contract_module(&mut self, hash: &'a Hash) -> Result<(), E>;
+    async fn remove_contract_module(&mut self, hash: &Hash) -> Result<(), E>;
 
     /// Get the energy resource for an account
     async fn get_energy_resource(

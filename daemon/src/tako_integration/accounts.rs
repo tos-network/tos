@@ -1,14 +1,13 @@
-/// Account adapter: TOS ContractProvider → TAKO AccountProvider
-///
-/// This module bridges TOS's account and balance system with TAKO VM's balance/transfer syscalls.
-
-use tos_program_runtime::storage::AccountProvider;
 use tos_common::{
     block::TopoHeight,
     contract::ContractProvider,
     crypto::{Hash, PublicKey},
     serializer::Serializer,
 };
+/// Account adapter: TOS ContractProvider → TAKO AccountProvider
+///
+/// This module bridges TOS's account and balance system with TAKO VM's balance/transfer syscalls.
+use tos_program_runtime::storage::AccountProvider;
 use tos_tbpf::error::EbpfError;
 
 /// Adapter that wraps TOS's ContractProvider to implement TAKO's AccountProvider
@@ -75,7 +74,11 @@ impl<'a> TosAccountAdapter<'a> {
     /// * `provider` - TOS contract provider
     /// * `topoheight` - Current topoheight for versioned reads
     /// * `asset` - Asset hash to use for balance queries
-    pub fn new_with_asset(provider: &'a (dyn ContractProvider + Send), topoheight: TopoHeight, asset: Hash) -> Self {
+    pub fn new_with_asset(
+        provider: &'a (dyn ContractProvider + Send),
+        topoheight: TopoHeight,
+        asset: Hash,
+    ) -> Self {
         Self {
             provider,
             topoheight,
@@ -221,10 +224,17 @@ mod tests {
             asset: &Hash,
             _topoheight: TopoHeight,
         ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
-            Ok(self.balances.get(&(key.clone(), asset.clone())).map(|bal| (100, *bal)))
+            Ok(self
+                .balances
+                .get(&(key.clone(), asset.clone()))
+                .map(|bal| (100, *bal)))
         }
 
-        fn asset_exists(&self, _asset: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+        fn asset_exists(
+            &self,
+            _asset: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<bool, anyhow::Error> {
             Ok(true)
         }
 
@@ -289,7 +299,11 @@ mod tests {
             Ok(false)
         }
 
-        fn has_contract(&self, _contract: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+        fn has_contract(
+            &self,
+            _contract: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<bool, anyhow::Error> {
             Ok(false)
         }
     }
@@ -359,9 +373,6 @@ mod tests {
         let mut adapter = TosAccountAdapter::new(&provider, 100);
         let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 1000);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("does not exist"));
+        assert!(result.unwrap_err().to_string().contains("does not exist"));
     }
 }

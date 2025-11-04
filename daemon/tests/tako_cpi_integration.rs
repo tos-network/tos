@@ -3,7 +3,6 @@
 /// Tests Cross-Program Invocation (CPI) functionality with TAKO VM contracts.
 /// This demonstrates that TAKO contracts can invoke other TAKO contracts and
 /// pass data between them.
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tos_common::{
@@ -14,8 +13,8 @@ use tos_common::{
     serializer::Serializer,
 };
 use tos_daemon::tako_integration::TakoContractExecutor;
-use tos_vm::ValueCell;
 use tos_program_runtime::storage::ContractLoader;
+use tos_vm::ValueCell;
 
 /// Mock provider for testing with CPI support
 struct MockCpiProvider {
@@ -61,7 +60,10 @@ impl ContractProvider for MockCpiProvider {
         asset: &Hash,
         _topoheight: TopoHeight,
     ) -> anyhow::Result<Option<(TopoHeight, u64)>> {
-        Ok(self.balances.get(&(key.clone(), asset.clone())).map(|&amount| (100, amount)))
+        Ok(self
+            .balances
+            .get(&(key.clone(), asset.clone()))
+            .map(|&amount| (100, amount)))
     }
 
     fn asset_exists(&self, _asset: &Hash, _topoheight: TopoHeight) -> anyhow::Result<bool> {
@@ -84,11 +86,7 @@ impl ContractProvider for MockCpiProvider {
         Ok(None)
     }
 
-    fn account_exists(
-        &self,
-        _key: &PublicKey,
-        _topoheight: TopoHeight,
-    ) -> anyhow::Result<bool> {
+    fn account_exists(&self, _key: &PublicKey, _topoheight: TopoHeight) -> anyhow::Result<bool> {
         Ok(true)
     }
 
@@ -162,14 +160,19 @@ impl MockContractLoader {
 }
 
 impl ContractLoader for MockContractLoader {
-    fn load_contract(&self, contract_address: &[u8; 32]) -> Result<Vec<u8>, tos_tbpf::error::EbpfError> {
+    fn load_contract(
+        &self,
+        contract_address: &[u8; 32],
+    ) -> Result<Vec<u8>, tos_tbpf::error::EbpfError> {
         if contract_address == &self.callee_address {
             Ok(self.callee_bytecode.clone())
         } else {
-            Err(tos_tbpf::error::EbpfError::SyscallError(Box::new(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Contract not found: {:?}", contract_address),
-            ))))
+            Err(tos_tbpf::error::EbpfError::SyscallError(Box::new(
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Contract not found: {:?}", contract_address),
+                ),
+            )))
         }
     }
 }
@@ -183,10 +186,10 @@ async fn test_cpi_basic_invocation() {
     let caller_path = format!("{}/tests/fixtures/cpi_caller.so", manifest_dir);
     let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
 
-    let caller_bytecode = std::fs::read(&caller_path)
-        .expect("Failed to load CPI caller contract from fixtures");
-    let callee_bytecode = std::fs::read(&callee_path)
-        .expect("Failed to load CPI callee contract from fixtures");
+    let caller_bytecode =
+        std::fs::read(&caller_path).expect("Failed to load CPI caller contract from fixtures");
+    let callee_bytecode =
+        std::fs::read(&callee_path).expect("Failed to load CPI callee contract from fixtures");
 
     println!("✓ Loaded caller contract: {} bytes", caller_bytecode.len());
     println!("✓ Loaded callee contract: {} bytes", callee_bytecode.len());
@@ -195,15 +198,20 @@ async fn test_cpi_basic_invocation() {
     let callee_address = [0xAAu8; 32]; // Must match CALLEE_ADDRESS in caller contract
     let callee_hash = Hash::from_bytes(&callee_address).expect("Valid hash");
 
-    let mut provider = MockCpiProvider::new()
-        .with_contract(callee_hash, callee_bytecode.clone());
+    let mut provider = MockCpiProvider::new().with_contract(callee_hash, callee_bytecode.clone());
 
     // Create TAKO executor
     let executor = TakoContractExecutor::new();
 
     // Verify both contracts are recognized as ELF format
-    assert!(executor.supports_format(&caller_bytecode), "Caller should be ELF format");
-    assert!(executor.supports_format(&callee_bytecode), "Callee should be ELF format");
+    assert!(
+        executor.supports_format(&caller_bytecode),
+        "Caller should be ELF format"
+    );
+    assert!(
+        executor.supports_format(&callee_bytecode),
+        "Callee should be ELF format"
+    );
     println!("✓ Both contracts recognized as ELF format\n");
 
     // NOTE: This test will currently fail because the ContractLoader integration
@@ -216,18 +224,20 @@ async fn test_cpi_basic_invocation() {
     println!("Executing caller contract (which will attempt CPI)...\n");
 
     // Execute the caller contract
-    let result = executor.execute(
-        &caller_bytecode,
-        &mut provider,
-        100,                    // topoheight
-        &Hash::zero(),          // contract_hash (caller)
-        &Hash::zero(),          // block_hash
-        0,                      // block_height
-        &Hash::zero(),          // tx_hash
-        &Hash::zero(),          // tx_sender
-        2_000_000,              // max_gas (2M compute units for CPI)
-        None,                   // parameters
-    ).await;
+    let result = executor
+        .execute(
+            &caller_bytecode,
+            &mut provider,
+            100,           // topoheight
+            &Hash::zero(), // contract_hash (caller)
+            &Hash::zero(), // block_hash
+            0,             // block_height
+            &Hash::zero(), // tx_hash
+            &Hash::zero(), // tx_sender
+            2_000_000,     // max_gas (2M compute units for CPI)
+            None,          // parameters
+        )
+        .await;
 
     // Due to incomplete CPI implementation, we expect this to fail
     // Once CPI is fully implemented, this should succeed
@@ -239,15 +249,25 @@ async fn test_cpi_basic_invocation() {
             println!("  Return data: {:?}", exec_result.return_data);
 
             // Verify success
-            assert_eq!(exec_result.exit_code, Some(0), "Contract should return success (0)");
+            assert_eq!(
+                exec_result.exit_code,
+                Some(0),
+                "Contract should return success (0)"
+            );
             assert!(exec_result.gas_used > 0, "Should have consumed some gas");
 
             // Check return data from CPI callee
             if let Some(return_data) = &exec_result.return_data {
                 if return_data.len() == 8 {
                     let counter_value = u64::from_le_bytes([
-                        return_data[0], return_data[1], return_data[2], return_data[3],
-                        return_data[4], return_data[5], return_data[6], return_data[7],
+                        return_data[0],
+                        return_data[1],
+                        return_data[2],
+                        return_data[3],
+                        return_data[4],
+                        return_data[5],
+                        return_data[6],
+                        return_data[7],
                     ]);
                     println!("  Counter value from CPI callee: {}", counter_value);
                     assert!(counter_value > 0, "Callee should have incremented counter");
@@ -262,7 +282,10 @@ async fn test_cpi_basic_invocation() {
             println!("   - Shared storage access across CPI boundary");
         }
         Err(e) => {
-            println!("⚠️  CPI execution failed (expected until loader is integrated): {}", e);
+            println!(
+                "⚠️  CPI execution failed (expected until loader is integrated): {}",
+                e
+            );
             println!("\nNote: This is expected behavior. The test demonstrates:");
             println!("  ✓ CPI contracts build successfully");
             println!("  ✓ ELF format detection works");
@@ -285,10 +308,8 @@ async fn test_cpi_contracts_load() {
     let caller_path = format!("{}/tests/fixtures/cpi_caller.so", manifest_dir);
     let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
 
-    let caller_bytecode = std::fs::read(&caller_path)
-        .expect("Failed to load CPI caller contract");
-    let callee_bytecode = std::fs::read(&callee_path)
-        .expect("Failed to load CPI callee contract");
+    let caller_bytecode = std::fs::read(&caller_path).expect("Failed to load CPI caller contract");
+    let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee contract");
 
     // Verify ELF magic numbers
     assert_eq!(&caller_bytecode[0..4], b"\x7FELF", "Caller should be ELF");
@@ -312,8 +333,7 @@ async fn test_callee_standalone() {
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
-    let callee_bytecode = std::fs::read(&callee_path)
-        .expect("Failed to load CPI callee contract");
+    let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee contract");
 
     let mut provider = MockCpiProvider::new();
     let executor = TakoContractExecutor::new();
@@ -321,18 +341,21 @@ async fn test_callee_standalone() {
     println!("Executing callee contract standalone...\n");
 
     // Execute the callee directly
-    let result = executor.execute(
-        &callee_bytecode,
-        &mut provider,
-        100,
-        &Hash::zero(),
-        &Hash::zero(),
-        0,
-        &Hash::zero(),
-        &Hash::zero(),
-        200_000,
-        None,
-    ).await.expect("Callee execution should succeed");
+    let result = executor
+        .execute(
+            &callee_bytecode,
+            &mut provider,
+            100,
+            &Hash::zero(),
+            &Hash::zero(),
+            0,
+            &Hash::zero(),
+            &Hash::zero(),
+            200_000,
+            None,
+        )
+        .await
+        .expect("Callee execution should succeed");
 
     println!("✓ Callee executed successfully");
     println!("  Exit code: {:?}", result.exit_code);
@@ -346,8 +369,14 @@ async fn test_callee_standalone() {
     if let Some(return_data) = &result.return_data {
         if return_data.len() == 8 {
             let counter = u64::from_le_bytes([
-                return_data[0], return_data[1], return_data[2], return_data[3],
-                return_data[4], return_data[5], return_data[6], return_data[7],
+                return_data[0],
+                return_data[1],
+                return_data[2],
+                return_data[3],
+                return_data[4],
+                return_data[5],
+                return_data[6],
+                return_data[7],
             ]);
             println!("  Counter value: {}", counter);
             assert_eq!(counter, 1, "First call should set counter to 1");

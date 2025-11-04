@@ -1,3 +1,4 @@
+use anyhow::Result;
 /// Contract execution trait for dependency injection
 ///
 /// This trait enables the common package to execute contracts without depending
@@ -15,15 +16,9 @@
 /// ```
 ///
 /// This follows Solana's pattern of dependency injection for VM execution.
-
 use async_trait::async_trait;
-use anyhow::Result;
 
-use crate::{
-    block::TopoHeight,
-    contract::ContractProvider,
-    crypto::Hash,
-};
+use crate::{block::TopoHeight, contract::ContractProvider, crypto::Hash};
 
 /// Result of contract execution
 ///

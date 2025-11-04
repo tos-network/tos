@@ -595,6 +595,31 @@ impl Transaction {
                     self.verify_invoke_contract(&invoke.deposits, invoke.max_gas)?;
                 }
 
+                // Compute deterministic contract address
+                // For TAKO VM contracts: use eBPF bytecode
+                // For legacy contracts: use serialized module bytes
+                let bytecode_or_module = payload
+                    .module
+                    .get_bytecode()
+                    .map(|b| b.to_vec())
+                    .unwrap_or_else(|| payload.module.to_bytes());
+
+                let contract_address = crate::crypto::compute_deterministic_contract_address(
+                    &self.source,
+                    &bytecode_or_module,
+                );
+
+                // Check if contract already exists at this deterministic address
+                if state
+                    .load_contract_module(&contract_address)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::ContractAlreadyExists(
+                        contract_address.clone(),
+                    ));
+                }
+
                 let environment = state
                     .get_environment()
                     .await
@@ -710,8 +735,23 @@ impl Transaction {
                     return Err(VerificationError::InvalidFormat);
                 }
 
+                // Compute deterministic contract address (CREATE2-style)
+                // For TAKO VM contracts: use eBPF bytecode
+                // For legacy contracts: use serialized module bytes
+                let bytecode_or_module = payload
+                    .module
+                    .get_bytecode()
+                    .map(|b| b.to_vec())
+                    .unwrap_or_else(|| payload.module.to_bytes());
+
+                let contract_address = crate::crypto::compute_deterministic_contract_address(
+                    &self.source,
+                    &bytecode_or_module,
+                );
+
                 if let Some(invoke) = payload.invoke.as_ref() {
-                    let dest_pubkey = PublicKey::from_hash(&tx_hash);
+                    // Use deterministic contract address for deposit verification
+                    let dest_pubkey = PublicKey::from_hash(&contract_address);
                     self.verify_contract_deposits(
                         &source_decompressed,
                         &dest_pubkey,
@@ -719,8 +759,9 @@ impl Transaction {
                     )?;
                 }
 
+                // Cache module under deterministic address (not tx_hash!)
                 state
-                    .set_contract_module(tx_hash, &payload.module)
+                    .set_contract_module(&contract_address, &payload.module)
                     .await
                     .map_err(VerificationError::State)?;
             }
@@ -1177,8 +1218,23 @@ impl Transaction {
                 }
             }
             TransactionType::DeployContract(payload) => {
+                // Compute deterministic contract address
+                // For TAKO VM contracts: use eBPF bytecode
+                // For legacy contracts: use serialized module bytes
+                let bytecode_or_module = payload
+                    .module
+                    .get_bytecode()
+                    .map(|b| b.to_vec())
+                    .unwrap_or_else(|| payload.module.to_bytes());
+
+                let contract_address = crate::crypto::compute_deterministic_contract_address(
+                    &self.source,
+                    &bytecode_or_module,
+                );
+
+                // Deploy contract to deterministic address
                 state
-                    .set_contract_module(tx_hash, &payload.module)
+                    .set_contract_module(&contract_address, &payload.module)
                     .await
                     .map_err(VerificationError::State)?;
 
@@ -1187,7 +1243,7 @@ impl Transaction {
                         .invoke_contract(
                             tx_hash,
                             state,
-                            tx_hash,
+                            &contract_address,
                             &invoke.deposits,
                             iter::empty(),
                             invoke.max_gas,
@@ -1199,10 +1255,10 @@ impl Transaction {
                     // TODO: we must handle this carefully
                     if !is_success {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("Contract deploy for {} failed", tx_hash);
+                            debug!("Contract deploy for {} failed", contract_address);
                         }
                         state
-                            .remove_contract_module(tx_hash)
+                            .remove_contract_module(&contract_address)
                             .await
                             .map_err(VerificationError::State)?;
                     }

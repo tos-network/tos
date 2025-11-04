@@ -650,6 +650,9 @@ async fn test_tx_deploy_contract() {
             },
         };
 
+        // Create module with bytecode for CREATE2-style deterministic address computation
+        // For legacy TOS-VM modules, we need chunks; bytecode is for TAKO VM
+        // Since bytecode doesn't survive hex serialization, use traditional approach
         let mut module = Module::new();
         module.add_chunk(Chunk::new());
         let data = TransactionTypeBuilder::DeployContract(DeployContractBuilder {
@@ -1386,20 +1389,20 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
 
     async fn set_contract_module(
         &mut self,
-        hash: &'a Hash,
+        hash: &Hash,
         module: &'a Module,
     ) -> Result<(), TestError> {
         self.contracts.insert(hash.clone(), module.clone());
         Ok(())
     }
 
-    async fn load_contract_module(&mut self, hash: &'a Hash) -> Result<bool, TestError> {
+    async fn load_contract_module(&mut self, hash: &Hash) -> Result<bool, TestError> {
         Ok(self.contracts.contains_key(hash))
     }
 
     async fn get_contract_module_with_environment(
         &self,
-        contract: &'a Hash,
+        contract: &Hash,
     ) -> Result<(&Module, &Environment), TestError> {
         let module = self.contracts.get(contract).ok_or(TestError(()))?;
         Ok((module, &self.env))

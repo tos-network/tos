@@ -371,18 +371,18 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
         Ok(&self.env)
     }
 
-    async fn set_contract_module(&mut self, hash: &'a Hash, module: &'a Module) -> Result<(), ()> {
+    async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), ()> {
         self.contracts.insert(hash.clone(), module.clone());
         Ok(())
     }
 
-    async fn load_contract_module(&mut self, hash: &'a Hash) -> Result<bool, ()> {
+    async fn load_contract_module(&mut self, hash: &Hash) -> Result<bool, ()> {
         Ok(self.contracts.contains_key(hash))
     }
 
     async fn get_contract_module_with_environment(
         &self,
-        hash: &'a Hash,
+        hash: &Hash,
     ) -> Result<(&Module, &Environment), ()> {
         let module = self.contracts.get(hash).ok_or(())?;
         Ok((module, &self.env))

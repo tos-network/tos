@@ -1,15 +1,14 @@
-/// Storage adapter: TOS ContractProvider → TAKO StorageProvider
-///
-/// This module bridges TOS's contract storage system with TAKO VM's storage syscalls.
-/// It translates between TOS's versioned storage model and TAKO's simple key-value interface.
-
-use tos_program_runtime::storage::StorageProvider;
 use tos_common::{
     block::TopoHeight,
     contract::{ContractCache, ContractProvider},
     crypto::Hash,
     versioned_type::VersionedState,
 };
+/// Storage adapter: TOS ContractProvider → TAKO StorageProvider
+///
+/// This module bridges TOS's contract storage system with TAKO VM's storage syscalls.
+/// It translates between TOS's versioned storage model and TAKO's simple key-value interface.
+use tos_program_runtime::storage::StorageProvider;
 use tos_tbpf::error::EbpfError;
 use tos_vm::ValueCell;
 
@@ -157,12 +156,10 @@ impl<'a> StorageProvider for TosStorageAdapter<'a> {
             })?;
 
         match value {
-            Some((_topoheight, value_opt)) => {
-                match value_opt {
-                    Some(value) => Ok(Some(Self::value_cell_to_bytes(&value)?)),
-                    None => Ok(None),
-                }
-            }
+            Some((_topoheight, value_opt)) => match value_opt {
+                Some(value) => Ok(Some(Self::value_cell_to_bytes(&value)?)),
+                None => Ok(None),
+            },
             None => Ok(None),
         }
     }
@@ -188,10 +185,11 @@ impl<'a> StorageProvider for TosStorageAdapter<'a> {
             }
             None => {
                 // Load latest topoheight for this key
-                match self
-                    .provider
-                    .load_data_latest_topoheight(self.contract_hash, &key_cell, self.topoheight)
-                {
+                match self.provider.load_data_latest_topoheight(
+                    self.contract_hash,
+                    &key_cell,
+                    self.topoheight,
+                ) {
                     Ok(Some(topoheight)) => VersionedState::Updated(topoheight),
                     Ok(None) => VersionedState::New,
                     Err(e) => {
@@ -255,10 +253,11 @@ impl<'a> StorageProvider for TosStorageAdapter<'a> {
             },
             None => {
                 // Load latest topoheight for this key
-                match self
-                    .provider
-                    .load_data_latest_topoheight(self.contract_hash, &key_cell, self.topoheight)
-                {
+                match self.provider.load_data_latest_topoheight(
+                    self.contract_hash,
+                    &key_cell,
+                    self.topoheight,
+                ) {
                     Ok(Some(topoheight)) => VersionedState::Updated(topoheight),
                     Ok(None) => return Ok(false), // Key doesn't exist
                     Err(e) => {
@@ -282,11 +281,7 @@ impl<'a> StorageProvider for TosStorageAdapter<'a> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use tos_common::{
-        contract::ContractCache,
-        crypto::Hash,
-        serializer::Serializer,
-    };
+    use tos_common::{contract::ContractCache, crypto::Hash, serializer::Serializer};
 
     // Mock ContractProvider for testing
     struct MockProvider {
@@ -320,7 +315,11 @@ mod tests {
             Ok(None)
         }
 
-        fn asset_exists(&self, _asset: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+        fn asset_exists(
+            &self,
+            _asset: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<bool, anyhow::Error> {
             Ok(false)
         }
 
@@ -362,7 +361,7 @@ mod tests {
             &self,
             contract: &Hash,
             key: &ValueCell,
-            topoheight: TopoHeight,
+            _topoheight: TopoHeight,
         ) -> Result<Option<(TopoHeight, Option<ValueCell>)>, anyhow::Error> {
             Ok(self.data.get(&(contract.clone(), key.clone())).cloned())
         }
@@ -371,7 +370,7 @@ mod tests {
             &self,
             contract: &Hash,
             key: &ValueCell,
-            topoheight: TopoHeight,
+            _topoheight: TopoHeight,
         ) -> Result<Option<TopoHeight>, anyhow::Error> {
             Ok(self
                 .data
@@ -383,12 +382,16 @@ mod tests {
             &self,
             contract: &Hash,
             key: &ValueCell,
-            topoheight: TopoHeight,
+            _topoheight: TopoHeight,
         ) -> Result<bool, anyhow::Error> {
             Ok(self.data.contains_key(&(contract.clone(), key.clone())))
         }
 
-        fn has_contract(&self, _contract: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+        fn has_contract(
+            &self,
+            _contract: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<bool, anyhow::Error> {
             Ok(false)
         }
     }

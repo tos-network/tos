@@ -12,19 +12,19 @@
 use std::fs;
 use std::time::Instant;
 use tos_common::crypto::Hash;
-use tos_daemon::tako_integration::{TakoExecutor, ExecutionResult};
+use tos_daemon::tako_integration::TakoExecutor;
 
 /// Mock provider for testing - implements the bare minimum traits needed
 mod mock {
+    use anyhow::Result;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use tos_common::{
         asset::AssetData,
-        crypto::{Hash, PublicKey},
         block::TopoHeight,
+        crypto::{Hash, PublicKey},
     };
     use tos_vm::ValueCell;
-    use anyhow::Result;
 
     /// Simple in-memory contract provider for testing
     pub struct MockContractProvider {
@@ -78,11 +78,7 @@ mod mock {
             Ok(Some((100, 21_000_000)))
         }
 
-        fn account_exists(
-            &self,
-            _key: &PublicKey,
-            _topoheight: TopoHeight,
-        ) -> Result<bool> {
+        fn account_exists(&self, _key: &PublicKey, _topoheight: TopoHeight) -> Result<bool> {
             Ok(true)
         }
 
@@ -150,9 +146,9 @@ fn main() {
 
     // Step 1: Load the hello-world contract bytecode
     // Try the test contract from tos-tbpf first (known working), then hello-world
-    let contract_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "/Users/tomisetsu/tos-network/tos-tbpf/tests/elfs/relative_call.so".to_string());
+    let contract_path = std::env::args().nth(1).unwrap_or_else(|| {
+        "/Users/tomisetsu/tos-network/tos-tbpf/tests/elfs/relative_call.so".to_string()
+    });
     println!("Loading contract bytecode from: {}", contract_path);
 
     let bytecode = match fs::read(contract_path) {
@@ -217,10 +213,15 @@ fn main() {
         Ok(exec_result) => {
             println!("✓ Execution succeeded!\n");
             println!("Return value: {}", exec_result.return_value);
-            println!("Instructions executed: {}", exec_result.instructions_executed);
+            println!(
+                "Instructions executed: {}",
+                exec_result.instructions_executed
+            );
             println!("Compute units used: {}", exec_result.compute_units_used);
-            println!("Compute units remaining: {}",
-                compute_budget.unwrap() - exec_result.compute_units_used);
+            println!(
+                "Compute units remaining: {}",
+                compute_budget.unwrap() - exec_result.compute_units_used
+            );
 
             if let Some(return_data) = &exec_result.return_data {
                 println!("Return data size: {} bytes", return_data.len());
@@ -233,10 +234,14 @@ fn main() {
 
             println!("\n=== Performance Metrics ===\n");
             println!("Total execution time: {:?}", elapsed);
-            println!("Time per instruction: {:.2} ns",
-                elapsed.as_nanos() as f64 / exec_result.instructions_executed as f64);
-            println!("Instructions per second: {:.2} million",
-                exec_result.instructions_executed as f64 / elapsed.as_secs_f64() / 1_000_000.0);
+            println!(
+                "Time per instruction: {:.2} ns",
+                elapsed.as_nanos() as f64 / exec_result.instructions_executed as f64
+            );
+            println!(
+                "Instructions per second: {:.2} million",
+                exec_result.instructions_executed as f64 / elapsed.as_secs_f64() / 1_000_000.0
+            );
 
             println!("\n=== JIT Status ===\n");
             #[cfg(feature = "jit")]
@@ -257,7 +262,10 @@ fn main() {
             if exec_result.return_value == 0 {
                 println!("✓ Contract executed successfully (return value = 0)");
             } else {
-                println!("⚠ Contract returned non-zero value: {}", exec_result.return_value);
+                println!(
+                    "⚠ Contract returned non-zero value: {}",
+                    exec_result.return_value
+                );
             }
 
             println!("✓ All syscalls worked correctly");

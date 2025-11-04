@@ -74,7 +74,10 @@ impl ContractProvider for CpiTestProvider {
         asset: &Hash,
         _topoheight: TopoHeight,
     ) -> anyhow::Result<Option<(TopoHeight, u64)>> {
-        Ok(self.balances.get(&(key.clone(), asset.clone())).map(|&amount| (100, amount)))
+        Ok(self
+            .balances
+            .get(&(key.clone(), asset.clone()))
+            .map(|&amount| (100, amount)))
     }
 
     fn asset_exists(&self, _asset: &Hash, _topoheight: TopoHeight) -> anyhow::Result<bool> {
@@ -97,11 +100,7 @@ impl ContractProvider for CpiTestProvider {
         Ok(None)
     }
 
-    fn account_exists(
-        &self,
-        _key: &PublicKey,
-        _topoheight: TopoHeight,
-    ) -> anyhow::Result<bool> {
+    fn account_exists(&self, _key: &PublicKey, _topoheight: TopoHeight) -> anyhow::Result<bool> {
         Ok(true)
     }
 
@@ -166,10 +165,10 @@ async fn test_cpi_e2e_basic_invocation() {
     let caller_path = format!("{}/tests/fixtures/cpi_caller.so", manifest_dir);
     let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
 
-    let caller_bytecode = std::fs::read(&caller_path)
-        .expect("Failed to load CPI caller contract from fixtures");
-    let callee_bytecode = std::fs::read(&callee_path)
-        .expect("Failed to load CPI callee contract from fixtures");
+    let caller_bytecode =
+        std::fs::read(&caller_path).expect("Failed to load CPI caller contract from fixtures");
+    let callee_bytecode =
+        std::fs::read(&callee_path).expect("Failed to load CPI callee contract from fixtures");
 
     println!("Loaded contracts:");
     println!("  Caller: {} bytes", caller_bytecode.len());
@@ -180,45 +179,66 @@ async fn test_cpi_e2e_basic_invocation() {
     let callee_hash = Hash::from_bytes(&callee_address).expect("Valid hash");
     let caller_hash = Hash::zero();
 
-    let mut provider = CpiTestProvider::new()
-        .with_contract(callee_hash, callee_bytecode.clone());
+    let mut provider = CpiTestProvider::new().with_contract(callee_hash, callee_bytecode.clone());
 
     let executor = TakoContractExecutor::new();
 
     println!("\nExecuting caller contract (will invoke callee via CPI)...\n");
 
     // Execute caller contract
-    let result = executor.execute(
-        &caller_bytecode,
-        &mut provider,
-        100,                    // topoheight
-        &caller_hash,           // caller contract hash
-        &Hash::zero(),          // block_hash
-        0,                      // block_height
-        &Hash::zero(),          // tx_hash
-        &Hash::zero(),          // tx_sender
-        2_000_000,              // max_gas (2M compute units for CPI)
-        None,                   // parameters
-    ).await;
+    let result = executor
+        .execute(
+            &caller_bytecode,
+            &mut provider,
+            100,           // topoheight
+            &caller_hash,  // caller contract hash
+            &Hash::zero(), // block_hash
+            0,             // block_height
+            &Hash::zero(), // tx_hash
+            &Hash::zero(), // tx_sender
+            2_000_000,     // max_gas (2M compute units for CPI)
+            None,          // parameters
+        )
+        .await;
 
     match result {
         Ok(exec_result) => {
             println!("CPI Execution Results:");
             println!("  Exit code: {:?}", exec_result.exit_code);
             println!("  Gas used: {}", exec_result.gas_used);
-            println!("  Return data length: {}", exec_result.return_data.as_ref().map(|d| d.len()).unwrap_or(0));
+            println!(
+                "  Return data length: {}",
+                exec_result
+                    .return_data
+                    .as_ref()
+                    .map(|d| d.len())
+                    .unwrap_or(0)
+            );
 
             // Verify success
-            assert_eq!(exec_result.exit_code, Some(0), "Contract should return success");
+            assert_eq!(
+                exec_result.exit_code,
+                Some(0),
+                "Contract should return success"
+            );
             assert!(exec_result.gas_used > 0, "Should have consumed gas");
-            assert!(exec_result.gas_used <= 2_000_000, "Should not exceed gas limit");
+            assert!(
+                exec_result.gas_used <= 2_000_000,
+                "Should not exceed gas limit"
+            );
 
             // Check return data
             if let Some(return_data) = &exec_result.return_data {
                 if return_data.len() >= 8 {
                     let counter_value = u64::from_le_bytes([
-                        return_data[0], return_data[1], return_data[2], return_data[3],
-                        return_data[4], return_data[5], return_data[6], return_data[7],
+                        return_data[0],
+                        return_data[1],
+                        return_data[2],
+                        return_data[3],
+                        return_data[4],
+                        return_data[5],
+                        return_data[6],
+                        return_data[7],
                     ]);
                     println!("  Counter value from CPI callee: {}", counter_value);
                     assert!(counter_value > 0, "Callee should have incremented counter");
@@ -235,7 +255,9 @@ async fn test_cpi_e2e_basic_invocation() {
         Err(e) => {
             println!("❌ CPI execution failed: {}", e);
             println!("\nNote: This failure indicates CPI is not yet fully functional.");
-            println!("Expected behavior: CPI calls should succeed when contract loader is integrated.");
+            println!(
+                "Expected behavior: CPI calls should succeed when contract loader is integrated."
+            );
 
             // For now, we accept failure as this is a work-in-progress feature
             println!("\nTest result: EXPECTED FAILURE (CPI integration pending)");
@@ -249,36 +271,44 @@ async fn test_cpi_e2e_storage_operations() {
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
-    let callee_bytecode = std::fs::read(&callee_path)
-        .expect("Failed to load CPI callee contract");
+    let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee contract");
 
     let callee_hash = Hash::zero();
     let mut provider = CpiTestProvider::new();
     let executor = TakoContractExecutor::new();
 
     println!("Test Setup:");
-    println!("  Contract: cpi_callee.so ({} bytes)", callee_bytecode.len());
+    println!(
+        "  Contract: cpi_callee.so ({} bytes)",
+        callee_bytecode.len()
+    );
     println!("  Purpose: Verify storage operations work during CPI");
 
     // Execute callee multiple times to test storage operations
     let num_executions = 3;
-    println!("\nExecuting callee {} times to test storage...\n", num_executions);
+    println!(
+        "\nExecuting callee {} times to test storage...\n",
+        num_executions
+    );
 
     for i in 1..=num_executions {
         println!("Execution #{}", i);
 
-        let result = executor.execute(
-            &callee_bytecode,
-            &mut provider,
-            100,
-            &callee_hash,
-            &Hash::zero(),
-            0,
-            &Hash::zero(),
-            &Hash::zero(),
-            200_000,
-            None,
-        ).await.expect("Execution should succeed");
+        let result = executor
+            .execute(
+                &callee_bytecode,
+                &mut provider,
+                100,
+                &callee_hash,
+                &Hash::zero(),
+                0,
+                &Hash::zero(),
+                &Hash::zero(),
+                200_000,
+                None,
+            )
+            .await
+            .expect("Execution should succeed");
 
         assert_eq!(result.exit_code, Some(0), "Should succeed");
 
@@ -286,8 +316,14 @@ async fn test_cpi_e2e_storage_operations() {
         if let Some(return_data) = &result.return_data {
             if return_data.len() >= 8 {
                 let counter = u64::from_le_bytes([
-                    return_data[0], return_data[1], return_data[2], return_data[3],
-                    return_data[4], return_data[5], return_data[6], return_data[7],
+                    return_data[0],
+                    return_data[1],
+                    return_data[2],
+                    return_data[3],
+                    return_data[4],
+                    return_data[5],
+                    return_data[6],
+                    return_data[7],
                 ]);
                 println!("  Counter value: {}", counter);
                 // Note: Storage doesn't persist across executions in this test
@@ -317,8 +353,7 @@ async fn test_cpi_e2e_compute_budget_tracking() {
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
-    let callee_bytecode = std::fs::read(&callee_path)
-        .expect("Failed to load CPI callee contract");
+    let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee contract");
 
     let callee_hash = Hash::zero();
     let mut provider = CpiTestProvider::new();
@@ -337,24 +372,30 @@ async fn test_cpi_e2e_compute_budget_tracking() {
     for (budget, label) in budgets {
         println!("{} budget ({} compute units):", label, budget);
 
-        let result = executor.execute(
-            &callee_bytecode,
-            &mut provider,
-            100,
-            &callee_hash,
-            &Hash::zero(),
-            0,
-            &Hash::zero(),
-            &Hash::zero(),
-            budget,
-            None,
-        ).await;
+        let result = executor
+            .execute(
+                &callee_bytecode,
+                &mut provider,
+                100,
+                &callee_hash,
+                &Hash::zero(),
+                0,
+                &Hash::zero(),
+                &Hash::zero(),
+                budget,
+                None,
+            )
+            .await;
 
         match result {
             Ok(exec_result) => {
                 let percentage = (exec_result.gas_used * 100) / budget;
                 println!("  ✓ Success");
-                println!("    Gas used: {} ({budget}%)", exec_result.gas_used, budget = percentage);
+                println!(
+                    "    Gas used: {} ({budget}%)",
+                    exec_result.gas_used,
+                    budget = percentage
+                );
                 println!("    Remaining: {}", budget - exec_result.gas_used);
 
                 assert!(exec_result.gas_used <= budget, "Should not exceed budget");
@@ -381,17 +422,14 @@ async fn test_cpi_e2e_performance_metrics() {
     let caller_path = format!("{}/tests/fixtures/cpi_caller.so", manifest_dir);
     let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
 
-    let caller_bytecode = std::fs::read(&caller_path)
-        .expect("Failed to load CPI caller");
-    let callee_bytecode = std::fs::read(&callee_path)
-        .expect("Failed to load CPI callee");
+    let caller_bytecode = std::fs::read(&caller_path).expect("Failed to load CPI caller");
+    let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee");
 
     let callee_address = [0xAAu8; 32];
     let callee_hash = Hash::from_bytes(&callee_address).expect("Valid hash");
     let caller_hash = Hash::zero();
 
-    let mut provider = CpiTestProvider::new()
-        .with_contract(callee_hash, callee_bytecode.clone());
+    let mut provider = CpiTestProvider::new().with_contract(callee_hash, callee_bytecode.clone());
 
     let executor = TakoContractExecutor::new();
 
@@ -400,18 +438,20 @@ async fn test_cpi_e2e_performance_metrics() {
 
     let start = std::time::Instant::now();
 
-    let result = executor.execute(
-        &caller_bytecode,
-        &mut provider,
-        100,
-        &caller_hash,
-        &Hash::zero(),
-        0,
-        &Hash::zero(),
-        &Hash::zero(),
-        2_000_000,
-        None,
-    ).await;
+    let result = executor
+        .execute(
+            &caller_bytecode,
+            &mut provider,
+            100,
+            &caller_hash,
+            &Hash::zero(),
+            0,
+            &Hash::zero(),
+            &Hash::zero(),
+            2_000_000,
+            None,
+        )
+        .await;
 
     let duration = start.elapsed();
 
@@ -420,8 +460,10 @@ async fn test_cpi_e2e_performance_metrics() {
             println!("Performance Metrics:");
             println!("  Wall time: {:?}", duration);
             println!("  Gas used: {}", exec_result.gas_used);
-            println!("  Instructions/second: ~{}",
-                (exec_result.gas_used as f64 / duration.as_secs_f64()) as u64);
+            println!(
+                "  Instructions/second: ~{}",
+                (exec_result.gas_used as f64 / duration.as_secs_f64()) as u64
+            );
             println!("  Exit code: {:?}", exec_result.exit_code);
 
             // Calculate efficiency

@@ -44,7 +44,7 @@ impl Transaction {
         self: &'a Arc<Self>,
         tx_hash: &'a Hash,
         state: &mut B,
-        contract: &'a Hash,
+        contract: &Hash,
         deposits: &'a IndexMap<Hash, ContractDeposit>,
         _parameters: impl DoubleEndedIterator<Item = ValueCell>,
         max_gas: u64,
@@ -117,7 +117,9 @@ impl Transaction {
                     parameters,
                 )
                 .await
-                .map_err(|e| VerificationError::ModuleError(format!("Contract execution failed: {:#}", e)))?
+                .map_err(|e| {
+                    VerificationError::ModuleError(format!("Contract execution failed: {:#}", e))
+                })?
         };
 
         let used_gas = execution_result.gas_used;

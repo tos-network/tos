@@ -1,14 +1,9 @@
+use tos_common::{block::TopoHeight, crypto::Hash, serializer::Serializer};
 /// Contract loader adapter: TOS contract storage → TAKO ContractLoader
 ///
 /// This module enables Cross-Program Invocation (CPI) by allowing TAKO contracts
 /// to load and invoke other contracts from TOS storage.
-
 use tos_program_runtime::storage::ContractLoader;
-use tos_common::{
-    block::TopoHeight,
-    crypto::Hash,
-    serializer::Serializer,
-};
 use tos_tbpf::error::EbpfError;
 
 /// Adapter that enables TAKO contracts to load other contracts from TOS storage
@@ -82,7 +77,8 @@ impl<'a> ContractLoader for TosContractLoaderAdapter<'a> {
         })?;
 
         // Load contract Module bytecode from storage
-        let bytecode_opt = self.storage
+        let bytecode_opt = self
+            .storage
             .load_contract_module(&hash, self.topoheight)
             .map_err(|e| {
                 EbpfError::SyscallError(Box::new(std::io::Error::new(
@@ -95,7 +91,10 @@ impl<'a> ContractLoader for TosContractLoaderAdapter<'a> {
         let Some(bytecode) = bytecode_opt else {
             return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                format!("Contract {} not found at topoheight {} or earlier", hash, self.topoheight),
+                format!(
+                    "Contract {} not found at topoheight {} or earlier",
+                    hash, self.topoheight
+                ),
             ))));
         };
 
@@ -129,8 +128,8 @@ mod tests {
     use super::*;
     use tos_common::{
         asset::AssetData,
+        contract::{ContractProvider, ContractStorage},
         crypto::PublicKey,
-        contract::{ContractStorage, ContractProvider},
     };
     use tos_vm::ValueCell;
 
@@ -166,7 +165,11 @@ mod tests {
             Ok(false)
         }
 
-        fn has_contract(&self, _contract: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+        fn has_contract(
+            &self,
+            _contract: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<bool, anyhow::Error> {
             Ok(false)
         }
     }
@@ -191,7 +194,11 @@ mod tests {
             Ok(None)
         }
 
-        fn asset_exists(&self, _asset: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+        fn asset_exists(
+            &self,
+            _asset: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<bool, anyhow::Error> {
             Ok(false)
         }
 

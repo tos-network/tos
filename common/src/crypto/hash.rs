@@ -170,3 +170,135 @@ impl<'a> Into<Cow<'a, Hash>> for &'a Hash {
         Cow::Borrowed(self)
     }
 }
+
+/// Compute deterministic contract address (CREATE2-style)
+///
+/// Formula: address = blake3(0xff || deployer || code_hash)
+///
+/// This enables pre-computing contract addresses before deployment,
+/// similar to Ethereum's CREATE2, but without salt parameter.
+///
+/// # Arguments
+/// * `deployer` - Public key of the deployer
+/// * `bytecode` - Contract module bytecode (WASM/ELF)
+///
+/// # Returns
+/// Deterministic 32-byte contract address
+///
+/// # Example
+/// ```
+/// use tos_common::crypto::{compute_deterministic_contract_address, elgamal::CompressedPublicKey};
+/// use tos_common::serializer::Serializer;
+///
+/// let deployer = CompressedPublicKey::from_bytes(&[1u8; 32]).unwrap();
+/// let bytecode = b"contract bytecode";
+/// let address = compute_deterministic_contract_address(&deployer, bytecode);
+/// ```
+pub fn compute_deterministic_contract_address(
+    deployer: &crate::crypto::elgamal::CompressedPublicKey,
+    bytecode: &[u8],
+) -> Hash {
+    // Step 1: Compute code_hash = blake3(bytecode)
+    let code_hash = hash(bytecode);
+
+    // Step 2: Prepare data = 0xff || deployer || code_hash
+    let mut data = Vec::with_capacity(1 + 32 + 32);
+    data.push(0xff); // CREATE2 prefix
+    data.extend_from_slice(deployer.as_bytes());
+    data.extend_from_slice(code_hash.as_bytes());
+
+    // Step 3: Return address = blake3(data)
+    hash(&data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deterministic_address_computation() {
+        // Create a test deployer public key
+        let deployer = crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let bytecode = b"test contract bytecode";
+
+        // Compute address
+        let addr1 = compute_deterministic_contract_address(&deployer, bytecode);
+
+        // Same inputs = same address (deterministic)
+        let addr2 = compute_deterministic_contract_address(&deployer, bytecode);
+        assert_eq!(addr1, addr2, "Same inputs should produce same address");
+
+        // Different bytecode = different address
+        let different_bytecode = b"different bytecode";
+        let addr3 = compute_deterministic_contract_address(&deployer, different_bytecode);
+        assert_ne!(
+            addr1, addr3,
+            "Different bytecode should produce different address"
+        );
+
+        // Different deployer = different address
+        let different_deployer =
+            crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let addr4 = compute_deterministic_contract_address(&different_deployer, bytecode);
+        assert_ne!(
+            addr1, addr4,
+            "Different deployer should produce different address"
+        );
+
+        // Same deployer + same bytecode = same address (idempotent)
+        let addr5 = compute_deterministic_contract_address(&deployer, bytecode);
+        assert_eq!(addr1, addr5, "Address computation should be idempotent");
+    }
+
+    #[test]
+    fn test_deterministic_address_format() {
+        let deployer = crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let bytecode = b"test";
+
+        let addr = compute_deterministic_contract_address(&deployer, bytecode);
+
+        // Verify address is 32 bytes
+        assert_eq!(addr.as_bytes().len(), 32, "Address should be 32 bytes");
+
+        // Verify it's different from simple hash of bytecode
+        let simple_hash = hash(bytecode);
+        assert_ne!(
+            addr, simple_hash,
+            "Address should not be simple hash of bytecode"
+        );
+
+        // Verify it includes CREATE2 prefix (0xff)
+        // Manually compute and verify
+        let code_hash = hash(bytecode);
+        let mut manual_data = Vec::new();
+        manual_data.push(0xff);
+        manual_data.extend_from_slice(deployer.as_bytes());
+        manual_data.extend_from_slice(code_hash.as_bytes());
+        let manual_addr = hash(&manual_data);
+        assert_eq!(addr, manual_addr, "Address should match manual computation");
+    }
+
+    #[test]
+    fn test_deterministic_address_uniqueness() {
+        // Test that different combinations produce different addresses
+        let deployer1 =
+            crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let deployer2 =
+            crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let bytecode1 = b"contract_v1";
+        let bytecode2 = b"contract_v2";
+
+        let addr_11 = compute_deterministic_contract_address(&deployer1, bytecode1);
+        let addr_12 = compute_deterministic_contract_address(&deployer1, bytecode2);
+        let addr_21 = compute_deterministic_contract_address(&deployer2, bytecode1);
+        let addr_22 = compute_deterministic_contract_address(&deployer2, bytecode2);
+
+        // All addresses should be different
+        assert_ne!(addr_11, addr_12);
+        assert_ne!(addr_11, addr_21);
+        assert_ne!(addr_11, addr_22);
+        assert_ne!(addr_12, addr_21);
+        assert_ne!(addr_12, addr_22);
+        assert_ne!(addr_21, addr_22);
+    }
+}
