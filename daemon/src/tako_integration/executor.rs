@@ -89,6 +89,9 @@ pub struct ExecutionResult {
     pub compute_units_used: u64,
     /// Return data set by the contract (if any)
     pub return_data: Option<Vec<u8>>,
+    /// Log messages emitted by the contract during execution
+    /// Format: "Program log: ...", "Program data: ...", "Program consumption: ..."
+    pub log_messages: Vec<String>,
 }
 
 impl TakoExecutor {
@@ -206,6 +209,10 @@ impl TakoExecutor {
         // This allows contracts to receive parameters (entry points, constructors, user args)
         invoke_context.set_input_data(input_data.to_vec());
 
+        // Enable log collection to capture contract logs (Program log: ...)
+        // This allows transaction results to include all log messages emitted by the contract
+        invoke_context.enable_log_collection();
+
         // Enable debug mode if TOS is in debug mode
         #[cfg(debug_assertions)]
         invoke_context.enable_debug();
@@ -244,36 +251,47 @@ impl TakoExecutor {
             instruction_count, compute_units_used, compute_budget
         );
 
-        // 11. Get return data (if any)
+        // 11. Extract log messages from contract execution
+        let log_messages = invoke_context.extract_log_messages().unwrap_or_default();
+        if !log_messages.is_empty() {
+            debug!("Contract emitted {} log messages", log_messages.len());
+        }
+
+        // 12. Get return data (if any)
         let return_data = invoke_context
             .get_return_data()
             .map(|(_, data)| data.to_vec());
 
-        // 12. Process result
+        // 13. Process result
         match result {
             ProgramResult::Ok(return_value) => {
                 info!(
-                    "TAKO VM execution succeeded: return_value={}, instructions={}, compute_units={}, return_data_size={}",
+                    "TAKO VM execution succeeded: return_value={}, instructions={}, compute_units={}, return_data_size={}, log_count={}",
                     return_value,
                     instruction_count,
                     compute_units_used,
-                    return_data.as_ref().map(|d| d.len()).unwrap_or(0)
+                    return_data.as_ref().map(|d| d.len()).unwrap_or(0),
+                    log_messages.len()
                 );
                 Ok(ExecutionResult {
                     return_value,
                     instructions_executed: instruction_count,
                     compute_units_used,
                     return_data,
+                    log_messages,
                 })
             }
             ProgramResult::Err(err) => {
                 let execution_error =
                     TakoExecutionError::from_ebpf_error(err, instruction_count, compute_units_used);
                 error!(
-                    "TAKO VM execution failed: category={}, error={}",
+                    "TAKO VM execution failed: category={}, error={}, log_count={}",
                     execution_error.category(),
-                    execution_error.user_message()
+                    execution_error.user_message(),
+                    log_messages.len()
                 );
+                // Note: Log messages are lost on error for now
+                // Future: Could extend TakoExecutionError to include log_messages for debugging
                 Err(execution_error)
             }
         }
