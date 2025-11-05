@@ -91,7 +91,45 @@ cargo test --workspace
 - ✅ **REQUIRED**: Fix or suppress all unused variable warnings in tests
 - ❌ **PROHIBITED**: Ignoring or skipping existing tests without justification
 
-### 4. Git Workflow
+### 4. Code Quality and Linting Requirements
+
+**RULE: All code changes must pass clippy lints and formatting checks before committing.**
+
+#### Clippy Verification
+```bash
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+# Expected output: 0 warnings, 0 errors
+```
+
+**IMPORTANT**: Clippy must run with `-D warnings` flag to treat all warnings as errors. This ensures the highest code quality standards.
+
+#### Code Formatting
+```bash
+# Auto-format all code (run this before committing)
+cargo fmt --all
+
+# Verify formatting is correct (CI check)
+cargo fmt --all -- --check
+# Expected output: No formatting differences
+```
+
+#### Standards
+- ✅ **REQUIRED**: Zero clippy warnings (all warnings treated as errors with `-D warnings`)
+- ✅ **REQUIRED**: All code must be formatted with `cargo fmt --all`
+- ✅ **REQUIRED**: Formatting verification must pass (`cargo fmt --all -- --check`)
+- ✅ **REQUIRED**: Run these checks after every code change, before committing
+- ❌ **PROHIBITED**: Committing code with clippy warnings or formatting issues
+
+#### Common Clippy Issues to Fix
+- `clippy::empty_line_after_doc_comments` - Remove empty lines after doc comments
+- `clippy::redundant_field_names` - Use shorthand for identical field names (e.g., `validator` instead of `validator: validator`)
+- `clippy::inconsistent_digit_grouping` - Use consistent underscores in numbers (e.g., `1_000_000` not `1000_000`)
+- `clippy::manual_range_contains` - Use `.contains()` instead of manual range checks
+- `clippy::needless_return` - Remove unnecessary `return` keywords
+
+**Note**: Pre-existing clippy warnings in the codebase should be fixed gradually. New code must have zero warnings.
+
+### 5. Git Workflow
 
 **RULE: Follow the standard commit and push workflow.**
 
@@ -121,19 +159,28 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 # 1. Check for non-English content
 perl -ne 'print "$ARGV:$.: $_" if /[^\x00-\x7F]/' **/*.rs **/*.md
 
-# 2. Build verification
+# 2. Code formatting (auto-fix)
+cargo fmt --all
+
+# 3. Formatting verification
+cargo fmt --all -- --check
+
+# 4. Clippy linting (treat warnings as errors)
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+# 5. Build verification
 cargo build --workspace
 
-# 3. Test verification
+# 6. Test verification
 cargo test --workspace
 
-# 4. Stage changes
+# 7. Stage changes
 git add <files>
 
-# 5. Commit with detailed message
+# 8. Commit with detailed message
 git commit -m "<message>"
 
-# 6. Push to GitHub
+# 9. Push to GitHub
 git push origin <branch>
 ```
 
