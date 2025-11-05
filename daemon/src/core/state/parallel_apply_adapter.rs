@@ -533,29 +533,36 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
             .await
             .map_err(|e| BlockchainError::Any(anyhow!("Failed to acquire storage semaphore: {}", e)))?;
 
-        // Load from storage using ContractProvider::load_contract_module
-        // This returns Option<Vec<u8>> (ELF bytecode)
+        // Load from storage using ContractProvider::get_contract_at_maximum_topoheight_for
+        // CRITICAL: Load the full VersionedContract to preserve metadata (constants, hooks, etc.)
+        // Using load_contract_module() would only give raw bytecode, losing all serialized metadata
+        // that the sequential path persists, causing execution divergence.
         let storage = self.storage.read().await;
         let topoheight = self.parallel_state.get_topoheight(); // Use public accessor
-        let module_bytes = storage
-            .load_contract_module(hash, topoheight)
-            .map_err(|e| BlockchainError::Any(e))?;
 
-        if let Some(bytes) = module_bytes {
-            // Parse ELF bytecode into Module
-            let module = tos_vm::Module::from_bytecode(bytes);
+        let contract_result = storage
+            .get_contract_at_maximum_topoheight_for(hash, topoheight)
+            .await?;
 
-            let module_arc = Arc::new(module);
+        if let Some((_stored_topoheight, versioned_contract)) = contract_result {
+            // Extract Module from VersionedContract (preserves all metadata)
+            let module_cow = versioned_contract.get();
 
-            // Cache using cache_existing_contract (skips collision check)
-            // This is safe because we're loading an already-deployed contract
-            self.parallel_state
-                .cache_existing_contract(hash, module_arc);
+            if let Some(module_ref) = module_cow.as_ref() {
+                // Clone the full Module (includes constants, entry chunks, hook map)
+                let module = module_ref.as_ref().clone();
+                let module_arc = Arc::new(module);
 
-            drop(storage); // Release storage lock
-            drop(permit); // Release semaphore
+                // Cache using cache_existing_contract (skips collision check)
+                // This is safe because we're loading an already-deployed contract
+                self.parallel_state
+                    .cache_existing_contract(hash, module_arc);
 
-            return Ok(true);
+                drop(storage); // Release storage lock
+                drop(permit); // Release semaphore
+
+                return Ok(true);
+            }
         }
 
         drop(storage);

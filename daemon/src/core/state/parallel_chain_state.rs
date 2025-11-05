@@ -1250,19 +1250,25 @@ impl<S: Storage> ParallelChainState<S> {
         }
 
         // Step 3: Try atomic insert (short critical section, no await)
-        // SAFETY: DashMap 5.5 doesn't have try_insert(), use insert() instead.
-        // insert() returns Some(old_value) if key existed, None if newly inserted.
-        // If another task inserted between step 1 and now, this will detect it.
+        // CRITICAL: Use entry() API to avoid overwriting existing entries.
+        // Using insert() would overwrite the winner's entry even when returning error.
+        // The entry() API ensures we only insert if vacant, preserving existing state.
         let contract_state = ContractState {
             module: Some(module),
             data: Vec::new(),
         };
 
-        if self.contracts.insert(contract_address.clone(), contract_state).is_some() {
-            // Another task won the race and inserted first
-            Err(BlockchainError::ContractAlreadyExists)
-        } else {
-            Ok(())
+        match self.contracts.entry(contract_address.clone()) {
+            dashmap::mapref::entry::Entry::Occupied(_) => {
+                // Another task won the race and inserted first
+                // SAFETY: We don't touch the existing entry, preserving winner's state
+                Err(BlockchainError::ContractAlreadyExists)
+            }
+            dashmap::mapref::entry::Entry::Vacant(entry) => {
+                // We won the race, insert our deployment
+                entry.insert(contract_state);
+                Ok(())
+            }
         }
     }
 
