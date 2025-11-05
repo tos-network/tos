@@ -127,8 +127,8 @@ impl TakoExecutor {
         block_hash: &Hash,
         block_height: u64,
         tx_hash: &Hash,
-        tx_sender: &Hash,   // Using Hash type for sender (32 bytes)
-        _input_data: &[u8], // Reserved for future use
+        tx_sender: &Hash,  // Using Hash type for sender (32 bytes)
+        input_data: &[u8], // Contract input parameters (entry point, user data)
         compute_budget: Option<u64>,
     ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
@@ -201,6 +201,10 @@ impl TakoExecutor {
             &loader_adapter,
             loader.clone(),
         );
+
+        // Set input data for contract to access via tos_get_input_data syscall
+        // This allows contracts to receive parameters (entry points, constructors, user args)
+        invoke_context.set_input_data(input_data.to_vec());
 
         // Enable debug mode if TOS is in debug mode
         #[cfg(debug_assertions)]

@@ -477,7 +477,7 @@ mod tests {
             validated_at: 200,
         };
         let validation2 = ValidationScore {
-            validator: validator,
+            validator,
             score: 90,
             validated_at: 210,
         };

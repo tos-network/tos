@@ -61,7 +61,6 @@ impl Transaction {
 
     /// Get the new output ciphertext
     /// This is used to substract the amount from the sender's balance
-
     /// Get the new output amounts for the sender
     /// Balance simplification: Returns plain u64 amounts instead of ciphertexts
     pub fn get_expected_sender_outputs<'a>(
@@ -620,6 +619,14 @@ impl Transaction {
                     ));
                 }
 
+                // CRITICAL: Reserve address immediately to prevent front-running
+                // This ensures subsequent TXs in the same block will see this address as occupied
+                // during their pre-verification phase, blocking duplicate deployments
+                state
+                    .set_contract_module(&contract_address, &payload.module)
+                    .await
+                    .map_err(VerificationError::State)?;
+
                 let environment = state
                     .get_environment()
                     .await
@@ -760,10 +767,20 @@ impl Transaction {
                 }
 
                 // Cache module under deterministic address (not tx_hash!)
-                state
-                    .set_contract_module(&contract_address, &payload.module)
+                // Note: If pre-verification already reserved this address, this will succeed
+                // because the module is already cached in mempool state
+                // We check first to avoid unnecessary error handling
+                if !state
+                    .load_contract_module(&contract_address)
                     .await
-                    .map_err(VerificationError::State)?;
+                    .map_err(VerificationError::State)?
+                {
+                    // Address not yet cached (shouldn't happen after pre-verify, but handle it)
+                    state
+                        .set_contract_module(&contract_address, &payload.module)
+                        .await
+                        .map_err(VerificationError::State)?;
+                }
             }
             TransactionType::Energy(payload) => {
                 if log::log_enabled!(log::Level::Debug) {

@@ -84,15 +84,9 @@ where
     if log::log_enabled!(log::Level::Trace) {
         trace!("Spawning task: {}", name_str);
     }
-    #[cfg(feature = "tracing")]
-    {
-        let name = name_str.as_str();
-        task::Builder::new().name(name).spawn(future).expect(name)
-    }
-    #[cfg(not(feature = "tracing"))]
-    {
-        tokio::spawn(future)
-    }
+    // Note: tokio::task::Builder requires tokio to be compiled with "tracing" feature
+    // Since it's not enabled, we use regular spawn for both cases
+    tokio::spawn(future)
 }
 
 // Spawn a new task with a name
