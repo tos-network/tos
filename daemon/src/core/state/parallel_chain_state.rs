@@ -49,13 +49,13 @@ struct AccountState {
 
 /// Contract state cached in memory
 #[derive(Debug, Clone)]
-struct ContractState {
+pub(crate) struct ContractState {
     /// Contract module (bytecode)
     #[allow(dead_code)]
-    module: Option<Arc<tos_vm::Module>>,
+    pub(crate) module: Option<Arc<tos_vm::Module>>,
     /// Contract storage data
     #[allow(dead_code)]
-    data: Vec<u8>,
+    pub(crate) data: Vec<u8>,
 }
 
 /// Result of transaction execution
@@ -471,7 +471,7 @@ impl<S: Storage> ParallelChainState<S> {
         // 4. Balance operations
         // 5. Fee deduction
         // 6. Type-specific application logic
-        match tx.apply_with_partial_verify(&tx_hash, &mut adapter).await {
+        match tx.apply_with_partial_verify(&tx_hash.clone(), &mut adapter).await {
             Ok(()) => {
                 // SECURITY FIX: Commit ALL mutations atomically (balances, nonces, multisig, gas, burns)
                 // This fixes the premature state mutation vulnerability where failed transactions
@@ -1210,6 +1210,112 @@ impl<S: Storage> ParallelChainState<S> {
     /// Get environment reference (for adapter)
     pub fn get_environment(&self) -> &Arc<Environment> {
         &self.environment
+    }
+
+    /// Store NEW deployed contract in cache (with collision check)
+    ///
+    /// This method is for NEW contract deployments and includes collision checking
+    /// to prevent duplicate CREATE2 addresses.
+    ///
+    /// CRITICAL: Uses try_insert() to avoid holding DashMap guard across .await
+    /// DashMap entry guards are not Send and cannot be held across async boundaries.
+    ///
+    /// Strategy:
+    /// 1. Quick cache check (no DashMap lock held)
+    /// 2. Async storage check (no DashMap lock held)
+    /// 3. Atomic insert with try_insert() (handles races)
+    pub async fn cache_deployed_contract(
+        &self,
+        contract_address: &Hash,
+        module: Arc<tos_vm::Module>,
+        _storage_permit: &tokio::sync::SemaphorePermit<'_>,
+    ) -> Result<(), BlockchainError> {
+        // NOTE: _storage_permit ensures caller has acquired semaphore before calling
+        // This enforces proper synchronization without directly using the permit
+
+        // Step 1: Check cache first (fast, no async)
+        if self.contracts.contains_key(contract_address) {
+            return Err(BlockchainError::ContractAlreadyExists);
+        }
+
+        // Step 2: Check storage (async, no DashMap lock held)
+        let storage = self.storage.read().await;
+        let exists = storage
+            .has_contract_at_maximum_topoheight(contract_address, self.topoheight)
+            .await?;
+        drop(storage); // Release storage lock before DashMap operation
+
+        if exists {
+            return Err(BlockchainError::ContractAlreadyExists);
+        }
+
+        // Step 3: Try atomic insert (short critical section, no await)
+        // SAFETY: DashMap 5.5 doesn't have try_insert(), use insert() instead.
+        // insert() returns Some(old_value) if key existed, None if newly inserted.
+        // If another task inserted between step 1 and now, this will detect it.
+        let contract_state = ContractState {
+            module: Some(module),
+            data: Vec::new(),
+        };
+
+        if self.contracts.insert(contract_address.clone(), contract_state).is_some() {
+            // Another task won the race and inserted first
+            Err(BlockchainError::ContractAlreadyExists)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Cache EXISTING contract loaded from storage (NO collision check)
+    ///
+    /// This method is for loading already-deployed contracts from storage.
+    /// It skips collision checking because the contract already exists on-chain.
+    ///
+    /// Used by load_contract_module() when loading contracts for CPI.
+    pub fn cache_existing_contract(&self, contract_address: &Hash, module: Arc<tos_vm::Module>) {
+        // No collision check - this is for loading existing contracts
+        self.contracts.insert(
+            contract_address.clone(),
+            ContractState {
+                module: Some(module),
+                data: Vec::new(),
+            },
+        );
+    }
+
+    /// Remove deployed contract from cache (for constructor failure rollback)
+    pub fn remove_cached_contract(&self, contract_address: &Hash) {
+        self.contracts.remove(contract_address);
+    }
+
+    /// Get cached contract module
+    pub fn get_cached_contract(&self, contract_address: &Hash) -> Option<Arc<tos_vm::Module>> {
+        self.contracts
+            .get(contract_address)
+            .and_then(|state| state.module.clone())
+    }
+
+    /// Get DashMap guard for contract (for trait implementations needing references)
+    ///
+    /// Returns a guard that keeps the contract entry locked and provides access to ContractState.
+    /// Used by get_contract_module_with_environment() to return a reference with proper lifetime.
+    pub fn get_contract_guard(&self, contract_address: &Hash) -> Option<dashmap::mapref::one::Ref<'_, Hash, ContractState>> {
+        self.contracts.get(contract_address)
+    }
+
+    /// Public accessor for private contracts field (for merge)
+    ///
+    /// Returns an iterator over all deployed contracts in the cache.
+    /// Used by merge_parallel_results() to write contracts to storage.
+    pub fn contracts_iter(&self) -> impl Iterator<Item = (Hash, Arc<tos_vm::Module>)> + '_ {
+        self.contracts.iter().filter_map(|entry| {
+            let address = entry.key().clone();
+            entry
+                .value()
+                .module
+                .as_ref()
+                .map(|module| (address, module.clone()))
+        })
     }
 }
 

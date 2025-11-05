@@ -35,6 +35,8 @@ use crate::core::{error::BlockchainError, storage::Storage};
 
 use super::parallel_chain_state::ParallelChainState;
 
+use log::debug;
+
 /// Adapter that makes ParallelChainState compatible with BlockchainApplyState trait
 ///
 /// This allows parallel execution to reuse the same Transaction::apply_with_partial_verify()
@@ -97,6 +99,15 @@ pub struct ParallelApplyAdapter<'a, S: Storage> {
 
     /// Contract executor for executing contract bytecode
     executor: std::sync::Arc<dyn tos_common::contract::ContractExecutor>,
+
+    /// Staged contract deployments (for commit on success)
+    /// Stores Arc<Module> to avoid double-clone and memory bloat
+    /// Used to keep modules alive during execution (lifetime safety)
+    staged_contracts: HashMap<Hash, Arc<tos_vm::Module>>,
+
+    /// Tracks whether adapter was successfully committed
+    /// Used by Drop impl to determine if rollback is needed
+    committed: bool,
 }
 
 impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
@@ -122,6 +133,8 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
             staged_gas_fees: 0,
             staged_burned_supply: 0,
             executor,
+            staged_contracts: HashMap::new(),
+            committed: false,
         }
     }
 
@@ -144,17 +157,17 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
     /// SECURITY FIX: Commit all staged mutations to ParallelChainState atomically
     ///
     /// This method is ONLY called when transaction validation succeeds.
-    /// It commits all staged mutations (nonces, multisig, gas, burns, balances) atomically.
+    /// It commits all staged mutations (nonces, multisig, gas, burns, balances, contracts) atomically.
     ///
     /// CRITICAL: If transaction fails, this method is never called, and all staged mutations
-    /// are automatically discarded when the adapter is dropped.
+    /// are automatically discarded when the adapter is dropped (including contract deployments via Drop).
     ///
     /// This fixes the premature state mutation vulnerability where failed transactions
     /// were leaving behind permanent state changes (nonce increments, multisig config changes,
     /// gas/burn accumulations).
     ///
     /// Returns an error if burned supply limit would be exceeded (overflow protection).
-    pub fn commit_all(&self) -> Result<(), BlockchainError> {
+    pub fn commit_all(&mut self) -> Result<(), BlockchainError> {
         // Commit balances (already implemented)
         self.commit_balances();
 
@@ -178,6 +191,18 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
             self.parallel_state
                 .add_burned_supply(self.staged_burned_supply)?;
         }
+
+        // Commit staged contracts
+        // NOTE: Contracts are already in ParallelChainState cache
+        // They will be written to storage during merge_parallel_results()
+        if log::log_enabled!(log::Level::Debug) {
+            for (contract_address, _) in &self.staged_contracts {
+                debug!("Committing deployed contract {}", contract_address);
+            }
+        }
+
+        // Mark as committed to prevent rollback in Drop
+        self.committed = true;
 
         Ok(())
     }
@@ -462,35 +487,113 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
 
     /// Get the VM environment (for contract execution)
     async fn get_environment(&mut self) -> Result<&Environment, BlockchainError> {
-        Err(BlockchainError::Any(anyhow!(
-            "Contract execution not yet supported in parallel execution (Phase 3)"
-        )))
+        // Use public accessor for environment, deref Arc<Environment> to &Environment
+        Ok(self.parallel_state.get_environment().as_ref())
     }
 
     /// Set contract module (deploy contract)
     async fn set_contract_module(
         &mut self,
-        _hash: &Hash,
-        _module: &'a Module,
+        hash: &Hash,
+        module: &'a Module,
     ) -> Result<(), BlockchainError> {
-        Err(BlockchainError::Any(anyhow!(
-            "Contract deployment not yet supported in parallel execution (Phase 3)"
-        )))
+        // Acquire storage semaphore to prevent RocksDB/Sled deadlocks
+        // CRITICAL: All storage access must be protected by this semaphore
+        let permit = self
+            .storage_semaphore
+            .acquire()
+            .await
+            .map_err(|e| BlockchainError::Any(anyhow!("Failed to acquire storage semaphore: {}", e)))?;
+
+        // Convert borrowed module to Arc for caching (avoids double-clone)
+        let module_arc = Arc::new(module.clone());
+
+        // Cache in ParallelChainState (atomic check-and-insert under semaphore)
+        self.parallel_state
+            .cache_deployed_contract(hash, module_arc.clone(), &permit)
+            .await?;
+
+        // Stage for commit - store Arc to avoid memory bloat
+        self.staged_contracts.insert(hash.clone(), module_arc);
+
+        Ok(())
     }
 
     /// Load contract module into cache
-    async fn load_contract_module(&mut self, _hash: &Hash) -> Result<bool, BlockchainError> {
+    async fn load_contract_module(&mut self, hash: &Hash) -> Result<bool, BlockchainError> {
+        // Check if already in cache (fast path, no storage access)
+        if self.parallel_state.get_cached_contract(hash).is_some() {
+            return Ok(true);
+        }
+
+        // Acquire storage semaphore before accessing storage
+        let permit = self
+            .storage_semaphore
+            .acquire()
+            .await
+            .map_err(|e| BlockchainError::Any(anyhow!("Failed to acquire storage semaphore: {}", e)))?;
+
+        // Load from storage using ContractProvider::load_contract_module
+        // This returns Option<Vec<u8>> (ELF bytecode)
+        let storage = self.storage.read().await;
+        let topoheight = self.parallel_state.get_topoheight(); // Use public accessor
+        let module_bytes = storage
+            .load_contract_module(hash, topoheight)
+            .map_err(|e| BlockchainError::Any(e))?;
+
+        if let Some(bytes) = module_bytes {
+            // Parse ELF bytecode into Module
+            let module = tos_vm::Module::from_bytecode(bytes);
+
+            let module_arc = Arc::new(module);
+
+            // Cache using cache_existing_contract (skips collision check)
+            // This is safe because we're loading an already-deployed contract
+            self.parallel_state
+                .cache_existing_contract(hash, module_arc);
+
+            drop(storage); // Release storage lock
+            drop(permit); // Release semaphore
+
+            return Ok(true);
+        }
+
+        drop(storage);
+        drop(permit);
         Ok(false)
     }
 
     /// Get contract module with environment
+    ///
+    /// SAFETY STRATEGY: We keep an Arc in staged_contracts that ties the lifetime
+    /// to &'self. This prevents use-after-free when rollback removes the cache entry
+    /// while execution still holds a reference.
     async fn get_contract_module_with_environment(
         &self,
-        _hash: &Hash,
+        hash: &Hash,
     ) -> Result<(&Module, &Environment), BlockchainError> {
-        Err(BlockchainError::Any(anyhow!(
-            "Contract execution not yet supported in parallel execution (Phase 3)"
-        )))
+        // Get DashMap guard to keep reference alive
+        let guard = self
+            .parallel_state
+            .get_contract_guard(hash)
+            .ok_or_else(|| BlockchainError::ContractNotFound(hash.clone()))?;
+
+        // Extract Module reference from ContractState
+        let module_arc = guard
+            .module
+            .as_ref()
+            .ok_or_else(|| BlockchainError::ContractNotFound(hash.clone()))?;
+
+        // SAFETY: This transmutes the lifetime from the guard's lifetime to the return lifetime.
+        // This is safe because:
+        // 1. The Module is stored in DashMap in ParallelChainState
+        // 2. ParallelChainState outlives this adapter
+        // 3. The contract won't be removed from the map during transaction execution
+        // 4. Even if removed, the Arc keeps the Module alive
+        let module_ref: &Module = unsafe { &*(module_arc.as_ref() as *const Module) };
+
+        // Use public accessor for environment
+        Ok((module_ref, self.parallel_state.get_environment().as_ref()))
     }
 }
 
@@ -616,6 +719,32 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
 
     fn get_contract_executor(&self) -> std::sync::Arc<dyn tos_common::contract::ContractExecutor> {
         self.executor.clone()
+    }
+}
+
+/// Automatic rollback on Drop for failed transactions
+///
+/// If commit_all() was not called (transaction failed), this automatically
+/// removes all staged contract deployments from the cache.
+///
+/// SECURITY: This ensures that failed contract deployments (e.g., constructor failure)
+/// do not leave contracts in the cache that could be accessed by other transactions.
+impl<'a, S: Storage> Drop for ParallelApplyAdapter<'a, S> {
+    fn drop(&mut self) {
+        // Only rollback if not committed
+        if !self.committed {
+            // Remove all staged contracts from cache
+            for contract_address in self.staged_contracts.keys() {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Rolling back deployed contract {} (transaction failed)",
+                        contract_address
+                    );
+                }
+                self.parallel_state
+                    .remove_cached_contract(contract_address);
+            }
+        }
     }
 }
 

@@ -5930,6 +5930,48 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
+        // Step 3: Merge deployed contracts
+        // CRITICAL: DashMap::iter() has non-deterministic order
+        // Must collect and sort by hash before writing to storage
+
+        // Collect all contract entries into a Vec for sorting
+        let mut contract_entries: Vec<(Hash, Arc<tos_vm::Module>)> = parallel_state
+            .contracts_iter()  // Use public accessor method
+            .collect();
+
+        if !contract_entries.is_empty() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Merging {} deployed contracts", contract_entries.len());
+            }
+
+            // Sort by contract address (hash) for deterministic merge order
+            contract_entries.sort_by_key(|(hash, _)| hash.clone());
+
+            // Write contracts to storage in deterministic order
+            for (contract_address, module_arc) in contract_entries {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Writing deployed contract {} at topoheight {}",
+                        contract_address,
+                        topoheight
+                    );
+                }
+
+                let module_ref = module_arc.as_ref();
+                use std::borrow::Cow;
+                use crate::core::storage::VersionedContract;
+                let versioned_contract = VersionedContract::new(Some(Cow::Borrowed(module_ref)), None);
+
+                storage
+                    .set_last_contract_to(&contract_address, topoheight, &versioned_contract)
+                    .await?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Merged deployed contract {} at topoheight {}", contract_address, topoheight);
+                }
+            }
+        }
+
             Ok(())
         }.await;
 
