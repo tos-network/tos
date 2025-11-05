@@ -499,11 +499,9 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     ) -> Result<(), BlockchainError> {
         // Acquire storage semaphore to prevent RocksDB/Sled deadlocks
         // CRITICAL: All storage access must be protected by this semaphore
-        let permit = self
-            .storage_semaphore
-            .acquire()
-            .await
-            .map_err(|e| BlockchainError::Any(anyhow!("Failed to acquire storage semaphore: {}", e)))?;
+        let permit = self.storage_semaphore.acquire().await.map_err(|e| {
+            BlockchainError::Any(anyhow!("Failed to acquire storage semaphore: {}", e))
+        })?;
 
         // Convert borrowed module to Arc for caching (avoids double-clone)
         let module_arc = Arc::new(module.clone());
@@ -527,11 +525,9 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         }
 
         // Acquire storage semaphore before accessing storage
-        let permit = self
-            .storage_semaphore
-            .acquire()
-            .await
-            .map_err(|e| BlockchainError::Any(anyhow!("Failed to acquire storage semaphore: {}", e)))?;
+        let permit = self.storage_semaphore.acquire().await.map_err(|e| {
+            BlockchainError::Any(anyhow!("Failed to acquire storage semaphore: {}", e))
+        })?;
 
         // Load from storage using ContractProvider::get_contract_at_maximum_topoheight_for
         // CRITICAL: Load the full VersionedContract to preserve metadata (constants, hooks, etc.)
@@ -748,8 +744,7 @@ impl<'a, S: Storage> Drop for ParallelApplyAdapter<'a, S> {
                         contract_address
                     );
                 }
-                self.parallel_state
-                    .remove_cached_contract(contract_address);
+                self.parallel_state.remove_cached_contract(contract_address);
             }
         }
     }

@@ -123,7 +123,10 @@ fn test_log_collection_hello_world() {
         Ok(exec_result) => {
             println!("\n✅ Execution succeeded!");
             println!("  Return value: {}", exec_result.return_value);
-            println!("  Instructions executed: {}", exec_result.instructions_executed);
+            println!(
+                "  Instructions executed: {}",
+                exec_result.instructions_executed
+            );
             println!("  Compute units used: {}", exec_result.compute_units_used);
             println!("  Log messages: {}", exec_result.log_messages.len());
 
@@ -140,7 +143,9 @@ fn test_log_collection_hello_world() {
 
             // The hello-world contract calls log("Hello, TOS!")
             // which should result in "Program log: Hello, TOS!"
-            let has_hello_log = exec_result.log_messages.iter()
+            let has_hello_log = exec_result
+                .log_messages
+                .iter()
                 .any(|msg| msg.contains("Hello, TOS!"));
 
             assert!(

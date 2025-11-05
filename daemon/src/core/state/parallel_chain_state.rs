@@ -471,7 +471,10 @@ impl<S: Storage> ParallelChainState<S> {
         // 4. Balance operations
         // 5. Fee deduction
         // 6. Type-specific application logic
-        match tx.apply_with_partial_verify(&tx_hash.clone(), &mut adapter).await {
+        match tx
+            .apply_with_partial_verify(&tx_hash.clone(), &mut adapter)
+            .await
+        {
             Ok(()) => {
                 // SECURITY FIX: Commit ALL mutations atomically (balances, nonces, multisig, gas, burns)
                 // This fixes the premature state mutation vulnerability where failed transactions
@@ -1305,7 +1308,10 @@ impl<S: Storage> ParallelChainState<S> {
     ///
     /// Returns a guard that keeps the contract entry locked and provides access to ContractState.
     /// Used by get_contract_module_with_environment() to return a reference with proper lifetime.
-    pub fn get_contract_guard(&self, contract_address: &Hash) -> Option<dashmap::mapref::one::Ref<'_, Hash, ContractState>> {
+    pub fn get_contract_guard(
+        &self,
+        contract_address: &Hash,
+    ) -> Option<dashmap::mapref::one::Ref<'_, Hash, ContractState>> {
         self.contracts.get(contract_address)
     }
 

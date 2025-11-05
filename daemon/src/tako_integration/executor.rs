@@ -92,6 +92,9 @@ pub struct ExecutionResult {
     /// Log messages emitted by the contract during execution
     /// Format: "Program log: ...", "Program data: ...", "Program consumption: ..."
     pub log_messages: Vec<String>,
+    /// Events emitted by the contract during execution (Ethereum-style)
+    /// Contains indexed topics and data for off-chain indexing and monitoring
+    pub events: Vec<tos_program_runtime::Event>,
 }
 
 impl TakoExecutor {
@@ -213,6 +216,10 @@ impl TakoExecutor {
         // This allows transaction results to include all log messages emitted by the contract
         invoke_context.enable_log_collection();
 
+        // Enable event collection to capture Ethereum-style events emitted by the contract
+        // Events are used for off-chain indexing, monitoring, and real-time notifications
+        invoke_context.enable_event_collection();
+
         // Enable debug mode if TOS is in debug mode
         #[cfg(debug_assertions)]
         invoke_context.enable_debug();
@@ -257,6 +264,14 @@ impl TakoExecutor {
             debug!("Contract emitted {} log messages", log_messages.len());
         }
 
+        // 11a. Extract events from contract execution
+        let events = invoke_context.extract_events().unwrap_or_default();
+        if log::log_enabled!(log::Level::Debug) {
+            if !events.is_empty() {
+                debug!("Contract emitted {} events", events.len());
+            }
+        }
+
         // 12. Get return data (if any)
         let return_data = invoke_context
             .get_return_data()
@@ -265,20 +280,24 @@ impl TakoExecutor {
         // 13. Process result
         match result {
             ProgramResult::Ok(return_value) => {
-                info!(
-                    "TAKO VM execution succeeded: return_value={}, instructions={}, compute_units={}, return_data_size={}, log_count={}",
-                    return_value,
-                    instruction_count,
-                    compute_units_used,
-                    return_data.as_ref().map(|d| d.len()).unwrap_or(0),
-                    log_messages.len()
-                );
+                if log::log_enabled!(log::Level::Info) {
+                    info!(
+                        "TAKO VM execution succeeded: return_value={}, instructions={}, compute_units={}, return_data_size={}, log_count={}, event_count={}",
+                        return_value,
+                        instruction_count,
+                        compute_units_used,
+                        return_data.as_ref().map(|d| d.len()).unwrap_or(0),
+                        log_messages.len(),
+                        events.len()
+                    );
+                }
                 Ok(ExecutionResult {
                     return_value,
                     instructions_executed: instruction_count,
                     compute_units_used,
                     return_data,
                     log_messages,
+                    events,
                 })
             }
             ProgramResult::Err(err) => {
