@@ -52,6 +52,12 @@ pub const MAX_COMPUTE_BUDGET: u64 = 10_000_000;
 /// Matches TBPF's default stack size.
 const STACK_SIZE: usize = 16 * 1024;
 
+/// Heap size for dynamic memory allocation (32KB)
+///
+/// Allows contracts to use Vec, BTreeMap, and other heap-allocated types
+/// via the tos-alloc library. Can be increased up to 256KB if needed.
+const HEAP_SIZE: usize = 32 * 1024;
+
 /// TAKO VM executor for TOS blockchain
 ///
 /// This is the main entry point for executing TAKO VM contracts within TOS.
@@ -224,12 +230,26 @@ impl TakoExecutor {
         #[cfg(debug_assertions)]
         invoke_context.enable_debug();
 
-        // 7. Create memory mapping
+        // 7. Create memory mapping WITH HEAP
         let mut stack = AlignedMemory::<{ ebpf::HOST_ALIGN }>::zero_filled(STACK_SIZE);
         let stack_len = stack.len();
+
+        // Create heap memory for dynamic allocation
+        let mut heap = AlignedMemory::<{ ebpf::HOST_ALIGN }>::zero_filled(HEAP_SIZE);
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Created heap: {} KB at 0x{:x}",
+                HEAP_SIZE / 1024,
+                ebpf::MM_HEAP_START
+            );
+        }
+
+        // Add heap to memory regions
         let regions: Vec<MemoryRegion> = vec![
             executable.get_ro_region(),
             MemoryRegion::new_writable(stack.as_slice_mut(), ebpf::MM_STACK_START),
+            MemoryRegion::new_writable(heap.as_slice_mut(), ebpf::MM_HEAP_START),
         ];
         let memory_mapping = MemoryMapping::new(regions, &config, executable.get_tbpf_version())
             .map_err(|e| TakoExecutionError::MemoryMappingFailed {
@@ -250,6 +270,10 @@ impl TakoExecutor {
         // 9. Execute contract
         debug!("Executing contract bytecode via TBPF VM");
         let (instruction_count, result) = vm.execute_program(&executable, true);
+
+        // CRITICAL: Drop heap after execution to prevent dangling pointers
+        drop(heap);
+        drop(stack);
 
         // 10. Calculate compute units used
         let compute_units_used = compute_budget - invoke_context.get_remaining();
