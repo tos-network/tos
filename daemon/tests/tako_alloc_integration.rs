@@ -4,15 +4,15 @@
 
 #![cfg(test)]
 
-use tos_daemon::tako_integration::TakoExecutor;
+use anyhow::Result;
 use tos_common::{
     asset::AssetData,
     block::TopoHeight,
     contract::{ContractProvider, ContractStorage},
     crypto::{Hash, PublicKey},
 };
+use tos_daemon::tako_integration::TakoExecutor;
 use tos_vm::ValueCell;
-use anyhow::Result;
 
 /// Mock ContractProvider for testing
 ///
@@ -142,18 +142,22 @@ fn test_alloc_basic_vec_operations() {
     let result = TakoExecutor::execute(
         &bytecode,
         &mut provider,
-        0,               // topoheight
+        0, // topoheight
         &contract_hash,
         &block_hash,
-        0,               // block_height
+        0, // block_height
         &tx_hash,
         &tx_sender,
-        &[],             // input_data
-        None,            // compute_budget (use default)
+        &[],  // input_data
+        None, // compute_budget (use default)
     );
 
     // Verify success
-    assert!(result.is_ok(), "Contract execution failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Contract execution failed: {:?}",
+        result.err()
+    );
 
     let exec_result = result.unwrap();
     assert_eq!(
