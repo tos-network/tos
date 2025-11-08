@@ -184,7 +184,7 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
         self.pending_transfers.push(TransferOutput {
             destination: to_pubkey,
             amount,
-            asset: self.native_asset,
+            asset: self.native_asset.clone(),
         });
 
         Ok(())

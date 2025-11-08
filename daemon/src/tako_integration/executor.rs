@@ -301,14 +301,7 @@ impl TakoExecutor {
         debug!("Executing contract bytecode via TBPF VM");
         let (instruction_count, result) = vm.execute_program(&executable, true);
 
-        // CRITICAL: Drop heap after execution to prevent dangling pointers
-        drop(heap);
-        drop(stack);
-
-        // Collect any transfers staged by the account adapter before it is dropped
-        let transfers = accounts.take_pending_transfers();
-
-        // 10. Calculate compute units used
+        // 10. Calculate compute units used (before dropping invoke_context)
         let compute_units_used = compute_budget - invoke_context.get_remaining();
         debug!(
             "Execution complete: instructions={}, compute_units_used={}/{}",
@@ -333,6 +326,16 @@ impl TakoExecutor {
         let return_data = invoke_context
             .get_return_data()
             .map(|(_, data)| data.to_vec());
+
+        // Drop InvokeContext to release the mutable borrow of accounts
+        drop(invoke_context);
+
+        // Now we can access accounts again to extract pending transfers
+        let transfers = accounts.take_pending_transfers();
+
+        // CRITICAL: Drop heap and stack after execution to prevent dangling pointers
+        drop(heap);
+        drop(stack);
 
         // 13. Process result
         match result {
