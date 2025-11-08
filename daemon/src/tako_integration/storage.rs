@@ -441,8 +441,6 @@ mod tests {
             .set(contract_hash.as_bytes(), b"key_b", b"value_b")
             .unwrap();
 
-        assert_eq!(cache.storage.len(), 2);
-
         let value_a = adapter
             .get(contract_hash.as_bytes(), b"key_a")
             .unwrap()
@@ -454,5 +452,11 @@ mod tests {
 
         assert_eq!(value_a, b"value_a");
         assert_eq!(value_b, b"value_b");
+
+        // Drop adapter to release mutable borrow of cache
+        drop(adapter);
+
+        // Now we can check the cache
+        assert_eq!(cache.storage.len(), 2);
     }
 }
