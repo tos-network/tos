@@ -124,16 +124,29 @@ impl Transaction {
 
         let used_gas = execution_result.gas_used;
         let exit_code = execution_result.exit_code;
+        let transfers = execution_result.transfers;
 
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Contract {} execution result: gas_used={}, exit_code={:?}",
-                contract, used_gas, exit_code
+                "Contract {} execution result: gas_used={}, exit_code={:?}, transfers={}",
+                contract, used_gas, exit_code, transfers.len()
             );
         }
 
         let is_success = exit_code == Some(0);
         let mut outputs = chain_state.outputs;
+
+        // Convert TAKO transfers to ContractOutput::Transfer
+        // This ensures transfers staged during contract execution are persisted to the ledger
+        if is_success {
+            for transfer in transfers {
+                outputs.push(crate::contract::ContractOutput::Transfer {
+                    amount: transfer.amount,
+                    asset: transfer.asset,
+                    destination: transfer.destination,
+                });
+            }
+        }
 
         // If the contract execution was successful, merge the changes
         if is_success {
