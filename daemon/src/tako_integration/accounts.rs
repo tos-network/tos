@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use tos_common::{
     block::TopoHeight,
     contract::{ContractProvider, TransferOutput},
@@ -52,6 +53,10 @@ pub struct TosAccountAdapter<'a> {
     native_asset: Hash,
     /// Transfers staged during the current execution
     pending_transfers: Vec<TransferOutput>,
+    /// Balance deltas for accounts during the current execution
+    /// Used to prevent double-spend when a contract calls transfer multiple times
+    /// Maps: PublicKey → balance delta (positive = received, negative = sent)
+    balance_deltas: HashMap<PublicKey, i128>,
 }
 
 impl<'a> TosAccountAdapter<'a> {
@@ -67,6 +72,7 @@ impl<'a> TosAccountAdapter<'a> {
             topoheight,
             native_asset: Hash::zero(), // TOS native asset
             pending_transfers: Vec::new(),
+            balance_deltas: HashMap::new(),
         }
     }
 
@@ -87,6 +93,7 @@ impl<'a> TosAccountAdapter<'a> {
             topoheight,
             native_asset: asset,
             pending_transfers: Vec::new(),
+            balance_deltas: HashMap::new(),
         }
     }
 
@@ -138,8 +145,8 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
         let from_pubkey = Self::address_to_pubkey(from)?;
         let to_pubkey = Self::address_to_pubkey(to)?;
 
-        // Check sender balance
-        let sender_balance = self
+        // Get actual balance from provider
+        let actual_balance = self
             .provider
             .get_account_balance_for_asset(&from_pubkey, &self.native_asset, self.topoheight)
             .map_err(|e| {
@@ -151,13 +158,24 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
             .map(|(_, bal)| bal)
             .unwrap_or(0);
 
-        // Verify sufficient balance
-        if sender_balance < amount {
+        // Calculate virtual balance (actual balance + pending deltas)
+        // This prevents double-spend when a contract calls transfer multiple times
+        let delta = self.balance_deltas.get(&from_pubkey).unwrap_or(&0);
+        let virtual_balance = if *delta < 0 {
+            // Subtract the negative delta (amount already staged for sending)
+            actual_balance.saturating_sub(delta.unsigned_abs() as u64)
+        } else {
+            // Add the positive delta (amount already staged for receiving)
+            actual_balance.saturating_add(*delta as u64)
+        };
+
+        // Verify sufficient virtual balance
+        if virtual_balance < amount {
             return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!(
-                    "Insufficient balance: has {}, needs {}",
-                    sender_balance, amount
+                    "Insufficient balance: has {} (actual: {}, pending delta: {}), needs {}",
+                    virtual_balance, actual_balance, delta, amount
                 ),
             ))));
         }
@@ -179,6 +197,12 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
                 "Recipient account does not exist",
             ))));
         }
+
+        // Update balance deltas to track virtual balances
+        // Sender loses amount (negative delta)
+        *self.balance_deltas.entry(from_pubkey.clone()).or_insert(0) -= amount as i128;
+        // Recipient gains amount (positive delta)
+        *self.balance_deltas.entry(to_pubkey.clone()).or_insert(0) += amount as i128;
 
         // Stage the transfer so the outer transaction processor can persist it atomically.
         self.pending_transfers.push(TransferOutput {
@@ -400,5 +424,69 @@ mod tests {
         let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 1000);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_transfer_multiple_exceeding_balance() {
+        // Test that multiple transfers are tracked with virtual balance
+        // to prevent double-spend attacks
+        let mut provider = MockProvider::new();
+        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+
+        // Sender has 1000 units
+        provider.set_balance(from.clone(), Hash::zero(), 1000);
+        provider.set_balance(to.clone(), Hash::zero(), 0);
+
+        let mut adapter = TosAccountAdapter::new(&provider, 100);
+
+        // First transfer of 600 succeeds
+        let result1 = adapter.transfer(from.as_bytes(), to.as_bytes(), 600);
+        assert!(result1.is_ok());
+
+        // Second transfer of 300 succeeds (total 900, still under 1000)
+        let result2 = adapter.transfer(from.as_bytes(), to.as_bytes(), 300);
+        assert!(result2.is_ok());
+
+        // Third transfer of 200 should fail (total would be 1100, exceeds 1000)
+        let result3 = adapter.transfer(from.as_bytes(), to.as_bytes(), 200);
+        assert!(result3.is_err());
+        assert!(result3
+            .unwrap_err()
+            .to_string()
+            .contains("Insufficient balance"));
+
+        // Verify that exactly 2 transfers were staged
+        let transfers = adapter.take_pending_transfers();
+        assert_eq!(transfers.len(), 2);
+        assert_eq!(transfers[0].amount, 600);
+        assert_eq!(transfers[1].amount, 300);
+    }
+
+    #[test]
+    fn test_transfer_to_self() {
+        // Test transferring to self - balance delta should be zero
+        let mut provider = MockProvider::new();
+        let account = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+
+        provider.set_balance(account.clone(), Hash::zero(), 1000);
+
+        let mut adapter = TosAccountAdapter::new(&provider, 100);
+
+        // Transfer to self should work
+        let result = adapter.transfer(account.as_bytes(), account.as_bytes(), 500);
+        assert!(result.is_ok());
+
+        // Second transfer to self should also work (net delta is 0)
+        let result2 = adapter.transfer(account.as_bytes(), account.as_bytes(), 500);
+        assert!(result2.is_ok());
+
+        // Third transfer to self should also work
+        let result3 = adapter.transfer(account.as_bytes(), account.as_bytes(), 500);
+        assert!(result3.is_ok());
+
+        // All transfers should be staged
+        let transfers = adapter.take_pending_transfers();
+        assert_eq!(transfers.len(), 3);
     }
 }
