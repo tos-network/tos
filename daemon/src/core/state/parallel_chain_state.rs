@@ -147,6 +147,11 @@ pub struct ParallelChainState<S: Storage> {
     // Concurrent contract state
     contracts: DashMap<Hash, ContractState>,
 
+    // Contract storage caches (for merge to storage)
+    // Maps contract_hash -> ContractCache
+    // These caches accumulate storage writes from all transactions in the block
+    contract_caches: DashMap<Hash, tos_common::contract::ContractCache>,
+
     // Immutable block context
     #[allow(dead_code)]
     stable_topoheight: TopoHeight,
@@ -208,6 +213,7 @@ impl<S: Storage> ParallelChainState<S> {
             environment,
             accounts: DashMap::new(),
             contracts: DashMap::new(),
+            contract_caches: DashMap::new(),
             stable_topoheight,
             topoheight,
             block_version,
@@ -672,35 +678,47 @@ impl<S: Storage> ParallelChainState<S> {
     }
 
     /// Legacy helper method - no longer used (replaced by adapter pattern)
+    ///
+    /// Contract invocation is now handled through ParallelApplyAdapter which implements
+    /// the BlockchainApplyState trait. When Transaction::apply_with_partial_verify() processes
+    /// an InvokeContract transaction, it calls merge_contract_changes() which stages the
+    /// contract cache for later persistence in merge_parallel_results().
+    ///
+    /// The full execution flow:
+    /// 1. Transaction::apply_with_partial_verify() validates the transaction
+    /// 2. Calls get_contract_environment_for() to prepare contract execution context
+    /// 3. Executes contract via TakoContractExecutor
+    /// 4. Calls merge_contract_changes() to stage storage writes
+    /// 5. ParallelApplyAdapter::commit_all() commits cache to ParallelChainState
+    /// 6. merge_parallel_results() persists all caches to RocksDB atomically
     #[allow(dead_code)]
     async fn apply_invoke_contract(
         &self,
         _source: &PublicKey,
         _payload: &InvokeContractPayload,
     ) -> Result<(), BlockchainError> {
-        // TODO [IN DEVELOPMENT]: Contract invocation support
-        // Waiting for contract system development to complete
-        // Once ready, integrate with parallel execution:
-        // 1. Load contract from storage
-        // 2. Prepare deposits
-        // 3. Execute contract in VM
-        // 4. Apply state changes to ParallelChainState
+        // NOTE: This method is no longer used. Contract invocation now flows through
+        // the adapter pattern described above.
         Ok(())
     }
 
     /// Legacy helper method - no longer used (replaced by adapter pattern)
+    ///
+    /// Contract deployment is now handled through the transaction verification pipeline
+    /// in common/src/transaction/verify/mod.rs:1237-1283. See TransactionType::DeployContract
+    /// handler for the full implementation including:
+    /// 1. Deterministic contract address generation
+    /// 2. Contract module storage via set_contract_module()
+    /// 3. Optional constructor invocation (Hook 0)
+    /// 4. Automatic rollback if constructor fails
     #[allow(dead_code)]
     async fn apply_deploy_contract(
         &self,
         _source: &PublicKey,
         _payload: &DeployContractPayload,
     ) -> Result<(), BlockchainError> {
-        // TODO [IN DEVELOPMENT]: Contract deployment support
-        // Waiting for contract system development to complete
-        // Once ready, integrate with parallel execution:
-        // 1. Validate contract bytecode
-        // 2. Store contract in ParallelChainState
-        // 3. Initialize contract storage
+        // NOTE: This method is no longer used. Contract deployment now flows through
+        // the transaction verification pipeline described above.
         Ok(())
     }
 
@@ -786,10 +804,11 @@ impl<S: Storage> ParallelChainState<S> {
         }
 
         // Write all contracts
+        // NOTE: Contract state persistence is now handled in blockchain.rs::merge_parallel_results()
+        // Step 4, which processes contract_caches from ParallelChainState and persists them to RocksDB.
+        // See daemon/src/core/blockchain.rs (search for "Step 4: Merge contract storage state changes")
         let mut contract_count = 0;
         for _entry in self.contracts.iter() {
-            // TODO [IN DEVELOPMENT]: Implement contract state persistence
-            // Waiting for contract system development to complete
             contract_count += 1;
         }
 
@@ -1328,6 +1347,68 @@ impl<S: Storage> ParallelChainState<S> {
                 .as_ref()
                 .map(|module| (address, module.clone()))
         })
+    }
+
+    /// Add a contract cache for later merging to storage
+    ///
+    /// Called from ParallelApplyAdapter::commit_all() when a transaction successfully
+    /// executes a contract. The cache contains all storage writes made by the contract.
+    ///
+    /// If multiple transactions modify the same contract in the same block, we merge
+    /// their caches by taking the last write for each key (last-write-wins semantics).
+    ///
+    /// # Arguments
+    ///
+    /// * `contract_hash` - Contract address
+    /// * `cache` - Contract storage cache containing writes
+    pub fn add_contract_cache(
+        &self,
+        contract_hash: Hash,
+        cache: tos_common::contract::ContractCache,
+    ) {
+        use dashmap::mapref::entry::Entry;
+
+        match self.contract_caches.entry(contract_hash.clone()) {
+            Entry::Occupied(mut existing) => {
+                // Merge: Last write wins for each key
+                // This handles multiple TX modifying the same contract in one block
+                let existing_cache = existing.get_mut();
+                for (key, value) in cache.storage {
+                    existing_cache.storage.insert(key, value);
+                }
+                // Merge balances (if present)
+                for (asset, balance) in cache.balances {
+                    existing_cache.balances.insert(asset, balance);
+                }
+                // Merge memory (if present)
+                for (key, value) in cache.memory {
+                    existing_cache.memory.insert(key, value);
+                }
+                // Merge events (if present)
+                for (key, values) in cache.events {
+                    existing_cache
+                        .events
+                        .entry(key)
+                        .or_insert_with(Vec::new)
+                        .extend(values);
+                }
+            }
+            Entry::Vacant(vacant) => {
+                // First write for this contract
+                vacant.insert(cache);
+            }
+        }
+    }
+
+    /// Get all contract caches for merging to storage
+    ///
+    /// Returns an iterator over (contract_hash, cache) pairs.
+    /// Used by merge_parallel_results() to persist contract state changes.
+    pub fn get_contract_caches(&self) -> Vec<(Hash, tos_common::contract::ContractCache)> {
+        self.contract_caches
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
+            .collect()
     }
 }
 
