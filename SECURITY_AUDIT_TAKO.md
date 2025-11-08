@@ -41,3 +41,8 @@ The TAKO integration introduces a new execution path for smart contracts but cur
 2. Add regression tests that cover multi-key storage, realistic return-data flows, and contract-level token transfers once implemented.
 3. Conduct a follow-up review after remediation, focusing on syscall surface area and interaction with consensus-critical state transitions.
 
+## Remediation Status (May 2024)
+- **Storage adapter fixes implemented:** The adapter now stores raw bytes with `ValueCell::Bytes` and rejects non-byte reads, preventing cache collisions and metadata leakage.【F:daemon/src/tako_integration/storage.rs†L94-L161】【F:daemon/src/tako_integration/storage.rs†L408-L461】
+- **Transfer syscall now stages outputs:** Account transfers are queued via `TransferOutput` and surfaced through the executor result so the transaction processor can persist them atomically.【F:daemon/src/tako_integration/accounts.rs†L20-L154】【F:daemon/src/tako_integration/executor.rs†L94-L352】【F:daemon/src/tako_integration/executor_adapter.rs†L16-L126】【F:common/src/contract/executor.rs†L1-L42】
+- **Additional regression tests added:** Storage tests cover distinct-key behaviour and byte round-trips, while account tests validate transfer queue semantics.【F:daemon/src/tako_integration/storage.rs†L400-L461】【F:daemon/src/tako_integration/accounts.rs†L244-L327】
+

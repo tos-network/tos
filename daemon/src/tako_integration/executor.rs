@@ -20,7 +20,7 @@
 use std::sync::Arc;
 use tos_common::{
     block::TopoHeight,
-    contract::{ContractCache, ContractProvider},
+    contract::{ContractCache, ContractProvider, TransferOutput},
     crypto::Hash,
 };
 use tos_program_runtime::invoke_context::InvokeContext;
@@ -101,6 +101,8 @@ pub struct ExecutionResult {
     /// Events emitted by the contract during execution (Ethereum-style)
     /// Contains indexed topics and data for off-chain indexing and monitoring
     pub events: Vec<tos_program_runtime::Event>,
+    /// Transfers requested via the AccountProvider interface during execution
+    pub transfers: Vec<TransferOutput>,
 }
 
 impl TakoExecutor {
@@ -303,6 +305,9 @@ impl TakoExecutor {
         drop(heap);
         drop(stack);
 
+        // Collect any transfers staged by the account adapter before it is dropped
+        let transfers = accounts.take_pending_transfers();
+
         // 10. Calculate compute units used
         let compute_units_used = compute_budget - invoke_context.get_remaining();
         debug!(
@@ -350,6 +355,7 @@ impl TakoExecutor {
                     return_data,
                     log_messages,
                     events,
+                    transfers,
                 })
             }
             ProgramResult::Err(err) => {
