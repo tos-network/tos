@@ -230,7 +230,10 @@ impl TakoExecutor {
                 );
                 TakoExecutionError::LoadedDataLimitExceeded {
                     current_size: bytecode_size,
-                    limit: invoke_context.get_compute_budget_limits().loaded_accounts_bytes.get() as u64,
+                    limit: invoke_context
+                        .get_compute_budget_limits()
+                        .loaded_accounts_bytes
+                        .get() as u64,
                     operation: "entry_contract_load".to_string(),
                     details: format!("Contract bytecode is {} bytes", bytecode_size),
                 }
@@ -596,19 +599,31 @@ mod tests {
             } => {
                 // Verify error details are parsed correctly from the string
                 assert_eq!(*limit, 67108864, "Limit should be parsed as 64 MB");
-                assert_eq!(*current_size, 70000000, "Current size should be parsed correctly");
+                assert_eq!(
+                    *current_size, 70000000,
+                    "Current size should be parsed correctly"
+                );
                 assert!(!operation.is_empty(), "Operation should be determined");
-                assert!(details.contains("exceeds limit"), "Details should contain full error");
+                assert!(
+                    details.contains("exceeds limit"),
+                    "Details should contain full error"
+                );
 
                 // CRITICAL: Verify error category for RPC/metrics - what operators will see
                 assert_eq!(tako_err.category(), "resource_limit");
             }
-            _ => panic!("Expected LoadedDataLimitExceeded error, got: {:?}", tako_err),
+            _ => panic!(
+                "Expected LoadedDataLimitExceeded error, got: {:?}",
+                tako_err
+            ),
         }
 
         // Verify the error has a user-friendly message for RPC responses
         let user_msg = tako_err.user_message();
-        assert!(!user_msg.is_empty(), "Should have user message for RPC clients");
+        assert!(
+            !user_msg.is_empty(),
+            "Should have user message for RPC clients"
+        );
     }
 
     #[test]
@@ -622,12 +637,25 @@ mod tests {
         let tako_err = TakoExecutionError::from_ebpf_error(ebpf_err, 2000, 1000);
 
         match &tako_err {
-            TakoExecutionError::LoadedDataLimitExceeded { current_size, limit, .. } => {
+            TakoExecutionError::LoadedDataLimitExceeded {
+                current_size,
+                limit,
+                ..
+            } => {
                 // These would be 0 and 64MB if parsing failed
-                assert_eq!(*limit, 134217728, "Limit should be 128 MB, not default 64 MB");
-                assert_eq!(*current_size, 135000000, "Current should be actual value, not 0");
+                assert_eq!(
+                    *limit, 134217728,
+                    "Limit should be 128 MB, not default 64 MB"
+                );
+                assert_eq!(
+                    *current_size, 135000000,
+                    "Current should be actual value, not 0"
+                );
             }
-            _ => panic!("Expected LoadedDataLimitExceeded error, got: {:?}", tako_err),
+            _ => panic!(
+                "Expected LoadedDataLimitExceeded error, got: {:?}",
+                tako_err
+            ),
         }
     }
 

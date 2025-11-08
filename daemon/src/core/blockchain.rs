@@ -5972,6 +5972,65 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
+        // Step 4: Merge contract storage state changes
+        // Collect all contract caches and sort for deterministic merge order
+        let mut contract_caches = parallel_state.get_contract_caches();
+
+        if !contract_caches.is_empty() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Merging storage state for {} contracts", contract_caches.len());
+            }
+
+            // Sort by contract hash for deterministic merge order (S1 compliance)
+            contract_caches.sort_by_key(|(hash, _)| hash.clone());
+
+            // Write contract state changes to storage in deterministic order
+            for (contract_hash, cache) in contract_caches {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Writing contract {} state: {} storage entries, {} balance entries",
+                        contract_hash,
+                        cache.storage.len(),
+                        cache.balances.len()
+                    );
+                }
+
+                // Persist each storage entry in the cache
+                // The cache uses VersionedState to track whether each key is New or Updated
+                for (key, (versioned_state, value_opt)) in &cache.storage {
+                    // Create VersionedContractData from the cache entry
+                    use tos_common::versioned_type::{Versioned, VersionedState as VS};
+
+                    // Determine the previous topoheight for MVCC
+                    let prev_topoheight = match versioned_state {
+                        VS::New => None,
+                        VS::Updated(prev_topo) | VS::FetchedAt(prev_topo) => Some(*prev_topo),
+                    };
+
+                    let versioned_data = Versioned::new(value_opt.clone(), prev_topoheight);
+
+                    // Write to storage
+                    storage
+                        .set_last_contract_data_to(
+                            &contract_hash,
+                            key,
+                            topoheight,
+                            &versioned_data,
+                        )
+                        .await?;
+                }
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Merged contract {} state: {} entries at topoheight {}",
+                        contract_hash,
+                        cache.storage.len(),
+                        topoheight
+                    );
+                }
+            }
+        }
+
             Ok(())
         }.await;
 

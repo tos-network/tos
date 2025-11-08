@@ -8,7 +8,7 @@ use crate::{
     config::{TOS_ASSET, TX_GAS_BURN_PERCENT},
     contract::ContractProvider,
     crypto::Hash,
-    transaction::{ContractDeposit, Transaction},
+    transaction::{encoding, ContractDeposit, Transaction},
 };
 
 use super::{BlockchainApplyState, BlockchainVerificationState, VerificationError};
@@ -93,10 +93,11 @@ impl Transaction {
 
         // Convert invoke type to parameters
         // For TAKO VM, we pass execution metadata as parameters
-        // TODO: Encode entry point / hook ID in parameters
+        // Uses deterministic encoding that supports full u16 range for entry_id
+        // and proper u8 range for hook_id. See encoding module for format spec.
         let parameters = match invoke {
-            InvokeContract::Entry(entry_id) => Some(vec![0u8, entry_id as u8]),
-            InvokeContract::Hook(hook_id) => Some(vec![1u8, hook_id]),
+            InvokeContract::Entry(entry_id) => Some(encoding::encode_entry_point(entry_id)),
+            InvokeContract::Hook(hook_id) => Some(encoding::encode_hook(hook_id)),
         };
 
         // Execute the contract
@@ -129,7 +130,10 @@ impl Transaction {
         if log::log_enabled!(log::Level::Debug) {
             debug!(
                 "Contract {} execution result: gas_used={}, exit_code={:?}, transfers={}",
-                contract, used_gas, exit_code, transfers.len()
+                contract,
+                used_gas,
+                exit_code,
+                transfers.len()
             );
         }
 

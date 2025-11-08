@@ -10,6 +10,7 @@ use crate::{
 use multisig::MultiSig;
 
 pub mod builder;
+pub mod encoding;
 pub mod extra_data;
 pub mod multisig;
 pub mod verify;

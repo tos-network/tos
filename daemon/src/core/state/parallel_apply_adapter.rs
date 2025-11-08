@@ -105,6 +105,11 @@ pub struct ParallelApplyAdapter<'a, S: Storage> {
     /// Used to keep modules alive during execution (lifetime safety)
     staged_contracts: HashMap<Hash, Arc<tos_vm::Module>>,
 
+    /// Staged contract caches (for merge on success)
+    /// Maps contract_hash -> ContractCache
+    /// These caches contain all storage writes performed by the contract during execution
+    staged_contract_caches: HashMap<Hash, ContractCache>,
+
     /// Tracks whether adapter was successfully committed
     /// Used by Drop impl to determine if rollback is needed
     committed: bool,
@@ -134,6 +139,7 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
             staged_burned_supply: 0,
             executor,
             staged_contracts: HashMap::new(),
+            staged_contract_caches: HashMap::new(),
             committed: false,
         }
     }
@@ -199,6 +205,19 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
             for (contract_address, _) in &self.staged_contracts {
                 debug!("Committing deployed contract {}", contract_address);
             }
+        }
+
+        // CRITICAL: Commit contract storage caches to ParallelChainState
+        // This allows merge_parallel_results() to persist contract state changes
+        for (contract_hash, cache) in self.staged_contract_caches.drain() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Committing contract cache for {} ({} storage entries)",
+                    contract_hash,
+                    cache.storage.len()
+                );
+            }
+            self.parallel_state.add_contract_cache(contract_hash, cache);
         }
 
         // Mark as committed to prevent rollback in Drop
@@ -666,16 +685,50 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
     }
 
     /// Merge contract state changes
+    ///
+    /// This method is called after contract execution to persist the contract's storage changes.
+    /// The cache contains all storage writes made by the contract during execution.
+    ///
+    /// # Implementation Strategy
+    ///
+    /// For parallel execution, we don't persist to storage immediately. Instead:
+    /// 1. Stage the contract cache for later merging (during commit_all())
+    /// 2. The actual persistence happens in merge_parallel_results() after all transactions succeed
+    ///
+    /// This ensures:
+    /// - Failed transactions don't persist state (rollback safety)
+    /// - Deterministic merge order (sorted by contract hash)
+    /// - Atomic commit with other state changes (nonces, balances)
+    ///
+    /// # Arguments
+    ///
+    /// * `hash` - Contract address (hash)
+    /// * `cache` - Contract storage cache containing all writes
+    /// * `_tracker` - Event tracker (currently unused in parallel path)
+    /// * `_assets` - Asset changes (currently unused in parallel path)
     async fn merge_contract_changes(
         &mut self,
-        _hash: &Hash,
-        _cache: ContractCache,
+        hash: &Hash,
+        cache: ContractCache,
         _tracker: ContractEventTracker,
         _assets: HashMap<Hash, Option<AssetChanges>>,
     ) -> Result<(), BlockchainError> {
-        Err(BlockchainError::Any(anyhow!(
-            "Contract execution not yet supported in parallel execution (Phase 3)"
-        )))
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Staging contract cache for {} ({} storage entries)",
+                hash,
+                cache.storage.len()
+            );
+        }
+
+        // Stage the contract cache for commit on success
+        // This will be merged to storage in merge_parallel_results()
+        self.staged_contract_caches.insert(hash.clone(), cache);
+
+        // TODO: Handle tracker (events) and assets when contract system is fully integrated
+        // For now, we only persist storage writes
+
+        Ok(())
     }
 
     /// Remove contract module
