@@ -84,6 +84,26 @@ pub enum TakoExecutionError {
         #[source]
         source: Option<Box<TakoExecutionError>>,
     },
+
+    /// Loaded contract data size limit exceeded
+    ///
+    /// This error occurs when the cumulative size of loaded data during execution
+    /// exceeds the configured limit (default: 64 MB). This includes:
+    /// - Entry contract bytecode
+    /// - CPI contract bytecode
+    /// - Storage read values
+    /// - CPI input/return data
+    #[error("Loaded contract data size {current_size} bytes exceeds limit {limit} bytes (operation: {operation})")]
+    LoadedDataLimitExceeded {
+        /// Current cumulative loaded data size
+        current_size: u64,
+        /// Maximum allowed size (from ComputeBudgetLimits)
+        limit: u64,
+        /// Operation that triggered the limit breach (e.g., "entry_contract_load", "storage_read", "cpi_call")
+        operation: String,
+        /// Additional details about what caused the limit to be exceeded
+        details: String,
+    },
 }
 
 impl TakoExecutionError {
@@ -221,6 +241,7 @@ impl TakoExecutionError {
             Self::StackOverflow { .. } => "execution",
             Self::InvalidInstruction { .. } => "execution",
             Self::CpiInvocationFailed { .. } => "execution",
+            Self::LoadedDataLimitExceeded { .. } => "resource_limit",
         }
     }
 

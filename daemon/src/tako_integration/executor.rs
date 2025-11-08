@@ -192,6 +192,8 @@ impl TakoExecutor {
         let loader = Arc::new(loader);
 
         // 5. Load executable
+        // Record bytecode size for loaded data accounting (done after InvokeContext creation)
+        let bytecode_size = bytecode.len() as u64;
         let executable = Executable::load(bytecode, loader.clone()).map_err(|e| {
             TakoExecutionError::ExecutableLoadFailed {
                 reason: "ELF parsing failed".to_string(),
@@ -213,6 +215,32 @@ impl TakoExecutor {
             &loader_adapter,
             loader.clone(),
         );
+
+        // Account for entry contract bytecode in loaded data size tracking
+        // This is done AFTER creating InvokeContext (post-load accounting pattern)
+        // because the bytecode is loaded before InvokeContext exists
+        invoke_context
+            .check_and_record_loaded_data(bytecode_size)
+            .map_err(|e| {
+                error!(
+                    "Entry contract bytecode size {} exceeds loaded data limit: {:?}",
+                    bytecode_size, e
+                );
+                TakoExecutionError::LoadedDataLimitExceeded {
+                    current_size: bytecode_size,
+                    limit: invoke_context.get_compute_budget_limits().loaded_accounts_bytes.get() as u64,
+                    operation: "entry_contract_load".to_string(),
+                    details: format!("Contract bytecode is {} bytes", bytecode_size),
+                }
+            })?;
+
+        if log::log_enabled!(log::Level::Info) {
+            info!(
+                "Entry contract bytecode accounted: {} bytes (remaining: {} bytes)",
+                bytecode_size,
+                invoke_context.get_remaining_loaded_data_size()
+            );
+        }
 
         // Set input data for contract to access via tos_get_input_data syscall
         // This allows contracts to receive parameters (entry points, constructors, user args)
