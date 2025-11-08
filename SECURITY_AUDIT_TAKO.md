@@ -41,8 +41,19 @@ The TAKO integration introduces a new execution path for smart contracts but cur
 2. Add regression tests that cover multi-key storage, realistic return-data flows, and contract-level token transfers once implemented.
 3. Conduct a follow-up review after remediation, focusing on syscall surface area and interaction with consensus-critical state transitions.
 
+## Follow-up Findings (November 2024)
+
+### 4. Critical – Transfers never applied to ledger
+- **Details:** While Finding #2 was remediated to stage transfers via `TransferOutput`, the transaction processor never reads `execution_result.transfers` to apply them to the ledger.【F:common/src/transaction/verify/contract.rs†L102-L177】The executor correctly returns transfers via `ExecutionResult::transfers`, but `Transaction::invoke_contract` ignores this data—it never converts them to `ContractOutput::Transfer`, never updates `ContractEventTracker`, and never modifies receiver balances.
+- **Impact:** The `tos_transfer` syscall reports success and enforces virtual balance limits, but **no state mutation is persisted**. Tokens are neither debited from the sender nor credited to the destination. Contracts believe transfers succeeded, but the ledger remains unchanged, effectively causing silent fund loss.
+- **Recommendation:** Wire `execution_result.transfers` into the existing pipeline by converting each `TransferOutput` to `ContractOutput::Transfer` before calling `merge_contract_changes`. This ensures staged transfers hit storage atomically.
+
 ## Remediation Status (May 2024)
 - **Storage adapter fixes implemented:** The adapter now stores raw bytes with `ValueCell::Bytes` and rejects non-byte reads, preventing cache collisions and metadata leakage.【F:daemon/src/tako_integration/storage.rs†L94-L161】【F:daemon/src/tako_integration/storage.rs†L408-L461】
 - **Transfer syscall now stages outputs:** Account transfers are queued via `TransferOutput` and surfaced through the executor result so the transaction processor can persist them atomically.【F:daemon/src/tako_integration/accounts.rs†L20-L154】【F:daemon/src/tako_integration/executor.rs†L94-L352】【F:daemon/src/tako_integration/executor_adapter.rs†L16-L126】【F:common/src/contract/executor.rs†L1-L42】
 - **Additional regression tests added:** Storage tests cover distinct-key behaviour and byte round-trips, while account tests validate transfer queue semantics.【F:daemon/src/tako_integration/storage.rs†L400-L461】【F:daemon/src/tako_integration/accounts.rs†L244-L327】
+
+## Remediation Status (November 2024)
+- **Finding #4 fixed:** Transaction processor now converts `execution_result.transfers` to `ContractOutput::Transfer` entries in the outputs list, ensuring TAKO transfers are persisted to the ledger.【F:common/src/transaction/verify/contract.rs†L125-L149】
+- **Virtual balance tracking added:** Multiple transfer calls in a single execution are tracked via balance deltas to prevent double-spend attacks.【F:daemon/src/tako_integration/accounts.rs†L59, L161-L205】
 
