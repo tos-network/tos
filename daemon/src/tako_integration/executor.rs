@@ -565,6 +565,63 @@ mod tests {
         assert!(err_str.contains("Invalid") && err_str.contains("ELF"));
     }
 
+    #[test]
+    fn test_loaded_data_limit_error_from_invoke_context() {
+        use tos_tbpf::error::EbpfError;
+
+        // Simulate the actual error message from InvokeContext::check_and_record_loaded_data
+        // This is the format produced by invoke_context.rs:772-776
+        let error_msg = "Loaded contract data size 70000000 exceeds limit 67108864 (tried to add 5000000 bytes)";
+        let ebpf_err = EbpfError::SyscallError(error_msg.into());
+
+        // Convert to TakoExecutionError - this is what happens in the executor
+        let tako_err = TakoExecutionError::from_ebpf_error(ebpf_err, 1000, 500);
+
+        // Verify it maps to LoadedDataLimitExceeded variant (KEY TEST for RPC error surfacing)
+        match &tako_err {
+            TakoExecutionError::LoadedDataLimitExceeded {
+                current_size,
+                limit,
+                operation,
+                details,
+            } => {
+                // Verify error details are parsed correctly from the string
+                assert_eq!(*limit, 67108864, "Limit should be parsed as 64 MB");
+                assert_eq!(*current_size, 70000000, "Current size should be parsed correctly");
+                assert!(!operation.is_empty(), "Operation should be determined");
+                assert!(details.contains("exceeds limit"), "Details should contain full error");
+
+                // CRITICAL: Verify error category for RPC/metrics - what operators will see
+                assert_eq!(tako_err.category(), "resource_limit");
+            }
+            _ => panic!("Expected LoadedDataLimitExceeded error, got: {:?}", tako_err),
+        }
+
+        // Verify the error has a user-friendly message for RPC responses
+        let user_msg = tako_err.user_message();
+        assert!(!user_msg.is_empty(), "Should have user message for RPC clients");
+    }
+
+    #[test]
+    fn test_loaded_data_limit_error_with_custom_limit() {
+        use tos_tbpf::error::EbpfError;
+
+        // Test with a non-default limit (128 MB) to verify parsing doesn't fall back to defaults
+        let error_msg = "Loaded contract data size 135000000 exceeds limit 134217728 (tried to add 10000000 bytes)";
+        let ebpf_err = EbpfError::SyscallError(error_msg.into());
+
+        let tako_err = TakoExecutionError::from_ebpf_error(ebpf_err, 2000, 1000);
+
+        match &tako_err {
+            TakoExecutionError::LoadedDataLimitExceeded { current_size, limit, .. } => {
+                // These would be 0 and 64MB if parsing failed
+                assert_eq!(*limit, 134217728, "Limit should be 128 MB, not default 64 MB");
+                assert_eq!(*current_size, 135000000, "Current should be actual value, not 0");
+            }
+            _ => panic!("Expected LoadedDataLimitExceeded error, got: {:?}", tako_err),
+        }
+    }
+
     // Note: Full integration test with actual contract execution requires
     // a compiled TAKO contract (.so file). See integration tests for that.
 }

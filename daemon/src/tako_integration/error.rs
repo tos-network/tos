@@ -124,6 +124,55 @@ impl TakoExecutionError {
         // Parse the error and extract meaningful information
         let reason = format!("{:?}", err);
 
+        // Check if it's a loaded data limit exceeded error
+        // This error can come from syscalls (storage reads, CPI calls, return data)
+        if reason.contains("LoadedDataLimitExceeded") || reason.contains("Loaded contract data size") {
+            // Helper function to extract first number after a keyword
+            let extract_number = |text: &str, keyword: &str| -> Option<u64> {
+                text.split(keyword)
+                    .nth(1)?
+                    .chars()
+                    .skip_while(|c| !c.is_ascii_digit())
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<u64>()
+                    .ok()
+            };
+
+            // Try to extract the actual values from the error message
+            // Format 1: "Loaded contract data size {new_total} exceeds limit {max_size}"
+            // Format 2: "LoadedDataLimitExceeded { attempted: ..., current: ..., limit: ... }"
+
+            // Parse the limit value
+            let limit = extract_number(&reason, "limit")
+                .or_else(|| extract_number(&reason, "limit:"))
+                .unwrap_or(64 * 1024 * 1024); // Default 64 MB
+
+            // Parse the current size
+            let current_size = extract_number(&reason, "current")
+                .or_else(|| extract_number(&reason, "current:"))
+                .or_else(|| extract_number(&reason, "data size"))
+                .unwrap_or(0);
+
+            // Determine the operation type from the error message
+            let operation = if reason.contains("storage") {
+                "storage_read"
+            } else if reason.contains("CPI") || reason.contains("call") {
+                "cpi_call"
+            } else if reason.contains("return") {
+                "return_data"
+            } else {
+                "unknown_operation"
+            }.to_string();
+
+            return Self::LoadedDataLimitExceeded {
+                current_size,
+                limit,
+                operation,
+                details: reason.clone(),
+            };
+        }
+
         // Check if it's an out-of-compute error
         if reason.contains("ExceededMaxInstructions") || reason.contains("compute") {
             return Self::OutOfComputeUnits {
@@ -312,5 +361,92 @@ mod tests {
             source: None,
         };
         assert!(!err.is_recoverable());
+    }
+
+    #[test]
+    fn test_from_ebpf_error_loaded_data_limit() {
+        // Test mapping from EbpfError::SyscallError containing LoadedDataLimitExceeded
+        // Simulate the error format from invoke_context.rs
+        let error_msg = "Loaded contract data size 70000000 exceeds limit 67108864 (tried to add 5000000 bytes)";
+        let ebpf_err = EbpfError::SyscallError(error_msg.into());
+
+        let result = TakoExecutionError::from_ebpf_error(ebpf_err, 1000, 500);
+
+        match result {
+            TakoExecutionError::LoadedDataLimitExceeded {
+                current_size,
+                limit,
+                operation,
+                details,
+            } => {
+                // Verify the error was parsed correctly
+                assert_eq!(limit, 67108864, "Limit should be 64 MB");
+                assert_eq!(current_size, 70000000, "Current size should be parsed");
+                assert!(!operation.is_empty(), "Operation should be determined");
+                assert!(details.contains("exceeds limit"), "Details should contain error message");
+            }
+            _ => panic!("Expected LoadedDataLimitExceeded error, got: {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_from_ebpf_error_storage_read_limit() {
+        // Test error from storage read syscall (Debug format with field names)
+        let error_msg = "LoadedDataLimitExceeded { attempted: 10000, current: 67000000, limit: 67108864 }";
+        let ebpf_err = EbpfError::SyscallError(error_msg.into());
+
+        let result = TakoExecutionError::from_ebpf_error(ebpf_err, 500, 250);
+
+        match result {
+            TakoExecutionError::LoadedDataLimitExceeded { current_size, limit, operation, .. } => {
+                // CRITICAL: Verify actual values are extracted, not defaults
+                assert_eq!(limit, 67108864, "Limit should be parsed from 'limit: 67108864'");
+                assert_eq!(current_size, 67000000, "Current should be parsed from 'current: 67000000'");
+                assert!(!operation.is_empty(), "Operation should be determined");
+            }
+            _ => panic!("Expected LoadedDataLimitExceeded error, got: {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_from_ebpf_error_custom_limit() {
+        // Test with a non-default limit (128 MB) to ensure we're not falling back to defaults
+        let error_msg = "LoadedDataLimitExceeded { attempted: 5000000, current: 130000000, limit: 134217728 }";
+        let ebpf_err = EbpfError::SyscallError(error_msg.into());
+
+        let result = TakoExecutionError::from_ebpf_error(ebpf_err, 1000, 500);
+
+        match result {
+            TakoExecutionError::LoadedDataLimitExceeded { current_size, limit, .. } => {
+                // If parsing fails, these would be 0 and 64MB (defaults)
+                assert_eq!(limit, 134217728, "Limit should be 128 MB, not default 64 MB");
+                assert_eq!(current_size, 130000000, "Current should be actual value, not 0");
+            }
+            _ => panic!("Expected LoadedDataLimitExceeded error, got: {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_from_ebpf_error_other_errors() {
+        // Test that other errors still work correctly
+        let ebpf_err = EbpfError::ExceededMaxInstructions;
+        let result = TakoExecutionError::from_ebpf_error(ebpf_err, 1000, 500);
+        assert!(matches!(result, TakoExecutionError::OutOfComputeUnits { .. }));
+
+        // Test memory error
+        let ebpf_err = EbpfError::SyscallError("Memory access violation at 0x1234".into());
+        let result = TakoExecutionError::from_ebpf_error(ebpf_err, 100, 50);
+        assert!(matches!(result, TakoExecutionError::MemoryAccessViolation { .. }));
+    }
+
+    #[test]
+    fn test_loaded_data_limit_category() {
+        let err = TakoExecutionError::LoadedDataLimitExceeded {
+            current_size: 70000000,
+            limit: 67108864,
+            operation: "storage_read".to_string(),
+            details: "Test error".to_string(),
+        };
+        assert_eq!(err.category(), "resource_limit");
     }
 }
