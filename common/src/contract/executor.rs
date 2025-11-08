@@ -1,3 +1,4 @@
+use super::TransferOutput;
 use anyhow::Result;
 /// Contract execution trait for dependency injection
 ///
@@ -38,6 +39,9 @@ pub struct ContractExecutionResult {
     /// Optional return data from the contract
     /// Used for inter-contract calls and debugging
     pub return_data: Option<Vec<u8>>,
+
+    /// Transfers requested by the contract during execution
+    pub transfers: Vec<TransferOutput>,
 }
 
 /// Contract executor trait

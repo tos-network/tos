@@ -20,7 +20,7 @@
 use std::sync::Arc;
 use tos_common::{
     block::TopoHeight,
-    contract::{ContractCache, ContractProvider},
+    contract::{ContractCache, ContractProvider, TransferOutput},
     crypto::Hash,
 };
 use tos_program_runtime::invoke_context::InvokeContext;
@@ -101,6 +101,8 @@ pub struct ExecutionResult {
     /// Events emitted by the contract during execution (Ethereum-style)
     /// Contains indexed topics and data for off-chain indexing and monitoring
     pub events: Vec<tos_program_runtime::Event>,
+    /// Transfers requested via the AccountProvider interface during execution
+    pub transfers: Vec<TransferOutput>,
 }
 
 impl TakoExecutor {
@@ -299,11 +301,7 @@ impl TakoExecutor {
         debug!("Executing contract bytecode via TBPF VM");
         let (instruction_count, result) = vm.execute_program(&executable, true);
 
-        // CRITICAL: Drop heap after execution to prevent dangling pointers
-        drop(heap);
-        drop(stack);
-
-        // 10. Calculate compute units used
+        // 10. Calculate compute units used (before dropping invoke_context)
         let compute_units_used = compute_budget - invoke_context.get_remaining();
         debug!(
             "Execution complete: instructions={}, compute_units_used={}/{}",
@@ -329,6 +327,16 @@ impl TakoExecutor {
             .get_return_data()
             .map(|(_, data)| data.to_vec());
 
+        // Drop InvokeContext to release the mutable borrow of accounts
+        drop(invoke_context);
+
+        // Now we can access accounts again to extract pending transfers
+        let transfers = accounts.take_pending_transfers();
+
+        // CRITICAL: Drop heap and stack after execution to prevent dangling pointers
+        drop(heap);
+        drop(stack);
+
         // 13. Process result
         match result {
             ProgramResult::Ok(return_value) => {
@@ -350,6 +358,7 @@ impl TakoExecutor {
                     return_data,
                     log_messages,
                     events,
+                    transfers,
                 })
             }
             ProgramResult::Err(err) => {

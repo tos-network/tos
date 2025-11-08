@@ -1,6 +1,6 @@
 use tos_common::{
     block::TopoHeight,
-    contract::ContractProvider,
+    contract::{ContractProvider, TransferOutput},
     crypto::{Hash, PublicKey},
     serializer::Serializer,
 };
@@ -50,6 +50,8 @@ pub struct TosAccountAdapter<'a> {
     topoheight: TopoHeight,
     /// Native asset hash (TOS uses Hash::zero() for native tokens)
     native_asset: Hash,
+    /// Transfers staged during the current execution
+    pending_transfers: Vec<TransferOutput>,
 }
 
 impl<'a> TosAccountAdapter<'a> {
@@ -64,6 +66,7 @@ impl<'a> TosAccountAdapter<'a> {
             provider,
             topoheight,
             native_asset: Hash::zero(), // TOS native asset
+            pending_transfers: Vec::new(),
         }
     }
 
@@ -83,6 +86,7 @@ impl<'a> TosAccountAdapter<'a> {
             provider,
             topoheight,
             native_asset: asset,
+            pending_transfers: Vec::new(),
         }
     }
 
@@ -94,6 +98,11 @@ impl<'a> TosAccountAdapter<'a> {
                 format!("Invalid address format: {}", e),
             )))
         })
+    }
+
+    /// Consume the transfers staged during the execution and return them.
+    pub fn take_pending_transfers(&mut self) -> Vec<TransferOutput> {
+        std::mem::take(&mut self.pending_transfers)
     }
 }
 
@@ -171,9 +180,12 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
             ))));
         }
 
-        // NOTE: Actual transfer logic will be implemented in Phase 2 with ContractOutput integration
-        // For now, we've validated the transfer can proceed. The actual balance updates
-        // will be handled by the TOS transaction processor.
+        // Stage the transfer so the outer transaction processor can persist it atomically.
+        self.pending_transfers.push(TransferOutput {
+            destination: to_pubkey,
+            amount,
+            asset: self.native_asset.clone(),
+        });
 
         Ok(())
     }
@@ -341,6 +353,20 @@ mod tests {
         let mut adapter = TosAccountAdapter::new(&provider, 100);
         let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 5000);
         assert!(result.is_ok());
+
+        let transfers = adapter.take_pending_transfers();
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(
+            transfers[0],
+            TransferOutput {
+                destination: to,
+                amount: 5000,
+                asset: Hash::zero(),
+            }
+        );
+
+        // Queue should be empty after consuming
+        assert!(adapter.take_pending_transfers().is_empty());
     }
 
     #[test]

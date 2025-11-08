@@ -22,7 +22,7 @@ use tos_common::{
     crypto::Hash,
 };
 
-use super::TakoExecutor;
+use super::{ExecutionResult, TakoExecutor};
 
 /// TAKO VM implementation of ContractExecutor trait
 ///
@@ -107,16 +107,26 @@ impl ContractExecutor for TakoContractExecutor {
             );
         }
 
+        let ExecutionResult {
+            return_value,
+            compute_units_used,
+            return_data,
+            transfers,
+            ..
+        } = result;
+
         // Convert TAKO result to ContractExecutionResult
         Ok(ContractExecutionResult {
             // TAKO uses compute units, which we map 1:1 to gas
-            gas_used: result.compute_units_used,
+            gas_used: compute_units_used,
 
             // TAKO return value: 0 = success, non-zero = error
-            exit_code: Some(result.return_value),
+            exit_code: Some(return_value),
 
             // Return data from TAKO execution
-            return_data: result.return_data,
+            return_data,
+
+            transfers,
         })
     }
 

@@ -92,32 +92,23 @@ impl<'a> TosStorageAdapter<'a> {
     /// wrapper around primitive types and complex structures. For TAKO integration,
     /// we serialize byte slices as ValueCell::String.
     fn bytes_to_value_cell(bytes: &[u8]) -> Result<ValueCell, EbpfError> {
-        // For TAKO integration, we treat all keys/values as raw bytes
-        // TOS-VM's ValueCell doesn't have a direct "bytes" type, so we use String
-        // and convert via bincode
-        match bincode::serialize(bytes) {
-            Ok(_serialized) => {
-                // Store as opaque serialized data
-                // Note: This is a temporary solution. Long-term, we may want to add
-                // ValueCell::Bytes variant to TOS-VM.
-                Ok(ValueCell::default()) // Placeholder - will be improved in Phase 2
-            }
-            Err(e) => Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to serialize key: {}", e),
-            )))),
-        }
+        // The ValueCell::Bytes variant preserves a one-to-one mapping between
+        // arbitrary byte slices and the cached key/value representation.
+        // This avoids the hash collisions that occurred when using
+        // ValueCell::default() as a placeholder.
+        Ok(ValueCell::Bytes(bytes.to_vec()))
     }
 
     /// Convert a ValueCell to bytes
     fn value_cell_to_bytes(cell: &ValueCell) -> Result<Vec<u8>, EbpfError> {
-        // Deserialize from bincode
-        bincode::serialize(cell).map_err(|e| {
-            EbpfError::SyscallError(Box::new(std::io::Error::new(
+        if let ValueCell::Bytes(bytes) = cell {
+            Ok(bytes.clone())
+        } else {
+            Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Failed to deserialize value: {}", e),
-            )))
-        })
+                "Stored value is not a raw byte array",
+            ))))
+        }
     }
 }
 
@@ -412,7 +403,10 @@ mod tests {
 
         // Test read from cache
         let result = adapter.get(contract_hash.as_bytes(), key).unwrap();
-        assert!(result.is_some());
+        assert_eq!(result, Some(value.to_vec()));
+
+        // Ensure cache keeps the exact ValueCell::Bytes entries for key/value
+        assert_eq!(cache.storage.len(), 1);
     }
 
     #[test]
@@ -429,5 +423,40 @@ mod tests {
         let result = adapter.get(other_contract.as_bytes(), b"key");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("mismatch"));
+    }
+
+    #[test]
+    fn test_storage_adapter_distinct_keys_preserved() {
+        let provider = MockProvider::new();
+        let contract_hash = Hash::zero();
+        let mut cache = ContractCache::default();
+        let topoheight = 100;
+
+        let mut adapter = TosStorageAdapter::new(&provider, &contract_hash, &mut cache, topoheight);
+
+        adapter
+            .set(contract_hash.as_bytes(), b"key_a", b"value_a")
+            .unwrap();
+        adapter
+            .set(contract_hash.as_bytes(), b"key_b", b"value_b")
+            .unwrap();
+
+        let value_a = adapter
+            .get(contract_hash.as_bytes(), b"key_a")
+            .unwrap()
+            .unwrap();
+        let value_b = adapter
+            .get(contract_hash.as_bytes(), b"key_b")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(value_a, b"value_a");
+        assert_eq!(value_b, b"value_b");
+
+        // Drop adapter to release mutable borrow of cache
+        drop(adapter);
+
+        // Now we can check the cache
+        assert_eq!(cache.storage.len(), 2);
     }
 }
