@@ -104,6 +104,18 @@ pub enum TakoExecutionError {
         /// Additional details about what caused the limit to be exceeded
         details: String,
     },
+
+    /// Precompile verification failed
+    ///
+    /// This error occurs when a precompile (signature verification program) fails to verify.
+    /// Precompiles are special programs for Ed25519, secp256k1, and secp256r1 signature verification.
+    #[error("Precompile verification failed for program {program_id}: {error_details}")]
+    PrecompileVerificationFailed {
+        /// Precompile program ID (hex encoded)
+        program_id: String,
+        /// Error details from the verification process
+        error_details: String,
+    },
 }
 
 impl TakoExecutionError {
@@ -294,6 +306,7 @@ impl TakoExecutionError {
             Self::InvalidInstruction { .. } => "execution",
             Self::CpiInvocationFailed { .. } => "execution",
             Self::LoadedDataLimitExceeded { .. } => "resource_limit",
+            Self::PrecompileVerificationFailed { .. } => "precompile",
         }
     }
 

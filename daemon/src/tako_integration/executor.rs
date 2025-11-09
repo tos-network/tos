@@ -167,20 +167,19 @@ impl TakoExecutor {
             });
         }
 
-        // 2. Validate ELF bytecode
-        debug!("Validating ELF bytecode: size={} bytes", bytecode.len());
-        tos_common::contract::validate_contract_bytecode(bytecode).map_err(|e| {
-            error!("Bytecode validation failed: {:?}", e);
-            TakoExecutionError::invalid_bytecode("Invalid ELF format", Some(e))
-        })?;
+        // 2. Check if this is a precompile instruction
+        // Precompiles are identified by their program ID (first 32 bytes of bytecode in this context)
+        // Note: In a real transaction, program_id would be separate from bytecode
+        // For now, we use contract_hash as the program ID
+        let program_id = contract_hash.as_bytes();
 
-        // 3. Create TOS adapters
+        // 3. Create TOS adapters (needed for both precompile and regular execution)
         let mut cache = ContractCache::default();
         let mut storage = TosStorageAdapter::new(provider, contract_hash, &mut cache, topoheight);
         let mut accounts = TosAccountAdapter::new(provider, topoheight);
         let loader_adapter = TosContractLoaderAdapter::new(provider, topoheight);
 
-        // 4. Create TBPF loader with syscalls
+        // 4. Create TBPF loader with syscalls (needed for InvokeContext creation)
         // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml
         // This provides 10-50x performance improvement over interpreter-only execution
         let config = Config::default();
@@ -263,7 +262,77 @@ impl TakoExecutor {
         #[cfg(debug_assertions)]
         invoke_context.enable_debug();
 
-        // 7. Create memory mapping WITH HEAP
+        // 6.5. Check if this is a precompile and handle it separately
+        if invoke_context.is_precompile(program_id) {
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "Executing precompile: program_id={:?}",
+                    hex::encode(program_id)
+                );
+            }
+
+            // For precompiles, input_data IS the instruction data
+            // In a real transaction, we would also need instruction_datas from other instructions
+            // For now, we only support single-instruction precompile calls
+            let instruction_datas = vec![input_data];
+            let instruction_data_refs: Vec<&[u8]> =
+                instruction_datas.iter().map(|data| *data).collect();
+
+            // Verify the precompile
+            invoke_context
+                .process_precompile(program_id, input_data, &instruction_data_refs)
+                .map_err(|e| {
+                    error!("Precompile verification failed: {:?}", e);
+                    TakoExecutionError::PrecompileVerificationFailed {
+                        program_id: hex::encode(program_id),
+                        error_details: format!("{:?}", e),
+                    }
+                })?;
+
+            // Precompile verification succeeded
+            // Return success result (precompiles consume 0 CU at runtime)
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "Precompile verification succeeded: program_id={:?}",
+                    hex::encode(program_id)
+                );
+            }
+
+            // Extract log messages and events (if any)
+            let log_messages = invoke_context.extract_log_messages().unwrap_or_default();
+            let events = invoke_context.extract_events().unwrap_or_default();
+
+            // Get return data (precompiles don't typically return data)
+            let return_data = invoke_context
+                .get_return_data()
+                .map(|(_, data)| data.to_vec());
+
+            // Drop InvokeContext to release borrows
+            drop(invoke_context);
+
+            // Get transfers (precompiles don't typically do transfers)
+            let transfers = accounts.take_pending_transfers();
+
+            return Ok(ExecutionResult {
+                return_value: 0,          // Success
+                instructions_executed: 0, // Precompiles don't execute instructions
+                compute_units_used: 0, // FREE at runtime (cost charged during transaction validation)
+                return_data,
+                log_messages,
+                events,
+                transfers,
+            });
+        }
+
+        // 7. Not a precompile - proceed with regular contract execution
+        // Validate ELF bytecode
+        debug!("Validating ELF bytecode: size={} bytes", bytecode.len());
+        tos_common::contract::validate_contract_bytecode(bytecode).map_err(|e| {
+            error!("Bytecode validation failed: {:?}", e);
+            TakoExecutionError::invalid_bytecode("Invalid ELF format", Some(e))
+        })?;
+
+        // 8. Create memory mapping WITH HEAP
         let mut stack = AlignedMemory::<{ ebpf::HOST_ALIGN }>::zero_filled(STACK_SIZE);
         let stack_len = stack.len();
 
@@ -573,8 +642,9 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         let err_str = err.to_string();
-        // The actual error from tos-tbpf ELF validation is "Invalid contract bytecode: Invalid ELF format"
-        assert!(err_str.contains("Invalid") && err_str.contains("ELF"));
+        // After precompile integration, ELF validation happens during executable loading
+        // Error message: "Failed to load executable: ELF parsing failed"
+        assert!(err_str.contains("ELF"));
     }
 
     #[test]

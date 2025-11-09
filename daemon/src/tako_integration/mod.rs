@@ -3,6 +3,8 @@ mod error;
 mod executor;
 mod executor_adapter;
 mod loader;
+pub mod precompile_cost;
+mod precompile_verifier;
 /// TAKO VM integration module for TOS blockchain.
 ///
 /// This module provides the adapter layer that bridges TOS blockchain's contract infrastructure
@@ -31,6 +33,7 @@ mod loader;
 /// - `executor`: Main TAKO execution engine with TOS integration
 /// - `executor_adapter`: ContractExecutor trait implementation for TAKO VM
 /// - `error`: Error types for TAKO VM execution
+/// - `precompile_verifier`: Transaction-level precompile verification (Ed25519, secp256k1, secp256r1)
 mod storage;
 
 pub use accounts::TosAccountAdapter;
@@ -38,4 +41,11 @@ pub use error::TakoExecutionError;
 pub use executor::{ExecutionResult, TakoExecutor};
 pub use executor_adapter::TakoContractExecutor;
 pub use loader::TosContractLoaderAdapter;
+pub use precompile_cost::{
+    costs, estimate_single_precompile_cost, estimate_transaction_precompile_cost,
+    TransactionCostEstimator,
+};
+pub use precompile_verifier::{
+    estimate_precompile_cost, verify_all_precompiles, verify_precompile_instruction,
+};
 pub use storage::TosStorageAdapter;

@@ -146,9 +146,9 @@ fn main() {
 
     // Step 1: Load the hello-world contract bytecode
     // Try the test contract from tos-tbpf first (known working), then hello-world
-    let contract_path = std::env::args().nth(1).unwrap_or_else(|| {
-        "~/tos-network/tos-tbpf/tests/elfs/relative_call.so".to_string()
-    });
+    let contract_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "~/tos-network/tos-tbpf/tests/elfs/relative_call.so".to_string());
     println!("Loading contract bytecode from: {}", contract_path);
 
     let bytecode = match fs::read(contract_path) {
