@@ -147,7 +147,7 @@ fn main() {
     // Step 1: Load the hello-world contract bytecode
     // Try the test contract from tos-tbpf first (known working), then hello-world
     let contract_path = std::env::args().nth(1).unwrap_or_else(|| {
-        "/Users/tomisetsu/tos-network/tos-tbpf/tests/elfs/relative_call.so".to_string()
+        "~/tos-network/tos-tbpf/tests/elfs/relative_call.so".to_string()
     });
     println!("Loading contract bytecode from: {}", contract_path);
 
@@ -159,7 +159,7 @@ fn main() {
         Err(e) => {
             eprintln!("✗ Failed to load contract: {}", e);
             eprintln!("\nPlease build the contract first:");
-            eprintln!("  cd /Users/tomisetsu/tos-network/tako/examples/hello-world");
+            eprintln!("  cd ~/tos-network/tako/examples/hello-world");
             eprintln!("  bash build.sh");
             std::process::exit(1);
         }

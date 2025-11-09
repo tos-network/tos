@@ -11,11 +11,11 @@ This directory contains utility scripts for the TOS blockchain project.
 **Usage**:
 ```bash
 # Run from project root
-cd /Users/tomisetsu/tos-network/tos
+cd ~/tos-network/tos
 ./scripts/check_migration_progress.sh
 
 # Or with absolute path
-/Users/tomisetsu/tos-network/tos/scripts/check_migration_progress.sh
+~/tos-network/tos/scripts/check_migration_progress.sh
 ```
 
 **Features**:
@@ -105,7 +105,7 @@ For issues or questions about scripts:
 ---
 
 **Related Files**:
-- `/Users/tomisetsu/tos-network/tos/MIGRATION_TRACKING_SYSTEM.md`
-- `/Users/tomisetsu/tos-network/tos/MIGRATION_PROGRESS.md`
-- `/Users/tomisetsu/tos-network/tos/ROCKSDB_MIGRATION_SUMMARY.md`
-- `/Users/tomisetsu/tos-network/tos/MIGRATION_QUICK_REFERENCE.md`
+- `~/tos-network/tos/MIGRATION_TRACKING_SYSTEM.md`
+- `~/tos-network/tos/MIGRATION_PROGRESS.md`
+- `~/tos-network/tos/ROCKSDB_MIGRATION_SUMMARY.md`
+- `~/tos-network/tos/MIGRATION_QUICK_REFERENCE.md`

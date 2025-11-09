@@ -16,7 +16,7 @@ import os
 import json
 import time
 
-WALLET_BIN = "/Users/tomisetsu/tos-network/tos/target/release/tos_wallet"
+WALLET_BIN = os.path.expanduser("~/tos-network/tos/target/release/tos_wallet")
 NETWORK = "testnet"
 WALLET_DIR = "/tmp/tos_test_wallets"
 

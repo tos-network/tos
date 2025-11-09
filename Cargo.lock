@@ -4796,6 +4796,7 @@ dependencies = [
  "ark-serialize",
  "base64 0.22.1",
  "blake3",
+ "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?tag=v4.2.0)",
  "libsecp256k1",
  "log",
  "num-bigint",

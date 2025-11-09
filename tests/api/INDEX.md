@@ -11,7 +11,7 @@
 
 **Run tests**:
 ```bash
-cd /Users/tomisetsu/tos-network/tos/tests/api
+cd ~/tos-network/tos/tests/api
 pytest -v
 ```
 

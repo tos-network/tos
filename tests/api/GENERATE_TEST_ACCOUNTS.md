@@ -10,11 +10,11 @@ TOS uses **Ristretto255** cryptography (not Ed25519), which lacks mature Python 
 
 Build the wallet binary:
 ```bash
-cd /Users/tomisetsu/tos-network/tos
+cd ~/tos-network/tos
 cargo build --release --bin tos_wallet
 ```
 
-Binary location: `/Users/tomisetsu/tos-network/tos/target/release/tos_wallet`
+Binary location: `~/tos-network/tos/target/release/tos_wallet`
 
 ## Test Accounts
 
@@ -60,7 +60,7 @@ For each account (Bob and Charlie):
 ### Step 1: Start Wallet
 
 ```bash
-cd /Users/tomisetsu/tos-network/tos
+cd ~/tos-network/tos
 ./target/release/tos_wallet --network testnet --offline-mode
 ```
 
@@ -112,11 +112,11 @@ Edit `tests/api/lib/wallet_signer.py` and update the corresponding TEST_ACCOUNTS
 To generate all accounts quickly:
 
 ```bash
-cd /Users/tomisetsu/tos-network/tos/tests/api
+cd ~/tos-network/tos/tests/api
 
 # Bob
 echo "Generating Bob..."
-./target/release/tos_wallet --network testnet --offline-mode << EOF
+~/tos-network/tos/target/release/tos_wallet --network testnet --offline-mode << EOF
 recover_seed
 ocean swift mountain eagle dancing river frozen sunset golden meadow crystal palace harmony wisdom ancient forest keeper silver dragon mystic lunar phantom voyage
 test123
@@ -144,7 +144,7 @@ Look for lines starting with `tst1` in the output.
 After generating, verify the accounts:
 
 ```bash
-cd /Users/tomisetsu/tos-network/tos/tests/api
+cd ~/tos-network/tos/tests/api
 python3 -c "from lib.wallet_signer import TEST_ACCOUNTS; print('\\n'.join(f'{k}: {v.address}' for k,v in TEST_ACCOUNTS.items()))"
 ```
 

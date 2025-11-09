@@ -66,7 +66,7 @@ class WalletSigner:
     def _find_wallet_binary(self) -> str:
         """Find tos_wallet binary in project"""
         possible_paths = [
-            "/Users/tomisetsu/tos-network/tos/target/release/tos_wallet",
+            os.path.expanduser("~/tos-network/tos/target/release/tos_wallet"),
             "./target/release/tos_wallet",
             "../../target/release/tos_wallet",
             "../../../target/release/tos_wallet"
