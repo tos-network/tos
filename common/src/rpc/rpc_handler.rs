@@ -84,7 +84,7 @@ where
                 })?)
             }
             _ => {
-                return Err(RpcResponseError::new(
+                Err(RpcResponseError::new(
                     None,
                     InternalRpcError::InvalidJSONRequest,
                 ))
@@ -156,11 +156,10 @@ where
 
     // register a new RPC method handler
     pub fn register_method(&mut self, name: &str, handler: Handler) {
-        if self.methods.insert(name.into(), handler).is_some() {
-            if log::log_enabled!(log::Level::Error) {
-                error!("The method '{}' was already registered !", name);
+        if self.methods.insert(name.into(), handler).is_some()
+            && log::log_enabled!(log::Level::Error) {
+                error!("The method '{name}' was already registered !");
             }
-        }
     }
 
     pub fn get_data(&self) -> &T {
@@ -173,7 +172,7 @@ pub fn parse_params<P: DeserializeOwned>(mut value: Value) -> Result<P, Internal
         value = Value::Object(Map::new());
     }
 
-    serde_json::from_value(value).map_err(|e| InternalRpcError::InvalidJSONParams(e))
+    serde_json::from_value(value).map_err(InternalRpcError::InvalidJSONParams)
 }
 
 // RPC Method with no params required

@@ -28,8 +28,8 @@ pub struct FreezeDuration {
 impl FreezeDuration {
     /// Create a new freeze duration with validation
     pub fn new(days: u32) -> Result<Self, &'static str> {
-        if days < crate::config::MIN_FREEZE_DURATION_DAYS
-            || days > crate::config::MAX_FREEZE_DURATION_DAYS
+        if !(crate::config::MIN_FREEZE_DURATION_DAYS..=crate::config::MAX_FREEZE_DURATION_DAYS)
+            .contains(&days)
         {
             return Err("Freeze duration must be between 3 and 180 days");
         }
@@ -147,11 +147,7 @@ impl FreezeRecord {
 
     /// Get remaining lock time in blocks
     pub fn remaining_blocks(&self, current_topoheight: TopoHeight) -> u64 {
-        if current_topoheight >= self.unlock_topoheight {
-            0
-        } else {
-            self.unlock_topoheight - current_topoheight
-        }
+        self.unlock_topoheight.saturating_sub(current_topoheight)
     }
 }
 
@@ -215,6 +211,12 @@ pub struct EnergyResource {
     pub last_update: TopoHeight,
     /// Individual freeze records for tracking duration-based rewards
     pub freeze_records: Vec<FreezeRecord>,
+}
+
+impl Default for EnergyResource {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EnergyResource {
@@ -389,8 +391,8 @@ impl EnergyResource {
 
         for record in &self.freeze_records {
             grouped
-                .entry(record.duration.clone())
-                .or_insert_with(Vec::new)
+                .entry(record.duration)
+                .or_default()
                 .push(record);
         }
 

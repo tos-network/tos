@@ -52,7 +52,7 @@ fn init_rustls_crypto_provider() {
                 Ok(_) => debug!("Successfully installed rustls aws-lc-rs crypto provider"),
                 Err(e) => {
                     if log::log_enabled!(log::Level::Warn) {
-                        warn!("Failed to install rustls crypto provider: {:?}", e);
+                        warn!("Failed to install rustls crypto provider: {e:?}");
                     }
                 }
             }
@@ -211,7 +211,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                 // Notify receivers
                 if let Err(e) = sender.send(()) {
                     if log::log_enabled!(log::Level::Error) {
-                        error!("Error sending event to the request: {:?}", e);
+                        error!("Error sending event to the request: {e:?}");
                     }
                 }
             }
@@ -260,7 +260,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     // Set if the client should try to reconnect to the server if the connection is lost
     pub async fn set_auto_reconnect_delay(&self, duration: Option<Duration>) {
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Setting auto reconnect delay to {:?}", duration);
+            debug!("Setting auto reconnect delay to {duration:?}");
         }
         let mut reconnect = self.delay_auto_reconnect.lock().await;
         *reconnect = duration;
@@ -282,7 +282,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         spawn_task("resubscribe-events", async move {
             for (event, id) in events {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Resubscribing to event {:?} with id {}", event, id);
+                    debug!("Resubscribing to event {event:?} with id {id}");
                 }
 
                 // Send it to the server
@@ -299,17 +299,16 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                     Ok(res) => res,
                     Err(e) => {
                         if log::log_enabled!(log::Level::Error) {
-                            error!("Error while resubscribing to event with id {}: {:?}", id, e);
+                            error!("Error while resubscribing to event with id {id}: {e:?}");
                         }
                         false
                     }
                 };
 
-                if !res {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!("Error while resubscribing to event with id {}", id);
+                if !res
+                    && log::log_enabled!(log::Level::Error) {
+                        error!("Error while resubscribing to event with id {id}");
                     }
-                }
             }
         });
         Ok(())
@@ -332,8 +331,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             if let Err(e) = sender.send(InternalMessage::Close).await {
                 if log::log_enabled!(log::Level::Error) {
                     error!(
-                        "Error while sending close message to the background task: {:?}",
-                        e
+                        "Error while sending close message to the background task: {e:?}"
                     );
                 }
             }
@@ -346,8 +344,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                     if let Err(e) = task.await {
                         if log::log_enabled!(log::Level::Error) {
                             error!(
-                                "Error while waiting for the background task to finish: {:?}",
-                                e
+                                "Error while waiting for the background task to finish: {e:?}"
                             );
                         }
                     }
@@ -367,7 +364,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     // Set the online status
     async fn set_online(&self, online: bool) {
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Setting online status to {}", online);
+            debug!("Setting online status to {online}");
         }
         let old = self.online.swap(online, Ordering::Relaxed);
         if old != online {
@@ -405,14 +402,14 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             let mut lock = self.sender.lock().await;
             *lock = sender;
 
-            let zelf = Arc::clone(&self);
+            let zelf = Arc::clone(self);
             trace!("Starting background task after reconnecting");
             zelf.start_background_task(receiver, ws).await?;
         }
 
-        if let Err(e) = Arc::clone(&self).resubscribe_events().await {
+        if let Err(e) = Arc::clone(self).resubscribe_events().await {
             if log::log_enabled!(log::Level::Error) {
-                error!("Error while resubscribing to events: {:?}", e);
+                error!("Error while resubscribing to events: {e:?}");
             }
         }
 
@@ -484,7 +481,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                     }
                     Err(e) => {
                         if log::log_enabled!(log::Level::Error) {
-                            error!("Error in the WebSocket client background task: {:?}", e);
+                            error!("Error in the WebSocket client background task: {e:?}");
                         }
                     }
                 }
@@ -526,7 +523,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                             // Register all events again
                             if let Err(e) = Arc::clone(&zelf).resubscribe_events().await {
                                 if log::log_enabled!(log::Level::Error) {
-                                    error!("Error while resubscribing to events due to reconnect: {:?}", e);
+                                    error!("Error while resubscribing to events due to reconnect: {e:?}");
                                 }
                             } else {
                                 info!("Resubscribed to all events");
@@ -536,7 +533,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                         }
                         Err(e) => {
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("Error while reconnecting to the server: {:?}", e);
+                                debug!("Error while reconnecting to the server: {e:?}");
                             }
                         }
                     }
@@ -593,7 +590,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                                     if let Some(sender) = requests.remove(&id) {
                                         if let Err(e) = sender.send(response) {
                                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("Error sending response to the request: {:?}", e);
+                                debug!("Error sending response to the request: {e:?}");
                             }
                                         }
                                         continue;
@@ -607,7 +604,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                                         // Check that we still have someone who listen it
                                         if let Err(e) = sender.send(response.result.unwrap_or_default()) {
                                             if log::log_enabled!(log::Level::Debug) {
-                                                debug!("Error sending event to the request: {:?}", e);
+                                                debug!("Error sending event to the request: {e:?}");
                                             }
                                         }
                                     }
@@ -620,7 +617,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                         },
                         m => {
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("Received unhandled message: {:?}", m);
+                                debug!("Received unhandled message: {m:?}");
                             }
                         }
                     }
@@ -634,7 +631,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     // Call a method without parameters
     pub async fn call<R: DeserializeOwned>(&self, method: &str) -> JsonRPCResult<R> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Calling method '{}'", method);
+            trace!("Calling method '{method}'");
         }
         self.send(method, None, &Value::Null).await
     }
@@ -654,7 +651,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     // Verify if we already subscribed to this event or not
     pub async fn has_event(&self, event: &E) -> bool {
         let events = self.events_to_id.lock().await;
-        events.contains_key(&event)
+        events.contains_key(event)
     }
 
     // Subscribe to an event
@@ -665,7 +662,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         capacity: usize,
     ) -> JsonRPCResult<EventReceiver<T>> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Subscribing to event {:?}", event);
+            trace!("Subscribing to event {event:?}");
         }
         // Returns a Receiver for this event if already registered
         {
@@ -710,7 +707,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     // Unsubscribe from an event
     pub async fn unsubscribe_event(&self, event: &E) -> JsonRPCResult<()> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Unsubscribing from event {:?}", event);
+            trace!("Unsubscribing from event {event:?}");
         }
         // Retrieve the id for this event
         let id = {
@@ -774,8 +771,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                 let mut requests = self.requests.lock().await;
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "Removing request with id {} from the pending requests due to its fail",
-                        id
+                        "Removing request with id {id} from the pending requests due to its fail"
                     );
                 }
                 requests.remove(&id);
@@ -833,7 +829,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     // Send a request to the server without waiting for the response
     pub async fn notify<P: Serialize>(&self, method: &str) -> JsonRPCResult<()> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Notifying method '{}'", method);
+            trace!("Notifying method '{method}'");
         }
         self.notify_with(method, &Value::Null).await
     }

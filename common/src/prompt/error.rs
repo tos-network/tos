@@ -42,7 +42,7 @@ pub enum PromptError {
 
 impl<T> From<PoisonError<T>> for PromptError {
     fn from(err: PoisonError<T>) -> Self {
-        Self::PoisonError(format!("{}", err))
+        Self::PoisonError(format!("{err}"))
     }
 }
 

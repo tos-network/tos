@@ -73,7 +73,7 @@ fn hrp_expand(hrp: &str) -> Vec<u8> {
 pub fn verify_checksum(hrp: &str, data: &[u8]) -> bool {
     let mut vec = hrp_expand(hrp);
     vec.extend(data);
-    return polymod(&vec) == 1;
+    polymod(&vec) == 1
 }
 
 /// Create a checksum for a human readable part and data.
@@ -128,12 +128,12 @@ pub fn convert_bits(data: &[u8], from: u16, to: u16, pad: bool) -> Result<Vec<u8
 
 /// Encode a human readable part and data into a bech32 string.
 pub fn encode(mut hrp: String, data: &[u8]) -> Result<String, Bech32Error> {
-    if hrp.len() == 0 {
+    if hrp.is_empty() {
         return Err(Bech32Error::HrpEmpty);
     }
 
     for value in hrp.bytes() {
-        if value < 33 || value > 126 {
+        if !(33..=126).contains(&value) {
             return Err(Bech32Error::HrpInvalidCharacter(value));
         }
     }
@@ -157,9 +157,7 @@ pub fn encode(mut hrp: String, data: &[u8]) -> Result<String, Bech32Error> {
         }
 
         result.push(
-            CHARSET
-                .bytes()
-                .nth(*value as usize)
+            CHARSET.as_bytes().get(*value as usize).copied()
                 .ok_or(Bech32Error::InvalidIndex(*value as usize))?,
         );
     }
@@ -183,7 +181,7 @@ pub fn decode(bech: &str) -> Result<(String, Vec<u8>), Bech32Error> {
 
     let hrp = bech[0..pos].to_owned();
     for value in hrp.bytes() {
-        if value < 33 || value > 126 {
+        if !(33..=126).contains(&value) {
             return Err(Bech32Error::HrpInvalidCharacter(value));
         }
     }

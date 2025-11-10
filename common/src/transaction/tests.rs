@@ -141,8 +141,7 @@ fn create_tx_for(
     let actual_size = tx.size();
     let to_bytes_size = tx.to_bytes().len();
     println!(
-        "Debug sizes: estimated={}, actual={}, to_bytes={}",
-        estimated_size, actual_size, to_bytes_size
+        "Debug sizes: estimated={estimated_size}, actual={actual_size}, to_bytes={to_bytes_size}"
     );
     println!("Debug components: version={}, source={}, data={}, fee={}, fee_type={}, nonce={}, signature={}",
              1, tx.get_source().size(), tx.get_data().size(), 8, 1, 8, tx.get_signature().size());
@@ -157,13 +156,11 @@ fn create_tx_for(
         + 8
         + tx.get_reference().size()
         + tx.get_signature().size();
-    println!("Debug calculated actual: {}", actual_components);
+    println!("Debug calculated actual: {actual_components}");
 
     assert!(
         estimated_size == tx.size(),
-        "expected {} bytes got {} bytes",
-        estimated_size,
-        actual_size
+        "expected {estimated_size} bytes got {actual_size} bytes"
     );
     assert!(tx.to_bytes().len() == estimated_size);
 
@@ -209,7 +206,7 @@ fn test_encrypt_decrypt_two_parties() {
     {
         let decrypted = cipher
             .decrypt(
-                &alice.keypair.get_private_key(),
+                alice.keypair.get_private_key(),
                 None,
                 Role::Sender,
                 TxVersion::T0,
@@ -222,7 +219,7 @@ fn test_encrypt_decrypt_two_parties() {
     {
         let decrypted = cipher
             .decrypt(
-                &bob.keypair.get_private_key(),
+                bob.keypair.get_private_key(),
                 None,
                 Role::Receiver,
                 TxVersion::T0,
@@ -235,7 +232,7 @@ fn test_encrypt_decrypt_two_parties() {
     // This is expected behavior - no encryption means no role-based access control
     {
         let decrypted = cipher.decrypt(
-            &bob.keypair.get_private_key(),
+            bob.keypair.get_private_key(),
             None,
             Role::Sender,
             TxVersion::T0,
@@ -1103,7 +1100,7 @@ async fn test_transfer_extra_data_limits() {
     match tx_oversized {
         Ok(_) => panic!("Transaction with oversized extra data should fail"),
         Err(e) => {
-            println!("Actual error: {:?}", e);
+            println!("Actual error: {e:?}");
             assert!(
                 matches!(e, GenerationError::ExtraDataTooLarge),
                 "Expected ExtraDataTooLarge error"
@@ -1150,7 +1147,7 @@ async fn test_transfer_extra_data_limits() {
     match tx_total_oversized {
         Ok(_) => panic!("Transaction with total oversized extra data should fail"),
         Err(e) => {
-            println!("Actual total oversized error: {:?}", e);
+            println!("Actual total oversized error: {e:?}");
             assert!(
                 matches!(
                     e,
@@ -1225,12 +1222,12 @@ async fn test_unfreeze_tos_balance_refund() {
         .balances
         .get(&TOS_ASSET)
         .unwrap();
-    println!("Balance before verify: {}", balance_before_verify);
+    println!("Balance before verify: {balance_before_verify}");
 
     // Verify UnfreezeTos transaction
     let unfreeze_tx_hash = unfreeze_tx.hash();
     let tx_fee = unfreeze_tx.fee; // Save actual fee from transaction
-    println!("Transaction fee: {}", tx_fee);
+    println!("Transaction fee: {tx_fee}");
     let unfreeze_result = Arc::new(unfreeze_tx)
         .verify(&unfreeze_tx_hash, &mut state, &NoZKPCache)
         .await;
@@ -1248,12 +1245,11 @@ async fn test_unfreeze_tos_balance_refund() {
         .balances
         .get(&TOS_ASSET)
         .unwrap();
-    println!("Balance after verify: {}", alice_balance_after_unfreeze);
+    println!("Balance after verify: {alice_balance_after_unfreeze}");
 
     let expected_balance = initial_balance + unfreeze_amount - tx_fee;
     println!(
-        "Expected balance: {} (initial {} + unfreeze {} - fee {})",
-        expected_balance, initial_balance, unfreeze_amount, tx_fee
+        "Expected balance: {expected_balance} (initial {initial_balance} + unfreeze {unfreeze_amount} - fee {tx_fee})"
     );
     assert_eq!(
         *alice_balance_after_unfreeze, expected_balance,
@@ -1269,13 +1265,12 @@ async fn test_unfreeze_tos_balance_refund() {
     );
 
     println!("✅ UnfreezeTos test passed: Balance refund works correctly");
-    println!("   Initial balance:     {}", initial_balance);
-    println!("   Unfreeze amount:     {}", unfreeze_amount);
-    println!("   Transaction fee:     {}", tx_fee);
-    println!("   Final balance:       {}", expected_balance);
+    println!("   Initial balance:     {initial_balance}");
+    println!("   Unfreeze amount:     {unfreeze_amount}");
+    println!("   Transaction fee:     {tx_fee}");
+    println!("   Final balance:       {expected_balance}");
     println!(
-        "   Formula verified:    {} + {} - {} = {}",
-        initial_balance, unfreeze_amount, tx_fee, expected_balance
+        "   Formula verified:    {initial_balance} + {unfreeze_amount} - {tx_fee} = {expected_balance}"
     );
 }
 
@@ -1673,12 +1668,11 @@ async fn test_p04_double_spend_prevention() {
             required,
         }) => {
             println!(
-                "✓ Double-spend prevented: available={}, required={}",
-                available, required
+                "✓ Double-spend prevented: available={available}, required={required}"
             );
             assert!(available < required, "Should have insufficient funds");
         }
-        _ => panic!("Expected InsufficientFunds error, got {:?}", result2),
+        _ => panic!("Expected InsufficientFunds error, got {result2:?}"),
     }
 }
 
@@ -1729,8 +1723,7 @@ async fn test_p04_insufficient_balance() {
             required,
         }) => {
             println!(
-                "✓ Insufficient balance detected: available={}, required={}",
-                available, required
+                "✓ Insufficient balance detected: available={available}, required={required}"
             );
             assert_eq!(
                 available,
@@ -1739,7 +1732,7 @@ async fn test_p04_insufficient_balance() {
             );
             assert!(required > available, "Required should exceed available");
         }
-        _ => panic!("Expected InsufficientFunds error, got {:?}", result),
+        _ => panic!("Expected InsufficientFunds error, got {result:?}"),
     }
 }
 
@@ -1807,8 +1800,7 @@ async fn test_p04_overflow_protection() {
             "Overflow should be detected when adding to u64::MAX"
         );
         println!(
-            "✓ Overflow protection triggered: u64::MAX + {} would overflow",
-            amount
+            "✓ Overflow protection triggered: u64::MAX + {amount} would overflow"
         );
         return;
     }
@@ -1885,7 +1877,7 @@ async fn test_p04_fee_deduction() {
         "Bob should receive exact transfer amount without fee deduction"
     );
 
-    println!("✓ Fee correctly deducted: {} from sender", tx_fee);
+    println!("✓ Fee correctly deducted: {tx_fee} from sender");
 }
 
 // Test 6: Burn transaction
@@ -1927,8 +1919,7 @@ async fn test_p04_burn_transaction() {
     );
 
     println!(
-        "✓ Burn transaction correctly deducted: 200 TOS + {} fee",
-        tx_fee
+        "✓ Burn transaction correctly deducted: 200 TOS + {tx_fee} fee"
     );
 }
 

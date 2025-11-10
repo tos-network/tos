@@ -25,7 +25,7 @@ TOS is a high-performance blockchain implementing the GHOSTDAG consensus algorit
 
 **Repository**: https://github.com/tos-network/tako
 **Language**: Rust
-**Based on**: Solana's RBPF (eBPF runtime)
+**Based on**: SVM eBPF runtime
 
 TAKO VM is a secure, high-performance virtual machine for smart contract execution:
 
@@ -322,7 +322,7 @@ tos-environment = { path = "./environment" }
 
 ### External Review Concerns
 
-1. **tos-tbpf**: Fork of Solana's RBPF with TOS-specific modifications
+1. **tos-tbpf**: Fork of SVM RBPF implementation with TOS-specific modifications
    - Review changes from upstream
    - Ensure security patches are applied
 

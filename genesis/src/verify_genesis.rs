@@ -4,7 +4,7 @@ fn main() {
     let genesis_hex = "02000000000000000000000197ff69f08100000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a7410";
 
     println!("Genesis hex length: {}", genesis_hex.len());
-    println!("Genesis hex: {}", genesis_hex);
+    println!("Genesis hex: {genesis_hex}");
 
     // check if the hex string is valid
     if genesis_hex.len() % 2 != 0 {
@@ -15,7 +15,7 @@ fn main() {
     // check if the hex string only contains valid hex characters
     for (i, c) in genesis_hex.chars().enumerate() {
         if !c.is_ascii_hexdigit() {
-            println!("Error: Invalid hex character '{}' at position {}", c, i);
+            println!("Error: Invalid hex character '{c}' at position {i}");
             return;
         }
     }
@@ -50,7 +50,7 @@ fn main() {
             println!("Block hash: {}", block.hash());
         }
         Err(e) => {
-            println!("Error parsing block: {:?}", e);
+            println!("Error parsing block: {e:?}");
         }
     }
 }

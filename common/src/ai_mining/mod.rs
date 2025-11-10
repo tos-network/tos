@@ -196,7 +196,7 @@ impl std::fmt::Display for AIMiningError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AIMiningError::InvalidTaskConfig(msg) => {
-                write!(f, "Invalid task configuration: {}", msg)
+                write!(f, "Invalid task configuration: {msg}")
             }
             AIMiningError::InsufficientStake {
                 required,
@@ -204,16 +204,15 @@ impl std::fmt::Display for AIMiningError {
             } => {
                 write!(
                     f,
-                    "Insufficient stake: required {} nanoTOS, available {} nanoTOS",
-                    required, available
+                    "Insufficient stake: required {required} nanoTOS, available {available} nanoTOS"
                 )
             }
-            AIMiningError::TaskNotFound(hash) => write!(f, "Task not found: {:?}", hash),
+            AIMiningError::TaskNotFound(hash) => write!(f, "Task not found: {hash:?}"),
             AIMiningError::MinerNotRegistered(address) => {
-                write!(f, "Miner not registered: {:?}", address)
+                write!(f, "Miner not registered: {address:?}")
             }
-            AIMiningError::ValidationFailed(msg) => write!(f, "Validation failed: {}", msg),
-            AIMiningError::SystemError(msg) => write!(f, "System error: {}", msg),
+            AIMiningError::ValidationFailed(msg) => write!(f, "Validation failed: {msg}"),
+            AIMiningError::SystemError(msg) => write!(f, "System error: {msg}"),
         }
     }
 }
@@ -231,15 +230,13 @@ impl AIMiningPayload {
                 // Validate description length
                 if description.len() < MIN_TASK_DESCRIPTION_LENGTH {
                     return Err(AIMiningError::InvalidTaskConfig(format!(
-                        "Description too short: minimum {} characters required",
-                        MIN_TASK_DESCRIPTION_LENGTH
+                        "Description too short: minimum {MIN_TASK_DESCRIPTION_LENGTH} characters required"
                     )));
                 }
 
                 if description.len() > MAX_TASK_DESCRIPTION_LENGTH {
                     return Err(AIMiningError::InvalidTaskConfig(format!(
-                        "Description too long: maximum {} characters allowed",
-                        MAX_TASK_DESCRIPTION_LENGTH
+                        "Description too long: maximum {MAX_TASK_DESCRIPTION_LENGTH} characters allowed"
                     )));
                 }
 
@@ -255,15 +252,13 @@ impl AIMiningPayload {
                 // Validate answer content length
                 if answer_content.len() < MIN_ANSWER_CONTENT_LENGTH {
                     return Err(AIMiningError::InvalidTaskConfig(format!(
-                        "Answer content too short: minimum {} characters required",
-                        MIN_ANSWER_CONTENT_LENGTH
+                        "Answer content too short: minimum {MIN_ANSWER_CONTENT_LENGTH} characters required"
                     )));
                 }
 
                 if answer_content.len() > MAX_ANSWER_CONTENT_LENGTH {
                     return Err(AIMiningError::InvalidTaskConfig(format!(
-                        "Answer content too long: maximum {} characters allowed",
-                        MAX_ANSWER_CONTENT_LENGTH
+                        "Answer content too long: maximum {MAX_ANSWER_CONTENT_LENGTH} characters allowed"
                     )));
                 }
 

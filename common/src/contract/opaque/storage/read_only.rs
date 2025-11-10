@@ -50,8 +50,7 @@ pub fn read_only_storage_load<P: ContractProvider>(
         Some(v) => v.clone(),
         None => storage
             .load_data(&zelf.0, &key, state.topoheight)?
-            .map(|(_, v)| v)
-            .flatten(),
+            .and_then(|(_, v)| v),
     };
 
     Ok(Some(value.unwrap_or_default()))

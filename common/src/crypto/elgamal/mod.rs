@@ -187,6 +187,12 @@ use zeroize::Zeroize;
 #[derive(Clone, Zeroize, serde::Serialize, serde::Deserialize)]
 pub struct PrivateKey(Scalar);
 
+impl Default for PrivateKey {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PrivateKey {
     pub fn new() -> Self {
         Self(Scalar::random(&mut OsRng))
@@ -260,6 +266,12 @@ impl SerializerTrait for PrivateKey {
 pub struct KeyPair {
     public_key: PublicKey,
     private_key: PrivateKey,
+}
+
+impl Default for KeyPair {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl KeyPair {

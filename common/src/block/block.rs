@@ -87,7 +87,7 @@ impl Deref for Block {
     type Target = BlockHeader;
 
     fn deref(&self) -> &Self::Target {
-        &self.get_header()
+        self.get_header()
     }
 }
 
@@ -96,7 +96,7 @@ impl Display for Block {
         let parents: Vec<String> = self
             .get_parents()
             .iter()
-            .map(|h| format!("{}", h))
+            .map(|h| format!("{h}"))
             .collect();
 
         write!(

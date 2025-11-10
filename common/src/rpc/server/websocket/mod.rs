@@ -221,7 +221,7 @@ where
     pub async fn stop(&self) {
         if let Err(e) = self.clear_connections().await {
             if log::log_enabled!(log::Level::Error) {
-                error!("Error while clearing connections: {}", e);
+                error!("Error while clearing connections: {e}");
             }
         }
     }
@@ -244,13 +244,13 @@ where
         for session in sessions {
             if let Err(e) = session.close_internal(None).await {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Error while closing internal session: {}", e);
+                    debug!("Error while closing internal session: {e}");
                 }
             }
 
             if let Err(e) = self.get_handler().on_close(&session).await {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Error while closing session: {}", e);
+                    debug!("Error while closing session: {e}");
                 }
             }
         }
@@ -283,13 +283,13 @@ where
         let session = Arc::new(WebSocketSession {
             id,
             request,
-            server: Arc::clone(&self),
+            server: Arc::clone(self),
             inner: Mutex::new(Some(session)),
             channel: tx,
         });
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Created new WebSocketSession with id {}", id);
+            debug!("Created new WebSocketSession with id {id}");
         }
 
         // call on_connection
@@ -298,7 +298,7 @@ where
             Ok(None) => (),
             Err(e) => {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Error while calling on_connection: {}", e);
+                    debug!("Error while calling on_connection: {e}");
                 }
                 return Ok(HttpResponse::InternalServerError().body(e.to_string()));
             }
@@ -306,12 +306,12 @@ where
 
         {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Inserting session #{} into sessions", id);
+                debug!("Inserting session #{id} into sessions");
             }
             let mut sessions = self.sessions.write().await;
             let res = sessions.insert(Arc::clone(&session));
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Session #{} has been inserted into sessions: {}", id, res);
+                debug!("Session #{id} has been inserted into sessions: {res}");
             }
         }
 
@@ -344,7 +344,7 @@ where
         // close session
         if let Err(e) = session.close_internal(reason).await {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Error while closing session: {}", e);
+                debug!("Error while closing session: {e}");
             }
         }
         trace!("session closed");
@@ -362,9 +362,9 @@ where
                 debug!("deleted session #{}", session.id);
             }
             // call on_close
-            if let Err(e) = self.handler.on_close(&session).await {
+            if let Err(e) = self.handler.on_close(session).await {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Error while calling on_close: {}", e);
+                    debug!("Error while calling on_close: {e}");
                 }
             }
         }
@@ -442,7 +442,7 @@ where
                             Ok(msg) => msg,
                             Err(e) => {
                                 if log::log_enabled!(log::Level::Debug) {
-                                    debug!("Error while receiving message: {}", e);
+                                    debug!("Error while receiving message: {e}");
                                 }
                                 break Some(CloseReason::from(CloseCode::Error));
                             }
@@ -463,7 +463,7 @@ where
                             }
                             if let Err(e) = self.handler.on_message(&session, text.as_bytes()).await {
                                 if log::log_enabled!(log::Level::Debug) {
-                                    debug!("Error while calling on_message: {}", e);
+                                    debug!("Error while calling on_message: {e}");
                                 }
                             }
                         },
@@ -496,7 +496,7 @@ where
                         },
                         msg => {
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("Received websocket message not supported: {:?}", msg);
+                                debug!("Received websocket message not supported: {msg:?}");
                             }
                             break None;
                         }

@@ -16,7 +16,7 @@ use anyhow::Result;
 /// Daemon Package (VM implementations)
 /// ```
 ///
-/// This follows Solana's pattern of dependency injection for VM execution.
+/// This follows SVM pattern of dependency injection for VM execution.
 use async_trait::async_trait;
 
 use crate::{block::TopoHeight, contract::ContractProvider, crypto::Hash};

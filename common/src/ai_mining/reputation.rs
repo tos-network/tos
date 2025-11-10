@@ -271,8 +271,7 @@ impl AntiSybilDetector {
             risk_score += 0.1;
             let remaining = reputation.get_remaining_cooldown(current_time);
             details.push(format!(
-                "Still in cooldown period, {} seconds remaining",
-                remaining
+                "Still in cooldown period, {remaining} seconds remaining"
             ));
         }
 
@@ -435,8 +434,7 @@ mod tests {
         // Based on: 30 days age + 50 transactions + 0.0005 TOS stake
         assert!(
             score > 5000 && score <= 10000,
-            "Score should be reasonable: {} (expected 5000-10000)",
-            score
+            "Score should be reasonable: {score} (expected 5000-10000)"
         );
     }
 

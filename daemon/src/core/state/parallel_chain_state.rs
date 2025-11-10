@@ -130,7 +130,7 @@ pub struct TransactionResult {
 /// - Deadlock Documentation: `daemon/tests/parallel_execution_parity_tests_rocksdb.rs`
 /// - Configuration: Future addition to `daemon/src/config.rs` (storage_read_permits)
 pub struct ParallelChainState<S: Storage> {
-    // Storage reference with RwLock for interior mutability (Solana pattern)
+    // Storage reference with RwLock for interior mutability (SVM pattern)
     // Arc<RwLock<S>> enables sharing storage across parallel executors
     storage: Arc<RwLock<S>>,
 

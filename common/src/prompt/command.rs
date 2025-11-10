@@ -71,7 +71,7 @@ pub enum CommandError {
 
 impl<T> From<PoisonError<T>> for CommandError {
     fn from(err: PoisonError<T>) -> Self {
-        Self::PoisonError(format!("{}", err))
+        Self::PoisonError(format!("{err}"))
     }
 }
 
@@ -221,7 +221,7 @@ impl Command {
                     arg.get_description()
                 ));
             }
-            help.push_str("\n");
+            help.push('\n');
         }
 
         // Optional arguments
@@ -234,7 +234,7 @@ impl Command {
                     arg.get_description()
                 ));
             }
-            help.push_str("\n");
+            help.push('\n');
         }
 
         help
@@ -459,19 +459,19 @@ impl CommandManager {
 
     pub fn message<D: Display>(&self, message: D) {
         if log::log_enabled!(log::Level::Info) {
-            info!("{}", message);
+            info!("{message}");
         }
     }
 
     pub fn warn<D: Display>(&self, message: D) {
         if log::log_enabled!(log::Level::Warn) {
-            warn!("{}", message);
+            warn!("{message}");
         }
     }
 
     pub fn error<D: Display>(&self, message: D) {
         if log::log_enabled!(log::Level::Error) {
-            error!("{}", message);
+            error!("{message}");
         }
     }
 
@@ -592,9 +592,9 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
             .ok_or(CommandError::CommandNotFound)?;
 
         // Display command name and description
-        manager.message(&format!("Command: {}", cmd.get_name()));
-        manager.message(&format!("Description: {}", cmd.get_description()));
-        manager.message(&format!("\nUsage: {}", cmd.get_usage()));
+        manager.message(format!("Command: {}", cmd.get_name()));
+        manager.message(format!("Description: {}", cmd.get_description()));
+        manager.message(format!("\nUsage: {}", cmd.get_usage()));
 
         // Display required arguments with types and descriptions
         if !cmd.get_required_args().is_empty() {
@@ -610,7 +610,7 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
 
                 // If description exists, show it; otherwise show type hints
                 if !arg.get_description().is_empty() {
-                    manager.message(&format!(
+                    manager.message(format!(
                         "  <{}> ({}) - {}",
                         arg.get_name(),
                         type_str,
@@ -624,7 +624,7 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
                         ArgType::Hash => "hash (hex string)",
                         ArgType::Array(_) => "array (comma-separated)",
                     };
-                    manager.message(&format!("  <{}> - {}", arg.get_name(), type_hint));
+                    manager.message(format!("  <{}> - {}", arg.get_name(), type_hint));
                 }
             }
         }
@@ -643,7 +643,7 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
 
                 // If description exists, show it; otherwise show type hints
                 if !arg.get_description().is_empty() {
-                    manager.message(&format!(
+                    manager.message(format!(
                         "  [{}] ({}) - {}",
                         arg.get_name(),
                         type_str,
@@ -657,7 +657,7 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
                         ArgType::Hash => "hash (hex string)",
                         ArgType::Array(_) => "array (comma-separated)",
                     };
-                    manager.message(&format!("  [{}] - {}", arg.get_name(), type_hint));
+                    manager.message(format!("  [{}] - {}", arg.get_name(), type_hint));
                 }
             }
         }
@@ -700,7 +700,7 @@ fn exit(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError
 }
 
 fn version(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    manager.message(format!("Version: {}", VERSION));
+    manager.message(format!("Version: {VERSION}"));
     Ok(())
 }
 
@@ -709,7 +709,7 @@ fn set_log_level(manager: &CommandManager, mut args: ArgumentManager) -> Result<
     let level =
         LogLevel::from_str(&arg_value).map_err(|e| CommandError::InvalidArgument(e.to_owned()))?;
     log::set_max_level(level.into());
-    manager.message(format!("Log level set to {}", level));
+    manager.message(format!("Log level set to {level}"));
 
     Ok(())
 }

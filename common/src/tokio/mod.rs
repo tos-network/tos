@@ -60,7 +60,7 @@ use std::cell::Cell;
     ))
 ))]
 thread_local! {
-    static IN_BLOCK_IN_PLACE: Cell<bool> = Cell::new(false);
+    static IN_BLOCK_IN_PLACE: Cell<bool> = const { Cell::new(false) };
 }
 
 // Spawn a new task with a name
@@ -82,7 +82,7 @@ where
 {
     let name_str = name.into();
     if log::log_enabled!(log::Level::Trace) {
-        trace!("Spawning task: {}", name_str);
+        trace!("Spawning task: {name_str}");
     }
     // Note: tokio::task::Builder requires tokio to be compiled with "tracing" feature
     // Since it's not enabled, we use regular spawn for both cases
@@ -125,7 +125,7 @@ pub fn is_multi_threads_supported() -> bool {
                 .map(|v| matches!(v.runtime_flavor(), runtime::RuntimeFlavor::MultiThread))
                 .unwrap_or(false);
             if log::log_enabled!(log::Level::Trace) {
-                trace!("multi threads supported: {}", supported);
+                trace!("multi threads supported: {supported}");
             }
 
             supported
@@ -187,7 +187,7 @@ where
             trace!("tokio spawn blocking");
 
             // If tokio is enabled, we spawn a blocking task
-            return task::spawn_blocking(f)
+            task::spawn_blocking(f)
                 .map_err(|e| anyhow::anyhow!("Failed to spawn blocking task: {}", e))
         } else {
             trace!("simulated spawn blocking");
@@ -239,10 +239,10 @@ where
     trace!("tokio block in place internal");
     let old = is_in_block_in_place();
     set_in_block_in_place(true);
-    let res;
+    
     cfg_if! {
         if #[cfg(feature = "tokio-multi-thread")] {
-            res = tokio::task::block_in_place(f);
+            let res = tokio::task::block_in_place(f);
         } else {
             res = f();
         }

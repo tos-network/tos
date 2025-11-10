@@ -35,7 +35,7 @@ impl State {
         // enable the raw mode for terminal
         // so we can read each event/action
         let interactive = if allow_interactive {
-            !terminal::enable_raw_mode().is_err()
+            terminal::enable_raw_mode().is_ok()
         } else {
             false
         };
@@ -140,8 +140,8 @@ impl State {
                                         is_in_history = true;
                                     }
 
-                                    if is_in_history {
-                                        if history_index < history.len() {
+                                    if is_in_history
+                                        && history_index < history.len() {
                                             buffer.clear();
                                             buffer.push_str(&history[history_index]);
                                             self.show_input(&buffer)?;
@@ -149,7 +149,6 @@ impl State {
                                                 history_index += 1;
                                             }
                                         }
-                                    }
                                 }
                                 KeyCode::Down => {
                                     if is_in_history {
@@ -199,21 +198,18 @@ impl State {
                                         if let Err(e) = sender.send(cloned_buffer) {
                                             if log::log_enabled!(log::Level::Error) {
                                                 error!(
-                                                    "Error while sending input to reader: {}",
-                                                    e
+                                                    "Error while sending input to reader: {e}"
                                                 );
                                             }
                                             break;
                                         }
-                                    } else {
-                                        if !cloned_buffer.is_empty() {
-                                            history.push_front(cloned_buffer.clone());
-                                            if let Err(e) = sender.send(cloned_buffer) {
-                                                if log::log_enabled!(log::Level::Error) {
-                                                    error!("Error while sending input to command handler: {}", e);
-                                                }
-                                                break;
+                                    } else if !cloned_buffer.is_empty() {
+                                        history.push_front(cloned_buffer.clone());
+                                        if let Err(e) = sender.send(cloned_buffer) {
+                                            if log::log_enabled!(log::Level::Error) {
+                                                error!("Error while sending input to command handler: {e}");
                                             }
+                                            break;
                                         }
                                     }
                                 }
@@ -225,22 +221,21 @@ impl State {
                 }
                 Err(e) => {
                     if log::log_enabled!(log::Level::Error) {
-                        error!("Error while reading input: {}", e);
+                        error!("Error while reading input: {e}");
                     }
                     break;
                 }
             };
         }
 
-        if !self.exit.swap(true, Ordering::SeqCst) {
-            if self.is_interactive() {
+        if !self.exit.swap(true, Ordering::SeqCst)
+            && self.is_interactive() {
                 if let Err(e) = terminal::disable_raw_mode() {
                     if log::log_enabled!(log::Level::Error) {
-                        error!("Error while disabling raw mode: {}", e);
+                        error!("Error while disabling raw mode: {e}");
                     }
                 }
             }
-        }
 
         info!("ioloop thread is now stopped");
 
@@ -249,7 +244,7 @@ impl State {
         if let Some(sender) = sender.take() {
             if let Err(e) = sender.send(String::new()) {
                 if log::log_enabled!(log::Level::Error) {
-                    error!("Error while sending input to reader: {}", e);
+                    error!("Error while sending input to reader: {e}");
                 }
             }
         }
@@ -290,7 +285,7 @@ impl State {
             return Ok(());
         }
 
-        let current_count = self.count_lines(&format!("\r{}{}", prompt, input));
+        let current_count = self.count_lines(&format!("\r{prompt}{input}"));
         let previous_count = self
             .previous_prompt_line
             .swap(current_count, Ordering::SeqCst);
@@ -303,7 +298,7 @@ impl State {
         if self.should_mask_input() {
             print!("\r\x1B[2K{}{}", prompt, "*".repeat(input.len()));
         } else {
-            print!("\r\x1B[2K{}{}", prompt, input);
+            print!("\r\x1B[2K{prompt}{input}");
         }
 
         stdout().flush()?;

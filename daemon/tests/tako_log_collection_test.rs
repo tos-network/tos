@@ -211,7 +211,7 @@ fn test_log_messages_format() {
             for (i, msg) in exec_result.log_messages.iter().enumerate() {
                 println!("  [{}] {}", i, msg);
 
-                // All log messages should follow Solana-compatible format
+                // All log messages should follow SVM-compatible format
                 // "Program log: ..." or "Program data: ..." or "Program consumption: ..."
                 let is_valid_format = msg.starts_with("Program log: ")
                     || msg.starts_with("Program data: ")
@@ -219,12 +219,12 @@ fn test_log_messages_format() {
 
                 assert!(
                     is_valid_format,
-                    "Log message should follow Solana format. Got: {}",
+                    "Log message should follow SVM format. Got: {}",
                     msg
                 );
             }
 
-            println!("✅ All log messages follow Solana-compatible format");
+            println!("✅ All log messages follow SVM-compatible format");
         }
         Err(e) => {
             panic!("Execution failed: {}", e);

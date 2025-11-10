@@ -79,10 +79,10 @@ impl<'a> Writer<'a> {
     }
 
     pub fn as_mut_bytes(&mut self) -> &mut Vec<u8> {
-        &mut self.bytes
+        self.bytes
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes
+        self.bytes
     }
 }

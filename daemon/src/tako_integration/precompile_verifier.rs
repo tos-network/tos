@@ -5,7 +5,7 @@
 //!
 //! # Architecture
 //!
-//! Following Solana's design:
+//! Following SVM design:
 //! - Precompiles are verified BEFORE transaction execution begins
 //! - Verification is FREE at runtime (0 compute units consumed)
 //! - Compute cost is charged during transaction cost estimation only
@@ -147,7 +147,7 @@ pub fn verify_all_precompiles(
 /// # Returns
 /// * Total compute units for all precompiles (0 for non-precompiles)
 ///
-/// # Cost Schedule (Solana-aligned)
+/// # Cost Schedule (SVM-aligned)
 /// - Ed25519: 2,280 CU per signature
 /// - secp256k1: 6,690 CU per signature
 /// - secp256r1: 4,800 CU per signature
@@ -166,7 +166,7 @@ pub fn estimate_precompile_cost(
     invoke_context: &InvokeContext,
     instructions: &[([u8; 32], Vec<u8>)],
 ) -> u64 {
-    // Precompile program IDs (Solana-compatible)
+    // Precompile program IDs (SVM-compatible)
     const ED25519_PROGRAM_ID: [u8; 32] = [
         3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0,
@@ -180,7 +180,7 @@ pub fn estimate_precompile_cost(
         0, 0,
     ];
 
-    // Compute costs per signature (Solana-aligned)
+    // Compute costs per signature (SVM-aligned)
     const ED25519_COST_PER_SIG: u64 = 2_280;
     const SECP256K1_COST_PER_SIG: u64 = 6_690;
     const SECP256R1_COST_PER_SIG: u64 = 4_800;

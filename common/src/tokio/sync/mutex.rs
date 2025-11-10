@@ -54,15 +54,12 @@ impl<T: ?Sized> Mutex<T> {
                             show = false;
                             let last = self.last_location.lock().expect("last lock location");
                             let mut msg = format!("Mutex at {} failed locking at {}.", self.init_location, location);
-                            match *last {
-                                Some(last) => {
-                                    msg.push_str(&format!("\n- Last successful lock at: {}", last));
-                                }
-                                None => {}
+                            if let Some(last) = *last {
+                                msg.push_str(&format!("\n- Last successful lock at: {last}"));
                             };
 
                             if log::log_enabled!(log::Level::Error) {
-                                error!("{}", msg);
+                                error!("{msg}");
                             }
                         }
                     }

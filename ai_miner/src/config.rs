@@ -195,18 +195,15 @@ impl std::fmt::Display for ConfigValidationError {
         match self {
             ConfigValidationError::InvalidDaemonAddress(addr) => write!(
                 f,
-                "Invalid daemon address: '{}' - must be a valid HTTP/HTTPS URL",
-                addr
+                "Invalid daemon address: '{addr}' - must be a valid HTTP/HTTPS URL"
             ),
             ConfigValidationError::InvalidNetworkType(network) => write!(
                 f,
-                "Invalid network type: '{}' - must be one of: mainnet, testnet, devnet, stagenet",
-                network
+                "Invalid network type: '{network}' - must be one of: mainnet, testnet, devnet, stagenet"
             ),
             ConfigValidationError::InvalidMinerAddress(addr) => write!(
                 f,
-                "Invalid miner address: '{}' - must be a valid TOS address",
-                addr
+                "Invalid miner address: '{addr}' - must be a valid TOS address"
             ),
             ConfigValidationError::InvalidTimeout {
                 field,
@@ -215,31 +212,27 @@ impl std::fmt::Display for ConfigValidationError {
                 max,
             } => write!(
                 f,
-                "Invalid {}: {} seconds - must be between {} and {} seconds",
-                field, value, min, max
+                "Invalid {field}: {value} seconds - must be between {min} and {max} seconds"
             ),
             ConfigValidationError::InvalidRetrySettings { field, value, max } => write!(
                 f,
-                "Invalid {}: {} - must be between 0 and {}",
-                field, value, max
+                "Invalid {field}: {value} - must be between 0 and {max}"
             ),
             ConfigValidationError::InvalidPath {
                 field,
                 path,
                 reason,
-            } => write!(f, "Invalid {}: '{}' - {}", field, path, reason),
+            } => write!(f, "Invalid {field}: '{path}' - {reason}"),
             ConfigValidationError::DuplicateLogFile {
                 logs_path,
                 filename,
             } => write!(
                 f,
-                "Log file conflict: '{}' already exists in directory '{}'",
-                filename, logs_path
+                "Log file conflict: '{filename}' already exists in directory '{logs_path}'"
             ),
             ConfigValidationError::InsufficientPermissions { path, operation } => write!(
                 f,
-                "Insufficient permissions for {}: '{}' - check directory permissions",
-                operation, path
+                "Insufficient permissions for {operation}: '{path}' - check directory permissions"
             ),
         }
     }
@@ -275,7 +268,7 @@ impl ConfigValidator {
         if let Err(e) = self.validate_daemon_address(&config.daemon_address) {
             if self.auto_fix && !self.strict_mode {
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("Auto-fixing daemon address: {}", e);
+                    warn!("Auto-fixing daemon address: {e}");
                 }
                 config.daemon_address = defaults::DAEMON_ADDRESS.to_string();
                 fixed_issues.push(format!(
@@ -291,7 +284,7 @@ impl ConfigValidator {
         if let Err(e) = self.validate_network(&config.network) {
             if self.auto_fix && !self.strict_mode {
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("Auto-fixing network type: {}", e);
+                    warn!("Auto-fixing network type: {e}");
                 }
                 config.network = defaults::NETWORK.to_string();
                 fixed_issues.push(format!("Fixed network type to default: {}", config.network));
@@ -306,7 +299,7 @@ impl ConfigValidator {
                 if self.strict_mode {
                     return Err(anyhow!("Configuration validation failed: {}", e));
                 } else {
-                    warnings.push(format!("Warning: {}", e));
+                    warnings.push(format!("Warning: {e}"));
                 }
             }
         }
@@ -315,7 +308,7 @@ impl ConfigValidator {
         if let Err(e) = self.validate_timeout("request_timeout", config.request_timeout_secs) {
             if self.auto_fix && !self.strict_mode {
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("Auto-fixing request timeout: {}", e);
+                    warn!("Auto-fixing request timeout: {e}");
                 }
                 config.request_timeout_secs = defaults::REQUEST_TIMEOUT_SECS;
                 fixed_issues.push(format!(
@@ -331,7 +324,7 @@ impl ConfigValidator {
         {
             if self.auto_fix && !self.strict_mode {
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("Auto-fixing connection timeout: {}", e);
+                    warn!("Auto-fixing connection timeout: {e}");
                 }
                 config.connection_timeout_secs = defaults::CONNECTION_TIMEOUT_SECS;
                 fixed_issues.push(format!(
@@ -347,7 +340,7 @@ impl ConfigValidator {
         if let Err(e) = self.validate_retry_count(config.max_retries) {
             if self.auto_fix && !self.strict_mode {
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("Auto-fixing max retries: {}", e);
+                    warn!("Auto-fixing max retries: {e}");
                 }
                 config.max_retries = defaults::MAX_RETRIES;
                 fixed_issues.push(format!("Fixed max retries to {}", config.max_retries));
@@ -359,7 +352,7 @@ impl ConfigValidator {
         if let Err(e) = self.validate_retry_delay(config.retry_delay_ms) {
             if self.auto_fix && !self.strict_mode {
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("Auto-fixing retry delay: {}", e);
+                    warn!("Auto-fixing retry delay: {e}");
                 }
                 config.retry_delay_ms = defaults::RETRY_DELAY_MS;
                 fixed_issues.push(format!("Fixed retry delay to {} ms", config.retry_delay_ms));
@@ -381,7 +374,7 @@ impl ConfigValidator {
             }
             for fix in &fixed_issues {
                 if log::log_enabled!(log::Level::Info) {
-                    info!("  ✅ {}", fix);
+                    info!("  ✅ {fix}");
                 }
             }
         }
@@ -390,7 +383,7 @@ impl ConfigValidator {
             warn!("⚠️  Configuration warnings:");
             for warning in &warnings {
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("  • {}", warning);
+                    warn!("  • {warning}");
                 }
             }
         }
@@ -406,7 +399,7 @@ impl ConfigValidator {
         let url_str = if address.starts_with("http://") || address.starts_with("https://") {
             address.to_string()
         } else {
-            format!("http://{}", address)
+            format!("http://{address}")
         };
 
         Url::parse(&url_str)
@@ -426,7 +419,7 @@ impl ConfigValidator {
 
     fn validate_miner_address(&self, address: &Address) -> ValidationResult<()> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Validating miner address: {}", address);
+            debug!("Validating miner address: {address}");
         }
 
         // Comprehensive address validation
@@ -435,7 +428,7 @@ impl ConfigValidator {
         self.validate_address_type_compatibility(address)?;
 
         if log::log_enabled!(log::Level::Info) {
-            info!("Miner address validation passed: {}", address);
+            info!("Miner address validation passed: {address}");
         }
         Ok(())
     }
@@ -462,7 +455,7 @@ impl ConfigValidator {
         }
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Address format validation passed for: {}", address);
+            debug!("Address format validation passed for: {address}");
         }
         Ok(())
     }
@@ -476,33 +469,28 @@ impl ConfigValidator {
 
         // Validate network-specific patterns
         if let Some(prefix) = expected_characteristics.prefix {
-            if !address_str.starts_with(prefix) {
-                if log::log_enabled!(log::Level::Warn) {
+            if !address_str.starts_with(prefix)
+                && log::log_enabled!(log::Level::Warn) {
                     warn!(
-                        "Address {} doesn't have expected network prefix '{}' for network type",
-                        address, prefix
+                        "Address {address} doesn't have expected network prefix '{prefix}' for network type"
                     );
                 }
                 // Note: This is a warning, not an error, as address formats may vary
-            }
         }
 
         // Check address format compatibility
         if let Some(expected_format) = expected_characteristics.format_hint {
-            if !self.matches_address_format(&address_str, expected_format) {
-                if log::log_enabled!(log::Level::Warn) {
+            if !self.matches_address_format(&address_str, expected_format)
+                && log::log_enabled!(log::Level::Warn) {
                     warn!(
-                        "Address {} may not be compatible with {} network format",
-                        address, expected_format
+                        "Address {address} may not be compatible with {expected_format} network format"
                     );
                 }
-            }
         }
 
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Address network compatibility validation passed for: {}",
-                address
+                "Address network compatibility validation passed for: {address}"
             );
         }
         Ok(())
@@ -516,18 +504,15 @@ impl ConfigValidator {
         let address_str = address.to_string();
 
         // Basic heuristics for address type validation
-        if address_str.starts_with("contract_") || address_str.contains("::") {
-            if log::log_enabled!(log::Level::Warn) {
-                warn!("Address {} appears to be a contract address, which may not be suitable for mining rewards",
-                      address);
+        if (address_str.starts_with("contract_") || address_str.contains("::"))
+            && log::log_enabled!(log::Level::Warn) {
+                warn!("Address {address} appears to be a contract address, which may not be suitable for mining rewards");
             }
-        }
 
         // Additional validation can be added based on TOS address specifications
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Address type compatibility validation passed for: {}",
-                address
+                "Address type compatibility validation passed for: {address}"
             );
         }
         Ok(())
@@ -562,7 +547,7 @@ impl ConfigValidator {
     }
 
     fn validate_timeout(&self, field: &str, value: u64) -> ValidationResult<()> {
-        if value < defaults::MIN_TIMEOUT_SECS || value > defaults::MAX_TIMEOUT_SECS {
+        if !(defaults::MIN_TIMEOUT_SECS..=defaults::MAX_TIMEOUT_SECS).contains(&value) {
             return Err(ConfigValidationError::InvalidTimeout {
                 field: field.to_string(),
                 value,
@@ -585,7 +570,7 @@ impl ConfigValidator {
     }
 
     fn validate_retry_delay(&self, value: u64) -> ValidationResult<()> {
-        if value < defaults::MIN_RETRY_DELAY_MS || value > defaults::MAX_RETRY_DELAY_MS {
+        if !(defaults::MIN_RETRY_DELAY_MS..=defaults::MAX_RETRY_DELAY_MS).contains(&value) {
             return Err(ConfigValidationError::InvalidTimeout {
                 field: "retry_delay".to_string(),
                 value,
@@ -630,12 +615,12 @@ impl ConfigValidator {
 
         if !path_buf.exists() {
             if log::log_enabled!(log::Level::Info) {
-                info!("Creating {} directory: {}", dir_type, path);
+                info!("Creating {dir_type} directory: {path}");
             }
             std::fs::create_dir_all(&path_buf).map_err(|e| {
                 anyhow!("Failed to create {} directory '{}': {}", dir_type, path, e)
             })?;
-            fixed_issues.push(format!("Created {} directory: {}", dir_type, path));
+            fixed_issues.push(format!("Created {dir_type} directory: {path}"));
         } else if !path_buf.is_dir() {
             return Err(anyhow!("Path '{}' exists but is not a directory", path));
         }
@@ -709,14 +694,13 @@ impl ValidatedConfig {
         let validator = ConfigValidator::new(strict_mode, auto_fix);
         let messages = validator.validate(&mut config)?;
 
-        if !messages.is_empty() {
-            if log::log_enabled!(log::Level::Info) {
+        if !messages.is_empty()
+            && log::log_enabled!(log::Level::Info) {
                 info!(
                     "Configuration loaded with {} adjustments/warnings",
                     messages.len()
                 );
             }
-        }
 
         Ok(config)
     }
@@ -746,19 +730,18 @@ impl ValidatedConfig {
         let _json_content = serde_json::to_string_pretty(&template_config)?;
 
         // Add descriptive header
-        let template = format!(
-            r#"{{
-  "_info": {{
+        let template = r#"{
+  "_info": {
     "description": "TOS AI Mining Configuration",
     "version": "1.0",
-    "sections": {{
+    "sections": {
       "logging": "Controls log output and file generation",
       "storage": "Persistent storage for AI mining state",
       "daemon": "Connection settings for TOS daemon",
       "network": "Advanced network timeouts and retry settings",
       "validation": "Configuration validation behavior"
-    }}
-  }},
+    }
+  },
   "log_level": "info",
   "disable_file_logging": false,
   "disable_log_color": false,
@@ -774,8 +757,7 @@ impl ValidatedConfig {
   "retry_delay_ms": 1000,
   "auto_fix_config": true,
   "strict_validation": false
-}}"#
-        );
+}"#.to_string();
 
         std::fs::write(&path, template).map_err(|e| {
             anyhow!(

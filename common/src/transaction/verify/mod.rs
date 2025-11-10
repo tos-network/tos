@@ -63,9 +63,9 @@ impl Transaction {
     /// This is used to substract the amount from the sender's balance
     /// Get the new output amounts for the sender
     /// Balance simplification: Returns plain u64 amounts instead of ciphertexts
-    pub fn get_expected_sender_outputs<'a>(
-        &'a self,
-    ) -> Result<Vec<(&'a Hash, u64)>, DecompressionError> {
+    pub fn get_expected_sender_outputs(
+        &self,
+    ) -> Result<Vec<(&Hash, u64)>, DecompressionError> {
         // This method previously collected sender output ciphertexts for each asset
         // With plaintext balances, no commitments or ciphertexts needed
         // Return empty vector for now (amounts are handled directly in apply())
@@ -92,9 +92,9 @@ impl Transaction {
     // 1. Validate deposit count and max_gas limits
     // 2. Validate all deposits are Public with amount > 0
     // 3. No decompression needed
-    fn verify_invoke_contract<'a, E>(
+    fn verify_invoke_contract<E>(
         &self,
-        deposits: &'a IndexMap<Hash, ContractDeposit>,
+        deposits: &IndexMap<Hash, ContractDeposit>,
         max_gas: u64,
     ) -> Result<(), VerificationError<E>> {
         if deposits.len() > MAX_DEPOSIT_PER_INVOKE_CALL {
@@ -102,7 +102,7 @@ impl Transaction {
         }
 
         if max_gas > MAX_GAS_USAGE_PER_TX {
-            return Err(VerificationError::MaxGasReached.into());
+            return Err(VerificationError::MaxGasReached);
         }
 
         // Validate all deposits are public with non-zero amounts
@@ -155,7 +155,7 @@ impl Transaction {
 
         trace!("Pre-verifying transaction on state");
         state
-            .pre_verify_tx(&self)
+            .pre_verify_tx(self)
             .await
             .map_err(VerificationError::State)?;
 
@@ -220,8 +220,8 @@ impl Transaction {
                 let validator = ModuleValidator::new(module, environment);
                 for constant in payload.parameters.iter() {
                     validator
-                        .verify_constant(&constant)
-                        .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
+                        .verify_constant(constant)
+                        .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
                 }
             }
             TransactionType::DeployContract(payload) => {
@@ -237,7 +237,7 @@ impl Transaction {
                 let validator = ModuleValidator::new(&payload.module, environment);
                 validator
                     .verify()
-                    .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
+                    .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
             }
             TransactionType::Energy(payload) => match payload {
                 EnergyPayload::FreezeTos { amount, duration } => {
@@ -453,7 +453,7 @@ impl Transaction {
 
         trace!("Pre-verifying transaction on state");
         state
-            .pre_verify_tx(&self)
+            .pre_verify_tx(self)
             .await
             .map_err(VerificationError::State)?;
 
@@ -585,8 +585,8 @@ impl Transaction {
                 let validator = ModuleValidator::new(module, environment);
                 for constant in payload.parameters.iter() {
                     validator
-                        .verify_constant(&constant)
-                        .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
+                        .verify_constant(constant)
+                        .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
                 }
             }
             TransactionType::DeployContract(payload) => {
@@ -635,7 +635,7 @@ impl Transaction {
                 let validator = ModuleValidator::new(&payload.module, environment);
                 validator
                     .verify()
-                    .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
+                    .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
             }
             TransactionType::Energy(_) => {
                 // Energy transactions don't require special verification beyond basic checks
@@ -687,8 +687,7 @@ impl Transaction {
                 if !sig.signature.verify(hash.as_bytes(), &decompressed) {
                     if log::log_enabled!(log::Level::Debug) {
                         debug!(
-                            "Multisig signature verification failed for participant {}",
-                            index
+                            "Multisig signature verification failed for participant {index}"
                         );
                     }
                     return Err(VerificationError::InvalidSignature);
@@ -954,8 +953,7 @@ impl Transaction {
             if dynamic_parts_only {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "TX {} is known from ZKPCache, verifying dynamic parts only",
-                        hash
+                        "TX {hash} is known from ZKPCache, verifying dynamic parts only"
                     );
                 }
                 tx.verify_dynamic_parts(hash, state).await?;
@@ -988,8 +986,7 @@ impl Transaction {
         if dynamic_parts_only {
             if log::log_enabled!(log::Level::Debug) {
                 debug!(
-                    "TX {} is known from ZKPCache, verifying dynamic parts only",
-                    tx_hash
+                    "TX {tx_hash} is known from ZKPCache, verifying dynamic parts only"
                 );
             }
             self.verify_dynamic_parts(tx_hash, state).await?;
@@ -1165,8 +1162,7 @@ impl Transaction {
 
                     if log::log_enabled!(log::Level::Debug) {
                         debug!(
-                            "Consumed {} energy for transaction {}",
-                            energy_cost, tx_hash
+                            "Consumed {energy_cost} energy for transaction {tx_hash}"
                         );
                     }
                 } else {
@@ -1272,7 +1268,7 @@ impl Transaction {
                     // TODO: we must handle this carefully
                     if !is_success {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("Contract deploy for {} failed", contract_address);
+                            debug!("Contract deploy for {contract_address} failed");
                         }
                         state
                             .remove_contract_module(&contract_address)
@@ -1295,10 +1291,10 @@ impl Transaction {
                             energy_resource.unwrap_or_else(EnergyResource::new);
 
                         // Freeze TOS for energy - get topoheight from the blockchain state
-                        let topoheight = state.get_block().get_blue_score() as u64; // Use blue_score for consensus
+                        let topoheight = state.get_block().get_blue_score(); // Use blue_score for consensus
                         energy_resource.freeze_tos_for_energy(
                             *amount,
-                            duration.clone(),
+                            *duration,
                             topoheight,
                         );
 
@@ -1322,7 +1318,7 @@ impl Transaction {
 
                         if let Some(mut energy_resource) = energy_resource {
                             // Unfreeze TOS - get topoheight from the blockchain state
-                            let topoheight = state.get_block().get_blue_score() as u64; // Use blue_score for consensus
+                            let topoheight = state.get_block().get_blue_score(); // Use blue_score for consensus
                             energy_resource
                                 .unfreeze_tos(*amount, topoheight)
                                 .map_err(|_| {
@@ -1341,7 +1337,7 @@ impl Transaction {
                             // to keep mempool state consistent. Do NOT add balance here to avoid double-refund.
 
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("UnfreezeTos applied: {} TOS unfrozen (balance already refunded in verify phase)", amount);
+                                debug!("UnfreezeTos applied: {amount} TOS unfrozen (balance already refunded in verify phase)");
                             }
                         } else {
                             return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -1363,7 +1359,7 @@ impl Transaction {
                     .unwrap_or_default();
 
                 // Create validator with current context
-                let block_height = state.get_block().get_blue_score() as u64;
+                let block_height = state.get_block().get_blue_score();
                 let timestamp = state.get_block().get_timestamp();
                 let source = self.source.clone();
 

@@ -29,7 +29,7 @@ pub fn hash_to_array_fn(zelf: FnInstance, _: FnParams, _: &mut Context) -> FnRet
     let hash: &Hash = zelf?.as_opaque_type()?;
     let bytes = hash
         .as_bytes()
-        .into_iter()
+        .iter()
         .map(|b| Primitive::U8(*b).into())
         .collect();
 
@@ -44,7 +44,7 @@ pub fn hash_from_bytes_fn(_: FnInstance, mut params: FnParams, _: &mut Context) 
         return Err(EnvironmentError::InvalidParameter);
     }
 
-    let hash = Hash::from_bytes(&bytes).context("failed to create hash from bytes")?;
+    let hash = Hash::from_bytes(bytes).context("failed to create hash from bytes")?;
 
     Ok(Some(Primitive::Opaque(OpaqueWrapper::new(hash)).into()))
 }
@@ -131,7 +131,7 @@ pub fn sha256_fn(_: FnInstance, mut params: FnParams, _: &mut Context) -> FnRetu
         .remove(0)
         .into_owned()?
         .as_vec()?
-        .into_iter()
+        .iter()
         .map(|v| v.as_u8())
         .collect::<Result<Vec<u8>, ValueError>>()?;
 

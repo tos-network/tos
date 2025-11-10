@@ -109,8 +109,8 @@ impl<T> Deref for Immutable<T> {
 impl<T: fmt::Display> Display for Immutable<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Immutable::Owned(v) => write!(f, "{}", v),
-            Immutable::Arc(v) => write!(f, "{}", v),
+            Immutable::Owned(v) => write!(f, "{v}"),
+            Immutable::Arc(v) => write!(f, "{v}"),
         }
     }
 }

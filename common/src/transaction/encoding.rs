@@ -227,7 +227,7 @@ mod tests {
         for id in large_ids {
             let encoded = encode_entry_point(id);
             let decoded = u16::from_le_bytes([encoded[1], encoded[2]]);
-            assert_eq!(decoded, id, "Data loss detected for entry_id={}", id);
+            assert_eq!(decoded, id, "Data loss detected for entry_id={id}");
         }
     }
 

@@ -260,7 +260,7 @@ impl<'a> RPCContractOutput<'a> {
             ContractOutput::NewAsset { asset } => RPCContractOutput::NewAsset {
                 asset: Cow::Borrowed(asset),
             },
-            ContractOutput::ExitCode(code) => RPCContractOutput::ExitCode(code.clone()),
+            ContractOutput::ExitCode(code) => RPCContractOutput::ExitCode(*code),
             ContractOutput::RefundDeposits => RPCContractOutput::RefundDeposits,
         }
     }

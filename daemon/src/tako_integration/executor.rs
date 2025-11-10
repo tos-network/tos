@@ -38,7 +38,7 @@ use super::{TakoExecutionError, TosAccountAdapter, TosContractLoaderAdapter, Tos
 
 /// Default compute budget for contract execution (200,000 compute units)
 ///
-/// This matches Solana's default for simple transactions. Can be adjusted
+/// This matches SVM default for simple transactions. Can be adjusted
 /// based on TOS's requirements.
 pub const DEFAULT_COMPUTE_BUDGET: u64 = 200_000;
 

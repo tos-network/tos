@@ -40,7 +40,7 @@ impl clap::ValueEnum for Network {
     fn from_str(input: &str, _: bool) -> Result<Self, String> {
         input
             .parse()
-            .map_err(|_| format!("Invalid network: {}", input))
+            .map_err(|_| format!("Invalid network: {input}"))
     }
 }
 
@@ -86,7 +86,7 @@ impl Display for Network {
             Self::Stagenet => "Stagenet",
             Self::Devnet => "Dev",
         };
-        write!(f, "{}", str)
+        write!(f, "{str}")
     }
 }
 

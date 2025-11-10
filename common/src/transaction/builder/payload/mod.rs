@@ -260,7 +260,7 @@ mod tests {
 
         for amount in amounts {
             for duration in &durations {
-                let builder = EnergyBuilder::freeze_tos(amount, duration.clone());
+                let builder = EnergyBuilder::freeze_tos(amount, *duration);
                 let expected_energy = (amount / COIN_VALUE) * duration.reward_multiplier();
                 assert_eq!(builder.calculate_energy_gain(), Some(expected_energy));
             }
@@ -272,19 +272,19 @@ mod tests {
         let duration = FreezeDuration::new(3).unwrap();
 
         // Test exactly 1 TOS (should pass)
-        let builder = EnergyBuilder::freeze_tos(COIN_VALUE, duration.clone());
+        let builder = EnergyBuilder::freeze_tos(COIN_VALUE, duration);
         assert!(builder.validate().is_ok());
 
         // Test slightly less than 1 TOS (should fail)
-        let builder = EnergyBuilder::freeze_tos(COIN_VALUE - 1, duration.clone());
+        let builder = EnergyBuilder::freeze_tos(COIN_VALUE - 1, duration);
         assert!(builder.validate().is_err());
 
         // Test 0.5 TOS (should fail)
-        let builder = EnergyBuilder::freeze_tos(COIN_VALUE / 2, duration.clone());
+        let builder = EnergyBuilder::freeze_tos(COIN_VALUE / 2, duration);
         assert!(builder.validate().is_err());
 
         // Test 2 TOS (should pass)
-        let builder = EnergyBuilder::freeze_tos(COIN_VALUE * 2, duration.clone());
+        let builder = EnergyBuilder::freeze_tos(COIN_VALUE * 2, duration);
         assert!(builder.validate().is_ok());
     }
 
@@ -295,11 +295,10 @@ mod tests {
         // Test valid whole TOS amounts for freeze
         let valid_amounts = [COIN_VALUE, COIN_VALUE * 2, COIN_VALUE * 3, COIN_VALUE * 10]; // 1, 2, 3, 10 TOS
         for amount in valid_amounts {
-            let builder = EnergyBuilder::freeze_tos(amount, duration.clone());
+            let builder = EnergyBuilder::freeze_tos(amount, duration);
             assert!(
                 builder.validate().is_ok(),
-                "Freeze amount {} should be valid",
-                amount
+                "Freeze amount {amount} should be valid"
             );
         }
 
@@ -312,11 +311,10 @@ mod tests {
             COIN_VALUE * 2 - 1,              // 1.99999999 TOS
         ];
         for amount in invalid_amounts {
-            let builder = EnergyBuilder::freeze_tos(amount, duration.clone());
+            let builder = EnergyBuilder::freeze_tos(amount, duration);
             assert!(
                 builder.validate().is_err(),
-                "Freeze amount {} should be invalid",
-                amount
+                "Freeze amount {amount} should be invalid"
             );
         }
     }
@@ -329,8 +327,7 @@ mod tests {
             let builder = EnergyBuilder::unfreeze_tos(amount);
             assert!(
                 builder.validate().is_ok(),
-                "Unfreeze amount {} should be valid",
-                amount
+                "Unfreeze amount {amount} should be valid"
             );
         }
 
@@ -346,8 +343,7 @@ mod tests {
             let builder = EnergyBuilder::unfreeze_tos(amount);
             assert!(
                 builder.validate().is_err(),
-                "Unfreeze amount {} should be invalid",
-                amount
+                "Unfreeze amount {amount} should be invalid"
             );
         }
     }
@@ -361,8 +357,7 @@ mod tests {
             let builder = EnergyBuilder::freeze_tos(100000000, duration); // 1 TOS
             assert!(
                 builder.validate().is_ok(),
-                "Duration {} days should be valid",
-                days
+                "Duration {days} days should be valid"
             );
         }
 
@@ -373,8 +368,7 @@ mod tests {
             let builder = EnergyBuilder::freeze_tos(100000000, duration); // 1 TOS
             assert!(
                 builder.validate().is_err(),
-                "Duration {} days should be invalid",
-                days
+                "Duration {days} days should be invalid"
             );
         }
     }

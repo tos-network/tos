@@ -21,8 +21,8 @@ fn main() {
     let address = Address::from_string(dev_address).unwrap();
     let public_key = address.to_public_key();
 
-    println!("Network: {}", network);
-    println!("Developer address: {}", dev_address);
+    println!("Network: {network}");
+    println!("Developer address: {dev_address}");
     println!("Developer public key: {}", public_key.to_hex());
 
     // Create genesis block header with different timestamps for different networks
@@ -46,7 +46,7 @@ fn main() {
 
     println!("\n=== New Genesis Block Information ===");
     println!("Block hex: {}", block.to_hex());
-    println!("Block hash: {}", block_hash);
+    println!("Block hash: {block_hash}");
     println!("Block hash (bytes): {:?}", block_hash.clone().to_bytes());
 
     // Verify block
@@ -94,7 +94,7 @@ fn main() {
             println!("Parsed block hash: {}", parsed_block.hash());
         }
         Err(e) => {
-            println!("❌ String cannot be parsed as block: {:?}", e);
+            println!("❌ String cannot be parsed as block: {e:?}");
         }
     }
 }

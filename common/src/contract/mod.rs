@@ -928,8 +928,7 @@ pub fn get_asset_changes_for_hash<'a>(
     state
         .assets
         .get(hash)
-        .map(|v| v.as_ref())
-        .flatten()
+        .and_then(|v| v.as_ref())
         .context("Asset not found in cache")
 }
 
@@ -940,8 +939,7 @@ pub fn get_asset_changes_for_hash_mut<'a>(
     state
         .assets
         .get_mut(hash)
-        .map(|v| v.as_mut())
-        .flatten()
+        .and_then(|v| v.as_mut())
         .context("Asset not found in cache")
 }
 
@@ -986,7 +984,7 @@ fn fire_event_fn(_: FnInstance, mut params: FnParams, context: &mut Context) -> 
     context.increase_gas_usage(cost)?;
 
     let state: &mut ChainState = context.get_mut().context("chain state not found")?;
-    let entry = state.cache.events.entry(id).or_insert_with(Vec::new);
+    let entry = state.cache.events.entry(id).or_default();
 
     entry.push(constant);
 
@@ -995,22 +993,20 @@ fn fire_event_fn(_: FnInstance, mut params: FnParams, context: &mut Context) -> 
 
 fn println_fn(_: FnInstance, params: FnParams, context: &mut Context) -> FnReturnType {
     let state: &ChainState = context.get().context("chain state not found")?;
-    if state.debug_mode {
-        if log::log_enabled!(log::Level::Info) {
+    if state.debug_mode
+        && log::log_enabled!(log::Level::Info) {
             info!("[{}]: {}", state.contract, params[0].as_ref()?);
         }
-    }
 
     Ok(None)
 }
 
 fn debug_fn(_: FnInstance, params: FnParams, context: &mut Context) -> FnReturnType {
     let state: &ChainState = context.get().context("chain state not found")?;
-    if state.debug_mode {
-        if log::log_enabled!(log::Level::Debug) {
+    if state.debug_mode
+        && log::log_enabled!(log::Level::Debug) {
             debug!("{:?}", params[0].as_ref()?);
         }
-    }
 
     Ok(None)
 }
@@ -1059,7 +1055,7 @@ fn transfer<P: ContractProvider>(
     context: &mut Context,
 ) -> FnReturnType {
     if log::log_enabled!(log::Level::Debug) {
-        debug!("Transfer called {:?}", params);
+        debug!("Transfer called {params:?}");
     }
 
     let asset: Hash = params.remove(2).into_owned()?.into_opaque_type()?;

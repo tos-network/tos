@@ -5,7 +5,7 @@
 
 // Note: Hash and InvokeContext not currently needed but available for future use
 
-/// Precompile compute costs (Solana-aligned)
+/// Precompile compute costs (SVM-aligned)
 pub mod costs {
     /// Ed25519 signature verification cost per signature
     pub const ED25519_COST: u64 = 2_280;
@@ -80,7 +80,9 @@ pub fn estimate_single_precompile_cost(
 }
 
 /// Get cost per signature for a given precompile
-fn get_precompile_cost_per_signature(program_id: &[u8; 32]) -> Result<u64, Box<dyn std::error::Error>> {
+fn get_precompile_cost_per_signature(
+    program_id: &[u8; 32],
+) -> Result<u64, Box<dyn std::error::Error>> {
     // Ed25519: [3, 0, 0, ...]
     if program_id[0] == 3 && program_id[1..].iter().all(|&b| b == 0) {
         return Ok(costs::ED25519_COST);
@@ -172,8 +174,8 @@ mod tests {
     #[test]
     fn test_estimate_ed25519_cost() {
         let program_id = [
-            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0,
+            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
         ];
 
         // 2 signatures
@@ -186,8 +188,8 @@ mod tests {
     #[test]
     fn test_estimate_secp256k1_cost() {
         let program_id = [
-            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0,
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
         ];
 
         // 3 signatures
@@ -214,18 +216,18 @@ mod tests {
     #[test]
     fn test_estimate_transaction_cost_mixed() {
         let ed25519_program_id = [
-            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0,
+            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
         ];
 
         let secp256k1_program_id = [
-            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0,
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
         ];
 
         let regular_program_id = [
-            1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0,
+            1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
         ];
 
         let ed25519_data = vec![2u8, 0]; // 2 signatures
@@ -250,8 +252,8 @@ mod tests {
         let estimator = TransactionCostEstimator::with_base_cost(5_000);
 
         let program_id = [
-            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0,
+            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
         ];
         let instruction_data = vec![1u8, 0]; // 1 signature
 
@@ -269,8 +271,8 @@ mod tests {
     #[test]
     fn test_empty_instruction() {
         let program_id = [
-            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0,
+            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
         ];
         let instruction_data = vec![];
 
@@ -281,8 +283,8 @@ mod tests {
     #[test]
     fn test_zero_signatures() {
         let program_id = [
-            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0,
+            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
         ];
         let instruction_data = vec![0u8, 0]; // num_signatures=0
 

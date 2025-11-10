@@ -189,7 +189,7 @@ impl Serializer for Primitive {
             Primitive::U128(_) => 16,
             Primitive::U256(value) => value.size(),
             Primitive::Boolean(_) => 1,
-            Primitive::String(value) => 2 + value.as_bytes().len(),
+            Primitive::String(value) => 2 + value.len(),
             Primitive::Range(range) => range.0.size() + range.1.size(),
             Primitive::Opaque(opaque) => opaque.size(),
         }
@@ -637,7 +637,7 @@ mod tests {
                 assert_eq!(max, MAX_VALUE_CELL_DEPTH);
                 assert_eq!(actual, 65);
             }
-            _ => panic!("Expected ExceedsMaxDepth error, got {:?}", result),
+            _ => panic!("Expected ExceedsMaxDepth error, got {result:?}"),
         }
     }
 
@@ -686,7 +686,7 @@ mod tests {
                 assert_eq!(max, MAX_ARRAY_SIZE);
                 assert_eq!(actual, 10001);
             }
-            _ => panic!("Expected ExceedsMaxArraySize error, got {:?}", result),
+            _ => panic!("Expected ExceedsMaxArraySize error, got {result:?}"),
         }
     }
 
@@ -710,7 +710,7 @@ mod tests {
                 assert_eq!(max, MAX_MAP_SIZE);
                 assert_eq!(actual, 10001);
             }
-            _ => panic!("Expected ExceedsMaxMapSize error, got {:?}", result),
+            _ => panic!("Expected ExceedsMaxMapSize error, got {result:?}"),
         }
     }
 

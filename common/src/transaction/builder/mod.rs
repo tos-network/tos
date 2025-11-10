@@ -235,7 +235,7 @@ impl TransactionBuilder {
                         freeze_duration: Some(duration),
                     } => EnergyPayload::FreezeTos {
                         amount: *amount,
-                        duration: duration.clone(),
+                        duration: *duration,
                     },
                     EnergyBuilder {
                         amount,
@@ -288,7 +288,7 @@ impl TransactionBuilder {
                         let mut new_addresses = 0;
                         for transfer in transfers {
                             if !state
-                                .account_exists(&transfer.destination.get_public_key())
+                                .account_exists(transfer.destination.get_public_key())
                                 .map_err(GenerationError::State)?
                             {
                                 new_addresses += 1;
@@ -307,7 +307,7 @@ impl TransactionBuilder {
                     {
                         // Use energy fee calculation for transfer transactions
                         let energy_fee = calculate_energy_fee(size, transfers, new_addresses);
-                        println!("[ESTIMATE DEBUG] Energy fee calculation: size={}, transfers={}, new_addresses={}, energy_fee={}", size, transfers, new_addresses, energy_fee);
+                        println!("[ESTIMATE DEBUG] Energy fee calculation: size={size}, transfers={transfers}, new_addresses={new_addresses}, energy_fee={energy_fee}");
                         energy_fee
                     } else {
                         // Use regular TOS fee calculation
@@ -484,7 +484,7 @@ impl TransactionBuilder {
                 if let TransactionTypeBuilder::Transfers(transfers) = &self.data {
                     for transfer in transfers {
                         if !state
-                            .is_account_registered(&transfer.destination.get_public_key())
+                            .is_account_registered(transfer.destination.get_public_key())
                             .map_err(GenerationError::State)?
                         {
                             return Err(GenerationError::InvalidEnergyFeeForNewAddress);
@@ -686,7 +686,7 @@ impl TransactionBuilder {
                         freeze_duration: Some(duration),
                     } => EnergyPayload::FreezeTos {
                         amount: *amount,
-                        duration: duration.clone(),
+                        duration: *duration,
                     },
                     EnergyBuilder {
                         amount,
@@ -722,7 +722,7 @@ impl TransactionBuilder {
 
 impl TransactionTypeBuilder {
     // Get the assets used in the transaction
-    pub fn used_assets<'a>(&'a self) -> HashSet<&'a Hash> {
+    pub fn used_assets(&self) -> HashSet<&Hash> {
         let mut consumed = HashSet::new();
 
         // Native asset is always used. (fees)
@@ -758,7 +758,7 @@ impl TransactionTypeBuilder {
     }
 
     // Get the destination keys used in the transaction
-    pub fn used_keys<'a>(&'a self) -> HashSet<&'a CompressedPublicKey> {
+    pub fn used_keys(&self) -> HashSet<&CompressedPublicKey> {
         let mut used_keys = HashSet::new();
 
         match &self {

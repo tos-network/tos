@@ -135,7 +135,7 @@ pub struct Blockchain<S: Storage> {
     // mempool to retrieve/add all txs
     mempool: RwLock<Mempool>,
     // storage to retrieve/add blocks
-    // Arc wrapper enables parallel execution (Solana pattern)
+    // Arc wrapper enables parallel execution (SVM pattern)
     storage: Arc<RwLock<S>>,
     // Current semaphore used to prevent
     // verifying more than one block at a time

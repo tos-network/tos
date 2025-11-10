@@ -110,6 +110,12 @@ pub enum WorkerError {
     HashError(#[from] TosHashError),
 }
 
+impl<'a> Default for Worker<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> Worker<'a> {
     // Create a new worker
     pub fn new() -> Self {
@@ -188,10 +194,10 @@ impl<'a> Worker<'a> {
                 let mut input = v1::AlignedInput::default();
                 let slice = input.as_mut_slice()?;
                 slice[0..BLOCK_WORK_SIZE].copy_from_slice(work.as_ref());
-                v1::tos_hash(slice, scratch_pad).map(|bytes| Hash::new(bytes))?
+                v1::tos_hash(slice, scratch_pad).map(Hash::new)?
             }
             WorkVariant::V2(scratch_pad) => {
-                v2::tos_hash(work, scratch_pad).map(|bytes| Hash::new(bytes))?
+                v2::tos_hash(work, scratch_pad).map(Hash::new)?
             }
         };
 
@@ -388,7 +394,7 @@ mod tests {
         let slice = input.as_mut_slice().unwrap();
         slice[0..BLOCK_WORK_SIZE].copy_from_slice(&work.to_bytes());
         let expected_hash = v1::tos_hash(slice, &mut v1::ScratchPad::default())
-            .map(|bytes| Hash::new(bytes))
+            .map(Hash::new)
             .unwrap();
         let block_hash = work.hash();
 

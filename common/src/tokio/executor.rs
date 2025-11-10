@@ -14,6 +14,12 @@ pin_project! {
     }
 }
 
+impl<F: Future> Default for Executor<F> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<F: Future> Executor<F> {
     pub fn new() -> Self {
         Self {

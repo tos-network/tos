@@ -160,7 +160,7 @@ impl Address {
         if hrp != PREFIX_ADDRESS && hrp != TESTNET_PREFIX_ADDRESS {
             return Err(Bech32Error::InvalidPrefix(
                 hrp,
-                format!("{} or {}", PREFIX_ADDRESS, TESTNET_PREFIX_ADDRESS),
+                format!("{PREFIX_ADDRESS} or {TESTNET_PREFIX_ADDRESS}"),
             )
             .into());
         }
@@ -207,19 +207,19 @@ impl Serializer for Address {
 impl FromStr for Address {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Address::from_string(&s.to_owned())
+        Address::from_string(s)
     }
 }
 
-impl Into<PublicKey> for Address {
-    fn into(self) -> PublicKey {
-        self.to_public_key()
+impl From<Address> for PublicKey {
+    fn from(val: Address) -> Self {
+        val.to_public_key()
     }
 }
 
-impl Into<AddressType> for Address {
-    fn into(self) -> AddressType {
-        self.addr_type
+impl From<Address> for AddressType {
+    fn from(val: Address) -> Self {
+        val.addr_type
     }
 }
 

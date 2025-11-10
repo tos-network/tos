@@ -75,7 +75,7 @@ impl ExtraData {
         &self,
         shared_key: &SharedKey,
     ) -> Result<PlaintextData, CipherFormatError> {
-        Ok(self.cipher.clone().decrypt(shared_key)?)
+        self.cipher.clone().decrypt(shared_key)
     }
 }
 

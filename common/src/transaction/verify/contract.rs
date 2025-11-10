@@ -28,7 +28,7 @@ impl Transaction {
         contract: &'a Hash,
     ) -> Result<bool, VerificationError<E>> {
         state
-            .load_contract_module(&contract)
+            .load_contract_module(contract)
             .await
             .map_err(VerificationError::State)
     }
@@ -52,8 +52,7 @@ impl Transaction {
     ) -> Result<bool, VerificationError<E>> {
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Invoking contract {} from TX {}: {:?}",
-                contract, tx_hash, invoke
+                "Invoking contract {contract} from TX {tx_hash}: {invoke:?}"
             );
         }
 
@@ -119,7 +118,7 @@ impl Transaction {
                 )
                 .await
                 .map_err(|e| {
-                    VerificationError::ModuleError(format!("Contract execution failed: {:#}", e))
+                    VerificationError::ModuleError(format!("Contract execution failed: {e:#}"))
                 })?
         };
 
@@ -158,7 +157,7 @@ impl Transaction {
             let tracker = chain_state.tracker;
             let assets = chain_state.assets;
             state
-                .merge_contract_changes(&contract, cache, tracker, assets)
+                .merge_contract_changes(contract, cache, tracker, assets)
                 .await
                 .map_err(VerificationError::State)?;
         } else {
@@ -178,7 +177,7 @@ impl Transaction {
         // Handle gas refunds
         let refund_gas = self.handle_gas(state, used_gas, max_gas).await?;
         if log::log_enabled!(log::Level::Debug) {
-            debug!("used gas: {}, refund gas: {}", used_gas, refund_gas);
+            debug!("used gas: {used_gas}, refund gas: {refund_gas}");
         }
         if refund_gas > 0 {
             outputs.push(crate::contract::ContractOutput::RefundGas { amount: refund_gas });
@@ -217,8 +216,7 @@ impl Transaction {
 
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Invoke contract used gas: {}, burned: {}, fee: {}, refund: {}",
-                used_gas, burned_gas, gas_fee, refund_gas
+                "Invoke contract used gas: {used_gas}, burned: {burned_gas}, fee: {gas_fee}, refund: {refund_gas}"
             );
         }
         state
@@ -264,10 +262,7 @@ impl Transaction {
                     .map_err(|_| VerificationError::InvalidFormat)?
                     .to_address(state.is_mainnet());
                 trace!(
-                    "Refunding deposit {:?} for asset: {} to {}",
-                    deposit,
-                    asset,
-                    source_address
+                    "Refunding deposit {deposit:?} for asset: {asset} to {source_address}"
                 );
             }
 
