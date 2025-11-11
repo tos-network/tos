@@ -1,24 +1,15 @@
 // Balance simplification: Proof implementations removed
-// This module now keeps essential cryptographic constants and error types
+// This module now re-exports cryptographic constants from tos-crypto
 
 use super::elgamal::DecompressionError;
 use curve25519_dalek::{RistrettoPoint, Scalar};
-use lazy_static::lazy_static;
-use sha3::Sha3_512;
 use thiserror::Error;
 
-// Essential cryptographic constants still needed for signatures and Pedersen commitments
+// Re-export generator points from tos-crypto
+pub use tos_crypto::proofs::{G, H};
 
-// G: Primary generator point (Ristretto basepoint)
-pub use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT as G;
-
-lazy_static! {
-    // H: Secondary generator point for signatures (Schnorr scheme)
-    // Generated deterministically from G using hash-to-point
-    pub static ref H: RistrettoPoint = {
-        RistrettoPoint::hash_from_bytes::<Sha3_512>(b"TOS_SIGNATURE_GENERATOR_H")
-    };
-}
+// Import lazy_static for PC_GENS
+use lazy_static::lazy_static;
 
 // Pedersen commitment generators (needed for commitment arithmetic)
 pub struct PedersenGens {
