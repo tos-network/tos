@@ -16,7 +16,8 @@ tos-hash = { git = "https://github.com/tos-network/tos-hash", branch = "master" 
 # TOS Kernel - Simplified re-export crate in TAKO (all types + validation)
 tos-kernel = { git = "https://github.com/tos-network/tako", branch = "main" }
 # TOS Crypto - Extracted cryptographic primitives to avoid circular dependencies
-tos-crypto = { git = "https://github.com/tos-network/tos-crypto", branch = "main" }
+# Pinned to specific rev for reproducible builds
+tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "ac298fb" }
 # Balance simplification: bulletproofs removed (no longer needed with plaintext balances)
 # bulletproofs = { git = "https://github.com/tos-network/bulletproofs", tag = "v5.0.2" }
 curve25519-dalek = { features = ["digest", "group", "rand_core", "serde", "ecdlp"], git = "https://github.com/tos-network/curve25519-dalek", tag = "v4.2.0" }

@@ -5013,7 +5013,7 @@ dependencies = [
 [[package]]
 name = "tos-crypto"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tos-crypto?branch=main#71dff8bf6499c198bae7505067b7329d747e4806"
+source = "git+https://github.com/tos-network/tos-crypto?rev=ac298fb#ac298fb87b068623cc0547029a3cf649bdf01d15"
 dependencies = [
  "blake3",
  "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?tag=v4.2.0)",
