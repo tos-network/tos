@@ -110,14 +110,25 @@ impl ContractStorage for MockProvider {
 
 /// Helper: Load compiled example contract
 fn load_example_contract(name: &str) -> Vec<u8> {
-    let path = format!("../../tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so");
-    std::fs::read(&path).unwrap_or_else(|e| {
-        panic!(
-            "Failed to load {path}: {e}\n\n\
-            Build the example first:\n  \
-            cd ../../tos-alloc && ./build-example.sh {name}"
-        )
-    })
+    // Try multiple paths to support both local development and CI environments
+    let paths = [
+        format!("../../tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so"), // Local development
+        format!("../tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so"),    // CI workspace
+        format!("tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so"),       // CI workspace alt
+    ];
+
+    for path in &paths {
+        if let Ok(data) = std::fs::read(path) {
+            return data;
+        }
+    }
+
+    panic!(
+        "Failed to load compiled contract '{name}' from any of:\n  {}\n\n\
+        Build the example first:\n  \
+        cd ../../tos-alloc && ./build-example.sh {name}",
+        paths.join("\n  ")
+    )
 }
 
 #[test]
