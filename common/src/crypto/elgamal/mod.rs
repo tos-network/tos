@@ -4,14 +4,18 @@ mod signature;
 pub use pedersen::*;
 pub use signature::*;
 
-pub use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT as G;
+// Import tos-crypto's H generator (used in sign() methods)
+pub use tos_crypto::proofs::G;
 
-// Constants that are still needed by the remaining code
+// Re-export constants
 pub const RISTRETTO_COMPRESSED_SIZE: usize = 32;
 pub const SCALAR_SIZE: usize = 32;
 
+// signature module re-exports: Signature, SIGNATURE_SIZE, hash_and_point_to_scalar
+
 // Re-export curve25519_dalek types that are needed
 use curve25519_dalek::{ristretto::CompressedRistretto, RistrettoPoint};
+use curve25519_dalek::traits::IsIdentity;
 
 // Minimal types needed for Pedersen commitments and proofs
 // These were in compressed.rs and key.rs but we keep minimal versions here
@@ -111,6 +115,18 @@ impl SerializerTrait for CompressedHandle {
     }
 }
 
+// Import types for TOS-specific extensions
+use crate::{
+    crypto::{Address, AddressType, Hash},
+    serializer::{Reader, ReaderError, Serializer as SerializerTrait, Writer},
+};
+use curve25519_dalek::Scalar;
+use rand::rngs::OsRng;
+use sha3::Sha3_512;
+use zeroize::Zeroize;
+
+// Schnorr signature key types (kept in tos-common for Address integration)
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CompressedPublicKey(CompressedRistretto);
 
@@ -161,6 +177,20 @@ impl PublicKey {
     pub fn compress(&self) -> CompressedPublicKey {
         CompressedPublicKey::new(self.0.compress())
     }
+
+    pub fn from_hash(hash: &Hash) -> Self {
+        Self(RistrettoPoint::hash_from_bytes::<Sha3_512>(hash.as_bytes()))
+    }
+
+    pub fn to_address(&self, mainnet: bool) -> Address {
+        Address::new(mainnet, AddressType::Normal, self.compress())
+    }
+
+    /// Create a decrypt handle using a Pedersen opening
+    /// This is a convenience method that calls DecryptHandle::new
+    pub fn decrypt_handle(&self, opening: &PedersenOpening) -> DecryptHandle {
+        DecryptHandle::new(self, opening)
+    }
 }
 
 // Error type for decompression
@@ -171,17 +201,6 @@ pub enum DecompressionError {
     #[error("identity point rejected")]
     IdentityPoint,
 }
-
-// Implement IsIdentity trait for RistrettoPoint check
-use crate::{
-    crypto::{Address, AddressType, Hash},
-    serializer::{Reader, ReaderError, Serializer as SerializerTrait, Writer},
-};
-use curve25519_dalek::traits::IsIdentity;
-use curve25519_dalek::Scalar;
-use rand::rngs::OsRng;
-use sha3::Sha3_512;
-use zeroize::Zeroize;
 
 // Minimal PrivateKey implementation (for signatures only, no encryption)
 #[derive(Clone, Zeroize, serde::Serialize, serde::Deserialize)]
@@ -229,7 +248,7 @@ impl PrivateKey {
         hex::encode(self.to_bytes())
     }
 
-    // Generate signature using inverse construction (for compatibility)
+    // Generate signature using tos-crypto's H generator
     #[allow(non_snake_case)]
     pub fn sign(&self, message: &[u8], public_key: &PublicKey) -> Signature {
         use crate::crypto::proofs::H;
@@ -240,24 +259,6 @@ impl PrivateKey {
         let s = r + (e * self.0);
 
         Signature::new(s, e)
-    }
-}
-
-impl SerializerTrait for PrivateKey {
-    fn write(&self, writer: &mut Writer) {
-        writer.write_bytes(&self.0.to_bytes());
-    }
-
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let bytes = reader.read_bytes::<[u8; 32]>(32)?;
-        let scalar = Scalar::from_canonical_bytes(bytes)
-            .into_option()
-            .ok_or(ReaderError::InvalidValue)?;
-        Ok(PrivateKey(scalar))
-    }
-
-    fn size(&self) -> usize {
-        32
     }
 }
 
@@ -322,23 +323,6 @@ impl KeyPair {
     }
 }
 
-// Additional methods for PublicKey needed by the system
-impl PublicKey {
-    pub fn from_hash(hash: &Hash) -> Self {
-        Self(RistrettoPoint::hash_from_bytes::<Sha3_512>(hash.as_bytes()))
-    }
-
-    pub fn to_address(&self, mainnet: bool) -> Address {
-        Address::new(mainnet, AddressType::Normal, self.compress())
-    }
-
-    /// Create a decrypt handle using a Pedersen opening
-    /// This is a convenience method that calls DecryptHandle::new
-    pub fn decrypt_handle(&self, opening: &PedersenOpening) -> DecryptHandle {
-        DecryptHandle::new(self, opening)
-    }
-}
-
 // Serializer implementation for CompressedPublicKey
 impl SerializerTrait for CompressedPublicKey {
     fn write(&self, writer: &mut Writer) {
@@ -350,6 +334,25 @@ impl SerializerTrait for CompressedPublicKey {
         let compressed =
             CompressedRistretto::from_slice(&bytes).map_err(|_| ReaderError::InvalidValue)?;
         Ok(Self(compressed))
+    }
+
+    fn size(&self) -> usize {
+        32
+    }
+}
+
+// Serializer implementation for PrivateKey
+impl SerializerTrait for PrivateKey {
+    fn write(&self, writer: &mut Writer) {
+        writer.write_bytes(&self.0.to_bytes());
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let bytes = reader.read_bytes::<[u8; 32]>(32)?;
+        let scalar = Scalar::from_canonical_bytes(bytes)
+            .into_option()
+            .ok_or(ReaderError::InvalidValue)?;
+        Ok(PrivateKey(scalar))
     }
 
     fn size(&self) -> usize {
