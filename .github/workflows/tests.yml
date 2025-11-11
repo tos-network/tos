@@ -76,6 +76,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Checkout tos-alloc
+        uses: actions/checkout@v4
+        with:
+          repository: tos-network/tos-alloc
+          path: ../tos-alloc
+
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
