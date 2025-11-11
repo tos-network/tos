@@ -113,8 +113,8 @@ fn load_example_contract(name: &str) -> Vec<u8> {
     // Try multiple paths to support both local development and CI environments
     let paths = [
         format!("../../tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so"), // Local development
-        format!("../tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so"),    // CI workspace
-        format!("tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so"),       // CI workspace alt
+        format!("../tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so"), // CI workspace
+        format!("tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so"), // CI workspace alt
     ];
 
     for path in &paths {
