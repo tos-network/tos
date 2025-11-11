@@ -15,12 +15,12 @@ autobenches = false
 tos_common = { path = "../common", features = ["prompt", "clap", "rpc-server", "tokio"] }
 
 # TOS Kernel - TOS Kernel(TAKO) runtime
-tos-kernel = { path = "../../tako/core" }
-tos-program-runtime = { path = "../../tako/program-runtime" }
-tos-syscalls = { path = "../../tako/syscalls" }
-tako-sdk = { path = "../../tako/sdk" }
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", branch = "main" }
+tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", branch = "main" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", branch = "main" }
+tako-sdk = { package = "tako-sdk", git = "https://github.com/tos-network/tako", branch = "main" }
 tos-tbpf = { git = "https://github.com/tos-network/tos-tbpf", branch = "main", features = ["jit"] }
-tos-environment = { path = "../../tako/environment" }
+tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", branch = "main" }
 
 # Database backends
 sled = "0.34.7"
