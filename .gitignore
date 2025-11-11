@@ -10,6 +10,7 @@ peerlist-*.json
 build/
 data/
 logs/
+librust_out.rlib
 demo_ai_wallet/
 parallel_test_sender/
 test_*/
@@ -42,6 +43,8 @@ wallet_receiver/
 wallet_sender/
 *_wallet/
 wallet_*/
+wallet1/
+wallet2/
 test_export.csv
 transactions_2024.csv
 wallet_history.csv

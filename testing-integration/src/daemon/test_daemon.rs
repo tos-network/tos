@@ -77,6 +77,7 @@ impl TestDaemon {
     ///
     /// **Note**: This is a placeholder for MVP. Full implementation requires
     /// daemon API refactoring.
+    #[allow(clippy::unimplemented)]
     pub async fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // TODO: Implement daemon start
         // This will require:

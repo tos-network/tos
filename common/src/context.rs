@@ -11,8 +11,20 @@ use anyhow::{Context as AnyContext, Result};
 pub struct NoOpHasher(u64);
 
 impl Hasher for NoOpHasher {
-    fn write(&mut self, _: &[u8]) {
-        unimplemented!("This NoOpHasher can only handle u64s")
+    fn write(&mut self, _bytes: &[u8]) {
+        // SAFETY: This hasher is intended ONLY for TypeId, which should call write_u64().
+        // TypeId is a u64 internally, so the standard Hasher::hash() implementation
+        // calls write_u64() directly, never calling this write() method.
+        //
+        // In debug builds, panic early to surface misuse during development.
+        // In release builds, use no-op to avoid crashes in production (hash will be incorrect,
+        // but this is acceptable as a graceful degradation if HashMap is accidentally misused).
+        #[cfg(debug_assertions)]
+        panic!("NoOpHasher::write called; this hasher only supports write_u64 for TypeId.");
+        #[cfg(not(debug_assertions))]
+        {
+            // no-op in release
+        }
     }
 
     fn write_u64(&mut self, i: u64) {
