@@ -621,17 +621,21 @@ async fn register_miner(
 
     // Store miner registration in storage
     {
-        let mut storage_guard = storage
+        let public_key = address.to_public_key();
+        let metadata_clone = metadata.clone();
+
+        storage
             .lock()
-            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {e}")))?;
-        storage_guard
-            .register_miner(&address.to_public_key(), fee_amount)
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {e}")))?
+            .register_miner(&public_key, fee_amount)
             .await
             .map_err(|e| CommandError::BatchModeError(format!("Storage error: {e}")))?;
 
         // Add transaction record
-        storage_guard
-            .add_transaction(&metadata, None)
+        storage
+            .lock()
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {e}")))?
+            .add_transaction(&metadata_clone, None)
             .await
             .map_err(|e| CommandError::BatchModeError(format!("Transaction storage error: {e}")))?;
     }
@@ -914,13 +918,16 @@ async fn show_reputation(
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
     let prompt = manager.get_prompt();
-    let context = manager.get_context().lock()?;
-    let config: &ValidatedConfig = context.get()?;
+    let miner_address_opt = {
+        let context = manager.get_context().lock()?;
+        let config: &ValidatedConfig = context.get()?;
+        config.miner_address.clone()
+    };
 
     let address_str = match args.get_value("address") {
         Ok(addr) => addr.to_string_value()?,
         Err(_) => {
-            if let Some(addr) = &config.miner_address {
+            if let Some(addr) = &miner_address_opt {
                 addr.to_string()
             } else {
                 prompt.read_input("Enter miner address", false).await?
@@ -952,8 +959,11 @@ async fn daemon_status(
     manager: &CommandManager,
     _args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let daemon_client: &Arc<DaemonClient> = context.get()?;
+    let daemon_client = {
+        let context = manager.get_context().lock()?;
+        let daemon_client: &Arc<DaemonClient> = context.get()?;
+        daemon_client.clone()
+    };
 
     manager.message("🔍 Performing daemon health check...");
 
@@ -1238,18 +1248,18 @@ async fn clear_storage(
         return Ok(());
     }
 
-    let context = manager.get_context().lock()?;
-    let storage: &Arc<Mutex<StorageManager>> = context.get()?;
+    let storage = {
+        let context = manager.get_context().lock()?;
+        let storage: &Arc<Mutex<StorageManager>> = context.get()?;
+        storage.clone()
+    };
 
-    {
-        let mut storage_guard = storage
-            .lock()
-            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {e}")))?;
-        storage_guard
-            .clear_all()
-            .await
-            .map_err(|e| CommandError::BatchModeError(format!("Clear storage error: {e}")))?;
-    }
+    storage
+        .lock()
+        .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {e}")))?
+        .clear_all()
+        .await
+        .map_err(|e| CommandError::BatchModeError(format!("Clear storage error: {e}")))?;
 
     manager.message("✅ All storage data cleared successfully.");
 
@@ -1277,10 +1287,20 @@ async fn test_task_publication_workflow(
 ) -> Result<(), CommandError> {
     manager.message("📤 Testing AI task publication workflow...");
 
-    let context = manager.get_context().lock()?;
-    let config: &ValidatedConfig = context.get()?;
-    let tx_builder: &Arc<AIMiningTransactionBuilder> = context.get()?;
-    let daemon_client: &Arc<DaemonClient> = context.get()?;
+    let (tx_builder, daemon_client, publisher_address) = {
+        let context = manager.get_context().lock()?;
+        let config: &ValidatedConfig = context.get()?;
+        let tx_builder: &Arc<AIMiningTransactionBuilder> = context.get()?;
+        let daemon_client: &Arc<DaemonClient> = context.get()?;
+
+        let publisher_address = config
+            .miner_address
+            .as_ref()
+            .ok_or_else(|| CommandError::BatchModeError("No miner address configured".to_string()))?
+            .clone();
+
+        (tx_builder.clone(), daemon_client.clone(), publisher_address)
+    };
 
     // Create test task
     let task_id = Hash::new(rand::random::<[u8; 32]>());
@@ -1292,13 +1312,7 @@ async fn test_task_publication_workflow(
         .as_secs()
         + 7200; // 2 hours from now
 
-    // Use miner address as publisher for testing
-    let publisher_address = config
-        .miner_address
-        .as_ref()
-        .ok_or_else(|| CommandError::BatchModeError("No miner address configured".to_string()))?;
-
-    let nonce = get_next_nonce(daemon_client, publisher_address)
+    let nonce = get_next_nonce(&daemon_client, &publisher_address)
         .await
         .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {e}")))?;
 
@@ -1341,10 +1355,20 @@ async fn test_answer_submission_workflow(
 ) -> Result<(), CommandError> {
     manager.message("💡 Testing AI answer submission workflow...");
 
-    let context = manager.get_context().lock()?;
-    let tx_builder: &Arc<AIMiningTransactionBuilder> = context.get()?;
-    let daemon_client: &Arc<DaemonClient> = context.get()?;
-    let config: &ValidatedConfig = context.get()?;
+    let (tx_builder, daemon_client, miner_address) = {
+        let context = manager.get_context().lock()?;
+        let tx_builder: &Arc<AIMiningTransactionBuilder> = context.get()?;
+        let daemon_client: &Arc<DaemonClient> = context.get()?;
+        let config: &ValidatedConfig = context.get()?;
+
+        let miner_address = config
+            .miner_address
+            .as_ref()
+            .ok_or_else(|| CommandError::BatchModeError("No miner address configured".to_string()))?
+            .clone();
+
+        (tx_builder.clone(), daemon_client.clone(), miner_address)
+    };
 
     // Create test answer
     let task_id = Hash::new(rand::random::<[u8; 32]>());
@@ -1352,13 +1376,7 @@ async fn test_answer_submission_workflow(
     let answer_hash = Hash::new(blake3::hash(answer_text.as_bytes()).into());
     let stake_amount = 2_000_000_000; // 2 TOS stake
 
-    // Use miner address
-    let miner_address = config
-        .miner_address
-        .as_ref()
-        .ok_or_else(|| CommandError::BatchModeError("No miner address configured".to_string()))?;
-
-    let nonce = get_next_nonce(daemon_client, miner_address)
+    let nonce = get_next_nonce(&daemon_client, &miner_address)
         .await
         .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {e}")))?;
 
@@ -1403,23 +1421,27 @@ async fn test_validation_workflow(
 ) -> Result<(), CommandError> {
     manager.message("🔍 Testing AI answer validation workflow...");
 
-    let context = manager.get_context().lock()?;
-    let tx_builder: &Arc<AIMiningTransactionBuilder> = context.get()?;
-    let daemon_client: &Arc<DaemonClient> = context.get()?;
-    let config: &ValidatedConfig = context.get()?;
+    let (tx_builder, daemon_client, validator_address) = {
+        let context = manager.get_context().lock()?;
+        let tx_builder: &Arc<AIMiningTransactionBuilder> = context.get()?;
+        let daemon_client: &Arc<DaemonClient> = context.get()?;
+        let config: &ValidatedConfig = context.get()?;
+
+        let validator_address = config
+            .miner_address
+            .as_ref()
+            .ok_or_else(|| CommandError::BatchModeError("No miner address configured".to_string()))?
+            .clone();
+
+        (tx_builder.clone(), daemon_client.clone(), validator_address)
+    };
 
     // Create test validation
     let task_id = Hash::new(rand::random::<[u8; 32]>());
     let answer_id = Hash::new(rand::random::<[u8; 32]>());
     let validation_score = 88; // Good score
 
-    // Use miner address as validator for testing
-    let validator_address = config
-        .miner_address
-        .as_ref()
-        .ok_or_else(|| CommandError::BatchModeError("No miner address configured".to_string()))?;
-
-    let nonce = get_next_nonce(daemon_client, validator_address)
+    let nonce = get_next_nonce(&daemon_client, &validator_address)
         .await
         .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {e}")))?;
 
