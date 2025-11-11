@@ -40,7 +40,7 @@ use tos_common::{
         FeeType, MultiSigPayload, Reference, Transaction, TransactionType, TxVersion,
     },
 };
-use tos_vm::{Environment, Module};
+use tos_kernel::{Environment, Module};
 
 // -------------------------------------------------------------------------------------------------
 // Transaction construction helpers

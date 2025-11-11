@@ -4,13 +4,13 @@ use tos_common::{
     crypto::Hash,
     versioned_type::VersionedState,
 };
+use tos_kernel::ValueCell;
 /// Storage adapter: TOS ContractProvider → TAKO StorageProvider
 ///
-/// This module bridges TOS's contract storage system with TAKO VM's storage syscalls.
+/// This module bridges TOS's contract storage system with TOS Kernel(TAKO)'s storage syscalls.
 /// It translates between TOS's versioned storage model and TAKO's simple key-value interface.
 use tos_program_runtime::storage::StorageProvider;
 use tos_tbpf::error::EbpfError;
-use tos_vm::ValueCell;
 
 /// Adapter that wraps TOS's ContractProvider to implement TAKO's StorageProvider
 ///
@@ -48,7 +48,7 @@ use tos_vm::ValueCell;
 ///     topoheight,
 /// );
 ///
-/// // TAKO VM will call these methods via syscalls
+/// // TOS Kernel(TAKO) will call these methods via syscalls
 /// adapter.get(&contract_hash.as_bytes(), b"balance")?;
 /// adapter.set(&contract_hash.as_bytes(), b"balance", b"1000")?;
 /// ```
@@ -86,9 +86,9 @@ impl<'a> TosStorageAdapter<'a> {
         }
     }
 
-    /// Convert a byte slice to a TOS-VM ValueCell (for cache lookups)
+    /// Convert a byte slice to a TOS Kernel ValueCell (for cache lookups)
     ///
-    /// TOS-VM uses ValueCell for all contract data, which is a dynamically-typed
+    /// TOS Kernel uses ValueCell for all contract data, which is a dynamically-typed
     /// wrapper around primitive types and complex structures. For TAKO integration,
     /// we serialize byte slices as ValueCell::String.
     fn bytes_to_value_cell(bytes: &[u8]) -> Result<ValueCell, EbpfError> {

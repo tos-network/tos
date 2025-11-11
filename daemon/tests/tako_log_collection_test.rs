@@ -1,4 +1,4 @@
-/// Integration test for TAKO VM log collection
+/// Integration test for TOS Kernel(TAKO) log collection
 ///
 /// This test verifies that log messages emitted by contracts are properly
 /// collected and included in the ExecutionResult.
@@ -70,16 +70,16 @@ impl ContractStorage for MockProvider {
     fn load_data(
         &self,
         _contract: &Hash,
-        _key: &tos_vm::ValueCell,
+        _key: &tos_kernel::ValueCell,
         _topoheight: TopoHeight,
-    ) -> Result<Option<(TopoHeight, Option<tos_vm::ValueCell>)>> {
+    ) -> Result<Option<(TopoHeight, Option<tos_kernel::ValueCell>)>> {
         Ok(None)
     }
 
     fn load_data_latest_topoheight(
         &self,
         _contract: &Hash,
-        _key: &tos_vm::ValueCell,
+        _key: &tos_kernel::ValueCell,
         _topoheight: TopoHeight,
     ) -> Result<Option<TopoHeight>> {
         Ok(Some(100))
@@ -88,7 +88,7 @@ impl ContractStorage for MockProvider {
     fn has_data(
         &self,
         _contract: &Hash,
-        _key: &tos_vm::ValueCell,
+        _key: &tos_kernel::ValueCell,
         _topoheight: TopoHeight,
     ) -> Result<bool> {
         Ok(false)

@@ -1,6 +1,6 @@
-//! TAKO VM JIT Compilation Performance Test
+//! TOS Kernel(TAKO) JIT Compilation Performance Test
 //!
-//! This example tests the TAKO VM with JIT compilation enabled and measures:
+//! This example tests the TOS Kernel(TAKO) with JIT compilation enabled and measures:
 //! - Contract loading and execution
 //! - JIT compilation (if enabled via features)
 //! - Performance metrics (execution time, instructions, compute units)
@@ -24,7 +24,7 @@ mod mock {
         block::TopoHeight,
         crypto::{Hash, PublicKey},
     };
-    use tos_vm::ValueCell;
+    use tos_kernel::ValueCell;
 
     /// Simple in-memory contract provider for testing
     pub struct MockContractProvider {
@@ -142,7 +142,7 @@ fn main() {
         .filter_level(log::LevelFilter::Info)
         .init();
 
-    println!("\n=== TAKO VM JIT Compilation Performance Test ===\n");
+    println!("\n=== TOS Kernel(TAKO) JIT Compilation Performance Test ===\n");
 
     // Step 1: Load the hello-world contract bytecode
     // Try the test contract from tos-tbpf first (known working), then hello-world
@@ -287,7 +287,7 @@ fn main() {
             eprintln!("\nExecution time before error: {:?}", elapsed);
 
             println!("\n=== Debug Information ===\n");
-            println!("This error occurred during TAKO VM execution.");
+            println!("This error occurred during TOS Kernel(TAKO) execution.");
             println!("Common issues:");
             println!("  - Invalid bytecode format (not proper ELF)");
             println!("  - Missing syscalls in the loader");

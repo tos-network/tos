@@ -243,10 +243,9 @@ impl Prompt {
             *lock = Some(input_receiver);
         }
 
-        if show_ascii
-            && log::log_enabled!(log::Level::Info) {
-                info!("{}", art::LOGO_ASCII);
-            }
+        if show_ascii && log::log_enabled!(log::Level::Info) {
+            info!("{}", art::LOGO_ASCII);
+        }
 
         Ok(Arc::new(prompt))
     }
@@ -336,14 +335,13 @@ impl Prompt {
             }
         }
 
-        if !self.state.exit().swap(true, Ordering::SeqCst)
-            && self.state.is_interactive() {
-                if let Err(e) = terminal::disable_raw_mode() {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!("Error while disabling raw mode: {e}");
-                    }
+        if !self.state.exit().swap(true, Ordering::SeqCst) && self.state.is_interactive() {
+            if let Err(e) = terminal::disable_raw_mode() {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while disabling raw mode: {e}");
                 }
             }
+        }
 
         if let Some(handle) = self.compression_handle.as_ref() {
             handle.abort();
@@ -580,7 +578,7 @@ impl Prompt {
                     }
                 }
 
-                
+
             })
             .chain(std::io::stdout())
             .level(level.into());
@@ -703,9 +701,7 @@ impl Prompt {
         loop {
             let now = chrono::Local::now().date_naive();
             if log::log_enabled!(log::Level::Trace) {
-                trace!(
-                    "Checking if we need to compress log file, current: {current}, now: {now}"
-                );
+                trace!("Checking if we need to compress log file, current: {current}, now: {now}");
             }
 
             // We need to check that current != now

@@ -10,7 +10,6 @@ pub enum TxVersion {
     T0 = 0,
 }
 
-
 impl TryFrom<u8> for TxVersion {
     type Error = ();
 

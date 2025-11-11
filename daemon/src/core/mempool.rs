@@ -21,7 +21,7 @@ use tos_common::{
     tokio::sync::Mutex as TokioMutex,
     transaction::{MultiSigPayload, Transaction, TransactionType},
 };
-use tos_vm::Environment;
+use tos_kernel::Environment;
 
 // Wrap a TX with its hash and size in bytes for faster access
 // size of tx can be heavy to compute, so we store it here
@@ -188,7 +188,7 @@ impl Mempool {
         let contract_address_to_reserve =
             if let TransactionType::DeployContract(ref payload) = tx.get_data() {
                 // Calculate deterministic CREATE2 address using the same logic as verify/mod.rs
-                // For TAKO VM contracts: use eBPF bytecode
+                // For TOS Kernel(TAKO) contracts: use eBPF bytecode
                 // For legacy contracts: use serialized module bytes
                 let bytecode_or_module = payload
                     .module

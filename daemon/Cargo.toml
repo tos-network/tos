@@ -14,8 +14,8 @@ autobenches = false
 [dependencies]
 tos_common = { path = "../common", features = ["prompt", "clap", "rpc-server", "tokio"] }
 
-# TAKO VM - The eBPF-based VM for TOS blockchain contracts
-tos-vm = { path = "../../tako/vm" }
+# TOS Kernel - TOS Kernel(TAKO) runtime
+tos-kernel = { path = "../../tako/core" }
 tos-program-runtime = { path = "../../tako/program-runtime" }
 tos-syscalls = { path = "../../tako/syscalls" }
 tako-sdk = { path = "../../tako/sdk" }

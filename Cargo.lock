@@ -2880,6 +2880,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "light-poseidon"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47a1ccadd0bb5a32c196da536fd72c59183de24a055f6bf0513bf845fefab862"
+dependencies = [
+ "ark-bn254",
+ "ark-ff",
+ "num-bigint",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4973,6 +4985,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tos-kernel"
+version = "0.1.0"
+dependencies = [
+ "indexmap 2.10.0",
+ "log",
+ "thiserror 2.0.12",
+ "tos-builder",
+ "tos-bytecode",
+ "tos-environment",
+ "tos-types",
+]
+
+[[package]]
+name = "tos-poseidon"
+version = "0.1.0"
+dependencies = [
+ "ark-bn254",
+ "ark-ff",
+ "light-poseidon",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "tos-precompiles"
 version = "0.2.0"
 dependencies = [
@@ -5021,6 +5056,7 @@ dependencies = [
  "sha3",
  "thiserror 2.0.12",
  "tiny-keccak",
+ "tos-poseidon",
  "tos-program-runtime",
  "tos-tbpf",
 ]
@@ -5074,19 +5110,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.12",
-]
-
-[[package]]
-name = "tos-vm"
-version = "0.1.0"
-dependencies = [
- "indexmap 2.10.0",
- "log",
- "thiserror 2.0.12",
- "tos-builder",
- "tos-bytecode",
- "tos-environment",
- "tos-types",
 ]
 
 [[package]]
@@ -5160,7 +5183,7 @@ dependencies = [
  "tokio-tungstenite-wasm",
  "tokio_with_wasm",
  "tos-hash",
- "tos-vm",
+ "tos-kernel",
  "win32console",
  "zeroize",
  "zip",
@@ -5213,11 +5236,11 @@ dependencies = [
  "tokio",
  "tokio-socks",
  "tos-environment",
+ "tos-kernel",
  "tos-program-runtime",
  "tos-syscalls",
  "tos-tbpf",
  "tos-testing-integration",
- "tos-vm",
  "tos_common",
  "x25519-dalek",
  "xxhash-rust",

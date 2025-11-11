@@ -11,7 +11,7 @@ use tos_common::{
     transaction::{verify::BlockchainVerificationState, MultiSigPayload, Reference, Transaction},
 };
 use tos_environment::Environment;
-use tos_vm::Module;
+use tos_kernel::Module;
 
 struct Account<'a> {
     // Account nonce used to verify valid transaction

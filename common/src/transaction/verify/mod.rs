@@ -10,7 +10,7 @@ use anyhow::anyhow;
 // use bulletproofs::RangeProof;
 use indexmap::IndexMap;
 use log::{debug, trace};
-use tos_vm::ModuleValidator;
+use tos_kernel::ModuleValidator;
 
 use super::{payload::EnergyPayload, ContractDeposit, Transaction, TransactionType};
 use crate::{
@@ -63,9 +63,7 @@ impl Transaction {
     /// This is used to substract the amount from the sender's balance
     /// Get the new output amounts for the sender
     /// Balance simplification: Returns plain u64 amounts instead of ciphertexts
-    pub fn get_expected_sender_outputs(
-        &self,
-    ) -> Result<Vec<(&Hash, u64)>, DecompressionError> {
+    pub fn get_expected_sender_outputs(&self) -> Result<Vec<(&Hash, u64)>, DecompressionError> {
         // This method previously collected sender output ciphertexts for each asset
         // With plaintext balances, no commitments or ciphertexts needed
         // Return empty vector for now (amounts are handled directly in apply())
@@ -595,7 +593,7 @@ impl Transaction {
                 }
 
                 // Compute deterministic contract address
-                // For TAKO VM contracts: use eBPF bytecode
+                // For TOS Kernel(TAKO) contracts: use eBPF bytecode
                 // For legacy contracts: use serialized module bytes
                 let bytecode_or_module = payload
                     .module
@@ -686,9 +684,7 @@ impl Transaction {
                 let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
                 if !sig.signature.verify(hash.as_bytes(), &decompressed) {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!(
-                            "Multisig signature verification failed for participant {index}"
-                        );
+                        debug!("Multisig signature verification failed for participant {index}");
                     }
                     return Err(VerificationError::InvalidSignature);
                 }
@@ -742,7 +738,7 @@ impl Transaction {
                 }
 
                 // Compute deterministic contract address (CREATE2-style)
-                // For TAKO VM contracts: use eBPF bytecode
+                // For TOS Kernel(TAKO) contracts: use eBPF bytecode
                 // For legacy contracts: use serialized module bytes
                 let bytecode_or_module = payload
                     .module
@@ -952,9 +948,7 @@ impl Transaction {
                 .map_err(VerificationError::State)?;
             if dynamic_parts_only {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "TX {hash} is known from ZKPCache, verifying dynamic parts only"
-                    );
+                    debug!("TX {hash} is known from ZKPCache, verifying dynamic parts only");
                 }
                 tx.verify_dynamic_parts(hash, state).await?;
             } else {
@@ -985,9 +979,7 @@ impl Transaction {
             .map_err(VerificationError::State)?;
         if dynamic_parts_only {
             if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "TX {tx_hash} is known from ZKPCache, verifying dynamic parts only"
-                );
+                debug!("TX {tx_hash} is known from ZKPCache, verifying dynamic parts only");
             }
             self.verify_dynamic_parts(tx_hash, state).await?;
         } else {
@@ -1161,9 +1153,7 @@ impl Transaction {
                         .map_err(VerificationError::State)?;
 
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!(
-                            "Consumed {energy_cost} energy for transaction {tx_hash}"
-                        );
+                        debug!("Consumed {energy_cost} energy for transaction {tx_hash}");
                     }
                 } else {
                     return Err(VerificationError::InsufficientEnergy(energy_cost));
@@ -1232,7 +1222,7 @@ impl Transaction {
             }
             TransactionType::DeployContract(payload) => {
                 // Compute deterministic contract address
-                // For TAKO VM contracts: use eBPF bytecode
+                // For TOS Kernel(TAKO) contracts: use eBPF bytecode
                 // For legacy contracts: use serialized module bytes
                 let bytecode_or_module = payload
                     .module
@@ -1292,11 +1282,7 @@ impl Transaction {
 
                         // Freeze TOS for energy - get topoheight from the blockchain state
                         let topoheight = state.get_block().get_blue_score(); // Use blue_score for consensus
-                        energy_resource.freeze_tos_for_energy(
-                            *amount,
-                            *duration,
-                            topoheight,
-                        );
+                        energy_resource.freeze_tos_for_energy(*amount, *duration, topoheight);
 
                         // Update energy resource in state
                         state

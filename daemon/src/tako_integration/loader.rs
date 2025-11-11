@@ -103,8 +103,8 @@ impl<'a> ContractLoader for TosContractLoaderAdapter<'a> {
             return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "Cross-VM CPI not supported: Contract {} is TOS-VM format (not TAKO VM ELF). \
-                    TAKO VM can only invoke other TAKO VM contracts.",
+                    "Cross-VM CPI not supported: Contract {} is legacy format (not TOS Kernel(TAKO) ELF). \
+                    TOS Kernel(TAKO) can only invoke other TOS Kernel(TAKO) contracts.",
                     hash
                 ),
             ))));
@@ -131,7 +131,7 @@ mod tests {
         contract::{ContractProvider, ContractStorage},
         crypto::PublicKey,
     };
-    use tos_vm::ValueCell;
+    use tos_kernel::ValueCell;
 
     // Mock storage for testing
     struct MockStorage;

@@ -1,6 +1,6 @@
-/// TAKO VM CPI Integration Tests
+/// TOS Kernel(TAKO) CPI Integration Tests
 ///
-/// Tests Cross-Program Invocation (CPI) functionality with TAKO VM contracts.
+/// Tests Cross-Program Invocation (CPI) functionality with TOS Kernel(TAKO) contracts.
 /// This demonstrates that TAKO contracts can invoke other TAKO contracts and
 /// pass data between them.
 use std::collections::HashMap;
@@ -13,8 +13,8 @@ use tos_common::{
     serializer::Serializer,
 };
 use tos_daemon::tako_integration::TakoContractExecutor;
+use tos_kernel::ValueCell;
 use tos_program_runtime::storage::ContractLoader;
-use tos_vm::ValueCell;
 
 /// Mock provider for testing with CPI support
 struct MockCpiProvider {

@@ -52,7 +52,7 @@ struct AccountState {
 pub(crate) struct ContractState {
     /// Contract module (bytecode)
     #[allow(dead_code)]
-    pub(crate) module: Option<Arc<tos_vm::Module>>,
+    pub(crate) module: Option<Arc<tos_kernel::Module>>,
     /// Contract storage data
     #[allow(dead_code)]
     pub(crate) data: Vec<u8>,
@@ -182,10 +182,10 @@ pub struct ParallelChainState<S: Storage> {
     /// and future optimization roadmap.
     storage_semaphore: Arc<Semaphore>,
 
-    /// Contract executor for TAKO VM (eBPF)
+    /// Contract executor for TOS Kernel(TAKO) (eBPF)
     ///
     /// Uses TakoContractExecutor to execute eBPF contracts.
-    /// Legacy TOS-VM contracts are no longer supported.
+    /// Legacy contracts are no longer supported.
     contract_executor: Arc<dyn tos_common::contract::ContractExecutor>,
 }
 
@@ -245,8 +245,8 @@ impl<S: Storage> ParallelChainState<S> {
 
     /// Get contract executor
     ///
-    /// Returns the TAKO VM executor for eBPF contract execution.
-    /// Legacy TOS-VM contracts are no longer supported.
+    /// Returns the TOS Kernel(TAKO) executor for eBPF contract execution.
+    /// Legacy contracts are no longer supported.
     pub fn get_contract_executor(&self) -> &Arc<dyn tos_common::contract::ContractExecutor> {
         &self.contract_executor
     }
@@ -1249,7 +1249,7 @@ impl<S: Storage> ParallelChainState<S> {
     pub async fn cache_deployed_contract(
         &self,
         contract_address: &Hash,
-        module: Arc<tos_vm::Module>,
+        module: Arc<tos_kernel::Module>,
         _storage_permit: &tokio::sync::SemaphorePermit<'_>,
     ) -> Result<(), BlockchainError> {
         // NOTE: _storage_permit ensures caller has acquired semaphore before calling
@@ -1300,7 +1300,11 @@ impl<S: Storage> ParallelChainState<S> {
     /// It skips collision checking because the contract already exists on-chain.
     ///
     /// Used by load_contract_module() when loading contracts for CPI.
-    pub fn cache_existing_contract(&self, contract_address: &Hash, module: Arc<tos_vm::Module>) {
+    pub fn cache_existing_contract(
+        &self,
+        contract_address: &Hash,
+        module: Arc<tos_kernel::Module>,
+    ) {
         // No collision check - this is for loading existing contracts
         self.contracts.insert(
             contract_address.clone(),
@@ -1317,7 +1321,7 @@ impl<S: Storage> ParallelChainState<S> {
     }
 
     /// Get cached contract module
-    pub fn get_cached_contract(&self, contract_address: &Hash) -> Option<Arc<tos_vm::Module>> {
+    pub fn get_cached_contract(&self, contract_address: &Hash) -> Option<Arc<tos_kernel::Module>> {
         self.contracts
             .get(contract_address)
             .and_then(|state| state.module.clone())
@@ -1338,7 +1342,7 @@ impl<S: Storage> ParallelChainState<S> {
     ///
     /// Returns an iterator over all deployed contracts in the cache.
     /// Used by merge_parallel_results() to write contracts to storage.
-    pub fn contracts_iter(&self) -> impl Iterator<Item = (Hash, Arc<tos_vm::Module>)> + '_ {
+    pub fn contracts_iter(&self) -> impl Iterator<Item = (Hash, Arc<tos_kernel::Module>)> + '_ {
         self.contracts.iter().filter_map(|entry| {
             let address = entry.key().clone();
             entry

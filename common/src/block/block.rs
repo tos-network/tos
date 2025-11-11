@@ -93,11 +93,7 @@ impl Deref for Block {
 
 impl Display for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        let parents: Vec<String> = self
-            .get_parents()
-            .iter()
-            .map(|h| format!("{h}"))
-            .collect();
+        let parents: Vec<String> = self.get_parents().iter().map(|h| format!("{h}")).collect();
 
         write!(
             f,

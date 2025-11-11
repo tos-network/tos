@@ -1,14 +1,14 @@
-/// Contract bytecode validation for TAKO VM (eBPF-based execution)
+/// Contract bytecode validation for TOS Kernel(TAKO) (eBPF-based execution)
 ///
 /// This module validates that contract bytecode is in the correct ELF format
-/// for execution by TAKO VM. TOS blockchain only supports TAKO VM contracts.
+/// for execution by TOS Kernel(TAKO). TOS blockchain only supports TOS Kernel(TAKO) contracts.
 use anyhow::{anyhow, Result};
 
-/// Validates that contract bytecode is a valid ELF binary for TAKO VM
+/// Validates that contract bytecode is a valid ELF binary for TOS Kernel(TAKO)
 ///
 /// # Contract Format
 ///
-/// TAKO VM contracts must be:
+/// TOS Kernel(TAKO) contracts must be:
 /// - **ELF format**: Standard Unix executable format
 /// - **eBPF bytecode**: Compiled from Rust using TAKO SDK
 /// - **Magic number**: Must start with `0x7F 'E' 'L' 'F'`
@@ -26,7 +26,7 @@ use anyhow::{anyhow, Result};
 ///
 /// ```
 /// # use tos_common::contract::validate_contract_bytecode;
-/// // Valid TAKO VM contract (ELF format with minimum 64 bytes)
+/// // Valid TOS Kernel(TAKO) contract (ELF format with minimum 64 bytes)
 /// let mut valid_bytecode = vec![0x7F, b'E', b'L', b'F', 0x02, 0x01, 0x01, 0x00];
 /// valid_bytecode.extend_from_slice(&[0u8; 56]); // Pad to 64 bytes minimum
 /// assert!(validate_contract_bytecode(&valid_bytecode).is_ok());

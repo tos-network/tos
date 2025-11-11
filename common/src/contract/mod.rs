@@ -29,8 +29,8 @@ use std::{
     any::TypeId,
     collections::{hash_map::Entry, HashMap, HashSet},
 };
-use tos_vm::EnvironmentBuilder;
-use tos_vm::{
+use tos_kernel::EnvironmentBuilder;
+use tos_kernel::{
     Context, FnInstance, FnParams, FnReturnType, OpaqueWrapper, Primitive, Type, ValueCell,
 };
 
@@ -993,20 +993,18 @@ fn fire_event_fn(_: FnInstance, mut params: FnParams, context: &mut Context) -> 
 
 fn println_fn(_: FnInstance, params: FnParams, context: &mut Context) -> FnReturnType {
     let state: &ChainState = context.get().context("chain state not found")?;
-    if state.debug_mode
-        && log::log_enabled!(log::Level::Info) {
-            info!("[{}]: {}", state.contract, params[0].as_ref()?);
-        }
+    if state.debug_mode && log::log_enabled!(log::Level::Info) {
+        info!("[{}]: {}", state.contract, params[0].as_ref()?);
+    }
 
     Ok(None)
 }
 
 fn debug_fn(_: FnInstance, params: FnParams, context: &mut Context) -> FnReturnType {
     let state: &ChainState = context.get().context("chain state not found")?;
-    if state.debug_mode
-        && log::log_enabled!(log::Level::Debug) {
-            debug!("{:?}", params[0].as_ref()?);
-        }
+    if state.debug_mode && log::log_enabled!(log::Level::Debug) {
+        debug!("{:?}", params[0].as_ref()?);
+    }
 
     Ok(None)
 }

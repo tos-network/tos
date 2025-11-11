@@ -29,7 +29,7 @@ use tos_common::{
         ContractDeposit, MultiSigPayload, Reference,
     },
 };
-use tos_vm::{Environment, Module};
+use tos_kernel::{Environment, Module};
 
 use crate::core::{error::BlockchainError, storage::Storage};
 
@@ -103,7 +103,7 @@ pub struct ParallelApplyAdapter<'a, S: Storage> {
     /// Staged contract deployments (for commit on success)
     /// Stores Arc<Module> to avoid double-clone and memory bloat
     /// Used to keep modules alive during execution (lifetime safety)
-    staged_contracts: HashMap<Hash, Arc<tos_vm::Module>>,
+    staged_contracts: HashMap<Hash, Arc<tos_kernel::Module>>,
 
     /// Staged contract caches (for merge on success)
     /// Maps contract_hash -> ContractCache

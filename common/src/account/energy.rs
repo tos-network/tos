@@ -390,10 +390,7 @@ impl EnergyResource {
             std::collections::HashMap::new();
 
         for record in &self.freeze_records {
-            grouped
-                .entry(record.duration)
-                .or_default()
-                .push(record);
+            grouped.entry(record.duration).or_default().push(record);
         }
 
         grouped

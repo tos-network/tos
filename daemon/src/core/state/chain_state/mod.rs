@@ -18,7 +18,7 @@ use tos_common::{
     versioned_type::VersionedState,
 };
 use tos_environment::Environment;
-use tos_vm::Module;
+use tos_kernel::Module;
 
 pub use apply::*;
 pub use storage::*;

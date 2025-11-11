@@ -388,9 +388,7 @@ impl Serializer for BlockHeader {
         // Reject headers with too many parent levels
         if levels_count as usize > MAX_PARENT_LEVELS {
             if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Error, too many parent levels: {levels_count} > {MAX_PARENT_LEVELS}"
-                );
+                debug!("Error, too many parent levels: {levels_count} > {MAX_PARENT_LEVELS}");
             }
             return Err(ReaderError::InvalidValue);
         }
@@ -492,11 +490,7 @@ impl Hashable for BlockHeader {
 
 impl Display for BlockHeader {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), FmtError> {
-        let parents: Vec<String> = self
-            .get_parents()
-            .iter()
-            .map(|h| format!("{h}"))
-            .collect();
+        let parents: Vec<String> = self.get_parents().iter().map(|h| format!("{h}")).collect();
 
         write!(
             f,

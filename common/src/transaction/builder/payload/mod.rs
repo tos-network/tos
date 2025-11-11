@@ -5,7 +5,7 @@ use crate::{
 };
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransferBuilder {

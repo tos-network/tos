@@ -1,5 +1,5 @@
 use anyhow::Context as AnyhowContext;
-use tos_vm::{
+use tos_kernel::{
     impl_opaque, traits::Serializable, Context, EnvironmentError, FnInstance, FnParams,
     FnReturnType, Primitive, ValueError,
 };

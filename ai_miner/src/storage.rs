@@ -135,9 +135,7 @@ impl StorageManager {
                 }
                 Err(e) => {
                     if log::log_enabled!(log::Level::Warn) {
-                        warn!(
-                            "Failed to parse existing state file: {e}. Creating new state."
-                        );
+                        warn!("Failed to parse existing state file: {e}. Creating new state.");
                     }
                     let mut new_state = AIMiningState::default();
                     new_state.network = network;

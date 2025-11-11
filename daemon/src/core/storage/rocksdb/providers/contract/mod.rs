@@ -14,7 +14,7 @@ use tos_common::{
     crypto::{Hash, PublicKey},
     tokio::try_block_on,
 };
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 #[async_trait]
 impl ContractAccess for RocksStorage {

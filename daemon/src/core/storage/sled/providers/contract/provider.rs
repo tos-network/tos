@@ -10,7 +10,7 @@ use tos_common::{
     crypto::{Hash, PublicKey},
     tokio::try_block_on,
 };
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 impl ContractStorage for SledStorage {
     fn load_data(

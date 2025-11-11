@@ -305,10 +305,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                     }
                 };
 
-                if !res
-                    && log::log_enabled!(log::Level::Error) {
-                        error!("Error while resubscribing to event with id {id}");
-                    }
+                if !res && log::log_enabled!(log::Level::Error) {
+                    error!("Error while resubscribing to event with id {id}");
+                }
             }
         });
         Ok(())
@@ -330,9 +329,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             let sender = self.sender.lock().await;
             if let Err(e) = sender.send(InternalMessage::Close).await {
                 if log::log_enabled!(log::Level::Error) {
-                    error!(
-                        "Error while sending close message to the background task: {e:?}"
-                    );
+                    error!("Error while sending close message to the background task: {e:?}");
                 }
             }
         }
@@ -343,9 +340,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                 if task.is_finished() {
                     if let Err(e) = task.await {
                         if log::log_enabled!(log::Level::Error) {
-                            error!(
-                                "Error while waiting for the background task to finish: {e:?}"
-                            );
+                            error!("Error while waiting for the background task to finish: {e:?}");
                         }
                     }
                 } else {

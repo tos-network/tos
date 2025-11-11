@@ -10,7 +10,7 @@ use tos_common::{
     crypto::{hash, Hash},
     serializer::Serializer,
 };
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 #[async_trait]
 impl ContractDataProvider for SledStorage {

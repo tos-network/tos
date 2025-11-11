@@ -1,11 +1,11 @@
-/// Error types for TAKO VM execution
+/// Error types for TOS Kernel(TAKO) execution
 ///
 /// Provides detailed, structured error types for better debugging and user feedback.
 /// Each error variant includes context and actionable information.
 use thiserror::Error;
 use tos_tbpf::error::EbpfError;
 
-/// Main error type for TAKO VM execution
+/// Main error type for TOS Kernel(TAKO) execution
 #[derive(Error, Debug)]
 pub enum TakoExecutionError {
     /// Compute budget validation failed

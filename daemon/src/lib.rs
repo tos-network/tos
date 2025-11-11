@@ -8,5 +8,5 @@ pub mod core;
 pub mod p2p;
 pub mod rpc;
 
-// TAKO VM integration module
+// TOS Kernel(TAKO) integration module
 pub mod tako_integration;

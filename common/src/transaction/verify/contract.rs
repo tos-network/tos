@@ -2,7 +2,7 @@ use std::{borrow::Cow, sync::Arc};
 
 use indexmap::IndexMap;
 use log::{debug, trace};
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 use crate::{
     config::{TOS_ASSET, TX_GAS_BURN_PERCENT},
@@ -34,7 +34,7 @@ impl Transaction {
     }
 
     // Invoke a contract from a transaction using the ContractExecutor trait
-    // This method supports both TAKO VM (eBPF) and legacy TOS-VM contracts
+    // This method supports both TOS Kernel(TAKO) (eBPF) and legacy contracts
     pub(super) async fn invoke_contract<
         'a,
         P: ContractProvider + Send,
@@ -51,9 +51,7 @@ impl Transaction {
         invoke: InvokeContract,
     ) -> Result<bool, VerificationError<E>> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Invoking contract {contract} from TX {tx_hash}: {invoke:?}"
-            );
+            debug!("Invoking contract {contract} from TX {tx_hash}: {invoke:?}");
         }
 
         // Get the contract module to extract bytecode
@@ -65,11 +63,11 @@ impl Transaction {
                 .map_err(VerificationError::State)?;
 
             // Extract bytecode from module
-            // For TAKO VM contracts, this will be ELF bytecode
-            // For legacy TOS-VM contracts, this will be None (not supported in new executor)
+            // For TOS Kernel(TAKO) contracts, this will be ELF bytecode
+            // For legacy contracts, this will be None (not supported in new executor)
             let bytecode = module.get_bytecode().ok_or_else(|| {
                 VerificationError::ModuleError(
-                    "Contract does not have eBPF bytecode. Legacy TOS-VM contracts are no longer supported. Please redeploy with TAKO VM format.".to_string()
+                    "Contract does not have eBPF bytecode. Legacy contracts are no longer supported. Please redeploy with TOS Kernel(TAKO) format.".to_string()
                 )
             })?;
 
@@ -91,7 +89,7 @@ impl Transaction {
         let _block = chain_state.block;
 
         // Convert invoke type to parameters
-        // For TAKO VM, we pass execution metadata as parameters
+        // For TOS Kernel(TAKO), we pass execution metadata as parameters
         // Uses deterministic encoding that supports full u16 range for entry_id
         // and proper u8 range for hook_id. See encoding module for format spec.
         let parameters = match invoke {
@@ -261,9 +259,7 @@ impl Transaction {
                     .decompress()
                     .map_err(|_| VerificationError::InvalidFormat)?
                     .to_address(state.is_mainnet());
-                trace!(
-                    "Refunding deposit {deposit:?} for asset: {asset} to {source_address}"
-                );
+                trace!("Refunding deposit {deposit:?} for asset: {asset} to {source_address}");
             }
 
             let balance = state

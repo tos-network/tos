@@ -11,7 +11,7 @@ pub type TimestampSeconds = u64;
 #[inline]
 pub fn get_current_time() -> Duration {
     let start = SystemTime::now();
-    
+
     start
         .duration_since(UNIX_EPOCH)
         .expect("Incorrect time returned from get_current_time")

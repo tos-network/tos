@@ -12,7 +12,7 @@
 /// 6. MVCC versioning (topoheight tracking)
 /// 7. Failed transaction rollback (no state persistence)
 use tos_common::{block::TopoHeight, contract::ContractCache, versioned_type::VersionedState};
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 #[cfg(test)]
 mod tests {

@@ -1,4 +1,4 @@
-//! Entry point and hook encoding for TAKO VM contract invocation
+//! Entry point and hook encoding for TOS Kernel(TAKO) contract invocation
 //!
 //! This module provides deterministic encoding for contract entry points and hooks.
 //! The encoding format is designed to support the full range of IDs and be easily
@@ -29,9 +29,9 @@
 //! 3. **Type discriminator**: Enables future extension with new invocation types
 //! 4. **No data loss**: Supports full u16 range for entry_id (previous: cast to u8)
 //!
-//! ## TAKO VM Decoder
+//! ## TOS Kernel(TAKO) Decoder
 //!
-//! The TAKO VM side should decode as follows:
+//! The TOS Kernel(TAKO) side should decode as follows:
 //!
 //! ```rust,ignore
 //! fn decode_invocation(params: &[u8]) -> Result<InvocationType, Error> {
@@ -63,7 +63,7 @@ pub const ENTRY_POINT_DISCRIMINATOR: u8 = 0x00;
 /// Type discriminator for hook invocation
 pub const HOOK_DISCRIMINATOR: u8 = 0x01;
 
-/// Encode an entry point ID for TAKO VM invocation
+/// Encode an entry point ID for TOS Kernel(TAKO) invocation
 ///
 /// # Format
 /// ```text
@@ -97,7 +97,7 @@ pub fn encode_entry_point(entry_id: u16) -> Vec<u8> {
     vec![ENTRY_POINT_DISCRIMINATOR, low, high]
 }
 
-/// Encode a hook ID for TAKO VM invocation
+/// Encode a hook ID for TOS Kernel(TAKO) invocation
 ///
 /// # Format
 /// ```text

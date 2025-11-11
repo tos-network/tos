@@ -32,7 +32,7 @@ use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use thiserror::Error;
-use tos_vm::Module;
+use tos_kernel::Module;
 
 pub use payload::*;
 

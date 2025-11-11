@@ -1,6 +1,6 @@
-/// TAKO VM Executor Integration Tests
+/// TOS Kernel(TAKO) Executor Integration Tests
 ///
-/// Tests the complete TAKO VM execution pipeline with real ELF contracts.
+/// Tests the complete TOS Kernel(TAKO) execution pipeline with real ELF contracts.
 use std::collections::HashMap;
 use tos_common::{
     asset::AssetData,
@@ -9,7 +9,7 @@ use tos_common::{
     crypto::{Hash, PublicKey},
 };
 use tos_daemon::tako_integration::TakoContractExecutor;
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 /// Mock provider for testing
 struct MockProvider {

@@ -1,4 +1,4 @@
-//! TAKO VM End-to-End CPI Integration Tests
+//! TOS Kernel(TAKO) End-to-End CPI Integration Tests
 //!
 //! This test suite validates the complete CPI (Cross-Program Invocation) flow
 //! with real contracts, real storage (RocksDB), and production-like conditions.
@@ -22,7 +22,7 @@ use tos_common::{
     serializer::Serializer,
 };
 use tos_daemon::tako_integration::TakoContractExecutor;
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 /// Test provider with storage tracking for CPI tests
 struct CpiTestProvider {

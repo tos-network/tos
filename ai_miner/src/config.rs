@@ -469,29 +469,27 @@ impl ConfigValidator {
 
         // Validate network-specific patterns
         if let Some(prefix) = expected_characteristics.prefix {
-            if !address_str.starts_with(prefix)
-                && log::log_enabled!(log::Level::Warn) {
-                    warn!(
+            if !address_str.starts_with(prefix) && log::log_enabled!(log::Level::Warn) {
+                warn!(
                         "Address {address} doesn't have expected network prefix '{prefix}' for network type"
                     );
-                }
-                // Note: This is a warning, not an error, as address formats may vary
+            }
+            // Note: This is a warning, not an error, as address formats may vary
         }
 
         // Check address format compatibility
         if let Some(expected_format) = expected_characteristics.format_hint {
             if !self.matches_address_format(&address_str, expected_format)
-                && log::log_enabled!(log::Level::Warn) {
-                    warn!(
-                        "Address {address} may not be compatible with {expected_format} network format"
-                    );
-                }
+                && log::log_enabled!(log::Level::Warn)
+            {
+                warn!(
+                    "Address {address} may not be compatible with {expected_format} network format"
+                );
+            }
         }
 
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Address network compatibility validation passed for: {address}"
-            );
+            debug!("Address network compatibility validation passed for: {address}");
         }
         Ok(())
     }
@@ -505,15 +503,14 @@ impl ConfigValidator {
 
         // Basic heuristics for address type validation
         if (address_str.starts_with("contract_") || address_str.contains("::"))
-            && log::log_enabled!(log::Level::Warn) {
-                warn!("Address {address} appears to be a contract address, which may not be suitable for mining rewards");
-            }
+            && log::log_enabled!(log::Level::Warn)
+        {
+            warn!("Address {address} appears to be a contract address, which may not be suitable for mining rewards");
+        }
 
         // Additional validation can be added based on TOS address specifications
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Address type compatibility validation passed for: {address}"
-            );
+            debug!("Address type compatibility validation passed for: {address}");
         }
         Ok(())
     }
@@ -694,13 +691,12 @@ impl ValidatedConfig {
         let validator = ConfigValidator::new(strict_mode, auto_fix);
         let messages = validator.validate(&mut config)?;
 
-        if !messages.is_empty()
-            && log::log_enabled!(log::Level::Info) {
-                info!(
-                    "Configuration loaded with {} adjustments/warnings",
-                    messages.len()
-                );
-            }
+        if !messages.is_empty() && log::log_enabled!(log::Level::Info) {
+            info!(
+                "Configuration loaded with {} adjustments/warnings",
+                messages.len()
+            );
+        }
 
         Ok(config)
     }
@@ -757,7 +753,8 @@ impl ValidatedConfig {
   "retry_delay_ms": 1000,
   "auto_fix_config": true,
   "strict_validation": false
-}"#.to_string();
+}"#
+        .to_string();
 
         std::fs::write(&path, template).map_err(|e| {
             anyhow!(

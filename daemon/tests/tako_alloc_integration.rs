@@ -1,6 +1,6 @@
 //! Integration tests for tos-alloc library
 //!
-//! Tests dynamic memory allocation in actual TAKO VM with heap regions
+//! Tests dynamic memory allocation in actual TOS Kernel(TAKO) with heap regions
 
 #![cfg(test)]
 
@@ -12,7 +12,7 @@ use tos_common::{
     crypto::{Hash, PublicKey},
 };
 use tos_daemon::tako_integration::TakoExecutor;
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 /// Mock ContractProvider for testing
 ///

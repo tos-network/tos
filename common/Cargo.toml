@@ -13,8 +13,8 @@ build = "build.rs"
 
 [dependencies]
 tos-hash = { git = "https://github.com/tos-network/tos-hash", branch = "master" }
-# TOS-VM - Simplified re-export crate in TAKO (all types + validation)
-tos-vm = { path = "../../tako/vm" }
+# TOS Kernel - Simplified re-export crate in TAKO (all types + validation)
+tos-kernel = { path = "../../tako/core" }
 # Balance simplification: bulletproofs removed (no longer needed with plaintext balances)
 # bulletproofs = { git = "https://github.com/tos-network/bulletproofs", tag = "v5.0.2" }
 curve25519-dalek = { features = ["digest", "group", "rand_core", "serde", "ecdlp"], git = "https://github.com/tos-network/curve25519-dalek", tag = "v4.2.0" }

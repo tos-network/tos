@@ -1,6 +1,6 @@
-# Test Fixtures for TAKO VM Integration Tests
+# Test Fixtures for TOS Kernel(TAKO) Integration Tests
 
-This directory contains compiled TAKO VM contracts used for integration testing.
+This directory contains compiled TOS Kernel(TAKO) contracts used for integration testing.
 
 ## Files
 

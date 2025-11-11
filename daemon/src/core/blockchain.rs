@@ -95,7 +95,7 @@ use tos_common::{
     utils::{calculate_tx_fee, format_tos},
     varuint::VarUint,
 };
-use tos_vm::Environment;
+use tos_kernel::Environment;
 
 use super::storage::{
     AccountProvider, BlockProvider, BlocksAtHeightProvider, ClientProtocolProvider,
@@ -185,7 +185,7 @@ pub struct Blockchain<S: Storage> {
     disable_zkp_cache: bool,
     // Cache for block template transactions (supports block reconstruction from header)
     transaction_cache: crate::core::mining::TransactionCache,
-    // Contract executor for running smart contracts (TAKO VM)
+    // Contract executor for running smart contracts (TOS Kernel(TAKO))
     executor: Arc<dyn tos_common::contract::ContractExecutor>,
 }
 
@@ -5935,7 +5935,7 @@ impl<S: Storage> Blockchain<S> {
         // Must collect and sort by hash before writing to storage
 
         // Collect all contract entries into a Vec for sorting
-        let mut contract_entries: Vec<(Hash, Arc<tos_vm::Module>)> = parallel_state
+        let mut contract_entries: Vec<(Hash, Arc<tos_kernel::Module>)> = parallel_state
             .contracts_iter()  // Use public accessor method
             .collect();
 

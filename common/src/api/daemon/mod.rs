@@ -17,7 +17,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
 };
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 pub use direction::*;
 

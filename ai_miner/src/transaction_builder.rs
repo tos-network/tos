@@ -39,9 +39,7 @@ impl AIMiningTransactionBuilder {
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Building register miner transaction metadata with nonce: {nonce}"
-            );
+            debug!("Building register miner transaction metadata with nonce: {nonce}");
         }
 
         let payload = AIMiningPayload::RegisterMiner {
@@ -80,9 +78,7 @@ impl AIMiningTransactionBuilder {
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Building publish task transaction metadata with nonce: {nonce}"
-            );
+            debug!("Building publish task transaction metadata with nonce: {nonce}");
         }
 
         let payload = AIMiningPayload::PublishTask {
@@ -124,9 +120,7 @@ impl AIMiningTransactionBuilder {
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Building submit answer transaction metadata with nonce: {nonce}"
-            );
+            debug!("Building submit answer transaction metadata with nonce: {nonce}");
         }
 
         let payload = AIMiningPayload::SubmitAnswer {
@@ -166,9 +160,7 @@ impl AIMiningTransactionBuilder {
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Building validate answer transaction metadata with nonce: {nonce}"
-            );
+            debug!("Building validate answer transaction metadata with nonce: {nonce}");
         }
 
         let payload = AIMiningPayload::ValidateAnswer {

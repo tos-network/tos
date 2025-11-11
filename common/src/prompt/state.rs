@@ -140,15 +140,14 @@ impl State {
                                         is_in_history = true;
                                     }
 
-                                    if is_in_history
-                                        && history_index < history.len() {
-                                            buffer.clear();
-                                            buffer.push_str(&history[history_index]);
-                                            self.show_input(&buffer)?;
-                                            if history_index + 1 < history.len() {
-                                                history_index += 1;
-                                            }
+                                    if is_in_history && history_index < history.len() {
+                                        buffer.clear();
+                                        buffer.push_str(&history[history_index]);
+                                        self.show_input(&buffer)?;
+                                        if history_index + 1 < history.len() {
+                                            history_index += 1;
                                         }
+                                    }
                                 }
                                 KeyCode::Down => {
                                     if is_in_history {
@@ -197,9 +196,7 @@ impl State {
                                     if let Some(sender) = prompt_sender.take() {
                                         if let Err(e) = sender.send(cloned_buffer) {
                                             if log::log_enabled!(log::Level::Error) {
-                                                error!(
-                                                    "Error while sending input to reader: {e}"
-                                                );
+                                                error!("Error while sending input to reader: {e}");
                                             }
                                             break;
                                         }
@@ -228,14 +225,13 @@ impl State {
             };
         }
 
-        if !self.exit.swap(true, Ordering::SeqCst)
-            && self.is_interactive() {
-                if let Err(e) = terminal::disable_raw_mode() {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!("Error while disabling raw mode: {e}");
-                    }
+        if !self.exit.swap(true, Ordering::SeqCst) && self.is_interactive() {
+            if let Err(e) = terminal::disable_raw_mode() {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while disabling raw mode: {e}");
                 }
             }
+        }
 
         info!("ioloop thread is now stopped");
 

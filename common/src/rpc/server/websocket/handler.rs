@@ -58,9 +58,7 @@ where
         trace!("checking if event is tracked");
         let sessions = self.events.read().await;
         trace!("tracked events sessions locked");
-        sessions
-            .values()
-            .any(|e| e.keys().any(|x| x == event))
+        sessions.values().any(|e| e.keys().any(|x| x == event))
     }
 
     // Notify all sessions subscribed to the given event
@@ -242,12 +240,10 @@ where
                     RpcResponseError::new(None, InternalRpcError::SerializeResponse(err))
                 })?)
             }
-            _ => {
-                Err(RpcResponseError::new(
-                    None,
-                    InternalRpcError::InvalidJSONRequest,
-                ))
-            }
+            _ => Err(RpcResponseError::new(
+                None,
+                InternalRpcError::InvalidJSONRequest,
+            )),
         }
     }
 

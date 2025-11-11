@@ -283,16 +283,12 @@ async fn main() -> Result<()> {
     };
 
     if log::log_enabled!(log::Level::Info) {
-        info!(
-            "Total threads to use: {threads} (detected: {detected_threads})"
-        );
+        info!("Total threads to use: {threads} (detected: {detected_threads})");
     }
 
     if let Some(algorithm) = config.benchmark.benchmark {
         if log::log_enabled!(log::Level::Info) {
-            info!(
-                "Benchmark mode enabled, miner will try up to {threads} threads"
-            );
+            info!("Benchmark mode enabled, miner will try up to {threads} threads");
         }
         benchmark(threads as usize, config.benchmark.iterations, algorithm);
         info!("Benchmark finished");
@@ -305,12 +301,11 @@ async fn main() -> Result<()> {
     if log::log_enabled!(log::Level::Info) {
         info!("Miner address: {address}");
     }
-    if threads != detected_threads
-        && log::log_enabled!(log::Level::Warn) {
-            warn!(
+    if threads != detected_threads && log::log_enabled!(log::Level::Warn) {
+        warn!(
                 "Attention, the number of threads used may not be optimal, recommended is: {detected_threads}"
             );
-        }
+    }
 
     // broadcast channel to send new jobs / exit command to all threads
     let (sender, _) = broadcast::channel::<ThreadNotification>(threads as usize);
@@ -343,7 +338,9 @@ async fn main() -> Result<()> {
     #[cfg(feature = "api_stats")]
     {
         // start stats task
-        stats_task = config.api_bind_address.map(|addr| spawn_task("broadcast", broadcast_stats_task(addr)));
+        stats_task = config
+            .api_bind_address
+            .map(|addr| spawn_task("broadcast", broadcast_stats_task(addr)));
     }
     #[cfg(not(feature = "api_stats"))]
     {
@@ -471,45 +468,42 @@ async fn communication_task(
         if log::log_enabled!(log::Level::Info) {
             info!("Trying to connect to {daemon_address}");
         }
-        let client = match connect_async(format!(
-            "{daemon_address}/getwork/{address}/{worker}"
-        ))
-        .await
-        {
-            Ok((client, response)) => {
-                let status = response.status();
-                if status.is_server_error() || status.is_client_error() {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!(
-                            "Error while connecting to {}, got an unexpected response: {}",
-                            daemon_address,
-                            status.as_str()
-                        );
+        let client =
+            match connect_async(format!("{daemon_address}/getwork/{address}/{worker}")).await {
+                Ok((client, response)) => {
+                    let status = response.status();
+                    if status.is_server_error() || status.is_client_error() {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Error while connecting to {}, got an unexpected response: {}",
+                                daemon_address,
+                                status.as_str()
+                            );
+                        }
+                        warn!("Trying to connect to WebSocket again in 10 seconds...");
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        continue 'main;
                     }
+                    client
+                }
+                Err(e) => {
+                    if let TungsteniteError::Http(e) = e {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Error while connecting to {}, got an unexpected response: {}",
+                                daemon_address,
+                                e.status()
+                            );
+                        }
+                    } else if log::log_enabled!(log::Level::Error) {
+                        error!("Error while connecting to {daemon_address}: {e}");
+                    }
+
                     warn!("Trying to connect to WebSocket again in 10 seconds...");
                     tokio::time::sleep(Duration::from_secs(10)).await;
                     continue 'main;
                 }
-                client
-            }
-            Err(e) => {
-                if let TungsteniteError::Http(e) = e {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!(
-                            "Error while connecting to {}, got an unexpected response: {}",
-                            daemon_address,
-                            e.status()
-                        );
-                    }
-                } else if log::log_enabled!(log::Level::Error) {
-                    error!("Error while connecting to {daemon_address}: {e}");
-                }
-
-                warn!("Trying to connect to WebSocket again in 10 seconds...");
-                tokio::time::sleep(Duration::from_secs(10)).await;
-                continue 'main;
-            }
-        };
+            };
         WEBSOCKET_CONNECTED.store(true, Ordering::SeqCst);
         if log::log_enabled!(log::Level::Info) {
             info!("Connected successfully to {daemon_address}");
@@ -616,9 +610,7 @@ async fn handle_websocket_message(
                 "No reason".into()
             };
             if log::log_enabled!(log::Level::Warn) {
-                warn!(
-                    "Daemon has closed the WebSocket connection with us: {reason}"
-                );
+                warn!("Daemon has closed the WebSocket connection with us: {reason}");
             }
             return Ok(true);
         }

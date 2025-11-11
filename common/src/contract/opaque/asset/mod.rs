@@ -9,7 +9,7 @@ use crate::{
     versioned_type::VersionedState,
 };
 use anyhow::Context as AnyhowContext;
-use tos_vm::{
+use tos_kernel::{
     traits::{JSONHelper, Serializable},
     Context, FnInstance, FnParams, FnReturnType, Primitive,
 };

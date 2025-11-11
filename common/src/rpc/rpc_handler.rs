@@ -83,12 +83,10 @@ where
                     RpcResponseError::new(None, InternalRpcError::SerializeResponse(err))
                 })?)
             }
-            _ => {
-                Err(RpcResponseError::new(
-                    None,
-                    InternalRpcError::InvalidJSONRequest,
-                ))
-            }
+            _ => Err(RpcResponseError::new(
+                None,
+                InternalRpcError::InvalidJSONRequest,
+            )),
         }
     }
 
@@ -157,9 +155,10 @@ where
     // register a new RPC method handler
     pub fn register_method(&mut self, name: &str, handler: Handler) {
         if self.methods.insert(name.into(), handler).is_some()
-            && log::log_enabled!(log::Level::Error) {
-                error!("The method '{name}' was already registered !");
-            }
+            && log::log_enabled!(log::Level::Error)
+        {
+            error!("The method '{name}' was already registered !");
+        }
     }
 
     pub fn get_data(&self) -> &T {

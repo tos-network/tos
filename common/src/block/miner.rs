@@ -196,9 +196,7 @@ impl<'a> Worker<'a> {
                 slice[0..BLOCK_WORK_SIZE].copy_from_slice(work.as_ref());
                 v1::tos_hash(slice, scratch_pad).map(Hash::new)?
             }
-            WorkVariant::V2(scratch_pad) => {
-                v2::tos_hash(work, scratch_pad).map(Hash::new)?
-            }
+            WorkVariant::V2(scratch_pad) => v2::tos_hash(work, scratch_pad).map(Hash::new)?,
         };
 
         Ok(hash)

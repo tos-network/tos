@@ -24,8 +24,8 @@ use crate::{
 use async_trait::async_trait;
 use indexmap::IndexSet;
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
-use tos_vm::Environment;
-use tos_vm::{Chunk, Module};
+use tos_kernel::Environment;
+use tos_kernel::{Chunk, Module};
 
 // Create a newtype wrapper to avoid orphan rule violation
 #[derive(Debug, Clone)]
@@ -648,7 +648,7 @@ async fn test_tx_deploy_contract() {
         };
 
         // Create module with bytecode for CREATE2-style deterministic address computation
-        // For legacy TOS-VM modules, we need chunks; bytecode is for TAKO VM
+        // For legacy modules, we need chunks; bytecode is for TOS Kernel(TAKO)
         // Since bytecode doesn't survive hex serialization, use traditional approach
         let mut module = Module::new();
         module.add_chunk(Chunk::new());
@@ -1667,9 +1667,7 @@ async fn test_p04_double_spend_prevention() {
             available,
             required,
         }) => {
-            println!(
-                "✓ Double-spend prevented: available={available}, required={required}"
-            );
+            println!("✓ Double-spend prevented: available={available}, required={required}");
             assert!(available < required, "Should have insufficient funds");
         }
         _ => panic!("Expected InsufficientFunds error, got {result2:?}"),
@@ -1722,9 +1720,7 @@ async fn test_p04_insufficient_balance() {
             available,
             required,
         }) => {
-            println!(
-                "✓ Insufficient balance detected: available={available}, required={required}"
-            );
+            println!("✓ Insufficient balance detected: available={available}, required={required}");
             assert_eq!(
                 available,
                 50 * COIN_VALUE,
@@ -1799,9 +1795,7 @@ async fn test_p04_overflow_protection() {
             result.is_none(),
             "Overflow should be detected when adding to u64::MAX"
         );
-        println!(
-            "✓ Overflow protection triggered: u64::MAX + {amount} would overflow"
-        );
+        println!("✓ Overflow protection triggered: u64::MAX + {amount} would overflow");
         return;
     }
 
@@ -1918,9 +1912,7 @@ async fn test_p04_burn_transaction() {
         "Alice's balance should be deducted by burn amount + fee"
     );
 
-    println!(
-        "✓ Burn transaction correctly deducted: 200 TOS + {tx_fee} fee"
-    );
+    println!("✓ Burn transaction correctly deducted: 200 TOS + {tx_fee} fee");
 }
 
 // Test 7: Multiple transfers in single transaction

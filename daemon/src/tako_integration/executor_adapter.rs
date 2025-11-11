@@ -1,6 +1,6 @@
-/// TAKO VM Contract Executor Adapter
+/// TOS Kernel(TAKO) Contract Executor Adapter
 ///
-/// This module implements the ContractExecutor trait for TAKO VM, enabling
+/// This module implements the ContractExecutor trait for TOS Kernel(TAKO), enabling
 /// the transaction processor to execute eBPF contracts via dependency injection.
 ///
 /// # Architecture
@@ -24,10 +24,10 @@ use tos_common::{
 
 use super::{ExecutionResult, TakoExecutor};
 
-/// TAKO VM implementation of ContractExecutor trait
+/// TOS Kernel(TAKO) implementation of ContractExecutor trait
 ///
 /// This adapter bridges the generic ContractExecutor interface with
-/// TAKO VM's specific execution engine.
+/// TOS Kernel(TAKO)'s specific execution engine.
 ///
 /// # Example
 ///
@@ -84,7 +84,7 @@ impl ContractExecutor for TakoContractExecutor {
             trace!("TAKO executor: Input data size: {} bytes", input_data.len());
         }
 
-        // Execute via TAKO VM
+        // Execute via TOS Kernel(TAKO)
         let result = TakoExecutor::execute(
             bytecode,
             provider,

@@ -3,7 +3,7 @@ use anyhow::Result;
 /// Contract execution trait for dependency injection
 ///
 /// This trait enables the common package to execute contracts without depending
-/// on specific VM implementations (TOS-VM, TAKO VM, etc.). The daemon package
+/// on specific VM implementations (legacy VM, TOS Kernel(TAKO), etc.). The daemon package
 /// implements this trait and injects the executor into the transaction processor.
 ///
 /// # Architecture
@@ -47,7 +47,7 @@ pub struct ContractExecutionResult {
 /// Contract executor trait
 ///
 /// Implementations of this trait handle the actual execution of contract bytecode.
-/// Different implementations can support different VM types (TOS-VM, TAKO VM, etc.).
+/// Different implementations can support different VM types (legacy VM, TOS Kernel(TAKO), etc.).
 ///
 /// # Example
 ///
@@ -79,7 +79,7 @@ pub trait ContractExecutor: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `bytecode` - Raw contract bytecode (ELF, TOS-VM format, etc.)
+    /// * `bytecode` - Raw contract bytecode (ELF format for TOS Kernel(TAKO), etc.)
     /// * `provider` - Contract provider for storage/account operations
     /// * `topoheight` - Current topoheight for versioned reads
     /// * `contract_hash` - Hash of the contract being executed

@@ -7,7 +7,7 @@ use tos_common::{
 };
 /// Account adapter: TOS ContractProvider → TAKO AccountProvider
 ///
-/// This module bridges TOS's account and balance system with TAKO VM's balance/transfer syscalls.
+/// This module bridges TOS's account and balance system with TOS Kernel(TAKO)'s balance/transfer syscalls.
 use tos_program_runtime::storage::AccountProvider;
 use tos_tbpf::error::EbpfError;
 
@@ -311,16 +311,16 @@ mod tests {
         fn load_data(
             &self,
             _contract: &Hash,
-            _key: &tos_vm::ValueCell,
+            _key: &tos_kernel::ValueCell,
             _topoheight: TopoHeight,
-        ) -> Result<Option<(TopoHeight, Option<tos_vm::ValueCell>)>, anyhow::Error> {
+        ) -> Result<Option<(TopoHeight, Option<tos_kernel::ValueCell>)>, anyhow::Error> {
             Ok(None)
         }
 
         fn load_data_latest_topoheight(
             &self,
             _contract: &Hash,
-            _key: &tos_vm::ValueCell,
+            _key: &tos_kernel::ValueCell,
             _topoheight: TopoHeight,
         ) -> Result<Option<TopoHeight>, anyhow::Error> {
             Ok(None)
@@ -329,7 +329,7 @@ mod tests {
         fn has_data(
             &self,
             _contract: &Hash,
-            _key: &tos_vm::ValueCell,
+            _key: &tos_kernel::ValueCell,
             _topoheight: TopoHeight,
         ) -> Result<bool, anyhow::Error> {
             Ok(false)

@@ -2,7 +2,7 @@ use crate::{
     contract::{from_context, ContractProvider},
     crypto::Hash,
 };
-use tos_vm::{
+use tos_kernel::{
     traits::{JSONHelper, Serializable},
     Context, FnInstance, FnParams, FnReturnType, OpaqueWrapper, Primitive,
 };

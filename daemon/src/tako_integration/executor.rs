@@ -1,6 +1,6 @@
-/// TAKO VM Executor for TOS Blockchain
+/// TOS Kernel(TAKO) Executor for TOS Blockchain
 ///
-/// This module provides the main execution engine for TAKO VM contracts within TOS blockchain.
+/// This module provides the main execution engine for TOS Kernel(TAKO) contracts within TOS blockchain.
 /// It handles bytecode loading, VM creation, execution, and result processing.
 ///
 /// # Architecture
@@ -58,9 +58,9 @@ const STACK_SIZE: usize = 16 * 1024;
 /// via the tos-alloc library. Can be increased up to 256KB if needed.
 const HEAP_SIZE: usize = 32 * 1024;
 
-/// TAKO VM executor for TOS blockchain
+/// TOS Kernel(TAKO) executor for TOS blockchain
 ///
-/// This is the main entry point for executing TAKO VM contracts within TOS.
+/// This is the main entry point for executing TOS Kernel(TAKO) contracts within TOS.
 /// It manages the complete lifecycle of contract execution from bytecode loading
 /// to result processing.
 ///
@@ -106,7 +106,7 @@ pub struct ExecutionResult {
 }
 
 impl TakoExecutor {
-    /// Execute a TAKO VM contract
+    /// Execute a TOS Kernel(TAKO) contract
     ///
     /// # Arguments
     ///
@@ -148,7 +148,7 @@ impl TakoExecutor {
         use log::{debug, error, info, warn};
 
         info!(
-            "TAKO VM execution starting: contract={}, compute_budget={}, bytecode_size={}",
+            "TOS Kernel(TAKO) execution starting: contract={}, compute_budget={}, bytecode_size={}",
             contract_hash,
             compute_budget.unwrap_or(DEFAULT_COMPUTE_BUDGET),
             bytecode.len()
@@ -414,7 +414,7 @@ impl TakoExecutor {
             ProgramResult::Ok(return_value) => {
                 if log::log_enabled!(log::Level::Info) {
                     info!(
-                        "TAKO VM execution succeeded: return_value={}, instructions={}, compute_units={}, return_data_size={}, log_count={}, event_count={}",
+                        "TOS Kernel(TAKO) execution succeeded: return_value={}, instructions={}, compute_units={}, return_data_size={}, log_count={}, event_count={}",
                         return_value,
                         instruction_count,
                         compute_units_used,
@@ -437,7 +437,7 @@ impl TakoExecutor {
                 let execution_error =
                     TakoExecutionError::from_ebpf_error(err, instruction_count, compute_units_used);
                 error!(
-                    "TAKO VM execution failed: category={}, error={}, log_count={}",
+                    "TOS Kernel(TAKO) execution failed: category={}, error={}, log_count={}",
                     execution_error.category(),
                     execution_error.user_message(),
                     log_messages.len()
@@ -482,8 +482,8 @@ mod tests {
         asset::AssetData,
         crypto::{Hash, PublicKey},
     };
+    use tos_kernel::ValueCell;
     use tos_program_runtime::storage::{InMemoryStorage, StorageProvider};
-    use tos_vm::ValueCell;
 
     // Mock provider for testing
     struct MockProvider {

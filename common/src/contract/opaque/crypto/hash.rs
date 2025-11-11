@@ -5,7 +5,7 @@ use crate::{
 };
 use anyhow::Context as AnyhowContext;
 use sha3::{Digest, Sha3_256};
-use tos_vm::{
+use tos_kernel::{
     traits::Serializable, Context, EnvironmentError, FnInstance, FnParams, FnReturnType,
     OpaqueWrapper, Primitive, ValueCell, ValueError, U256,
 };
