@@ -6,6 +6,7 @@ use crate::TestResult;
 ///
 /// **Note**: This requires TestDaemon which is deferred to Phase 2.
 /// For Phase 1, parallel execution tests use ParallelChainState directly.
+#[allow(clippy::unimplemented)]
 pub fn create_simple_transfer() -> TestResult<()> {
     unimplemented!("create_simple_transfer() requires TestDaemon (Phase 2)")
 }
