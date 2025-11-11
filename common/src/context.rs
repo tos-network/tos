@@ -12,13 +12,19 @@ pub struct NoOpHasher(u64);
 
 impl Hasher for NoOpHasher {
     fn write(&mut self, _bytes: &[u8]) {
-        // SAFETY: This is intentionally a no-op.
-        // NoOpHasher is specifically designed for TypeId hashing, which only uses write_u64().
+        // SAFETY: This hasher is intended ONLY for TypeId, which should call write_u64().
         // TypeId is a u64 internally, so the standard Hasher::hash() implementation
         // calls write_u64() directly, never calling this write() method.
-        // If this is ever called, it's a programmer error in the hash map usage,
-        // but we choose to silently ignore it rather than panic in production.
-        // The hash output will be incorrect, but the program won't crash.
+        //
+        // In debug builds, panic early to surface misuse during development.
+        // In release builds, use no-op to avoid crashes in production (hash will be incorrect,
+        // but this is acceptable as a graceful degradation if HashMap is accidentally misused).
+        #[cfg(debug_assertions)]
+        panic!("NoOpHasher::write called; this hasher only supports write_u64 for TypeId.");
+        #[cfg(not(debug_assertions))]
+        {
+            // no-op in release
+        }
     }
 
     fn write_u64(&mut self, i: u64) {

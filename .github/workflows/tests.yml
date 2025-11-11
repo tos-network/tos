@@ -247,20 +247,21 @@ jobs:
           echo "=========================================="
           cargo fmt --all -- --check
 
-      - name: Run clippy (critical lints only)
+      - name: Run clippy (critical lints as errors, others as warnings)
         run: |
           echo "=========================================="
-          echo "Running Clippy - Critical Lints Only"
+          echo "Running Clippy - Critical Lints as Errors"
           echo "=========================================="
-          echo "Checking for critical issues that must be fixed:"
+          echo "Checking for critical issues that must be fixed (will fail the build):"
           echo "  - await_holding_lock: Prevents deadlocks and performance issues"
           echo "  - todo/unimplemented: Prevents incomplete code in production"
           echo ""
-          echo "Note: Other style warnings are informational and can be fixed gradually"
+          echo "Other Clippy findings will be shown as non-blocking warnings"
           cargo clippy --workspace --all-targets -- \
             -D clippy::await_holding_lock \
             -D clippy::todo \
-            -D clippy::unimplemented
+            -D clippy::unimplemented \
+            -W clippy::all
 
   # Build verification
   build:

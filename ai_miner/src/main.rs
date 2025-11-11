@@ -1551,11 +1551,7 @@ async fn test_reward_cycle(
     manager.message("");
     manager.message("💰 Network Fee Analysis:");
     let sample_payload = AIMiningPayload::RegisterMiner {
-        miner_address: miner_address_opt
-            .as_ref()
-            .unwrap()
-            .clone()
-            .to_public_key(),
+        miner_address: miner_address_opt.as_ref().unwrap().clone().to_public_key(),
         registration_fee: 1_000_000_000,
     };
 

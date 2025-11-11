@@ -455,9 +455,11 @@ async fn main() -> Result<()> {
     }
 
     let wallet_opt = {
-        command_manager.get_context().lock().ok().and_then(|context| {
-            context.get::<Arc<Wallet>>().ok().cloned()
-        })
+        command_manager
+            .get_context()
+            .lock()
+            .ok()
+            .and_then(|context| context.get::<Arc<Wallet>>().ok().cloned())
     };
     if let Some(wallet) = wallet_opt {
         wallet.close().await;
@@ -2333,7 +2335,8 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
 
     // Create transaction with appropriate fee type
     let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload).await?
+        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload)
+            .await?
     } else {
         // Create transaction state and builder
         let storage = wallet.get_storage().read().await;
@@ -2580,7 +2583,8 @@ async fn transfer_all(
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
     let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload).await?
+        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload)
+            .await?
     } else {
         // Create transaction with appropriate fee type
         let storage = wallet.get_storage().read().await;
@@ -2757,7 +2761,8 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
 
     let tx_type = TransactionTypeBuilder::Burn(payload);
     let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload).await?
+        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload)
+            .await?
     } else {
         match wallet
             .create_transaction(tx_type, FeeBuilder::default())
@@ -4321,7 +4326,8 @@ async fn multisig_setup(
     };
     let tx_type = TransactionTypeBuilder::MultiSig(payload);
     let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload).await?
+        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload)
+            .await?
     } else {
         match wallet
             .create_transaction(tx_type, FeeBuilder::default())
