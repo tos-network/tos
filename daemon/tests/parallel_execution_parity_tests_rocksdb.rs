@@ -36,6 +36,7 @@ use tos_daemon::core::{
     state::{parallel_chain_state::ParallelChainState, ApplicableChainState},
     storage::{rocksdb::RocksStorage, BalanceProvider, NonceProvider},
 };
+use tos_daemon::tako_integration::TakoContractExecutor;
 
 use tos_environment::Environment;
 use tos_testing_integration::create_test_storage_with_funded_accounts;
@@ -218,6 +219,10 @@ async fn execute_sequential(
     let mut guard = storage.write().await;
     println!("  [Sequential] ✓ Got write lock");
 
+    println!("  [Sequential] Creating contract executor...");
+    let contract_executor = Arc::new(TakoContractExecutor::new());
+    println!("  [Sequential] ✓ Contract executor created");
+
     println!("  [Sequential] Creating ApplicableChainState...");
     let mut chain_state = ApplicableChainState::new(
         &mut *guard,
@@ -228,6 +233,7 @@ async fn execute_sequential(
         0,
         block_hash,
         block,
+        contract_executor,
     );
     println!("  [Sequential] ✓ ApplicableChainState created");
 

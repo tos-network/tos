@@ -2,6 +2,7 @@
 // No lifetimes, DashMap for automatic concurrency control
 
 use crate::core::{error::BlockchainError, storage::Storage};
+use crate::tako_integration::TakoContractExecutor;
 use dashmap::DashMap;
 use std::{
     collections::HashMap,
@@ -48,13 +49,13 @@ struct AccountState {
 
 /// Contract state cached in memory
 #[derive(Debug, Clone)]
-struct ContractState {
+pub(crate) struct ContractState {
     /// Contract module (bytecode)
     #[allow(dead_code)]
-    module: Option<Arc<tos_vm::Module>>,
+    pub(crate) module: Option<Arc<tos_kernel::Module>>,
     /// Contract storage data
     #[allow(dead_code)]
-    data: Vec<u8>,
+    pub(crate) data: Vec<u8>,
 }
 
 /// Result of transaction execution
@@ -129,7 +130,7 @@ pub struct TransactionResult {
 /// - Deadlock Documentation: `daemon/tests/parallel_execution_parity_tests_rocksdb.rs`
 /// - Configuration: Future addition to `daemon/src/config.rs` (storage_read_permits)
 pub struct ParallelChainState<S: Storage> {
-    // Storage reference with RwLock for interior mutability (Solana pattern)
+    // Storage reference with RwLock for interior mutability (SVM pattern)
     // Arc<RwLock<S>> enables sharing storage across parallel executors
     storage: Arc<RwLock<S>>,
 
@@ -145,6 +146,11 @@ pub struct ParallelChainState<S: Storage> {
 
     // Concurrent contract state
     contracts: DashMap<Hash, ContractState>,
+
+    // Contract storage caches (for merge to storage)
+    // Maps contract_hash -> ContractCache
+    // These caches accumulate storage writes from all transactions in the block
+    contract_caches: DashMap<Hash, tos_common::contract::ContractCache>,
 
     // Immutable block context
     #[allow(dead_code)]
@@ -175,6 +181,12 @@ pub struct ParallelChainState<S: Storage> {
     /// See struct-level documentation for detailed rationale, performance impact,
     /// and future optimization roadmap.
     storage_semaphore: Arc<Semaphore>,
+
+    /// Contract executor for TOS Kernel(TAKO) (eBPF)
+    ///
+    /// Uses TakoContractExecutor to execute eBPF contracts.
+    /// Legacy contracts are no longer supported.
+    contract_executor: Arc<dyn tos_common::contract::ContractExecutor>,
 }
 
 impl<S: Storage> ParallelChainState<S> {
@@ -191,12 +203,17 @@ impl<S: Storage> ParallelChainState<S> {
         // Cache network info to avoid repeated lock acquisition
         let is_mainnet = storage.read().await.is_mainnet();
 
+        // Initialize contract executor (TakoContractExecutor for eBPF contracts)
+        let contract_executor: Arc<dyn tos_common::contract::ContractExecutor> =
+            Arc::new(TakoContractExecutor::new());
+
         Arc::new(Self {
             storage,
             _phantom: PhantomData,
             environment,
             accounts: DashMap::new(),
             contracts: DashMap::new(),
+            contract_caches: DashMap::new(),
             stable_topoheight,
             topoheight,
             block_version,
@@ -211,6 +228,8 @@ impl<S: Storage> ParallelChainState<S> {
             // SAFETY (S4): Semaphore = 1 prevents RocksDB deadlocks in async context
             // See struct-level documentation for detailed explanation and optimization roadmap
             storage_semaphore: Arc::new(Semaphore::new(1)),
+            // TAKO integration: Multi-executor for both eBPF and legacy contracts
+            contract_executor,
         })
     }
 
@@ -222,6 +241,14 @@ impl<S: Storage> ParallelChainState<S> {
     /// Get total gas fees
     pub fn get_gas_fee(&self) -> u64 {
         self.gas_fee.load(Ordering::Relaxed)
+    }
+
+    /// Get contract executor
+    ///
+    /// Returns the TOS Kernel(TAKO) executor for eBPF contract execution.
+    /// Legacy contracts are no longer supported.
+    pub fn get_contract_executor(&self) -> &Arc<dyn tos_common::contract::ContractExecutor> {
+        &self.contract_executor
     }
 
     /// Load account state from storage if not already cached
@@ -440,6 +467,7 @@ impl<S: Storage> ParallelChainState<S> {
             Arc::clone(&self.storage_semaphore),
             &self.block,
             &self.block_hash,
+            self.contract_executor.clone(),
         );
 
         // Call Transaction::apply_with_partial_verify() which performs:
@@ -449,7 +477,10 @@ impl<S: Storage> ParallelChainState<S> {
         // 4. Balance operations
         // 5. Fee deduction
         // 6. Type-specific application logic
-        match tx.apply_with_partial_verify(&tx_hash, &mut adapter).await {
+        match tx
+            .apply_with_partial_verify(&tx_hash.clone(), &mut adapter)
+            .await
+        {
             Ok(()) => {
                 // SECURITY FIX: Commit ALL mutations atomically (balances, nonces, multisig, gas, burns)
                 // This fixes the premature state mutation vulnerability where failed transactions
@@ -647,35 +678,47 @@ impl<S: Storage> ParallelChainState<S> {
     }
 
     /// Legacy helper method - no longer used (replaced by adapter pattern)
+    ///
+    /// Contract invocation is now handled through ParallelApplyAdapter which implements
+    /// the BlockchainApplyState trait. When Transaction::apply_with_partial_verify() processes
+    /// an InvokeContract transaction, it calls merge_contract_changes() which stages the
+    /// contract cache for later persistence in merge_parallel_results().
+    ///
+    /// The full execution flow:
+    /// 1. Transaction::apply_with_partial_verify() validates the transaction
+    /// 2. Calls get_contract_environment_for() to prepare contract execution context
+    /// 3. Executes contract via TakoContractExecutor
+    /// 4. Calls merge_contract_changes() to stage storage writes
+    /// 5. ParallelApplyAdapter::commit_all() commits cache to ParallelChainState
+    /// 6. merge_parallel_results() persists all caches to RocksDB atomically
     #[allow(dead_code)]
     async fn apply_invoke_contract(
         &self,
         _source: &PublicKey,
         _payload: &InvokeContractPayload,
     ) -> Result<(), BlockchainError> {
-        // TODO [IN DEVELOPMENT]: Contract invocation support
-        // Waiting for contract system development to complete
-        // Once ready, integrate with parallel execution:
-        // 1. Load contract from storage
-        // 2. Prepare deposits
-        // 3. Execute contract in VM
-        // 4. Apply state changes to ParallelChainState
+        // NOTE: This method is no longer used. Contract invocation now flows through
+        // the adapter pattern described above.
         Ok(())
     }
 
     /// Legacy helper method - no longer used (replaced by adapter pattern)
+    ///
+    /// Contract deployment is now handled through the transaction verification pipeline
+    /// in common/src/transaction/verify/mod.rs:1237-1283. See TransactionType::DeployContract
+    /// handler for the full implementation including:
+    /// 1. Deterministic contract address generation
+    /// 2. Contract module storage via set_contract_module()
+    /// 3. Optional constructor invocation (Hook 0)
+    /// 4. Automatic rollback if constructor fails
     #[allow(dead_code)]
     async fn apply_deploy_contract(
         &self,
         _source: &PublicKey,
         _payload: &DeployContractPayload,
     ) -> Result<(), BlockchainError> {
-        // TODO [IN DEVELOPMENT]: Contract deployment support
-        // Waiting for contract system development to complete
-        // Once ready, integrate with parallel execution:
-        // 1. Validate contract bytecode
-        // 2. Store contract in ParallelChainState
-        // 3. Initialize contract storage
+        // NOTE: This method is no longer used. Contract deployment now flows through
+        // the transaction verification pipeline described above.
         Ok(())
     }
 
@@ -761,10 +804,11 @@ impl<S: Storage> ParallelChainState<S> {
         }
 
         // Write all contracts
+        // NOTE: Contract state persistence is now handled in blockchain.rs::merge_parallel_results()
+        // Step 4, which processes contract_caches from ParallelChainState and persists them to RocksDB.
+        // See daemon/src/core/blockchain.rs (search for "Step 4: Merge contract storage state changes")
         let mut contract_count = 0;
         for _entry in self.contracts.iter() {
-            // TODO [IN DEVELOPMENT]: Implement contract state persistence
-            // Waiting for contract system development to complete
             contract_count += 1;
         }
 
@@ -1188,6 +1232,187 @@ impl<S: Storage> ParallelChainState<S> {
     /// Get environment reference (for adapter)
     pub fn get_environment(&self) -> &Arc<Environment> {
         &self.environment
+    }
+
+    /// Store NEW deployed contract in cache (with collision check)
+    ///
+    /// This method is for NEW contract deployments and includes collision checking
+    /// to prevent duplicate CREATE2 addresses.
+    ///
+    /// CRITICAL: Uses try_insert() to avoid holding DashMap guard across .await
+    /// DashMap entry guards are not Send and cannot be held across async boundaries.
+    ///
+    /// Strategy:
+    /// 1. Quick cache check (no DashMap lock held)
+    /// 2. Async storage check (no DashMap lock held)
+    /// 3. Atomic insert with try_insert() (handles races)
+    pub async fn cache_deployed_contract(
+        &self,
+        contract_address: &Hash,
+        module: Arc<tos_kernel::Module>,
+        _storage_permit: &tokio::sync::SemaphorePermit<'_>,
+    ) -> Result<(), BlockchainError> {
+        // NOTE: _storage_permit ensures caller has acquired semaphore before calling
+        // This enforces proper synchronization without directly using the permit
+
+        // Step 1: Check cache first (fast, no async)
+        if self.contracts.contains_key(contract_address) {
+            return Err(BlockchainError::ContractAlreadyExists);
+        }
+
+        // Step 2: Check storage (async, no DashMap lock held)
+        let storage = self.storage.read().await;
+        let exists = storage
+            .has_contract_at_maximum_topoheight(contract_address, self.topoheight)
+            .await?;
+        drop(storage); // Release storage lock before DashMap operation
+
+        if exists {
+            return Err(BlockchainError::ContractAlreadyExists);
+        }
+
+        // Step 3: Try atomic insert (short critical section, no await)
+        // CRITICAL: Use entry() API to avoid overwriting existing entries.
+        // Using insert() would overwrite the winner's entry even when returning error.
+        // The entry() API ensures we only insert if vacant, preserving existing state.
+        let contract_state = ContractState {
+            module: Some(module),
+            data: Vec::new(),
+        };
+
+        match self.contracts.entry(contract_address.clone()) {
+            dashmap::mapref::entry::Entry::Occupied(_) => {
+                // Another task won the race and inserted first
+                // SAFETY: We don't touch the existing entry, preserving winner's state
+                Err(BlockchainError::ContractAlreadyExists)
+            }
+            dashmap::mapref::entry::Entry::Vacant(entry) => {
+                // We won the race, insert our deployment
+                entry.insert(contract_state);
+                Ok(())
+            }
+        }
+    }
+
+    /// Cache EXISTING contract loaded from storage (NO collision check)
+    ///
+    /// This method is for loading already-deployed contracts from storage.
+    /// It skips collision checking because the contract already exists on-chain.
+    ///
+    /// Used by load_contract_module() when loading contracts for CPI.
+    pub fn cache_existing_contract(
+        &self,
+        contract_address: &Hash,
+        module: Arc<tos_kernel::Module>,
+    ) {
+        // No collision check - this is for loading existing contracts
+        self.contracts.insert(
+            contract_address.clone(),
+            ContractState {
+                module: Some(module),
+                data: Vec::new(),
+            },
+        );
+    }
+
+    /// Remove deployed contract from cache (for constructor failure rollback)
+    pub fn remove_cached_contract(&self, contract_address: &Hash) {
+        self.contracts.remove(contract_address);
+    }
+
+    /// Get cached contract module
+    pub fn get_cached_contract(&self, contract_address: &Hash) -> Option<Arc<tos_kernel::Module>> {
+        self.contracts
+            .get(contract_address)
+            .and_then(|state| state.module.clone())
+    }
+
+    /// Get DashMap guard for contract (for trait implementations needing references)
+    ///
+    /// Returns a guard that keeps the contract entry locked and provides access to ContractState.
+    /// Used by get_contract_module_with_environment() to return a reference with proper lifetime.
+    pub(crate) fn get_contract_guard(
+        &self,
+        contract_address: &Hash,
+    ) -> Option<dashmap::mapref::one::Ref<'_, Hash, ContractState>> {
+        self.contracts.get(contract_address)
+    }
+
+    /// Public accessor for private contracts field (for merge)
+    ///
+    /// Returns an iterator over all deployed contracts in the cache.
+    /// Used by merge_parallel_results() to write contracts to storage.
+    pub fn contracts_iter(&self) -> impl Iterator<Item = (Hash, Arc<tos_kernel::Module>)> + '_ {
+        self.contracts.iter().filter_map(|entry| {
+            let address = entry.key().clone();
+            entry
+                .value()
+                .module
+                .as_ref()
+                .map(|module| (address, module.clone()))
+        })
+    }
+
+    /// Add a contract cache for later merging to storage
+    ///
+    /// Called from ParallelApplyAdapter::commit_all() when a transaction successfully
+    /// executes a contract. The cache contains all storage writes made by the contract.
+    ///
+    /// If multiple transactions modify the same contract in the same block, we merge
+    /// their caches by taking the last write for each key (last-write-wins semantics).
+    ///
+    /// # Arguments
+    ///
+    /// * `contract_hash` - Contract address
+    /// * `cache` - Contract storage cache containing writes
+    pub fn add_contract_cache(
+        &self,
+        contract_hash: Hash,
+        cache: tos_common::contract::ContractCache,
+    ) {
+        use dashmap::mapref::entry::Entry;
+
+        match self.contract_caches.entry(contract_hash.clone()) {
+            Entry::Occupied(mut existing) => {
+                // Merge: Last write wins for each key
+                // This handles multiple TX modifying the same contract in one block
+                let existing_cache = existing.get_mut();
+                for (key, value) in cache.storage {
+                    existing_cache.storage.insert(key, value);
+                }
+                // Merge balances (if present)
+                for (asset, balance) in cache.balances {
+                    existing_cache.balances.insert(asset, balance);
+                }
+                // Merge memory (if present)
+                for (key, value) in cache.memory {
+                    existing_cache.memory.insert(key, value);
+                }
+                // Merge events (if present)
+                for (key, values) in cache.events {
+                    existing_cache
+                        .events
+                        .entry(key)
+                        .or_insert_with(Vec::new)
+                        .extend(values);
+                }
+            }
+            Entry::Vacant(vacant) => {
+                // First write for this contract
+                vacant.insert(cache);
+            }
+        }
+    }
+
+    /// Get all contract caches for merging to storage
+    ///
+    /// Returns an iterator over (contract_hash, cache) pairs.
+    /// Used by merge_parallel_results() to persist contract state changes.
+    pub fn get_contract_caches(&self) -> Vec<(Hash, tos_common::contract::ContractCache)> {
+        self.contract_caches
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
+            .collect()
     }
 }
 

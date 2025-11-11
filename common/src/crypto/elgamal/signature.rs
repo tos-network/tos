@@ -25,7 +25,7 @@ impl Signature {
 
     // Verify the signature using the Public Key and the hash of the message
     pub fn verify(&self, message: &[u8], key: &PublicKey) -> bool {
-        let r = (*H) * &self.s + key.as_point() * -self.e;
+        let r = (*H) * self.s + key.as_point() * -self.e;
         let calculated = hash_and_point_to_scalar(&key.compress(), message, &r);
         self.e == calculated
     }
@@ -43,7 +43,7 @@ pub fn hash_and_point_to_scalar(
     hasher.update(point.compress().as_bytes());
 
     let hash = hasher.finalize();
-    Scalar::from_bytes_mod_order_wide(&hash.try_into().unwrap())
+    Scalar::from_bytes_mod_order_wide(&hash.into())
 }
 
 impl Serialize for Signature {
@@ -51,7 +51,7 @@ impl Serialize for Signature {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&hex::encode(&self.to_bytes()))
+        serializer.serialize_str(&hex::encode(self.to_bytes()))
     }
 }
 
@@ -61,7 +61,7 @@ impl<'de> serde::Deserialize<'de> for Signature {
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Ok(Self::from_hex(&s).map_err(D::Error::custom)?)
+        Self::from_hex(&s).map_err(D::Error::custom)
     }
 }
 

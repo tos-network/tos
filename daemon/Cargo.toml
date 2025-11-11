@@ -13,8 +13,14 @@ autobenches = false
 
 [dependencies]
 tos_common = { path = "../common", features = ["prompt", "clap", "rpc-server", "tokio"] }
-tos-environment = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
-tos-vm = { git = "https://github.com/tos-network/tos-vm", branch = "dev" }
+
+# TOS Kernel - TOS Kernel(TAKO) runtime
+tos-kernel = { path = "../../tako/core" }
+tos-program-runtime = { path = "../../tako/program-runtime" }
+tos-syscalls = { path = "../../tako/syscalls" }
+tako-sdk = { path = "../../tako/sdk" }
+tos-tbpf = { git = "https://github.com/tos-network/tos-tbpf", branch = "main", features = ["jit"] }
+tos-environment = { path = "../../tako/environment" }
 
 # Database backends
 sled = "0.34.7"
@@ -88,6 +94,10 @@ criterion = "0.6.0"
 rayon = "1.8"
 sysinfo = "0.32"
 tos-testing-integration = { path = "../testing-integration" }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+libsecp256k1 = { version = "0.7", features = ["hmac"] }
+sha3 = "0.10"
+rand = "0.8"
 
 [[bench]]
 name = "tps"

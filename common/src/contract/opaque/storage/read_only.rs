@@ -2,7 +2,7 @@ use crate::{
     contract::{from_context, ContractProvider},
     crypto::Hash,
 };
-use tos_vm::{
+use tos_kernel::{
     traits::{JSONHelper, Serializable},
     Context, FnInstance, FnParams, FnReturnType, OpaqueWrapper, Primitive,
 };
@@ -50,8 +50,7 @@ pub fn read_only_storage_load<P: ContractProvider>(
         Some(v) => v.clone(),
         None => storage
             .load_data(&zelf.0, &key, state.topoheight)?
-            .map(|(_, v)| v)
-            .flatten(),
+            .and_then(|(_, v)| v),
     };
 
     Ok(Some(value.unwrap_or_default()))

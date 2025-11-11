@@ -11,7 +11,7 @@ use tos_common::{
     transaction::{verify::BlockchainVerificationState, MultiSigPayload, Reference, Transaction},
 };
 use tos_environment::Environment;
-use tos_vm::Module;
+use tos_kernel::Module;
 
 struct Account<'a> {
     // Account nonce used to verify valid transaction
@@ -38,7 +38,7 @@ pub struct MempoolState<'a, S: Storage> {
     // This is used to verify ZK Proofs and store/update nonces
     accounts: HashMap<&'a PublicKey, Account<'a>>,
     // Contract modules
-    contracts: HashMap<&'a Hash, Cow<'a, Module>>,
+    contracts: HashMap<Hash, Cow<'a, Module>>,
     // The current stable topoheight of the chain
     stable_topoheight: TopoHeight,
     // The current topoheight of the chain
@@ -403,38 +403,51 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     /// Set the contract module
     async fn set_contract_module(
         &mut self,
-        hash: &'a Hash,
+        hash: &Hash,
         module: &'a Module,
     ) -> Result<(), BlockchainError> {
-        if self.contracts.insert(hash, Cow::Borrowed(module)).is_some() {
+        // Insert contract with owned hash (no memory leak!)
+        if self
+            .contracts
+            .insert(hash.clone(), Cow::Borrowed(module))
+            .is_some()
+        {
             return Err(BlockchainError::ContractAlreadyExists);
         }
 
         Ok(())
     }
 
-    async fn load_contract_module(&mut self, hash: &'a Hash) -> Result<bool, BlockchainError> {
-        match self.contracts.entry(hash) {
-            Entry::Occupied(_) => Ok(true),
-            Entry::Vacant(v) => {
-                let module = self
-                    .storage
-                    .get_contract_at_maximum_topoheight_for(hash, self.topoheight)
-                    .await?
-                    .map(|(_, v)| v.take().map(|v| v.into_owned()))
-                    .flatten()
-                    .ok_or_else(|| BlockchainError::ContractNotFound(hash.clone()))?;
+    async fn load_contract_module(&mut self, hash: &Hash) -> Result<bool, BlockchainError> {
+        // Check if already loaded
+        if self.contracts.contains_key(hash) {
+            return Ok(true);
+        }
 
-                v.insert(Cow::Owned(module));
+        // Load from storage - return Ok(false) if not found
+        let module_opt = self
+            .storage
+            .get_contract_at_maximum_topoheight_for(hash, self.topoheight)
+            .await?
+            .map(|(_, v)| v.take().map(|v| v.into_owned()))
+            .flatten();
 
+        match module_opt {
+            Some(module) => {
+                // Insert contract with owned hash (no memory leak!)
+                self.contracts.insert(hash.clone(), Cow::Owned(module));
                 Ok(true)
+            }
+            None => {
+                // Contract doesn't exist - this is OK for existence checks
+                Ok(false)
             }
         }
     }
 
     async fn get_contract_module_with_environment(
         &self,
-        hash: &'a Hash,
+        hash: &Hash,
     ) -> Result<(&Module, &Environment), BlockchainError> {
         let module = self
             .contracts

@@ -25,6 +25,12 @@ pub struct MultiSig {
     signatures: IndexSet<SignatureId>,
 }
 
+impl Default for MultiSig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MultiSig {
     /// Creates a new MultiSig
     pub fn new() -> Self {

@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use crate::core::error::BlockchainError;
 use async_trait::async_trait;
 use tos_common::{block::TopoHeight, crypto::Hash, versioned_type::Versioned};
-use tos_vm::Module;
+use tos_kernel::Module;
 
 pub use balance::*;
 pub use data::*;

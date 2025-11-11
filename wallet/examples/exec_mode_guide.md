@@ -175,6 +175,5 @@ print(f"Balance: {balance_output}")
 |------|------------------|----------------------|
 | `geth --exec "cmd"` | JavaScript | `--exec="cmd"` |
 | `bitcoin-cli cmd` | Single command | `--exec="cmd"` |
-| `solana cmd` | Subcommand | `--exec="cmd"` |
 
 TOS Wallet's `--exec` mode combines the advantages of various tools, providing a consistent, powerful, and user-friendly interface!

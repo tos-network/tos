@@ -2,6 +2,7 @@
 // Tests component interactions and end-to-end functionality
 
 pub mod concurrent_lock_tests;
+pub mod contract_state_persistence_tests;
 pub mod daa_tests;
 pub mod dag_tests;
 pub mod ghostdag_tests;

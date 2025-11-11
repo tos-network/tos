@@ -228,7 +228,7 @@ impl<'a, T: ?Sized> Deref for RwLockReadGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner.as_ref().expect("not dropped")
+        self.inner.as_ref().expect("not dropped")
     }
 }
 
@@ -268,7 +268,7 @@ impl<'a, T: ?Sized> Deref for RwLockWriteGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner.as_ref().expect("not dropped")
+        self.inner.as_ref().expect("not dropped")
     }
 }
 

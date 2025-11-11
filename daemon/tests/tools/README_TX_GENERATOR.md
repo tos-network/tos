@@ -1,6 +1,6 @@
 # TOS Transaction Generator Tool
 
-**Location**: `/Users/tomisetsu/tos-network/tos/daemon/tests/tools/tx_generator.rs`
+**Location**: `~/tos-network/tos/daemon/tests/tools/tx_generator.rs`
 
 **Purpose**: Generate and submit batches of signed transactions to devnet/testnet for testing parallel transaction execution performance.
 
@@ -506,11 +506,11 @@ Based on theoretical analysis (from `memo/BENCHMARK_RESULTS.md`):
 
 ## References
 
-- **Source Code**: `/Users/tomisetsu/tos-network/tos/daemon/tests/tools/tx_generator.rs`
-- **Build Config**: `/Users/tomisetsu/tos-network/tos/daemon/Cargo.toml` (lines 70-72)
-- **Benchmark Results**: `/Users/tomisetsu/tos-network/tos/memo/BENCHMARK_RESULTS.md`
-- **Devnet Testing Guide**: `/Users/tomisetsu/tos-network/tos/memo/DEVNET_TESTING_GUIDE.md`
-- **Phase 3 Integration**: `/Users/tomisetsu/tos-network/tos/memo/PHASE_3_COMPLETE.md`
+- **Source Code**: `~/tos-network/tos/daemon/tests/tools/tx_generator.rs`
+- **Build Config**: `~/tos-network/tos/daemon/Cargo.toml` (lines 70-72)
+- **Benchmark Results**: `~/tos-network/tos/memo/BENCHMARK_RESULTS.md`
+- **Devnet Testing Guide**: `~/tos-network/tos/memo/DEVNET_TESTING_GUIDE.md`
+- **Phase 3 Integration**: `~/tos-network/tos/memo/PHASE_3_COMPLETE.md`
 
 ---
 

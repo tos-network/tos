@@ -1,7 +1,7 @@
 #!/bin/bash
 # Generate test accounts from seeds using tos_wallet binary
 
-WALLET_BIN="/Users/tomisetsu/tos-network/tos/target/release/tos_wallet"
+WALLET_BIN="$HOME/tos-network/tos/target/release/tos_wallet"
 NETWORK="testnet"
 WALLET_DIR="/tmp/tos_test_wallets"
 

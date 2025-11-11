@@ -223,7 +223,7 @@ async fn main() -> Result<()> {
     if let Some(path) = config.config_file.as_ref() {
         if config.generate_config_template {
             if Path::new(path).exists() {
-                eprintln!("Config file already exists at {}", path);
+                eprintln!("Config file already exists at {path}");
                 return Ok(());
             }
 
@@ -232,7 +232,7 @@ async fn main() -> Result<()> {
                 .context("Error while serializing config file")?;
             file.write_all(json.as_bytes())
                 .context("Error while writing config file")?;
-            println!("Config file template generated at {}", path);
+            println!("Config file template generated at {path}");
             return Ok(());
         }
 
@@ -270,8 +270,7 @@ async fn main() -> Result<()> {
         Err(e) => {
             if log::log_enabled!(log::Level::Warn) {
                 warn!(
-                    "Couldn't detect number of available threads: {}, fallback to 1 thread only",
-                    e
+                    "Couldn't detect number of available threads: {e}, fallback to 1 thread only"
                 );
             }
             1
@@ -284,18 +283,12 @@ async fn main() -> Result<()> {
     };
 
     if log::log_enabled!(log::Level::Info) {
-        info!(
-            "Total threads to use: {} (detected: {})",
-            threads, detected_threads
-        );
+        info!("Total threads to use: {threads} (detected: {detected_threads})");
     }
 
     if let Some(algorithm) = config.benchmark.benchmark {
         if log::log_enabled!(log::Level::Info) {
-            info!(
-                "Benchmark mode enabled, miner will try up to {} threads",
-                threads
-            );
+            info!("Benchmark mode enabled, miner will try up to {threads} threads");
         }
         benchmark(threads as usize, config.benchmark.iterations, algorithm);
         info!("Benchmark finished");
@@ -306,15 +299,12 @@ async fn main() -> Result<()> {
         .miner_address
         .ok_or_else(|| Error::msg("No miner address specified"))?;
     if log::log_enabled!(log::Level::Info) {
-        info!("Miner address: {}", address);
+        info!("Miner address: {address}");
     }
-    if threads != detected_threads {
-        if log::log_enabled!(log::Level::Warn) {
-            warn!(
-                "Attention, the number of threads used may not be optimal, recommended is: {}",
-                detected_threads
+    if threads != detected_threads && log::log_enabled!(log::Level::Warn) {
+        warn!(
+                "Attention, the number of threads used may not be optimal, recommended is: {detected_threads}"
             );
-        }
     }
 
     // broadcast channel to send new jobs / exit command to all threads
@@ -323,11 +313,11 @@ async fn main() -> Result<()> {
     let (block_sender, block_receiver) = mpsc::channel::<MinerWork>(threads as usize);
     for id in 0..threads {
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Starting thread #{}", id);
+            debug!("Starting thread #{id}");
         }
         if let Err(e) = start_thread(id, sender.subscribe(), block_sender.clone()) {
             if log::log_enabled!(log::Level::Error) {
-                error!("Error while creating Mining Thread #{}: {}", id, e);
+                error!("Error while creating Mining Thread #{id}: {e}");
             }
         }
     }
@@ -348,10 +338,9 @@ async fn main() -> Result<()> {
     #[cfg(feature = "api_stats")]
     {
         // start stats task
-        stats_task = match config.api_bind_address {
-            Some(addr) => Some(spawn_task("broadcast", broadcast_stats_task(addr))),
-            None => None,
-        };
+        stats_task = config
+            .api_bind_address
+            .map(|addr| spawn_task("broadcast", broadcast_stats_task(addr)));
     }
     #[cfg(not(feature = "api_stats"))]
     {
@@ -360,12 +349,12 @@ async fn main() -> Result<()> {
 
     if let Err(e) = run_prompt(prompt).await {
         if log::log_enabled!(log::Level::Error) {
-            error!("Error on running prompt: {}", e);
+            error!("Error on running prompt: {e}");
         }
     }
 
     // send exit command to all threads to stop
-    if let Err(_) = sender.send(ThreadNotification::Exit) {
+    if sender.send(ThreadNotification::Exit).is_err() {
         debug!("Error while sending exit message to threads");
     }
 
@@ -477,62 +466,54 @@ async fn communication_task(
     let daemon_address = sanitize_ws_address(&daemon_address);
     'main: loop {
         if log::log_enabled!(log::Level::Info) {
-            info!("Trying to connect to {}", daemon_address);
+            info!("Trying to connect to {daemon_address}");
         }
-        let client = match connect_async(format!(
-            "{}/getwork/{}/{}",
-            daemon_address,
-            address.to_string(),
-            worker
-        ))
-        .await
-        {
-            Ok((client, response)) => {
-                let status = response.status();
-                if status.is_server_error() || status.is_client_error() {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!(
-                            "Error while connecting to {}, got an unexpected response: {}",
-                            daemon_address,
-                            status.as_str()
-                        );
+        let client =
+            match connect_async(format!("{daemon_address}/getwork/{address}/{worker}")).await {
+                Ok((client, response)) => {
+                    let status = response.status();
+                    if status.is_server_error() || status.is_client_error() {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Error while connecting to {}, got an unexpected response: {}",
+                                daemon_address,
+                                status.as_str()
+                            );
+                        }
+                        warn!("Trying to connect to WebSocket again in 10 seconds...");
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        continue 'main;
                     }
+                    client
+                }
+                Err(e) => {
+                    if let TungsteniteError::Http(e) = e {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Error while connecting to {}, got an unexpected response: {}",
+                                daemon_address,
+                                e.status()
+                            );
+                        }
+                    } else if log::log_enabled!(log::Level::Error) {
+                        error!("Error while connecting to {daemon_address}: {e}");
+                    }
+
                     warn!("Trying to connect to WebSocket again in 10 seconds...");
                     tokio::time::sleep(Duration::from_secs(10)).await;
                     continue 'main;
                 }
-                client
-            }
-            Err(e) => {
-                if let TungsteniteError::Http(e) = e {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!(
-                            "Error while connecting to {}, got an unexpected response: {}",
-                            daemon_address,
-                            e.status()
-                        );
-                    }
-                } else {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!("Error while connecting to {}: {}", daemon_address, e);
-                    }
-                }
-
-                warn!("Trying to connect to WebSocket again in 10 seconds...");
-                tokio::time::sleep(Duration::from_secs(10)).await;
-                continue 'main;
-            }
-        };
+            };
         WEBSOCKET_CONNECTED.store(true, Ordering::SeqCst);
         if log::log_enabled!(log::Level::Info) {
-            info!("Connected successfully to {}", daemon_address);
+            info!("Connected successfully to {daemon_address}");
         }
         let (mut write, mut read) = client.split();
         loop {
             select! {
                 Some(message) = read.next() => { // read all messages from daemon
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Received message from daemon: {:?}", message);
+                        debug!("Received message from daemon: {message:?}");
                     }
                     match handle_websocket_message(message, &job_sender).await {
                         Ok(exit) => {
@@ -543,7 +524,7 @@ async fn communication_task(
                         },
                         Err(e) => {
                             if log::log_enabled!(log::Level::Error) {
-                                error!("Error while handling message from WebSocket: {}", e);
+                                error!("Error while handling message from WebSocket: {e}");
                             }
                             break;
                         }
@@ -554,7 +535,7 @@ async fn communication_task(
                     let submit = serde_json::json!(SubmitMinerWorkParams { miner_work: work.to_hex() }).to_string();
                     if let Err(e) = write.send(Message::Text(submit.into())).await {
                         if log::log_enabled!(log::Level::Error) {
-                            error!("Error while sending the block found to the daemon: {}", e);
+                            error!("Error while sending the block found to the daemon: {e}");
                         }
                         break;
                     }
@@ -583,7 +564,7 @@ async fn handle_websocket_message(
     match message? {
         Message::Text(text) => {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("new message from daemon: {}", text);
+                debug!("new message from daemon: {text}");
             }
             match serde_json::from_slice::<SocketMessage>(text.as_bytes())? {
                 SocketMessage::NewJob(job) => {
@@ -606,7 +587,7 @@ async fn handle_websocket_message(
                         job.height,
                     )) {
                         if log::log_enabled!(log::Level::Error) {
-                            error!("Error while sending new job to threads: {}", e);
+                            error!("Error while sending new job to threads: {e}");
                         }
                     }
                 }
@@ -617,7 +598,7 @@ async fn handle_websocket_message(
                 SocketMessage::BlockRejected(err) => {
                     BLOCKS_REJECTED.fetch_add(1, Ordering::SeqCst);
                     if log::log_enabled!(log::Level::Error) {
-                        error!("Block submitted has been rejected by network: {}", err);
+                        error!("Block submitted has been rejected by network: {err}");
                     }
                 }
             }
@@ -629,10 +610,7 @@ async fn handle_websocket_message(
                 "No reason".into()
             };
             if log::log_enabled!(log::Level::Warn) {
-                warn!(
-                    "Daemon has closed the WebSocket connection with us: {}",
-                    reason
-                );
+                warn!("Daemon has closed the WebSocket connection with us: {reason}");
             }
             return Ok(true);
         }
@@ -641,7 +619,7 @@ async fn handle_websocket_message(
         }
         msg => {
             if log::log_enabled!(log::Level::Warn) {
-                warn!("Unexpected message from WebSocket: {:?}", msg);
+                warn!("Unexpected message from WebSocket: {msg:?}");
             }
             return Ok(true);
         }
@@ -655,20 +633,20 @@ fn start_thread(
     mut job_receiver: broadcast::Receiver<ThreadNotification<'static>>,
     block_sender: mpsc::Sender<MinerWork<'static>>,
 ) -> Result<(), Error> {
-    let builder = thread::Builder::new().name(format!("Mining Thread #{}", id));
+    let builder = thread::Builder::new().name(format!("Mining Thread #{id}"));
     builder.spawn(move || {
         let mut worker = Worker::new();
         let mut hash: Hash;
 
         if log::log_enabled!(log::Level::Info) {
-            info!("Mining Thread #{}: started", id);
+            info!("Mining Thread #{id}: started");
         }
         'main: loop {
             let message = match job_receiver.blocking_recv() {
                 Ok(message) => message,
                 Err(e) => {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Mining thread #{} skipped lagged job ({}), syncing to latest", id, e);
+                        debug!("Mining thread #{id} skipped lagged job ({e}), syncing to latest");
                     }
                     // Channel is lagging, empty it to get the latest job
                     while job_receiver.len() > 1 {
@@ -688,13 +666,13 @@ fn start_thread(
                 }
                 ThreadNotification::Exit => {
                     if log::log_enabled!(log::Level::Info) {
-                        info!("Exiting Mining Thread #{}...", id);
+                        info!("Exiting Mining Thread #{id}...");
                     }
                     break 'main;
                 },
                 ThreadNotification::NewJob(algorithm, mut new_job, expected_difficulty, height) => {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!("Mining Thread #{} received a new job", id);
+                        debug!("Mining Thread #{id} received a new job");
                     }
                     // set thread id in extra nonce for more work spread between threads
                     // u16 support up to 65535 threads
@@ -706,7 +684,7 @@ fn start_thread(
                         Ok(value) => value,
                         Err(e) => {
                             if log::log_enabled!(log::Level::Error) {
-                                error!("Mining Thread #{}: error on difficulty target computation: {}", id, e);
+                                error!("Mining Thread #{id}: error on difficulty target computation: {e}");
                             }
                             continue 'main;
                         }
@@ -742,7 +720,7 @@ fn start_thread(
                     // This prevents submitting stale blocks that will be rejected
                     if !job_receiver.is_empty() {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("Thread #{}: discarding found block {} at height {} due to newer job available", id, block_hash, height);
+                            debug!("Thread #{id}: discarding found block {block_hash} at height {height} due to newer job available");
                         }
                         continue 'main;
                     }
@@ -752,9 +730,9 @@ fn start_thread(
                     }
 
                     let job = worker.take_work().unwrap();
-                    if let Err(_) = block_sender.blocking_send(job) {
+                    if block_sender.blocking_send(job).is_err() {
                         if log::log_enabled!(log::Level::Error) {
-                            error!("Mining Thread #{}: error while sending block found with hash {}", id, block_hash);
+                            error!("Mining Thread #{id}: error while sending block found with hash {block_hash}");
                         }
                         continue 'main;
                     }
@@ -763,7 +741,7 @@ fn start_thread(
             };
         }
         if log::log_enabled!(log::Level::Info) {
-            info!("Mining Thread #{}: stopped", id);
+            info!("Mining Thread #{id}: stopped");
         }
     })?;
     Ok(())
@@ -813,7 +791,7 @@ async fn run_prompt(prompt: ShareablePrompt) -> Result<()> {
             #[cfg(feature = "api_stats")]
             HASHRATE.store(hashrate as u64, Ordering::SeqCst);
 
-            prompt.colorize_string(Color::Green, &format!("{}", format_hashrate(hashrate)))
+            prompt.colorize_string(Color::Green, &format_hashrate(hashrate).to_string())
         };
 
         Ok(format!(

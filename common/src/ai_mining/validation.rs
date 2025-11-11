@@ -90,8 +90,7 @@ impl<'a> AIMiningValidator<'a> {
         let min_registration_fee = 1_000_000_000; // 1 TOS in nanoTOS
         if registration_fee < min_registration_fee {
             return Err(AIMiningError::ValidationFailed(format!(
-                "Registration fee {} is below minimum {}",
-                registration_fee, min_registration_fee
+                "Registration fee {registration_fee} is below minimum {min_registration_fee}"
             )));
         }
 
@@ -137,8 +136,7 @@ impl<'a> AIMiningValidator<'a> {
         let (min_reward, max_reward) = difficulty.reward_range();
         if reward_amount < min_reward || reward_amount > max_reward {
             return Err(AIMiningError::InvalidTaskConfig(format!(
-                "Reward amount {} is outside valid range [{}, {}] for difficulty {:?}",
-                reward_amount, min_reward, max_reward, difficulty
+                "Reward amount {reward_amount} is outside valid range [{min_reward}, {max_reward}] for difficulty {difficulty:?}"
             )));
         }
 
@@ -167,8 +165,7 @@ impl<'a> AIMiningValidator<'a> {
             if !reputation.can_submit_now(self.current_time) {
                 let remaining = reputation.get_remaining_cooldown(self.current_time);
                 return Err(AIMiningError::ValidationFailed(format!(
-                    "Account is in cooldown for {} more seconds",
-                    remaining
+                    "Account is in cooldown for {remaining} more seconds"
                 )));
             }
 
@@ -268,8 +265,7 @@ impl<'a> AIMiningValidator<'a> {
         let max_stake = reward_amount / 2;
         if stake_amount > max_stake {
             return Err(AIMiningError::ValidationFailed(format!(
-                "Stake amount {} exceeds maximum {} (50% of reward)",
-                stake_amount, max_stake
+                "Stake amount {stake_amount} exceeds maximum {max_stake} (50% of reward)"
             )));
         }
 
@@ -298,8 +294,7 @@ impl<'a> AIMiningValidator<'a> {
             if !reputation.can_submit_now(self.current_time) {
                 let remaining = reputation.get_remaining_cooldown(self.current_time);
                 return Err(AIMiningError::ValidationFailed(format!(
-                    "Account is in cooldown for {} more seconds",
-                    remaining
+                    "Account is in cooldown for {remaining} more seconds"
                 )));
             }
 
@@ -441,8 +436,7 @@ impl<'a> AIMiningValidator<'a> {
             if !reputation.can_submit_now(self.current_time) {
                 let remaining = reputation.get_remaining_cooldown(self.current_time);
                 return Err(AIMiningError::ValidationFailed(format!(
-                    "Account is in cooldown for {} more seconds",
-                    remaining
+                    "Account is in cooldown for {remaining} more seconds"
                 )));
             }
 

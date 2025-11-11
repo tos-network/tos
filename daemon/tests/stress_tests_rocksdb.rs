@@ -21,10 +21,7 @@ use tos_common::{
     crypto::{Hash, Hashable, KeyPair},
     immutable::Immutable,
 };
-use tos_daemon::core::{
-    state::parallel_chain_state::ParallelChainState,
-    storage::{BalanceProvider, NonceProvider},
-};
+use tos_daemon::core::state::parallel_chain_state::ParallelChainState;
 use tos_environment::Environment;
 use tos_testing_integration::utils::storage_helpers::{
     create_test_rocksdb_storage, setup_account_rocksdb,

@@ -3,15 +3,11 @@ use core::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum TxVersion {
     // All operations: Burn, Transfer, Multisig, Deploy Contract, Invoke Contract, Energy
+    #[default]
     T0 = 0,
-}
-
-impl Default for TxVersion {
-    fn default() -> Self {
-        TxVersion::T0
-    }
 }
 
 impl TryFrom<u8> for TxVersion {
@@ -25,17 +21,17 @@ impl TryFrom<u8> for TxVersion {
     }
 }
 
-impl Into<u8> for TxVersion {
-    fn into(self) -> u8 {
-        match self {
+impl From<TxVersion> for u8 {
+    fn from(val: TxVersion) -> Self {
+        match val {
             TxVersion::T0 => 0,
         }
     }
 }
 
-impl Into<u64> for TxVersion {
-    fn into(self) -> u64 {
-        let byte: u8 = self.into();
+impl From<TxVersion> for u64 {
+    fn from(val: TxVersion) -> Self {
+        let byte: u8 = val.into();
         byte as u64
     }
 }

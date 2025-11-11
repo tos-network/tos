@@ -16,6 +16,12 @@ pub struct Queue<K: Hash + Eq + Debug, V> {
     order: VecDeque<Arc<K>>,
 }
 
+impl<K: Hash + Eq + Debug, V> Default for Queue<K, V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K: Hash + Eq + Debug, V> Queue<K, V> {
     pub fn new() -> Self {
         Self {

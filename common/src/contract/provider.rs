@@ -1,4 +1,4 @@
-use tos_vm::tid;
+use tos_kernel::tid;
 
 use crate::{
     asset::AssetData,
@@ -48,6 +48,15 @@ pub trait ContractProvider: ContractStorage + 'static {
         key: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<bool, anyhow::Error>;
+
+    // Load contract Module bytecode for Cross-Program Invocation (CPI)
+    // Returns the ELF bytecode of the contract at the given topoheight
+    // Used by TOS Kernel(TAKO)'s contract loader to enable CPI
+    fn load_contract_module(
+        &self,
+        contract: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<Option<Vec<u8>>, anyhow::Error>;
 }
 
 // This is a wrapper around the storage to allow for the storage to be passed in the Context

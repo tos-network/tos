@@ -213,7 +213,7 @@ def test_energy_query(client, alice_account):
 
 ```bash
 # Generate Bob's address
-cd /Users/tomisetsu/tos-network/tos
+cd ~/tos-network/tos
 ./target/release/tos_wallet --network testnet --offline-mode
 
 # In wallet prompt:

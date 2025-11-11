@@ -8,7 +8,7 @@ use crate::{
     crypto::Hash,
     versioned_type::VersionedState,
 };
-use tos_vm::{
+use tos_kernel::{
     traits::{JSONHelper, Serializable},
     Context, FnInstance, FnParams, FnReturnType, OpaqueWrapper, Primitive, ValueCell,
 };
@@ -74,7 +74,7 @@ pub fn storage_load<P: ContractProvider>(
 
     let value = match state.cache.storage.get(&key) {
         Some((_, value)) => value.clone(),
-        None => match storage.load_data(&state.contract, &key, state.topoheight)? {
+        None => match storage.load_data(state.contract, &key, state.topoheight)? {
             Some((topoheight, constant)) => {
                 state.cache.storage.insert(
                     key.clone(),
@@ -139,8 +139,8 @@ pub fn storage_store<P: ContractProvider>(
         None => {
             // We need to retrieve the latest topoheight version
             storage
-                .load_data_latest_topoheight(&state.contract, &key, state.topoheight)?
-                .map(|topoheight| VersionedState::Updated(topoheight))
+                .load_data_latest_topoheight(state.contract, &key, state.topoheight)?
+                .map(VersionedState::Updated)
                 .unwrap_or(VersionedState::New)
         }
     };
@@ -149,8 +149,7 @@ pub fn storage_store<P: ContractProvider>(
         .cache
         .storage
         .insert(key, (data_state, Some(value)))
-        .map(|(_, v)| v)
-        .flatten()
+        .and_then(|(_, v)| v)
         .unwrap_or_default();
 
     Ok(Some(value))
@@ -169,14 +168,14 @@ pub fn storage_delete<P: ContractProvider>(
         Some((s, _)) => match s {
             VersionedState::New => {
                 let value = state.cache.storage.remove(&key);
-                return Ok(Some(value.map(|(_, v)| v).flatten().unwrap_or_default()));
+                return Ok(Some(value.and_then(|(_, v)| v).unwrap_or_default()));
             }
             VersionedState::FetchedAt(topoheight) => VersionedState::Updated(*topoheight),
             VersionedState::Updated(topoheight) => VersionedState::Updated(*topoheight),
         },
         None => {
             // We need to retrieve the latest topoheight version
-            match storage.load_data_latest_topoheight(&state.contract, &key, state.topoheight)? {
+            match storage.load_data_latest_topoheight(state.contract, &key, state.topoheight)? {
                 Some(topoheight) => VersionedState::Updated(topoheight),
                 None => return Ok(Some(Default::default())),
             }
@@ -187,8 +186,7 @@ pub fn storage_delete<P: ContractProvider>(
         .cache
         .storage
         .insert(key, (data_state, None))
-        .map(|(_, v)| v)
-        .flatten()
+        .and_then(|(_, v)| v)
         .unwrap_or_default();
 
     Ok(Some(value))

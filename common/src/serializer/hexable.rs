@@ -107,7 +107,7 @@ mod tests {
             b: "hello".to_string(),
         };
         let hex = test.to_hex();
-        let hexable: Hexable<Test> = serde_json::from_str(&format!("\"{}\"", hex)).unwrap();
+        let hexable: Hexable<Test> = serde_json::from_str(&format!("\"{hex}\"")).unwrap();
         assert_eq!(*hexable, test);
     }
 }

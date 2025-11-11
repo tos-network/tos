@@ -112,7 +112,7 @@ impl StorageManager {
         if !storage_dir.exists() {
             fs::create_dir_all(&storage_dir).await?;
             if log::log_enabled!(log::Level::Info) {
-                info!("Created storage directory: {:?}", storage_dir);
+                info!("Created storage directory: {storage_dir:?}");
             }
         }
 
@@ -124,7 +124,7 @@ impl StorageManager {
         // Load existing state or create new one
         let state = if storage_path.exists() {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Loading existing state from: {:?}", storage_path);
+                debug!("Loading existing state from: {storage_path:?}");
             }
             let content = fs::read_to_string(&storage_path).await?;
             match serde_json::from_str::<AIMiningState>(&content) {
@@ -135,10 +135,7 @@ impl StorageManager {
                 }
                 Err(e) => {
                     if log::log_enabled!(log::Level::Warn) {
-                        warn!(
-                            "Failed to parse existing state file: {}. Creating new state.",
-                            e
-                        );
+                        warn!("Failed to parse existing state file: {e}. Creating new state.");
                     }
                     let mut new_state = AIMiningState::default();
                     new_state.network = network;
@@ -147,7 +144,7 @@ impl StorageManager {
             }
         } else {
             if log::log_enabled!(log::Level::Info) {
-                info!("Creating new AI mining state for network: {:?}", network);
+                info!("Creating new AI mining state for network: {network:?}");
             }
             let mut new_state = AIMiningState::default();
             new_state.network = network;
@@ -241,12 +238,10 @@ impl StorageManager {
             task.updated_at = chrono::Utc::now().timestamp() as u64;
             self.save().await?;
             if log::log_enabled!(log::Level::Info) {
-                info!("Updated task {} state", task_key);
+                info!("Updated task {task_key} state");
             }
-        } else {
-            if log::log_enabled!(log::Level::Warn) {
-                warn!("Task not found: {}", task_key);
-            }
+        } else if log::log_enabled!(log::Level::Warn) {
+            warn!("Task not found: {task_key}");
         }
 
         Ok(())
@@ -298,7 +293,7 @@ impl StorageManager {
 
         self.save().await?;
         if log::log_enabled!(log::Level::Info) {
-            info!("Added transaction record: {:?}", payload_type);
+            info!("Added transaction record: {payload_type:?}");
         }
         Ok(())
     }

@@ -52,6 +52,8 @@ pub enum VerificationError<T> {
     MaxGasReached,
     #[error("Contract not found")]
     ContractNotFound,
+    #[error("Contract already exists at address {0}")]
+    ContractAlreadyExists(Hash),
     #[error("Insufficient energy: required {0}")]
     InsufficientEnergy(u64),
     #[error("Insufficient funds: available {available}, required {required}")]

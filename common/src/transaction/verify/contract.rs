@@ -1,16 +1,14 @@
 use std::{borrow::Cow, sync::Arc};
 
-use anyhow::Context;
 use indexmap::IndexMap;
-use log::{debug, trace, warn};
-use tos_vm::{ValueCell, VM};
+use log::{debug, trace};
+use tos_kernel::ValueCell;
 
 use crate::{
     config::{TOS_ASSET, TX_GAS_BURN_PERCENT},
-    contract::{ContractOutput, ContractProvider, ContractProviderWrapper},
+    contract::ContractProvider,
     crypto::Hash,
-    tokio::block_in_place_safe,
-    transaction::{ContractDeposit, Transaction},
+    transaction::{encoding, ContractDeposit, Transaction},
 };
 
 use super::{BlockchainApplyState, BlockchainVerificationState, VerificationError};
@@ -30,155 +28,157 @@ impl Transaction {
         contract: &'a Hash,
     ) -> Result<bool, VerificationError<E>> {
         state
-            .load_contract_module(&contract)
+            .load_contract_module(contract)
             .await
             .map_err(VerificationError::State)
     }
 
-    // Invoke a contract from a transaction
-    // Note that the contract must be already loaded by calling
-    // `is_contract_available`
+    // Invoke a contract from a transaction using the ContractExecutor trait
+    // This method supports both TOS Kernel(TAKO) (eBPF) and legacy contracts
     pub(super) async fn invoke_contract<
         'a,
-        P: ContractProvider,
+        P: ContractProvider + Send,
         E,
         B: BlockchainApplyState<'a, P, E>,
     >(
         self: &'a Arc<Self>,
         tx_hash: &'a Hash,
         state: &mut B,
-        contract: &'a Hash,
+        contract: &Hash,
         deposits: &'a IndexMap<Hash, ContractDeposit>,
-        parameters: impl DoubleEndedIterator<Item = ValueCell>,
+        _parameters: impl DoubleEndedIterator<Item = ValueCell>,
         max_gas: u64,
         invoke: InvokeContract,
     ) -> Result<bool, VerificationError<E>> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Invoking contract {} from TX {}: {:?}",
-                contract, tx_hash, invoke
-            );
+            debug!("Invoking contract {contract} from TX {tx_hash}: {invoke:?}");
         }
-        let (contract_environment, mut chain_state) = state
+
+        // Get the contract module to extract bytecode
+        // Extract bytecode into owned Vec to avoid borrowing conflicts
+        let bytecode: Vec<u8> = {
+            let (module, _environment) = state
+                .get_contract_module_with_environment(contract)
+                .await
+                .map_err(VerificationError::State)?;
+
+            // Extract bytecode from module
+            // For TOS Kernel(TAKO) contracts, this will be ELF bytecode
+            // For legacy contracts, this will be None (not supported in new executor)
+            let bytecode = module.get_bytecode().ok_or_else(|| {
+                VerificationError::ModuleError(
+                    "Contract does not have eBPF bytecode. Legacy contracts are no longer supported. Please redeploy with TOS Kernel(TAKO) format.".to_string()
+                )
+            })?;
+
+            bytecode.to_vec()
+        };
+
+        // Get the executor before any mutable borrows to avoid borrow conflicts
+        let executor = state.get_contract_executor();
+
+        // Get the contract environment for state access
+        let (contract_environment, chain_state) = state
             .get_contract_environment_for(contract, deposits, tx_hash)
             .await
             .map_err(VerificationError::State)?;
 
-        // Total used gas by the VM
-        let (used_gas, exit_code) = block_in_place_safe::<_, Result<_, anyhow::Error>>(|| {
-            // Create the VM
-            let mut vm = VM::new(contract_environment.environment);
+        // Get block information from chain state
+        let topoheight = chain_state.topoheight;
+        let block_hash = chain_state.block_hash;
+        let _block = chain_state.block;
 
-            // Insert the module to load
-            vm.append_module(contract_environment.module)?;
+        // Convert invoke type to parameters
+        // For TOS Kernel(TAKO), we pass execution metadata as parameters
+        // Uses deterministic encoding that supports full u16 range for entry_id
+        // and proper u8 range for hook_id. See encoding module for format spec.
+        let parameters = match invoke {
+            InvokeContract::Entry(entry_id) => Some(encoding::encode_entry_point(entry_id)),
+            InvokeContract::Hook(hook_id) => Some(encoding::encode_hook(hook_id)),
+        };
 
-            // Invoke the needed chunk
-            // This is the first chunk to be called
-            match invoke {
-                InvokeContract::Entry(entry) => {
-                    vm.invoke_entry_chunk(entry).context("invoke entry chunk")?;
-                }
-                InvokeContract::Hook(hook) => {
-                    if !vm.invoke_hook_id(hook).context("invoke hook")? {
-                        if log::log_enabled!(log::Level::Warn) {
-                            warn!(
-                                "Invoke contract {} from TX {} hook {} not found",
-                                contract, tx_hash, hook
-                            );
-                        }
-                        return Ok((0, None));
-                    }
-                }
-            }
+        // Execute the contract
+        let execution_result = {
+            let provider = contract_environment.provider;
+            let tx_sender_hash = Hash::new(*self.get_source().as_bytes());
+            executor
+                .execute(
+                    &bytecode,
+                    provider,
+                    topoheight,
+                    contract,
+                    block_hash,
+                    topoheight, // Use topoheight as block_height for now
+                    tx_hash,
+                    &tx_sender_hash,
+                    max_gas,
+                    parameters,
+                )
+                .await
+                .map_err(|e| {
+                    VerificationError::ModuleError(format!("Contract execution failed: {e:#}"))
+                })?
+        };
 
-            // We need to push it in reverse order because the VM will pop them in reverse order
-            for constant in parameters.rev() {
-                if log::log_enabled!(log::Level::Trace) {
-                    trace!("Pushing constant: {}", constant);
-                }
-                vm.push_stack(constant).context("push param")?;
-            }
+        let used_gas = execution_result.gas_used;
+        let exit_code = execution_result.exit_code;
+        let transfers = execution_result.transfers;
 
-            let context = vm.context_mut();
-
-            // Set the gas limit for the VM
-            context.set_gas_limit(max_gas);
-
-            // Configure the context
-            // Note that the VM already include the environment in Context
-            context.insert_ref(self);
-            // insert the chain state separetly to avoid to give the S type
-            context.insert_mut(&mut chain_state);
-            // insert the storage through our wrapper
-            // so it can be easily mocked
-            context.insert(ContractProviderWrapper(contract_environment.provider));
-
-            // We need to handle the result of the VM
-            let res = vm.run();
-
-            // To be sure that we don't have any overflow
-            // We take the minimum between the gas used and the max gas
-            let gas_usage = vm.context().current_gas_usage().min(max_gas);
-
-            let exit_code = match res {
-                Ok(res) => {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!(
-                            "Invoke contract {} from TX {} result: {:#}",
-                            contract, tx_hash, res
-                        );
-                    }
-                    // If the result return 0 as exit code, it means that everything went well
-                    let exit_code = res.as_u64().ok();
-                    exit_code
-                }
-                Err(err) => {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!(
-                            "Invoke contract {} from TX {} error: {:#}",
-                            contract, tx_hash, err
-                        );
-                    }
-                    None
-                }
-            };
-
-            Ok((gas_usage, exit_code))
-        })?;
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Contract {} execution result: gas_used={}, exit_code={:?}, transfers={}",
+                contract,
+                used_gas,
+                exit_code,
+                transfers.len()
+            );
+        }
 
         let is_success = exit_code == Some(0);
         let mut outputs = chain_state.outputs;
-        // If the contract execution was successful, we need to merge the cache
+
+        // Convert TAKO transfers to ContractOutput::Transfer
+        // This ensures transfers staged during contract execution are persisted to the ledger
+        if is_success {
+            for transfer in transfers {
+                outputs.push(crate::contract::ContractOutput::Transfer {
+                    amount: transfer.amount,
+                    asset: transfer.asset,
+                    destination: transfer.destination,
+                });
+            }
+        }
+
+        // If the contract execution was successful, merge the changes
         if is_success {
             let cache = chain_state.cache;
             let tracker = chain_state.tracker;
             let assets = chain_state.assets;
             state
-                .merge_contract_changes(&contract, cache, tracker, assets)
+                .merge_contract_changes(contract, cache, tracker, assets)
                 .await
                 .map_err(VerificationError::State)?;
         } else {
-            // Otherwise, something was wrong, we delete the outputs made by the contract
+            // Otherwise, something went wrong, delete the outputs made by the contract
             outputs.clear();
 
             if !deposits.is_empty() {
                 // It was not successful, we need to refund the deposits
                 self.refund_deposits(state, deposits).await?;
-
-                outputs.push(ContractOutput::RefundDeposits);
+                outputs.push(crate::contract::ContractOutput::RefundDeposits);
             }
         }
 
         // Push the exit code to the outputs
-        outputs.push(ContractOutput::ExitCode(exit_code));
+        outputs.push(crate::contract::ContractOutput::ExitCode(exit_code));
 
-        // We must refund all the gas not used by the contract
+        // Handle gas refunds
         let refund_gas = self.handle_gas(state, used_gas, max_gas).await?;
         if log::log_enabled!(log::Level::Debug) {
-            debug!("used gas: {}, refund gas: {}", used_gas, refund_gas);
+            debug!("used gas: {used_gas}, refund gas: {refund_gas}");
         }
         if refund_gas > 0 {
-            outputs.push(ContractOutput::RefundGas { amount: refund_gas });
+            outputs.push(crate::contract::ContractOutput::RefundGas { amount: refund_gas });
         }
 
         // Track the outputs
@@ -214,8 +214,7 @@ impl Transaction {
 
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Invoke contract used gas: {}, burned: {}, fee: {}, refund: {}",
-                used_gas, burned_gas, gas_fee, refund_gas
+                "Invoke contract used gas: {used_gas}, burned: {burned_gas}, fee: {gas_fee}, refund: {refund_gas}"
             );
         }
         state
@@ -260,12 +259,7 @@ impl Transaction {
                     .decompress()
                     .map_err(|_| VerificationError::InvalidFormat)?
                     .to_address(state.is_mainnet());
-                trace!(
-                    "Refunding deposit {:?} for asset: {} to {}",
-                    deposit,
-                    asset,
-                    source_address
-                );
+                trace!("Refunding deposit {deposit:?} for asset: {asset} to {source_address}");
             }
 
             let balance = state

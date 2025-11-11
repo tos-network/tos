@@ -39,6 +39,7 @@ use crate::{
         rpc::{get_block_response, get_block_type_for_block},
         DaemonRpcServer, SharedDaemonRpcServer,
     },
+    tako_integration::TakoContractExecutor,
 };
 use anyhow::Error;
 use futures::{stream, TryStreamExt};
@@ -94,7 +95,7 @@ use tos_common::{
     utils::{calculate_tx_fee, format_tos},
     varuint::VarUint,
 };
-use tos_vm::Environment;
+use tos_kernel::Environment;
 
 use super::storage::{
     AccountProvider, BlockProvider, BlocksAtHeightProvider, ClientProtocolProvider,
@@ -134,7 +135,7 @@ pub struct Blockchain<S: Storage> {
     // mempool to retrieve/add all txs
     mempool: RwLock<Mempool>,
     // storage to retrieve/add blocks
-    // Arc wrapper enables parallel execution (Solana pattern)
+    // Arc wrapper enables parallel execution (SVM pattern)
     storage: Arc<RwLock<S>>,
     // Current semaphore used to prevent
     // verifying more than one block at a time
@@ -184,6 +185,8 @@ pub struct Blockchain<S: Storage> {
     disable_zkp_cache: bool,
     // Cache for block template transactions (supports block reconstruction from header)
     transaction_cache: crate::core::mining::TransactionCache,
+    // Contract executor for running smart contracts (TOS Kernel(TAKO))
+    executor: Arc<dyn tos_common::contract::ContractExecutor>,
 }
 
 impl<S: Storage> Blockchain<S> {
@@ -342,6 +345,7 @@ impl<S: Storage> Blockchain<S> {
             flush_db_every_n_blocks: config.flush_db_every_n_blocks,
             disable_zkp_cache: config.disable_zkp_cache,
             transaction_cache: crate::core::mining::TransactionCache::new(100, 60000), // 100 templates, 60s TTL
+            executor: Arc::new(TakoContractExecutor::new()),
         };
 
         // include genesis block
@@ -4025,6 +4029,7 @@ impl<S: Storage> Blockchain<S> {
                     past_burned_supply,
                     &hash,
                     &block,
+                    self.executor.clone(),
                 );
 
                 // DAG FIX: Add miner rewards BEFORE executing transactions
@@ -4197,6 +4202,7 @@ impl<S: Storage> Blockchain<S> {
                         past_burned_supply,
                         &hash,
                         &block,
+                        self.executor.clone(),
                     );
 
                     // SECURITY FIX S2: Removed redundant post-execution reward application
@@ -5921,6 +5927,107 @@ impl<S: Storage> Blockchain<S> {
                 storage
                     .set_last_multisig_to(&account, topoheight, versioned_multisig)
                     .await?;
+            }
+        }
+
+        // Step 3: Merge deployed contracts
+        // CRITICAL: DashMap::iter() has non-deterministic order
+        // Must collect and sort by hash before writing to storage
+
+        // Collect all contract entries into a Vec for sorting
+        let mut contract_entries: Vec<(Hash, Arc<tos_kernel::Module>)> = parallel_state
+            .contracts_iter()  // Use public accessor method
+            .collect();
+
+        if !contract_entries.is_empty() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Merging {} deployed contracts", contract_entries.len());
+            }
+
+            // Sort by contract address (hash) for deterministic merge order
+            contract_entries.sort_by_key(|(hash, _)| hash.clone());
+
+            // Write contracts to storage in deterministic order
+            for (contract_address, module_arc) in contract_entries {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Writing deployed contract {} at topoheight {}",
+                        contract_address,
+                        topoheight
+                    );
+                }
+
+                let module_ref = module_arc.as_ref();
+                use std::borrow::Cow;
+                use crate::core::storage::VersionedContract;
+                let versioned_contract = VersionedContract::new(Some(Cow::Borrowed(module_ref)), None);
+
+                storage
+                    .set_last_contract_to(&contract_address, topoheight, &versioned_contract)
+                    .await?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Merged deployed contract {} at topoheight {}", contract_address, topoheight);
+                }
+            }
+        }
+
+        // Step 4: Merge contract storage state changes
+        // Collect all contract caches and sort for deterministic merge order
+        let mut contract_caches = parallel_state.get_contract_caches();
+
+        if !contract_caches.is_empty() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Merging storage state for {} contracts", contract_caches.len());
+            }
+
+            // Sort by contract hash for deterministic merge order (S1 compliance)
+            contract_caches.sort_by_key(|(hash, _)| hash.clone());
+
+            // Write contract state changes to storage in deterministic order
+            for (contract_hash, cache) in contract_caches {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Writing contract {} state: {} storage entries, {} balance entries",
+                        contract_hash,
+                        cache.storage.len(),
+                        cache.balances.len()
+                    );
+                }
+
+                // Persist each storage entry in the cache
+                // The cache uses VersionedState to track whether each key is New or Updated
+                for (key, (versioned_state, value_opt)) in &cache.storage {
+                    // Create VersionedContractData from the cache entry
+                    use tos_common::versioned_type::{Versioned, VersionedState as VS};
+
+                    // Determine the previous topoheight for MVCC
+                    let prev_topoheight = match versioned_state {
+                        VS::New => None,
+                        VS::Updated(prev_topo) | VS::FetchedAt(prev_topo) => Some(*prev_topo),
+                    };
+
+                    let versioned_data = Versioned::new(value_opt.clone(), prev_topoheight);
+
+                    // Write to storage
+                    storage
+                        .set_last_contract_data_to(
+                            &contract_hash,
+                            key,
+                            topoheight,
+                            &versioned_data,
+                        )
+                        .await?;
+                }
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Merged contract {} state: {} entries at topoheight {}",
+                        contract_hash,
+                        cache.storage.len(),
+                        topoheight
+                    );
+                }
             }
         }
 

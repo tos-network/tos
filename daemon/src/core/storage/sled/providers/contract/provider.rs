@@ -10,7 +10,7 @@ use tos_common::{
     crypto::{Hash, PublicKey},
     tokio::try_block_on,
 };
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 impl ContractStorage for SledStorage {
     fn load_data(
@@ -188,5 +188,64 @@ impl ContractProvider for SledStorage {
         }
         let res = try_block_on(self.get_balance_at_maximum_topoheight(key, asset, topoheight))??;
         Ok(res.map(|(topoheight, balance)| (topoheight, balance.get_balance())))
+    }
+
+    fn load_contract_module(
+        &self,
+        contract: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<Option<Vec<u8>>, anyhow::Error> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "load contract Module bytecode for contract {} at topoheight {}",
+                contract,
+                topoheight
+            );
+        }
+
+        // Get the VersionedContract from storage using the daemon's async ContractProvider
+        use crate::core::storage::ContractProvider as DaemonContractProvider;
+        let versioned_contract_opt =
+            try_block_on(self.get_contract_at_maximum_topoheight_for(contract, topoheight))??;
+
+        let Some((found_topo, versioned)) = versioned_contract_opt else {
+            return Ok(None);
+        };
+
+        // Extract Module from VersionedContract
+        // VersionedContract = Versioned<Option<Cow<'a, Module>>>
+        let module_option_cow = versioned.get();
+
+        let module_cow = module_option_cow.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Contract {} at topoheight {} has been deleted",
+                contract,
+                found_topo
+            )
+        })?;
+
+        let module = module_cow.as_ref();
+
+        // Get bytecode from Module
+        let bytecode_opt = module.get_bytecode();
+
+        let bytecode = bytecode_opt.ok_or_else(|| {
+            anyhow::anyhow!(
+                "Contract {} at topoheight {} has no bytecode",
+                contract,
+                found_topo
+            )
+        })?;
+
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!(
+                "Loaded contract Module {} at topoheight {}: {} bytes",
+                contract,
+                found_topo,
+                bytecode.len()
+            );
+        }
+
+        Ok(Some(bytecode.to_vec()))
     }
 }

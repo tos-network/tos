@@ -71,7 +71,7 @@ impl Serializer for VarUint {
 
         if len > MAX_VARUINT_SIZE {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("VarUint size is too big: {}", len);
+                debug!("VarUint size is too big: {len}");
             }
             return Err(ReaderError::InvalidSize);
         }

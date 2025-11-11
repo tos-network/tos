@@ -111,8 +111,7 @@ impl AIMiningTask {
         let (min_reward, max_reward) = difficulty.reward_range();
         if reward_amount < min_reward || reward_amount > max_reward {
             return Err(AIMiningError::InvalidTaskConfig(format!(
-                "Reward amount {} is outside valid range [{}, {}] for difficulty {:?}",
-                reward_amount, min_reward, max_reward, difficulty
+                "Reward amount {reward_amount} is outside valid range [{min_reward}, {max_reward}] for difficulty {difficulty:?}"
             )));
         }
 
@@ -477,7 +476,7 @@ mod tests {
             validated_at: 200,
         };
         let validation2 = ValidationScore {
-            validator: validator,
+            validator,
             score: 90,
             validated_at: 210,
         };

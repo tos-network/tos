@@ -9,17 +9,15 @@ use crate::{
     versioned_type::VersionedState,
 };
 use blake3::hash;
-use tos_vm::{Context, EnvironmentError, FnInstance, FnParams, FnReturnType, Primitive};
+use tos_kernel::{Context, EnvironmentError, FnInstance, FnParams, FnReturnType, Primitive};
 
 // Maximum size for the ticker
 pub const TICKER_LEN: usize = 8;
 
 // Verify if the asset str is valid
 fn is_valid_str_for_asset(name: &str, whitespace: bool, uppercase_only: bool) -> bool {
-    if whitespace {
-        if name.starts_with(" ") || name.ends_with(" ") {
-            return false;
-        }
+    if whitespace && (name.starts_with(" ") || name.ends_with(" ")) {
+        return false;
     }
 
     name.chars()
@@ -54,23 +52,31 @@ pub fn asset_create<P: ContractProvider>(
     let ticker = params.remove(2).into_owned()?.into_string()?;
 
     if ticker.len() > TICKER_LEN {
-        return Err(EnvironmentError::Expect("Asset ticker is too long".to_owned()).into());
+        return Err(EnvironmentError::Expect(
+            "Asset ticker is too long".to_owned(),
+        ));
     }
 
     // Ticker can be ASCII & upper case only
     // No whitespace is allowed in it
     if !is_valid_str_for_asset(&ticker, false, true) {
-        return Err(EnvironmentError::Expect("Asset ticker must be ASCII only".to_owned()).into());
+        return Err(EnvironmentError::Expect(
+            "Asset ticker must be ASCII only".to_owned(),
+        ));
     }
 
     let name = params.remove(1).into_owned()?.into_string()?;
     if name.len() > u8::MAX as usize {
-        return Err(EnvironmentError::Expect("Asset name is too long".to_owned()).into());
+        return Err(EnvironmentError::Expect(
+            "Asset name is too long".to_owned(),
+        ));
     }
 
     // Name can be ASCII only
     if !is_valid_str_for_asset(&name, true, false) {
-        return Err(EnvironmentError::Expect("Asset name must be ASCII only".to_owned()).into());
+        return Err(EnvironmentError::Expect(
+            "Asset name must be ASCII only".to_owned(),
+        ));
     }
 
     let id = params.remove(0).as_u64()?;

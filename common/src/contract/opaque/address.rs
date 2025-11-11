@@ -1,5 +1,5 @@
 use crate::crypto::Address;
-use tos_vm::{
+use tos_kernel::{
     traits::Serializable, Context, EnvironmentError, FnInstance, FnParams, FnReturnType,
     OpaqueWrapper, Primitive, ValueCell,
 };

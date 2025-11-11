@@ -2,7 +2,7 @@ use crate::core::error::BlockchainError;
 use async_trait::async_trait;
 use futures::Stream;
 use tos_common::{block::TopoHeight, crypto::Hash, versioned_type::Versioned};
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 // Versioned contract data
 // ValueCell is optional because it can be deleted

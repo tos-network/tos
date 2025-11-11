@@ -121,7 +121,7 @@ impl Display for LogLevel {
             Self::Debug => "debug",
             Self::Trace => "trace",
         };
-        write!(f, "{}", str)
+        write!(f, "{str}")
     }
 }
 
@@ -234,7 +234,7 @@ impl Prompt {
             std::thread::spawn(move || {
                 if let Err(e) = state.ioloop(input_sender) {
                     if log::log_enabled!(log::Level::Error) {
-                        error!("Error in ioloop: {}", e);
+                        error!("Error in ioloop: {e}");
                     }
                 };
             });
@@ -243,10 +243,8 @@ impl Prompt {
             *lock = Some(input_receiver);
         }
 
-        if show_ascii {
-            if log::log_enabled!(log::Level::Info) {
-                info!("{}", art::LOGO_ASCII);
-            }
+        if show_ascii && log::log_enabled!(log::Level::Info) {
+            info!("{}", art::LOGO_ASCII);
         }
 
         Ok(Arc::new(prompt))
@@ -292,7 +290,7 @@ impl Prompt {
                 res = tokio::signal::ctrl_c() => {
                     if let Err(e) = res {
                         if log::log_enabled!(log::Level::Error) {
-                            error!("Error received on CTRL+C: {}", e);
+                            error!("Error received on CTRL+C: {e}");
                         }
                     } else {
                         info!("CTRL+C received, exiting...");
@@ -305,15 +303,13 @@ impl Prompt {
                             Err(CommandError::Exit) => break,
                             Err(e) => {
                                 if log::log_enabled!(log::Level::Error) {
-                                    error!("Error while executing command: {:#}", e);
+                                    error!("Error while executing command: {e:#}");
                                 }
                             }
                             _ => {},
                         }
-                    } else {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("You said '{}'", input);
-                        }
+                    } else if log::log_enabled!(log::Level::Debug) {
+                        debug!("You said '{input}'");
                     }
                 }
                 _ = interval.tick() => {
@@ -324,14 +320,14 @@ impl Prompt {
                             continue;
                         }
                     }
-                    match timeout(Duration::from_secs(5), (*fn_message)(&self, command_manager)).await {
+                    match timeout(Duration::from_secs(5), (*fn_message)(self, command_manager)).await {
                         Ok(res) => {
                             let prompt = res?;
                             self.update_prompt(prompt)?;
                         }
                         Err(e) => {
                             if log::log_enabled!(log::Level::Warn) {
-                            warn!("Couldn't update prompt message: {}", e);
+                            warn!("Couldn't update prompt message: {e}");
                         }
                         }
                     };
@@ -339,12 +335,10 @@ impl Prompt {
             }
         }
 
-        if !self.state.exit().swap(true, Ordering::SeqCst) {
-            if self.state.is_interactive() {
-                if let Err(e) = terminal::disable_raw_mode() {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!("Error while disabling raw mode: {}", e);
-                    }
+        if !self.state.exit().swap(true, Ordering::SeqCst) && self.state.is_interactive() {
+            if let Err(e) = terminal::disable_raw_mode() {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while disabling raw mode: {e}");
                 }
             }
         }
@@ -409,7 +403,7 @@ impl Prompt {
                 .state
                 .get_ascii_escape_regex()
                 .replace_all(&original_prompt, "");
-            prompt = self.colorize_string(Color::Red, &escaped_colors.into_owned());
+            prompt = self.colorize_string(Color::Red, &escaped_colors);
         }
     }
 
@@ -548,7 +542,7 @@ impl Prompt {
                     target_with_pad = " ".to_owned() + &target_with_pad;
                 }
 
-                let res = if disable_colors {
+                if disable_colors {
                     out.finish(format_args!(
                         "\x1b[2K{}{} {}{} > {}",
                         if interactive { "\r" } else { "" },
@@ -573,18 +567,18 @@ impl Prompt {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    out.finish(format_args!("{}", messages))
+                    out.finish(format_args!("{messages}"))
                 };
 
                 if interactive {
                     if let Err(e) = state.show() {
                         if log::log_enabled!(log::Level::Error) {
-                            error!("Error on prompt refresh: {}", e);
+                            error!("Error on prompt refresh: {e}");
                         }
                     }
                 }
 
-                res
+
             })
             .chain(std::io::stdout())
             .level(level.into());
@@ -621,7 +615,7 @@ impl Prompt {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    out.finish(format_args!("{}", messages))
+                    out.finish(format_args!("{messages}"))
                 },
             );
 
@@ -636,7 +630,7 @@ impl Prompt {
                     let handle = spawn_task("loop-compress-log", async move {
                         if let Err(e) = Self::loop_compress_log_file(dir_path, suffix).await {
                             if log::log_enabled!(log::Level::Error) {
-                                error!("Error while compressing log file: {}", e);
+                                error!("Error while compressing log file: {e}");
                             }
                         }
                     });
@@ -644,7 +638,7 @@ impl Prompt {
                     self.compression_handle = Some(handle);
                 }
             } else {
-                file_log = file_log.chain(fern::log_file(format!("{}/{}", dir_path, filename_log))?)
+                file_log = file_log.chain(fern::log_file(format!("{dir_path}/{filename_log}"))?)
             }
 
             base = base.chain(file_log);
@@ -707,11 +701,7 @@ impl Prompt {
         loop {
             let now = chrono::Local::now().date_naive();
             if log::log_enabled!(log::Level::Trace) {
-                trace!(
-                    "Checking if we need to compress log file, current: {}, now: {}",
-                    current,
-                    now
-                );
+                trace!("Checking if we need to compress log file, current: {current}, now: {now}");
             }
 
             // We need to check that current != now
@@ -719,27 +709,23 @@ impl Prompt {
             if current.succ_opt() == Some(now) {
                 let filename = current.format(suffix.as_str());
                 if log::log_enabled!(log::Level::Info) {
-                    info!("Compressing log file for {}", filename);
+                    info!("Compressing log file for {filename}");
                 }
-                let path = format!("{}/{}", dir_path, filename);
+                let path = format!("{dir_path}/{filename}");
                 if Path::new(&path).exists() {
-                    let zip_path = format!("{}.zip", path);
+                    let zip_path = format!("{path}.zip");
                     if let Err(e) = Self::zip_log_file(&path, &zip_path) {
                         if log::log_enabled!(log::Level::Error) {
-                            error!("Error while compressing log file: {}", e);
+                            error!("Error while compressing log file: {e}");
                         }
                     }
-                } else {
-                    if log::log_enabled!(log::Level::Info) {
-                        info!("No log file to compress for {}", filename);
-                    }
+                } else if log::log_enabled!(log::Level::Info) {
+                    info!("No log file to compress for {filename}");
                 }
 
                 current = now;
-            } else {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!("No need to compress log file for {}", current);
-                }
+            } else if log::log_enabled!(log::Level::Debug) {
+                debug!("No need to compress log file for {current}");
             }
 
             tokio::time::sleep(Duration::from_secs(60)).await;
@@ -763,7 +749,7 @@ impl Drop for Prompt {
             if let Ok(true) = terminal::is_raw_mode_enabled() {
                 if let Err(e) = terminal::disable_raw_mode() {
                     if log::log_enabled!(log::Level::Error) {
-                        error!("Error while forcing to disable raw mode: {}", e);
+                        error!("Error while forcing to disable raw mode: {e}");
                     }
                 }
             }

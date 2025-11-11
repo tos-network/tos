@@ -39,10 +39,7 @@ impl AIMiningTransactionBuilder {
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Building register miner transaction metadata with nonce: {}",
-                nonce
-            );
+            debug!("Building register miner transaction metadata with nonce: {nonce}");
         }
 
         let payload = AIMiningPayload::RegisterMiner {
@@ -81,10 +78,7 @@ impl AIMiningTransactionBuilder {
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Building publish task transaction metadata with nonce: {}",
-                nonce
-            );
+            debug!("Building publish task transaction metadata with nonce: {nonce}");
         }
 
         let payload = AIMiningPayload::PublishTask {
@@ -126,10 +120,7 @@ impl AIMiningTransactionBuilder {
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Building submit answer transaction metadata with nonce: {}",
-                nonce
-            );
+            debug!("Building submit answer transaction metadata with nonce: {nonce}");
         }
 
         let payload = AIMiningPayload::SubmitAnswer {
@@ -169,10 +160,7 @@ impl AIMiningTransactionBuilder {
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!(
-                "Building validate answer transaction metadata with nonce: {}",
-                nonce
-            );
+            debug!("Building validate answer transaction metadata with nonce: {nonce}");
         }
 
         let payload = AIMiningPayload::ValidateAnswer {
@@ -273,7 +261,7 @@ impl AIMiningTransactionBuilder {
             Ok(serialized) => {
                 let json_size = serialized.len();
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Payload JSON serialization size: {} bytes", json_size);
+                    debug!("Payload JSON serialization size: {json_size} bytes");
                 }
 
                 // Account for binary serialization overhead (typically more compact than JSON)
@@ -283,8 +271,7 @@ impl AIMiningTransactionBuilder {
 
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "Estimated binary payload size: {} bytes (from JSON: {} bytes)",
-                        estimated_binary_size, json_size
+                        "Estimated binary payload size: {estimated_binary_size} bytes (from JSON: {json_size} bytes)"
                     );
                 }
                 estimated_binary_size

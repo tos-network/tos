@@ -32,7 +32,7 @@ use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use thiserror::Error;
-use tos_vm::Module;
+use tos_kernel::Module;
 
 pub use payload::*;
 
@@ -235,7 +235,7 @@ impl TransactionBuilder {
                         freeze_duration: Some(duration),
                     } => EnergyPayload::FreezeTos {
                         amount: *amount,
-                        duration: duration.clone(),
+                        duration: *duration,
                     },
                     EnergyBuilder {
                         amount,
@@ -288,7 +288,7 @@ impl TransactionBuilder {
                         let mut new_addresses = 0;
                         for transfer in transfers {
                             if !state
-                                .account_exists(&transfer.destination.get_public_key())
+                                .account_exists(transfer.destination.get_public_key())
                                 .map_err(GenerationError::State)?
                             {
                                 new_addresses += 1;
@@ -307,7 +307,7 @@ impl TransactionBuilder {
                     {
                         // Use energy fee calculation for transfer transactions
                         let energy_fee = calculate_energy_fee(size, transfers, new_addresses);
-                        println!("[ESTIMATE DEBUG] Energy fee calculation: size={}, transfers={}, new_addresses={}, energy_fee={}", size, transfers, new_addresses, energy_fee);
+                        println!("[ESTIMATE DEBUG] Energy fee calculation: size={size}, transfers={transfers}, new_addresses={new_addresses}, energy_fee={energy_fee}");
                         energy_fee
                     } else {
                         // Use regular TOS fee calculation
@@ -484,7 +484,7 @@ impl TransactionBuilder {
                 if let TransactionTypeBuilder::Transfers(transfers) = &self.data {
                     for transfer in transfers {
                         if !state
-                            .is_account_registered(&transfer.destination.get_public_key())
+                            .is_account_registered(transfer.destination.get_public_key())
                             .map_err(GenerationError::State)?
                         {
                             return Err(GenerationError::InvalidEnergyFeeForNewAddress);
@@ -686,7 +686,7 @@ impl TransactionBuilder {
                         freeze_duration: Some(duration),
                     } => EnergyPayload::FreezeTos {
                         amount: *amount,
-                        duration: duration.clone(),
+                        duration: *duration,
                     },
                     EnergyBuilder {
                         amount,
@@ -722,7 +722,7 @@ impl TransactionBuilder {
 
 impl TransactionTypeBuilder {
     // Get the assets used in the transaction
-    pub fn used_assets<'a>(&'a self) -> HashSet<&'a Hash> {
+    pub fn used_assets(&self) -> HashSet<&Hash> {
         let mut consumed = HashSet::new();
 
         // Native asset is always used. (fees)
@@ -758,7 +758,7 @@ impl TransactionTypeBuilder {
     }
 
     // Get the destination keys used in the transaction
-    pub fn used_keys<'a>(&'a self) -> HashSet<&'a CompressedPublicKey> {
+    pub fn used_keys(&self) -> HashSet<&CompressedPublicKey> {
         let mut used_keys = HashSet::new();
 
         match &self {
@@ -785,6 +785,39 @@ impl TransactionTypeBuilder {
 
         used_keys
     }
+}
+
+/// Compute the deterministic contract address that will be generated
+/// when deploying the given bytecode from the given deployer.
+///
+/// This allows pre-computing the contract address before deployment,
+/// enabling counterfactual deployment patterns and knowing the contract
+/// address before creating the deployment transaction.
+///
+/// # Arguments
+/// * `deployer` - The public key of the deployer
+/// * `bytecode` - The contract bytecode (WASM/ELF)
+///
+/// # Returns
+/// The deterministic 32-byte contract address
+///
+/// # Example
+/// ```
+/// use tos_common::transaction::builder::compute_contract_address;
+/// use tos_common::crypto::elgamal::CompressedPublicKey;
+/// use tos_common::serializer::Serializer;
+///
+/// let deployer_pubkey = CompressedPublicKey::from_bytes(&[1u8; 32]).unwrap();
+/// let bytecode = b"my contract bytecode";
+///
+/// // Pre-compute address before deployment
+/// let contract_address = compute_contract_address(&deployer_pubkey, bytecode);
+///
+/// // Now you can send funds to this address before deploying!
+/// // The contract will be deployed to this exact address
+/// ```
+pub fn compute_contract_address(deployer: &CompressedPublicKey, bytecode: &[u8]) -> Hash {
+    crate::crypto::compute_deterministic_contract_address(deployer, bytecode)
 }
 
 #[cfg(test)]

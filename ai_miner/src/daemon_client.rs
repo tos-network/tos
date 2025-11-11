@@ -87,7 +87,7 @@ impl DaemonClient {
             if daemon_address.starts_with("http://") || daemon_address.starts_with("https://") {
                 Url::parse(daemon_address)?
             } else {
-                Url::parse(&format!("http://{}", daemon_address))?
+                Url::parse(&format!("http://{daemon_address}"))?
             };
 
         let client = Client::builder()
@@ -113,7 +113,7 @@ impl DaemonClient {
 
         let url = self.base_url.join("json_rpc")?;
         if log::log_enabled!(log::Level::Debug) {
-            debug!("Making JSON-RPC request to {}: {}", url, method);
+            debug!("Making JSON-RPC request to {url}: {method}");
         }
 
         let mut last_error = None;
@@ -143,7 +143,7 @@ impl DaemonClient {
                             || err_msg.contains("forbidden")
                         {
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("Not retrying due to non-retryable error: {}", err);
+                                debug!("Not retrying due to non-retryable error: {err}");
                             }
                             break;
                         }
@@ -217,7 +217,7 @@ impl DaemonClient {
 
     /// Submit a transaction to the mempool
     pub async fn submit_transaction(&self, tx: &Transaction) -> Result<Hash> {
-        let tx_hex = hex::encode(&tx.to_bytes());
+        let tx_hex = hex::encode(tx.to_bytes());
         let params = json!({
             "tx_hex": tx_hex
         });
@@ -272,7 +272,7 @@ impl DaemonClient {
                     is_healthy: false,
                     version: None,
                     response_time: start_time.elapsed(),
-                    error_message: Some(format!("Version check failed: {}", e)),
+                    error_message: Some(format!("Version check failed: {e}")),
                     peer_count: None,
                     mempool_size: None,
                 })

@@ -215,8 +215,8 @@ cargo bench --package tos_daemon --bench parallel_execution --no-run
 
 ## References
 
-- **Phase 1-3 Implementation**: `/Users/tomisetsu/tos-network/tos/daemon/src/core/executor/`
-- **Integration Tests**: `/Users/tomisetsu/tos-network/tos/daemon/tests/integration/parallel_execution_tests.rs`
+- **Phase 1-3 Implementation**: `~/tos-network/tos/daemon/src/core/executor/`
+- **Integration Tests**: `~/tos-network/tos/daemon/tests/integration/parallel_execution_tests.rs`
 - **Criterion Documentation**: https://bheisler.github.io/criterion.rs/book/
 
 ---

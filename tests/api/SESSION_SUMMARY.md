@@ -290,7 +290,7 @@ Estimated effort: 1-2 days
 
 1. Generate test accounts (30 min):
    ```bash
-   cd /Users/tomisetsu/tos-network/tos
+   cd ~/tos-network/tos
    ./target/release/tos_wallet --network testnet --offline-mode
    # For each account: recover_seed -> enter seed -> address -> save keys
    ```

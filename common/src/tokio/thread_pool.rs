@@ -56,9 +56,9 @@ struct Worker {
 
 impl Worker {
     pub fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Self {
-        let handle = spawn_task(format!("thread-pool-#{}", id), async move {
+        let handle = spawn_task(format!("thread-pool-#{id}"), async move {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Worker {} started", id);
+                debug!("Worker {id} started");
             }
             loop {
                 let job = {

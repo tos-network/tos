@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// AI Mining state stored in blockchain
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct AIMiningState {
     /// Map of task_id -> AIMiningTask
     pub tasks: HashMap<Hash, AIMiningTask>,
@@ -24,7 +24,7 @@ pub struct AIMiningState {
 }
 
 /// System-wide AI mining statistics
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct AIMiningStatistics {
     /// Total number of tasks published
     pub total_tasks: u64,
@@ -38,30 +38,6 @@ pub struct AIMiningStatistics {
     pub total_rewards_distributed: u64,
     /// Total TOS staked in the system
     pub total_staked: u64,
-}
-
-impl Default for AIMiningState {
-    fn default() -> Self {
-        Self {
-            tasks: HashMap::new(),
-            miners: HashMap::new(),
-            account_reputations: HashMap::new(),
-            statistics: AIMiningStatistics::default(),
-        }
-    }
-}
-
-impl Default for AIMiningStatistics {
-    fn default() -> Self {
-        Self {
-            total_tasks: 0,
-            active_tasks: 0,
-            completed_tasks: 0,
-            total_miners: 0,
-            total_rewards_distributed: 0,
-            total_staked: 0,
-        }
-    }
 }
 
 impl AIMiningState {
@@ -247,12 +223,9 @@ impl AIMiningState {
     pub fn cleanup_old_tasks(&mut self, cutoff_time: u64, max_age: u64) {
         let old_count = self.tasks.len();
 
-        self.tasks.retain(|_, task| {
-            let keep = match task.status {
-                TaskStatus::Expired => cutoff_time - task.published_at < max_age,
-                _ => true,
-            };
-            keep
+        self.tasks.retain(|_, task| match task.status {
+            TaskStatus::Expired => cutoff_time - task.published_at < max_age,
+            _ => true,
         });
 
         let removed_count = old_count - self.tasks.len();

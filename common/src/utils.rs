@@ -103,7 +103,7 @@ pub fn detect_available_parallelism() -> usize {
         Ok(n) => n.get(),
         Err(e) => {
             if log::log_enabled!(log::Level::Warn) {
-                warn!("Error while detecting parallelism, default to 1: {}", e);
+                warn!("Error while detecting parallelism, default to 1: {e}");
             }
             1
         }
@@ -151,10 +151,10 @@ pub fn format_hashrate(mut hashrate: f64) -> String {
     let mut count = 0;
     while hashrate >= 1000f64 && count < max {
         count += 1;
-        hashrate = hashrate / 1000f64;
+        hashrate /= 1000f64;
     }
 
-    return format!("{:.2} {}", hashrate, HASHRATE_FORMATS[count]);
+    format!("{:.2} {}", hashrate, HASHRATE_FORMATS[count])
 }
 
 const DIFFICULTY_FORMATS: [&str; 7] = ["", "K", "M", "G", "T", "P", "E"];
@@ -177,7 +177,7 @@ pub fn format_difficulty(mut difficulty: Difficulty) -> String {
         format!(".{}", left / 10)
     };
 
-    return format!("{}{}{}", difficulty, left_str, DIFFICULTY_FORMATS[count]);
+    format!("{}{}{}", difficulty, left_str, DIFFICULTY_FORMATS[count])
 }
 
 // Sanitize a ws address to make sure it's a valid websocket address
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn test_high_difficulty() {
-        let value: Difficulty = 1150_000_000u64.into();
+        let value: Difficulty = 1_150_000_000_u64.into();
         assert_eq!(format_difficulty(value), "1.15G");
 
         let max: Difficulty = u64::MAX.into();
@@ -261,6 +261,6 @@ mod tests {
     #[test]
     fn test_from_tos() {
         let value = from_tos("100.123");
-        assert_eq!(value, Some(100_123_00000));
+        assert_eq!(value, Some(10_012_300_000));
     }
 }

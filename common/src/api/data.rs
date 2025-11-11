@@ -363,7 +363,7 @@ impl DataValue {
     pub fn to_type<T: Serializer>(self) -> Result<T, DataConversionError> {
         match &self {
             Self::Blob(v) => {
-                T::from_bytes(&v).map_err(|_| DataConversionError::UnexpectedValue(self.kind()))
+                T::from_bytes(v).map_err(|_| DataConversionError::UnexpectedValue(self.kind()))
             }
             _ => Err(DataConversionError::UnexpectedValue(self.kind())),
         }
@@ -428,7 +428,7 @@ impl DataValue {
     pub fn as_type<T: Serializer>(&self) -> Result<T, DataConversionError> {
         match self {
             Self::Blob(v) => {
-                T::from_bytes(&v).map_err(|_| DataConversionError::UnexpectedValue(self.kind()))
+                T::from_bytes(v).map_err(|_| DataConversionError::UnexpectedValue(self.kind()))
             }
             _ => Err(DataConversionError::UnexpectedValue(self.kind())),
         }
@@ -484,15 +484,15 @@ impl DataValue {
 impl ToString for DataValue {
     fn to_string(&self) -> String {
         match self {
-            Self::Bool(v) => format!("{}", v),
-            Self::String(v) => format!("{}", v),
-            Self::U8(v) => format!("{}", v),
-            Self::U16(v) => format!("{}", v),
-            Self::U32(v) => format!("{}", v),
-            Self::U64(v) => format!("{}", v),
-            Self::U128(v) => format!("{}", v),
-            Self::Hash(v) => format!("{}", v),
-            Self::Blob(v) => format!("{:?}", v),
+            Self::Bool(v) => format!("{v}"),
+            Self::String(v) => v.to_string(),
+            Self::U8(v) => format!("{v}"),
+            Self::U16(v) => format!("{v}"),
+            Self::U32(v) => format!("{v}"),
+            Self::U64(v) => format!("{v}"),
+            Self::U128(v) => format!("{v}"),
+            Self::Hash(v) => format!("{v}"),
+            Self::Blob(v) => format!("{v:?}"),
         }
     }
 }
@@ -758,7 +758,7 @@ mod tests {
         let dummy: Dummy = value.to_type().unwrap();
         assert_eq!(dummy.name, "John");
         assert_eq!(dummy.age, 25);
-        assert_eq!(dummy.is_active, true);
+        assert!(dummy.is_active);
         assert_eq!(dummy.friends, vec![0, 1, 2, 3, 4]);
     }
 }

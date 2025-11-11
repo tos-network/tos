@@ -50,7 +50,7 @@ where
         trace!("getting tracked events");
         let sessions = self.events.read().await;
         trace!("tracked events sessions locked");
-        HashSet::from_iter(sessions.values().map(|e| e.keys().cloned()).flatten())
+        HashSet::from_iter(sessions.values().flat_map(|e| e.keys().cloned()))
     }
 
     // Check if an event is tracked by any session
@@ -58,10 +58,7 @@ where
         trace!("checking if event is tracked");
         let sessions = self.events.read().await;
         trace!("tracked events sessions locked");
-        sessions
-            .values()
-            .find(|e| e.keys().into_iter().find(|x| *x == event).is_some())
-            .is_some()
+        sessions.values().any(|e| e.keys().any(|x| x == event))
     }
 
     // Notify all sessions subscribed to the given event
@@ -83,7 +80,7 @@ where
             .for_each_concurrent(self.notify_concurrency, |(session, subscriptions)| {
                 let data = subscriptions
                     .get(event)
-                    .map(|id| json!(RpcResponse::new(Cow::Borrowed(&id), Cow::Borrowed(&value))));
+                    .map(|id| json!(RpcResponse::new(Cow::Borrowed(id), Cow::Borrowed(&value))));
 
                 async move {
                     if let Some(data) = data {
@@ -92,7 +89,7 @@ where
                         }
                         if let Err(e) = session.send_text(data.to_string()).await {
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("Error occured while notifying a new event: {}", e);
+                                debug!("Error occured while notifying a new event: {e}");
                             }
                         };
                         if log::log_enabled!(log::Level::Trace) {
@@ -243,12 +240,10 @@ where
                     RpcResponseError::new(None, InternalRpcError::SerializeResponse(err))
                 })?)
             }
-            _ => {
-                return Err(RpcResponseError::new(
-                    None,
-                    InternalRpcError::InvalidJSONRequest,
-                ))
-            }
+            _ => Err(RpcResponseError::new(
+                None,
+                InternalRpcError::InvalidJSONRequest,
+            )),
         }
     }
 

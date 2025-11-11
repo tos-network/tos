@@ -19,7 +19,7 @@ use tos_common::{
     transaction::MultiSigPayload,
     versioned_type::State,
 };
-use tos_vm::{Module, ValueCell};
+use tos_kernel::{Module, ValueCell};
 
 // this file implements the protocol for the fast sync (bootstrapped chain)
 // You will have to request through StepRequest::FetchAssets all the registered assets

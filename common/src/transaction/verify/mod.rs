@@ -10,7 +10,7 @@ use anyhow::anyhow;
 // use bulletproofs::RangeProof;
 use indexmap::IndexMap;
 use log::{debug, trace};
-use tos_vm::ModuleValidator;
+use tos_kernel::ModuleValidator;
 
 use super::{payload::EnergyPayload, ContractDeposit, Transaction, TransactionType};
 use crate::{
@@ -61,12 +61,9 @@ impl Transaction {
 
     /// Get the new output ciphertext
     /// This is used to substract the amount from the sender's balance
-
     /// Get the new output amounts for the sender
     /// Balance simplification: Returns plain u64 amounts instead of ciphertexts
-    pub fn get_expected_sender_outputs<'a>(
-        &'a self,
-    ) -> Result<Vec<(&'a Hash, u64)>, DecompressionError> {
+    pub fn get_expected_sender_outputs(&self) -> Result<Vec<(&Hash, u64)>, DecompressionError> {
         // This method previously collected sender output ciphertexts for each asset
         // With plaintext balances, no commitments or ciphertexts needed
         // Return empty vector for now (amounts are handled directly in apply())
@@ -93,9 +90,9 @@ impl Transaction {
     // 1. Validate deposit count and max_gas limits
     // 2. Validate all deposits are Public with amount > 0
     // 3. No decompression needed
-    fn verify_invoke_contract<'a, E>(
+    fn verify_invoke_contract<E>(
         &self,
-        deposits: &'a IndexMap<Hash, ContractDeposit>,
+        deposits: &IndexMap<Hash, ContractDeposit>,
         max_gas: u64,
     ) -> Result<(), VerificationError<E>> {
         if deposits.len() > MAX_DEPOSIT_PER_INVOKE_CALL {
@@ -103,7 +100,7 @@ impl Transaction {
         }
 
         if max_gas > MAX_GAS_USAGE_PER_TX {
-            return Err(VerificationError::MaxGasReached.into());
+            return Err(VerificationError::MaxGasReached);
         }
 
         // Validate all deposits are public with non-zero amounts
@@ -156,7 +153,7 @@ impl Transaction {
 
         trace!("Pre-verifying transaction on state");
         state
-            .pre_verify_tx(&self)
+            .pre_verify_tx(self)
             .await
             .map_err(VerificationError::State)?;
 
@@ -221,8 +218,8 @@ impl Transaction {
                 let validator = ModuleValidator::new(module, environment);
                 for constant in payload.parameters.iter() {
                     validator
-                        .verify_constant(&constant)
-                        .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
+                        .verify_constant(constant)
+                        .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
                 }
             }
             TransactionType::DeployContract(payload) => {
@@ -238,7 +235,7 @@ impl Transaction {
                 let validator = ModuleValidator::new(&payload.module, environment);
                 validator
                     .verify()
-                    .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
+                    .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
             }
             TransactionType::Energy(payload) => match payload {
                 EnergyPayload::FreezeTos { amount, duration } => {
@@ -454,7 +451,7 @@ impl Transaction {
 
         trace!("Pre-verifying transaction on state");
         state
-            .pre_verify_tx(&self)
+            .pre_verify_tx(self)
             .await
             .map_err(VerificationError::State)?;
 
@@ -586,14 +583,47 @@ impl Transaction {
                 let validator = ModuleValidator::new(module, environment);
                 for constant in payload.parameters.iter() {
                     validator
-                        .verify_constant(&constant)
-                        .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
+                        .verify_constant(constant)
+                        .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
                 }
             }
             TransactionType::DeployContract(payload) => {
                 if let Some(invoke) = payload.invoke.as_ref() {
                     self.verify_invoke_contract(&invoke.deposits, invoke.max_gas)?;
                 }
+
+                // Compute deterministic contract address
+                // For TOS Kernel(TAKO) contracts: use eBPF bytecode
+                // For legacy contracts: use serialized module bytes
+                let bytecode_or_module = payload
+                    .module
+                    .get_bytecode()
+                    .map(|b| b.to_vec())
+                    .unwrap_or_else(|| payload.module.to_bytes());
+
+                let contract_address = crate::crypto::compute_deterministic_contract_address(
+                    &self.source,
+                    &bytecode_or_module,
+                );
+
+                // Check if contract already exists at this deterministic address
+                if state
+                    .load_contract_module(&contract_address)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::ContractAlreadyExists(
+                        contract_address.clone(),
+                    ));
+                }
+
+                // CRITICAL: Reserve address immediately to prevent front-running
+                // This ensures subsequent TXs in the same block will see this address as occupied
+                // during their pre-verification phase, blocking duplicate deployments
+                state
+                    .set_contract_module(&contract_address, &payload.module)
+                    .await
+                    .map_err(VerificationError::State)?;
 
                 let environment = state
                     .get_environment()
@@ -603,7 +633,7 @@ impl Transaction {
                 let validator = ModuleValidator::new(&payload.module, environment);
                 validator
                     .verify()
-                    .map_err(|err| VerificationError::ModuleError(format!("{:#}", err)))?;
+                    .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
             }
             TransactionType::Energy(_) => {
                 // Energy transactions don't require special verification beyond basic checks
@@ -654,10 +684,7 @@ impl Transaction {
                 let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
                 if !sig.signature.verify(hash.as_bytes(), &decompressed) {
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!(
-                            "Multisig signature verification failed for participant {}",
-                            index
-                        );
+                        debug!("Multisig signature verification failed for participant {index}");
                     }
                     return Err(VerificationError::InvalidSignature);
                 }
@@ -710,8 +737,23 @@ impl Transaction {
                     return Err(VerificationError::InvalidFormat);
                 }
 
+                // Compute deterministic contract address (CREATE2-style)
+                // For TOS Kernel(TAKO) contracts: use eBPF bytecode
+                // For legacy contracts: use serialized module bytes
+                let bytecode_or_module = payload
+                    .module
+                    .get_bytecode()
+                    .map(|b| b.to_vec())
+                    .unwrap_or_else(|| payload.module.to_bytes());
+
+                let contract_address = crate::crypto::compute_deterministic_contract_address(
+                    &self.source,
+                    &bytecode_or_module,
+                );
+
                 if let Some(invoke) = payload.invoke.as_ref() {
-                    let dest_pubkey = PublicKey::from_hash(&tx_hash);
+                    // Use deterministic contract address for deposit verification
+                    let dest_pubkey = PublicKey::from_hash(&contract_address);
                     self.verify_contract_deposits(
                         &source_decompressed,
                         &dest_pubkey,
@@ -719,10 +761,21 @@ impl Transaction {
                     )?;
                 }
 
-                state
-                    .set_contract_module(tx_hash, &payload.module)
+                // Cache module under deterministic address (not tx_hash!)
+                // Note: If pre-verification already reserved this address, this will succeed
+                // because the module is already cached in mempool state
+                // We check first to avoid unnecessary error handling
+                if !state
+                    .load_contract_module(&contract_address)
                     .await
-                    .map_err(VerificationError::State)?;
+                    .map_err(VerificationError::State)?
+                {
+                    // Address not yet cached (shouldn't happen after pre-verify, but handle it)
+                    state
+                        .set_contract_module(&contract_address, &payload.module)
+                        .await
+                        .map_err(VerificationError::State)?;
+                }
             }
             TransactionType::Energy(payload) => {
                 if log::log_enabled!(log::Level::Debug) {
@@ -895,10 +948,7 @@ impl Transaction {
                 .map_err(VerificationError::State)?;
             if dynamic_parts_only {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "TX {} is known from ZKPCache, verifying dynamic parts only",
-                        hash
-                    );
+                    debug!("TX {hash} is known from ZKPCache, verifying dynamic parts only");
                 }
                 tx.verify_dynamic_parts(hash, state).await?;
             } else {
@@ -929,10 +979,7 @@ impl Transaction {
             .map_err(VerificationError::State)?;
         if dynamic_parts_only {
             if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "TX {} is known from ZKPCache, verifying dynamic parts only",
-                    tx_hash
-                );
+                debug!("TX {tx_hash} is known from ZKPCache, verifying dynamic parts only");
             }
             self.verify_dynamic_parts(tx_hash, state).await?;
         } else {
@@ -947,7 +994,7 @@ impl Transaction {
 
     // Apply the transaction to the state
     // Arc is required around Self to be shared easily into the VM if needed
-    async fn apply<'a, P: ContractProvider, E, B: BlockchainApplyState<'a, P, E>>(
+    async fn apply<'a, P: ContractProvider + Send, E, B: BlockchainApplyState<'a, P, E>>(
         self: &'a Arc<Self>,
         tx_hash: &'a Hash,
         state: &mut B,
@@ -1106,10 +1153,7 @@ impl Transaction {
                         .map_err(VerificationError::State)?;
 
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!(
-                            "Consumed {} energy for transaction {}",
-                            energy_cost, tx_hash
-                        );
+                        debug!("Consumed {energy_cost} energy for transaction {tx_hash}");
                     }
                 } else {
                     return Err(VerificationError::InsufficientEnergy(energy_cost));
@@ -1177,8 +1221,23 @@ impl Transaction {
                 }
             }
             TransactionType::DeployContract(payload) => {
+                // Compute deterministic contract address
+                // For TOS Kernel(TAKO) contracts: use eBPF bytecode
+                // For legacy contracts: use serialized module bytes
+                let bytecode_or_module = payload
+                    .module
+                    .get_bytecode()
+                    .map(|b| b.to_vec())
+                    .unwrap_or_else(|| payload.module.to_bytes());
+
+                let contract_address = crate::crypto::compute_deterministic_contract_address(
+                    &self.source,
+                    &bytecode_or_module,
+                );
+
+                // Deploy contract to deterministic address
                 state
-                    .set_contract_module(tx_hash, &payload.module)
+                    .set_contract_module(&contract_address, &payload.module)
                     .await
                     .map_err(VerificationError::State)?;
 
@@ -1187,7 +1246,7 @@ impl Transaction {
                         .invoke_contract(
                             tx_hash,
                             state,
-                            tx_hash,
+                            &contract_address,
                             &invoke.deposits,
                             iter::empty(),
                             invoke.max_gas,
@@ -1199,10 +1258,10 @@ impl Transaction {
                     // TODO: we must handle this carefully
                     if !is_success {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("Contract deploy for {} failed", tx_hash);
+                            debug!("Contract deploy for {contract_address} failed");
                         }
                         state
-                            .remove_contract_module(tx_hash)
+                            .remove_contract_module(&contract_address)
                             .await
                             .map_err(VerificationError::State)?;
                     }
@@ -1222,12 +1281,8 @@ impl Transaction {
                             energy_resource.unwrap_or_else(EnergyResource::new);
 
                         // Freeze TOS for energy - get topoheight from the blockchain state
-                        let topoheight = state.get_block().get_blue_score() as u64; // Use blue_score for consensus
-                        energy_resource.freeze_tos_for_energy(
-                            *amount,
-                            duration.clone(),
-                            topoheight,
-                        );
+                        let topoheight = state.get_block().get_blue_score(); // Use blue_score for consensus
+                        energy_resource.freeze_tos_for_energy(*amount, *duration, topoheight);
 
                         // Update energy resource in state
                         state
@@ -1249,7 +1304,7 @@ impl Transaction {
 
                         if let Some(mut energy_resource) = energy_resource {
                             // Unfreeze TOS - get topoheight from the blockchain state
-                            let topoheight = state.get_block().get_blue_score() as u64; // Use blue_score for consensus
+                            let topoheight = state.get_block().get_blue_score(); // Use blue_score for consensus
                             energy_resource
                                 .unfreeze_tos(*amount, topoheight)
                                 .map_err(|_| {
@@ -1268,7 +1323,7 @@ impl Transaction {
                             // to keep mempool state consistent. Do NOT add balance here to avoid double-refund.
 
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("UnfreezeTos applied: {} TOS unfrozen (balance already refunded in verify phase)", amount);
+                                debug!("UnfreezeTos applied: {amount} TOS unfrozen (balance already refunded in verify phase)");
                             }
                         } else {
                             return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -1290,7 +1345,7 @@ impl Transaction {
                     .unwrap_or_default();
 
                 // Create validator with current context
-                let block_height = state.get_block().get_blue_score() as u64;
+                let block_height = state.get_block().get_blue_score();
                 let timestamp = state.get_block().get_timestamp();
                 let source = self.source.clone();
 
@@ -1340,7 +1395,7 @@ impl Transaction {
     /// Assume the tx is valid, apply it to `state`. May panic if a ciphertext is ill-formed.
     pub async fn apply_without_verify<
         'a,
-        P: ContractProvider,
+        P: ContractProvider + Send,
         E,
         B: BlockchainApplyState<'a, P, E>,
     >(
@@ -1379,7 +1434,7 @@ impl Transaction {
     /// Checks done are: commitment eq proofs only
     pub async fn apply_with_partial_verify<
         'a,
-        P: ContractProvider,
+        P: ContractProvider + Send,
         E,
         B: BlockchainApplyState<'a, P, E>,
     >(

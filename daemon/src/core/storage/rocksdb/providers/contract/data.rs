@@ -10,7 +10,7 @@ use futures::{stream, Stream, StreamExt};
 use log::trace;
 use rocksdb::Direction;
 use tos_common::{block::TopoHeight, crypto::Hash, serializer::Serializer};
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 #[async_trait]
 impl ContractDataProvider for RocksStorage {

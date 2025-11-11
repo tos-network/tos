@@ -87,17 +87,13 @@ impl Deref for Block {
     type Target = BlockHeader;
 
     fn deref(&self) -> &Self::Target {
-        &self.get_header()
+        self.get_header()
     }
 }
 
 impl Display for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        let parents: Vec<String> = self
-            .get_parents()
-            .iter()
-            .map(|h| format!("{}", h))
-            .collect();
+        let parents: Vec<String> = self.get_parents().iter().map(|h| format!("{h}")).collect();
 
         write!(
             f,

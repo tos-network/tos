@@ -221,5 +221,5 @@ All tests pass in **0.28 seconds** for 10 tests, including one that creates **50
 ## References
 
 - **Kaspa genesis pattern**: `rusty-kaspa/consensus/core/src/config/genesis.rs`
-- **TOS migration summary**: `/Users/tomisetsu/tos-network/tos/ROCKSDB_MIGRATION_SUMMARY.md`
+- **TOS migration summary**: `~/tos-network/tos/ROCKSDB_MIGRATION_SUMMARY.md`
 - **Test helpers**: `testing-integration/src/utils/storage_helpers.rs`

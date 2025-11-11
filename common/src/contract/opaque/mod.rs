@@ -17,8 +17,8 @@ use crate::{
     transaction::Transaction,
 };
 use log::debug;
-use tos_types::{impl_opaque, register_opaque_json};
-use tos_vm::{tid, traits::JSON_REGISTRY, OpaqueWrapper};
+use tos_kernel::{impl_opaque, register_opaque_json};
+use tos_kernel::{tid, traits::JSON_REGISTRY, OpaqueWrapper};
 
 pub use address::*;
 pub use asset::*;
@@ -88,7 +88,7 @@ mod tests {
 
     use super::*;
     use serde_json::json;
-    use tos_vm::OpaqueWrapper;
+    use tos_kernel::OpaqueWrapper;
 
     #[test]
     fn test_address_serde() {

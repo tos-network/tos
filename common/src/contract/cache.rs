@@ -2,7 +2,7 @@ use crate::{
     asset::AssetData, context::NoOpBuildHasher, crypto::Hash, versioned_type::VersionedState,
 };
 use std::collections::HashMap;
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
 #[derive(Debug, Clone)]
 pub struct AssetChanges {
