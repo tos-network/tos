@@ -548,13 +548,16 @@ async fn register_miner(
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
     let prompt = manager.get_prompt();
-    let context = manager.get_context().lock()?;
-    let config: &ValidatedConfig = context.get()?;
+    let miner_address_opt = {
+        let context = manager.get_context().lock()?;
+        let config: &ValidatedConfig = context.get()?;
+        config.miner_address.clone()
+    };
 
     let address_str = match args.get_value("address") {
         Ok(addr) => addr.to_string_value()?,
         Err(_) => {
-            if let Some(addr) = &config.miner_address {
+            if let Some(addr) = &miner_address_opt {
                 addr.to_string()
             } else {
                 prompt.read_input("Enter miner address", false).await?
@@ -582,13 +585,17 @@ async fn register_miner(
         "Registering miner {address} with fee {fee_amount} nanoTOS"
     ));
 
-    // Get storage and transaction builder
-    let storage: &Arc<Mutex<StorageManager>> = context.get()?;
-    let tx_builder: &Arc<AIMiningTransactionBuilder> = context.get()?;
+    // Get storage, transaction builder, and daemon client
+    let (storage, tx_builder, daemon_client) = {
+        let context = manager.get_context().lock()?;
+        let storage: &Arc<Mutex<StorageManager>> = context.get()?;
+        let tx_builder: &Arc<AIMiningTransactionBuilder> = context.get()?;
+        let daemon_client: &Arc<DaemonClient> = context.get()?;
+        (storage.clone(), tx_builder.clone(), daemon_client.clone())
+    };
 
-    // Get daemon client and generate nonce
-    let daemon_client: &Arc<DaemonClient> = context.get()?;
-    let nonce = get_next_nonce(daemon_client, &address)
+    // Generate nonce
+    let nonce = get_next_nonce(&daemon_client, &address)
         .await
         .map_err(|e| CommandError::BatchModeError(format!("Failed to generate nonce: {e}")))?;
 
@@ -1482,9 +1489,12 @@ async fn test_reward_cycle(
 ) -> Result<(), CommandError> {
     manager.message("🔄 Testing complete AI mining reward cycle...");
 
-    let context = manager.get_context().lock()?;
-    let config: &ValidatedConfig = context.get()?;
-    let daemon_client: &Arc<DaemonClient> = context.get()?;
+    let (miner_address_opt, daemon_client) = {
+        let context = manager.get_context().lock()?;
+        let config: &ValidatedConfig = context.get()?;
+        let daemon_client: &Arc<DaemonClient> = context.get()?;
+        (config.miner_address.clone(), daemon_client.clone())
+    };
 
     // Test daemon connectivity first
     match daemon_client.health_check().await {
@@ -1541,8 +1551,7 @@ async fn test_reward_cycle(
     manager.message("");
     manager.message("💰 Network Fee Analysis:");
     let sample_payload = AIMiningPayload::RegisterMiner {
-        miner_address: config
-            .miner_address
+        miner_address: miner_address_opt
             .as_ref()
             .unwrap()
             .clone()
