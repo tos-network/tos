@@ -454,10 +454,13 @@ async fn main() -> Result<()> {
         }
     }
 
-    if let Ok(context) = command_manager.get_context().lock() {
-        if let Ok(wallet) = context.get::<Arc<Wallet>>() {
-            wallet.close().await;
-        }
+    let wallet_opt = {
+        command_manager.get_context().lock().ok().and_then(|context| {
+            context.get::<Arc<Wallet>>().ok().cloned()
+        })
+    };
+    if let Some(wallet) = wallet_opt {
+        wallet.close().await;
     }
 
     Ok(())
@@ -1267,62 +1270,64 @@ async fn prompt_message_builder(
     command_manager: Option<&CommandManager>,
 ) -> Result<String, PromptError> {
     if let Some(manager) = command_manager {
-        let context = manager.get_context().lock()?;
-        if let Ok(wallet) = context.get::<Arc<Wallet>>() {
-            let network = wallet.get_network();
+        let wallet = {
+            let context = manager.get_context().lock()?;
+            context.get::<Arc<Wallet>>()?.clone()
+        };
 
-            let addr_str = {
-                let addr = &wallet.get_address().to_string()[..8];
-                prompt.colorize_string(Color::Yellow, addr)
-            };
+        let network = wallet.get_network();
 
-            let storage = wallet.get_storage().read().await;
-            let topoheight_str = format!(
-                "{}: {}",
-                prompt.colorize_string(Color::Yellow, "TopoHeight"),
-                prompt.colorize_string(
-                    Color::Green,
-                    &format!("{}", storage.get_synced_topoheight().unwrap_or(0))
+        let addr_str = {
+            let addr = &wallet.get_address().to_string()[..8];
+            prompt.colorize_string(Color::Yellow, addr)
+        };
+
+        let storage = wallet.get_storage().read().await;
+        let topoheight_str = format!(
+            "{}: {}",
+            prompt.colorize_string(Color::Yellow, "TopoHeight"),
+            prompt.colorize_string(
+                Color::Green,
+                &format!("{}", storage.get_synced_topoheight().unwrap_or(0))
+            )
+        );
+        let balance = format!(
+            "{}: {}",
+            prompt.colorize_string(Color::Yellow, "Balance"),
+            prompt.colorize_string(
+                Color::Green,
+                &format_tos(
+                    storage
+                        .get_plaintext_balance_for(&TOS_ASSET)
+                        .await
+                        .unwrap_or(0)
                 )
-            );
-            let balance = format!(
-                "{}: {}",
-                prompt.colorize_string(Color::Yellow, "Balance"),
-                prompt.colorize_string(
-                    Color::Green,
-                    &format_tos(
-                        storage
-                            .get_plaintext_balance_for(&TOS_ASSET)
-                            .await
-                            .unwrap_or(0)
-                    )
-                ),
-            );
-            let status = if wallet.is_online().await {
-                prompt.colorize_string(Color::Green, "Online")
-            } else {
-                prompt.colorize_string(Color::Red, "Offline")
-            };
-            let network_str = if !network.is_mainnet() {
-                format!(
-                    "{} ",
-                    prompt.colorize_string(Color::Red, &network.to_string())
-                )
-            } else {
-                "".into()
-            };
+            ),
+        );
+        let status = if wallet.is_online().await {
+            prompt.colorize_string(Color::Green, "Online")
+        } else {
+            prompt.colorize_string(Color::Red, "Offline")
+        };
+        let network_str = if !network.is_mainnet() {
+            format!(
+                "{} ",
+                prompt.colorize_string(Color::Red, &network.to_string())
+            )
+        } else {
+            "".into()
+        };
 
-            return Ok(format!(
-                "{} | {} | {} | {} | {} {}{} ",
-                prompt.colorize_string(Color::Blue, "Tos Wallet"),
-                addr_str,
-                topoheight_str,
-                balance,
-                status,
-                network_str,
-                prompt.colorize_string(Color::BrightBlack, ">>")
-            ));
-        }
+        return Ok(format!(
+            "{} | {} | {} | {} | {} {}{} ",
+            prompt.colorize_string(Color::Blue, "Tos Wallet"),
+            addr_str,
+            topoheight_str,
+            balance,
+            status,
+            network_str,
+            prompt.colorize_string(Color::BrightBlack, ">>")
+        ));
     }
 
     Ok(format!(
@@ -1381,26 +1386,28 @@ async fn open_wallet(
             .context("Error while reading wallet password")?
     };
 
-    let wallet = {
+    let network = {
         let context = manager.get_context().lock()?;
-        let network = context.get::<Network>()?;
-        let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(
-            config.precomputed_tables.precomputed_tables_path.as_deref(),
-            config.precomputed_tables.precomputed_tables_l1,
-            LogProgressTableGenerationReportFunction,
-            true,
-        )
-        .await?;
-        Wallet::open(
-            &dir,
-            &password,
-            *network,
-            precomputed_tables,
-            config.n_decryption_threads,
-            config.network_concurrency,
-            config.light_mode,
-        )?
+        *context.get::<Network>()?
     };
+
+    let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(
+        config.precomputed_tables.precomputed_tables_path.as_deref(),
+        config.precomputed_tables.precomputed_tables_l1,
+        LogProgressTableGenerationReportFunction,
+        true,
+    )
+    .await?;
+
+    let wallet = Wallet::open(
+        &dir,
+        &password,
+        network,
+        precomputed_tables,
+        config.n_decryption_threads,
+        config.network_concurrency,
+        config.light_mode,
+    )?;
 
     manager.message("Wallet sucessfully opened");
     apply_config(
@@ -1476,28 +1483,30 @@ async fn create_wallet(
         password
     };
 
-    let wallet = {
+    let network = {
         let context = manager.get_context().lock()?;
-        let network = context.get::<Network>()?;
-        let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(
-            config.precomputed_tables.precomputed_tables_path.as_deref(),
-            precomputed_tables::L1_FULL,
-            LogProgressTableGenerationReportFunction,
-            true,
-        )
-        .await?;
-        Wallet::create(
-            &dir,
-            &password,
-            None,
-            *network,
-            precomputed_tables,
-            config.n_decryption_threads,
-            config.network_concurrency,
-            config.light_mode,
-        )
-        .await?
+        *context.get::<Network>()?
     };
+
+    let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(
+        config.precomputed_tables.precomputed_tables_path.as_deref(),
+        precomputed_tables::L1_FULL,
+        LogProgressTableGenerationReportFunction,
+        true,
+    )
+    .await?;
+
+    let wallet = Wallet::create(
+        &dir,
+        &password,
+        None,
+        network,
+        precomputed_tables,
+        config.n_decryption_threads,
+        config.network_concurrency,
+        config.light_mode,
+    )
+    .await?;
 
     manager.message("Wallet sucessfully created");
     apply_config(
@@ -1624,34 +1633,36 @@ async fn recover_wallet(
         password
     };
 
-    let wallet = {
+    let network = {
         let context = manager.get_context().lock()?;
-        let network = context.get::<Network>()?;
-        let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(
-            config.precomputed_tables.precomputed_tables_path.as_deref(),
-            config.precomputed_tables.precomputed_tables_l1,
-            LogProgressTableGenerationReportFunction,
-            true,
-        )
-        .await?;
-
-        let recover = if seed {
-            RecoverOption::Seed(&content)
-        } else {
-            RecoverOption::PrivateKey(&content)
-        };
-        Wallet::create(
-            &dir,
-            &password,
-            Some(recover),
-            *network,
-            precomputed_tables,
-            config.n_decryption_threads,
-            config.network_concurrency,
-            config.light_mode,
-        )
-        .await?
+        *context.get::<Network>()?
     };
+
+    let precomputed_tables = precomputed_tables::read_or_generate_precomputed_tables(
+        config.precomputed_tables.precomputed_tables_path.as_deref(),
+        config.precomputed_tables.precomputed_tables_l1,
+        LogProgressTableGenerationReportFunction,
+        true,
+    )
+    .await?;
+
+    let recover = if seed {
+        RecoverOption::Seed(&content)
+    } else {
+        RecoverOption::PrivateKey(&content)
+    };
+
+    let wallet = Wallet::create(
+        &dir,
+        &password,
+        Some(recover),
+        network,
+        precomputed_tables,
+        config.n_decryption_threads,
+        config.network_concurrency,
+        config.light_mode,
+    )
+    .await?;
 
     manager.message("Wallet sucessfully recovered");
     apply_config(
@@ -1688,8 +1699,10 @@ async fn set_asset_name(
     manager.validate_batch_params("set_asset_name", &args)?;
 
     let prompt = manager.get_prompt();
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     let asset_str = get_required_arg(
         &mut args,
@@ -1722,8 +1735,10 @@ async fn list_assets(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     let page = if args.has_argument("page") {
         args.get_value("page")?.to_number()? as usize
@@ -1774,8 +1789,10 @@ async fn list_balances(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     let page = if args.has_argument("page") {
         args.get_value("page")?.to_number()? as usize
@@ -1830,8 +1847,10 @@ async fn list_tracked_assets(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     let page = if args.has_argument("page") {
         args.get_value("page")?.to_number()? as usize
@@ -1887,8 +1906,10 @@ async fn track_asset(
 ) -> Result<(), CommandError> {
     manager.validate_batch_params("track_asset", &args)?;
 
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let prompt = manager.get_prompt();
 
     let asset_str = get_required_arg(
@@ -1928,8 +1949,10 @@ async fn untrack_asset(
 ) -> Result<(), CommandError> {
     manager.validate_batch_params("untrack_asset", &args)?;
 
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let prompt = manager.get_prompt();
 
     let asset_str = get_required_arg(
@@ -1972,8 +1995,10 @@ async fn change_password(
 ) -> Result<(), CommandError> {
     manager.validate_batch_params("change_password", &args)?;
 
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     let prompt = manager.get_prompt();
 
@@ -2116,8 +2141,10 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     manager.validate_batch_params("transfer", &args)?;
 
     let prompt = manager.get_prompt();
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     // Wait for wallet to sync before creating transaction (Issue 3: Option 2)
     #[cfg(feature = "network_handler")]
@@ -2306,7 +2333,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
 
     // Create transaction with appropriate fee type
     let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
+        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload).await?
     } else {
         // Create transaction state and builder
         let storage = wallet.get_storage().read().await;
@@ -2368,7 +2395,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         }
     };
 
-    broadcast_tx(wallet, manager, tx).await;
+    broadcast_tx(&wallet, manager, tx).await;
     Ok(())
 }
 
@@ -2380,8 +2407,10 @@ async fn transfer_all(
     manager.validate_batch_params("transfer_all", &args)?;
 
     let prompt = manager.get_prompt();
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     // read address (with example for better error messages)
     let str_address = get_required_arg_with_example(
@@ -2551,7 +2580,7 @@ async fn transfer_all(
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
     let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
+        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload).await?
     } else {
         // Create transaction with appropriate fee type
         let storage = wallet.get_storage().read().await;
@@ -2613,7 +2642,7 @@ async fn transfer_all(
         }
     };
 
-    broadcast_tx(wallet, manager, tx).await;
+    broadcast_tx(&wallet, manager, tx).await;
     Ok(())
 }
 
@@ -2621,8 +2650,10 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
     manager.validate_batch_params("burn", &args)?;
 
     let prompt = manager.get_prompt();
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     let asset = {
         let asset_str = get_required_arg_with_example(
@@ -2726,7 +2757,7 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
 
     let tx_type = TransactionTypeBuilder::Burn(payload);
     let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
+        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload).await?
     } else {
         match wallet
             .create_transaction(tx_type, FeeBuilder::default())
@@ -2740,14 +2771,16 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         }
     };
 
-    broadcast_tx(wallet, manager, tx).await;
+    broadcast_tx(&wallet, manager, tx).await;
     Ok(())
 }
 
 // Show current wallet address
 async fn display_address(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     manager.message(format!("Wallet address: {}", wallet.get_address()));
     Ok(())
 }
@@ -2757,9 +2790,11 @@ async fn balance(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let prompt = manager.get_prompt();
-    let wallet: &Arc<Wallet> = context.get()?;
     let storage = wallet.get_storage().read().await;
 
     let asset = if arguments.has_argument("asset") {
@@ -2800,8 +2835,10 @@ async fn history(
         ));
     }
 
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let storage = wallet.get_storage().read().await;
 
     let txs_len = storage.get_transactions_count()?;
@@ -2858,8 +2895,10 @@ async fn transaction(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let storage = wallet.get_storage().read().await;
     let hash = arguments.get_value("hash")?.to_hash()?;
     let tx = storage
@@ -2877,8 +2916,10 @@ async fn export_transactions_csv(
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
     let filename = arguments.get_value("filename")?.to_string_value()?;
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let storage = wallet.get_storage().read().await;
     let transactions = storage.get_transactions()?;
     let mut file = File::create(&filename).context("Error while creating CSV file")?;
@@ -2893,8 +2934,10 @@ async fn export_transactions_csv(
 }
 
 async fn clear_tx_cache(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let mut storage = wallet.get_storage().write().await;
     storage.clear_tx_cache();
     manager.message("Transaction cache has been cleared");
@@ -2907,8 +2950,10 @@ async fn online_mode(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     if wallet.is_online().await {
         manager.error("Wallet is already online");
     } else {
@@ -2930,8 +2975,10 @@ async fn online_mode(
 // Set your wallet in offline mode
 #[cfg(feature = "network_handler")]
 async fn offline_mode(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     if !wallet.is_online().await {
         manager.error("Wallet is already offline");
     } else {
@@ -2950,8 +2997,10 @@ async fn rescan(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let topoheight = if arguments.has_argument("topoheight") {
         arguments.get_value("topoheight")?.to_number()?
     } else {
@@ -2971,8 +3020,10 @@ async fn sync_status(
     manager: &CommandManager,
     _arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     match wallet.get_sync_progress().await {
         Ok((wallet_topo, daemon_topo, percentage)) => {
@@ -3001,8 +3052,10 @@ async fn seed(
 ) -> Result<(), CommandError> {
     manager.validate_batch_params("seed", &arguments)?;
 
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let prompt = manager.get_prompt();
 
     let password = if arguments.has_argument("password") {
@@ -3044,8 +3097,10 @@ async fn seed(
 }
 
 async fn nonce(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let storage = wallet.get_storage().read().await;
     let nonce = storage.get_nonce()?;
     let unconfirmed_nonce = storage.get_unconfirmed_nonce()?;
@@ -3071,8 +3126,10 @@ async fn set_nonce(
 
     let value = value_str.parse::<u64>().context("Invalid nonce number")?;
 
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let mut storage = wallet.get_storage().write().await;
     storage.set_nonce(value)?;
     storage.clear_tx_cache();
@@ -3082,8 +3139,10 @@ async fn set_nonce(
 }
 
 async fn tx_version(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let storage = wallet.get_storage().read().await;
     let version = storage.get_tx_version().await?;
     manager.message(format!("Transaction version: {version}"));
@@ -3112,8 +3171,10 @@ async fn set_tx_version(
     let tx_version = TxVersion::try_from(value)
         .map_err(|_| CommandError::InvalidArgument("Invalid transaction version".to_string()))?;
 
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let mut storage = wallet.get_storage().write().await;
     storage.set_tx_version(tx_version).await?;
 
@@ -3122,8 +3183,10 @@ async fn set_tx_version(
 }
 
 async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     if let Some(network_handler) = wallet.get_network_handler().lock().await.as_ref() {
         let api = network_handler.get_api();
@@ -3242,8 +3305,10 @@ async fn ai_mining_history(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     let page = if arguments.has_argument("page") {
         arguments.get_value("page")?.to_number()? as usize
@@ -3341,8 +3406,10 @@ async fn ai_mining_history(
 
 // Show AI mining statistics for this wallet
 async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     let storage = wallet.get_storage().read().await;
     let all_transactions = storage.get_transactions()?;
@@ -3448,8 +3515,10 @@ async fn ai_mining_tasks(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     let page = if arguments.has_argument("page") {
         arguments.get_value("page")?.to_number()? as usize
@@ -3579,8 +3648,10 @@ async fn ai_mining_rewards(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     let page = if arguments.has_argument("page") {
         arguments.get_value("page")?.to_number()? as usize
@@ -3944,8 +4015,10 @@ struct AIMiningSummary {
 
 async fn logout(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
     {
-        let context = manager.get_context().lock()?;
-        let wallet: &Arc<Wallet> = context.get()?;
+        let wallet = {
+            let context = manager.get_context().lock()?;
+            context.get::<Arc<Wallet>>()?.clone()
+        };
         wallet.close().await;
     }
 
@@ -3962,8 +4035,10 @@ async fn logout(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
 
 #[cfg(feature = "api_server")]
 async fn stop_api_server(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     wallet
         .stop_api_server()
         .await
@@ -3979,8 +4054,10 @@ async fn start_rpc_server(
 ) -> Result<(), CommandError> {
     manager.validate_batch_params("start_rpc_server", &arguments)?;
 
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let bind_address = arguments.get_value("bind_address")?.to_string_value()?;
     let username = arguments.get_value("username")?.to_string_value()?;
     let password = arguments.get_value("password")?.to_string_value()?;
@@ -3997,8 +4074,10 @@ async fn start_rpc_server(
 
 #[cfg(feature = "api_server")]
 async fn start_xswd(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     match wallet.enable_xswd().await {
         Ok(receiver) => {
             if let Some(receiver) = receiver {
@@ -4019,8 +4098,10 @@ async fn add_xswd_relayer(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     let app_data = if args.has_argument("app_data") {
         args.get_value("app_data")?.to_string_value()?
@@ -4057,8 +4138,10 @@ async fn multisig_setup(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let prompt = manager.get_prompt();
 
     let multisig = {
@@ -4131,13 +4214,13 @@ async fn multisig_setup(
         let tx = create_transaction_with_multisig(
             manager,
             prompt,
-            wallet,
+            &wallet,
             TransactionTypeBuilder::MultiSig(payload),
             multisig.payload,
         )
         .await?;
 
-        broadcast_tx(wallet, manager, tx).await;
+        broadcast_tx(&wallet, manager, tx).await;
         return Ok(());
     }
 
@@ -4238,7 +4321,7 @@ async fn multisig_setup(
     };
     let tx_type = TransactionTypeBuilder::MultiSig(payload);
     let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
+        create_transaction_with_multisig(manager, prompt, &wallet, tx_type, multisig.payload).await?
     } else {
         match wallet
             .create_transaction(tx_type, FeeBuilder::default())
@@ -4252,7 +4335,7 @@ async fn multisig_setup(
         }
     };
 
-    broadcast_tx(wallet, manager, tx).await;
+    broadcast_tx(&wallet, manager, tx).await;
 
     Ok(())
 }
@@ -4263,8 +4346,10 @@ async fn multisig_sign(
 ) -> Result<(), CommandError> {
     manager.validate_batch_params("multisig_sign", &args)?;
 
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let prompt = manager.get_prompt();
 
     let tx_hash = if args.has_argument("tx_hash") {
@@ -4298,8 +4383,10 @@ async fn multisig_sign(
 }
 
 async fn multisig_show(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
     let storage = wallet.get_storage().read().await;
     let multisig = storage
         .get_multisig_state()
@@ -4415,8 +4502,10 @@ async fn freeze_tos(
     manager.validate_batch_params("freeze_tos", &args)?;
 
     let prompt = manager.get_prompt();
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     // Get amount, duration, and confirm from arguments (with examples for better error messages)
     let amount_str = get_required_arg_with_example(
@@ -4580,7 +4669,7 @@ async fn freeze_tos(
     ));
 
     // Broadcast the transaction
-    broadcast_tx(wallet, manager, tx).await;
+    broadcast_tx(&wallet, manager, tx).await;
 
     Ok(())
 }
@@ -4593,8 +4682,10 @@ async fn unfreeze_tos(
     manager.validate_batch_params("unfreeze_tos", &args)?;
 
     let prompt = manager.get_prompt();
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     // Get amount and confirm from arguments (with example for better error messages)
     let amount_str = get_required_arg_with_example(
@@ -4710,15 +4801,17 @@ async fn unfreeze_tos(
     }
 
     // Broadcast the transaction
-    broadcast_tx(wallet, manager, tx).await;
+    broadcast_tx(&wallet, manager, tx).await;
 
     Ok(())
 }
 
 /// Show energy information and freeze records
 async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
 
     if !wallet.is_online().await {
         manager.error("Wallet is not connected to a daemon. Please enable online mode first.");

@@ -240,15 +240,13 @@ where
     let old = is_in_block_in_place();
     set_in_block_in_place(true);
 
-    cfg_if! {
-        if #[cfg(feature = "tokio-multi-thread")] {
-            let res = tokio::task::block_in_place(f);
-        } else {
-            res = f();
-        }
-    };
-    set_in_block_in_place(old);
+    #[cfg(feature = "tokio-multi-thread")]
+    let res = tokio::task::block_in_place(f);
 
+    #[cfg(not(feature = "tokio-multi-thread"))]
+    let res = f();
+
+    set_in_block_in_place(old);
     res
 }
 

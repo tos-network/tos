@@ -1,69 +1,69 @@
-# await_holding_lock 问题修复计划
+# await_holding_lock Fix Plan
 
-## 问题统计
+## Issue Statistics
 
-- **总数**: 192 个 `await_holding_lock` 警告
-- **继承自 Xelis**: 74 个
-- **TOS 新增**: 118 个 ⚠️
+- **Total**: 192 `await_holding_lock` warnings
+- **Inherited from Xelis**: 74
+- **TOS additions**: 118 ⚠️
 
-## 风险等级: 🔴 高危
+## Risk Level: 🔴 High
 
-持有锁时进行 `.await` 操作可能导致：
-- 死锁
-- 性能严重下降
-- 并发竞争问题
-- 区块链同步失败
+Performing `.await` operations while holding locks can lead to:
+- Deadlocks
+- Severe performance degradation
+- Concurrency race conditions
+- Blockchain synchronization failures
 
-## 修复策略
+## Fix Strategy
 
-### Phase 1: 自动修复（优先尝试）
+### Phase 1: Automatic Fix (Try First)
 
 ```bash
-# 尝试自动修复
+# Attempt automatic fix
 cargo clippy --fix --allow-dirty --allow-staged -- -W clippy::await_holding_lock
 ```
 
-### Phase 2: 手动修复模式
+### Phase 2: Manual Fix Patterns
 
-#### 模式 A: 提前释放锁
+#### Pattern A: Release Lock Early
 
 ```rust
-// ❌ 错误
+// ❌ Wrong
 let data = lock.lock().unwrap();
 some_async_fn().await;
 drop(data);
 
-// ✅ 正确
+// ✅ Correct
 let data = {
     let data = lock.lock().unwrap();
     data.clone()
-}; // 锁在这里自动释放
+}; // Lock automatically released here
 some_async_fn().await;
 ```
 
-#### 模式 B: 使用 async-aware 锁
+#### Pattern B: Use Async-Aware Locks
 
 ```rust
-// ❌ 错误: 使用 std::sync::Mutex
+// ❌ Wrong: Using std::sync::Mutex
 use std::sync::Mutex;
 let lock = Mutex::new(data);
 
-// ✅ 正确: 使用 tokio::sync::Mutex
+// ✅ Correct: Using tokio::sync::Mutex
 use tokio::sync::Mutex;
 let lock = Mutex::new(data);
 let guard = lock.lock().await;
 some_async_fn().await;
 ```
 
-#### 模式 C: 缩小锁作用域
+#### Pattern C: Reduce Lock Scope
 
 ```rust
-// ❌ 错误: 锁作用域太大
+// ❌ Wrong: Lock scope too large
 let guard = lock.lock().unwrap();
 let value = guard.get_value();
 let result = process(value).await;
 
-// ✅ 正确: 只在必要时持有锁
+// ✅ Correct: Only hold lock when necessary
 let value = {
     let guard = lock.lock().unwrap();
     guard.get_value().clone()
@@ -71,53 +71,53 @@ let value = {
 let result = process(value).await;
 ```
 
-## 预计工作量
+## Estimated Workload
 
-- **Phase 1 自动修复**: 可能修复 30-50% (60-96 个)
-- **Phase 2 手动修复**: 剩余 96-132 个
-- **总时间**: 3-5 天
+- **Phase 1 Automatic Fix**: May fix 30-50% (60-96 instances)
+- **Phase 2 Manual Fix**: Remaining 96-132 instances
+- **Total Time**: 3-5 days
 
-## 自动修复结果 ❌
+## Automatic Fix Result ❌
 
-尝试了 `cargo clippy --fix` 但失败了：
-- Clippy 尝试修复但引入了编译错误
-- 错误：泛型参数移除导致类型不匹配
-- 结论：**必须手动修复**
+Attempted `cargo clippy --fix` but failed:
+- Clippy attempted fixes but introduced compilation errors
+- Error: Generic parameter removal caused type mismatches
+- Conclusion: **Must fix manually**
 
-## 手动修复策略
+## Manual Fix Strategy
 
-### 优先级排序
+### Priority Order
 
-1. **高优先级**: TOS 新增的 118 个问题（最近的代码）
-2. **中优先级**: 继承自 Xelis 的 74 个问题
+1. **High Priority**: 118 TOS additions (recent code)
+2. **Medium Priority**: 74 inherited from Xelis
 
-### 具体执行步骤
+### Execution Steps
 
-1. ✅ 创建修复分支并推送
-2. ✅ 尝试自动修复（失败）
-3. ⏳ 手动逐个修复（需要 3-5 天）
-4. ⏳ 每修复一批，运行测试验证
-5. ⏳ 所有修复完成后提交 PR
-6. ⏳ 代码审查和合并到 main
+1. ✅ Create fix branch and push
+2. ✅ Attempt automatic fix (failed)
+3. ⏳ Fix manually one by one (requires 3-5 days)
+4. ⏳ Run tests to verify each batch of fixes
+5. ⏳ Submit PR after all fixes complete
+6. ⏳ Code review and merge to main
 
-## 下一步行动
+## Next Actions
 
-**建议**: 由于需要手动修复 192 个问题，建议分阶段进行：
+**Recommendation**: Due to needing to manually fix 192 issues, suggest phased approach:
 
-### Phase 1: 修复最关键的模块（1-2 天）
-- `daemon/src/core/blockchain.rs` - 区块链核心
-- `daemon/src/core/mempool.rs` - 交易池
-- `daemon/src/rpc/rpc.rs` - RPC 接口
+### Phase 1: Fix Critical Modules (1-2 days)
+- `daemon/src/core/blockchain.rs` - Blockchain core
+- `daemon/src/core/mempool.rs` - Transaction pool
+- `daemon/src/rpc/rpc.rs` - RPC interface
 
-### Phase 2: 修复 TAKO 相关（1 天）
-- `daemon/src/tako_integration/` - TAKO VM 集成
+### Phase 2: Fix TAKO Related (1 day)
+- `daemon/src/tako_integration/` - TAKO VM integration
 
-### Phase 3: 修复其他模块（1-2 天）
-- 其余 daemon 和 wallet 模块
+### Phase 3: Fix Other Modules (1-2 days)
+- Remaining daemon and wallet modules
 
-每个 Phase 完成后提交一次，便于增量审查。
+Submit after each phase completes for incremental review.
 
-## 参考
+## References
 
-- Clippy 文档: https://rust-lang.github.io/rust-clippy/master/index.html#await_holding_lock
-- Tokio 同步原语: https://docs.rs/tokio/latest/tokio/sync/
+- Clippy documentation: https://rust-lang.github.io/rust-clippy/master/index.html#await_holding_lock
+- Tokio sync primitives: https://docs.rs/tokio/latest/tokio/sync/
