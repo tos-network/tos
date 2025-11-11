@@ -1,5 +1,5 @@
 use chacha20poly1305::{
-    aead::{rand_core::OsError, AeadInOut, Buffer},
+    aead::{AeadInOut, Buffer},
     ChaCha20Poly1305, KeyInit,
 };
 use log::trace;
@@ -67,8 +67,8 @@ pub enum EncryptionError {
     DecryptError,
     #[error("Not supported")]
     NotSupported,
-    #[error(transparent)]
-    RngError(#[from] OsError),
+    #[error("Random number generation failed")]
+    RngError,
 }
 
 impl Encryption {
@@ -104,7 +104,7 @@ impl Encryption {
     pub fn generate_key(&self) -> Result<EncryptionKey, EncryptionError> {
         ChaCha20Poly1305::generate_key()
             .map(Into::into)
-            .map_err(EncryptionError::from)
+            .map_err(|_| EncryptionError::RngError)
     }
 
     // Encrypt a packet using the shared symetric key
