@@ -14,7 +14,6 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
-use tokio::sync::Semaphore;
 use tos_common::{
     account::{EnergyResource, Nonce},
     ai_mining::AIMiningState,
@@ -24,6 +23,7 @@ use tos_common::{
         ContractOutput,
     },
     crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
+    tokio::sync::{RwLock, Semaphore},
     transaction::{
         verify::{BlockchainApplyState, BlockchainVerificationState, ContractEnvironment},
         ContractDeposit, MultiSigPayload, Reference,
@@ -54,7 +54,7 @@ pub struct ParallelApplyAdapter<'a, S: Storage> {
     parallel_state: Arc<ParallelChainState<S>>,
 
     /// Read-only storage access for validation (acquired via read lock)
-    storage: Arc<tokio::sync::RwLock<S>>,
+    storage: Arc<RwLock<S>>,
 
     /// Semaphore to prevent concurrent storage access (DEADLOCK FIX)
     /// This ensures only one task accesses storage at a time, preventing sled internal deadlocks.
@@ -119,7 +119,7 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
     /// Create a new adapter for a transaction execution
     pub fn new(
         parallel_state: Arc<ParallelChainState<S>>,
-        storage: Arc<tokio::sync::RwLock<S>>,
+        storage: Arc<RwLock<S>>,
         storage_semaphore: Arc<Semaphore>,
         block: &'a Block,
         block_hash: &'a Hash,

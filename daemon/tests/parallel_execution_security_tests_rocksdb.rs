@@ -476,8 +476,7 @@ async fn test_burned_supply_limit() {
                 e,
                 tos_daemon::core::error::BlockchainError::BurnedSupplyLimitExceeded
             ),
-            "Should return BurnedSupplyLimitExceeded error, got: {:?}",
-            e
+            "Should return BurnedSupplyLimitExceeded error, got: {e:?}"
         );
     }
 
@@ -546,7 +545,6 @@ async fn test_fuzz_concurrent_counter_updates() {
     );
 
     println!(
-        "✓ Test passed: Concurrent counter updates work correctly (final value: {})",
-        final_value
+        "✓ Test passed: Concurrent counter updates work correctly (final value: {final_value})"
     );
 }

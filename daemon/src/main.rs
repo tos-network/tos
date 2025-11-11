@@ -208,20 +208,20 @@ async fn main() -> Result<()> {
     }
 
     let log_config = &config.log;
-    let prompt = Prompt::new(
-        log_config.log_level,
-        &log_config.logs_path,
-        &log_config.filename_log,
-        log_config.disable_file_logging,
-        log_config.disable_file_log_date_based,
-        log_config.disable_log_color,
-        log_config.auto_compress_logs,
-        !log_config.disable_interactive_mode,
-        log_config.logs_modules.clone(),
-        log_config.file_log_level.unwrap_or(log_config.log_level),
-        !log_config.disable_ascii_art,
-        log_config.datetime_format.clone(),
-    )?;
+    let prompt = Prompt::new(tos_common::prompt::PromptConfig {
+        level: log_config.log_level,
+        dir_path: &log_config.logs_path,
+        filename_log: &log_config.filename_log,
+        disable_file_logging: log_config.disable_file_logging,
+        disable_file_log_date_based: log_config.disable_file_log_date_based,
+        disable_colors: log_config.disable_log_color,
+        enable_auto_compress_logs: log_config.auto_compress_logs,
+        interactive: !log_config.disable_interactive_mode,
+        module_logs: log_config.logs_modules.clone(),
+        file_level: log_config.file_log_level.unwrap_or(log_config.log_level),
+        show_ascii: !log_config.disable_ascii_art,
+        logs_datetime_format: log_config.datetime_format.clone(),
+    })?;
 
     if log::log_enabled!(log::Level::Info) {
         info!("Tos Blockchain running version: {}", VERSION);

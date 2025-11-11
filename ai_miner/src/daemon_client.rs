@@ -167,9 +167,9 @@ impl DaemonClient {
                 if e.is_timeout() {
                     anyhow!("Request timeout after {:?}", self.config.request_timeout)
                 } else if e.is_connect() {
-                    anyhow!("Connection failed: {}", e)
+                    anyhow!("Connection failed: {e}")
                 } else {
-                    anyhow!("Network error: {}", e)
+                    anyhow!("Network error: {e}")
                 }
             })?;
 
@@ -187,7 +187,7 @@ impl DaemonClient {
         let rpc_response: JsonRpcResponse = response
             .json()
             .await
-            .map_err(|e| anyhow!("Failed to parse JSON response: {}", e))?;
+            .map_err(|e| anyhow!("Failed to parse JSON response: {e}"))?;
 
         if let Some(error) = rpc_response.error {
             return Err(anyhow!("RPC error {}: {}", error.code, error.message));

@@ -130,20 +130,20 @@ fn verify_dag_invariants(blocks: &HashMap<Hash, MockBlock>) -> Result<(), String
     for (hash, block) in blocks.iter() {
         // 1. Block's hash matches
         if hash != &block.hash {
-            return Err(format!("Block hash mismatch"));
+            return Err("Block hash mismatch".to_string());
         }
 
         // 2. Parents exist (except genesis)
         if !block.parents.is_empty() {
             for parent in &block.parents {
                 if !blocks.contains_key(parent) {
-                    return Err(format!("Parent {} not found", parent));
+                    return Err(format!("Parent {parent} not found"));
                 }
             }
         }
 
         // 3. Parent count is valid (1-32 for non-genesis)
-        if !block.parents.is_empty() && (block.parents.len() < 1 || block.parents.len() > 32) {
+        if !block.parents.is_empty() && (block.parents.is_empty() || block.parents.len() > 32) {
             return Err(format!("Invalid parent count: {}", block.parents.len()));
         }
     }

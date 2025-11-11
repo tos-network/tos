@@ -320,7 +320,7 @@ fn bench_parallel_executor_batch_sizes(c: &mut Criterion) {
     // Test with different batch sizes: 10, 20, 50, 100
     for batch_size in [10, 20, 50, 100].iter() {
         group.bench_with_input(
-            BenchmarkId::from_parameter(format!("{}_txs", batch_size)),
+            BenchmarkId::from_parameter(format!("{batch_size}_txs")),
             batch_size,
             |b, &size| {
                 b.iter(|| {
@@ -377,7 +377,7 @@ fn bench_conflict_detection(c: &mut Criterion) {
     // Benchmark with conflicting transactions (same sender)
     for tx_count in [10, 50, 100].iter() {
         group.bench_with_input(
-            BenchmarkId::from_parameter(format!("conflicting_{}_txs", tx_count)),
+            BenchmarkId::from_parameter(format!("conflicting_{tx_count}_txs")),
             tx_count,
             |b, &count| {
                 let transactions = generate_conflicting_transactions(count);
@@ -399,7 +399,7 @@ fn bench_conflict_detection(c: &mut Criterion) {
     // Benchmark with conflict-free transactions (different senders)
     for tx_count in [10, 50, 100].iter() {
         group.bench_with_input(
-            BenchmarkId::from_parameter(format!("conflict_free_{}_txs", tx_count)),
+            BenchmarkId::from_parameter(format!("conflict_free_{tx_count}_txs")),
             tx_count,
             |b, &count| {
                 let transactions = generate_conflict_free_transactions(count);
@@ -425,13 +425,10 @@ fn bench_conflict_detection(c: &mut Criterion) {
 fn extract_transaction_accounts(tx: &Transaction) -> Vec<PublicKey> {
     let mut accounts = vec![tx.get_source().clone()];
 
-    match tx.get_data() {
-        TransactionType::Transfers(transfers) => {
-            for transfer in transfers {
-                accounts.push(transfer.get_destination().clone());
-            }
+    if let TransactionType::Transfers(transfers) = tx.get_data() {
+        for transfer in transfers {
+            accounts.push(transfer.get_destination().clone());
         }
-        _ => {}
     }
 
     accounts
@@ -448,7 +445,7 @@ fn bench_account_extraction(c: &mut Criterion) {
 
     for tx_count in [10, 50, 100, 200].iter() {
         group.bench_with_input(
-            BenchmarkId::from_parameter(format!("{}_txs", tx_count)),
+            BenchmarkId::from_parameter(format!("{tx_count}_txs")),
             tx_count,
             |b, &count| {
                 let transactions = generate_transfer_transactions(count);
@@ -484,7 +481,7 @@ fn bench_executor_parallelism(c: &mut Criterion) {
 
     for parallelism in parallelism_levels {
         group.bench_with_input(
-            BenchmarkId::from_parameter(format!("parallelism_{}", parallelism)),
+            BenchmarkId::from_parameter(format!("parallelism_{parallelism}")),
             &parallelism,
             |b, &parallelism| {
                 b.iter(|| {
@@ -539,7 +536,7 @@ fn bench_state_commit(c: &mut Criterion) {
 
     for tx_count in [10, 50, 100].iter() {
         group.bench_with_input(
-            BenchmarkId::from_parameter(format!("{}_txs", tx_count)),
+            BenchmarkId::from_parameter(format!("{tx_count}_txs")),
             tx_count,
             |b, &count| {
                 b.iter(|| {

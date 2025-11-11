@@ -45,8 +45,7 @@ fn test_ed25519_batch_cost() {
         let expected = num_signatures as u64 * costs::ED25519_COST;
         assert_eq!(
             cost, expected,
-            "Batch size {} should cost {} CU",
-            num_signatures, expected
+            "Batch size {num_signatures} should cost {expected} CU"
         );
     }
 }

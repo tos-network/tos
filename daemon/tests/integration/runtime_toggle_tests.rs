@@ -60,7 +60,7 @@ fn test_cross_process_environment_isolation() {
 
     // Verify that the function is callable and returns a boolean
     let current_state = parallel_execution_enabled();
-    assert!(current_state == true || current_state == false);
+    assert!(current_state || !current_state);
 
     // Verify that calling multiple times returns same value (cached)
     for _ in 0..100 {
@@ -124,8 +124,7 @@ fn test_environment_variable_parsing() {
         let result = matches!(input, "1" | "true" | "TRUE" | "True");
         assert_eq!(
             result, expected,
-            "Input '{}' should parse to {}",
-            input, expected
+            "Input '{input}' should parse to {expected}"
         );
     }
 }

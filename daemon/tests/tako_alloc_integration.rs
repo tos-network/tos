@@ -110,16 +110,12 @@ impl ContractStorage for MockProvider {
 
 /// Helper: Load compiled example contract
 fn load_example_contract(name: &str) -> Vec<u8> {
-    let path = format!(
-        "../../tos-alloc/examples/{}/target/tbpf-tos-tos/release/ex.so",
-        name
-    );
+    let path = format!("../../tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so");
     std::fs::read(&path).unwrap_or_else(|e| {
         panic!(
-            "Failed to load {}: {}\n\n\
+            "Failed to load {path}: {e}\n\n\
             Build the example first:\n  \
-            cd ../../tos-alloc && ./build-example.sh {}",
-            path, e, name
+            cd ../../tos-alloc && ./build-example.sh {name}"
         )
     })
 }
@@ -169,7 +165,7 @@ fn test_alloc_basic_vec_operations() {
     // Check logs
     println!("Contract logs:");
     for log in &exec_result.log_messages {
-        println!("  {}", log);
+        println!("  {log}");
     }
 
     assert!(

@@ -299,7 +299,7 @@ async fn test_nonce_conflict_detection() {
     {
         println!("  - Operation 1: Transaction uses nonce 1 (current nonce: 0)");
         let current_nonce = parallel_state.get_nonce(&alice_pubkey);
-        println!("    Current nonce: {}", current_nonce);
+        println!("    Current nonce: {current_nonce}");
         assert_eq!(current_nonce, 0, "Initial nonce should be 0");
 
         // Transaction would verify nonce == current_nonce + 1, then increment
@@ -311,7 +311,7 @@ async fn test_nonce_conflict_detection() {
     {
         println!("  - Operation 2: Transaction tries to use nonce 1 (CONFLICT!)");
         let current_nonce = parallel_state.get_nonce(&alice_pubkey);
-        println!("    Current nonce in cache: {}", current_nonce);
+        println!("    Current nonce in cache: {current_nonce}");
 
         // In real system, this would fail validation because nonce != expected
         // For testing, we verify the conflict is detected via modified nonces
@@ -346,7 +346,7 @@ async fn test_nonce_conflict_detection() {
     assert_eq!(*final_nonce, 2, "Final nonce should be 2");
 
     println!("  ✓ Conflict detected: Both operations modified Alice's nonce");
-    println!("  ✓ Final nonce: {}", final_nonce);
+    println!("  ✓ Final nonce: {final_nonce}");
 
     // Step 6: Commit and verify
     println!("Step 6/6: Committing state and verifying...");

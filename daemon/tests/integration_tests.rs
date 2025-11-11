@@ -87,11 +87,7 @@ impl MockChainState {
 
     fn get_available_energy(&self, account: &CompressedPublicKey) -> u64 {
         let (used, total) = self.get_energy(account);
-        if used >= total {
-            0
-        } else {
-            total - used
-        }
+        total.saturating_sub(used)
     }
 
     fn set_nonce(&mut self, account: CompressedPublicKey, nonce: u64) {
@@ -129,7 +125,7 @@ impl MockChainState {
         // Verify nonce
         let current_nonce = self.get_nonce(sender);
         if nonce != current_nonce {
-            return Err(format!("Invalid nonce: expected {}, got {}", current_nonce, nonce).into());
+            return Err(format!("Invalid nonce: expected {current_nonce}, got {nonce}").into());
         }
 
         // Update nonce
@@ -609,7 +605,7 @@ async fn test_invalid_energy_fee_for_new_address() {
     // Note: In our current mock implementation, all accounts are assumed to be registered (true)
     // So this test will actually pass, but in a real scenario with new addresses, it would fail
     // This demonstrates that the validation logic is in place
-    println!("Test result: {:?}", result);
+    println!("Test result: {result:?}");
 
     // For this test to properly demonstrate the new address validation,
     // we would need a more sophisticated mock that can simulate unregistered addresses
@@ -654,10 +650,7 @@ fn test_block_execution_simulation() {
         chain.get_balance(&bob_pubkey) as f64 / COIN_VALUE as f64
     );
     let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
-    println!(
-        "Alice energy: used_energy: {}, total_energy: {}",
-        used_energy, total_energy
-    );
+    println!("Alice energy: used_energy: {used_energy}, total_energy: {total_energy}");
 
     // Create multiple transactions for the block
     let tx1 = create_transfer_transaction(
@@ -716,10 +709,7 @@ fn test_block_execution_simulation() {
         chain.get_balance(&bob_pubkey) as f64 / COIN_VALUE as f64
     );
     let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
-    println!(
-        "Alice energy: used_energy: {}, total_energy: {}",
-        used_energy, total_energy
-    );
+    println!("Alice energy: used_energy: {used_energy}, total_energy: {total_energy}");
     println!("Alice nonce: {}", chain.get_nonce(&alice_pubkey));
 
     // Verify final balances
@@ -774,10 +764,7 @@ fn test_block_execution_with_new_account() {
         chain.get_balance(&bob_pubkey) as f64 / COIN_VALUE as f64
     );
     let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
-    println!(
-        "Alice energy: used_energy: {}, total_energy: {}",
-        used_energy, total_energy
-    );
+    println!("Alice energy: used_energy: {used_energy}, total_energy: {total_energy}");
     println!(
         "Bob energy: used_energy: {}, total_energy: {}",
         chain.get_energy(&bob_pubkey).0,
@@ -818,10 +805,7 @@ fn test_block_execution_with_new_account() {
         chain.get_balance(&bob_pubkey) as f64 / COIN_VALUE as f64
     );
     let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
-    println!(
-        "Alice energy: used_energy: {}, total_energy: {}",
-        used_energy, total_energy
-    );
+    println!("Alice energy: used_energy: {used_energy}, total_energy: {total_energy}");
     println!(
         "Bob energy: used_energy: {}, total_energy: {}",
         chain.get_energy(&bob_pubkey).0,
@@ -891,10 +875,7 @@ fn test_block_execution_with_new_account_energy_fee() {
         chain.get_balance(&bob_pubkey) as f64 / COIN_VALUE as f64
     );
     let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
-    println!(
-        "Alice energy: used_energy: {}, total_energy: {}",
-        used_energy, total_energy
-    );
+    println!("Alice energy: used_energy: {used_energy}, total_energy: {total_energy}");
     println!(
         "Bob energy: used_energy: {}, total_energy: {}",
         chain.get_energy(&bob_pubkey).0,
@@ -938,10 +919,7 @@ fn test_block_execution_with_new_account_energy_fee() {
         chain.get_balance(&bob_pubkey) as f64 / COIN_VALUE as f64
     );
     let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
-    println!(
-        "Alice energy: used_energy: {}, total_energy: {}",
-        used_energy, total_energy
-    );
+    println!("Alice energy: used_energy: {used_energy}, total_energy: {total_energy}");
     println!(
         "Bob energy: used_energy: {}, total_energy: {}",
         chain.get_energy(&bob_pubkey).0,
@@ -1108,10 +1086,8 @@ fn test_freeze_tos_integration() {
     let energy_gain = (freeze_amount / COIN_VALUE) * duration.reward_multiplier(); // 200 * 14 = 2800 transfers
 
     // Create energy transaction builder
-    let energy_builder = tos_common::transaction::builder::EnergyBuilder::freeze_tos(
-        freeze_amount,
-        duration.clone(),
-    );
+    let energy_builder =
+        tos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, duration);
     let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
     let fee_builder = tos_common::transaction::builder::FeeBuilder::default();
 
@@ -1134,7 +1110,7 @@ fn test_freeze_tos_integration() {
     println!("\nFreeze transaction created:");
     println!("Amount: {} TOS", freeze_amount as f64 / COIN_VALUE as f64);
     println!("Duration: {} days", duration.name());
-    println!("Energy gained: {} units", energy_gain);
+    println!("Energy gained: {energy_gain} units");
     println!("Transaction hash: {}", freeze_tx.hash());
 
     // Execute the transaction using the chain state
@@ -1241,10 +1217,8 @@ fn test_freeze_tos_sigma_proofs_verification() {
         state.nonce = 0;
 
         // Create energy transaction builder
-        let energy_builder = tos_common::transaction::builder::EnergyBuilder::freeze_tos(
-            freeze_amount,
-            duration.clone(),
-        );
+        let energy_builder =
+            tos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, duration);
         let tx_type =
             tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
         let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
@@ -1264,7 +1238,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
                 tx
             }
             Err(e) => {
-                panic!("Failed to build transaction: {:?}", e);
+                panic!("Failed to build transaction: {e:?}");
             }
         };
 
@@ -1290,7 +1264,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
                 tx
             }
             Err(e) => {
-                panic!("Failed to deserialize transaction: {:?}", e);
+                panic!("Failed to deserialize transaction: {e:?}");
             }
         };
 
@@ -1308,7 +1282,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
 
         if !freeze_tx
             .get_signature()
-            .verify(&signature_data, &alice_pubkey_decompressed)
+            .verify(&signature_data, alice_pubkey_decompressed)
         {
             panic!("Transaction signature verification failed");
         }
@@ -1343,7 +1317,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
         // Test 7: Verify that the transaction has the expected size
         let tx_size = freeze_tx.size();
         assert!(tx_size > 0, "Transaction size should be positive");
-        println!("✓ Transaction size: {} bytes", tx_size);
+        println!("✓ Transaction size: {tx_size} bytes");
 
         // Test 8: Verify that the transaction can be converted to RPC format
         let rpc_tx = tos_common::api::RPCTransaction::from_tx(&freeze_tx, &tx_hash, false);
@@ -1417,7 +1391,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
                 tx
             }
             Err(e) => {
-                panic!("Failed to build transaction: {:?}", e);
+                panic!("Failed to build transaction: {e:?}");
             }
         };
 
@@ -1443,7 +1417,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
                 tx
             }
             Err(e) => {
-                panic!("Failed to deserialize transaction: {:?}", e);
+                panic!("Failed to deserialize transaction: {e:?}");
             }
         };
 
@@ -1461,7 +1435,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
 
         if !unfreeze_tx
             .get_signature()
-            .verify(&signature_data, &alice_pubkey_decompressed)
+            .verify(&signature_data, alice_pubkey_decompressed)
         {
             panic!("Transaction signature verification failed");
         }
@@ -1492,7 +1466,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         // Test 7: Verify that the transaction has the expected size
         let tx_size = unfreeze_tx.size();
         assert!(tx_size > 0, "Transaction size should be positive");
-        println!("✓ Transaction size: {} bytes", tx_size);
+        println!("✓ Transaction size: {tx_size} bytes");
 
         // Test 8: Verify that the transaction can be converted to RPC format
         let rpc_tx = tos_common::api::RPCTransaction::from_tx(&unfreeze_tx, &tx_hash, false);
@@ -1566,10 +1540,8 @@ fn test_unfreeze_tos_integration() {
     let energy_gain = (freeze_amount / COIN_VALUE) * freeze_duration.reward_multiplier();
 
     // Create freeze transaction
-    let energy_builder = tos_common::transaction::builder::EnergyBuilder::freeze_tos(
-        freeze_amount,
-        freeze_duration.clone(),
-    );
+    let energy_builder =
+        tos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, freeze_duration);
     let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
     let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
 
@@ -1592,7 +1564,7 @@ fn test_unfreeze_tos_integration() {
     println!("\nFreeze transaction created:");
     println!("Amount: {} TOS", freeze_amount as f64 / COIN_VALUE as f64);
     println!("Duration: {} days", freeze_duration.name());
-    println!("Energy gained: {} units", energy_gain);
+    println!("Energy gained: {energy_gain} units");
     println!("Transaction hash: {}", freeze_tx.hash());
 
     // Execute the freeze transaction
@@ -1849,7 +1821,7 @@ fn test_unfreeze_tos_edge_cases() {
 
         // This should fail because insufficient balance for fee
         let result = chain.apply_block(&unfreeze_txs, &signers);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
         assert!(
             result.is_err(),
             "Should fail when insufficient balance for fee"
@@ -1885,10 +1857,7 @@ fn test_energy_system_demo() {
             topoheight,
         );
     println!("Alice froze 1 TOS for 7 days");
-    println!(
-        "Energy gained: {} transfers (1 TOS × 7 days × 2 = 14 transfers)",
-        energy_gained_7d
-    );
+    println!("Energy gained: {energy_gained_7d} transfers (1 TOS × 7 days × 2 = 14 transfers)");
     println!(
         "Available energy: {} transfers",
         alice_energy.available_energy()
@@ -1905,10 +1874,7 @@ fn test_energy_system_demo() {
             topoheight,
         );
     println!("Alice froze 2 TOS for 14 days");
-    println!(
-        "Energy gained: {} transfers (2 TOS × 14 days × 2 = 56 transfers)",
-        energy_gained_14d
-    );
+    println!("Energy gained: {energy_gained_14d} transfers (2 TOS × 14 days × 2 = 56 transfers)");
     println!(
         "Available energy: {} transfers",
         alice_energy.available_energy()
@@ -1940,19 +1906,16 @@ fn test_energy_system_demo() {
         output_count,
         new_addresses,
     );
-    println!("Transaction size: {} bytes", tx_size);
-    println!("Outputs: {} transfers", output_count);
-    println!("New addresses: {} activations", new_addresses);
-    println!("Energy cost: {} transfers", energy_cost);
+    println!("Transaction size: {tx_size} bytes");
+    println!("Outputs: {output_count} transfers");
+    println!("New addresses: {new_addresses} activations");
+    println!("Energy cost: {energy_cost} transfers");
     println!("TOS equivalent: N/A (energy conversion not implemented)");
     println!();
 
     // Simulate transaction execution
     println!("=== Transaction Execution ===");
-    println!(
-        "Executing transaction with energy cost: {} transfers",
-        energy_cost
-    );
+    println!("Executing transaction with energy cost: {energy_cost} transfers");
 
     let result =
         tos_common::utils::energy_fee::EnergyResourceManager::consume_energy_for_transaction(
@@ -1969,7 +1932,7 @@ fn test_energy_system_demo() {
             );
         }
         Err(e) => {
-            println!("Transaction failed: {}", e);
+            println!("Transaction failed: {e}");
         }
     }
     println!();
@@ -1995,8 +1958,8 @@ fn test_energy_system_demo() {
     let unlock_topoheight_7d = topoheight + 7 * 24 * 60 * 60;
     let unlock_topoheight_14d = topoheight + 14 * 24 * 60 * 60;
 
-    println!("7-day freeze unlock time: {}", unlock_topoheight_7d);
-    println!("14-day freeze unlock time: {}", unlock_topoheight_14d);
+    println!("7-day freeze unlock time: {unlock_topoheight_7d}");
+    println!("14-day freeze unlock time: {unlock_topoheight_14d}");
     println!();
 
     // Try to unfreeze before unlock time (should fail)
@@ -2009,10 +1972,10 @@ fn test_energy_system_demo() {
 
     match result {
         Ok(energy_removed) => {
-            println!("Unexpected success! Energy removed: {}", energy_removed);
+            println!("Unexpected success! Energy removed: {energy_removed}");
         }
         Err(e) => {
-            println!("Expected failure: {}", e);
+            println!("Expected failure: {e}");
         }
     }
     println!();
@@ -2027,12 +1990,12 @@ fn test_energy_system_demo() {
 
     match result {
         Ok(energy_removed) => {
-            println!("Success! Energy removed: {}", energy_removed);
+            println!("Success! Energy removed: {energy_removed}");
             println!("Remaining frozen TOS: {}", alice_energy.frozen_tos);
             println!("Remaining total energy: {}", alice_energy.total_energy);
         }
         Err(e) => {
-            println!("Failed: {}", e);
+            println!("Failed: {e}");
         }
     }
     println!();
@@ -2042,8 +2005,8 @@ fn test_energy_system_demo() {
     let unlockable_7d = alice_energy.get_unlockable_tos(unlock_topoheight_7d);
     let unlockable_14d = alice_energy.get_unlockable_tos(unlock_topoheight_14d);
 
-    println!("Unlockable at 7 days: {} TOS", unlockable_7d);
-    println!("Unlockable at 14 days: {} TOS", unlockable_14d);
+    println!("Unlockable at 7 days: {unlockable_7d} TOS");
+    println!("Unlockable at 14 days: {unlockable_14d} TOS");
     println!();
 
     // Demonstrate fee calculation with insufficient energy
@@ -2066,12 +2029,12 @@ fn test_energy_system_demo() {
         0
     };
 
-    println!("Required energy: {}", large_energy_cost);
+    println!("Required energy: {large_energy_cost}");
     println!("Available energy: {}", alice_energy.available_energy());
-    println!("Energy consumed: {}", energy_consumed);
-    println!("TOS cost: {}", tos_cost);
+    println!("Energy consumed: {energy_consumed}");
+    println!("TOS cost: {tos_cost}");
     println!("TOS cost breakdown:");
-    println!("  - Energy conversion: {} TOS", tos_cost);
+    println!("  - Energy conversion: {tos_cost} TOS");
     println!();
 
     // Show freeze records by duration
@@ -2486,7 +2449,7 @@ fn test_energy_fee_transfer_insufficient_tos_for_account_creation() {
     );
     println!(
         "Account creation fee: {} TOS",
-        100000 as f64 / COIN_VALUE as f64
+        100000_f64 / COIN_VALUE as f64
     );
 
     // Test Case 1: Try to transfer to uninitialized address with insufficient TOS for account creation

@@ -42,8 +42,7 @@ impl SecureBlockchain {
         let current_nonce = *nonces.get("sender").unwrap_or(&0);
         if current_nonce != expected_nonce {
             return Err(format!(
-                "Invalid nonce: expected {}, got {}",
-                expected_nonce, current_nonce
+                "Invalid nonce: expected {expected_nonce}, got {current_nonce}"
             ));
         }
 
@@ -102,10 +101,10 @@ async fn main() {
     const TXS_PER_BLOCK: usize = NUM_TRANSACTIONS / NUM_BLOCKS;
 
     println!("Benchmark Configuration:");
-    println!("  Total Transactions:     {}", NUM_TRANSACTIONS);
-    println!("  Transfer Amount:        {} units", TRANSFER_AMOUNT);
-    println!("  Number of Blocks:       {}", NUM_BLOCKS);
-    println!("  Transactions per Block: {}", TXS_PER_BLOCK);
+    println!("  Total Transactions:     {NUM_TRANSACTIONS}");
+    println!("  Transfer Amount:        {TRANSFER_AMOUNT} units");
+    println!("  Number of Blocks:       {NUM_BLOCKS}");
+    println!("  Transactions per Block: {TXS_PER_BLOCK}");
     println!();
 
     println!("Security Checks Enabled:");
@@ -158,9 +157,9 @@ async fn main() {
         "  Total Duration:         {:.3} seconds",
         tx_duration.as_secs_f64()
     );
-    println!("  Transactions Processed: {}", tx_count);
-    println!("  Transaction Throughput: {:.2} TPS", tx_per_sec);
-    println!("  Average Latency:        {:.3} ms/tx", avg_tx_latency_ms);
+    println!("  Transactions Processed: {tx_count}");
+    println!("  Transaction Throughput: {tx_per_sec:.2} TPS");
+    println!("  Average Latency:        {avg_tx_latency_ms:.3} ms/tx");
     println!();
 
     // Benchmark 2: Block processing simulation
@@ -202,15 +201,9 @@ async fn main() {
         "  Total Duration:         {:.3} seconds",
         block_total_duration.as_secs_f64()
     );
-    println!("  Blocks Processed:       {}", NUM_BLOCKS);
-    println!(
-        "  Block Throughput:       {:.2} blocks/sec",
-        block_throughput
-    );
-    println!(
-        "  Average Block Latency:  {:.3} ms/block",
-        avg_block_latency_ms
-    );
+    println!("  Blocks Processed:       {NUM_BLOCKS}");
+    println!("  Block Throughput:       {block_throughput:.2} blocks/sec");
+    println!("  Average Block Latency:  {avg_block_latency_ms:.3} ms/block");
     println!();
 
     // Verify final state
@@ -219,11 +212,8 @@ async fn main() {
     let expected_transferred = NUM_TRANSACTIONS as u64 * TRANSFER_AMOUNT;
 
     println!("✅ State Verification:");
-    println!(
-        "  Sender Balance:         {} units (transferred {})",
-        final_sender, expected_transferred
-    );
-    println!("  Receiver Balance:       {} units", final_receiver);
+    println!("  Sender Balance:         {final_sender} units (transferred {expected_transferred})");
+    println!("  Receiver Balance:       {final_receiver} units");
     println!(
         "  Balance Conservation:   {}",
         if final_receiver == expected_transferred {
@@ -237,7 +227,7 @@ async fn main() {
     // Performance targets
     println!("🎯 Performance Targets:");
     println!("  Target TPS:             > 1,000 TPS");
-    println!("  Actual TPS:             {:.2} TPS", tx_per_sec);
+    println!("  Actual TPS:             {tx_per_sec:.2} TPS");
     println!(
         "  Status:                 {}",
         if tx_per_sec > 1000.0 {
@@ -251,7 +241,7 @@ async fn main() {
     println!();
 
     println!("  Target Latency:         < 100 ms");
-    println!("  Actual Latency:         {:.3} ms", avg_tx_latency_ms);
+    println!("  Actual Latency:         {avg_tx_latency_ms:.3} ms");
     println!(
         "  Status:                 {}",
         if avg_tx_latency_ms < 100.0 {
@@ -264,7 +254,7 @@ async fn main() {
 
     // Production expectations
     println!("📈 Production Environment Expectations:");
-    println!("  Mock Environment:       {:.0} TPS (current)", tx_per_sec);
+    println!("  Mock Environment:       {tx_per_sec:.0} TPS (current)");
     println!("  Single-threaded Prod:   100-200 TPS (with real I/O + crypto)");
     println!("  Parallel Validation:    400-800 TPS (4 threads, 2-4x improvement)");
     println!("  Batch Processing:       800-1,200 TPS (+30-40% with batching)");

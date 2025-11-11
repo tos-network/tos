@@ -114,15 +114,12 @@ async fn test_nonce_increments_correctly() {
 
     let initial_nonce = parallel_state.get_nonce(&alice_pubkey);
     assert_eq!(initial_nonce, 0, "Initial nonce should be 0");
-    println!(
-        "✓ Step 3: Alice's account loaded, nonce = {}",
-        initial_nonce
-    );
+    println!("✓ Step 3: Alice's account loaded, nonce = {initial_nonce}");
 
     // Step 4: Simulate transaction (increment nonce)
     let new_nonce = initial_nonce + 1;
     parallel_state.set_nonce(&alice_pubkey, new_nonce);
-    println!("✓ Step 4: Nonce incremented to {}", new_nonce);
+    println!("✓ Step 4: Nonce incremented to {new_nonce}");
 
     // Step 5: Verify nonce is tracked as modified
     let modified_nonces = parallel_state.get_modified_nonces();
@@ -135,7 +132,7 @@ async fn test_nonce_increments_correctly() {
         modified_nonces[0].1, new_nonce,
         "Modified nonce value should be 1"
     );
-    println!("✓ Step 5: Nonce tracked as modified: {:?}", modified_nonces);
+    println!("✓ Step 5: Nonce tracked as modified: {modified_nonces:?}");
 
     // Step 6: Commit state to storage
     {
@@ -229,15 +226,12 @@ async fn test_staged_nonces_not_committed_until_success() {
 
     let initial_nonce = parallel_state.get_nonce(&bob_pubkey);
     assert_eq!(initial_nonce, 5, "Initial nonce should be 5");
-    println!("✓ Step 3: Bob's account loaded, nonce = {}", initial_nonce);
+    println!("✓ Step 3: Bob's account loaded, nonce = {initial_nonce}");
 
     // Increment nonce (staged in memory)
     let staged_nonce = initial_nonce + 1;
     parallel_state.set_nonce(&bob_pubkey, staged_nonce);
-    println!(
-        "✓ Step 4: Nonce staged to {} (not committed yet)",
-        staged_nonce
-    );
+    println!("✓ Step 4: Nonce staged to {staged_nonce} (not committed yet)");
 
     // Step 5: Verify storage still shows original nonce
     {
@@ -264,7 +258,7 @@ async fn test_staged_nonces_not_committed_until_success() {
         memory_nonce, staged_nonce,
         "Memory should show staged nonce"
     );
-    println!("✓ Step 6: Memory nonce = {} (staged)", memory_nonce);
+    println!("✓ Step 6: Memory nonce = {memory_nonce} (staged)");
 
     // Step 7: Commit state
     {
@@ -358,18 +352,12 @@ async fn test_nonce_rollback_on_failure() {
 
     let initial_nonce = parallel_state_1.get_nonce(&charlie_pubkey);
     assert_eq!(initial_nonce, 10, "Initial nonce should be 10");
-    println!(
-        "✓ Step 3: Charlie's account loaded, nonce = {}",
-        initial_nonce
-    );
+    println!("✓ Step 3: Charlie's account loaded, nonce = {initial_nonce}");
 
     // Increment nonce (simulate transaction execution)
     let failed_nonce = initial_nonce + 1;
     parallel_state_1.set_nonce(&charlie_pubkey, failed_nonce);
-    println!(
-        "✓ Step 4: Nonce incremented to {} (simulating transaction)",
-        failed_nonce
-    );
+    println!("✓ Step 4: Nonce incremented to {failed_nonce} (simulating transaction)");
 
     // Step 5: DO NOT COMMIT (simulate transaction failure)
     println!("✓ Step 5: Transaction FAILED - state NOT committed (rollback)");
@@ -422,10 +410,7 @@ async fn test_nonce_rollback_on_failure() {
         final_nonce, 10,
         "Nonce should be original value after rollback"
     );
-    println!(
-        "✓ Step 8: Charlie's nonce = {} (rollback successful)",
-        final_nonce
-    );
+    println!("✓ Step 8: Charlie's nonce = {final_nonce} (rollback successful)");
 
     println!("✓ Test passed: Nonce rollback on transaction failure works correctly\n");
 }
@@ -645,7 +630,7 @@ async fn test_nonce_ordering_preserved() {
 
     let initial_nonce = parallel_state.get_nonce(&dave_pubkey);
     assert_eq!(initial_nonce, 0, "Initial nonce should be 0");
-    println!("✓ Step 3: Dave's account loaded, nonce = {}", initial_nonce);
+    println!("✓ Step 3: Dave's account loaded, nonce = {initial_nonce}");
 
     // Step 4: Perform 5 sequential nonce increments
     println!("✓ Step 4: Performing 5 sequential nonce increments...");
@@ -660,13 +645,13 @@ async fn test_nonce_ordering_preserved() {
             next_nonce, *expected_nonce,
             "Nonce should progress sequentially"
         );
-        println!("  - Nonce: {} → {} ✓", current_nonce, next_nonce);
+        println!("  - Nonce: {current_nonce} → {next_nonce} ✓");
     }
 
     // Step 5: Verify final nonce
     let final_nonce_memory = parallel_state.get_nonce(&dave_pubkey);
     assert_eq!(final_nonce_memory, 5, "Final nonce in memory should be 5");
-    println!("✓ Step 5: Final nonce in memory = {}", final_nonce_memory);
+    println!("✓ Step 5: Final nonce in memory = {final_nonce_memory}");
 
     // Step 6: Commit state
     {

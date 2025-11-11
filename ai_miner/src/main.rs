@@ -44,18 +44,11 @@ async fn get_next_nonce(
     // Try to get the current nonce from daemon
     match daemon_client.get_nonce(&address_str).await {
         Ok(nonce) => {
-            log::debug!(
-                "Retrieved nonce {} from daemon for address {}",
-                nonce,
-                address
-            );
+            log::debug!("Retrieved nonce {nonce} from daemon for address {address}");
             Ok(nonce + 1) // Next nonce is current + 1
         }
         Err(e) => {
-            log::warn!(
-                "Failed to get nonce from daemon: {}. Using fallback method.",
-                e
-            );
+            log::warn!("Failed to get nonce from daemon: {e}. Using fallback method.");
 
             // Fallback to timestamp + random for development
             let timestamp = std::time::SystemTime::now()
@@ -66,7 +59,7 @@ async fn get_next_nonce(
             let random_component = rand::random::<u16>() as u64;
             let nonce = timestamp + random_component;
 
-            log::debug!("Generated fallback nonce {} for address {}", nonce, address);
+            log::debug!("Generated fallback nonce {nonce} for address {address}");
             Ok(nonce)
         }
     }
@@ -188,24 +181,21 @@ async fn main() -> Result<()> {
     if let Some(path) = cli_config.config_file.as_ref() {
         if cli_config.generate_config_template {
             if Path::new(path).exists() {
-                eprintln!("⚠️  Config file already exists at {}", path);
+                eprintln!("⚠️  Config file already exists at {path}");
                 eprintln!("Use a different path or remove the existing file");
                 return Ok(());
             }
 
             ValidatedConfig::generate_template(path)?;
-            println!("📝 Configuration template generated at {}", path);
-            println!(
-                "💡 Edit the file and run the application with --config-file {}",
-                path
-            );
+            println!("📝 Configuration template generated at {path}");
+            println!("💡 Edit the file and run the application with --config-file {path}");
             return Ok(());
         }
     }
 
     // Load and validate configuration
     let config = if let Some(config_path) = &cli_config.config_file {
-        println!("📖 Loading configuration from: {}", config_path);
+        println!("📖 Loading configuration from: {config_path}");
         ValidatedConfig::from_file(
             config_path,
             cli_config.strict_validation,
@@ -228,20 +218,20 @@ async fn main() -> Result<()> {
     };
 
     // Initialize logging
-    let prompt = Prompt::new(
-        config.log_level,
-        &config.logs_path,
-        &config.filename_log,
-        config.disable_file_logging,
-        false, // disable_file_log_date_based
-        config.disable_log_color,
-        false, // auto_compress_logs
-        !config.disable_interactive_mode,
-        vec![],           // logs_modules
-        config.log_level, // file_log_level
-        true,             // show_ascii
-        default_logs_datetime_format(),
-    )?;
+    let prompt = Prompt::new(tos_common::prompt::PromptConfig {
+        level: config.log_level,
+        dir_path: &config.logs_path,
+        filename_log: &config.filename_log,
+        disable_file_logging: config.disable_file_logging,
+        disable_file_log_date_based: false,
+        disable_colors: config.disable_log_color,
+        enable_auto_compress_logs: false,
+        interactive: !config.disable_interactive_mode,
+        module_logs: vec![],
+        file_level: config.log_level,
+        show_ascii: true,
+        logs_datetime_format: default_logs_datetime_format(),
+    })?;
 
     // Remove init call since it returns ()
 
@@ -254,7 +244,7 @@ async fn main() -> Result<()> {
 
     if let Some(address) = &config.miner_address {
         if log::log_enabled!(log::Level::Info) {
-            info!("Miner address: {}", address);
+            info!("Miner address: {address}");
         }
     } else {
         warn!("No miner address specified. Some operations will require an address.");
@@ -284,10 +274,7 @@ async fn main() -> Result<()> {
     info!("Testing connection to daemon...");
     if let Err(e) = daemon_client.test_connection().await {
         if log::log_enabled!(log::Level::Warn) {
-            warn!(
-                "Failed to connect to daemon: {}. AI mining commands may not work properly.",
-                e
-            );
+            warn!("Failed to connect to daemon: {e}. AI mining commands may not work properly.");
         }
     }
 
@@ -592,8 +579,7 @@ async fn register_miner(
         .map_err(|_| CommandError::InvalidArgument("Invalid address format".to_string()))?;
 
     manager.message(format!(
-        "Registering miner {} with fee {} nanoTOS",
-        address, fee_amount
+        "Registering miner {address} with fee {fee_amount} nanoTOS"
     ));
 
     // Get storage and transaction builder
@@ -604,7 +590,7 @@ async fn register_miner(
     let daemon_client: &Arc<DaemonClient> = context.get()?;
     let nonce = get_next_nonce(daemon_client, &address)
         .await
-        .map_err(|e| CommandError::BatchModeError(format!("Failed to generate nonce: {}", e)))?;
+        .map_err(|e| CommandError::BatchModeError(format!("Failed to generate nonce: {e}")))?;
 
     // Create transaction metadata
     let metadata = tx_builder
@@ -617,7 +603,7 @@ async fn register_miner(
         .map_err(|e| CommandError::BatchModeError(e.to_string()))?;
 
     manager.message("Registration transaction created:");
-    manager.message(format!("  - Address: {}", address));
+    manager.message(format!("  - Address: {address}"));
     manager.message(format!(
         "  - Registration Fee: {} nanoTOS ({} TOS)",
         fee_amount,
@@ -637,19 +623,17 @@ async fn register_miner(
     {
         let mut storage_guard = storage
             .lock()
-            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {e}")))?;
         storage_guard
             .register_miner(&address.to_public_key(), fee_amount)
             .await
-            .map_err(|e| CommandError::BatchModeError(format!("Storage error: {}", e)))?;
+            .map_err(|e| CommandError::BatchModeError(format!("Storage error: {e}")))?;
 
         // Add transaction record
         storage_guard
             .add_transaction(&metadata, None)
             .await
-            .map_err(|e| {
-                CommandError::BatchModeError(format!("Transaction storage error: {}", e))
-            })?;
+            .map_err(|e| CommandError::BatchModeError(format!("Transaction storage error: {e}")))?;
     }
 
     manager.message("✅ Miner registration stored successfully");
@@ -723,24 +707,23 @@ async fn publish_task(
     let (min_reward, max_reward) = difficulty.reward_range();
     if reward_amount < min_reward || reward_amount > max_reward {
         return Err(CommandError::InvalidArgument(format!(
-            "Reward {} is outside valid range [{}, {}] for difficulty {:?}",
-            reward_amount, min_reward, max_reward, difficulty
+            "Reward {reward_amount} is outside valid range [{min_reward}, {max_reward}] for difficulty {difficulty:?}"
         )));
     }
 
     // Generate task ID
     let task_id = Hash::new(rand::random::<[u8; 32]>());
 
-    manager.message(format!("Publishing AI mining task:"));
+    manager.message("Publishing AI mining task:".to_string());
     manager.message(format!("  - Task ID: {}", hex::encode(task_id.as_bytes())));
     manager.message(format!(
         "  - Reward: {} nanoTOS ({} TOS)",
         reward_amount,
         reward_amount as f64 / 1_000_000_000.0
     ));
-    manager.message(format!("  - Difficulty: {:?}", difficulty));
-    manager.message(format!("  - Deadline: {}", deadline));
-    manager.message(format!("  - Description: {}", description));
+    manager.message(format!("  - Difficulty: {difficulty:?}"));
+    manager.message(format!("  - Deadline: {deadline}"));
+    manager.message(format!("  - Description: {description}"));
 
     TOTAL_TASKS.fetch_add(1, Ordering::SeqCst);
     ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst);
@@ -795,8 +778,8 @@ async fn submit_answer(
     hash_array.copy_from_slice(hash_bytes.as_bytes());
     let answer_hash = Hash::new(hash_array);
 
-    manager.message(format!("Submitting answer to task:"));
-    manager.message(format!("  - Task ID: {}", task_id_str));
+    manager.message("Submitting answer to task:".to_string());
+    manager.message(format!("  - Task ID: {task_id_str}"));
     manager.message(format!(
         "  - Answer hash: {}",
         hex::encode(answer_hash.as_bytes())
@@ -845,10 +828,10 @@ async fn validate_answer(
         ));
     }
 
-    manager.message(format!("Validating answer:"));
-    manager.message(format!("  - Task ID: {}", task_id_str));
-    manager.message(format!("  - Answer ID: {}", answer_id_str));
-    manager.message(format!("  - Score: {}/100", score));
+    manager.message("Validating answer:".to_string());
+    manager.message(format!("  - Task ID: {task_id_str}"));
+    manager.message(format!("  - Answer ID: {answer_id_str}"));
+    manager.message(format!("  - Score: {score}/100"));
 
     Ok(())
 }
@@ -886,11 +869,10 @@ async fn list_tasks(manager: &CommandManager, _args: ArgumentManager) -> Result<
 
     for (task_id, difficulty, reward, description, remaining) in sample_tasks {
         manager.message(format!(
-            "  Task ID: {} | Difficulty: {} | Reward: {} TOS",
-            task_id, difficulty, reward
+            "  Task ID: {task_id} | Difficulty: {difficulty} | Reward: {reward} TOS"
         ));
-        manager.message(format!("    Description: {}", description));
-        manager.message(format!("    Time remaining: {}", remaining));
+        manager.message(format!("    Description: {description}"));
+        manager.message(format!("    Time remaining: {remaining}"));
         manager.message("");
     }
 
@@ -946,7 +928,7 @@ async fn show_reputation(
         }
     };
 
-    manager.message(format!("Miner Reputation for {}:", address_str));
+    manager.message(format!("Miner Reputation for {address_str}:"));
     manager.message("(Demo mode - showing sample data)");
     manager.message("");
     manager.message("  Current Reputation: 650/1000");
@@ -982,19 +964,19 @@ async fn daemon_status(
                 manager.message("📊 Health Check Results:");
 
                 if let Some(version) = &health.version {
-                    manager.message(format!("  - Version: {}", version));
+                    manager.message(format!("  - Version: {version}"));
                 }
 
                 manager.message(format!("  - Response Time: {:?}", health.response_time));
 
                 if let Some(peer_count) = health.peer_count {
-                    manager.message(format!("  - Connected Peers: {}", peer_count));
+                    manager.message(format!("  - Connected Peers: {peer_count}"));
                 } else {
                     manager.message("  - Connected Peers: Unable to retrieve");
                 }
 
                 if let Some(mempool_size) = health.mempool_size {
-                    manager.message(format!("  - Mempool Size: {} transactions", mempool_size));
+                    manager.message(format!("  - Mempool Size: {mempool_size} transactions"));
                 } else {
                     manager.message("  - Mempool Size: Unable to retrieve");
                 }
@@ -1004,13 +986,13 @@ async fn daemon_status(
                     Ok(info) => {
                         manager.message("⛓️  Blockchain Information:");
                         if let Some(height) = info.get("height").and_then(|h| h.as_u64()) {
-                            manager.message(format!("  - Current Height: {}", height));
+                            manager.message(format!("  - Current Height: {height}"));
                         }
                         if let Some(topoheight) = info.get("topoheight").and_then(|h| h.as_u64()) {
-                            manager.message(format!("  - Topo Height: {}", topoheight));
+                            manager.message(format!("  - Topo Height: {topoheight}"));
                         }
                         if let Some(network) = info.get("network").and_then(|n| n.as_str()) {
-                            manager.message(format!("  - Network: {}", network));
+                            manager.message(format!("  - Network: {network}"));
                         }
                     }
                     Err(_) => {
@@ -1040,17 +1022,17 @@ async fn daemon_status(
                     "🐌 Very Slow"
                 };
 
-                manager.message(format!("  - Performance: {}", performance));
+                manager.message(format!("  - Performance: {performance}"));
             } else {
                 manager.message("❌ Daemon health check failed");
                 if let Some(error) = &health.error_message {
-                    manager.message(format!("  - Error: {}", error));
+                    manager.message(format!("  - Error: {error}"));
                 }
                 manager.message(format!("  - Response Time: {:?}", health.response_time));
             }
         }
         Err(e) => {
-            manager.message(format!("❌ Failed to perform health check: {}", e));
+            manager.message(format!("❌ Failed to perform health check: {e}"));
             manager.message("🔧 Troubleshooting Tips:");
             manager.message("  1. Verify daemon is running");
             manager.message("  2. Check daemon address configuration");
@@ -1073,7 +1055,7 @@ async fn storage_stats(
     let (stats, miner_info) = {
         let storage_guard = storage
             .lock()
-            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {e}")))?;
         (
             storage_guard.get_stats(),
             storage_guard.get_miner_info().cloned(),
@@ -1134,7 +1116,7 @@ async fn show_stored_tasks(
     let tasks = {
         let storage_guard = storage
             .lock()
-            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {e}")))?;
         storage_guard.get_all_tasks().clone()
     };
 
@@ -1181,7 +1163,7 @@ async fn show_transaction_history(
     let transactions = {
         let storage_guard = storage
             .lock()
-            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {e}")))?;
         storage_guard
             .get_recent_transactions(20)
             .into_iter()
@@ -1262,11 +1244,11 @@ async fn clear_storage(
     {
         let mut storage_guard = storage
             .lock()
-            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {e}")))?;
         storage_guard
             .clear_all()
             .await
-            .map_err(|e| CommandError::BatchModeError(format!("Clear storage error: {}", e)))?;
+            .map_err(|e| CommandError::BatchModeError(format!("Clear storage error: {e}")))?;
     }
 
     manager.message("✅ All storage data cleared successfully.");
@@ -1318,7 +1300,7 @@ async fn test_task_publication_workflow(
 
     let nonce = get_next_nonce(daemon_client, publisher_address)
         .await
-        .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {}", e)))?;
+        .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {e}")))?;
 
     // Create transaction metadata
     let metadata = tx_builder
@@ -1339,7 +1321,7 @@ async fn test_task_publication_workflow(
         "  - Reward: {} TOS",
         reward_amount as f64 / 1_000_000_000.0
     ));
-    manager.message(format!("  - Difficulty: {:?}", difficulty));
+    manager.message(format!("  - Difficulty: {difficulty:?}"));
     manager.message(format!(
         "  - Estimated Fee: {} nanoTOS",
         metadata.estimated_fee
@@ -1378,7 +1360,7 @@ async fn test_answer_submission_workflow(
 
     let nonce = get_next_nonce(daemon_client, miner_address)
         .await
-        .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {}", e)))?;
+        .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {e}")))?;
 
     // Create transaction metadata
     let metadata = tx_builder
@@ -1439,7 +1421,7 @@ async fn test_validation_workflow(
 
     let nonce = get_next_nonce(daemon_client, validator_address)
         .await
-        .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {}", e)))?;
+        .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {e}")))?;
 
     // Create transaction metadata
     let metadata = tx_builder
@@ -1458,7 +1440,7 @@ async fn test_validation_workflow(
         "  - Answer ID: {}",
         hex::encode(answer_id.as_bytes())
     ));
-    manager.message(format!("  - Validation Score: {}/100", validation_score));
+    manager.message(format!("  - Validation Score: {validation_score}/100"));
     manager.message(format!(
         "  - Estimated Fee: {} nanoTOS",
         metadata.estimated_fee
@@ -1493,17 +1475,17 @@ async fn test_reward_cycle(
                 manager.message(format!("   Response time: {:?}", health.response_time));
 
                 if let Some(peer_count) = health.peer_count {
-                    manager.message(format!("   Peers: {}", peer_count));
+                    manager.message(format!("   Peers: {peer_count}"));
                 }
                 if let Some(mempool_size) = health.mempool_size {
-                    manager.message(format!("   Mempool: {} transactions", mempool_size));
+                    manager.message(format!("   Mempool: {mempool_size} transactions"));
                 }
             } else {
                 manager.message("⚠️  Daemon unhealthy, using mock mode");
             }
         }
         Err(e) => {
-            manager.message(format!("⚠️  Daemon connection failed: {}", e));
+            manager.message(format!("⚠️  Daemon connection failed: {e}"));
             manager.message("   This is expected when no daemon is running");
             manager.message("   In production, ensure TOS daemon is running and accessible");
         }
@@ -1517,9 +1499,9 @@ async fn test_reward_cycle(
 
     manager.message("");
     manager.message("📊 AI Mining Cycle Metrics:");
-    manager.message(format!("  Total Tasks: {}", total_tasks));
-    manager.message(format!("  Active Tasks: {}", active_tasks));
-    manager.message(format!("  Completed Tasks: {}", completed_tasks));
+    manager.message(format!("  Total Tasks: {total_tasks}"));
+    manager.message(format!("  Active Tasks: {active_tasks}"));
+    manager.message(format!("  Completed Tasks: {completed_tasks}"));
     manager.message(format!(
         "  Success Rate: {:.1}%",
         (completed_tasks as f64 / total_tasks as f64) * 100.0

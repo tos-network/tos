@@ -162,8 +162,8 @@ async fn test_cpi_e2e_basic_invocation() {
 
     // Load existing CPI test contracts
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let caller_path = format!("{}/tests/fixtures/cpi_caller.so", manifest_dir);
-    let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
+    let caller_path = format!("{manifest_dir}/tests/fixtures/cpi_caller.so");
+    let callee_path = format!("{manifest_dir}/tests/fixtures/cpi_callee.so");
 
     let caller_bytecode =
         std::fs::read(&caller_path).expect("Failed to load CPI caller contract from fixtures");
@@ -240,7 +240,7 @@ async fn test_cpi_e2e_basic_invocation() {
                         return_data[6],
                         return_data[7],
                     ]);
-                    println!("  Counter value from CPI callee: {}", counter_value);
+                    println!("  Counter value from CPI callee: {counter_value}");
                     assert!(counter_value > 0, "Callee should have incremented counter");
                 }
             }
@@ -253,7 +253,7 @@ async fn test_cpi_e2e_basic_invocation() {
             println!("   - Gas metering across CPI boundary");
         }
         Err(e) => {
-            println!("❌ CPI execution failed: {}", e);
+            println!("❌ CPI execution failed: {e}");
             println!("\nNote: This failure indicates CPI is not yet fully functional.");
             println!(
                 "Expected behavior: CPI calls should succeed when contract loader is integrated."
@@ -270,7 +270,7 @@ async fn test_cpi_e2e_storage_operations() {
     println!("\n=== CPI E2E Test: Storage Operations ===\n");
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
+    let callee_path = format!("{manifest_dir}/tests/fixtures/cpi_callee.so");
     let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee contract");
 
     let callee_hash = Hash::zero();
@@ -286,13 +286,10 @@ async fn test_cpi_e2e_storage_operations() {
 
     // Execute callee multiple times to test storage operations
     let num_executions = 3;
-    println!(
-        "\nExecuting callee {} times to test storage...\n",
-        num_executions
-    );
+    println!("\nExecuting callee {num_executions} times to test storage...\n");
 
     for i in 1..=num_executions {
-        println!("Execution #{}", i);
+        println!("Execution #{i}");
 
         let result = executor
             .execute(
@@ -325,7 +322,7 @@ async fn test_cpi_e2e_storage_operations() {
                     return_data[6],
                     return_data[7],
                 ]);
-                println!("  Counter value: {}", counter);
+                println!("  Counter value: {counter}");
                 // Note: Storage doesn't persist across executions in this test
                 // because each execution uses a fresh contract state
                 // This is expected behavior for isolated contract testing
@@ -340,7 +337,7 @@ async fn test_cpi_e2e_storage_operations() {
     // The MockProvider doesn't persist state between executions,
     // but the contract successfully reads/writes during each execution
     println!("\nStorage Test Summary:");
-    println!("  {} successful executions", num_executions);
+    println!("  {num_executions} successful executions");
     println!("  Each execution performed storage read and write operations");
     println!("  Return data verified successful storage access");
 
@@ -352,7 +349,7 @@ async fn test_cpi_e2e_compute_budget_tracking() {
     println!("\n=== CPI E2E Test: Compute Budget Tracking ===\n");
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
+    let callee_path = format!("{manifest_dir}/tests/fixtures/cpi_callee.so");
     let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee contract");
 
     let callee_hash = Hash::zero();
@@ -370,7 +367,7 @@ async fn test_cpi_e2e_compute_budget_tracking() {
     println!("Testing compute budget tracking with different limits:\n");
 
     for (budget, label) in budgets {
-        println!("{} budget ({} compute units):", label, budget);
+        println!("{label} budget ({budget} compute units):");
 
         let result = executor
             .execute(
@@ -402,9 +399,9 @@ async fn test_cpi_e2e_compute_budget_tracking() {
                 assert!(exec_result.gas_used > 0, "Should use some compute units");
             }
             Err(e) => {
-                println!("  ✗ Failed: {}", e);
+                println!("  ✗ Failed: {e}");
                 if budget >= 200_000 {
-                    panic!("Should succeed with reasonable budget of {}", budget);
+                    panic!("Should succeed with reasonable budget of {budget}");
                 }
             }
         }
@@ -419,8 +416,8 @@ async fn test_cpi_e2e_performance_metrics() {
     println!("\n=== CPI E2E Test: Performance Metrics ===\n");
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let caller_path = format!("{}/tests/fixtures/cpi_caller.so", manifest_dir);
-    let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
+    let caller_path = format!("{manifest_dir}/tests/fixtures/cpi_caller.so");
+    let callee_path = format!("{manifest_dir}/tests/fixtures/cpi_callee.so");
 
     let caller_bytecode = std::fs::read(&caller_path).expect("Failed to load CPI caller");
     let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee");
@@ -458,7 +455,7 @@ async fn test_cpi_e2e_performance_metrics() {
     match result {
         Ok(exec_result) => {
             println!("Performance Metrics:");
-            println!("  Wall time: {:?}", duration);
+            println!("  Wall time: {duration:?}");
             println!("  Gas used: {}", exec_result.gas_used);
             println!(
                 "  Instructions/second: ~{}",
@@ -468,13 +465,13 @@ async fn test_cpi_e2e_performance_metrics() {
 
             // Calculate efficiency
             let gas_per_ms = exec_result.gas_used as f64 / duration.as_millis() as f64;
-            println!("  Gas per millisecond: {:.2}", gas_per_ms);
+            println!("  Gas per millisecond: {gas_per_ms:.2}");
 
             println!("\n✅ Performance metrics collected successfully!");
         }
         Err(e) => {
-            println!("❌ Performance test failed: {}", e);
-            println!("  Wall time: {:?}", duration);
+            println!("❌ Performance test failed: {e}");
+            println!("  Wall time: {duration:?}");
             println!("  Note: CPI execution failed, performance metrics unavailable");
         }
     }

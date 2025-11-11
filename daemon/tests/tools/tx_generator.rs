@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio;
 
 use tos_common::{
     config::TOS_ASSET,
@@ -217,7 +216,7 @@ impl RpcClient {
         params: serde_json::Value,
     ) -> Result<T> {
         if log::log_enabled!(log::Level::Debug) {
-            debug!("RPC Request: {} with params: {}", method, params);
+            debug!("RPC Request: {method} with params: {params}");
         }
 
         let request = RpcRequest {
@@ -299,7 +298,7 @@ struct TransactionGenerator {
 
 impl TransactionGenerator {
     fn new(is_mainnet: bool, num_senders: usize) -> Self {
-        info!("Generating {} sender keypairs...", num_senders);
+        info!("Generating {num_senders} sender keypairs...");
         let sender_keypairs: Vec<KeyPair> = (0..num_senders).map(|_| KeyPair::new()).collect();
 
         let receiver_keypair = KeyPair::new();
@@ -346,10 +345,7 @@ impl TransactionGenerator {
         fee: u64,
         different_senders: bool,
     ) -> Result<Vec<Transaction>> {
-        info!(
-            "Generating {} transactions (different_senders: {})...",
-            count, different_senders
-        );
+        info!("Generating {count} transactions (different_senders: {different_senders})...");
 
         let mut transactions = Vec::with_capacity(count);
         let initial_balance = 1_000_000_000_000u64; // 1M TOS = 1e15 nanoTOS
@@ -400,7 +396,7 @@ impl TransactionGenerator {
             )
             .with_fee_type(FeeType::TOS)
             .build(&mut state, sender_keypair)
-            .context(format!("Failed to build transaction {}", i))?;
+            .context(format!("Failed to build transaction {i}"))?;
 
             if log::log_enabled!(log::Level::Trace) {
                 debug!("Generated tx {}: hash={}, nonce={}", i, tx.hash(), nonce);
@@ -409,7 +405,7 @@ impl TransactionGenerator {
             transactions.push(tx);
         }
 
-        info!("Successfully generated {} transactions", count);
+        info!("Successfully generated {count} transactions");
         Ok(transactions)
     }
 }
@@ -543,8 +539,7 @@ impl PerformanceTracker {
             let min_batch = self.batch_durations.iter().min().unwrap();
             let max_batch = self.batch_durations.iter().max().unwrap();
             println!(
-                "Batch durations:              min={:?}, avg={:?}, max={:?}",
-                min_batch, avg_batch, max_batch
+                "Batch durations:              min={min_batch:?}, avg={avg_batch:?}, max={max_batch:?}"
             );
         }
         println!("{}", "=".repeat(70));
@@ -642,7 +637,7 @@ async fn main() -> Result<()> {
     let mut perf_tracker = PerformanceTracker::new();
 
     // Submit transactions in batches
-    let num_batches = (args.count + args.batch_size - 1) / args.batch_size;
+    let num_batches = args.count.div_ceil(args.batch_size);
     info!(
         "Submitting {} transactions in {} batches...",
         args.count, num_batches
@@ -657,7 +652,7 @@ async fn main() -> Result<()> {
                 perf_tracker.record_batch(batch.len(), batch.len(), duration);
             }
             Err(e) => {
-                error!("Batch submission failed: {}", e);
+                error!("Batch submission failed: {e}");
                 perf_tracker.record_batch(batch.len(), 0, Duration::ZERO);
             }
         }

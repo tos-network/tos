@@ -132,7 +132,7 @@ fn test_log_collection_hello_world() {
 
             // Print all log messages
             for (i, msg) in exec_result.log_messages.iter().enumerate() {
-                println!("    [{}] {}", i, msg);
+                println!("    [{i}] {msg}");
             }
 
             // Verify log messages were collected
@@ -157,8 +157,8 @@ fn test_log_collection_hello_world() {
             println!("\n✅ Log collection verified!");
         }
         Err(e) => {
-            println!("\n❌ Execution failed: {:?}", e);
-            panic!("Log collection test failed: {}", e);
+            println!("\n❌ Execution failed: {e:?}");
+            panic!("Log collection test failed: {e}");
         }
     }
 }
@@ -184,10 +184,10 @@ fn test_log_collection_field_exists() {
             let _log_count = exec_result.log_messages.len();
 
             println!("✅ log_messages field exists and is accessible");
-            println!("   Collected {} log messages", _log_count);
+            println!("   Collected {_log_count} log messages");
         }
         Err(e) => {
-            panic!("Execution failed: {}", e);
+            panic!("Execution failed: {e}");
         }
     }
 }
@@ -209,7 +209,7 @@ fn test_log_messages_format() {
             println!("Collected {} log messages:", exec_result.log_messages.len());
 
             for (i, msg) in exec_result.log_messages.iter().enumerate() {
-                println!("  [{}] {}", i, msg);
+                println!("  [{i}] {msg}");
 
                 // All log messages should follow SVM-compatible format
                 // "Program log: ..." or "Program data: ..." or "Program consumption: ..."
@@ -219,15 +219,14 @@ fn test_log_messages_format() {
 
                 assert!(
                     is_valid_format,
-                    "Log message should follow SVM format. Got: {}",
-                    msg
+                    "Log message should follow SVM format. Got: {msg}"
                 );
             }
 
             println!("✅ All log messages follow SVM-compatible format");
         }
         Err(e) => {
-            panic!("Execution failed: {}", e);
+            panic!("Execution failed: {e}");
         }
     }
 }
@@ -262,7 +261,7 @@ fn test_empty_logs_for_non_logging_contract() {
             // and is a valid Vec<String>
 
             for (i, msg) in exec_result.log_messages.iter().enumerate() {
-                println!("  [{}] {}", i, msg);
+                println!("  [{i}] {msg}");
             }
 
             println!("✅ log_messages field works correctly for all contracts");
@@ -270,7 +269,7 @@ fn test_empty_logs_for_non_logging_contract() {
         Err(e) => {
             // Counter contract might not execute successfully in this test environment
             // That's okay, we're mainly testing the structure
-            println!("⚠️  Execution failed (expected for some contracts): {}", e);
+            println!("⚠️  Execution failed (expected for some contracts): {e}");
         }
     }
 }

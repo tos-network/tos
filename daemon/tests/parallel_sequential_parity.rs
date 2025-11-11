@@ -36,7 +36,7 @@ use tos_testing_integration::create_test_storage_with_funded_accounts;
 #[tokio::test]
 async fn test_parallel_state_creation() {
     let test_name = "parallel_state_creation";
-    println!("\n=== {} START ===", test_name);
+    println!("\n=== {test_name} START ===");
 
     // Create storage with funded accounts
     let (storage, _keypairs) = create_test_storage_with_funded_accounts(2, 100 * COIN_VALUE)
@@ -51,7 +51,7 @@ async fn test_parallel_state_creation() {
 
     // Note: We can't create a real block without triggering the deadlock,
     // so we're testing the state infrastructure only
-    println!("[{}] Storage created with 2 funded accounts", test_name);
+    println!("[{test_name}] Storage created with 2 funded accounts");
     println!("[{}] Each account has balance: {} TOS", test_name, 100);
 
     // Verify storage is accessible
@@ -59,11 +59,8 @@ async fn test_parallel_state_creation() {
     let is_mainnet = (*guard).is_mainnet();
     drop(guard);
 
-    println!(
-        "[{}] Storage is accessible, is_mainnet: {}",
-        test_name, is_mainnet
-    );
-    println!("=== {} PASS ===\n", test_name);
+    println!("[{test_name}] Storage is accessible, is_mainnet: {is_mainnet}");
+    println!("=== {test_name} PASS ===\n");
 }
 
 /// Test 2: Verify that multiple ParallelChainState instances can coexist
@@ -71,7 +68,7 @@ async fn test_parallel_state_creation() {
 #[tokio::test]
 async fn test_multiple_parallel_states() {
     let test_name = "multiple_parallel_states";
-    println!("\n=== {} START ===", test_name);
+    println!("\n=== {test_name} START ===");
 
     // Create two separate storages
     let (storage1, _keypairs1) = create_test_storage_with_funded_accounts(2, 100 * COIN_VALUE)
@@ -82,7 +79,7 @@ async fn test_multiple_parallel_states() {
         .await
         .expect("Failed to create storage 2");
 
-    println!("[{}] Created two independent storage instances", test_name);
+    println!("[{test_name}] Created two independent storage instances");
 
     // Verify both storages are independent
     let guard1 = storage1.read().await;
@@ -99,11 +96,8 @@ async fn test_multiple_parallel_states() {
         "Both storages should have same network type"
     );
 
-    println!(
-        "[{}] Both storages are accessible and independent",
-        test_name
-    );
-    println!("=== {} PASS ===\n", test_name);
+    println!("[{test_name}] Both storages are accessible and independent");
+    println!("=== {test_name} PASS ===\n");
 }
 
 /// Test 3: Verify storage reads work correctly
@@ -111,26 +105,26 @@ async fn test_multiple_parallel_states() {
 #[tokio::test]
 async fn test_storage_read_operations() {
     let test_name = "storage_read_operations";
-    println!("\n=== {} START ===", test_name);
+    println!("\n=== {test_name} START ===");
 
     let (storage, keypairs) = create_test_storage_with_funded_accounts(3, 100 * COIN_VALUE)
         .await
         .expect("Failed to create storage");
 
-    println!("[{}] Created storage with 3 funded accounts", test_name);
+    println!("[{test_name}] Created storage with 3 funded accounts");
 
     // Read balances for all accounts
     let guard = storage.read().await;
 
     for (i, keypair) in keypairs.iter().enumerate() {
         let account_key = keypair.get_public_key().compress();
-        println!("[{}] Account {}: {:?}", test_name, i, account_key);
+        println!("[{test_name}] Account {i}: {account_key:?}");
     }
 
     drop(guard);
 
-    println!("[{}] Successfully accessed all accounts", test_name);
-    println!("=== {} PASS ===\n", test_name);
+    println!("[{test_name}] Successfully accessed all accounts");
+    println!("=== {test_name} PASS ===\n");
 }
 
 /// Test 4: Document the full transaction execution limitation
@@ -138,30 +132,19 @@ async fn test_storage_read_operations() {
 #[tokio::test]
 async fn test_full_execution_limitation_documented() {
     let test_name = "full_execution_limitation";
-    println!("\n=== {} START ===", test_name);
+    println!("\n=== {test_name} START ===");
 
+    println!("[{test_name}] LIMITATION: Full transaction execution in tests causes deadlocks");
+    println!("[{test_name}] REASON: RocksDB + async runtime + test environment interaction");
     println!(
-        "[{}] LIMITATION: Full transaction execution in tests causes deadlocks",
-        test_name
+        "[{test_name}] EVIDENCE: Existing ignored tests in parallel_execution_parity_tests_rocksdb.rs"
     );
+    println!("[{test_name}] WORKAROUND: Simplified tests that verify storage-level operations");
     println!(
-        "[{}] REASON: RocksDB + async runtime + test environment interaction",
-        test_name
-    );
-    println!(
-        "[{}] EVIDENCE: Existing ignored tests in parallel_execution_parity_tests_rocksdb.rs",
-        test_name
-    );
-    println!(
-        "[{}] WORKAROUND: Simplified tests that verify storage-level operations",
-        test_name
-    );
-    println!(
-        "[{}] PRODUCTION: Parallel execution works correctly in daemon (verified via code review)",
-        test_name
+        "[{test_name}] PRODUCTION: Parallel execution works correctly in daemon (verified via code review)"
     );
 
-    println!("=== {} PASS (Documentation) ===\n", test_name);
+    println!("=== {test_name} PASS (Documentation) ===\n");
 }
 
 /// Test 5: Verify the test environment setup is working
@@ -169,11 +152,11 @@ async fn test_full_execution_limitation_documented() {
 #[tokio::test]
 async fn test_environment_setup() {
     let test_name = "environment_setup";
-    println!("\n=== {} START ===", test_name);
+    println!("\n=== {test_name} START ===");
 
     // Create environment
     let _environment = Environment::new();
-    println!("[{}] Created VM environment", test_name);
+    println!("[{test_name}] Created VM environment");
 
     // Create storage
     let (storage, _keypairs) = create_test_storage_with_funded_accounts(1, 50 * COIN_VALUE)
@@ -190,10 +173,10 @@ async fn test_environment_setup() {
     let network = (*guard).get_network();
     drop(guard);
 
-    println!("[{}] Network: {:?}", test_name, network);
-    println!("[{}] Environment and storage setup verified", test_name);
+    println!("[{test_name}] Network: {network:?}");
+    println!("[{test_name}] Environment and storage setup verified");
 
-    println!("=== {} PASS ===\n", test_name);
+    println!("=== {test_name} PASS ===\n");
 }
 
 /// Summary test that explains the overall testing strategy
@@ -238,16 +221,10 @@ async fn test_deterministic_merge_order() {
     use tos_common::crypto::Hash;
 
     let test_name = "deterministic_merge_order";
-    println!("\n=== {} START ===", test_name);
+    println!("\n=== {test_name} START ===");
 
-    println!(
-        "[{}] SECURITY FIX (S1): Testing deterministic merge order",
-        test_name
-    );
-    println!(
-        "[{}] OBJECTIVE: Verify storage writes occur in consistent order",
-        test_name
-    );
+    println!("[{test_name}] SECURITY FIX (S1): Testing deterministic merge order");
+    println!("[{test_name}] OBJECTIVE: Verify storage writes occur in consistent order");
 
     // Test data: Create byte arrays representing accounts and assets
     let account_bytes: Vec<[u8; 32]> = (0..5)
@@ -279,17 +256,17 @@ async fn test_deterministic_merge_order() {
     test_accounts.reverse();
 
     // Sort using the same logic as merge_parallel_results()
-    test_accounts.sort_by(|a, b| a.cmp(b));
+    test_accounts.sort();
 
     // Verify sorting produces consistent order
     let mut test_accounts2 = account_bytes.clone();
-    test_accounts2.sort_by(|a, b| a.cmp(b));
+    test_accounts2.sort();
     assert_eq!(
         test_accounts, test_accounts2,
         "Multiple sorts should produce identical order"
     );
 
-    println!("[{}] ✅ Account byte sorting is deterministic", test_name);
+    println!("[{test_name}] ✅ Account byte sorting is deterministic");
 
     // Test 2: Verify (bytes, Hash) tuples are sorted correctly
     let mut balance_entries: Vec<_> = account_bytes
@@ -333,7 +310,7 @@ async fn test_deterministic_merge_order() {
         "Multiple sorts should produce identical order"
     );
 
-    println!("[{}] ✅ Balance entry sorting is deterministic", test_name);
+    println!("[{test_name}] ✅ Balance entry sorting is deterministic");
 
     // Test 3: Verify the sort order is stable across multiple iterations
     for iteration in 1..=100 {
@@ -344,13 +321,9 @@ async fn test_deterministic_merge_order() {
 
         // Apply random shuffling based on iteration
         use std::collections::hash_map::RandomState;
-        use std::hash::{BuildHasher, Hash as StdHash, Hasher};
+        use std::hash::BuildHasher;
         let hasher = RandomState::new();
-        test_entries.sort_by_key(|_| {
-            let mut h = hasher.build_hasher();
-            iteration.hash(&mut h);
-            h.finish()
-        });
+        test_entries.sort_by_key(|_| hasher.hash_one(iteration));
 
         // Now sort using our deterministic logic
         test_entries.sort_by(|a, b| match a.0.cmp(&b.0) {
@@ -361,31 +334,15 @@ async fn test_deterministic_merge_order() {
         // Verify matches expected order
         assert_eq!(
             test_entries, balance_entries,
-            "Iteration {} produced different order",
-            iteration
+            "Iteration {iteration} produced different order"
         );
     }
 
-    println!(
-        "[{}] ✅ Verified deterministic sort order across 100 iterations",
-        test_name
-    );
-    println!(
-        "[{}] ✅ Account nonces will be written in consistent order",
-        test_name
-    );
-    println!(
-        "[{}] ✅ Account balances will be written in consistent order",
-        test_name
-    );
-    println!(
-        "[{}] ✅ Multisig configs will be written in consistent order",
-        test_name
-    );
-    println!(
-        "[{}] RESULT: Merge order is deterministic and consensus-safe",
-        test_name
-    );
+    println!("[{test_name}] ✅ Verified deterministic sort order across 100 iterations");
+    println!("[{test_name}] ✅ Account nonces will be written in consistent order");
+    println!("[{test_name}] ✅ Account balances will be written in consistent order");
+    println!("[{test_name}] ✅ Multisig configs will be written in consistent order");
+    println!("[{test_name}] RESULT: Merge order is deterministic and consensus-safe");
 
-    println!("=== {} PASS ===\n", test_name);
+    println!("=== {test_name} PASS ===\n");
 }

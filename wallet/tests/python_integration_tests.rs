@@ -9,7 +9,7 @@ mod tests {
     fn test_wallet_batch_mode_with_python() -> Result<()> {
         let script_path = Path::new("tests/run_all_tests.py");
         if !script_path.exists() {
-            println!("Python test runner not found at {:?}", script_path);
+            println!("Python test runner not found at {script_path:?}");
             println!("Skipping Python integration test");
             return Ok(());
         }
@@ -38,7 +38,7 @@ mod tests {
     fn test_display_address_command() -> Result<()> {
         let script_path = Path::new("tests/test_display_address.py");
         if !script_path.exists() {
-            println!("Display address test script not found at {:?}", script_path);
+            println!("Display address test script not found at {script_path:?}");
             println!("Skipping display address test");
             return Ok(());
         }
@@ -66,7 +66,7 @@ mod tests {
     fn test_list_commands() -> Result<()> {
         let script_path = Path::new("tests/test_list_commands.py");
         if !script_path.exists() {
-            println!("List commands test script not found at {:?}", script_path);
+            println!("List commands test script not found at {script_path:?}");
             println!("Skipping list commands test");
             return Ok(());
         }
@@ -94,10 +94,7 @@ mod tests {
     fn test_balance_commands() -> Result<()> {
         let script_path = Path::new("tests/test_balance_commands.py");
         if !script_path.exists() {
-            println!(
-                "Balance commands test script not found at {:?}",
-                script_path
-            );
+            println!("Balance commands test script not found at {script_path:?}");
             println!("Skipping balance commands test");
             return Ok(());
         }
@@ -125,7 +122,7 @@ mod tests {
     fn test_energy_commands() -> Result<()> {
         let script_path = Path::new("tests/test_energy_commands.py");
         if !script_path.exists() {
-            println!("Energy commands test script not found at {:?}", script_path);
+            println!("Energy commands test script not found at {script_path:?}");
             println!("Skipping energy commands test");
             return Ok(());
         }
@@ -153,10 +150,7 @@ mod tests {
     fn test_transaction_commands() -> Result<()> {
         let script_path = Path::new("tests/test_transaction_commands.py");
         if !script_path.exists() {
-            println!(
-                "Transaction commands test script not found at {:?}",
-                script_path
-            );
+            println!("Transaction commands test script not found at {script_path:?}");
             println!("Skipping transaction commands test");
             return Ok(());
         }
@@ -184,10 +178,7 @@ mod tests {
     fn test_utility_commands() -> Result<()> {
         let script_path = Path::new("tests/test_utility_commands.py");
         if !script_path.exists() {
-            println!(
-                "Utility commands test script not found at {:?}",
-                script_path
-            );
+            println!("Utility commands test script not found at {script_path:?}");
             println!("Skipping utility commands test");
             return Ok(());
         }

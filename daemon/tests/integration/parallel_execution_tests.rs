@@ -227,19 +227,10 @@ async fn test_should_use_parallel_execution_threshold() {
     let should_use_devnet =
         |tx_count: usize| -> bool { parallel_execution_enabled() && tx_count >= devnet_threshold };
 
-    assert_eq!(
-        should_use_devnet(0),
-        false,
-        "Empty batch should not use parallel"
-    );
-    assert_eq!(
-        should_use_devnet(1),
-        false,
-        "Single tx should not use parallel"
-    );
-    assert_eq!(
-        should_use_devnet(3),
-        false,
+    assert!(!should_use_devnet(0), "Empty batch should not use parallel");
+    assert!(!should_use_devnet(1), "Single tx should not use parallel");
+    assert!(
+        !should_use_devnet(3),
         "Below devnet threshold should not use parallel"
     );
 
@@ -252,8 +243,8 @@ async fn test_should_use_parallel_execution_threshold() {
     let should_use_mainnet =
         |tx_count: usize| -> bool { parallel_execution_enabled() && tx_count >= mainnet_threshold };
 
-    assert_eq!(should_use_mainnet(10), false, "Below mainnet threshold");
-    assert_eq!(should_use_mainnet(19), false, "Below mainnet threshold");
+    assert!(!should_use_mainnet(10), "Below mainnet threshold");
+    assert!(!should_use_mainnet(19), "Below mainnet threshold");
     assert_eq!(
         should_use_mainnet(20),
         expected,

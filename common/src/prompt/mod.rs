@@ -162,21 +162,53 @@ pub fn is_maybe_dir(path: &str) -> bool {
     path.ends_with("/") || path.ends_with("\\")
 }
 
+/// Configuration for creating a new Prompt
+#[derive(Debug, Clone)]
+pub struct PromptConfig<'a> {
+    pub level: LogLevel,
+    pub dir_path: &'a str,
+    pub filename_log: &'a str,
+    pub disable_file_logging: bool,
+    pub disable_file_log_date_based: bool,
+    pub disable_colors: bool,
+    pub enable_auto_compress_logs: bool,
+    pub interactive: bool,
+    pub module_logs: Vec<ModuleConfig>,
+    pub file_level: LogLevel,
+    pub show_ascii: bool,
+    pub logs_datetime_format: String,
+}
+
+/// Configuration for logger setup
+#[derive(Debug, Clone)]
+struct LoggerConfig<'a> {
+    level: LogLevel,
+    dir_path: &'a str,
+    filename_log: &'a str,
+    disable_file_logging: bool,
+    disable_file_log_date_based: bool,
+    enable_auto_compress_logs: bool,
+    module_logs: Vec<ModuleConfig>,
+    file_level: LogLevel,
+    logs_datetime_format: String,
+}
+
 impl Prompt {
-    pub fn new(
-        level: LogLevel,
-        dir_path: &str,
-        filename_log: &str,
-        disable_file_logging: bool,
-        disable_file_log_date_based: bool,
-        disable_colors: bool,
-        enable_auto_compress_logs: bool,
-        interactive: bool,
-        module_logs: Vec<ModuleConfig>,
-        file_level: LogLevel,
-        show_ascii: bool,
-        logs_datetime_format: String,
-    ) -> Result<ShareablePrompt, PromptError> {
+    pub fn new(config: PromptConfig) -> Result<ShareablePrompt, PromptError> {
+        let PromptConfig {
+            level,
+            dir_path,
+            filename_log,
+            disable_file_logging,
+            disable_file_log_date_based,
+            disable_colors,
+            enable_auto_compress_logs,
+            interactive,
+            module_logs,
+            file_level,
+            show_ascii,
+            logs_datetime_format,
+        } = config;
         if !is_maybe_dir(dir_path) {
             return Err(PromptError::LogsPathNotFolder);
         }
@@ -199,7 +231,7 @@ impl Prompt {
             return Err(PromptError::FileNotDir);
         }
 
-        prompt.setup_logger(
+        prompt.setup_logger(LoggerConfig {
             level,
             dir_path,
             filename_log,
@@ -209,7 +241,7 @@ impl Prompt {
             module_logs,
             file_level,
             logs_datetime_format,
-        )?;
+        })?;
 
         // Logs all the panics into the log file
         log_panics::init();
@@ -511,18 +543,18 @@ impl Prompt {
     }
 
     // configure fern and print prompt message after each new output
-    fn setup_logger(
-        &mut self,
-        level: LogLevel,
-        dir_path: &str,
-        filename_log: &str,
-        disable_file_logging: bool,
-        disable_file_log_date_based: bool,
-        enable_auto_compress_logs: bool,
-        module_logs: Vec<ModuleConfig>,
-        file_level: LogLevel,
-        logs_datetime_format: String,
-    ) -> Result<(), fern::InitError> {
+    fn setup_logger(&mut self, config: LoggerConfig) -> Result<(), fern::InitError> {
+        let LoggerConfig {
+            level,
+            dir_path,
+            filename_log,
+            disable_file_logging,
+            disable_file_log_date_based,
+            enable_auto_compress_logs,
+            module_logs,
+            file_level,
+            logs_datetime_format,
+        } = config;
         let colors = ColoredLevelConfig::new()
             .debug(Color::Green)
             .info(Color::Cyan)

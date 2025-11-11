@@ -12,13 +12,13 @@ use std::{
         Arc,
     },
 };
-use tokio::sync::{RwLock, Semaphore};
 use tos_common::{
     account::EnergyResource,
     ai_mining::AIMiningState,
     block::{Block, BlockVersion, TopoHeight},
     config::TOS_ASSET,
     crypto::{Hash, Hashable, PublicKey},
+    tokio::sync::{RwLock, Semaphore},
     transaction::{
         BurnPayload, DeployContractPayload, EnergyPayload, InvokeContractPayload, MultiSigPayload,
         Transaction, TransferPayload,

@@ -29,7 +29,7 @@ async fn test_daa_stable_hashrate() -> Result<(), BlockchainError> {
     let blocks = harness.add_chain_blocks(num_blocks, 1).await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Created {} blocks with 1-second intervals", num_blocks);
+        log::info!("Created {num_blocks} blocks with 1-second intervals");
     }
 
     // Get initial and final difficulty
@@ -37,8 +37,8 @@ async fn test_daa_stable_hashrate() -> Result<(), BlockchainError> {
     let final_diff = harness.get_difficulty(&blocks[blocks.len() - 1]).await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Initial difficulty: {:?}", initial_diff);
-        log::info!("Final difficulty: {:?}", final_diff);
+        log::info!("Initial difficulty: {initial_diff:?}");
+        log::info!("Final difficulty: {final_diff:?}");
     }
 
     // With stable 1-second blocks (matching TARGET_TIME_PER_BLOCK),
@@ -59,13 +59,12 @@ async fn test_daa_stable_hashrate() -> Result<(), BlockchainError> {
     let ratio = final_val as f64 / initial_val as f64;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Difficulty ratio: {:.4}", ratio);
+        log::info!("Difficulty ratio: {ratio:.4}");
     }
 
     assert!(
         ratio > 0.8 && ratio < 1.2,
-        "Difficulty should remain stable (0.8-1.2x) with consistent block times, got {:.4}x",
-        ratio
+        "Difficulty should remain stable (0.8-1.2x) with consistent block times, got {ratio:.4}x"
     );
 
     // Verify DAA scores are monotonically increasing
@@ -105,11 +104,7 @@ async fn test_daa_increasing_hashrate() -> Result<(), BlockchainError> {
     let baseline_diff = harness.get_difficulty(harness.current_tip()).await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!(
-            "Baseline difficulty after {} blocks: {:?}",
-            baseline_blocks,
-            baseline_diff
-        );
+        log::info!("Baseline difficulty after {baseline_blocks} blocks: {baseline_diff:?}");
     }
 
     // Add blocks twice as fast (0.5 seconds intervals)
@@ -120,7 +115,7 @@ async fn test_daa_increasing_hashrate() -> Result<(), BlockchainError> {
         .await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Added {} fast blocks (0.5s intervals)", fast_blocks_count);
+        log::info!("Added {fast_blocks_count} fast blocks (0.5s intervals)");
     }
 
     let new_diff = harness
@@ -128,7 +123,7 @@ async fn test_daa_increasing_hashrate() -> Result<(), BlockchainError> {
         .await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("New difficulty after fast blocks: {:?}", new_diff);
+        log::info!("New difficulty after fast blocks: {new_diff:?}");
     }
 
     // Convert to u128 for comparison
@@ -180,11 +175,7 @@ async fn test_daa_decreasing_hashrate() -> Result<(), BlockchainError> {
     let baseline_diff = harness.get_difficulty(harness.current_tip()).await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!(
-            "Baseline difficulty after {} blocks: {:?}",
-            baseline_blocks,
-            baseline_diff
-        );
+        log::info!("Baseline difficulty after {baseline_blocks} blocks: {baseline_diff:?}");
     }
 
     // Add blocks twice as slow (2 seconds intervals)
@@ -195,7 +186,7 @@ async fn test_daa_decreasing_hashrate() -> Result<(), BlockchainError> {
         .await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Added {} slow blocks (2s intervals)", slow_blocks_count);
+        log::info!("Added {slow_blocks_count} slow blocks (2s intervals)");
     }
 
     let new_diff = harness
@@ -203,7 +194,7 @@ async fn test_daa_decreasing_hashrate() -> Result<(), BlockchainError> {
         .await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("New difficulty after slow blocks: {:?}", new_diff);
+        log::info!("New difficulty after slow blocks: {new_diff:?}");
     }
 
     // Convert to u128 for comparison
@@ -246,10 +237,7 @@ async fn test_daa_window_boundaries() -> Result<(), BlockchainError> {
     let mut harness = DAATestHarness::new(test_storage.storage).await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!(
-            "Testing DAA window boundaries (DAA_WINDOW_SIZE = {})",
-            DAA_WINDOW_SIZE
-        );
+        log::info!("Testing DAA window boundaries (DAA_WINDOW_SIZE = {DAA_WINDOW_SIZE})");
     }
 
     // Test blocks below window size (< 2016)
@@ -276,7 +264,7 @@ async fn test_daa_window_boundaries() -> Result<(), BlockchainError> {
         .await?;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("DAA score at block 2016: {}", block_2016_daa);
+        log::info!("DAA score at block 2016: {block_2016_daa}");
     }
 
     assert_eq!(

@@ -14,8 +14,8 @@ pub const SCALAR_SIZE: usize = 32;
 // signature module re-exports: Signature, SIGNATURE_SIZE, hash_and_point_to_scalar
 
 // Re-export curve25519_dalek types that are needed
-use curve25519_dalek::{ristretto::CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::traits::IsIdentity;
+use curve25519_dalek::{ristretto::CompressedRistretto, RistrettoPoint};
 
 // Minimal types needed for Pedersen commitments and proofs
 // These were in compressed.rs and key.rs but we keep minimal versions here

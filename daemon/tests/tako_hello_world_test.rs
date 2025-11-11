@@ -103,7 +103,7 @@ fn test_hello_world_loads() {
     // Load the hello-world contract bytecode
     let contract_path = "tests/fixtures/hello_world.so";
 
-    println!("Loading contract from: {}", contract_path);
+    println!("Loading contract from: {contract_path}");
     let bytecode = std::fs::read(contract_path)
         .expect("Failed to read hello_world.so - ensure it exists in tests/fixtures/");
 
@@ -174,9 +174,9 @@ fn test_hello_world_executes() {
             println!("\n✅ All assertions passed!");
         }
         Err(e) => {
-            println!("\n❌ Execution failed: {:?}", e);
-            println!("Error details: {}", e);
-            panic!("Hello world execution failed: {}", e);
+            println!("\n❌ Execution failed: {e:?}");
+            println!("Error details: {e}");
+            panic!("Hello world execution failed: {e}");
         }
     }
 }
@@ -198,7 +198,7 @@ fn test_hello_world_with_compute_budget() {
     let budgets = vec![1000, 10000, 100000];
 
     for budget in budgets {
-        println!("\nTesting with compute budget: {}", budget);
+        println!("\nTesting with compute budget: {budget}");
 
         let result = TakoExecutor::execute(
             &bytecode,
@@ -215,7 +215,7 @@ fn test_hello_world_with_compute_budget() {
 
         match result {
             Ok(exec_result) => {
-                println!("  ✓ Success with budget {}", budget);
+                println!("  ✓ Success with budget {budget}");
                 println!(
                     "    Compute used: {}/{}",
                     exec_result.compute_units_used, budget
@@ -226,10 +226,10 @@ fn test_hello_world_with_compute_budget() {
                 );
             }
             Err(e) => {
-                println!("  ✗ Failed with budget {}: {}", budget, e);
+                println!("  ✗ Failed with budget {budget}: {e}");
                 // Low budgets might fail, that's okay
                 if budget >= 10000 {
-                    panic!("Should succeed with reasonable budget: {}", e);
+                    panic!("Should succeed with reasonable budget: {e}");
                 }
             }
         }
@@ -274,14 +274,14 @@ fn test_hello_world_vs_cpi_callee() {
             println!("  Compute units: {}", callee.compute_units_used);
         }
         (Err(e), Ok(_)) => {
-            panic!("Hello World failed but CPI Callee succeeded: {}", e);
+            panic!("Hello World failed but CPI Callee succeeded: {e}");
         }
         (Ok(_), Err(e)) => {
             println!("✓ Hello World succeeded");
-            println!("✗ CPI Callee failed: {}", e);
+            println!("✗ CPI Callee failed: {e}");
         }
         (Err(e1), Err(e2)) => {
-            panic!("Both failed - Hello: {}, Callee: {}", e1, e2);
+            panic!("Both failed - Hello: {e1}, Callee: {e2}");
         }
     }
 }

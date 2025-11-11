@@ -170,7 +170,7 @@ impl ContractLoader for MockContractLoader {
             Err(tos_tbpf::error::EbpfError::SyscallError(Box::new(
                 std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    format!("Contract not found: {:?}", contract_address),
+                    format!("Contract not found: {contract_address:?}"),
                 ),
             )))
         }
@@ -183,8 +183,8 @@ async fn test_cpi_basic_invocation() {
 
     // Load the CPI contracts from test fixtures
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let caller_path = format!("{}/tests/fixtures/cpi_caller.so", manifest_dir);
-    let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
+    let caller_path = format!("{manifest_dir}/tests/fixtures/cpi_caller.so");
+    let callee_path = format!("{manifest_dir}/tests/fixtures/cpi_callee.so");
 
     let caller_bytecode =
         std::fs::read(&caller_path).expect("Failed to load CPI caller contract from fixtures");
@@ -269,7 +269,7 @@ async fn test_cpi_basic_invocation() {
                         return_data[6],
                         return_data[7],
                     ]);
-                    println!("  Counter value from CPI callee: {}", counter_value);
+                    println!("  Counter value from CPI callee: {counter_value}");
                     assert!(counter_value > 0, "Callee should have incremented counter");
                 }
             }
@@ -282,10 +282,7 @@ async fn test_cpi_basic_invocation() {
             println!("   - Shared storage access across CPI boundary");
         }
         Err(e) => {
-            println!(
-                "⚠️  CPI execution failed (expected until loader is integrated): {}",
-                e
-            );
+            println!("⚠️  CPI execution failed (expected until loader is integrated): {e}");
             println!("\nNote: This is expected behavior. The test demonstrates:");
             println!("  ✓ CPI contracts build successfully");
             println!("  ✓ ELF format detection works");
@@ -305,8 +302,8 @@ async fn test_cpi_contracts_load() {
 
     // This test verifies the contracts are available and valid
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let caller_path = format!("{}/tests/fixtures/cpi_caller.so", manifest_dir);
-    let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
+    let caller_path = format!("{manifest_dir}/tests/fixtures/cpi_caller.so");
+    let callee_path = format!("{manifest_dir}/tests/fixtures/cpi_callee.so");
 
     let caller_bytecode = std::fs::read(&caller_path).expect("Failed to load CPI caller contract");
     let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee contract");
@@ -332,7 +329,7 @@ async fn test_callee_standalone() {
     // This verifies the callee works on its own before testing CPI
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let callee_path = format!("{}/tests/fixtures/cpi_callee.so", manifest_dir);
+    let callee_path = format!("{manifest_dir}/tests/fixtures/cpi_callee.so");
     let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee contract");
 
     let mut provider = MockCpiProvider::new();
@@ -378,7 +375,7 @@ async fn test_callee_standalone() {
                 return_data[6],
                 return_data[7],
             ]);
-            println!("  Counter value: {}", counter);
+            println!("  Counter value: {counter}");
             assert_eq!(counter, 1, "First call should set counter to 1");
         }
     } else {

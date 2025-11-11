@@ -63,9 +63,9 @@ fn main() -> Result<()> {
         // Serialize private key (for testing only!)
         let private_key = keypair.get_private_key();
         let private_key_bytes = private_key.to_bytes();
-        let private_key_hex = hex::encode(&private_key_bytes);
+        let private_key_hex = hex::encode(private_key_bytes);
 
-        println!("Account {}: {}", name, address);
+        println!("Account {name}: {address}");
 
         accounts.push(TestAccount {
             name: name.to_string(),

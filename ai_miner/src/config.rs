@@ -276,7 +276,7 @@ impl ConfigValidator {
                     config.daemon_address
                 ));
             } else {
-                return Err(anyhow!("Configuration validation failed: {}", e));
+                return Err(anyhow!("Configuration validation failed: {e}"));
             }
         }
 
@@ -289,7 +289,7 @@ impl ConfigValidator {
                 config.network = defaults::NETWORK.to_string();
                 fixed_issues.push(format!("Fixed network type to default: {}", config.network));
             } else {
-                return Err(anyhow!("Configuration validation failed: {}", e));
+                return Err(anyhow!("Configuration validation failed: {e}"));
             }
         }
 
@@ -297,7 +297,7 @@ impl ConfigValidator {
         if let Some(ref addr) = config.miner_address {
             if let Err(e) = self.validate_miner_address(addr) {
                 if self.strict_mode {
-                    return Err(anyhow!("Configuration validation failed: {}", e));
+                    return Err(anyhow!("Configuration validation failed: {e}"));
                 } else {
                     warnings.push(format!("Warning: {e}"));
                 }
@@ -316,7 +316,7 @@ impl ConfigValidator {
                     config.request_timeout_secs
                 ));
             } else {
-                return Err(anyhow!("Configuration validation failed: {}", e));
+                return Err(anyhow!("Configuration validation failed: {e}"));
             }
         }
 
@@ -332,7 +332,7 @@ impl ConfigValidator {
                     config.connection_timeout_secs
                 ));
             } else {
-                return Err(anyhow!("Configuration validation failed: {}", e));
+                return Err(anyhow!("Configuration validation failed: {e}"));
             }
         }
 
@@ -345,7 +345,7 @@ impl ConfigValidator {
                 config.max_retries = defaults::MAX_RETRIES;
                 fixed_issues.push(format!("Fixed max retries to {}", config.max_retries));
             } else {
-                return Err(anyhow!("Configuration validation failed: {}", e));
+                return Err(anyhow!("Configuration validation failed: {e}"));
             }
         }
 
@@ -357,7 +357,7 @@ impl ConfigValidator {
                 config.retry_delay_ms = defaults::RETRY_DELAY_MS;
                 fixed_issues.push(format!("Fixed retry delay to {} ms", config.retry_delay_ms));
             } else {
-                return Err(anyhow!("Configuration validation failed: {}", e));
+                return Err(anyhow!("Configuration validation failed: {e}"));
             }
         }
 
@@ -614,12 +614,11 @@ impl ConfigValidator {
             if log::log_enabled!(log::Level::Info) {
                 info!("Creating {dir_type} directory: {path}");
             }
-            std::fs::create_dir_all(&path_buf).map_err(|e| {
-                anyhow!("Failed to create {} directory '{}': {}", dir_type, path, e)
-            })?;
+            std::fs::create_dir_all(&path_buf)
+                .map_err(|e| anyhow!("Failed to create {dir_type} directory '{path}': {e}"))?;
             fixed_issues.push(format!("Created {dir_type} directory: {path}"));
         } else if !path_buf.is_dir() {
-            return Err(anyhow!("Path '{}' exists but is not a directory", path));
+            return Err(anyhow!("Path '{path}' exists but is not a directory"));
         }
 
         // Check write permissions
@@ -630,10 +629,7 @@ impl ConfigValidator {
             }
             Err(e) => {
                 return Err(anyhow!(
-                    "Insufficient write permissions for {} directory '{}': {}",
-                    dir_type,
-                    path,
-                    e
+                    "Insufficient write permissions for {dir_type} directory '{path}': {e}"
                 ));
             }
         }
@@ -704,7 +700,7 @@ impl ValidatedConfig {
     /// Save validated configuration to file
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let content = serde_json::to_string_pretty(self)
-            .map_err(|e| anyhow!("Failed to serialize config: {}", e))?;
+            .map_err(|e| anyhow!("Failed to serialize config: {e}"))?;
 
         std::fs::write(&path, content).map_err(|e| {
             anyhow!(

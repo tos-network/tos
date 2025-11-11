@@ -186,7 +186,7 @@ impl RpcClient {
             .context("Failed to parse get_info response")?;
 
         if let Some(error) = body.get("error") {
-            bail!("RPC error: {}", error);
+            bail!("RPC error: {error}");
         }
 
         let result = body.get("result").context("No result in response")?;
@@ -218,7 +218,7 @@ impl RpcClient {
             .context("Failed to parse get_balance response")?;
 
         if let Some(error) = body.get("error") {
-            bail!("RPC error: {}", error);
+            bail!("RPC error: {error}");
         }
 
         let result: BalanceResult =
@@ -253,7 +253,7 @@ impl RpcClient {
             .context("Failed to parse submit_transaction response")?;
 
         if let Some(error) = body.get("error") {
-            bail!("RPC error: {}", error);
+            bail!("RPC error: {error}");
         }
 
         Ok(tx.hash().to_string())
@@ -310,10 +310,7 @@ async fn main() -> Result<()> {
     // Check account A balance
     let balance_a = rpc.get_balance(&account_a.address).await?;
     let balance_tos = balance_a as f64 / 1_000_000_000_000.0;
-    info!(
-        "Account A balance: {:.6} TOS ({} nanoTOS)",
-        balance_tos, balance_a
-    );
+    info!("Account A balance: {balance_tos:.6} TOS ({balance_a} nanoTOS)");
 
     // Calculate total needed
     let recipients = &test_accounts.accounts[1..5]; // B, C, D, E
@@ -330,15 +327,11 @@ async fn main() -> Result<()> {
         "  Fee per transaction: {:.6} TOS",
         args.fee as f64 / 1_000_000_000_000.0
     );
-    info!("  Total needed: {:.6} TOS", total_tos);
+    info!("  Total needed: {total_tos:.6} TOS");
     info!("");
 
     if balance_a < total_needed {
-        bail!(
-            "Insufficient balance! Have {:.6} TOS, need {:.6} TOS",
-            balance_tos,
-            total_tos
-        );
+        bail!("Insufficient balance! Have {balance_tos:.6} TOS, need {total_tos:.6} TOS");
     }
 
     // Create reference
@@ -377,7 +370,7 @@ async fn main() -> Result<()> {
         .build(&mut state, &keypair_a)?;
 
         let tx_hash = rpc.submit_transaction(&tx).await?;
-        info!("  ✓ Transaction submitted: {}", tx_hash);
+        info!("  ✓ Transaction submitted: {tx_hash}");
 
         nonce += 1;
 

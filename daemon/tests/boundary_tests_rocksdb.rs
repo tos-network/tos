@@ -245,7 +245,7 @@ async fn test_nonce_sequential_boundary() {
 
         // Increment nonce
         let current_nonce = parallel_state.get_nonce(&alice_pubkey);
-        assert_eq!(current_nonce, i, "Nonce should be {}", i);
+        assert_eq!(current_nonce, i, "Nonce should be {i}");
 
         parallel_state.set_nonce(&alice_pubkey, i + 1);
 

@@ -214,7 +214,7 @@ impl ExecutionLedger {
                 let dest_balances = self
                     .balances
                     .entry(transfer.get_destination().clone())
-                    .or_insert_with(HashMap::new);
+                    .or_default();
                 *dest_balances
                     .entry(transfer.get_asset().clone())
                     .or_insert(0) += per_transfer;
@@ -538,8 +538,7 @@ fn print_performance_stats(mode: &str, tx_count: usize, duration: Duration) {
     let latency_ms = (duration_secs * 1000.0) / tx_count_f64;
 
     println!(
-        "[{}] tx_count={} | TPS={:.2} | avg_latency={:.3}ms | total_time={:.3}s",
-        mode, tx_count, tps, latency_ms, duration_secs
+        "[{mode}] tx_count={tx_count} | TPS={tps:.2} | avg_latency={latency_ms:.3}ms | total_time={duration_secs:.3}s"
     );
 }
 
@@ -600,8 +599,7 @@ fn run_pipeline(c: &mut Criterion, mode: PipelineMode) {
                             runtime.block_on(async {
                                 // Pre-allocate futures vector with exact capacity
                                 let batch_size = get_batch_size();
-                                let num_batches =
-                                    (transactions.len() + batch_size - 1) / batch_size;
+                                let num_batches = transactions.len().div_ceil(batch_size);
                                 let mut futures = Vec::with_capacity(num_batches);
 
                                 // Process transactions in batches
@@ -678,9 +676,9 @@ fn bench_tps(c: &mut Criterion) {
     println!("Batch size: {}", get_batch_size());
     println!("Sample size: {}", get_sample_size());
     println!("Measurement time: {}s", get_measurement_time());
-    println!("Transaction counts: {:?}", DEFAULT_TX_COUNTS);
-    println!("Transfer amount: {} TOS", DEFAULT_TRANSFER_AMOUNT);
-    println!("Fee: {} base units", DEFAULT_FEE);
+    println!("Transaction counts: {DEFAULT_TX_COUNTS:?}");
+    println!("Transfer amount: {DEFAULT_TRANSFER_AMOUNT} TOS");
+    println!("Fee: {DEFAULT_FEE} base units");
     println!("\nEnvironment variables:");
     println!("  TOS_BENCH_THREADS={}", get_worker_threads());
     println!("  TOS_BENCH_BATCH_SIZE={}", get_batch_size());

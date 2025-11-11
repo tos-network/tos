@@ -149,7 +149,7 @@ fn main() {
     let contract_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "~/tos-network/tos-tbpf/tests/elfs/relative_call.so".to_string());
-    println!("Loading contract bytecode from: {}", contract_path);
+    println!("Loading contract bytecode from: {contract_path}");
 
     let bytecode = match fs::read(contract_path) {
         Ok(bytes) => {
@@ -157,7 +157,7 @@ fn main() {
             bytes
         }
         Err(e) => {
-            eprintln!("✗ Failed to load contract: {}", e);
+            eprintln!("✗ Failed to load contract: {e}");
             eprintln!("\nPlease build the contract first:");
             eprintln!("  cd ~/tos-network/tako/examples/hello-world");
             eprintln!("  bash build.sh");
@@ -179,9 +179,9 @@ fn main() {
     let compute_budget = Some(200_000);
 
     println!("\nExecution parameters:");
-    println!("  Contract hash: {}", contract_hash);
-    println!("  Topoheight: {}", topoheight);
-    println!("  Block height: {}", block_height);
+    println!("  Contract hash: {contract_hash}");
+    println!("  Topoheight: {topoheight}");
+    println!("  Block height: {block_height}");
     println!("  Compute budget: {} units", compute_budget.unwrap());
 
     // Step 4: Execute with timing
@@ -233,7 +233,7 @@ fn main() {
             }
 
             println!("\n=== Performance Metrics ===\n");
-            println!("Total execution time: {:?}", elapsed);
+            println!("Total execution time: {elapsed:?}");
             println!(
                 "Time per instruction: {:.2} ns",
                 elapsed.as_nanos() as f64 / exec_result.instructions_executed as f64
@@ -281,10 +281,10 @@ fn main() {
         }
         Err(e) => {
             eprintln!("✗ Execution failed!\n");
-            eprintln!("Error: {}", e);
+            eprintln!("Error: {e}");
             eprintln!("Error category: {}", e.category());
             eprintln!("User message: {}", e.user_message());
-            eprintln!("\nExecution time before error: {:?}", elapsed);
+            eprintln!("\nExecution time before error: {elapsed:?}");
 
             println!("\n=== Debug Information ===\n");
             println!("This error occurred during TOS Kernel(TAKO) execution.");

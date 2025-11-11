@@ -81,7 +81,7 @@ async fn test_stress_100_accounts() {
     }
 
     let setup_time = start.elapsed();
-    println!("✓ Created 100 accounts in {:?}", setup_time);
+    println!("✓ Created 100 accounts in {setup_time:?}");
 
     // Step 3: Create ParallelChainState
     let state_start = Instant::now();
@@ -100,7 +100,7 @@ async fn test_stress_100_accounts() {
     .await;
 
     let state_time = state_start.elapsed();
-    println!("✓ Created ParallelChainState in {:?}", state_time);
+    println!("✓ Created ParallelChainState in {state_time:?}");
 
     // Step 4: Load all accounts and verify
     let load_start = Instant::now();
@@ -121,7 +121,7 @@ async fn test_stress_100_accounts() {
         assert_eq!(nonce, *expected_nonce, "Nonce mismatch");
     }
     let load_time = load_start.elapsed();
-    println!("✓ Loaded 100 accounts in {:?}", load_time);
+    println!("✓ Loaded 100 accounts in {load_time:?}");
 
     // Step 5: Commit state
     let commit_start = Instant::now();
@@ -133,10 +133,10 @@ async fn test_stress_100_accounts() {
             .expect("Failed to commit");
     }
     let commit_time = commit_start.elapsed();
-    println!("✓ Committed state in {:?}", commit_time);
+    println!("✓ Committed state in {commit_time:?}");
 
     let total_time = start.elapsed();
-    println!("✓ Total time: {:?}", total_time);
+    println!("✓ Total time: {total_time:?}");
     println!("✓ Test passed: 100 accounts handled without deadlock");
 }
 
@@ -170,7 +170,7 @@ async fn test_stress_500_accounts() {
     }
 
     let setup_time = start.elapsed();
-    println!("✓ Created 500 accounts in {:?}", setup_time);
+    println!("✓ Created 500 accounts in {setup_time:?}");
 
     // Step 3: Create ParallelChainState
     let state_start = Instant::now();
@@ -189,7 +189,7 @@ async fn test_stress_500_accounts() {
     .await;
 
     let state_time = state_start.elapsed();
-    println!("✓ Created ParallelChainState in {:?}", state_time);
+    println!("✓ Created ParallelChainState in {state_time:?}");
 
     // Step 4: Sample verify 50 random accounts
     let load_start = Instant::now();
@@ -207,15 +207,11 @@ async fn test_stress_500_accounts() {
         let balance = parallel_state.get_balance(pubkey, &TOS_ASSET);
         let nonce = parallel_state.get_nonce(pubkey);
 
-        assert_eq!(
-            balance, *expected_balance,
-            "Balance mismatch at index {}",
-            i
-        );
-        assert_eq!(nonce, *expected_nonce, "Nonce mismatch at index {}", i);
+        assert_eq!(balance, *expected_balance, "Balance mismatch at index {i}");
+        assert_eq!(nonce, *expected_nonce, "Nonce mismatch at index {i}");
     }
     let load_time = load_start.elapsed();
-    println!("✓ Verified 50 sampled accounts in {:?}", load_time);
+    println!("✓ Verified 50 sampled accounts in {load_time:?}");
 
     // Step 5: Commit state
     let commit_start = Instant::now();
@@ -227,10 +223,10 @@ async fn test_stress_500_accounts() {
             .expect("Failed to commit");
     }
     let commit_time = commit_start.elapsed();
-    println!("✓ Committed state in {:?}", commit_time);
+    println!("✓ Committed state in {commit_time:?}");
 
     let total_time = start.elapsed();
-    println!("✓ Total time: {:?}", total_time);
+    println!("✓ Total time: {total_time:?}");
     println!("✓ Test passed: 500 accounts handled without deadlock");
 }
 
@@ -270,7 +266,7 @@ async fn test_stress_1000_accounts() {
     }
 
     let setup_time = start.elapsed();
-    println!("✓ Created 1000 accounts in {:?}", setup_time);
+    println!("✓ Created 1000 accounts in {setup_time:?}");
 
     // Step 3: Create ParallelChainState
     let state_start = Instant::now();
@@ -289,7 +285,7 @@ async fn test_stress_1000_accounts() {
     .await;
 
     let state_time = state_start.elapsed();
-    println!("✓ Created ParallelChainState in {:?}", state_time);
+    println!("✓ Created ParallelChainState in {state_time:?}");
 
     // Step 4: Sample verify 100 random accounts
     let load_start = Instant::now();
@@ -307,15 +303,11 @@ async fn test_stress_1000_accounts() {
         let balance = parallel_state.get_balance(pubkey, &TOS_ASSET);
         let nonce = parallel_state.get_nonce(pubkey);
 
-        assert_eq!(
-            balance, *expected_balance,
-            "Balance mismatch at index {}",
-            i
-        );
-        assert_eq!(nonce, *expected_nonce, "Nonce mismatch at index {}", i);
+        assert_eq!(balance, *expected_balance, "Balance mismatch at index {i}");
+        assert_eq!(nonce, *expected_nonce, "Nonce mismatch at index {i}");
     }
     let load_time = load_start.elapsed();
-    println!("✓ Verified 100 sampled accounts in {:?}", load_time);
+    println!("✓ Verified 100 sampled accounts in {load_time:?}");
 
     // Step 5: Commit state
     let commit_start = Instant::now();
@@ -327,10 +319,10 @@ async fn test_stress_1000_accounts() {
             .expect("Failed to commit");
     }
     let commit_time = commit_start.elapsed();
-    println!("✓ Committed state in {:?}", commit_time);
+    println!("✓ Committed state in {commit_time:?}");
 
     let total_time = start.elapsed();
-    println!("✓ Total time: {:?}", total_time);
+    println!("✓ Total time: {total_time:?}");
     println!("✓ Test passed: 1000 accounts handled without deadlock");
 }
 
@@ -364,7 +356,7 @@ async fn test_stress_concurrent_modifications() {
     }
 
     let setup_time = start.elapsed();
-    println!("✓ Created 50 accounts in {:?}", setup_time);
+    println!("✓ Created 50 accounts in {setup_time:?}");
 
     // Step 3: Create ParallelChainState
     let dummy_block = create_dummy_block();
@@ -411,7 +403,7 @@ async fn test_stress_concurrent_modifications() {
     }
 
     let mod_time = mod_start.elapsed();
-    println!("✓ 50 concurrent modifications completed in {:?}", mod_time);
+    println!("✓ 50 concurrent modifications completed in {mod_time:?}");
 
     // Step 5: Commit state
     let commit_start = Instant::now();
@@ -423,10 +415,10 @@ async fn test_stress_concurrent_modifications() {
             .expect("Failed to commit");
     }
     let commit_time = commit_start.elapsed();
-    println!("✓ Committed state in {:?}", commit_time);
+    println!("✓ Committed state in {commit_time:?}");
 
     let total_time = start.elapsed();
-    println!("✓ Total time: {:?}", total_time);
+    println!("✓ Total time: {total_time:?}");
     println!("✓ Test passed: Concurrent modifications handled without deadlock");
 }
 
@@ -498,7 +490,7 @@ async fn test_stress_rapid_state_cycles() {
     }
 
     let total_time = start.elapsed();
-    println!("✓ Total time: {:?}", total_time);
+    println!("✓ Total time: {total_time:?}");
     println!("✓ Average time per cycle: {:?}", total_time / 20);
     println!("✓ Test passed: Rapid cycles handled without deadlock");
 }

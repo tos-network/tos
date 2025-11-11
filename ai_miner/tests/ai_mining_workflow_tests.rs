@@ -48,7 +48,7 @@ async fn test_task_publication_workflow() -> Result<()> {
     println!("  - Estimated fee: {} nanoTOS", metadata.estimated_fee);
     println!("  - Estimated size: {} bytes", metadata.estimated_size);
     println!("  - Task ID: {}", hex::encode(task_id.as_bytes()));
-    println!("  - Reward: {} nanoTOS", reward_amount);
+    println!("  - Reward: {reward_amount} nanoTOS");
 
     // Test 2: Storage Management
     let mut storage_manager =
@@ -108,7 +108,7 @@ async fn test_answer_submission_workflow() -> Result<()> {
     println!("  - Estimated size: {} bytes", metadata.estimated_size);
     println!("  - Task ID: {}", hex::encode(task_id.as_bytes()));
     println!("  - Answer Hash: {}", hex::encode(answer_hash.as_bytes()));
-    println!("  - Stake: {} nanoTOS", stake_amount);
+    println!("  - Stake: {stake_amount} nanoTOS");
 
     // Test 2: Storage Management
     let mut storage_manager =
@@ -166,7 +166,7 @@ async fn test_validation_workflow() -> Result<()> {
     println!("  - Estimated size: {} bytes", metadata.estimated_size);
     println!("  - Task ID: {}", hex::encode(task_id.as_bytes()));
     println!("  - Answer ID: {}", hex::encode(answer_id.as_bytes()));
-    println!("  - Validation Score: {}%", validation_score);
+    println!("  - Validation Score: {validation_score}%");
 
     // Test 2: Storage Management
     let mut storage_manager =
@@ -218,9 +218,9 @@ async fn test_reward_distribution_workflow() -> Result<()> {
     );
 
     println!("✓ Network-specific fee calculation verified");
-    println!("  - Mainnet fee: {} nanoTOS", mainnet_fee);
-    println!("  - Testnet fee: {} nanoTOS", testnet_fee);
-    println!("  - Devnet fee: {} nanoTOS", devnet_fee);
+    println!("  - Mainnet fee: {mainnet_fee} nanoTOS");
+    println!("  - Testnet fee: {testnet_fee} nanoTOS");
+    println!("  - Devnet fee: {devnet_fee} nanoTOS");
 
     // Test 2: Complete Task Lifecycle
     let mut storage_manager =
@@ -249,7 +249,7 @@ async fn test_reward_distribution_workflow() -> Result<()> {
 
     println!("✓ Complete task lifecycle verified");
     println!("  - Final state: {:?}", TaskState::Validated);
-    println!("  - Reward amount: {} nanoTOS", reward_amount);
+    println!("  - Reward amount: {reward_amount} nanoTOS");
 
     println!("=== Reward Distribution Workflow Test PASSED ===\n");
     Ok(())
@@ -283,7 +283,7 @@ async fn test_miner_registration_workflow() -> Result<()> {
     println!("✓ Miner registration transaction metadata created successfully");
     println!("  - Estimated fee: {} nanoTOS", metadata.estimated_fee);
     println!("  - Estimated size: {} bytes", metadata.estimated_size);
-    println!("  - Registration fee: {} nanoTOS", registration_fee);
+    println!("  - Registration fee: {registration_fee} nanoTOS");
 
     println!("=== Miner Registration Workflow Test PASSED ===\n");
     Ok(())
@@ -346,10 +346,10 @@ fn test_payload_complexity_calculation() {
     );
 
     println!("✓ Payload complexity calculations verified");
-    println!("  - Register miner fee: {} nanoTOS", register_fee);
-    println!("  - Publish task fee: {} nanoTOS", publish_fee);
-    println!("  - Submit answer fee: {} nanoTOS", answer_fee);
-    println!("  - Validate answer fee: {} nanoTOS", validation_fee);
+    println!("  - Register miner fee: {register_fee} nanoTOS");
+    println!("  - Publish task fee: {publish_fee} nanoTOS");
+    println!("  - Submit answer fee: {answer_fee} nanoTOS");
+    println!("  - Validate answer fee: {validation_fee} nanoTOS");
 
     println!("=== Payload Complexity Test PASSED ===\n");
 }

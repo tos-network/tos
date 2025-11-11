@@ -321,8 +321,8 @@ fn print_performance_comparison(
     sequential_time: Duration,
     parallel_time: Duration,
 ) {
-    let seq_micros = sequential_time.as_micros() as u128;
-    let par_micros = parallel_time.as_micros() as u128;
+    let seq_micros = sequential_time.as_micros();
+    let par_micros = parallel_time.as_micros();
 
     let seq_tps = calculate_tps_integer(tx_count, sequential_time);
     let par_tps = calculate_tps_integer(tx_count, parallel_time);
@@ -332,8 +332,7 @@ fn print_performance_comparison(
     let speedup_display = speedup as f64 / SCALE as f64;
 
     println!(
-        "[{}] txs={} | Sequential: {}µs ({}tx/s) | Parallel: {}µs ({}tx/s) | Speedup: {:.2}x",
-        mode, tx_count, seq_micros, seq_tps, par_micros, par_tps, speedup_display
+        "[{mode}] txs={tx_count} | Sequential: {seq_micros}µs ({seq_tps}tx/s) | Parallel: {par_micros}µs ({par_tps}tx/s) | Speedup: {speedup_display:.2}x"
     );
 }
 
@@ -640,7 +639,7 @@ fn bench_tps_comparison(c: &mut Criterion) {
     for tx_count in [10, 50, 100].iter() {
         // Fixed: Use standard b.iter() to include all overhead in measurement
         group.bench_with_input(
-            BenchmarkId::new("sequential", format!("{}_txs", tx_count)),
+            BenchmarkId::new("sequential", format!("{tx_count}_txs")),
             tx_count,
             |b, &count| {
                 b.iter(|| {
@@ -682,7 +681,7 @@ fn bench_tps_comparison(c: &mut Criterion) {
 
         // Fixed: Use standard b.iter() to include all overhead in measurement
         group.bench_with_input(
-            BenchmarkId::new("parallel", format!("{}_txs", tx_count)),
+            BenchmarkId::new("parallel", format!("{tx_count}_txs")),
             tx_count,
             |b, &count| {
                 b.iter(|| {

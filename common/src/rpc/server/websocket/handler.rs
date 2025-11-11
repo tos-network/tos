@@ -70,6 +70,10 @@ where
             value
         });
         debug!("notifying event");
+        // SAFE: WebSocketSessionShared contains Arc<WebSocketSession> which has interior mutability,
+        // but the Hash/Eq implementation only depends on immutable fields (session ID).
+        // The interior mutability is used for connection state management, not for hashing.
+        #[allow(clippy::mutable_key_type)]
         let sessions = {
             let events = self.events.read().await;
             trace!("events locked for propagation");

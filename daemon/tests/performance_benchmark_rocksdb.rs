@@ -134,12 +134,12 @@ fn create_dummy_block() -> (Block, Hash) {
 /// Print formatted benchmark results
 fn print_benchmark_header(name: &str) {
     println!("\n{}", "=".repeat(80));
-    println!("  BENCHMARK: {}", name);
+    println!("  BENCHMARK: {name}");
     println!("{}", "=".repeat(80));
 }
 
 fn print_benchmark_result(label: &str, value: &str, unit: &str) {
-    println!("  {:40} {:>15} {}", label, value, unit);
+    println!("  {label:40} {value:>15} {unit}");
 }
 
 fn print_benchmark_footer() {
@@ -176,7 +176,7 @@ async fn benchmark_storage_write_speed() {
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
 
-    println!("\n  Creating {} accounts...", NUM_ACCOUNTS);
+    println!("\n  Creating {NUM_ACCOUNTS} accounts...");
 
     let start = Instant::now();
     for _i in 0..NUM_ACCOUNTS {
@@ -207,12 +207,12 @@ async fn benchmark_storage_write_speed() {
     );
     print_benchmark_result(
         "Throughput",
-        &format!("{:.2}", accounts_per_sec),
+        &format!("{accounts_per_sec:.2}"),
         "accounts/sec",
     );
     print_benchmark_result(
         "Average time per account",
-        &format!("{:.2}", avg_time_per_account),
+        &format!("{avg_time_per_account:.2}"),
         "microseconds",
     );
 
@@ -271,7 +271,7 @@ async fn benchmark_storage_read_speed() {
     let storage = Arc::new(RwLock::new(storage));
 
     // Pre-populate accounts
-    println!("\n  Pre-populating {} accounts...", NUM_ACCOUNTS);
+    println!("\n  Pre-populating {NUM_ACCOUNTS} accounts...");
     let mut accounts = Vec::new();
     for i in 0..NUM_ACCOUNTS {
         let keypair = KeyPair::new();
@@ -281,7 +281,7 @@ async fn benchmark_storage_read_speed() {
     }
 
     // Benchmark reads
-    println!("  Performing {} random reads...", NUM_READS);
+    println!("  Performing {NUM_READS} random reads...");
     let start = Instant::now();
     for i in 0..NUM_READS {
         let account_idx = i % NUM_ACCOUNTS;
@@ -308,10 +308,10 @@ async fn benchmark_storage_read_speed() {
         &format!("{:.3}", elapsed.as_secs_f64()),
         "seconds",
     );
-    print_benchmark_result("Throughput", &format!("{:.2}", reads_per_sec), "reads/sec");
+    print_benchmark_result("Throughput", &format!("{reads_per_sec:.2}"), "reads/sec");
     print_benchmark_result(
         "Average time per read",
-        &format!("{:.2}", avg_time_per_read),
+        &format!("{avg_time_per_read:.2}"),
         "microseconds",
     );
 
@@ -370,7 +370,7 @@ async fn benchmark_storage_update_speed() {
     let storage = Arc::new(RwLock::new(storage));
 
     // Pre-populate accounts
-    println!("\n  Pre-populating {} accounts...", NUM_ACCOUNTS);
+    println!("\n  Pre-populating {NUM_ACCOUNTS} accounts...");
     let mut accounts = Vec::new();
     for _i in 0..NUM_ACCOUNTS {
         let keypair = KeyPair::new();
@@ -380,7 +380,7 @@ async fn benchmark_storage_update_speed() {
     }
 
     // Benchmark updates
-    println!("  Performing {} update operations...", NUM_UPDATES);
+    println!("  Performing {NUM_UPDATES} update operations...");
     let start = Instant::now();
     for i in 0..NUM_UPDATES {
         let account_idx = i % NUM_ACCOUNTS;
@@ -446,12 +446,12 @@ async fn benchmark_storage_update_speed() {
     );
     print_benchmark_result(
         "Throughput",
-        &format!("{:.2}", updates_per_sec),
+        &format!("{updates_per_sec:.2}"),
         "updates/sec",
     );
     print_benchmark_result(
         "Average time per update",
-        &format!("{:.2}", avg_time_per_update),
+        &format!("{avg_time_per_update:.2}"),
         "microseconds",
     );
 
@@ -510,10 +510,7 @@ async fn benchmark_concurrent_access_10_workers() {
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
 
-    println!(
-        "\n  Spawning {} workers performing {} operations each...",
-        NUM_WORKERS, OPS_PER_WORKER
-    );
+    println!("\n  Spawning {NUM_WORKERS} workers performing {OPS_PER_WORKER} operations each...");
 
     let start = Instant::now();
     let mut join_set = JoinSet::new();
@@ -577,10 +574,10 @@ async fn benchmark_concurrent_access_10_workers() {
         &format!("{:.3}", elapsed.as_secs_f64()),
         "seconds",
     );
-    print_benchmark_result("Throughput", &format!("{:.2}", ops_per_sec), "ops/sec");
+    print_benchmark_result("Throughput", &format!("{ops_per_sec:.2}"), "ops/sec");
     print_benchmark_result(
         "Average time per op",
-        &format!("{:.2}", avg_time_per_op),
+        &format!("{avg_time_per_op:.2}"),
         "microseconds",
     );
 
@@ -639,10 +636,7 @@ async fn benchmark_concurrent_access_50_workers() {
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
 
-    println!(
-        "\n  Spawning {} workers performing {} operations each...",
-        NUM_WORKERS, OPS_PER_WORKER
-    );
+    println!("\n  Spawning {NUM_WORKERS} workers performing {OPS_PER_WORKER} operations each...");
 
     let start = Instant::now();
     let mut join_set = JoinSet::new();
@@ -697,10 +691,10 @@ async fn benchmark_concurrent_access_50_workers() {
         &format!("{:.3}", elapsed.as_secs_f64()),
         "seconds",
     );
-    print_benchmark_result("Throughput", &format!("{:.2}", ops_per_sec), "ops/sec");
+    print_benchmark_result("Throughput", &format!("{ops_per_sec:.2}"), "ops/sec");
     print_benchmark_result(
         "Average time per op",
-        &format!("{:.2}", avg_time_per_op),
+        &format!("{avg_time_per_op:.2}"),
         "microseconds",
     );
 
@@ -759,10 +753,7 @@ async fn benchmark_concurrent_access_100_workers() {
     register_tos_asset(&mut storage).await;
     let storage = Arc::new(RwLock::new(storage));
 
-    println!(
-        "\n  Spawning {} workers performing {} operations each...",
-        NUM_WORKERS, OPS_PER_WORKER
-    );
+    println!("\n  Spawning {NUM_WORKERS} workers performing {OPS_PER_WORKER} operations each...");
 
     let start = Instant::now();
     let mut join_set = JoinSet::new();
@@ -817,10 +808,10 @@ async fn benchmark_concurrent_access_100_workers() {
         &format!("{:.3}", elapsed.as_secs_f64()),
         "seconds",
     );
-    print_benchmark_result("Throughput", &format!("{:.2}", ops_per_sec), "ops/sec");
+    print_benchmark_result("Throughput", &format!("{ops_per_sec:.2}"), "ops/sec");
     print_benchmark_result(
         "Average time per op",
-        &format!("{:.2}", avg_time_per_op),
+        &format!("{avg_time_per_op:.2}"),
         "microseconds",
     );
 
@@ -880,10 +871,7 @@ async fn benchmark_parallel_chain_state_creation() {
 
     let (dummy_block, block_hash) = create_dummy_block();
 
-    println!(
-        "\n  Creating {} ParallelChainState instances...",
-        NUM_CREATIONS
-    );
+    println!("\n  Creating {NUM_CREATIONS} ParallelChainState instances...");
 
     let start = Instant::now();
     let mut states = Vec::new();
@@ -918,7 +906,7 @@ async fn benchmark_parallel_chain_state_creation() {
     );
     print_benchmark_result(
         "Throughput",
-        &format!("{:.2}", creations_per_sec),
+        &format!("{creations_per_sec:.2}"),
         "creations/sec",
     );
 
@@ -968,7 +956,7 @@ async fn benchmark_parallel_chain_state_commit() {
     const NUM_ACCOUNTS_LIST: &[usize] = &[10, 50, 100, 200];
 
     for &num_accounts in NUM_ACCOUNTS_LIST {
-        println!("\n  Testing commit with {} accounts...", num_accounts);
+        println!("\n  Testing commit with {num_accounts} accounts...");
 
         let temp_dir = TempDir::new("tos_bench_pcs_commit").unwrap();
         let dir_path = temp_dir.path().to_string_lossy().to_string();
@@ -1025,18 +1013,18 @@ async fn benchmark_parallel_chain_state_commit() {
         let time_per_account_us = (elapsed.as_micros() as f64) / (num_accounts as f64);
 
         print_benchmark_result(
-            &format!("  Commit time (n={})", num_accounts),
-            &format!("{:.2}", time_ms),
+            &format!("  Commit time (n={num_accounts})"),
+            &format!("{time_ms:.2}"),
             "milliseconds",
         );
         print_benchmark_result(
-            &format!("  Time per account (n={})", num_accounts),
-            &format!("{:.2}", time_per_account_us),
+            &format!("  Time per account (n={num_accounts})"),
+            &format!("{time_per_account_us:.2}"),
             "microseconds",
         );
         print_benchmark_result(
-            &format!("  Throughput (n={})", num_accounts),
-            &format!("{:.2}", commits_per_sec),
+            &format!("  Throughput (n={num_accounts})"),
+            &format!("{commits_per_sec:.2}"),
             "commits/sec",
         );
 
@@ -1099,7 +1087,7 @@ async fn benchmark_account_loading() {
     let environment = Arc::new(Environment::new());
 
     // Pre-populate accounts in storage
-    println!("\n  Pre-populating {} accounts in storage...", NUM_ACCOUNTS);
+    println!("\n  Pre-populating {NUM_ACCOUNTS} accounts in storage...");
     let mut accounts = Vec::new();
     for i in 0..NUM_ACCOUNTS {
         let keypair = KeyPair::new();
@@ -1122,10 +1110,7 @@ async fn benchmark_account_loading() {
     .await;
 
     // Benchmark account loading (nonce + balance)
-    println!(
-        "  Loading {} accounts into ParallelChainState...",
-        NUM_ACCOUNTS
-    );
+    println!("  Loading {NUM_ACCOUNTS} accounts into ParallelChainState...");
     let start = Instant::now();
     for account in &accounts {
         state.ensure_account_loaded(account).await.unwrap();
@@ -1149,10 +1134,10 @@ async fn benchmark_account_loading() {
         &format!("{:.3}", elapsed.as_secs_f64()),
         "seconds",
     );
-    print_benchmark_result("Throughput", &format!("{:.2}", loads_per_sec), "loads/sec");
+    print_benchmark_result("Throughput", &format!("{loads_per_sec:.2}"), "loads/sec");
     print_benchmark_result(
         "Average load time",
-        &format!("{:.2}", avg_time_per_load),
+        &format!("{avg_time_per_load:.2}"),
         "microseconds",
     );
 
@@ -1191,13 +1176,13 @@ async fn benchmark_account_loading() {
 
     print_benchmark_result(
         "Cache hit time per account",
-        &format!("{:.2}", cache_time_per_load),
+        &format!("{cache_time_per_load:.2}"),
         "microseconds",
     );
 
     println!("\n  Cache Effectiveness:");
     let speedup = avg_time_per_load / cache_time_per_load;
-    println!("    Cache hits are {}x faster than storage loads", speedup);
+    println!("    Cache hits are {speedup}x faster than storage loads");
     if speedup > 10.0 {
         println!("    ✓ EXCELLENT: Cache is very effective");
     } else if speedup > 5.0 {

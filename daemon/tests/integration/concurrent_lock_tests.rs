@@ -172,8 +172,7 @@ async fn test_storage_lock_acquisition_time() {
 
     assert!(
         read_duration < Duration::from_millis(10),
-        "Read lock acquisition took {:?}, expected < 10ms",
-        read_duration
+        "Read lock acquisition took {read_duration:?}, expected < 10ms"
     );
 
     // Measure write lock acquisition time
@@ -184,8 +183,7 @@ async fn test_storage_lock_acquisition_time() {
 
     assert!(
         write_duration < Duration::from_millis(10),
-        "Write lock acquisition took {:?}, expected < 10ms",
-        write_duration
+        "Write lock acquisition took {write_duration:?}, expected < 10ms"
     );
 }
 
@@ -225,12 +223,10 @@ async fn test_concurrent_read_locks() {
     // Verify all tasks completed successfully and quickly
     for result in results {
         let (task_id, is_mainnet, duration) = result.unwrap();
-        assert!(!is_mainnet, "Task {} should see devnet", task_id);
+        assert!(!is_mainnet, "Task {task_id} should see devnet");
         assert!(
             duration < Duration::from_millis(50),
-            "Task {} took {:?}, expected < 50ms",
-            task_id,
-            duration
+            "Task {task_id} took {duration:?}, expected < 50ms"
         );
     }
 }
@@ -277,13 +273,11 @@ async fn test_write_lock_blocks_reads() {
 
     assert!(
         read_duration >= Duration::from_millis(100),
-        "Read task should have been blocked for ~100ms, but took {:?}",
-        read_duration
+        "Read task should have been blocked for ~100ms, but took {read_duration:?}"
     );
     assert!(
         read_duration < Duration::from_millis(200),
-        "Read task blocked too long: {:?}",
-        read_duration
+        "Read task blocked too long: {read_duration:?}"
     );
 }
 
@@ -335,12 +329,10 @@ async fn test_parallel_state_creation_under_load() {
     // Verify all completed without timeout
     for result in results {
         let (task_id, success, duration) = result.unwrap();
-        assert!(success, "Task {} should not timeout", task_id);
+        assert!(success, "Task {task_id} should not timeout");
         assert!(
             duration < Duration::from_secs(2),
-            "Task {} took {:?}, expected < 2s",
-            task_id,
-            duration
+            "Task {task_id} took {duration:?}, expected < 2s"
         );
     }
 }
@@ -419,13 +411,12 @@ async fn test_high_concurrency_lock_stress() {
         }
     }
 
-    println!("Stress test completed in {:?}", total_duration);
-    println!("Max read lock acquisition time: {:?}", max_read_duration);
+    println!("Stress test completed in {total_duration:?}");
+    println!("Max read lock acquisition time: {max_read_duration:?}");
 
     // Verify no excessive blocking
     assert!(
         max_read_duration < Duration::from_secs(1),
-        "Max read duration {:?} exceeds 1s threshold",
-        max_read_duration
+        "Max read duration {max_read_duration:?} exceeds 1s threshold"
     );
 }

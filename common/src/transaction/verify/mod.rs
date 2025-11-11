@@ -1360,16 +1360,14 @@ impl Transaction {
                     // Validate and apply the AI mining operation
                     validator.validate_and_apply(payload).map_err(|e| {
                         VerificationError::AnyError(anyhow::anyhow!(
-                            "AI Mining validation failed: {}",
-                            e
+                            "AI Mining validation failed: {e}"
                         ))
                     })?;
 
                     // Update tasks and process completions
                     validator.update_tasks().map_err(|e| {
                         VerificationError::AnyError(anyhow::anyhow!(
-                            "AI Mining task update failed: {}",
-                            e
+                            "AI Mining task update failed: {e}"
                         ))
                     })?;
 

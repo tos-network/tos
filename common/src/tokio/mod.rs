@@ -188,7 +188,7 @@ where
 
             // If tokio is enabled, we spawn a blocking task
             task::spawn_blocking(f)
-                .map_err(|e| anyhow::anyhow!("Failed to spawn blocking task: {}", e))
+                .map_err(|e| anyhow::anyhow!("Failed to spawn blocking task: {e}"))
         } else {
             trace!("simulated spawn blocking");
             return async move {
@@ -240,10 +240,9 @@ where
     let old = is_in_block_in_place();
     set_in_block_in_place(true);
 
-    let res;
     cfg_if! {
         if #[cfg(feature = "tokio-multi-thread")] {
-            res = tokio::task::block_in_place(f);
+            let res = tokio::task::block_in_place(f);
         } else {
             res = f();
         }

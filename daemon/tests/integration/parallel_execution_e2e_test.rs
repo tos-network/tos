@@ -271,7 +271,7 @@ impl BlockchainTestHarness {
         // Run GHOSTDAG algorithm
         let ghostdag_data = self
             .ghostdag
-            .ghostdag(&self.storage, &vec![self.current_tip.clone()])
+            .ghostdag(&self.storage, &[self.current_tip.clone()])
             .await?;
 
         // Calculate difficulty
@@ -378,9 +378,9 @@ async fn test_parallel_execution_4_transactions() {
         let tx = create_transfer_transaction(
             &sender_keypair,
             &receiver_pubkey,
-            1 * COIN_VALUE, // 1.0 TOS per transaction
-            50,             // 50 nanoTOS fee
-            i,              // Nonce sequence: 0, 1, 2, 3
+            COIN_VALUE, // 1.0 TOS per transaction
+            50,         // 50 nanoTOS fee
+            i,          // Nonce sequence: 0, 1, 2, 3
         )
         .expect("Failed to create transaction");
 
@@ -394,7 +394,7 @@ async fn test_parallel_execution_4_transactions() {
         .await
         .expect("Failed to add block with transactions");
 
-    println!("Block created with hash: {}", block_hash);
+    println!("Block created with hash: {block_hash}");
 
     // Verify block was stored
     let block = harness
@@ -442,7 +442,7 @@ async fn test_transaction_builder_with_nonce_sequence() {
     // Create 4 transactions with nonce sequence: 0, 1, 2, 3
     let mut transactions = Vec::new();
     for i in 0..4 {
-        let tx = create_transfer_transaction(&sender, &receiver_pubkey, 1 * COIN_VALUE, 50, i)
+        let tx = create_transfer_transaction(&sender, &receiver_pubkey, COIN_VALUE, 50, i)
             .expect("Failed to create transaction");
 
         // Verify nonce
@@ -452,7 +452,7 @@ async fn test_transaction_builder_with_nonce_sequence() {
         match tx.get_data() {
             TransactionType::Transfers(transfers) => {
                 assert_eq!(transfers.len(), 1, "Should have 1 transfer");
-                assert_eq!(transfers[0].get_amount(), 1 * COIN_VALUE, "Amount mismatch");
+                assert_eq!(transfers[0].get_amount(), COIN_VALUE, "Amount mismatch");
                 assert_eq!(transfers[0].get_asset(), &TOS_ASSET, "Asset mismatch");
             }
             _ => panic!("Expected Transfers transaction type"),
@@ -485,7 +485,7 @@ async fn test_block_creation_with_transactions() {
 
     let mut transactions = Vec::new();
     for i in 0..4 {
-        let tx = create_transfer_transaction(&sender, &receiver_pubkey, 1 * COIN_VALUE, 50, i)
+        let tx = create_transfer_transaction(&sender, &receiver_pubkey, COIN_VALUE, 50, i)
             .expect("Failed to create transaction");
         transactions.push(tx);
     }
@@ -496,7 +496,7 @@ async fn test_block_creation_with_transactions() {
         .await
         .expect("Failed to add block");
 
-    println!("Block created: {}", block_hash);
+    println!("Block created: {block_hash}");
 
     // Verify block was stored
     let block = harness
@@ -506,7 +506,7 @@ async fn test_block_creation_with_transactions() {
         .expect("Failed to get block");
 
     assert_eq!(block.hash(), block_hash);
-    println!("✓ Block stored with hash: {}", block_hash);
+    println!("✓ Block stored with hash: {block_hash}");
 
     // Verify transactions were stored
     let stored_txs = block.get_transactions();
@@ -518,14 +518,12 @@ async fn test_block_creation_with_transactions() {
         assert_eq!(
             original.hash(),
             stored.hash(),
-            "Transaction {} hash mismatch",
-            i
+            "Transaction {i} hash mismatch"
         );
         assert_eq!(
             original.get_nonce(),
             stored.get_nonce(),
-            "Transaction {} nonce mismatch",
-            i
+            "Transaction {i} nonce mismatch"
         );
     }
     println!("✓ All transaction hashes and nonces verified");

@@ -34,7 +34,7 @@ fn test_tiered_gas_pricing() {
     let short_gas = short_payload.calculate_content_gas_cost();
     let expected_short = (100 * SHORT_CONTENT_GAS_RATE).max(MIN_TRANSACTION_COST);
     assert_eq!(short_gas, expected_short);
-    println!("✓ Short content (100 bytes): {} nanoTOS", short_gas);
+    println!("✓ Short content (100 bytes): {short_gas} nanoTOS");
 
     // Test 2: Medium content pricing (200-1000 bytes)
     let medium_content = "B".repeat(500); // 500 bytes
@@ -50,7 +50,7 @@ fn test_tiered_gas_pricing() {
     let expected_medium = (SHORT_CONTENT_THRESHOLD as u64 * SHORT_CONTENT_GAS_RATE)
         + ((500 - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE);
     assert_eq!(medium_gas, expected_medium.max(MIN_TRANSACTION_COST));
-    println!("✓ Medium content (500 bytes): {} nanoTOS", medium_gas);
+    println!("✓ Medium content (500 bytes): {medium_gas} nanoTOS");
 
     // Test 3: Long content pricing (1000+ bytes)
     let long_content = "C".repeat(1500); // 1500 bytes
@@ -67,7 +67,7 @@ fn test_tiered_gas_pricing() {
         + ((MEDIUM_CONTENT_THRESHOLD - SHORT_CONTENT_THRESHOLD) as u64 * MEDIUM_CONTENT_GAS_RATE)
         + ((1500 - MEDIUM_CONTENT_THRESHOLD) as u64 * LONG_CONTENT_GAS_RATE);
     assert_eq!(long_gas, expected_long.max(MIN_TRANSACTION_COST));
-    println!("✓ Long content (1500 bytes): {} nanoTOS", long_gas);
+    println!("✓ Long content (1500 bytes): {long_gas} nanoTOS");
 
     // Verify fee increment
     assert!(
@@ -106,10 +106,7 @@ fn test_reputation_system() {
     assert_eq!(score, 10000);
     assert_eq!(reputation.reputation_score, 10000);
 
-    println!(
-        "✓ High reputation account score: {} (scaled, 10000 = 1.0)",
-        score
-    );
+    println!("✓ High reputation account score: {score} (scaled, 10000 = 1.0)");
 
     // Test permission checks
     assert!(reputation.can_participate_in_difficulty(&DifficultyLevel::Beginner));
@@ -129,8 +126,7 @@ fn test_reputation_system() {
     assert!(!new_reputation.can_participate_in_difficulty(&DifficultyLevel::Beginner));
 
     println!(
-        "✓ New account correctly restricted: score = {} (< {} minimum)",
-        new_score, MIN_REPUTATION_FOR_BASIC
+        "✓ New account correctly restricted: score = {new_score} (< {MIN_REPUTATION_FOR_BASIC} minimum)"
     );
 
     println!("=== Reputation System Test PASSED ===\n");
@@ -209,8 +205,8 @@ fn test_secure_gas_calculation() {
         "Should meet minimum cost"
     );
 
-    println!("✓ High reputation gas cost: {} nanoTOS", high_rep_gas);
-    println!("✓ Low reputation gas cost: {} nanoTOS", low_rep_gas);
+    println!("✓ High reputation gas cost: {high_rep_gas} nanoTOS");
+    println!("✓ Low reputation gas cost: {low_rep_gas} nanoTOS");
     println!(
         "✓ Fee difference: {}x",
         low_rep_gas as f64 / high_rep_gas as f64
@@ -289,13 +285,13 @@ fn test_final_reward_calculation() {
     assert!(medium_quality_reward > low_quality_reward);
     assert!(high_quality_reward > base_reward); // Should have quality bonus
 
-    println!("✓ Base reward: {} nanoTOS", base_reward);
-    println!("✓ High quality (95%): {} nanoTOS", high_quality_reward);
-    println!("✓ Medium quality (85%): {} nanoTOS", medium_quality_reward);
-    println!("✓ Low quality (70%): {} nanoTOS", low_quality_reward);
+    println!("✓ Base reward: {base_reward} nanoTOS");
+    println!("✓ High quality (95%): {high_quality_reward} nanoTOS");
+    println!("✓ Medium quality (85%): {medium_quality_reward} nanoTOS");
+    println!("✓ Low quality (70%): {low_quality_reward} nanoTOS");
 
     let quality_bonus = high_quality_reward as f64 / base_reward as f64;
-    println!("✓ Quality bonus multiplier: {:.2}x", quality_bonus);
+    println!("✓ Quality bonus multiplier: {quality_bonus:.2}x");
 
     println!("=== Final Reward Calculation Test PASSED ===\n");
 }
@@ -339,7 +335,7 @@ fn test_economic_incentive_balance() {
         final_reward,
         final_reward as f64 / 1_000_000_000.0
     );
-    println!("✓ Profit ratio: {:.2}x", profit_ratio);
+    println!("✓ Profit ratio: {profit_ratio:.2}x");
 
     // Verify economic incentives
     assert!(
@@ -366,7 +362,7 @@ fn test_economic_incentive_balance() {
     let low_final_reward = calculate_final_reward(low_base_reward, 75, &low_rep);
     let low_profit_ratio = low_final_reward as f64 / low_gas_cost as f64;
 
-    println!("✓ Low reputation profit ratio: {:.2}x", low_profit_ratio);
+    println!("✓ Low reputation profit ratio: {low_profit_ratio:.2}x");
 
     // Low reputation users should have lower profits or losses to incentivize reputation improvement
     assert!(
@@ -472,7 +468,7 @@ async fn test_workflow_with_security_model() -> Result<()> {
         miner_share,
         miner_share as f64 / 1_000_000_000.0
     );
-    println!("  - Profit ratio: {:.2}x", profit_ratio);
+    println!("  - Profit ratio: {profit_ratio:.2}x");
 
     // Verify profitability of new model
     assert!(profit_ratio > 1.0, "New model should be profitable");
@@ -517,7 +513,7 @@ fn test_spam_prevention() {
         minimal_gas >= MIN_TRANSACTION_COST,
         "Should meet minimum transaction cost"
     );
-    println!("✓ Minimum fee enforced: {} nanoTOS", minimal_gas);
+    println!("✓ Minimum fee enforced: {minimal_gas} nanoTOS");
 
     // Test high cost for spam content
     let spam_content = "spam ".repeat(400); // 2000 bytes spam content

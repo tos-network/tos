@@ -132,7 +132,7 @@ impl ContractStorage for MockProvider {
 async fn test_tako_executor_hello_world() {
     // Load the hello-world ELF contract from test fixtures
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let contract_path = format!("{}/tests/fixtures/hello_world.so", manifest_dir);
+    let contract_path = format!("{manifest_dir}/tests/fixtures/hello_world.so");
     let bytecode =
         std::fs::read(&contract_path).expect("Failed to load hello-world contract from fixtures");
 
@@ -185,7 +185,7 @@ async fn test_tako_executor_hello_world() {
 async fn test_multi_executor_format_detection() {
     // Load ELF contract from test fixtures
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let contract_path = format!("{}/tests/fixtures/hello_world.so", manifest_dir);
+    let contract_path = format!("{manifest_dir}/tests/fixtures/hello_world.so");
     let elf_bytecode =
         std::fs::read(&contract_path).expect("Failed to load hello-world contract from fixtures");
 
@@ -205,7 +205,7 @@ async fn test_multi_executor_format_detection() {
 async fn test_multi_executor_execution() {
     // Load ELF contract from test fixtures
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let contract_path = format!("{}/tests/fixtures/hello_world.so", manifest_dir);
+    let contract_path = format!("{manifest_dir}/tests/fixtures/hello_world.so");
     let bytecode =
         std::fs::read(&contract_path).expect("Failed to load hello-world contract from fixtures");
 
@@ -239,7 +239,7 @@ async fn test_multi_executor_execution() {
 #[tokio::test]
 async fn test_gas_metering() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let contract_path = format!("{}/tests/fixtures/hello_world.so", manifest_dir);
+    let contract_path = format!("{manifest_dir}/tests/fixtures/hello_world.so");
     let bytecode =
         std::fs::read(&contract_path).expect("Failed to load hello-world contract from fixtures");
 
@@ -284,7 +284,7 @@ async fn test_contract_with_storage() {
     // For now, just verify the hello-world contract can execute
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let contract_path = format!("{}/tests/fixtures/hello_world.so", manifest_dir);
+    let contract_path = format!("{manifest_dir}/tests/fixtures/hello_world.so");
     let bytecode = std::fs::read(&contract_path).expect("Failed to load contract from fixtures");
 
     let mut provider = MockProvider::new();
