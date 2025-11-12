@@ -1,3 +1,4 @@
+#![allow(clippy::unimplemented)]
 // GHOSTDAG JSON Test Loader
 //
 // This module provides infrastructure for loading and executing JSON-based GHOSTDAG tests.
@@ -80,7 +81,6 @@
 // ```
 
 
-#![allow(clippy::unimplemented)]
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;

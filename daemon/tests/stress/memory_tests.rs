@@ -1,7 +1,7 @@
+#![allow(clippy::unimplemented)]
 // Memory Stress Tests
 // Tests memory usage and leak detection under various conditions
 
-#![allow(clippy::unimplemented)]
 
 use std::time::Instant;
 

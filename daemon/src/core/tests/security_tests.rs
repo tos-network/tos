@@ -1,3 +1,4 @@
+#![allow(clippy::unimplemented)]
 // Security Tests for TOS Daemon Core
 // These tests verify critical security properties, particularly merkle root validation
 //
@@ -6,7 +7,6 @@
 // IMPORTANT: These tests verify fixes for HIGH SEVERITY security vulnerabilities
 
 
-#![allow(clippy::unimplemented)]
 #[cfg(test)]
 #[allow(unused)]
 mod security_tests {

@@ -1,3 +1,4 @@
+#![allow(clippy::unimplemented)]
 // GHOSTDAG DAG Structure Tests
 //
 // These tests verify GHOSTDAG consensus with complex DAG structures including:
@@ -7,7 +8,6 @@
 // - Expected blue_score, blue_work, and selected parent calculations
 
 
-#![allow(clippy::unimplemented)]
 #[cfg(test)]
 mod ghostdag_dag_tests {
     use crate::core::{

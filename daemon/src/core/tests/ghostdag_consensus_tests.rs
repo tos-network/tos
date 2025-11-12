@@ -1,3 +1,4 @@
+#![allow(clippy::unimplemented)]
 // GHOSTDAG Consensus Migration Tests
 // Tests for consensus-critical GHOSTDAG logic (blue_score/blue_work)
 //
@@ -5,7 +6,6 @@
 // instead of legacy chain-based cumulative difficulty.
 
 
-#![allow(clippy::unimplemented)]
 #[cfg(test)]
 mod ghostdag_consensus_tests {
     use crate::core::{

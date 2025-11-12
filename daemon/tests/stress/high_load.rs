@@ -1,8 +1,8 @@
+#![allow(clippy::unimplemented)]
 // High Load Stress Tests
 // Tests system behavior under high block rates and large DAG structures
 
 
-#![allow(clippy::unimplemented)]
 use std::time::{Duration, Instant};
 
 /// Stress Test 1: High block rate (100+ blocks/sec)
