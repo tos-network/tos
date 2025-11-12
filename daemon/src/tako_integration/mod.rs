@@ -5,6 +5,7 @@ mod executor_adapter;
 mod loader;
 pub mod precompile_cost;
 mod precompile_verifier;
+pub mod transaction_cost;
 /// TOS Kernel(TAKO) integration module for TOS blockchain.
 ///
 /// This module provides the adapter layer that bridges TOS blockchain's contract infrastructure
@@ -49,3 +50,4 @@ pub use precompile_verifier::{
     estimate_precompile_cost, verify_all_precompiles, verify_precompile_instruction,
 };
 pub use storage::TosStorageAdapter;
+pub use transaction_cost::{estimate_transaction_cost, validate_transaction_cost, TransactionCost};
