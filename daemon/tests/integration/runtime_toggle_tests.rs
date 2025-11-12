@@ -60,7 +60,8 @@ fn test_cross_process_environment_isolation() {
 
     // Verify that the function is callable and returns a boolean
     let current_state = parallel_execution_enabled();
-    assert!(current_state || !current_state);
+    // Simply verify the function is callable and assign the result
+    let _: bool = current_state;
 
     // Verify that calling multiple times returns same value (cached)
     for _ in 0..100 {

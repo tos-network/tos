@@ -5,6 +5,8 @@
 //
 // IMPORTANT: These tests verify fixes for HIGH SEVERITY security vulnerabilities
 
+
+#![allow(clippy::unimplemented)]
 #[cfg(test)]
 #[allow(unused)]
 mod security_tests {

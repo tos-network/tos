@@ -2,6 +2,8 @@
 // Tests GHOSTDAG algorithm with real storage and complex scenarios
 
 /// Test 1: GHOSTDAG with multiple merging blocks
+
+#![allow(clippy::unimplemented)]
 #[tokio::test]
 #[ignore] // Requires full storage implementation
 async fn test_ghostdag_multiple_merging() {

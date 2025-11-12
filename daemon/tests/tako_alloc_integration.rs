@@ -2,6 +2,8 @@
 //!
 //! Tests dynamic memory allocation in actual TOS Kernel(TAKO) with heap regions
 
+
+#![allow(clippy::unimplemented)]
 #![cfg(test)]
 
 use anyhow::Result;

@@ -4,6 +4,8 @@
 // These tests verify that consensus decisions use GHOSTDAG semantics
 // instead of legacy chain-based cumulative difficulty.
 
+
+#![allow(clippy::unimplemented)]
 #[cfg(test)]
 mod ghostdag_consensus_tests {
     use crate::core::{
