@@ -18,7 +18,6 @@
 ///     ↓
 /// Total compute budget required
 /// ```
-
 use super::precompile_cost;
 use std::error::Error;
 
@@ -220,9 +219,18 @@ mod tests {
         let bytecode = vec![0u8; 5_000];
 
         // Ed25519 + Schnorr + BLS
-        let ed25519_id = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let schnorr_id = [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let bls_id = [6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let ed25519_id = [
+            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let schnorr_id = [
+            4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let bls_id = [
+            6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
 
         let ed25519_data = vec![1u8, 0]; // 1 signature
         let schnorr_data = vec![1u8]; // 1 signature
@@ -291,9 +299,6 @@ mod tests {
 
         assert_eq!(estimate_contract_cost(&bytecode1), CONTRACT_COST_PER_KB);
         assert_eq!(estimate_contract_cost(&bytecode2), CONTRACT_COST_PER_KB);
-        assert_eq!(
-            estimate_contract_cost(&bytecode3),
-            2 * CONTRACT_COST_PER_KB
-        );
+        assert_eq!(estimate_contract_cost(&bytecode3), 2 * CONTRACT_COST_PER_KB);
     }
 }

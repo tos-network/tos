@@ -112,15 +112,17 @@ pub fn estimate_single_precompile_cost(
         // Cost = BASE_COST + (threshold × PER_SIGNATURE_COST)
         5 if program_id[1..].iter().all(|&b| b == 0) => {
             let threshold = instruction_data[0] as u64;
-            Ok(costs::THRESHOLD_MULTISIG_BASE_COST
-                .saturating_add(threshold.saturating_mul(costs::THRESHOLD_MULTISIG_PER_SIGNATURE_COST)))
+            Ok(costs::THRESHOLD_MULTISIG_BASE_COST.saturating_add(
+                threshold.saturating_mul(costs::THRESHOLD_MULTISIG_PER_SIGNATURE_COST),
+            ))
         }
         // BLS Fast Aggregate: [num_signers: u8, ...]
         // Cost = BASE_COST + (num_signers × PER_SIGNER_COST)
         6 if program_id[1..].iter().all(|&b| b == 0) => {
             let num_signers = instruction_data[0] as u64;
-            Ok(costs::BLS_FAST_AGGREGATE_BASE_COST
-                .saturating_add(num_signers.saturating_mul(costs::BLS_FAST_AGGREGATE_PER_SIGNER_COST)))
+            Ok(costs::BLS_FAST_AGGREGATE_BASE_COST.saturating_add(
+                num_signers.saturating_mul(costs::BLS_FAST_AGGREGATE_PER_SIGNER_COST),
+            ))
         }
         _ => Err("Unknown precompile program ID".into()),
     }
@@ -365,12 +367,30 @@ mod tests {
     #[test]
     fn test_estimate_transaction_cost_all_precompiles() {
         // Program IDs for all 6 precompiles
-        let ed25519_program_id = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let secp256k1_program_id = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let secp256r1_program_id = [113, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let schnorr_program_id = [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let threshold_program_id = [5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let bls_program_id = [6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let ed25519_program_id = [
+            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let secp256k1_program_id = [
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let secp256r1_program_id = [
+            113, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0,
+        ];
+        let schnorr_program_id = [
+            4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let threshold_program_id = [
+            5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let bls_program_id = [
+            6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
 
         // Instruction data
         let ed25519_data = vec![1u8, 0]; // 1 signature
@@ -402,7 +422,8 @@ mod tests {
             + costs::SECP256K1_COST
             + costs::SECP256R1_COST
             + costs::SCHNORR_RISTRETTO_COST
-            + (costs::THRESHOLD_MULTISIG_BASE_COST + 2 * costs::THRESHOLD_MULTISIG_PER_SIGNATURE_COST)
+            + (costs::THRESHOLD_MULTISIG_BASE_COST
+                + 2 * costs::THRESHOLD_MULTISIG_PER_SIGNATURE_COST)
             + (costs::BLS_FAST_AGGREGATE_BASE_COST + 2 * costs::BLS_FAST_AGGREGATE_PER_SIGNER_COST);
 
         assert_eq!(cost, expected);
@@ -412,12 +433,30 @@ mod tests {
     #[test]
     fn test_is_precompile_program_id() {
         // Valid precompiles
-        let ed25519 = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let secp256k1 = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let secp256r1 = [113, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let schnorr = [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let threshold = [5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let bls = [6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let ed25519 = [
+            3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let secp256k1 = [
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let secp256r1 = [
+            113, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0,
+        ];
+        let schnorr = [
+            4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let threshold = [
+            5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let bls = [
+            6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
 
         assert!(is_precompile_program_id(&ed25519));
         assert!(is_precompile_program_id(&secp256k1));
@@ -427,11 +466,17 @@ mod tests {
         assert!(is_precompile_program_id(&bls));
 
         // Invalid precompile (unknown ID)
-        let invalid = [99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let invalid = [
+            99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
         assert!(!is_precompile_program_id(&invalid));
 
         // Invalid precompile (non-zero tail)
-        let invalid2 = [3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let invalid2 = [
+            3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
         assert!(!is_precompile_program_id(&invalid2));
     }
 }
