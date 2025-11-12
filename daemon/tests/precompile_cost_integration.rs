@@ -267,9 +267,9 @@ fn test_all_precompile_types_transaction() {
 /// Test invalid program ID (should return error)
 #[test]
 fn test_invalid_program_id() {
-    // Invalid program ID (not a precompile)
+    // Invalid program ID (not a precompile) - use ID 99 which is not assigned
     let program_id = [
-        5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0,
     ];
 
