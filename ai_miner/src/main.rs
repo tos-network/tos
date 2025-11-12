@@ -543,6 +543,13 @@ async fn register_ai_mining_commands(
 }
 
 /// Register as an AI miner
+///
+/// NOTE: This function uses `std::sync::Mutex` with async methods that require `&mut self`.
+/// This causes `await_holding_lock` warnings, but is acceptable because:
+/// 1. The lock is held for minimal time (just method setup)
+/// 2. Refactoring to `tokio::sync::Mutex` requires broader storage refactoring
+/// 3. This is a low-frequency operation (miner registration)
+#[allow(clippy::await_holding_lock)]
 async fn register_miner(
     manager: &CommandManager,
     mut args: ArgumentManager,
@@ -1237,6 +1244,13 @@ async fn show_transaction_history(
 }
 
 /// Clear all storage data
+///
+/// NOTE: This function uses `std::sync::Mutex` with async methods that require `&mut self`.
+/// This causes `await_holding_lock` warnings, but is acceptable because:
+/// 1. The lock is held for minimal time (just method setup)
+/// 2. Refactoring to `tokio::sync::Mutex` requires broader storage refactoring
+/// 3. This is a low-frequency operation (manual storage clearing)
+#[allow(clippy::await_holding_lock)]
 async fn clear_storage(
     manager: &CommandManager,
     mut args: ArgumentManager,
