@@ -3,7 +3,6 @@
 //!
 //! Tests dynamic memory allocation in actual TOS Kernel(TAKO) with heap regions
 
-
 #![cfg(test)]
 
 use anyhow::Result;

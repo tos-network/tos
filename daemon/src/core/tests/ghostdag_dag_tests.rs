@@ -7,7 +7,6 @@
 // - Multiple parents with different topological orders
 // - Expected blue_score, blue_work, and selected parent calculations
 
-
 #[cfg(test)]
 mod ghostdag_dag_tests {
     use crate::core::{
