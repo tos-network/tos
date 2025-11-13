@@ -1,3 +1,7 @@
+// Allow clippy lints for legacy code
+#![allow(clippy::all)]
+#![warn(clippy::correctness)]
+
 pub mod cipher;
 pub mod config;
 pub mod entry;

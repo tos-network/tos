@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 use tempdir::TempDir;
-use tokio::sync::RwLock;
+use tos_common::tokio::sync::RwLock;
 
 use tos_common::{
     account::{VersionedBalance, VersionedNonce},

@@ -8,6 +8,8 @@
 // 4. DAA window calculations work correctly
 // 5. Timestamp manipulation resistance works
 
+#![allow(clippy::result_large_err)]
+
 use crate::integration::test_helpers::{DAATestHarness, TestStorage};
 use tos_daemon::core::error::BlockchainError;
 use tos_daemon::core::ghostdag::daa::{

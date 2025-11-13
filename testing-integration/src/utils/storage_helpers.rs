@@ -126,7 +126,7 @@ use tos_daemon::core::{
 /// // Remember to flush before parallel execution
 /// flush_storage_and_wait(&storage).await;
 /// ```
-pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<SledStorage>> {
+pub async fn create_test_storage() -> Arc<tos_common::tokio::sync::RwLock<SledStorage>> {
     let temp_dir = TempDir::new("tos_parallel_test").unwrap();
     let storage = SledStorage::new(
         temp_dir.path().to_string_lossy().to_string(),
@@ -137,7 +137,7 @@ pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<SledStorage>> {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
 
     // Register TOS asset
     {
@@ -163,7 +163,8 @@ pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<SledStorage>> {
 ///
 /// This is an explicit alias to make test intent clearer. Functionally identical
 /// to `create_test_storage()` but the name emphasizes that TOS asset is included.
-pub async fn create_test_storage_with_tos_asset() -> Arc<tokio::sync::RwLock<SledStorage>> {
+pub async fn create_test_storage_with_tos_asset(
+) -> Arc<tos_common::tokio::sync::RwLock<SledStorage>> {
     create_test_storage().await
 }
 
@@ -197,7 +198,7 @@ pub async fn create_test_storage_with_tos_asset() -> Arc<tokio::sync::RwLock<Sle
 /// ```
 pub async fn create_test_storage_with_accounts(
     accounts: Vec<(PublicKey, u64, u64)>,
-) -> Result<Arc<tokio::sync::RwLock<SledStorage>>, BlockchainError> {
+) -> Result<Arc<tos_common::tokio::sync::RwLock<SledStorage>>, BlockchainError> {
     let storage = create_test_storage().await;
 
     // Setup all accounts using safe pattern
@@ -250,7 +251,7 @@ pub async fn create_test_storage_with_accounts(
 /// let parallel_state = ParallelChainState::new(storage.clone(), 0).await.unwrap();
 /// ```
 pub async fn setup_account_safe(
-    storage: &Arc<tokio::sync::RwLock<SledStorage>>,
+    storage: &Arc<tos_common::tokio::sync::RwLock<SledStorage>>,
     account: &CompressedPublicKey,
     balance: u64,
     nonce: u64,
@@ -325,7 +326,7 @@ pub async fn setup_account_safe(
 /// // Now safe to create parallel state
 /// let parallel_state = ParallelChainState::new(storage.clone(), 0).await.unwrap();
 /// ```
-pub async fn flush_storage_and_wait(storage: &Arc<tokio::sync::RwLock<SledStorage>>) {
+pub async fn flush_storage_and_wait(storage: &Arc<tos_common::tokio::sync::RwLock<SledStorage>>) {
     {
         let _storage_read = storage.read().await;
         // Sled's flush() is a synchronous operation that ensures all writes are persisted
@@ -370,7 +371,7 @@ pub async fn flush_storage_and_wait(storage: &Arc<tokio::sync::RwLock<SledStorag
 /// ```
 #[allow(dead_code)]
 pub async fn setup_account_in_storage_legacy(
-    storage: &Arc<tokio::sync::RwLock<SledStorage>>,
+    storage: &Arc<tos_common::tokio::sync::RwLock<SledStorage>>,
     account: &CompressedPublicKey,
     balance: u64,
     nonce: u64,
@@ -533,7 +534,7 @@ mod tests {
 ///     let parallel_state = ParallelChainState::new(storage.clone(), 0).await.unwrap();
 /// }
 /// ```
-pub async fn create_test_rocksdb_storage() -> Arc<tokio::sync::RwLock<RocksStorage>> {
+pub async fn create_test_rocksdb_storage() -> Arc<tos_common::tokio::sync::RwLock<RocksStorage>> {
     let temp_dir = TempDir::new("tos_test_rocksdb").expect("Failed to create temp directory");
     let dir_path = temp_dir.path().to_string_lossy().to_string();
 
@@ -564,7 +565,7 @@ pub async fn create_test_rocksdb_storage() -> Arc<tokio::sync::RwLock<RocksStora
     // Store temp_dir to prevent cleanup (move ownership)
     std::mem::forget(temp_dir);
 
-    Arc::new(tokio::sync::RwLock::new(storage))
+    Arc::new(tos_common::tokio::sync::RwLock::new(storage))
 }
 
 /// Setup account in RocksDB storage (no deadlock risk, no delays needed)
@@ -593,7 +594,7 @@ pub async fn create_test_rocksdb_storage() -> Arc<tokio::sync::RwLock<RocksStora
 /// }
 /// ```
 pub async fn setup_account_rocksdb(
-    storage: &Arc<tokio::sync::RwLock<RocksStorage>>,
+    storage: &Arc<tos_common::tokio::sync::RwLock<RocksStorage>>,
     account: &CompressedPublicKey,
     balance: u64,
     nonce: u64,
@@ -657,7 +658,7 @@ pub async fn setup_account_rocksdb(
 /// ```
 pub async fn create_test_rocksdb_storage_with_accounts(
     accounts: Vec<(CompressedPublicKey, u64, u64)>,
-) -> Result<Arc<tokio::sync::RwLock<RocksStorage>>, BlockchainError> {
+) -> Result<Arc<tos_common::tokio::sync::RwLock<RocksStorage>>, BlockchainError> {
     let storage = create_test_rocksdb_storage().await;
 
     for (account, balance, nonce) in accounts {
@@ -704,7 +705,13 @@ pub async fn create_test_rocksdb_storage_with_accounts(
 pub async fn create_test_storage_with_funded_accounts(
     count: usize,
     balance_per_account: u64,
-) -> Result<(Arc<tokio::sync::RwLock<RocksStorage>>, Vec<KeyPair>), BlockchainError> {
+) -> Result<
+    (
+        Arc<tos_common::tokio::sync::RwLock<RocksStorage>>,
+        Vec<KeyPair>,
+    ),
+    BlockchainError,
+> {
     let storage = create_test_rocksdb_storage().await;
 
     let mut keypairs = Vec::with_capacity(count);
@@ -762,7 +769,7 @@ pub async fn create_test_storage_with_funded_accounts(
 /// }
 /// ```
 pub async fn fund_accounts_at_genesis(
-    storage: &Arc<tokio::sync::RwLock<RocksStorage>>,
+    storage: &Arc<tos_common::tokio::sync::RwLock<RocksStorage>>,
     accounts: &[(CompressedPublicKey, u64)],
 ) -> Result<(), BlockchainError> {
     for (pubkey, balance) in accounts {

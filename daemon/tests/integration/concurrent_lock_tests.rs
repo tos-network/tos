@@ -66,7 +66,7 @@ async fn test_no_deadlock_on_parallel_state_creation() {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
     // Test: Create ParallelChainState while holding read lock
@@ -120,7 +120,7 @@ async fn test_parallel_executor_no_deadlock_empty_batch() {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
     let (block, block_hash) = create_dummy_block();
@@ -162,7 +162,7 @@ async fn test_storage_lock_acquisition_time() {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
 
     // Measure read lock acquisition time
     let start = Instant::now();
@@ -200,7 +200,7 @@ async fn test_concurrent_read_locks() {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
 
     // Spawn 10 concurrent read tasks
     let mut handles = vec![];
@@ -248,7 +248,7 @@ async fn test_write_lock_blocks_reads() {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
 
     // Acquire write lock
     let write_guard = storage_arc.write().await;
@@ -294,7 +294,7 @@ async fn test_parallel_state_creation_under_load() {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
     // Spawn 5 concurrent tasks creating ParallelChainState
@@ -371,7 +371,7 @@ async fn test_high_concurrency_lock_stress() {
     use tos_testing_integration::utils::storage_helpers::create_test_rocksdb_storage;
 
     // Create RocksDB storage (no deadlock risk)
-    let storage_arc: std::sync::Arc<tokio::sync::RwLock<RocksStorage>> =
+    let storage_arc: std::sync::Arc<tos_common::tokio::sync::RwLock<RocksStorage>> =
         create_test_rocksdb_storage().await;
 
     // Spawn 100 concurrent read tasks

@@ -31,10 +31,10 @@ pub enum BlockType {
 
 // Serialize the extra nonce in a hexadecimal string
 pub fn serialize_extra_nonce<S: Serializer>(
-    extra_nonce: &Cow<'_, [u8; EXTRA_NONCE_SIZE]>,
+    extra_nonce: &[u8; EXTRA_NONCE_SIZE],
     s: S,
 ) -> Result<S::Ok, S::Error> {
-    s.serialize_str(&hex::encode(extra_nonce.as_ref()))
+    s.serialize_str(&hex::encode(extra_nonce))
 }
 
 // Deserialize the extra nonce from a hexadecimal string

@@ -13,6 +13,8 @@
 //! - Skip full transaction execution (not yet implemented)
 //! - Focus on scale and concurrency without deadlocks
 
+#![allow(deprecated)] // Allow usage of set_balance in tests
+
 use std::sync::Arc;
 use std::time::Instant;
 use tos_common::{

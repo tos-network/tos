@@ -5,6 +5,9 @@
 // - Building test blocks
 // - Managing GHOSTDAG and DAA test scenarios
 
+#![allow(clippy::result_large_err)]
+#![allow(clippy::assertions_on_constants)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempdir::TempDir;

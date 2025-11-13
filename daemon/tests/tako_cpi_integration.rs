@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 /// TOS Kernel(TAKO) CPI Integration Tests
 ///
 /// Tests Cross-Program Invocation (CPI) functionality with TOS Kernel(TAKO) contracts.

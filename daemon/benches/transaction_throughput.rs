@@ -135,14 +135,12 @@ async fn main() {
 
     // Benchmark 1: Sequential transaction processing
     let start = Instant::now();
-    let mut nonce = 0u64;
 
-    for _ in 0..NUM_TRANSACTIONS {
+    for nonce in 0..NUM_TRANSACTIONS {
         blockchain
-            .process_transaction(TRANSFER_AMOUNT, nonce)
+            .process_transaction(TRANSFER_AMOUNT, nonce as u64)
             .await
             .expect("Transaction should succeed");
-        nonce += 1;
     }
 
     let tx_duration = start.elapsed();

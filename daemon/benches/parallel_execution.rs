@@ -15,7 +15,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::sync::Arc;
 use tempdir::TempDir;
 use tokio::runtime::Runtime;
-use tokio::sync::RwLock;
+use tos_common::tokio::sync::RwLock;
 
 use tos_common::{
     block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},

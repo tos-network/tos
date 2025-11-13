@@ -12,6 +12,8 @@
 //! - Gas consumption measurement
 //! - Error handling and propagation
 
+#![allow(clippy::type_complexity)]
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tos_common::{

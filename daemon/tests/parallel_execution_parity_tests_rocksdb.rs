@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
+use tos_common::tokio::sync::RwLock;
 
 use tos_common::{
     block::{Block, BlockHeader, BlockVersion, TopoHeight, EXTRA_NONCE_SIZE},

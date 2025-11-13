@@ -5,6 +5,8 @@
 // Usage:
 //   cargo run --bin distribute_funds -- --accounts test_accounts.json
 
+#![allow(clippy::explicit_counter_loop)]
+
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use log::info;

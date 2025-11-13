@@ -110,7 +110,7 @@ impl<'a> AIMiningValidator<'a> {
         reward_amount: u64,
         difficulty: &DifficultyLevel,
         deadline: u64,
-        description: &String,
+        description: &str,
     ) -> AIMiningResult<()> {
         // Check if publisher is registered miner
         if !self.state.is_miner_registered(&self.source) {
@@ -189,7 +189,7 @@ impl<'a> AIMiningValidator<'a> {
         let task = AIMiningTask::new(
             task_id.clone(),
             self.source.clone(),
-            description.clone(),
+            description.to_owned(),
             reward_amount,
             difficulty.clone(),
             deadline,

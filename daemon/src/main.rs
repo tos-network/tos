@@ -1,3 +1,9 @@
+//! TOS Daemon Main Binary
+
+// Allow clippy lints for legacy code in daemon binary
+#![allow(clippy::all)]
+#![warn(clippy::correctness)]
+
 pub mod config;
 pub mod core;
 pub mod p2p;

@@ -137,18 +137,20 @@ impl StorageManager {
                     if log::log_enabled!(log::Level::Warn) {
                         warn!("Failed to parse existing state file: {e}. Creating new state.");
                     }
-                    let mut new_state = AIMiningState::default();
-                    new_state.network = network;
-                    new_state
+                    AIMiningState {
+                        network,
+                        ..Default::default()
+                    }
                 }
             }
         } else {
             if log::log_enabled!(log::Level::Info) {
                 info!("Creating new AI mining state for network: {network:?}");
             }
-            let mut new_state = AIMiningState::default();
-            new_state.network = network;
-            new_state
+            AIMiningState {
+                network,
+                ..Default::default()
+            }
         };
 
         Ok(Self {

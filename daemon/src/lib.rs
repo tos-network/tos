@@ -1,6 +1,15 @@
 // TOS Daemon Library
 // Exposes internal modules for benchmarking and testing
 
+// Allow some clippy lints for legacy code - to be fixed gradually
+#![allow(clippy::all)]
+#![warn(clippy::correctness)]
+#![allow(clippy::int_plus_one)]
+#![allow(clippy::needless_borrow)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::collapsible_else_if)]
+#![allow(clippy::uninlined_format_args)]
+
 extern crate log;
 
 pub mod config;

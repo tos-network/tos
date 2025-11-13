@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tempdir::TempDir;
 use tokio::runtime::Runtime;
-use tokio::sync::RwLock;
+use tos_common::tokio::sync::RwLock;
 
 use tos_common::{
     block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},

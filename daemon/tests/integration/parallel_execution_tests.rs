@@ -3,6 +3,8 @@
 // Phase 4: Testing and Validation
 // Comprehensive integration tests for parallel execution infrastructure
 
+#![allow(clippy::assertions_on_constants)]
+
 use std::sync::Arc;
 use tempdir::TempDir;
 use tos_common::{
@@ -68,7 +70,7 @@ async fn test_parallel_chain_state_initialization() {
 
     // Create parallel chain state
     // Wrap storage in Arc<RwLock<S>> to match new signature
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
     let (block, block_hash) = create_dummy_block();
@@ -103,7 +105,7 @@ async fn test_parallel_executor_empty_batch() {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
     let (block, block_hash) = create_dummy_block();
@@ -139,7 +141,7 @@ async fn test_parallel_state_getters() {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
     let (block, block_hash) = create_dummy_block();
@@ -194,7 +196,7 @@ async fn test_parallel_executor_with_custom_parallelism() {
 
     // Verify executors were created successfully
     // (Can't test internals directly, but ensure no panic)
-    assert!(true);
+    // Test passed if we reached this point without panic
 }
 
 // Phase 4: Extended Testing - Infrastructure tests
@@ -305,7 +307,7 @@ async fn test_parallel_state_modification_simulation() {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
     let (block, block_hash) = create_dummy_block();
@@ -366,7 +368,7 @@ async fn test_parallel_executor_batch_size_verification() {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
     let (block, block_hash) = create_dummy_block();
@@ -408,7 +410,7 @@ async fn test_parallel_state_network_caching() {
     )
     .unwrap();
 
-    let storage_arc_dev = Arc::new(tokio::sync::RwLock::new(storage_dev));
+    let storage_arc_dev = Arc::new(tos_common::tokio::sync::RwLock::new(storage_dev));
     let environment = Arc::new(Environment::new());
 
     let (block, block_hash) = create_dummy_block();
@@ -452,7 +454,7 @@ async fn test_parallel_state_network_caching() {
     )
     .unwrap();
 
-    let storage_arc_main = Arc::new(tokio::sync::RwLock::new(storage_main));
+    let storage_arc_main = Arc::new(tos_common::tokio::sync::RwLock::new(storage_main));
 
     let (block2, block_hash2) = create_dummy_block();
     let parallel_state_main =
@@ -515,7 +517,7 @@ async fn test_parallel_executor_parallelism_configuration() {
     )
     .unwrap();
 
-    let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
+    let storage_arc = Arc::new(tos_common::tokio::sync::RwLock::new(storage));
     let environment = Arc::new(Environment::new());
 
     let (block, block_hash) = create_dummy_block();

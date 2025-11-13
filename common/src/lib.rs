@@ -1,3 +1,19 @@
+// Allow some clippy lints for legacy code - to be fixed gradually
+#![allow(clippy::match_like_matches_macro)]
+#![allow(clippy::module_inception)]
+#![allow(clippy::extra_unused_lifetimes)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::result_unit_err)]
+#![allow(clippy::collapsible_match)]
+#![allow(clippy::upper_case_acronyms)]
+#![allow(clippy::owned_cow)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::single_match)]
+#![allow(clippy::needless_return)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::to_string_trait_impl)]
+
 pub mod account;
 pub mod api;
 pub mod block;

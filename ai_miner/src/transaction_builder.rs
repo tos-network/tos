@@ -1,3 +1,6 @@
+// Allow some clippy lints for AI miner code
+#![allow(clippy::too_many_arguments)]
+
 use anyhow::Result;
 use log::{debug, info, warn};
 

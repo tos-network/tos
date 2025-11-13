@@ -19,7 +19,7 @@ tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tak
 tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", branch = "main" }
 tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", branch = "main" }
 tako-sdk = { package = "tako-sdk", git = "https://github.com/tos-network/tako", branch = "main" }
-tos-tbpf = { git = "https://github.com/tos-network/tos-tbpf", branch = "main", features = ["jit"] }
+tos-tbpf = { git = "https://github.com/tos-network/tos-tbpf", rev = "54f1d35dfeab6d2a55494277b42d8a6453455ad1", features = ["jit"] }
 tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", branch = "main" }
 
 # Database backends

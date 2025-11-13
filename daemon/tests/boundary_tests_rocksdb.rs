@@ -14,6 +14,8 @@
 //! - Skip full transaction execution (not yet implemented)
 //! - Focus on state transition correctness
 
+#![allow(deprecated)] // Allow usage of set_balance in tests
+
 use std::sync::Arc;
 use tos_common::{
     block::{Block, BlockVersion, EXTRA_NONCE_SIZE},

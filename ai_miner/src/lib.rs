@@ -1,3 +1,7 @@
+// Allow clippy lints for legacy code
+#![allow(clippy::all)]
+#![warn(clippy::correctness)]
+
 //! TOS AI Miner Library
 //!
 //! This library provides components for AI mining operations on the TOS network.

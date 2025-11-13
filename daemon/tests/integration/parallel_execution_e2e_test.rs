@@ -7,6 +7,8 @@
 // 4. No "Skipping TX" errors occur
 // 5. Two-hop transfers work (A→B→X)
 
+#![allow(clippy::result_large_err)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use tempdir::TempDir;

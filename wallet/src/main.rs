@@ -2455,9 +2455,8 @@ async fn transfer_all(
             }
         ).await?;
 
-        if asset_str.is_empty() || asset_str.trim().is_empty() {
-            TOS_ASSET
-        } else if asset_str.to_uppercase() == "TOS" {
+        if asset_str.is_empty() || asset_str.trim().is_empty() || asset_str.to_uppercase() == "TOS"
+        {
             TOS_ASSET
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while reading hash from hex")?
@@ -2677,9 +2676,8 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         )
         .await?;
 
-        if asset_str.is_empty() || asset_str.trim().is_empty() {
-            TOS_ASSET
-        } else if asset_str.to_uppercase() == "TOS" {
+        if asset_str.is_empty() || asset_str.trim().is_empty() || asset_str.to_uppercase() == "TOS"
+        {
             TOS_ASSET
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while reading hash from hex")?

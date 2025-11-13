@@ -34,6 +34,7 @@ mod tests {
     }
 
     /// Test helper to update an existing cache entry
+    #[allow(dead_code)]
     fn update_test_cache(
         cache: &mut ContractCache,
         key: &[u8],

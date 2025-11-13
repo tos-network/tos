@@ -28,6 +28,8 @@
 //!
 //! - Conflicting transactions are detected (preventing incorrect parallel execution)
 //! - Independent transactions can execute in parallel (maximizing throughput)
+
+#![allow(deprecated)] // Allow usage of set_balance in tests
 //! - The system maintains consensus-critical correctness under all scenarios
 
 use std::sync::Arc;

@@ -9,6 +9,11 @@
 //! Usage:
 //!   cargo run --release --example test_tako_jit
 
+// Allow clippy lints for example code
+#![allow(clippy::type_complexity)]
+#![allow(clippy::unnecessary_literal_unwrap)]
+#![allow(unexpected_cfgs)]
+
 use std::fs;
 use std::time::Instant;
 use tos_common::crypto::Hash;
