@@ -44,10 +44,22 @@ use tos_common::{
 
 // Compile-time validation that P2P configuration constants are non-zero
 // These assertions ensure that NonZeroUsize::new_unchecked is safe to use
-const _: () = assert!(PEER_OBJECTS_CONCURRENCY > 0, "PEER_OBJECTS_CONCURRENCY must be non-zero");
-const _: () = assert!(PEER_PEERS_CACHE_SIZE > 0, "PEER_PEERS_CACHE_SIZE must be non-zero");
-const _: () = assert!(PEER_TX_CACHE_SIZE > 0, "PEER_TX_CACHE_SIZE must be non-zero");
-const _: () = assert!(PEER_BLOCK_CACHE_SIZE > 0, "PEER_BLOCK_CACHE_SIZE must be non-zero");
+const _: () = assert!(
+    PEER_OBJECTS_CONCURRENCY > 0,
+    "PEER_OBJECTS_CONCURRENCY must be non-zero"
+);
+const _: () = assert!(
+    PEER_PEERS_CACHE_SIZE > 0,
+    "PEER_PEERS_CACHE_SIZE must be non-zero"
+);
+const _: () = assert!(
+    PEER_TX_CACHE_SIZE > 0,
+    "PEER_TX_CACHE_SIZE must be non-zero"
+);
+const _: () = assert!(
+    PEER_BLOCK_CACHE_SIZE > 0,
+    "PEER_BLOCK_CACHE_SIZE must be non-zero"
+);
 
 // A RequestedObjects is a map of all objects requested from a peer
 // This is done to be awaitable with a timeout
