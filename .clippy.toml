@@ -1,0 +1,54 @@
+# TOS Network - Clippy Security Configuration
+# Reference: Round 3 audit recommendations
+# Last Updated: 2025-11-14
+#
+# Purpose: Enforce security best practices and prevent common vulnerabilities
+
+# =============================================================================
+# SECURITY: Disallowed Methods
+# =============================================================================
+# These methods are prohibited in production code to prevent panics and
+# undefined behavior. Tests are exempt via #[cfg(test)].
+
+disallowed-methods = [
+    # Unwrap/Expect - Use proper error handling with Result
+    { path = "std::option::Option::unwrap", reason = "Use .ok_or() or .ok_or_else() for proper error handling" },
+    { path = "std::option::Option::expect", reason = "Use .ok_or() or .ok_or_else() for proper error handling" },
+    { path = "std::result::Result::unwrap", reason = "Use .unwrap_or(), .unwrap_or_else(), or ? operator" },
+    { path = "std::result::Result::expect", reason = "Use pattern matching or ? operator for error propagation" },
+    { path = "std::result::Result::unwrap_err", reason = "Use pattern matching for error handling" },
+
+]
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# Allow unwrap in test code (tests should be allowed to panic)
+allow-unwrap-in-tests = true
+
+# Maximum cognitive complexity before warning
+# (Default is 25, we use 50 for complex blockchain logic)
+cognitive-complexity-threshold = 50
+
+# Maximum type complexity before warning
+type-complexity-threshold = 500
+
+# Warn on functions with too many arguments
+too-many-arguments-threshold = 8
+
+# =============================================================================
+# NOTES
+# =============================================================================
+#
+# Safe usage exceptions must be documented with SAFETY comments:
+#
+# // SAFETY: This unwrap is safe because we just inserted this key on line 123
+# // and the key cannot be removed before this point.
+# let value = map.get(&key).unwrap();
+#
+# For configuration or initialization that is guaranteed to succeed:
+#
+# // SAFETY: Config is initialized in main() before any other code runs (line 45)
+# // and never removed. This unwrap cannot fail in normal execution.
+# let config = GLOBAL_CONFIG.get().unwrap();

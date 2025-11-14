@@ -96,6 +96,7 @@ tokio = { workspace = true, features = ["macros", "signal", "time", "sync", "rt"
 tokio = { workspace = true, features = ["full"] }
 criterion = "0.6.0"
 rayon = "1.8"
+proptest = "1.4"
 
 [features]
 tokio = ["dep:tokio", "dep:tokio_with_wasm", "dep:futures", "dep:pin-project-lite"]

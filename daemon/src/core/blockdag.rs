@@ -139,7 +139,13 @@ where
     let tips_len = tips.len();
     match tips_len {
         0 => Err(BlockchainError::ExpectedTips),
-        1 => Ok(tips.into_iter().next().unwrap()),
+        1 => {
+            // SAFETY: We just checked tips_len == 1, so next() must return Some
+            Ok(tips
+                .into_iter()
+                .next()
+                .expect("ExactSizeIterator guaranteed to have 1 element"))
+        }
         _ => {
             let mut highest_blue_work = BlueWorkType::zero();
             let mut selected_tip = None;
@@ -170,7 +176,11 @@ where
     match tips_len {
         0 => Err(BlockchainError::ExpectedTips),
         1 => {
-            let hash = tips.into_iter().next().unwrap();
+            // SAFETY: We just checked tips_len == 1, so next() must return Some
+            let hash = tips
+                .into_iter()
+                .next()
+                .expect("ExactSizeIterator guaranteed to have 1 element");
             let timestamp = provider.get_timestamp_for_block_hash(hash).await?;
             Ok((hash, timestamp))
         }

@@ -1,10 +1,11 @@
 use anyhow::Result;
 use log::warn;
+use parking_lot::Mutex;
 use std::{
     borrow::Borrow,
     collections::{BTreeMap, HashMap},
     ops::{Bound, Deref, RangeBounds},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 use thiserror::Error;
 use tos_common::serializer::{Reader, ReaderError, Serializer, Writer};
@@ -113,8 +114,7 @@ pub struct Db {
 )))]
 #[derive(Debug, Error)]
 pub enum DbError {
-    #[error("An error occured on the database")]
-    Poisoned,
+    // No errors defined for non-WASM targets (using parking_lot, which doesn't poison)
 }
 
 #[cfg(all(
@@ -124,8 +124,6 @@ pub enum DbError {
 ))]
 #[derive(Debug, Error)]
 pub enum DbError {
-    #[error("An error occured on the database")]
-    Poisoned,
     #[error("Cannot access to the window object")]
     Window,
     #[error("Cannot access to the local storage object")]
@@ -203,18 +201,16 @@ impl Db {
 
     /// Returns the trees names saved in this Db.
     ///
-    /// # Errors
-    ///
-    /// Returns `DbError::Poisoned` if the mutex is poisoned.
+    /// List all tree names in this database.
     pub fn tree_names(&self) -> Result<Vec<IVec>> {
-        let trees = self.trees.lock().map_err(|_| DbError::Poisoned)?;
+        let trees = self.trees.lock();
         Ok(trees.keys().cloned().collect())
     }
 
     /// Open or create a new memory-backed Tree with its own keyspace,
     /// accessible from the `Db` via the provided identifier.
     pub fn open_tree<V: AsRef<[u8]>>(&self, name: V) -> Result<Tree> {
-        let mut trees = self.trees.lock().map_err(|_| DbError::Poisoned)?;
+        let mut trees = self.trees.lock();
         let name_ref = name.as_ref();
         match trees.get(name_ref) {
             Some(tree) => Ok(tree.clone()),
@@ -228,7 +224,7 @@ impl Db {
 
     /// Drop a tree from the `Db`, removing its keyspace.
     pub fn drop_tree<V: AsRef<[u8]>>(&self, name: V) -> Result<()> {
-        let mut trees = self.trees.lock().map_err(|_| DbError::Poisoned)?;
+        let mut trees = self.trees.lock();
         let name_ref = name.as_ref();
         match trees.remove(name_ref) {
             Some(_) => Ok(()),
@@ -286,7 +282,7 @@ impl Db {
 
     /// Export the database to a writer.
     fn export(&self, writer: &mut Writer) -> Result<()> {
-        let trees = self.trees.lock().map_err(|_| DbError::Poisoned)?;
+        let trees = self.trees.lock();
 
         // Write the default tree
         self.default.export(writer)?;
@@ -304,7 +300,7 @@ impl Db {
 
     /// Populate the database from a reader.
     fn populate(&self, reader: &mut Reader) -> Result<()> {
-        let mut trees = self.trees.lock().map_err(|_| DbError::Poisoned)?;
+        let mut trees = self.trees.lock();
 
         // Read the default tree
         self.default.populate(reader)?;
@@ -358,14 +354,14 @@ impl InnerTree {
         K: AsRef<[u8]>,
         V: Into<IVec>,
     {
-        let mut entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
+        let mut entries = self.entries.lock();
         let old = entries.insert(key.as_ref().into(), value.into());
         Ok(old)
     }
 
     /// Retrieve a value from the `Tree` if it exists.
     pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<IVec>> {
-        let entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
+        let entries = self.entries.lock();
         Ok(entries.get(key.as_ref()).cloned())
     }
 
@@ -377,37 +373,25 @@ impl InnerTree {
 
     /// Delete a value, returning the old value if it existed.
     pub fn remove<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<IVec>> {
-        let mut entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
+        let mut entries = self.entries.lock();
         Ok(entries.remove(key.as_ref()))
     }
 
     /// Returns `true` if the `Tree` contains no elements.
-    ///
-    /// # Errors
-    ///
-    /// Returns `DbError::Poisoned` if the mutex is poisoned.
     pub fn is_empty(&self) -> Result<bool> {
-        let entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
+        let entries = self.entries.lock();
         Ok(entries.is_empty())
     }
 
     /// Returns the number of elements in this tree.
-    ///
-    /// # Errors
-    ///
-    /// Returns `DbError::Poisoned` if the mutex is poisoned.
     pub fn len(&self) -> Result<usize> {
-        let entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
+        let entries = self.entries.lock();
         Ok(entries.len())
     }
 
     /// Returns the last entry (key/value) (by order) from this tree.
-    ///
-    /// # Errors
-    ///
-    /// Returns `DbError::Poisoned` if the mutex is poisoned.
     pub fn last(&self) -> Result<Option<(IVec, IVec)>> {
-        let entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
+        let entries = self.entries.lock();
         Ok(entries
             .last_key_value()
             .map(|(k, v)| (k.clone(), v.clone())))
@@ -415,7 +399,7 @@ impl InnerTree {
 
     /// Clears the `Tree`, removing all values.
     pub fn clear(&self) -> Result<()> {
-        let mut entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
+        let mut entries = self.entries.lock();
         entries.clear();
         Ok(())
     }
@@ -459,7 +443,7 @@ impl InnerTree {
 
     /// Internal function to export the tree to a writer.
     fn export(&self, writer: &mut Writer) -> Result<()> {
-        let entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
+        let entries = self.entries.lock();
 
         let len = entries.len() as u16;
         writer.write_u16(len);
@@ -473,7 +457,7 @@ impl InnerTree {
 
     /// Internal function to populate the tree from a reader.
     fn populate(&self, reader: &mut Reader) -> Result<()> {
-        let mut entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
+        let mut entries = self.entries.lock();
 
         let len = reader.read_u16()?;
         for _ in 0..len {
@@ -512,10 +496,7 @@ impl Iterator for Iter {
     type Item = Result<(IVec, IVec)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let entries = match self.tree.entries.lock() {
-            Ok(entries) => entries,
-            Err(_) => return Some(Err(DbError::Poisoned.into())),
-        };
+        let entries = self.tree.entries.lock();
 
         if self.index >= entries.len() - self.index_back {
             return None;
@@ -529,10 +510,7 @@ impl Iterator for Iter {
 
 impl DoubleEndedIterator for Iter {
     fn next_back(&mut self) -> Option<Self::Item> {
-        let entries = match self.tree.entries.lock() {
-            Ok(entries) => entries,
-            Err(_) => return Some(Err(DbError::Poisoned.into())),
-        };
+        let entries = self.tree.entries.lock();
 
         // If we reach the other bound, we stop
         if self.index >= entries.len() - self.index_back {

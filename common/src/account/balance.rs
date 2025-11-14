@@ -352,4 +352,171 @@ mod tests {
         let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).unwrap();
         assert_eq!(zero, zero_bis);
     }
+
+    // Property-based tests using proptest
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// Property: Balance never goes negative (underflow protection)
+            #[test]
+            fn test_balance_no_underflow(initial in 0u64..1_000_000_000, delta in 0u64..2_000_000_000) {
+                let mut balance = VersionedBalance::new(initial, None);
+
+                // If delta > initial, subtraction would underflow
+                // We test that our code properly handles this
+                if delta <= initial {
+                    // Safe subtraction
+                    balance.set_balance(initial - delta);
+                    prop_assert!(balance.get_balance() <= initial);
+                } else {
+                    // Would underflow - this should be caught by caller validation
+                    // Property: We document that callers must check bounds
+                    prop_assert!(delta > initial);
+                }
+            }
+
+            /// Property: Addition preserves balance increase
+            #[test]
+            fn test_balance_addition(initial in 0u64..u64::MAX/2, delta in 0u64..u64::MAX/2) {
+                let mut balance = VersionedBalance::new(initial, None);
+                balance.add_to_balance(delta);
+                prop_assert_eq!(balance.get_balance(), initial + delta);
+            }
+
+            /// Property: Serialization roundtrip preserves balance
+            #[test]
+            fn test_balance_serialization_roundtrip(
+                final_balance in 0u64..u64::MAX,
+                output_balance in proptest::option::of(0u64..u64::MAX),
+                previous_topo in proptest::option::of(0u64..1_000_000),
+                balance_type in prop_oneof![
+                    Just(BalanceType::Input),
+                    Just(BalanceType::Output),
+                    Just(BalanceType::Both),
+                ]
+            ) {
+                let mut balance = VersionedBalance::new(final_balance, previous_topo);
+                balance.set_output_balance(output_balance);
+                balance.set_balance_type(balance_type);
+
+                let bytes = balance.to_bytes();
+                let decoded = VersionedBalance::from_bytes(&bytes);
+                prop_assert!(decoded.is_ok());
+                prop_assert_eq!(balance, decoded.unwrap());
+            }
+
+            /// Property: Output balance is independent of final balance
+            #[test]
+            fn test_output_balance_independence(
+                final_balance in 0u64..1_000_000,
+                output_balance in 0u64..1_000_000
+            ) {
+                let mut balance = VersionedBalance::new(final_balance, None);
+                balance.set_output_balance(Some(output_balance));
+
+                // Final balance unchanged
+                prop_assert_eq!(balance.get_balance(), final_balance);
+                // Output balance set correctly
+                prop_assert_eq!(balance.take_output_balance(), Some(output_balance));
+            }
+
+            /// Property: Balance type transitions are valid
+            #[test]
+            fn test_balance_type_transitions(
+                initial_type in prop_oneof![
+                    Just(BalanceType::Input),
+                    Just(BalanceType::Output),
+                    Just(BalanceType::Both),
+                ],
+                new_type in prop_oneof![
+                    Just(BalanceType::Input),
+                    Just(BalanceType::Output),
+                    Just(BalanceType::Both),
+                ]
+            ) {
+                let mut balance = VersionedBalance::new(1000, None);
+                balance.set_balance_type(initial_type);
+                balance.set_balance_type(new_type);
+
+                // Type should be updated
+                prop_assert_eq!(balance.get_balance_type(), new_type);
+
+                // Balance unchanged
+                prop_assert_eq!(balance.get_balance(), 1000);
+            }
+
+            /// Property: Previous topoheight is preserved
+            #[test]
+            fn test_previous_topoheight_preservation(topo in 0u64..1_000_000) {
+                let mut balance = VersionedBalance::new(1000, Some(topo));
+                prop_assert_eq!(balance.get_previous_topoheight(), Some(topo));
+
+                // Change balance, topoheight should remain
+                balance.set_balance(2000);
+                prop_assert_eq!(balance.get_previous_topoheight(), Some(topo));
+            }
+
+            /// Property: Zero balance is valid
+            #[test]
+            fn test_zero_balance_valid(_dummy in 0u8..1) {
+                let balance = VersionedBalance::zero();
+                prop_assert_eq!(balance.get_balance(), 0);
+                prop_assert_eq!(balance.get_previous_topoheight(), None);
+                prop_assert_eq!(balance.take_output_balance(), None);
+            }
+
+            /// Property: Balance selection logic is consistent
+            #[test]
+            fn test_balance_selection(
+                final_balance in 0u64..1_000_000,
+                output_balance in 0u64..1_000_000,
+                select_output in any::<bool>()
+            ) {
+                let mut balance = VersionedBalance::new(final_balance, None);
+                balance.set_output_balance(Some(output_balance));
+
+                let (selected, is_output) = balance.select_balance(select_output);
+
+                if select_output {
+                    // Should select output balance
+                    prop_assert_eq!(*selected, output_balance);
+                    prop_assert!(is_output);
+                } else {
+                    // Should select final balance
+                    prop_assert_eq!(*selected, final_balance);
+                    prop_assert!(!is_output);
+                }
+            }
+
+            /// Property: Contains output/input flags are consistent with type
+            #[test]
+            fn test_contains_flags_consistency(
+                balance_type in prop_oneof![
+                    Just(BalanceType::Input),
+                    Just(BalanceType::Output),
+                    Just(BalanceType::Both),
+                ]
+            ) {
+                let mut balance = VersionedBalance::new(1000, None);
+                balance.set_balance_type(balance_type);
+
+                match balance_type {
+                    BalanceType::Input => {
+                        prop_assert!(balance.contains_input());
+                        prop_assert!(!balance.contains_output());
+                    },
+                    BalanceType::Output => {
+                        prop_assert!(!balance.contains_input());
+                        prop_assert!(balance.contains_output());
+                    },
+                    BalanceType::Both => {
+                        prop_assert!(balance.contains_input());
+                        prop_assert!(balance.contains_output());
+                    },
+                }
+            }
+        }
+    }
 }

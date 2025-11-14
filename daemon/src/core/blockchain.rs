@@ -2722,8 +2722,8 @@ impl<S: Storage> Blockchain<S> {
             // Cache misses result in miners needing to provide full block data via block_hex param.
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64;
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0); // Fallback to 0 on clock error (cache will miss)
 
             self.transaction_cache
                 .put(
@@ -2776,8 +2776,8 @@ impl<S: Storage> Blockchain<S> {
         // Cache misses result in block reconstruction failure (miner must provide block_hex).
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0); // Fallback to 0 on clock error (cache will miss)
 
         if let Some(transactions) = self.transaction_cache.get(merkle_root, current_time).await {
             // Found cached transactions - reconstruct block

@@ -313,3 +313,114 @@ mod tests {
         assert_eq!(difficulty.to_string(), "71135336520");
     }
 }
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Property: Addition is commutative (a + b = b + a)
+        #[test]
+        fn test_addition_commutative(a in 0u64..u64::MAX/2, b in 0u64..u64::MAX/2) {
+            let va = VarUint::from(a);
+            let vb = VarUint::from(b);
+            prop_assert_eq!(va + vb, vb + va);
+        }
+
+        /// Property: Addition with zero is identity (a + 0 = a)
+        #[test]
+        fn test_addition_identity(a in 0u64..u64::MAX) {
+            let va = VarUint::from(a);
+            let zero = VarUint::zero();
+            prop_assert_eq!(va + zero, va);
+        }
+
+        /// Property: Subtraction is inverse of addition (a + b - b = a)
+        #[test]
+        fn test_subtraction_inverse(a in 0u64..u64::MAX/2, b in 0u64..u64::MAX/2) {
+            let va = VarUint::from(a);
+            let vb = VarUint::from(b);
+            let sum = va + vb;
+            prop_assert_eq!(sum - vb, va);
+        }
+
+        /// Property: Multiplication by one is identity (a * 1 = a)
+        #[test]
+        fn test_multiplication_identity(a in 0u64..u64::MAX) {
+            let va = VarUint::from(a);
+            let one = VarUint::one();
+            prop_assert_eq!(va * one, va);
+        }
+
+        /// Property: Multiplication by zero yields zero (a * 0 = 0)
+        #[test]
+        fn test_multiplication_zero(a in 0u64..u64::MAX) {
+            let va = VarUint::from(a);
+            let zero = VarUint::zero();
+            prop_assert_eq!(va * zero, zero);
+        }
+
+        /// Property: Multiplication is commutative (a * b = b * a)
+        #[test]
+        fn test_multiplication_commutative(a in 0u64..1000000u64, b in 0u64..1000000u64) {
+            let va = VarUint::from(a);
+            let vb = VarUint::from(b);
+            prop_assert_eq!(va * vb, vb * va);
+        }
+
+        /// Property: Division by self yields one (a / a = 1, for a != 0)
+        #[test]
+        fn test_division_self(a in 1u64..u64::MAX) {
+            let va = VarUint::from(a);
+            let one = VarUint::one();
+            prop_assert_eq!(va / va, one);
+        }
+
+        /// Property: Serialization roundtrip preserves value
+        #[test]
+        fn test_serialization_roundtrip(a in 0u64..u64::MAX) {
+            let va = VarUint::from(a);
+            let bytes = va.to_bytes();
+            let vb = VarUint::read(&mut Reader::new(&bytes)).unwrap();
+            prop_assert_eq!(va, vb);
+        }
+
+        /// Property: Serialization roundtrip for u128 values
+        #[test]
+        fn test_serialization_roundtrip_u128(a in 0u128..u128::MAX) {
+            let va = VarUint::from(a);
+            let bytes = va.to_bytes();
+            let vb = VarUint::read(&mut Reader::new(&bytes)).unwrap();
+            prop_assert_eq!(va, vb);
+        }
+
+        /// Property: Bit shift left then right preserves value (a << n >> n = a)
+        #[test]
+        fn test_shift_roundtrip(a in 0u64..u64::MAX/2, shift in 0u64..32) {
+            let va = VarUint::from(a);
+            let shifted_left = va << shift;
+            let shifted_back = shifted_left >> shift;
+            prop_assert_eq!(shifted_back, va);
+        }
+
+        /// Property: Ordering is consistent with u64 ordering
+        #[test]
+        fn test_ordering_consistency(a in 0u64..u64::MAX, b in 0u64..u64::MAX) {
+            let va = VarUint::from(a);
+            let vb = VarUint::from(b);
+            prop_assert_eq!(va < vb, a < b);
+            prop_assert_eq!(va > vb, a > b);
+            prop_assert_eq!(va == vb, a == b);
+        }
+
+        /// Property: Remainder is always less than divisor (a % b < b, for b != 0)
+        #[test]
+        fn test_remainder_bounds(a in 0u64..u64::MAX, b in 1u64..u64::MAX) {
+            let va = VarUint::from(a);
+            let vb = VarUint::from(b);
+            let remainder = va % vb;
+            prop_assert!(remainder < vb);
+        }
+    }
+}

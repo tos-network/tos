@@ -281,6 +281,56 @@ jobs:
             -D clippy::unimplemented \
             -W clippy::all
 
+  # Security checks - strict lints for production code
+  security-checks:
+    name: Security Checks (Strict Clippy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Security Clippy - Production Code Only
+        run: |
+          echo "=========================================="
+          echo "Security Clippy Checks - Production Code"
+          echo "=========================================="
+          echo "Enforcing security best practices (will fail on violations):"
+          echo "  - unwrap_used: Prevent panic in production code"
+          echo "  - expect_used: Prevent panic in production code"
+          echo "  - panic: Prevent explicit panic calls"
+          echo "  - disallowed_methods: Prevent unsafe time operations"
+          echo ""
+          echo "Note: Test code is exempt from these checks"
+          cargo clippy --workspace --lib --bins -- \
+            -D clippy::unwrap_used \
+            -D clippy::expect_used \
+            -D clippy::panic \
+            -D clippy::disallowed_methods \
+            -D warnings
+
   # Build verification
   build:
     name: Build Check

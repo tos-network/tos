@@ -30,11 +30,19 @@ impl CompactBlockCache {
     /// Create a new compact block cache
     ///
     /// # Arguments
-    /// * `capacity` - Maximum number of compact blocks to cache
+    /// * `capacity` - Maximum number of compact blocks to cache (must be non-zero)
     /// * `entry_timeout` - Maximum time to keep entries before eviction
+    ///
+    /// # Panics
+    /// Panics if capacity is zero (should never happen with reasonable config)
     pub fn new(capacity: usize, entry_timeout: Duration) -> Self {
+        // SAFETY: Capacity is always > 0 in production (default is 1000)
+        // Panic here is acceptable as it indicates a configuration error at startup
+        let non_zero_cap = capacity
+            .try_into()
+            .expect("CompactBlockCache capacity must be non-zero");
         Self {
-            cache: Arc::new(RwLock::new(LruCache::new(capacity.try_into().unwrap()))),
+            cache: Arc::new(RwLock::new(LruCache::new(non_zero_cap))),
             entry_timeout,
         }
     }

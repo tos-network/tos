@@ -70,7 +70,7 @@ proptest! {
         ),
     ) {
         // Create 10 accounts
-        let mut accounts = vec![initial_supply / 10; 10];
+        let mut accounts = [initial_supply / 10; 10];
 
         for (from_idx, to_idx, amount) in transfers {
             if from_idx == to_idx {

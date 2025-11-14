@@ -8,13 +8,21 @@ fn main() {
         hash[0..7].to_string()
     } else {
         // Run git command to get the commit hash
-        let output = Command::new("git")
+        // SAFETY: Build script - failure defaults to "unknown" instead of panicking
+        let output = match Command::new("git")
             .args(["rev-parse", "--short", "HEAD"])
             .output()
-            .expect("Failed to execute git command");
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            }
+            _ => {
+                // Git command failed or not available - use fallback
+                "unknown".to_string()
+            }
+        };
 
-        // Convert the commit hash to a string
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
+        output
     };
 
     // Set the result as an environment variable for the build

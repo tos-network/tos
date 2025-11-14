@@ -41,9 +41,14 @@ futures = { workspace = true }
 cfg-if = { workspace = true }
 sha3 = { workspace = true }
 tokio-tungstenite-wasm = { workspace = true, optional = true }
+parking_lot = "0.12"
 
 # test dependencies
 tempfile = { version = "3.8", optional = true }
+
+[dev-dependencies]
+proptest = "1.4"
+parking_lot = "0.12"
 
 # WASM dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]

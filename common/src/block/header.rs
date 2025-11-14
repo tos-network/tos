@@ -172,7 +172,9 @@ impl BlockHeader {
     /// Apply miner work to this block header
     pub fn apply_miner_work(&mut self, work: MinerWork) {
         let (_, timestamp, nonce, miner, extra_nonce) = work.take();
-        self.miner = miner.unwrap().into_owned();
+        // SAFETY: MinerWork deserialization (line 348 in miner.rs) always sets miner to Some.
+        // When created from RPC, miner field is validated and guaranteed to be present.
+        self.miner = miner.expect("MinerWork miner field must be present after deserialization").into_owned();
         self.timestamp = timestamp;
         self.nonce = nonce;
         self.extra_nonce = extra_nonce;

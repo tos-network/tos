@@ -949,4 +949,147 @@ mod tests {
         // Should fail (depth 33 > MAX_DEPTH 32)
         assert!(DataElement::from_bytes(&bytes33).is_err());
     }
+
+    // Property-based tests using proptest
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        // Generate simple DataValue for testing
+        fn arb_data_value() -> impl Strategy<Value = DataValue> {
+            prop_oneof![
+                any::<bool>().prop_map(DataValue::Bool),
+                any::<u8>().prop_map(DataValue::U8),
+                any::<u16>().prop_map(DataValue::U16),
+                any::<u32>().prop_map(DataValue::U32),
+                any::<u64>().prop_map(DataValue::U64),
+                "[a-zA-Z0-9]{1,20}".prop_map(DataValue::String),
+            ]
+        }
+
+        // Generate DataElement with bounded depth to avoid exceeding MAX_DEPTH
+        fn arb_data_element_bounded(
+            depth: u32,
+            max_depth: u32,
+        ) -> impl Strategy<Value = DataElement> {
+            let leaf = arb_data_value().prop_map(DataElement::Value);
+
+            if depth >= max_depth {
+                // Stop recursion at max depth
+                leaf.boxed()
+            } else {
+                leaf.prop_recursive(
+                    depth,
+                    max_depth * 5,
+                    3, // Max elements per collection
+                    |inner| {
+                        prop_oneof![
+                            // Array variant
+                            prop::collection::vec(inner.clone(), 0..3).prop_map(DataElement::Array),
+                            // Fields variant (small maps)
+                            prop::collection::hash_map(arb_data_value(), inner, 0..2)
+                                .prop_map(DataElement::Fields),
+                        ]
+                    },
+                )
+                .boxed()
+            }
+        }
+
+        proptest! {
+            /// Property: Serialization roundtrip preserves value
+            #[test]
+            fn test_serialization_roundtrip(element in arb_data_element_bounded(0, 10)) {
+                let bytes = element.to_bytes();
+                let decoded = DataElement::from_bytes(&bytes);
+                prop_assert!(decoded.is_ok());
+                prop_assert_eq!(element, decoded.unwrap());
+            }
+
+            /// Property: Depth limit is enforced
+            #[test]
+            fn test_depth_limit_enforced(depth in 33u32..50) {
+                // Create nested array structure exceeding MAX_DEPTH
+                let mut bytes = Vec::new();
+                for _ in 0..depth {
+                    bytes.push(1); // Array type
+                    bytes.push(1); // Size = 1
+                }
+                bytes.push(0); // Value type
+                bytes.push(2); // U8 type
+                bytes.push(42);
+
+                let result = DataElement::from_bytes(&bytes);
+
+                // Should fail with DepthLimitExceeded
+                prop_assert!(result.is_err());
+                if let Err(ReaderError::DepthLimitExceeded { max, actual }) = result {
+                    prop_assert_eq!(max, MAX_DEPTH);
+                    prop_assert!(actual > MAX_DEPTH);
+                } else {
+                    return Err(TestCaseError::fail(format!("Expected DepthLimitExceeded, got {:?}", result)));
+                }
+            }
+
+            /// Property: Valid depth structures succeed
+            #[test]
+            fn test_valid_depth_structures(depth in 1u32..=MAX_DEPTH as u32) {
+                // Create nested array structure within MAX_DEPTH
+                let mut bytes = Vec::new();
+                for _ in 0..depth {
+                    bytes.push(1); // Array type
+                    bytes.push(1); // Size = 1
+                }
+                bytes.push(0); // Value type
+                bytes.push(2); // U8 type
+                bytes.push(42);
+
+                let result = DataElement::from_bytes(&bytes);
+                prop_assert!(result.is_ok(), "Depth {} should be valid (MAX_DEPTH={})", depth, MAX_DEPTH);
+            }
+
+            /// Property: Empty arrays serialize correctly
+            #[test]
+            fn test_empty_arrays(size in 0usize..10) {
+                let elements: Vec<DataElement> = (0..size)
+                    .map(|_| DataElement::Array(vec![]))
+                    .collect();
+                let array = DataElement::Array(elements);
+
+                let bytes = array.to_bytes();
+                let decoded = DataElement::from_bytes(&bytes);
+                prop_assert!(decoded.is_ok());
+                prop_assert_eq!(array, decoded.unwrap());
+            }
+
+            /// Property: Value type roundtrip
+            #[test]
+            fn test_value_type_roundtrip(value in arb_data_value()) {
+                let element = DataElement::Value(value.clone());
+                let bytes = element.to_bytes();
+                let decoded = DataElement::from_bytes(&bytes);
+
+                prop_assert!(decoded.is_ok());
+                if let Ok(DataElement::Value(decoded_value)) = decoded {
+                    prop_assert_eq!(value, decoded_value);
+                } else {
+                    return Err(TestCaseError::fail("Expected Value variant"));
+                }
+            }
+
+            /// Property: kind() method is consistent with variant
+            #[test]
+            fn test_kind_consistency(element in arb_data_element_bounded(0, 8)) {
+                let kind = element.kind();
+                match (&element, &kind) {
+                    (DataElement::Value(_), ElementType::Value(_)) => {},
+                    (DataElement::Array(_), ElementType::Array) => {},
+                    (DataElement::Fields(_), ElementType::Fields) => {},
+                    _ => return Err(TestCaseError::fail(
+                        format!("Kind mismatch: {:?} vs {:?}", element, kind)
+                    )),
+                }
+            }
+        }
+    }
 }

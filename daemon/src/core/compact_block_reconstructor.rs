@@ -236,20 +236,19 @@ impl CompactBlockReconstructor {
             }
         }
 
-        // Verify all transactions are present
-        for (index, tx_opt) in transactions.iter().enumerate() {
-            if tx_opt.is_none() {
-                return Err(BlockchainError::Any(anyhow::anyhow!(
-                    "Transaction at index {} still missing after reconstruction",
-                    index
-                )));
-            }
-        }
-
+        // Verify all transactions are present and collect them
         let complete_transactions: Vec<Arc<Transaction>> = transactions
             .into_iter()
-            .map(|opt_tx| opt_tx.unwrap())
-            .collect();
+            .enumerate()
+            .map(|(index, opt_tx)| {
+                opt_tx.ok_or_else(|| {
+                    BlockchainError::Any(anyhow::anyhow!(
+                        "Transaction at index {} still missing after reconstruction",
+                        index
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         let block = Block::new(
             Immutable::Owned(compact_block.header),
