@@ -93,7 +93,12 @@ pub fn get_tos_tempdir() -> TempDir {
 ///
 /// This should not be used in production code - use proper storage configuration instead.
 /// Only compiled when not in test mode.
+///
+/// # Panics
+/// Panics if both "tos-storage" and "tos" temporary directory creation fail.
+/// This is acceptable as temporary directory failure is a fatal system configuration error.
 #[cfg(not(test))]
+#[allow(clippy::expect_used)]
 pub fn get_tos_tempdir() -> TempDir {
     TempDir::new("tos-storage").unwrap_or_else(|_| {
         // Fallback to system temp dir if tos-storage creation fails

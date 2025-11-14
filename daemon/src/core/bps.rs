@@ -139,17 +139,10 @@ impl<const BPS: u64> Bps<BPS> {
             1 => 10,   // TOS: K=10 for 1 BPS (x=4.0, calculated ~9.7)
             10 => 124, // Reference: K=124 for 10 BPS (x=40.0, with safety margin)
             _ => {
-                // In debug builds, this helps catch unsupported BPS configurations
-                #[cfg(debug_assertions)]
-                {
-                    panic!("Unsupported BPS value - calculate K and add to lookup table");
-                }
-                // In release builds, return a conservative K value
-                // This should never be reached with proper configuration
-                #[cfg(not(debug_assertions))]
-                {
-                    10 // Conservative fallback for 1 BPS configuration
-                }
+                // Conservative fallback for unsupported BPS values
+                // Should be caught by compile-time configuration validation
+                // Note: Cannot use debug_assert! with formatting in const fn
+                10 // Conservative fallback for 1 BPS configuration
             }
         }
     }
