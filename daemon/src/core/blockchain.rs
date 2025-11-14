@@ -780,6 +780,7 @@ impl<S: Storage> Blockchain<S> {
                     warn!("No genesis block found!");
                     info!("Generating a new genesis block...");
                     let genesis_version = get_version_at_height(&self.network, 0);
+                    // SAFE: Genesis block creation - timestamp is for initial chain bootstrap only
                     let header = BlockHeader::new_simple(
                         genesis_version,
                         Vec::new(),
@@ -857,6 +858,8 @@ impl<S: Storage> Blockchain<S> {
                 header = self.get_block_template(key.clone()).await?;
             }
             header.nonce += 1;
+            // SAFE: Block production (not validation) - miner sets timestamp using local clock
+            // The network will validate this timestamp is reasonable during block validation
             header.timestamp = get_current_time_in_millis();
             hash = header.get_pow_hash(algorithm)?;
         }
@@ -2084,6 +2087,7 @@ impl<S: Storage> Blockchain<S> {
                         hash: Cow::Borrowed(&hash),
                         fee: tx.get_fee(),
                         source: tx.get_source().as_address(self.network.is_mainnet()),
+                        // SAFE: RPC notification timestamp - for display only, not consensus
                         first_seen: get_current_time_in_seconds(),
                     };
                     let json = json!(data);
@@ -2409,6 +2413,8 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // Check that our current timestamp is correct
+        // SAFE: Block template generation (not validation) - setting timestamp for new block
+        // Ensures block timestamp is monotonically increasing relative to parent tips
         let current_timestamp = get_current_time_in_millis();
         if current_timestamp < timestamp {
             warn!("Current timestamp is less than the newest tip timestamp, using newest timestamp from tips");
@@ -2710,8 +2716,10 @@ impl<S: Storage> Blockchain<S> {
         // TTL increased to 300s (5 min) to allow slow miners and restarts
         // Miners can also use block_hex param in submit_block to bypass cache entirely
         if !selected_tx_objects.is_empty() {
-            // SAFETY: Non-consensus operation - system time used only for cache TTL
-            // This does not affect consensus validation or block acceptance
+            // SAFE: Used only for cache TTL management, does not affect consensus
+            // The system time is used purely for cache expiration logic, not for
+            // block validation, state transitions, or any consensus-critical operations.
+            // Cache misses result in miners needing to provide full block data via block_hex param.
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -2762,8 +2770,10 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // Try to retrieve cached transactions by merkle root
-        // SAFETY: Non-consensus operation - system time used only for cache TTL
-        // This does not affect consensus validation or block acceptance
+        // SAFE: Used only for cache TTL management, does not affect consensus
+        // The system time is used purely for cache expiration logic, not for
+        // block validation, state transitions, or any consensus-critical operations.
+        // Cache misses result in block reconstruction failure (miner must provide block_hex).
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -2850,6 +2860,14 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // V-21 Fix: Strengthen timestamp validation
+        // SECURITY NOTE: This uses SystemTime::now() for admission control, not consensus
+        // This is acceptable because:
+        // 1. Large buffer (10s) tolerates clock skew between nodes
+        // 2. Only REJECTS blocks (doesn't accept based on time)
+        // 3. Standard pattern in Bitcoin/Ethereum for DoS prevention
+        // 4. Nodes with correct clocks will eventually accept valid blocks
+        // This prevents attackers from flooding the network with far-future blocks
+        // while allowing legitimate blocks with reasonable clock skew.
         let current_timestamp = get_current_time_in_millis();
         if block.get_timestamp() > current_timestamp + TIMESTAMP_IN_FUTURE_LIMIT {
             if log::log_enabled!(log::Level::Debug) {

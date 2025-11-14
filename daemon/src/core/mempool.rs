@@ -308,6 +308,7 @@ impl Mempool {
 
         let sorted_tx = SortedTx {
             size,
+            // SAFE: Mempool metadata - used for sorting and metrics only, not consensus
             first_seen: get_current_time_in_seconds(),
             tx,
         };

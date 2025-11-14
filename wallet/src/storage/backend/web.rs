@@ -202,9 +202,13 @@ impl Db {
     }
 
     /// Returns the trees names saved in this Db.
-    pub fn tree_names(&self) -> Vec<IVec> {
-        let trees = self.trees.lock().expect("Poisoned");
-        trees.keys().cloned().collect()
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Poisoned` if the mutex is poisoned.
+    pub fn tree_names(&self) -> Result<Vec<IVec>> {
+        let trees = self.trees.lock().map_err(|_| DbError::Poisoned)?;
+        Ok(trees.keys().cloned().collect())
     }
 
     /// Open or create a new memory-backed Tree with its own keyspace,
@@ -378,20 +382,32 @@ impl InnerTree {
     }
 
     /// Returns `true` if the `Tree` contains no elements.
-    pub fn is_empty(&self) -> bool {
-        let entries = self.entries.lock().expect("Poisoned");
-        entries.is_empty()
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Poisoned` if the mutex is poisoned.
+    pub fn is_empty(&self) -> Result<bool> {
+        let entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
+        Ok(entries.is_empty())
     }
 
     /// Returns the number of elements in this tree.
-    pub fn len(&self) -> usize {
-        let entries = self.entries.lock().expect("Poisoned");
-        entries.len()
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Poisoned` if the mutex is poisoned.
+    pub fn len(&self) -> Result<usize> {
+        let entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
+        Ok(entries.len())
     }
 
     /// Returns the last entry (key/value) (by order) from this tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Poisoned` if the mutex is poisoned.
     pub fn last(&self) -> Result<Option<(IVec, IVec)>> {
-        let entries = self.entries.lock().expect("Poisoned");
+        let entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
         Ok(entries
             .last_key_value()
             .map(|(k, v)| (k.clone(), v.clone())))
@@ -546,15 +562,15 @@ mod tests {
         assert_eq!(tree.get("test").unwrap().unwrap(), b"test".into());
         assert_eq!(tree.remove("test").unwrap().unwrap(), b"test".into());
         assert!(tree.get("test").unwrap().is_none());
-        assert!(tree.is_empty());
-        assert_eq!(tree.len(), 0);
+        assert!(tree.is_empty().unwrap());
+        assert_eq!(tree.len().unwrap(), 0);
 
         tree.insert("tos", "sonimret").unwrap();
-        assert_eq!(tree.len(), 1);
+        assert_eq!(tree.len().unwrap(), 1);
 
         tree.clear().unwrap();
-        assert!(tree.is_empty());
-        assert_eq!(tree.len(), 0);
+        assert!(tree.is_empty().unwrap());
+        assert_eq!(tree.len().unwrap(), 0);
 
         let mut iter = tree.iter();
         assert!(iter.next().is_none());
@@ -594,13 +610,13 @@ mod tests {
 
         let db = open("test").unwrap();
         assert_eq!(db.name(), "test");
-        assert!(db.tree_names().is_empty());
+        assert!(db.tree_names().unwrap().is_empty());
         assert!(db.import(&buffer).is_ok());
-        assert_eq!(db.tree_names().len(), 1);
+        assert_eq!(db.tree_names().unwrap().len(), 1);
 
         let tree = db.open_tree("test").unwrap();
         assert_eq!(tree.name(), b"test".into());
-        assert_eq!(tree.len(), 2);
+        assert_eq!(tree.len().unwrap(), 2);
         assert_eq!(tree.get("test").unwrap().unwrap(), b"test".into());
         assert_eq!(tree.contains_key("tos").unwrap(), true);
         assert_eq!(tree.get("tos").unwrap().unwrap(), b"sonimret".into());
@@ -609,7 +625,7 @@ mod tests {
         db.flush().unwrap();
 
         db.drop_tree("test").unwrap();
-        assert_eq!(db.tree_names().len(), 0);
+        assert_eq!(db.tree_names().unwrap().len(), 0);
     }
 
     #[test]
