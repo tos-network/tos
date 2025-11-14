@@ -147,6 +147,8 @@ impl PlaintextData {
     pub fn encrypt_in_place_with_aead(mut self, key: &SharedKey) -> AEADCipher {
         let c = ChaCha20Poly1305::new(&key.0.into());
         // SAFETY: Vec capacity is sufficient for in-place encryption, this expect cannot fail
+        #[allow(clippy::disallowed_methods)]
+        #[allow(clippy::expect_used)]
         c.encrypt_in_place(NONCE.into(), &[], &mut self.0)
             .expect("Vec capacity guaranteed for in-place AEAD encryption");
 

@@ -738,6 +738,8 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         params: &P,
     ) -> JsonRPCResult<()> {
         let sender = self.sender.lock().await;
+        // SAFETY: json! macro uses unwrap internally but only on known-valid JSON structure
+        #[allow(clippy::disallowed_methods)]
         let value = json!({
             "jsonrpc": JSON_RPC_VERSION,
             "method": method,

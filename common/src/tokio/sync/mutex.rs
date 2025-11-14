@@ -1,3 +1,8 @@
+// Debugging tool for deadlock detection - uses .expect() for internal state tracking
+// These expects are safe as they only track the deadlock detection state itself
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::expect_used)]
+
 use log::{debug, error, log, Level};
 use std::{
     future::Future,

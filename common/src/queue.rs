@@ -52,6 +52,10 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
         let key = self.order.pop_front()?;
         let value = self.keys.remove(&key)?;
 
+        // SAFETY: Arc::try_unwrap is safe here because we just removed the key from both
+        // order (VecDeque) and keys (HashMap), so this is the last reference.
+        #[allow(clippy::disallowed_methods)]
+        #[allow(clippy::expect_used)]
         let key = Arc::try_unwrap(key).expect("Failed to unwrap Arc");
         Some((key, value))
     }
@@ -71,6 +75,10 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
         let value = self.keys.remove(key)?;
         let key = self.remove_order_internal(key)?;
 
+        // SAFETY: Arc::try_unwrap is safe here because we just removed the key from both
+        // order (VecDeque) and keys (HashMap), so this is the last reference.
+        #[allow(clippy::disallowed_methods)]
+        #[allow(clippy::expect_used)]
         let key = Arc::try_unwrap(key).expect("Failed to unwrap Arc");
         Some((key, value))
     }

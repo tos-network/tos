@@ -24,6 +24,9 @@ fn get_ansi_regex() -> &'static Regex {
         // This pattern is a compile-time constant and guaranteed to be valid
         Regex::new("\x1B\\[[0-9;]*[A-Za-z]").unwrap_or_else(|_| {
             // Fallback to a simpler pattern if the main one somehow fails
+            // SAFETY: Empty regex pattern is always valid
+            #[allow(clippy::disallowed_methods)]
+            #[allow(clippy::unwrap_used)]
             Regex::new("").unwrap()
         })
     })
