@@ -8,6 +8,12 @@ use crate::{
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
 
+// SECURITY FIX: Maximum nesting depth for DataElement to prevent stack overflow DoS attacks
+// Reference: Audit finding R2-C1-05
+// Attackers could craft deeply nested structures (up to 255 levels) causing stack overflow
+// 32 levels is sufficient for legitimate use cases while preventing stack exhaustion
+pub const MAX_DEPTH: usize = 32;
+
 #[derive(Debug, Error)]
 pub enum DataConversionError {
     #[error("Expected a value")]
@@ -189,6 +195,44 @@ impl DataElement {
             _ => Err(DataConversionError::ExpectedMap),
         }
     }
+
+    // SECURITY FIX: Depth-limited recursion helper to prevent stack overflow DoS
+    // Reference: Audit finding R2-C1-05
+    // This internal method tracks recursion depth and fails if it exceeds MAX_DEPTH
+    fn read_with_depth(reader: &mut Reader, depth: usize) -> Result<Self, ReaderError> {
+        // Check depth limit before recursing
+        if depth > MAX_DEPTH {
+            return Err(ReaderError::DepthLimitExceeded {
+                max: MAX_DEPTH,
+                actual: depth,
+            });
+        }
+
+        Ok(match reader.read_u8()? {
+            0 => Self::Value(DataValue::read(reader)?),
+            1 => {
+                // Array variant - recurse with incremented depth
+                let size = reader.read_u8()?;
+                let mut values = Vec::new();
+                for _ in 0..size {
+                    values.push(DataElement::read_with_depth(reader, depth + 1)?)
+                }
+                Self::Array(values)
+            }
+            2 => {
+                // Fields (map) variant - recurse with incremented depth
+                let size = reader.read_u8()?;
+                let mut fields = HashMap::new();
+                for _ in 0..size {
+                    let key = DataValue::read(reader)?;
+                    let value = DataElement::read_with_depth(reader, depth + 1)?;
+                    fields.insert(key, value);
+                }
+                Self::Fields(fields)
+            }
+            _ => return Err(ReaderError::InvalidValue),
+        })
+    }
 }
 
 impl Serializer for DataElement {
@@ -196,28 +240,9 @@ impl Serializer for DataElement {
     // Otherwise an attacker could generate big depth with high size until max limit
     // which can create OOM on low devices
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        Ok(match reader.read_u8()? {
-            0 => Self::Value(DataValue::read(reader)?),
-            1 => {
-                let size = reader.read_u8()?;
-                let mut values = Vec::new();
-                for _ in 0..size {
-                    values.push(DataElement::read(reader)?)
-                }
-                Self::Array(values)
-            }
-            2 => {
-                let size = reader.read_u8()?;
-                let mut fields = HashMap::new();
-                for _ in 0..size {
-                    let key = DataValue::read(reader)?;
-                    let value = DataElement::read(reader)?;
-                    fields.insert(key, value);
-                }
-                Self::Fields(fields)
-            }
-            _ => return Err(ReaderError::InvalidValue),
-        })
+        // SECURITY FIX: Start depth-limited recursion at depth 0
+        // Reference: Audit finding R2-C1-05 - Prevent unbounded recursion DoS
+        Self::read_with_depth(reader, 0)
     }
 
     fn write(&self, writer: &mut Writer) {
@@ -760,5 +785,168 @@ mod tests {
         assert_eq!(dummy.age, 25);
         assert!(dummy.is_active);
         assert_eq!(dummy.friends, vec![0, 1, 2, 3, 4]);
+    }
+
+    // SECURITY TEST: Test depth limit enforcement (Audit finding R2-C1-05)
+    #[test]
+    fn test_depth_limit_exceeded() {
+        // Create a deeply nested structure that exceeds MAX_DEPTH (32)
+        // This tests that the DoS attack via unbounded recursion is prevented
+        let mut bytes = Vec::new();
+
+        // Build 33 levels of nested arrays (exceeds MAX_DEPTH by 1)
+        for _ in 0..33 {
+            bytes.push(1); // Array type tag
+            bytes.push(1); // Array size = 1 element
+        }
+        // Add a value at the deepest level
+        bytes.push(0); // Value type tag
+        bytes.push(2); // ValueType::U8
+        bytes.push(42); // Value = 42
+
+        // Attempt to deserialize - should fail with DepthLimitExceeded
+        let result = DataElement::from_bytes(&bytes);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            ReaderError::DepthLimitExceeded { max, actual } => {
+                assert_eq!(max, MAX_DEPTH);
+                assert_eq!(actual, 33);
+            }
+            err => panic!("Expected DepthLimitExceeded, got: {err:?}"),
+        }
+    }
+
+    // SECURITY TEST: Test maximum allowed depth succeeds
+    #[test]
+    fn test_depth_limit_at_maximum() {
+        // Create a structure at exactly MAX_DEPTH (32) - should succeed
+        let mut bytes = Vec::new();
+
+        // Build 32 levels of nested arrays (exactly MAX_DEPTH)
+        for _ in 0..32 {
+            bytes.push(1); // Array type tag
+            bytes.push(1); // Array size = 1 element
+        }
+        // Add a value at the deepest level
+        bytes.push(0); // Value type tag
+        bytes.push(2); // ValueType::U8
+        bytes.push(42); // Value = 42
+
+        // Should succeed at exactly MAX_DEPTH
+        let result = DataElement::from_bytes(&bytes);
+        assert!(result.is_ok(), "Should allow nesting up to MAX_DEPTH");
+
+        // Verify the structure is correct
+        let mut current = &result.unwrap();
+        for _ in 0..32 {
+            match current {
+                DataElement::Array(arr) => {
+                    assert_eq!(arr.len(), 1);
+                    current = &arr[0];
+                }
+                DataElement::Value(DataValue::U8(val)) => {
+                    assert_eq!(*val, 42);
+                    return;
+                }
+                _ => panic!("Unexpected structure"),
+            }
+        }
+    }
+
+    // SECURITY TEST: Test mixed Array and Fields nesting respects depth
+    #[test]
+    fn test_depth_limit_mixed_structures() {
+        // Create a mix of Arrays and Fields that exceeds depth limit
+        let mut bytes = Vec::new();
+
+        // Alternate between Array and Fields for 33 levels
+        for i in 0..33 {
+            if i % 2 == 0 {
+                // Array
+                bytes.push(1); // Array type tag
+                bytes.push(1); // Array size = 1
+            } else {
+                // Fields (map)
+                bytes.push(2); // Fields type tag
+                bytes.push(1); // Map size = 1
+                               // Key (simple string value)
+                bytes.push(1); // ValueType::String
+                bytes.push(1); // String length = 1
+                bytes.push(b'k'); // Key = "k"
+            }
+        }
+        // Add a value at the deepest level
+        bytes.push(0); // Value type tag
+        bytes.push(2); // ValueType::U8
+        bytes.push(99); // Value = 99
+
+        // Should fail - mixed nesting still counts toward depth
+        let result = DataElement::from_bytes(&bytes);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            ReaderError::DepthLimitExceeded { max, actual } => {
+                assert_eq!(max, MAX_DEPTH);
+                assert_eq!(actual, 33);
+            }
+            err => panic!("Expected DepthLimitExceeded, got: {err:?}"),
+        }
+    }
+
+    // SECURITY TEST: Test that shallow structures still work correctly
+    #[test]
+    fn test_shallow_structure_works() {
+        // Test that normal, shallow structures are unaffected by the security fix
+        let json = r#"{"level1": {"level2": {"level3": [1, 2, 3]}}}"#;
+        let element: DataElement = serde_json::from_str(json).unwrap();
+
+        // Verify it serializes/deserializes correctly
+        let bytes = element.to_bytes();
+        let element2 = DataElement::from_bytes(&bytes).unwrap();
+        assert_eq!(element, element2);
+    }
+
+    // SECURITY TEST: Test depth counting is accurate
+    #[test]
+    fn test_depth_counting_accuracy() {
+        // Create structure at depth 31 (just under limit)
+        let mut bytes = Vec::new();
+        for _ in 0..31 {
+            bytes.push(1); // Array
+            bytes.push(1); // Size = 1
+        }
+        bytes.push(0); // Value
+        bytes.push(2); // U8
+        bytes.push(10);
+
+        // Should succeed (depth 31 <= MAX_DEPTH 32)
+        assert!(DataElement::from_bytes(&bytes).is_ok());
+
+        // Add one more level (depth 32, at limit)
+        let mut bytes32 = Vec::new();
+        for _ in 0..32 {
+            bytes32.push(1);
+            bytes32.push(1);
+        }
+        bytes32.push(0);
+        bytes32.push(2);
+        bytes32.push(10);
+
+        // Should succeed (depth 32 == MAX_DEPTH)
+        assert!(DataElement::from_bytes(&bytes32).is_ok());
+
+        // Add one more level (depth 33, exceeds limit)
+        let mut bytes33 = Vec::new();
+        for _ in 0..33 {
+            bytes33.push(1);
+            bytes33.push(1);
+        }
+        bytes33.push(0);
+        bytes33.push(2);
+        bytes33.push(10);
+
+        // Should fail (depth 33 > MAX_DEPTH 32)
+        assert!(DataElement::from_bytes(&bytes33).is_err());
     }
 }

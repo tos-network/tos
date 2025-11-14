@@ -187,6 +187,7 @@ pub enum AIMiningError {
     InvalidTaskConfig(String),
     InsufficientStake { required: u64, available: u64 },
     TaskNotFound(Hash),
+    AnswerNotFound(Hash),
     MinerNotRegistered(CompressedPublicKey),
     ValidationFailed(String),
     SystemError(String),
@@ -208,6 +209,7 @@ impl std::fmt::Display for AIMiningError {
                 )
             }
             AIMiningError::TaskNotFound(hash) => write!(f, "Task not found: {hash:?}"),
+            AIMiningError::AnswerNotFound(hash) => write!(f, "Answer not found: {hash:?}"),
             AIMiningError::MinerNotRegistered(address) => {
                 write!(f, "Miner not registered: {address:?}")
             }

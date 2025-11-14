@@ -20,6 +20,8 @@ pub enum ReaderError {
     ExceedsMaxArraySize { max: usize, actual: usize },
     #[error("Map size {actual} exceeds maximum allowed size {max}")]
     ExceedsMaxMapSize { max: usize, actual: usize },
+    #[error("Nesting depth {actual} exceeds maximum allowed depth {max}")]
+    DepthLimitExceeded { max: usize, actual: usize },
     #[error(transparent)]
     TryFromSliceError(#[from] TryFromSliceError),
     #[error(transparent)]

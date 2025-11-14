@@ -158,15 +158,62 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
             .map(|(_, bal)| bal)
             .unwrap_or(0);
 
+        // SECURITY FIX (R2-C1-03): Integer overflow protection in balance delta calculations
+        //
         // Calculate virtual balance (actual balance + pending deltas)
         // This prevents double-spend when a contract calls transfer multiple times
+        //
+        // Previously, this code used unchecked casting from i128 to u64:
+        //   actual_balance.saturating_add(*delta as u64)
+        // This could cause integer overflow or incorrect balance calculations.
+        //
+        // New implementation uses explicit overflow checks and bounds validation.
         let delta = self.balance_deltas.get(&from_pubkey).unwrap_or(&0);
-        let virtual_balance = if *delta < 0 {
-            // Subtract the negative delta (amount already staged for sending)
-            actual_balance.saturating_sub(delta.unsigned_abs() as u64)
-        } else {
-            // Add the positive delta (amount already staged for receiving)
-            actual_balance.saturating_add(*delta as u64)
+        let virtual_balance = match delta.cmp(&0) {
+            std::cmp::Ordering::Less => {
+                // Negative delta: subtract from balance with underflow protection
+                let abs_delta = delta.unsigned_abs();
+
+                // Check if delta magnitude exceeds actual balance
+                if abs_delta > actual_balance as u128 {
+                    return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "Negative delta {} exceeds actual balance {}",
+                            delta, actual_balance
+                        ),
+                    ))));
+                }
+
+                // Safe subtraction: we've verified abs_delta <= actual_balance
+                actual_balance - (abs_delta as u64)
+            }
+            std::cmp::Ordering::Greater => {
+                // Positive delta: add to balance with overflow protection
+
+                // Check if delta exceeds u64::MAX (would overflow when casting)
+                if *delta > u64::MAX as i128 {
+                    return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("Delta {} exceeds maximum allowed value (u64::MAX)", delta),
+                    ))));
+                }
+
+                // Use checked_add to detect overflow when adding to actual_balance
+                actual_balance.checked_add(*delta as u64).ok_or_else(|| {
+                    EbpfError::SyscallError(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "Balance overflow: {} + {} exceeds u64::MAX",
+                            actual_balance, delta
+                        ),
+                    )))
+                })?
+            }
+            std::cmp::Ordering::Equal => {
+                // Zero delta: return actual balance unchanged
+                actual_balance
+            }
         };
 
         // Verify sufficient virtual balance
@@ -488,5 +535,231 @@ mod tests {
         // All transfers should be staged
         let transfers = adapter.take_pending_transfers();
         assert_eq!(transfers.len(), 3);
+    }
+
+    // ============================================================================
+    // SECURITY TESTS (R2-C1-03): Integer Overflow Protection
+    // ============================================================================
+    //
+    // These tests verify that the balance delta calculation code properly
+    // handles integer overflow scenarios that could lead to:
+    // 1. Incorrect balance calculations
+    // 2. Privilege escalation (creating balance out of thin air)
+    // 3. DoS attacks (panics from arithmetic overflow)
+    //
+    // Reference: Security Audit Finding R2-C1-03
+    // Fixed: Lines 161-219 (balance delta calculation with overflow checks)
+
+    #[test]
+    fn test_security_i128_max_delta_causes_error() {
+        // SECURITY TEST: Verify that i128::MAX delta is rejected (not overflow/panic)
+        //
+        // Attack scenario: Malicious contract tries to cause overflow by
+        // manipulating balance_deltas to contain i128::MAX
+        let mut provider = MockProvider::new();
+        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+
+        provider.set_balance(from.clone(), Hash::zero(), 1000);
+        provider.set_balance(to.clone(), Hash::zero(), 0);
+
+        let mut adapter = TosAccountAdapter::new(&provider, 100);
+
+        // Manually inject i128::MAX into balance_deltas (simulating attack)
+        adapter.balance_deltas.insert(from.clone(), i128::MAX);
+
+        // Attempt transfer - should return error, not panic/overflow
+        let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 100);
+
+        assert!(result.is_err(), "Expected error for i128::MAX delta");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("exceeds maximum allowed value") || err_msg.contains("overflow"),
+            "Error message should mention overflow or maximum value, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_security_negative_delta_exceeding_balance_causes_error() {
+        // SECURITY TEST: Verify that negative delta exceeding balance is rejected
+        //
+        // Attack scenario: Contract has staged outgoing transfers exceeding balance
+        let mut provider = MockProvider::new();
+        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+
+        // Account has 1000 units
+        provider.set_balance(from.clone(), Hash::zero(), 1000);
+        provider.set_balance(to.clone(), Hash::zero(), 0);
+
+        let mut adapter = TosAccountAdapter::new(&provider, 100);
+
+        // Manually inject negative delta larger than balance (simulating attack)
+        // This could happen if balance_deltas tracking is corrupted
+        adapter.balance_deltas.insert(from.clone(), -5000i128);
+
+        // Attempt transfer - should detect that virtual balance would be negative
+        let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 100);
+
+        assert!(
+            result.is_err(),
+            "Expected error when negative delta exceeds balance"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("exceeds actual balance") || err_msg.contains("Negative delta"),
+            "Error message should mention delta exceeding balance, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_security_accumulated_deltas_causing_overflow() {
+        // SECURITY TEST: Verify that accumulated positive deltas causing overflow are rejected
+        //
+        // Attack scenario: Multiple incoming transfers push virtual balance over u64::MAX
+        let mut provider = MockProvider::new();
+        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+
+        // Account has maximum balance
+        provider.set_balance(from.clone(), Hash::zero(), u64::MAX);
+        provider.set_balance(to.clone(), Hash::zero(), 0);
+
+        let mut adapter = TosAccountAdapter::new(&provider, 100);
+
+        // Manually inject positive delta that would overflow when added to u64::MAX
+        adapter.balance_deltas.insert(from.clone(), 1000i128);
+
+        // Attempt transfer - should detect overflow in virtual balance calculation
+        let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 100);
+
+        assert!(
+            result.is_err(),
+            "Expected error when accumulated deltas cause overflow"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("overflow") || err_msg.contains("exceeds u64::MAX"),
+            "Error message should mention overflow, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_security_edge_case_u64_max_balance() {
+        // SECURITY TEST: Verify correct handling of u64::MAX balance
+        //
+        // Edge case: Account has maximum possible balance
+        let mut provider = MockProvider::new();
+        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+
+        // Set balance to maximum u64 value
+        provider.set_balance(from.clone(), Hash::zero(), u64::MAX);
+        provider.set_balance(to.clone(), Hash::zero(), 0);
+
+        let mut adapter = TosAccountAdapter::new(&provider, 100);
+
+        // Transfer with u64::MAX balance should work
+        let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 1000);
+        assert!(
+            result.is_ok(),
+            "Transfer with u64::MAX balance should succeed"
+        );
+
+        // Verify the transfer was staged
+        let transfers = adapter.take_pending_transfers();
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].amount, 1000);
+    }
+
+    #[test]
+    fn test_security_zero_delta_no_overflow() {
+        // SECURITY TEST: Verify that zero delta doesn't cause issues
+        //
+        // Edge case: Delta is exactly zero
+        let mut provider = MockProvider::new();
+        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+
+        provider.set_balance(from.clone(), Hash::zero(), 5000);
+        provider.set_balance(to.clone(), Hash::zero(), 0);
+
+        let mut adapter = TosAccountAdapter::new(&provider, 100);
+
+        // Explicitly set delta to zero
+        adapter.balance_deltas.insert(from.clone(), 0i128);
+
+        // Transfer should work normally
+        let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 1000);
+        assert!(result.is_ok(), "Transfer with zero delta should succeed");
+
+        let transfers = adapter.take_pending_transfers();
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].amount, 1000);
+    }
+
+    #[test]
+    fn test_security_large_positive_delta_within_bounds() {
+        // SECURITY TEST: Verify large positive deltas work correctly when within u64 bounds
+        //
+        // Valid scenario: Large positive delta that doesn't overflow
+        let mut provider = MockProvider::new();
+        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+
+        provider.set_balance(from.clone(), Hash::zero(), 1_000_000);
+        provider.set_balance(to.clone(), Hash::zero(), 0);
+
+        let mut adapter = TosAccountAdapter::new(&provider, 100);
+
+        // Large but valid positive delta
+        let large_delta = 500_000i128;
+        adapter.balance_deltas.insert(from.clone(), large_delta);
+
+        // Virtual balance should be 1_000_000 + 500_000 = 1_500_000
+        // Transfer of 1_400_000 should succeed
+        let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 1_400_000);
+        assert!(
+            result.is_ok(),
+            "Transfer with large positive delta should succeed"
+        );
+
+        let transfers = adapter.take_pending_transfers();
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].amount, 1_400_000);
+    }
+
+    #[test]
+    fn test_security_large_negative_delta_within_bounds() {
+        // SECURITY TEST: Verify large negative deltas work correctly when within balance
+        //
+        // Valid scenario: Large negative delta that doesn't exceed balance
+        let mut provider = MockProvider::new();
+        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+
+        provider.set_balance(from.clone(), Hash::zero(), 1_000_000);
+        provider.set_balance(to.clone(), Hash::zero(), 0);
+
+        let mut adapter = TosAccountAdapter::new(&provider, 100);
+
+        // Large but valid negative delta
+        let large_delta = -500_000i128;
+        adapter.balance_deltas.insert(from.clone(), large_delta);
+
+        // Virtual balance should be 1_000_000 - 500_000 = 500_000
+        // Transfer of 400_000 should succeed
+        let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 400_000);
+        assert!(
+            result.is_ok(),
+            "Transfer with large negative delta should succeed"
+        );
+
+        let transfers = adapter.take_pending_transfers();
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].amount, 400_000);
     }
 }

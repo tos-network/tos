@@ -341,8 +341,12 @@ impl<'a> AIMiningValidator<'a> {
             self.block_height,
         );
 
-        // Add answer to task
-        let task = self.state.get_task_mut(task_id).unwrap();
+        // SECURITY FIX (R2-C1-01): Replace .unwrap() with proper error handling
+        // to prevent DoS attacks via invalid task_id
+        let task = self
+            .state
+            .get_task_mut(task_id)
+            .ok_or_else(|| AIMiningError::TaskNotFound(task_id.clone()))?;
         task.add_answer(answer)?;
 
         // Update miner statistics
@@ -393,9 +397,7 @@ impl<'a> AIMiningValidator<'a> {
                 .submitted_answers
                 .iter()
                 .find(|a| a.answer_id == *answer_id)
-                .ok_or_else(|| {
-                    AIMiningError::ValidationFailed("Answer not found in task".to_string())
-                })?;
+                .ok_or_else(|| AIMiningError::AnswerNotFound(answer_id.clone()))?;
 
             if answer.submitter == self.source {
                 return Err(AIMiningError::ValidationFailed(
@@ -464,12 +466,17 @@ impl<'a> AIMiningValidator<'a> {
             validated_at: self.block_height,
         };
 
-        let task = self.state.get_task_mut(task_id).unwrap();
+        // SECURITY FIX (R2-C1-02): Replace .unwrap() calls with proper error handling
+        // to prevent DoS attacks via invalid task_id or answer_id
+        let task = self
+            .state
+            .get_task_mut(task_id)
+            .ok_or_else(|| AIMiningError::TaskNotFound(task_id.clone()))?;
         let answer = task
             .submitted_answers
             .iter_mut()
             .find(|a| a.answer_id == *answer_id)
-            .unwrap();
+            .ok_or_else(|| AIMiningError::AnswerNotFound(answer_id.clone()))?;
 
         answer.add_validation(validation)?;
 
@@ -784,5 +791,190 @@ mod tests {
         assert_eq!(summary.total_miners, 1);
         assert_eq!(summary.block_height, 100);
         assert_eq!(summary.current_time, 1000);
+    }
+
+    // ==================== SECURITY TESTS ====================
+    // Tests for audit findings R2-C1-01 and R2-C1-02:
+    // DoS vulnerability via .unwrap() on attacker-controlled keys
+
+    #[test]
+    fn test_submit_answer_with_invalid_task_id_returns_error() {
+        // SECURITY TEST (R2-C1-01): Verify invalid task_id returns error instead of panic
+        let mut state = AIMiningState::new();
+        let submitter = create_test_pubkey([2u8; 32]);
+
+        // Register submitter
+        state
+            .register_miner(submitter.clone(), 1_000_000_000, 100)
+            .unwrap();
+
+        // Try to submit answer to non-existent task
+        let mut validator = AIMiningValidator::new(&mut state, 150, 1500, submitter);
+        let invalid_task_id = Hash::new([99u8; 32]); // Task doesn't exist
+        let answer_content = "Test answer content for validation".to_string();
+        let answer_hash = crate::crypto::hash(answer_content.as_bytes());
+
+        let payload = AIMiningPayload::SubmitAnswer {
+            task_id: invalid_task_id.clone(),
+            answer_content,
+            answer_hash,
+            stake_amount: 1_000_000_000,
+        };
+
+        // Should return TaskNotFound error, NOT panic
+        let result = validator.validate_and_apply(&payload);
+        assert!(result.is_err());
+        match result {
+            Err(AIMiningError::TaskNotFound(hash)) => {
+                assert_eq!(hash, invalid_task_id);
+            }
+            _ => panic!("Expected TaskNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_answer_with_invalid_task_id_returns_error() {
+        // SECURITY TEST (R2-C1-02): Verify invalid task_id returns error instead of panic
+        let mut state = AIMiningState::new();
+        let validator_key = create_test_pubkey([3u8; 32]);
+
+        // Register validator
+        state
+            .register_miner(validator_key.clone(), 1_000_000_000, 100)
+            .unwrap();
+
+        // Try to validate answer for non-existent task
+        let mut validator = AIMiningValidator::new(&mut state, 200, 2000, validator_key);
+        let invalid_task_id = Hash::new([98u8; 32]); // Task doesn't exist
+        let answer_id = Hash::new([1u8; 32]);
+
+        let payload = AIMiningPayload::ValidateAnswer {
+            task_id: invalid_task_id.clone(),
+            answer_id,
+            validation_score: 85,
+        };
+
+        // Should return TaskNotFound error, NOT panic
+        let result = validator.validate_and_apply(&payload);
+        assert!(result.is_err());
+        match result {
+            Err(AIMiningError::TaskNotFound(hash)) => {
+                assert_eq!(hash, invalid_task_id);
+            }
+            _ => panic!("Expected TaskNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_answer_with_invalid_answer_id_returns_error() {
+        // SECURITY TEST (R2-C1-02): Verify invalid answer_id returns error instead of panic
+        let mut state = AIMiningState::new();
+        let publisher = create_test_pubkey([1u8; 32]);
+        let submitter = create_test_pubkey([2u8; 32]);
+        let validator_key = create_test_pubkey([3u8; 32]);
+
+        // Register all users
+        state
+            .register_miner(publisher.clone(), 1_000_000_000, 100)
+            .unwrap();
+        state
+            .register_miner(submitter.clone(), 1_000_000_000, 100)
+            .unwrap();
+        state
+            .register_miner(validator_key.clone(), 1_000_000_000, 100)
+            .unwrap();
+
+        // Create task
+        let task_id = Hash::new([1u8; 32]);
+        let task = AIMiningTask::new(
+            task_id.clone(),
+            publisher.clone(),
+            "Test task".to_string(),
+            10_000_000_000,
+            DifficultyLevel::Beginner,
+            3000,
+            100,
+        )
+        .unwrap();
+        state.publish_task(task).unwrap();
+
+        // Try to validate non-existent answer
+        let mut validator = AIMiningValidator::new(&mut state, 200, 2000, validator_key);
+        let invalid_answer_id = Hash::new([97u8; 32]); // Answer doesn't exist
+
+        let payload = AIMiningPayload::ValidateAnswer {
+            task_id: task_id.clone(),
+            answer_id: invalid_answer_id.clone(),
+            validation_score: 85,
+        };
+
+        // Should return AnswerNotFound error, NOT panic
+        let result = validator.validate_and_apply(&payload);
+        assert!(result.is_err());
+        match result {
+            Err(AIMiningError::AnswerNotFound(hash)) => {
+                assert_eq!(hash, invalid_answer_id);
+            }
+            _ => panic!("Expected AnswerNotFound error, got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn test_dos_attack_scenario_multiple_invalid_requests() {
+        // SECURITY TEST: Simulate DoS attack with multiple invalid requests
+        // Ensures system remains stable and doesn't crash
+        let mut state = AIMiningState::new();
+        let attacker = create_test_pubkey([99u8; 32]);
+
+        // Register attacker
+        state
+            .register_miner(attacker.clone(), 1_000_000_000, 100)
+            .unwrap();
+
+        // Create one valid task for testing
+        let valid_task_id = Hash::new([1u8; 32]);
+        let task = AIMiningTask::new(
+            valid_task_id.clone(),
+            attacker.clone(),
+            "Valid task".to_string(),
+            10_000_000_000,
+            DifficultyLevel::Beginner,
+            5000,
+            100,
+        )
+        .unwrap();
+        state.publish_task(task).unwrap();
+
+        // Simulate 100 DoS attempts with invalid IDs
+        for i in 0..100 {
+            let mut validator = AIMiningValidator::new(&mut state, 200 + i, 2000, attacker.clone());
+
+            // Attack vector 1: Invalid task_id
+            let invalid_task = Hash::new([i as u8; 32]);
+            let answer_content = "Attack payload".to_string();
+            let answer_hash = crate::crypto::hash(answer_content.as_bytes());
+            let attack_payload = AIMiningPayload::SubmitAnswer {
+                task_id: invalid_task,
+                answer_content,
+                answer_hash,
+                stake_amount: 1_000_000_000,
+            };
+            let result = validator.validate_and_apply(&attack_payload);
+            assert!(result.is_err()); // Should handle gracefully, not panic
+
+            // Attack vector 2: Invalid answer_id
+            let invalid_answer = Hash::new([i as u8; 32]);
+            let attack_validation = AIMiningPayload::ValidateAnswer {
+                task_id: valid_task_id.clone(),
+                answer_id: invalid_answer,
+                validation_score: 50,
+            };
+            let result2 = validator.validate_and_apply(&attack_validation);
+            assert!(result2.is_err()); // Should handle gracefully, not panic
+        }
+
+        // System should still be functional after attack
+        assert_eq!(state.statistics.total_tasks, 1);
+        assert!(state.is_miner_registered(&attacker));
     }
 }
