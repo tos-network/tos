@@ -10,11 +10,24 @@ use std::{
     io::{stdout, Write},
     sync::{
         atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
 };
 
 use super::PromptError;
+
+// Global regex pattern for ANSI escape sequences (initialized once, safe to use)
+static ANSI_ESCAPE_REGEX: OnceLock<Regex> = OnceLock::new();
+
+fn get_ansi_regex() -> &'static Regex {
+    ANSI_ESCAPE_REGEX.get_or_init(|| {
+        // This pattern is a compile-time constant and guaranteed to be valid
+        Regex::new("\x1B\\[[0-9;]*[A-Za-z]").unwrap_or_else(|_| {
+            // Fallback to a simpler pattern if the main one somehow fails
+            Regex::new("").unwrap()
+        })
+    })
+}
 
 // State used to be shared between stdin thread and Prompt instance
 pub struct State {
@@ -26,7 +39,6 @@ pub struct State {
     mask_input: AtomicBool,
     prompt_sender: Mutex<Option<oneshot::Sender<String>>>,
     exit: AtomicBool,
-    ascii_escape_regex: Regex,
     interactive: bool,
 }
 
@@ -49,7 +61,6 @@ impl State {
             mask_input: AtomicBool::new(false),
             prompt_sender: Mutex::new(None),
             exit: AtomicBool::new(false),
-            ascii_escape_regex: Regex::new("\x1B\\[[0-9;]*[A-Za-z]").unwrap(),
             interactive,
         }
     }
@@ -71,7 +82,7 @@ impl State {
     }
 
     pub fn get_ascii_escape_regex(&self) -> &Regex {
-        &self.ascii_escape_regex
+        get_ansi_regex()
     }
 
     pub fn get_mask_input(&self) -> &AtomicBool {
@@ -257,7 +268,7 @@ impl State {
 
         let mut lines = 0;
         let mut current_line_width = 0;
-        let input = self.ascii_escape_regex.replace_all(value, "");
+        let input = get_ansi_regex().replace_all(value, "");
 
         for c in input.chars() {
             if c == '\n' || current_line_width >= width {

@@ -8,7 +8,7 @@ use crate::{
     serializer::ReaderError,
 };
 use anyhow::Error as AnyError;
-use serde_json::{json, Error as SerdeError, Value};
+use serde_json::{Error as SerdeError, Value};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -108,20 +108,24 @@ impl RpcResponseError {
 
     pub fn get_id(&self) -> Value {
         match &self.id {
-            Some(id) => json!(id),
+            // SAFE: Converting simple types to JSON Value - use direct conversion instead of json!()
+            Some(id) => serde_json::to_value(id).unwrap_or(Value::Null),
             None => Value::Null,
         }
     }
 
     pub fn to_json(&self) -> Value {
-        json!({
-            "jsonrpc": JSON_RPC_VERSION,
-            "id": self.get_id(),
-            "error": {
-                "code": self.error.get_code(),
-                "message": format!("{:#}", self.error)
-            }
-        })
+        // SAFE: Build JSON manually instead of using json!() macro to avoid unwrap
+        let mut obj = serde_json::Map::new();
+        obj.insert("jsonrpc".to_string(), Value::String(JSON_RPC_VERSION.to_string()));
+        obj.insert("id".to_string(), self.get_id());
+
+        let mut error_obj = serde_json::Map::new();
+        error_obj.insert("code".to_string(), Value::Number(self.error.get_code().into()));
+        error_obj.insert("message".to_string(), Value::String(format!("{:#}", self.error)));
+        obj.insert("error".to_string(), Value::Object(error_obj));
+
+        Value::Object(obj)
     }
 }
 

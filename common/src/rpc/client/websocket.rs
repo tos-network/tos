@@ -638,7 +638,11 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         params: &P,
     ) -> JsonRPCResult<R> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Calling method '{}' with params: {}", method, json!(params));
+            // SAFE: Logging only - serialization failure logged as error instead of panic
+            match serde_json::to_value(params) {
+                Ok(v) => trace!("Calling method '{}' with params: {}", method, v),
+                Err(e) => trace!("Calling method '{}' with params (serialization failed: {})", method, e),
+            }
         }
         self.send(method, None, params).await
     }
@@ -788,13 +792,14 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         let response = timeout(self.timeout_after, receiver)
             .await
             .map_err(|_| {
-                JsonRPCError::TimedOut(json!({ "method": method, "params": params }).to_string())
+                // SAFE: Error context - use simple string formatting instead of json!()
+                let context = format!("method: {}, params: <serialized>", method);
+                JsonRPCError::TimedOut(context)
             })?
             .map_err(|e| {
-                JsonRPCError::NoResponse(
-                    json!({ "method": method, "params": params }).to_string(),
-                    e.to_string(),
-                )
+                // SAFE: Error context - use simple string formatting instead of json!()
+                let context = format!("method: {}, params: <serialized>", method);
+                JsonRPCError::NoResponse(context, e.to_string())
             })?;
 
         if let Some(error) = response.error {
@@ -815,7 +820,11 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     // Send a request to the server without waiting for the response
     pub async fn notify_with<P: Serialize>(&self, method: &str, params: &P) -> JsonRPCResult<()> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Notifying method '{}' with {}", method, json!(params));
+            // SAFE: Logging only - serialization failure logged as error instead of panic
+            match serde_json::to_value(params) {
+                Ok(v) => trace!("Notifying method '{}' with {}", method, v),
+                Err(e) => trace!("Notifying method '{}' with params (serialization failed: {})", method, e),
+            }
         }
         self.send_message_internal(None, method, params).await?;
         Ok(())
