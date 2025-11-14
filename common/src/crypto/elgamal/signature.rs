@@ -12,6 +12,15 @@ const SCALAR_SIZE: usize = 32;
 
 pub const SIGNATURE_SIZE: usize = SCALAR_SIZE * 2;
 
+/// Error type for signature operations
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SignatureError {
+    #[error("invalid signature length")]
+    InvalidLength,
+    #[error("invalid scalar value")]
+    InvalidScalar,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Signature {
     s: Scalar,
@@ -28,6 +37,56 @@ impl Signature {
         let r = (*H) * self.s + key.as_point() * -self.e;
         let calculated = hash_and_point_to_scalar(&key.compress(), message, &r);
         self.e == calculated
+    }
+
+    /// Convert signature to byte array representation
+    pub fn to_bytes(&self) -> [u8; SIGNATURE_SIZE] {
+        let mut bytes = [0u8; SIGNATURE_SIZE];
+        bytes[..SCALAR_SIZE].copy_from_slice(self.s.as_bytes());
+        bytes[SCALAR_SIZE..].copy_from_slice(self.e.as_bytes());
+        bytes
+    }
+
+    /// Create signature from byte array
+    pub fn from_bytes(bytes: &[u8; SIGNATURE_SIZE]) -> Result<Self, SignatureError> {
+        Self::from_bytes_slice(bytes)
+    }
+
+    /// Create signature from byte slice
+    pub fn from_bytes_slice(bytes: &[u8]) -> Result<Self, SignatureError> {
+        if bytes.len() != SIGNATURE_SIZE {
+            return Err(SignatureError::InvalidLength);
+        }
+
+        let s_bytes: [u8; SCALAR_SIZE] = bytes[..SCALAR_SIZE]
+            .try_into()
+            .map_err(|_| SignatureError::InvalidLength)?;
+        let e_bytes: [u8; SCALAR_SIZE] = bytes[SCALAR_SIZE..]
+            .try_into()
+            .map_err(|_| SignatureError::InvalidLength)?;
+
+        let s = Scalar::from_canonical_bytes(s_bytes)
+            .into_option()
+            .ok_or(SignatureError::InvalidScalar)?;
+        let e = Scalar::from_canonical_bytes(e_bytes)
+            .into_option()
+            .ok_or(SignatureError::InvalidScalar)?;
+
+        Ok(Self::new(s, e))
+    }
+
+    /// Create signature from hex string
+    pub fn from_hex(hex: &str) -> Result<Self, hex::FromHexError> {
+        let bytes: [u8; SIGNATURE_SIZE] = hex::decode(hex)?
+            .as_slice()
+            .try_into()
+            .map_err(|_| hex::FromHexError::InvalidStringLength)?;
+        Self::from_bytes(&bytes).map_err(|_| hex::FromHexError::InvalidStringLength)
+    }
+
+    /// Convert signature to hex string
+    pub fn to_hex(&self) -> String {
+        hex::encode(self.to_bytes())
     }
 }
 

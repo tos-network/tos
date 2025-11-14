@@ -442,6 +442,8 @@ pub enum BlockchainError {
     UnknownAccount,
     #[error(transparent)]
     SemaphoreError(#[from] AcquireError),
+    #[error("Cache miss in parallel execution - data was expected to be loaded")]
+    CacheMiss,
 }
 
 impl BlockchainError {

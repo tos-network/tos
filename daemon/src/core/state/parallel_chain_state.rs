@@ -546,7 +546,9 @@ impl<S: Storage> ParallelChainState<S> {
 
             // Check and deduct from source balance
             {
-                let mut account = self.accounts.get_mut(source).unwrap();
+                let mut account = self.accounts.get_mut(source).ok_or_else(|| {
+                    BlockchainError::AccountNotFound(source.as_address(self.is_mainnet))
+                })?;
                 let src_balance = account.balances.get_mut(asset).ok_or_else(|| {
                     if log::log_enabled!(log::Level::Debug) {
                         debug!(
@@ -584,8 +586,13 @@ impl<S: Storage> ParallelChainState<S> {
             // Credit destination - MUST update self.accounts (not self.balances DashMap)
             // The loaded balance is in self.accounts, so we must increment it there
             {
-                let mut dest_account = self.accounts.get_mut(destination).unwrap();
-                let dest_balance = dest_account.balances.get_mut(asset).unwrap();
+                let mut dest_account = self.accounts.get_mut(destination).ok_or_else(|| {
+                    BlockchainError::AccountNotFound(destination.as_address(self.is_mainnet))
+                })?;
+                let dest_balance = dest_account
+                    .balances
+                    .get_mut(asset)
+                    .ok_or_else(|| BlockchainError::AssetNotFound(asset.clone()))?;
                 *dest_balance = dest_balance.saturating_add(amount);
 
                 if log::log_enabled!(log::Level::Trace) {
@@ -639,7 +646,9 @@ impl<S: Storage> ParallelChainState<S> {
 
         // Check and deduct from source balance
         {
-            let mut account = self.accounts.get_mut(source).unwrap();
+            let mut account = self.accounts.get_mut(source).ok_or_else(|| {
+                BlockchainError::AccountNotFound(source.as_address(self.is_mainnet))
+            })?;
             let src_balance = account
                 .balances
                 .get_mut(asset)
@@ -742,7 +751,10 @@ impl<S: Storage> ParallelChainState<S> {
         payload: &MultiSigPayload,
     ) -> Result<(), BlockchainError> {
         // Update multisig state
-        let mut account = self.accounts.get_mut(_source).unwrap();
+        let mut account = self
+            .accounts
+            .get_mut(_source)
+            .ok_or_else(|| BlockchainError::AccountNotFound(_source.as_address(self.is_mainnet)))?;
         if payload.is_delete() {
             account.multisig = None;
         } else {

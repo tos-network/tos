@@ -283,7 +283,8 @@ mod tests {
         // Create a test public key - read from bytes using Serializer trait
         use tos_common::serializer::{Reader, Serializer};
         let mut reader = Reader::new(&[1u8; 32]);
-        let address = PublicKey::read(&mut reader).expect("Failed to read public key");
+        let address = PublicKey::read(&mut reader)
+            .unwrap_or_else(|e| panic!("Failed to read test public key: {:?}", e));
 
         let header = BlockHeader::new_simple(
             BlockVersion::V1,

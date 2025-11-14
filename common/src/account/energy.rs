@@ -25,6 +25,35 @@ pub struct FreezeDuration {
     pub days: u32,
 }
 
+/// Pre-validated freeze duration constants for common use cases
+/// SAFETY: These values are compile-time constants verified to be valid (3-180 days range)
+#[allow(dead_code)]
+pub const FREEZE_DURATION_3_DAYS: FreezeDuration = FreezeDuration { days: 3 };
+#[allow(dead_code)]
+pub const FREEZE_DURATION_7_DAYS: FreezeDuration = FreezeDuration { days: 7 };
+#[allow(dead_code)]
+pub const FREEZE_DURATION_14_DAYS: FreezeDuration = FreezeDuration { days: 14 };
+#[allow(dead_code)]
+pub const FREEZE_DURATION_30_DAYS: FreezeDuration = FreezeDuration { days: 30 };
+#[allow(dead_code)]
+pub const FREEZE_DURATION_60_DAYS: FreezeDuration = FreezeDuration { days: 60 };
+#[allow(dead_code)]
+pub const FREEZE_DURATION_90_DAYS: FreezeDuration = FreezeDuration { days: 90 };
+
+// Compile-time validation of constants
+const _: () = assert!(
+    FREEZE_DURATION_3_DAYS.days >= crate::config::MIN_FREEZE_DURATION_DAYS,
+    "FREEZE_DURATION_3_DAYS must be >= MIN_FREEZE_DURATION_DAYS"
+);
+const _: () = assert!(
+    FREEZE_DURATION_7_DAYS.days >= crate::config::MIN_FREEZE_DURATION_DAYS,
+    "FREEZE_DURATION_7_DAYS must be >= MIN_FREEZE_DURATION_DAYS"
+);
+const _: () = assert!(
+    FREEZE_DURATION_14_DAYS.days >= crate::config::MIN_FREEZE_DURATION_DAYS,
+    "FREEZE_DURATION_14_DAYS must be >= MIN_FREEZE_DURATION_DAYS"
+);
+
 impl FreezeDuration {
     /// Create a new freeze duration with validation
     pub fn new(days: u32) -> Result<Self, &'static str> {

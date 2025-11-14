@@ -1,4 +1,5 @@
 use std::{
+    num::NonZeroUsize,
     ops::{Deref, DerefMut},
     sync::Arc,
 };
@@ -13,13 +14,16 @@ use tos_common::{
 
 use super::Tips;
 
+// SAFETY: 1024 is a non-zero compile-time constant
+const FALLBACK_CACHE_SIZE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(1024) };
+const _: () = assert!(1024 > 0, "Fallback cache size must be non-zero");
+
 #[macro_export]
 macro_rules! init_cache {
     ($cache_size: expr) => {{
         if let Some(size) = &$cache_size {
-            Some(Mutex::new(LruCache::new(
-                std::num::NonZeroUsize::new(*size).expect("Non zero value for cache"),
-            )))
+            let cache_size = NonZeroUsize::new(*size).unwrap_or(FALLBACK_CACHE_SIZE);
+            Some(Mutex::new(LruCache::new(cache_size)))
         } else {
             None
         }

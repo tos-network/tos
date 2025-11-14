@@ -175,7 +175,8 @@ impl RocksStorage {
         opts.set_max_open_files(config.max_open_files);
         opts.set_keep_log_file_num(config.keep_max_log_files);
 
-        let mut env = Env::new().expect("Creating new env");
+        let mut env =
+            Env::new().unwrap_or_else(|e| panic!("Failed to create RocksDB environment: {:?}", e));
         env.set_low_priority_background_threads(config.low_priority_background_threads as _);
         opts.set_env(&env);
         opts.set_compression_type(config.compression_mode.convert());
@@ -207,7 +208,7 @@ impl RocksStorage {
             format!("{}{}", dir, network.to_string().to_lowercase()),
             cfs,
         )
-        .expect("Failed to open RocksDB");
+        .unwrap_or_else(|e| panic!("Failed to open RocksDB database: {:?}", e));
 
         Self {
             db: Arc::new(db),

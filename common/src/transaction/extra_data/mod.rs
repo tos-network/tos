@@ -146,8 +146,9 @@ impl PlaintextData {
     /// Warning: keys should not be reused
     pub fn encrypt_in_place_with_aead(mut self, key: &SharedKey) -> AEADCipher {
         let c = ChaCha20Poly1305::new(&key.0.into());
+        // SAFETY: Vec capacity is sufficient for in-place encryption, this expect cannot fail
         c.encrypt_in_place(NONCE.into(), &[], &mut self.0)
-            .expect("unreachable (unsufficient capacity on a vec)");
+            .expect("Vec capacity guaranteed for in-place AEAD encryption");
 
         AEADCipher(self.0)
     }

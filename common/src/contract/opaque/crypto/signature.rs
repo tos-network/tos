@@ -47,7 +47,7 @@ pub fn signature_from_bytes_fn(
         .map(|v| v.as_u8())
         .collect::<Result<Vec<_>, ValueError>>()?;
 
-    let signature = Signature::from_bytes(&bytes).context("signature from bytes")?;
+    let signature = Signature::from_bytes_slice(&bytes).context("signature from bytes")?;
     Ok(Some(Primitive::Opaque(signature.into()).into()))
 }
 

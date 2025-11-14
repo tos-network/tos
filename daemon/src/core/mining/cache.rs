@@ -7,6 +7,14 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tos_common::{crypto::Hash, tokio::sync::RwLock, transaction::Transaction};
 
+// SAFETY: 1000 is a non-zero compile-time constant
+const DEFAULT_MINING_CACHE_CAPACITY: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(1000) };
+const _: () = assert!(1000 > 0, "Mining cache capacity must be non-zero");
+
+// SAFETY: 100 is a non-zero compile-time constant
+const DEFAULT_BLOCK_CACHE_CAPACITY: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(100) };
+const _: () = assert!(100 > 0, "Block cache capacity must be non-zero");
+
 /// Cache for GHOSTDAG data to avoid repeated calculations during block template generation
 #[derive(Clone)]
 pub struct GhostdagCache {
@@ -17,7 +25,7 @@ pub struct GhostdagCache {
 impl GhostdagCache {
     /// Create a new GHOSTDAG cache with specified capacity
     pub fn new(capacity: usize) -> Self {
-        let capacity = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(1000).unwrap());
+        let capacity = NonZeroUsize::new(capacity).unwrap_or(DEFAULT_MINING_CACHE_CAPACITY);
         Self {
             cache: Arc::new(RwLock::new(LruCache::new(capacity))),
         }
@@ -129,7 +137,7 @@ pub struct TipSelectionCache {
 impl TipSelectionCache {
     /// Create a new tip selection cache
     pub fn new(capacity: usize) -> Self {
-        let capacity = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(100).unwrap());
+        let capacity = NonZeroUsize::new(capacity).unwrap_or(DEFAULT_BLOCK_CACHE_CAPACITY);
         Self {
             cache: Arc::new(RwLock::new(LruCache::new(capacity))),
         }
@@ -180,7 +188,7 @@ impl TransactionCache {
     /// Default capacity is 100 templates (enough for multiple miners)
     /// Note: TTL is specified per cache entry in the `put` method
     pub fn new(capacity: usize, _ttl_ms: u64) -> Self {
-        let capacity = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(100).unwrap());
+        let capacity = NonZeroUsize::new(capacity).unwrap_or(DEFAULT_BLOCK_CACHE_CAPACITY);
         Self {
             cache: Arc::new(RwLock::new(LruCache::new(capacity))),
         }

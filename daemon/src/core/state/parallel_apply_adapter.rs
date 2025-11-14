@@ -240,7 +240,9 @@ impl<'a, S: Storage> ParallelApplyAdapter<'a, S> {
 
         // DEADLOCK FIX: Acquire semaphore permit before calling ensure_*_loaded()
         // These methods will call storage.read() internally
-        let _permit = self.storage_semaphore.acquire().await.unwrap();
+        let _permit = self.storage_semaphore.acquire().await.map_err(|e| {
+            BlockchainError::Any(anyhow!("Failed to acquire storage semaphore: {}", e))
+        })?;
 
         // Load from ParallelChainState
         self.parallel_state.ensure_account_loaded(account).await?;
@@ -273,7 +275,9 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     ) -> Result<(), BlockchainError> {
         // DEADLOCK FIX: Acquire semaphore permit before storage access
         // This prevents concurrent storage.read() calls that trigger sled internal deadlocks
-        let _permit = self.storage_semaphore.acquire().await.unwrap();
+        let _permit = self.storage_semaphore.acquire().await.map_err(|e| {
+            BlockchainError::Any(anyhow!("Failed to acquire storage semaphore: {}", e))
+        })?;
 
         // Acquire read lock on storage for validation
         let storage_guard = self.storage.read().await;
@@ -309,7 +313,10 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         // 1. The HashMap entry exists (we just inserted it)
         // 2. The reference is valid for lifetime 'b (tied to &'b mut self)
         // 3. No other code can access self.balance_reads while this reference exists
-        Ok(self.balance_reads.get_mut(&key).unwrap())
+        Ok(self
+            .balance_reads
+            .get_mut(&key)
+            .ok_or_else(|| BlockchainError::CacheMiss)?)
     }
 
     /// Get the balance for a sender account (used for spending verification)
@@ -343,7 +350,9 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         }
 
         // DEADLOCK FIX: Acquire semaphore permit before storage access
-        let _permit = self.storage_semaphore.acquire().await.unwrap();
+        let _permit = self.storage_semaphore.acquire().await.map_err(|e| {
+            BlockchainError::Any(anyhow!("Failed to acquire storage semaphore: {}", e))
+        })?;
 
         // Acquire read lock for reference validation queries
         let storage_guard = self.storage.read().await;
@@ -384,7 +393,10 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         self.balance_reads.insert(key.clone(), validated_balance);
 
         // Return mutable reference to cached value
-        Ok(self.balance_reads.get_mut(&key).unwrap())
+        Ok(self
+            .balance_reads
+            .get_mut(&key)
+            .ok_or_else(|| BlockchainError::CacheMiss)?)
     }
 
     /// Track sender output (spending) for final balance verification
