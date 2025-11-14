@@ -1,6 +1,7 @@
+#![allow(clippy::disallowed_methods)]
+
 // RPC modules use json! macro which internally uses unwrap
 // This is acceptable for JSON construction which should never fail for valid literals
-#![allow(clippy::disallowed_methods)]
 
 pub mod getwork;
 pub mod rpc;

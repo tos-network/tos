@@ -1,6 +1,7 @@
+#![allow(clippy::disallowed_methods)]
+
 // Blockchain core uses json! macro for event serialization
 // This is acceptable for JSON construction which should never fail for valid event structs
-#![allow(clippy::disallowed_methods)]
 
 use crate::{
     config::{
