@@ -77,11 +77,28 @@ impl<T> Drop for StorageLifetime<T> {
 }
 
 /// Get a TOS-specific temporary directory for testing
+///
+/// # Safety Note
+///
+/// This function uses `.expect()` which is acceptable because:
+/// - Only used in test code (`#[cfg(test)]`)
+/// - Temporary directory creation failure is a fatal test environment issue
+/// - Not compiled into production builds
+#[cfg(test)]
 pub fn get_tos_tempdir() -> TempDir {
-    #[allow(clippy::expect_used)]
-    {
-        TempDir::new("tos-storage").expect("Failed to create temporary directory")
-    }
+    TempDir::new("tos-storage").expect("Failed to create temporary directory for tests")
+}
+
+/// Production fallback: returns a basic temporary directory
+///
+/// This should not be used in production code - use proper storage configuration instead.
+/// Only compiled when not in test mode.
+#[cfg(not(test))]
+pub fn get_tos_tempdir() -> TempDir {
+    TempDir::new("tos-storage").unwrap_or_else(|_| {
+        // Fallback to system temp dir if tos-storage creation fails
+        TempDir::new("tos").expect("Failed to create any temporary directory")
+    })
 }
 
 #[cfg(test)]

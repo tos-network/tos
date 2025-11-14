@@ -637,6 +637,8 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         //   * DashMap already provides interior mutability with better concurrency
         //   * Would require locking for entire execution duration (bad for parallelism)
         //
+        // SAFETY: This unsafe pointer cast is safe due to the following invariants:
+        //
         // Memory safety guarantees:
         // - No use-after-free: DashMap + Arc double protection keeps Module alive
         // - No dangling pointers: Pointer derived from Arc, stable heap address
@@ -657,6 +659,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         // - Even if reference existed, Arc would keep Module alive
         //
         // Verified by: Manual review 2025-11-14, parallel execution tests passing
+        // Test coverage: daemon/tests/integration/parallel_execution_tests.rs
         let module_ref: &Module = unsafe { &*(module_arc.as_ref() as *const Module) };
 
         // Use public accessor for environment

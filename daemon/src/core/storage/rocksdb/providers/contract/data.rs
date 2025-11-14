@@ -143,12 +143,20 @@ impl ContractDataProvider for RocksStorage {
                 return Ok(Some(topo));
             }
 
-            #[allow(clippy::unwrap_used)]
-            {
-                prev_topo = self
-                    .load_from_disk(Column::VersionedContractsData, &versioned_key)
-                    .unwrap();
-            }
+            // Load the previous version from disk
+            // If this fails, it indicates database corruption
+            prev_topo = self
+                .load_from_disk(Column::VersionedContractsData, &versioned_key)
+                .map_err(|e| {
+                    if log::log_enabled!(log::Level::Error) {
+                        log::error!(
+                            "Failed to load versioned contract data at topoheight {}: {:?}",
+                            topo,
+                            e
+                        );
+                    }
+                    BlockchainError::CorruptedData
+                })?;
         }
 
         Ok(None)
