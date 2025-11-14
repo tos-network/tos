@@ -135,12 +135,14 @@ impl EncryptedStorage {
             cipher,
             inner,
             balances_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE).unwrap(),
+                #[allow(clippy::unwrap_used)]
+                {NonZeroUsize::new(DEFAULT_CACHE_SIZE).unwrap()},
             )),
             unconfirmed_balances_cache: Mutex::new(HashMap::new()),
             tx_cache: None,
             assets_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE).unwrap(),
+                #[allow(clippy::unwrap_used)]
+                {NonZeroUsize::new(DEFAULT_CACHE_SIZE).unwrap()},
             )),
             synced_topoheight: None,
             last_coinbase_reward_topoheight: None,

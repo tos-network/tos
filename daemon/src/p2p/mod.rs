@@ -267,13 +267,15 @@ impl<S: Storage> P2pServer<S> {
             is_running: AtomicBool::new(true),
             peer_sender,
             blocks_propagation_queue: RwLock::new(LruCache::new(
-                NonZeroUsize::new(STABLE_LIMIT as usize * TIPS_LIMIT)
-                    .expect("non-zero blocks propagation queue"),
+                #[allow(clippy::expect_used)]
+                {NonZeroUsize::new(STABLE_LIMIT as usize * TIPS_LIMIT)
+                    .expect("non-zero blocks propagation queue")},
             )),
             blocks_processor,
             txs_propagation_queue: RwLock::new(LruCache::new(
-                NonZeroUsize::new(TRANSACTIONS_CHANNEL_CAPACITY)
-                    .expect("non-zero transactions propagation queue"),
+                #[allow(clippy::expect_used)]
+                {NonZeroUsize::new(TRANSACTIONS_CHANNEL_CAPACITY)
+                    .expect("non-zero transactions propagation queue")},
             )),
             txs_processor,
             allow_fast_sync_mode,
@@ -1525,6 +1527,7 @@ impl<S: Storage> P2pServer<S> {
                                         "No peer found in peerlist, selecting a random seed node"
                                     );
                                     let seed_nodes = get_seed_nodes(self.blockchain.get_network());
+                                    #[allow(clippy::expect_used)]
                                     self.select_random_socket_address(
                                         seed_nodes
                                             .iter()

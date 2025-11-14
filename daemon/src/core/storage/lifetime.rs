@@ -78,7 +78,8 @@ impl<T> Drop for StorageLifetime<T> {
 
 /// Get a TOS-specific temporary directory for testing
 pub fn get_tos_tempdir() -> TempDir {
-    TempDir::new("tos-storage").expect("Failed to create temporary directory")
+    #[allow(clippy::expect_used)]
+    {TempDir::new("tos-storage").expect("Failed to create temporary directory")}
 }
 
 #[cfg(test)]

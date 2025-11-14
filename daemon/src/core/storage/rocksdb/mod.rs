@@ -175,6 +175,7 @@ impl RocksStorage {
         opts.set_max_open_files(config.max_open_files);
         opts.set_keep_log_file_num(config.keep_max_log_files);
 
+        #[allow(clippy::panic)]
         let mut env =
             Env::new().unwrap_or_else(|e| panic!("Failed to create RocksDB environment: {:?}", e));
         env.set_low_priority_background_threads(config.low_priority_background_threads as _);
@@ -203,6 +204,7 @@ impl RocksStorage {
             opts.set_write_buffer_size(config.write_buffer_size as _);
         }
 
+        #[allow(clippy::panic)]
         let db = DBWithThreadMode::<MultiThreaded>::open_cf_descriptors(
             &opts,
             format!("{}{}", dir, network.to_string().to_lowercase()),

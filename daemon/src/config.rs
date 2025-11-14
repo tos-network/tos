@@ -423,9 +423,10 @@ static DEV_PUBLIC_KEY_CELL: OnceLock<PublicKey> = OnceLock::new();
 /// Get developer public key (lazily initialized from DEV_ADDRESS)
 pub fn dev_public_key() -> &'static PublicKey {
     DEV_PUBLIC_KEY_CELL.get_or_init(|| {
-        Address::from_string(&DEV_ADDRESS)
+        #[allow(clippy::expect_used)]
+        {Address::from_string(&DEV_ADDRESS)
             .expect("valid dev address")
-            .to_public_key()
+            .to_public_key()}
     })
 }
 

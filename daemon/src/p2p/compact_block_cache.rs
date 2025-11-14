@@ -38,6 +38,7 @@ impl CompactBlockCache {
     pub fn new(capacity: usize, entry_timeout: Duration) -> Self {
         // SAFETY: Capacity is always > 0 in production (default is 1000)
         // Panic here is acceptable as it indicates a configuration error at startup
+        #[allow(clippy::expect_used)]
         let non_zero_cap = capacity
             .try_into()
             .expect("CompactBlockCache capacity must be non-zero");

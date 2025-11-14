@@ -143,9 +143,10 @@ impl ContractDataProvider for RocksStorage {
                 return Ok(Some(topo));
             }
 
-            prev_topo = self
+            #[allow(clippy::unwrap_used)]
+            {prev_topo = self
                 .load_from_disk(Column::VersionedContractsData, &versioned_key)
-                .unwrap();
+                .unwrap();}
         }
 
         Ok(None)

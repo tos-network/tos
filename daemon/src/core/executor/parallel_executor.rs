@@ -150,6 +150,7 @@ impl ParallelExecutor {
 
         for (index, tx) in batch {
             // Acquire permit before spawning - blocks if max_parallelism limit reached
+            #[allow(clippy::expect_used)]
             let permit = semaphore
                 .clone()
                 .acquire_owned()

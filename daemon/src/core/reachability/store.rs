@@ -64,6 +64,7 @@ impl ReachabilityData {
 impl Serializer for ReachabilityData {
     fn write(&self, writer: &mut Writer) {
         // Use bincode for efficient serialization
+        #[allow(clippy::expect_used)]
         let bytes = bincode::serialize(self).expect("Failed to serialize ReachabilityData");
         writer.write_bytes(&bytes);
     }
@@ -74,6 +75,7 @@ impl Serializer for ReachabilityData {
     }
 
     fn size(&self) -> usize {
-        bincode::serialized_size(self).expect("Failed to get size") as usize
+        #[allow(clippy::expect_used)]
+        {bincode::serialized_size(self).expect("Failed to get size") as usize}
     }
 }

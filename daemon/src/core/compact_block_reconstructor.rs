@@ -150,6 +150,7 @@ impl CompactBlockReconstructor {
         }
 
         // All transactions found! Reconstruct the full block
+        #[allow(clippy::expect_used)]
         let complete_transactions: Vec<Arc<Transaction>> = transactions
             .into_iter()
             .map(|opt_tx| opt_tx.expect("All transactions should be present"))

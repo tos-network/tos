@@ -94,8 +94,9 @@ impl<S: Storage> GetWorkServer<S> {
             miners: Mutex::new(HashMap::new()),
             blockchain,
             mining_jobs: Mutex::new(LruCache::new(
-                NonZeroUsize::new(STABLE_LIMIT as usize * TIPS_LIMIT)
-                    .expect("Non zero mining jobs cache"),
+                #[allow(clippy::expect_used)]
+                {NonZeroUsize::new(STABLE_LIMIT as usize * TIPS_LIMIT)
+                    .expect("Non zero mining jobs cache")},
             )),
             last_header_hash: Mutex::new(None),
             last_notify: AtomicU64::new(0),
