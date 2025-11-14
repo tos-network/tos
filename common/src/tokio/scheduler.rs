@@ -107,6 +107,8 @@ impl<F: Future> Stream for Scheduler<F> {
         for state in this.states.iter_mut().take(n.unwrap_or(len)) {
             match state {
                 State::New(fut) => {
+                    // SAFETY: State::New always contains Some(future), never None
+                    #[allow(clippy::expect_used, clippy::disallowed_methods)]
                     let mut fut = fut.take().expect("new future available");
 
                     // Try poll it, if its already ready, just mark it has such

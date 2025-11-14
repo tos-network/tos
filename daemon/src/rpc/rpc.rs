@@ -1,3 +1,7 @@
+// RPC implementation uses json! macro which internally uses unwrap
+// This is acceptable for JSON construction which should never fail for valid literals
+#![allow(clippy::disallowed_methods)]
+
 use super::{ApiError, InternalRpcError};
 use crate::{
     config::{

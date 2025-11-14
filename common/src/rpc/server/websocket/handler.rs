@@ -1,3 +1,7 @@
+// WebSocket RPC handler uses json! macro which internally uses unwrap
+// This is acceptable for JSON construction which should never fail for valid literals
+#![allow(clippy::disallowed_methods)]
+
 use super::{WebSocketHandler, WebSocketSessionShared};
 use crate::{
     api::{EventResult, SubscribeParams},
@@ -178,6 +182,9 @@ where
         match method.as_str() {
             "subscribe" => {
                 let event = self.parse_event(&mut request)?;
+                // SAFETY: WebSocketSessionShared is inserted into context during session initialization
+                // and is always present for the lifetime of the WebSocket connection
+                #[allow(clippy::unwrap_used)]
                 self.subscribe_session_to_event(
                     context.get::<WebSocketSessionShared<Self>>().unwrap(),
                     event,
@@ -191,6 +198,9 @@ where
             }
             "unsubscribe" => {
                 let event = self.parse_event(&mut request)?;
+                // SAFETY: WebSocketSessionShared is inserted into context during session initialization
+                // and is always present for the lifetime of the WebSocket connection
+                #[allow(clippy::unwrap_used)]
                 self.unsubscribe_session_from_event(
                     context.get::<WebSocketSessionShared<Self>>().unwrap(),
                     event,
