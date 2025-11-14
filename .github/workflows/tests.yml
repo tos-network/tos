@@ -300,19 +300,23 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-build-
 
-      - name: Build workspace
+      - name: Build workspace (libs and bins only)
         run: |
           echo "=========================================="
-          echo "Building Workspace"
+          echo "Building Workspace (libs and bins)"
           echo "=========================================="
-          cargo build --workspace --all-targets
+          echo "Building libraries and binaries..."
+          echo "(Tests are built separately to avoid linker memory issues)"
+          cargo build --workspace --lib
+          cargo build --workspace --bins
 
       - name: Build release
         run: |
           echo "=========================================="
           echo "Building Release"
           echo "=========================================="
-          cargo build --workspace --release
+          cargo build --workspace --release --lib
+          cargo build --workspace --release --bins
 
       - name: Build with strict warnings (production crates only)
         run: |
