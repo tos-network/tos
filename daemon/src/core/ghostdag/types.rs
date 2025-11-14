@@ -244,12 +244,14 @@ impl Serializer for TosGhostdagData {
         // All fields have deterministic sizes
         // If this panics, it indicates a critical bug in the data structure
         #[allow(clippy::panic)]
-        {bincode::serialized_size(self).unwrap_or_else(|e| {
+        {
+            bincode::serialized_size(self).unwrap_or_else(|e| {
             panic!(
                 "Critical: Failed to calculate size of TosGhostdagData - data structure is corrupted: {}",
                 e
             )
-        }) as usize}
+        }) as usize
+        }
     }
 }
 
@@ -279,12 +281,14 @@ impl Serializer for CompactGhostdagData {
         // All fields have deterministic sizes
         // If this panics, it indicates a critical bug in the data structure
         #[allow(clippy::panic)]
-        {bincode::serialized_size(self).unwrap_or_else(|e| {
+        {
+            bincode::serialized_size(self).unwrap_or_else(|e| {
             panic!(
                 "Critical: Failed to calculate size of CompactGhostdagData - data structure is corrupted: {}",
                 e
             )
-        }) as usize}
+        }) as usize
+        }
     }
 }
 

@@ -76,6 +76,8 @@ impl Serializer for ReachabilityData {
 
     fn size(&self) -> usize {
         #[allow(clippy::expect_used)]
-        {bincode::serialized_size(self).expect("Failed to get size") as usize}
+        {
+            bincode::serialized_size(self).expect("Failed to get size") as usize
+        }
     }
 }

@@ -436,10 +436,12 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         // SAFETY: ApplicableChainState always constructed with Mutable storage
         // This is guaranteed by the constructor at line 407
         #[allow(clippy::expect_used)]
-        {self.inner
-            .storage
-            .try_as_mut()
-            .expect("ApplicableChainState must have mutable storage")}
+        {
+            self.inner
+                .storage
+                .try_as_mut()
+                .expect("ApplicableChainState must have mutable storage")
+        }
     }
 
     // Get the contracts cache

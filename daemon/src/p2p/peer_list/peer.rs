@@ -186,13 +186,17 @@ impl Peer {
                 peer_list,
                 objects_requested: Mutex::new(LruCache::new(
                     #[allow(clippy::expect_used)]
-                    {NonZeroUsize::new(PEER_OBJECTS_CONCURRENCY)
-                        .expect("PEER_OBJECTS_CONCURRENCY must be non-zero")},
+                    {
+                        NonZeroUsize::new(PEER_OBJECTS_CONCURRENCY)
+                            .expect("PEER_OBJECTS_CONCURRENCY must be non-zero")
+                    },
                 )),
                 peers: Mutex::new(LruCache::new(
                     #[allow(clippy::expect_used)]
-                    {NonZeroUsize::new(PEER_PEERS_CACHE_SIZE)
-                        .expect("PEER_PEERS_CACHE_SIZE must be non-zero")},
+                    {
+                        NonZeroUsize::new(PEER_PEERS_CACHE_SIZE)
+                            .expect("PEER_PEERS_CACHE_SIZE must be non-zero")
+                    },
                 )),
                 last_peer_list: AtomicU64::new(0),
                 last_ping: AtomicU64::new(0),
@@ -200,13 +204,17 @@ impl Peer {
                 blue_work: Mutex::new(blue_work),
                 txs_cache: Mutex::new(LruCache::new(
                     #[allow(clippy::expect_used)]
-                    {NonZeroUsize::new(PEER_TX_CACHE_SIZE)
-                        .expect("PEER_TX_CACHE_SIZE must be non-zero")},
+                    {
+                        NonZeroUsize::new(PEER_TX_CACHE_SIZE)
+                            .expect("PEER_TX_CACHE_SIZE must be non-zero")
+                    },
                 )),
                 blocks_propagation: Mutex::new(LruCache::new(
                     #[allow(clippy::expect_used)]
-                    {NonZeroUsize::new(PEER_BLOCK_CACHE_SIZE)
-                        .expect("PEER_BLOCK_CACHE_SIZE must be non-zero")},
+                    {
+                        NonZeroUsize::new(PEER_BLOCK_CACHE_SIZE)
+                            .expect("PEER_BLOCK_CACHE_SIZE must be non-zero")
+                    },
                 )),
                 last_inventory: AtomicU64::new(0),
                 requested_inventory: AtomicBool::new(false),
