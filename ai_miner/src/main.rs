@@ -59,6 +59,7 @@ async fn get_next_nonce(
             log::warn!("Failed to get nonce from daemon: {e}. Using fallback method.");
 
             // Fallback to timestamp + random for development
+            // NON-CONSENSUS: SystemTime used only for nonce generation (client-side, not validated by network)
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_millis() as u64;
@@ -1335,6 +1336,7 @@ async fn test_task_publication_workflow(
     let task_id = Hash::new(rand::random::<[u8; 32]>());
     let reward_amount = 25_000_000_000; // 25 TOS
     let difficulty = DifficultyLevel::Beginner;
+    // NON-CONSENSUS: SystemTime used only for test task deadline (test code, not production)
     let deadline = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

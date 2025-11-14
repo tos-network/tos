@@ -5,6 +5,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// Helper function to create unique wallet name
+    /// NON-CONSENSUS: SystemTime used only for test wallet naming (test code, not production)
     fn create_unique_wallet_name(test_name: &str) -> String {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)

@@ -1,3 +1,10 @@
+//! AI Miner Integration Tests
+//!
+//! NON-CONSENSUS NOTE:
+//! This module uses SystemTime::now() extensively for test timing, benchmarking,
+//! and deadline generation. All usages are NON-CONSENSUS as this is test code only.
+//! SystemTime values are never used for blockchain state validation or consensus decisions.
+
 use anyhow::Result;
 use log::{info, warn, error};
 use std::collections::HashMap;
