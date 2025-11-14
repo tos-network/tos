@@ -42,6 +42,13 @@ use tos_common::{
     },
 };
 
+// Compile-time validation that P2P configuration constants are non-zero
+// These assertions ensure that NonZeroUsize::new_unchecked is safe to use
+const _: () = assert!(PEER_OBJECTS_CONCURRENCY > 0, "PEER_OBJECTS_CONCURRENCY must be non-zero");
+const _: () = assert!(PEER_PEERS_CACHE_SIZE > 0, "PEER_PEERS_CACHE_SIZE must be non-zero");
+const _: () = assert!(PEER_TX_CACHE_SIZE > 0, "PEER_TX_CACHE_SIZE must be non-zero");
+const _: () = assert!(PEER_BLOCK_CACHE_SIZE > 0, "PEER_BLOCK_CACHE_SIZE must be non-zero");
+
 // A RequestedObjects is a map of all objects requested from a peer
 // This is done to be awaitable with a timeout
 pub type RequestedObjects = LruCache<ObjectRequest, broadcast::Sender<OwnedObjectResponse>>;
@@ -185,36 +192,24 @@ impl Peer {
                 last_chain_sync: AtomicU64::new(0),
                 peer_list,
                 objects_requested: Mutex::new(LruCache::new(
-                    #[allow(clippy::expect_used)]
-                    {
-                        NonZeroUsize::new(PEER_OBJECTS_CONCURRENCY)
-                            .expect("PEER_OBJECTS_CONCURRENCY must be non-zero")
-                    },
+                    // SAFETY: Compile-time assertion above guarantees PEER_OBJECTS_CONCURRENCY > 0
+                    unsafe { NonZeroUsize::new_unchecked(PEER_OBJECTS_CONCURRENCY) },
                 )),
                 peers: Mutex::new(LruCache::new(
-                    #[allow(clippy::expect_used)]
-                    {
-                        NonZeroUsize::new(PEER_PEERS_CACHE_SIZE)
-                            .expect("PEER_PEERS_CACHE_SIZE must be non-zero")
-                    },
+                    // SAFETY: Compile-time assertion above guarantees PEER_PEERS_CACHE_SIZE > 0
+                    unsafe { NonZeroUsize::new_unchecked(PEER_PEERS_CACHE_SIZE) },
                 )),
                 last_peer_list: AtomicU64::new(0),
                 last_ping: AtomicU64::new(0),
                 last_ping_sent: AtomicU64::new(0),
                 blue_work: Mutex::new(blue_work),
                 txs_cache: Mutex::new(LruCache::new(
-                    #[allow(clippy::expect_used)]
-                    {
-                        NonZeroUsize::new(PEER_TX_CACHE_SIZE)
-                            .expect("PEER_TX_CACHE_SIZE must be non-zero")
-                    },
+                    // SAFETY: Compile-time assertion above guarantees PEER_TX_CACHE_SIZE > 0
+                    unsafe { NonZeroUsize::new_unchecked(PEER_TX_CACHE_SIZE) },
                 )),
                 blocks_propagation: Mutex::new(LruCache::new(
-                    #[allow(clippy::expect_used)]
-                    {
-                        NonZeroUsize::new(PEER_BLOCK_CACHE_SIZE)
-                            .expect("PEER_BLOCK_CACHE_SIZE must be non-zero")
-                    },
+                    // SAFETY: Compile-time assertion above guarantees PEER_BLOCK_CACHE_SIZE > 0
+                    unsafe { NonZeroUsize::new_unchecked(PEER_BLOCK_CACHE_SIZE) },
                 )),
                 last_inventory: AtomicU64::new(0),
                 requested_inventory: AtomicBool::new(false),
