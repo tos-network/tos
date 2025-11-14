@@ -88,7 +88,11 @@ impl<const BPS: u64> Bps<BPS> {
     /// assert_eq!(OneBps::target_time_per_block(), 1000);  // 1 second
     /// assert_eq!(TenBps::target_time_per_block(), 100);   // 100 milliseconds
     /// ```
+    #[allow(clippy::panic)]
     pub const fn target_time_per_block() -> u64 {
+        // COMPILE-TIME ONLY: This panic only triggers during compilation with invalid BPS
+        // It validates that BPS divides 1000 evenly for millisecond precision
+        // This is NOT a runtime panic - it's a compile-time configuration check
         if 1000 % BPS != 0 {
             panic!("BPS must divide 1000 evenly to maintain millisecond precision")
         }
@@ -125,6 +129,7 @@ impl<const BPS: u64> Bps<BPS> {
     ///
     /// This is intentional and forces explicit calculation and security review before
     /// adding new BPS configurations.
+    #[allow(clippy::panic)]
     pub const fn ghostdag_k() -> u64 {
         match BPS {
             1 => 10,   // TOS: K=10 for 1 BPS (x=4.0, calculated ~9.7)
