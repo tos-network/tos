@@ -101,6 +101,9 @@ proptest = "1.4"
 [features]
 tokio = ["dep:tokio", "dep:tokio_with_wasm", "dep:futures", "dep:pin-project-lite"]
 tokio-multi-thread = ["tokio", "tokio/rt-multi-thread", "tokio_with_wasm/rt-multi-thread"]
+# Debug-mode deadlock detection wrappers (includes .expect() for diagnostics)
+# Default: disabled (production uses direct tokio re-exports with zero overhead)
+# Enable for development: cargo build --features tos_common/deadlock-detection
 deadlock-detection = ["tokio"]
 
 rustls = ["dep:rustls"]

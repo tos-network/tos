@@ -1,3 +1,26 @@
+//! Debug-mode Mutex wrapper with deadlock detection diagnostics
+//!
+//! **Note**: This module is only compiled when the `deadlock-detection` feature is enabled.
+//! In production builds, the parent module re-exports `tokio::sync::Mutex` directly.
+//!
+//! ## .expect() Usage Documentation
+//!
+//! The `.expect()` calls in this module are acceptable because:
+//!
+//! 1. **Debug-only compilation**: This module is NOT compiled in production builds (only with `deadlock-detection` feature)
+//! 2. **Unreachable in practice**: Tokio's async Mutex does not poison (unlike `std::sync::Mutex`)
+//! 3. **Development diagnostics**: The assertions help catch logic errors and deadlocks during development
+//! 4. **Internal invariant tracking**: Only used for tracking lock acquisition state, not user data
+//!
+//! ## Feature Flag
+//!
+//! ```bash
+//! # Enable this module:
+//! cargo build --features tos_common/deadlock-detection
+//! ```
+//!
+//! See TOS_SECURITY_AUDIT_v5.md Section 5.1 for audit approval.
+
 // Debugging tool for deadlock detection - uses .expect() for internal state tracking
 // These expects are safe as they only track the deadlock detection state itself
 #![allow(clippy::disallowed_methods)]
