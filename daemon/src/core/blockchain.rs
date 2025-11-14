@@ -5,11 +5,12 @@ use crate::{
         get_hex_genesis_block,
         get_min_txs_for_parallel,
         parallel_execution_enabled, // runtime toggle
-        DEFAULT_CACHE_SIZE,
+        DEFAULT_CACHE_SIZE_NONZERO,
         DEV_FEES,
         EMISSION_SPEED_FACTOR,
         GENESIS_BLOCK_DIFFICULTY,
         MAX_ORPHANED_TRANSACTIONS,
+        MAX_ORPHANED_TRANSACTIONS_NONZERO,
         MILLIS_PER_SECOND,
         PRUNE_SAFETY_LIMIT,
         SIDE_BLOCK_REWARD_MAX_BLOCKS,
@@ -52,7 +53,6 @@ use std::{
     borrow::Cow,
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     net::SocketAddr,
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -322,22 +322,10 @@ impl<S: Storage> Blockchain<S> {
             skip_pow_verification: config.skip_pow_verification || config.simulator.is_some(),
             simulator: config.simulator,
             network,
-            tip_base_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE)
-                    .expect("Default cache size for tip base must be above 0"),
-            )),
-            tip_work_score_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE)
-                    .expect("Default cache size for tip work score must be above 0"),
-            )),
-            common_base_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE)
-                    .expect("Default cache size for common base must be above 0"),
-            )),
-            full_order_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE)
-                    .expect("Default cache size for full order must be above 0"),
-            )),
+            tip_base_cache: Mutex::new(LruCache::new(DEFAULT_CACHE_SIZE_NONZERO)),
+            tip_work_score_cache: Mutex::new(LruCache::new(DEFAULT_CACHE_SIZE_NONZERO)),
+            common_base_cache: Mutex::new(LruCache::new(DEFAULT_CACHE_SIZE_NONZERO)),
+            full_order_cache: Mutex::new(LruCache::new(DEFAULT_CACHE_SIZE_NONZERO)),
             auto_prune_keep_n_blocks: config.auto_prune_keep_n_blocks,
             skip_block_template_txs_verification: config.skip_block_template_txs_verification,
             checkpoints: config.checkpoints.into_iter().collect(),
@@ -3791,10 +3779,7 @@ impl<S: Storage> Blockchain<S> {
         // V-26 Fix: Track all orphaned transactions with bounded size
         // We keep orphaned txs to try to re-add them in the mempool
         // Using LRU cache with max size to prevent unbounded memory growth
-        let mut orphaned_transactions = LruCache::new(
-            NonZeroUsize::new(MAX_ORPHANED_TRANSACTIONS)
-                .expect("MAX_ORPHANED_TRANSACTIONS must be > 0"),
-        );
+        let mut orphaned_transactions = LruCache::new(MAX_ORPHANED_TRANSACTIONS_NONZERO);
 
         // order the DAG (up to TOP_HEIGHT - STABLE_LIMIT)
         let mut highest_topo = 0;

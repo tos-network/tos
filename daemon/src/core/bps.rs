@@ -74,10 +74,13 @@ impl<const BPS: u64> Bps<BPS> {
     /// This is the ideal time between blocks that the DAA (Difficulty Adjustment Algorithm)
     /// will try to achieve. Calculated as 1000ms / BPS.
     ///
-    /// # Panics
+    /// # Compile-Time Validation
     ///
-    /// Panics at compile time if BPS doesn't divide 1000 evenly. This ensures we maintain
-    /// millisecond precision in block times.
+    /// This function contains a compile-time panic that ensures BPS divides 1000 evenly.
+    /// The panic only occurs if the code is compiled with an invalid BPS constant,
+    /// and will **never trigger at runtime** in production.
+    ///
+    /// This is intentional and provides compile-time configuration validation.
     ///
     /// # Example
     ///
@@ -113,10 +116,15 @@ impl<const BPS: u64> Bps<BPS> {
     /// - 1 BPS: K=10 (x=4.0)
     /// - 10 BPS: K=124 (x=40.0, with safety margin)
     ///
-    /// # Panics
+    /// # Compile-Time Validation
     ///
-    /// Panics at compile time if BPS value is not in the lookup table. This forces
-    /// explicit calculation and review before adding new BPS configurations.
+    /// This function contains a compile-time panic that ensures only validated BPS values
+    /// with pre-computed K parameters are used. The panic only occurs if the code is
+    /// compiled with an unsupported BPS constant, and will **never trigger at runtime**
+    /// in production.
+    ///
+    /// This is intentional and forces explicit calculation and security review before
+    /// adding new BPS configurations.
     pub const fn ghostdag_k() -> u64 {
         match BPS {
             1 => 10,   // TOS: K=10 for 1 BPS (x=4.0, calculated ~9.7)

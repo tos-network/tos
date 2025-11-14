@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use tos_common::{
     api::daemon::{DevFeeThreshold, HardFork},
     block::BlockVersion,
@@ -26,6 +27,19 @@ pub const DEFAULT_RPC_BIND_ADDRESS: &str = "127.0.0.1:8080";
 
 // Default cache size for storage DB
 pub const DEFAULT_CACHE_SIZE: usize = 1024;
+
+// Compile-time NonZeroUsize constants for LruCache initialization
+// SAFETY: These constants are compile-time validated to be non-zero
+pub const DEFAULT_CACHE_SIZE_NONZERO: NonZeroUsize = unsafe {
+    // SAFETY: DEFAULT_CACHE_SIZE is a compile-time constant set to 1024 (non-zero)
+    NonZeroUsize::new_unchecked(DEFAULT_CACHE_SIZE)
+};
+
+// Compile-time assertion to validate DEFAULT_CACHE_SIZE is non-zero
+const _: () = assert!(
+    DEFAULT_CACHE_SIZE > 0,
+    "DEFAULT_CACHE_SIZE must be non-zero"
+);
 
 // Block rules
 // Millis per second, it is used to prevent having random 1000 values anywhere
@@ -64,6 +78,19 @@ pub const TIMESTAMP_IN_FUTURE_LIMIT: TimestampSeconds = 10_000;
 // V-26 Fix: Maximum number of orphaned transactions to prevent unbounded memory growth
 // Using LRU eviction, oldest transactions are dropped when limit is reached
 pub const MAX_ORPHANED_TRANSACTIONS: usize = 10_000;
+
+// Compile-time NonZeroUsize constant for orphaned transactions LruCache
+// SAFETY: This constant is compile-time validated to be non-zero
+pub const MAX_ORPHANED_TRANSACTIONS_NONZERO: NonZeroUsize = unsafe {
+    // SAFETY: MAX_ORPHANED_TRANSACTIONS is a compile-time constant set to 10,000 (non-zero)
+    NonZeroUsize::new_unchecked(MAX_ORPHANED_TRANSACTIONS)
+};
+
+// Compile-time assertion to validate MAX_ORPHANED_TRANSACTIONS is non-zero
+const _: () = assert!(
+    MAX_ORPHANED_TRANSACTIONS > 0,
+    "MAX_ORPHANED_TRANSACTIONS must be non-zero"
+);
 
 // -----------------------------------------------------------------------------
 // Parallel Execution Configuration (runtime toggles)

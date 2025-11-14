@@ -7,6 +7,17 @@ pub enum StorageReference<'a, S: Storage> {
     Immutable(&'a S),
 }
 
+impl<'a, S: Storage> StorageReference<'a, S> {
+    /// Try to get a mutable reference to the storage.
+    /// Returns an error if the storage is immutable.
+    pub fn try_as_mut(&mut self) -> Result<&mut S, &'static str> {
+        match self {
+            Self::Mutable(s) => Ok(*s),
+            Self::Immutable(_) => Err("Cannot mutably borrow immutable storage"),
+        }
+    }
+}
+
 impl<'a, S: Storage> AsRef<S> for StorageReference<'a, S> {
     fn as_ref(&self) -> &S {
         match self {

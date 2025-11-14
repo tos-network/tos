@@ -304,7 +304,13 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         let contract_environment = ContractEnvironment {
             environment: self.inner.environment,
             module,
-            provider: self.inner.storage.as_mut(),
+            // SAFETY: ApplicableChainState always constructed with Mutable storage
+            // This is guaranteed by the constructor at line 407
+            provider: self
+                .inner
+                .storage
+                .try_as_mut()
+                .expect("ApplicableChainState must have mutable storage"),
         };
 
         Ok((contract_environment, state))
@@ -426,7 +432,12 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
 
     // Get the storage used by the chain state
     pub fn get_mut_storage(&mut self) -> &mut S {
-        self.inner.storage.as_mut()
+        // SAFETY: ApplicableChainState always constructed with Mutable storage
+        // This is guaranteed by the constructor at line 407
+        self.inner
+            .storage
+            .try_as_mut()
+            .expect("ApplicableChainState must have mutable storage")
     }
 
     // Get the contracts cache

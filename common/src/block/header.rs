@@ -170,16 +170,19 @@ impl BlockHeader {
     }
 
     /// Apply miner work to this block header
-    pub fn apply_miner_work(&mut self, work: MinerWork) {
+    ///
+    /// Returns an error if the miner field is missing from the MinerWork.
+    pub fn apply_miner_work(&mut self, work: MinerWork) -> Result<(), &'static str> {
         let (_, timestamp, nonce, miner, extra_nonce) = work.take();
-        // SAFETY: MinerWork deserialization (line 348 in miner.rs) always sets miner to Some.
-        // When created from RPC, miner field is validated and guaranteed to be present.
+        // Validate that miner field is present
+        // MinerWork deserialization should always set miner field
         self.miner = miner
-            .expect("MinerWork miner field must be present after deserialization")
+            .ok_or("MinerWork miner field must be present after deserialization")?
             .into_owned();
         self.timestamp = timestamp;
         self.nonce = nonce;
         self.extra_nonce = extra_nonce;
+        Ok(())
     }
 
     // Getters for common fields

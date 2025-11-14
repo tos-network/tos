@@ -435,7 +435,9 @@ impl<S: Storage> GetWorkServer<S> {
             if let Some((header, _)) = mining_jobs.peek(job.get_header_work_hash()) {
                 // job is found in cache, clone it and put miner data inside
                 miner_header = header.clone();
-                miner_header.apply_miner_work(job);
+                miner_header
+                    .apply_miner_work(job)
+                    .map_err(|e| InternalRpcError::InvalidParams(e))?;
             } else {
                 // really old job, or miner send invalid job
                 if log::log_enabled!(log::Level::Debug) {
