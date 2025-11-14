@@ -27,15 +27,22 @@ pub type TimestampMillis = u64;
 pub type TimestampSeconds = u64;
 
 #[inline]
-#[allow(clippy::expect_used, clippy::disallowed_methods)]
+#[allow(clippy::disallowed_methods)]
 pub fn get_current_time() -> Duration {
     let start = SystemTime::now();
 
-    // SAFETY: This expect would only fail if system clock is set before 1970 (UNIX_EPOCH).
-    // This is a severe system misconfiguration. Non-consensus operation (see module docs).
-    start
-        .duration_since(UNIX_EPOCH)
-        .expect("Incorrect time returned from get_current_time")
+    // Handle system clock before 1970 (UNIX_EPOCH) gracefully with fallback to zero.
+    // This would only occur with severe system misconfiguration, but we avoid panic.
+    // Non-consensus operation (see module docs), so conservative fallback is acceptable.
+    match start.duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration,
+        Err(e) => {
+            if log::log_enabled!(log::Level::Error) {
+                log::error!("System clock is before UNIX_EPOCH: {}", e);
+            }
+            Duration::ZERO
+        }
+    }
 }
 
 // Return timestamp in seconds

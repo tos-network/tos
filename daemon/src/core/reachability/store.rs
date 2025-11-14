@@ -64,8 +64,17 @@ impl ReachabilityData {
 impl Serializer for ReachabilityData {
     fn write(&self, writer: &mut Writer) {
         // Use bincode for efficient serialization
-        #[allow(clippy::expect_used)]
-        let bytes = bincode::serialize(self).expect("Failed to serialize ReachabilityData");
+        // Safe serialization: log error and write empty bytes on failure (consistent with GHOSTDAG v5 approach)
+        // Reader will reject empty data with ReaderError::InvalidSize
+        let bytes = match bincode::serialize(self) {
+            Ok(b) => b,
+            Err(e) => {
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!("reachability: serialize failed: {}", e);
+                }
+                Vec::new()
+            }
+        };
         writer.write_bytes(&bytes);
     }
 
@@ -75,9 +84,7 @@ impl Serializer for ReachabilityData {
     }
 
     fn size(&self) -> usize {
-        #[allow(clippy::expect_used)]
-        {
-            bincode::serialized_size(self).expect("Failed to get size") as usize
-        }
+        // Return 0 on serialization failure (conservative fallback)
+        bincode::serialized_size(self).unwrap_or(0) as usize
     }
 }

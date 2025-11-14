@@ -11,18 +11,18 @@ use std::{
 // The HashSet is used to check if an element is already in the queue
 // The VecDeque is used to keep track of the order of the elements
 // This can be shared between threads
-pub struct Queue<K: Hash + Eq + Debug, V> {
+pub struct Queue<K: Hash + Eq + Debug + Clone, V> {
     keys: HashMap<Arc<K>, V>,
     order: VecDeque<Arc<K>>,
 }
 
-impl<K: Hash + Eq + Debug, V> Default for Queue<K, V> {
+impl<K: Hash + Eq + Debug + Clone, V> Default for Queue<K, V> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K: Hash + Eq + Debug, V> Queue<K, V> {
+impl<K: Hash + Eq + Debug + Clone, V> Queue<K, V> {
     pub fn new() -> Self {
         Self {
             keys: HashMap::new(),
@@ -52,11 +52,14 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
         let key = self.order.pop_front()?;
         let value = self.keys.remove(&key)?;
 
-        // SAFETY: Arc::try_unwrap is safe here because we just removed the key from both
-        // order (VecDeque) and keys (HashMap), so this is the last reference.
+        // SAFETY: Arc::try_unwrap should succeed here because we just removed the key from both
+        // order (VecDeque) and keys (HashMap), so this should be the last reference.
+        // In debug mode, assert this invariant. In release mode, fall back to cloning if needed.
         #[allow(clippy::disallowed_methods)]
-        #[allow(clippy::expect_used)]
-        let key = Arc::try_unwrap(key).expect("Failed to unwrap Arc");
+        let key = Arc::try_unwrap(key).unwrap_or_else(|arc| {
+            debug_assert!(false, "Arc still has multiple references in Queue::pop");
+            (*arc).clone()
+        });
         Some((key, value))
     }
 
@@ -75,11 +78,17 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
         let value = self.keys.remove(key)?;
         let key = self.remove_order_internal(key)?;
 
-        // SAFETY: Arc::try_unwrap is safe here because we just removed the key from both
-        // order (VecDeque) and keys (HashMap), so this is the last reference.
+        // SAFETY: Arc::try_unwrap should succeed here because we just removed the key from both
+        // order (VecDeque) and keys (HashMap), so this should be the last reference.
+        // In debug mode, assert this invariant. In release mode, fall back to cloning if needed.
         #[allow(clippy::disallowed_methods)]
-        #[allow(clippy::expect_used)]
-        let key = Arc::try_unwrap(key).expect("Failed to unwrap Arc");
+        let key = Arc::try_unwrap(key).unwrap_or_else(|arc| {
+            debug_assert!(
+                false,
+                "Arc still has multiple references in Queue::remove_entry"
+            );
+            (*arc).clone()
+        });
         Some((key, value))
     }
 
@@ -160,11 +169,17 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
             if f(&k, &v) {
                 self.remove_order_internal(&k)?;
 
-                // SAFETY: Arc::try_unwrap is safe here because we just removed from order (VecDeque)
+                // SAFETY: Arc::try_unwrap should succeed here because we just removed from order (VecDeque)
                 // and this key is not in keys (HashMap) anymore (swapped out to tmp).
+                // In debug mode, assert this invariant. In release mode, fall back to cloning if needed.
                 #[allow(clippy::disallowed_methods)]
-                #[allow(clippy::expect_used)]
-                let key = Arc::try_unwrap(k).expect("Failed to unwrap Arc");
+                let key = Arc::try_unwrap(k).unwrap_or_else(|arc| {
+                    debug_assert!(
+                        false,
+                        "Arc still has multiple references in Queue::extract_if"
+                    );
+                    (*arc).clone()
+                });
                 Some((key, v))
             } else {
                 self.keys.insert(k, v);

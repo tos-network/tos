@@ -266,21 +266,28 @@ impl<S: Storage> P2pServer<S> {
             object_tracker,
             is_running: AtomicBool::new(true),
             peer_sender,
-            blocks_propagation_queue: RwLock::new(LruCache::new(
-                #[allow(clippy::expect_used)]
-                {
-                    NonZeroUsize::new(STABLE_LIMIT as usize * TIPS_LIMIT)
-                        .expect("non-zero blocks propagation queue")
-                },
-            )),
+            blocks_propagation_queue: RwLock::new(LruCache::new({
+                // SAFETY: Compile-time assertion ensures STABLE_LIMIT * TIPS_LIMIT is non-zero
+                // STABLE_LIMIT = 60 (config.rs:180), TIPS_LIMIT = 32 (common/src/config.rs)
+                // 60 * 32 = 1920 > 0, guaranteed by const evaluation
+                const CAPACITY: usize = STABLE_LIMIT as usize * TIPS_LIMIT;
+                const _: () = assert!(
+                    CAPACITY > 0,
+                    "blocks propagation queue capacity must be non-zero"
+                );
+                unsafe { NonZeroUsize::new_unchecked(CAPACITY) }
+            })),
             blocks_processor,
-            txs_propagation_queue: RwLock::new(LruCache::new(
-                #[allow(clippy::expect_used)]
-                {
-                    NonZeroUsize::new(TRANSACTIONS_CHANNEL_CAPACITY)
-                        .expect("non-zero transactions propagation queue")
-                },
-            )),
+            txs_propagation_queue: RwLock::new(LruCache::new({
+                // SAFETY: Compile-time assertion ensures TRANSACTIONS_CHANNEL_CAPACITY is non-zero
+                // TRANSACTIONS_CHANNEL_CAPACITY = 128 (mod.rs:79)
+                // 128 > 0, guaranteed by const evaluation
+                const _: () = assert!(
+                    TRANSACTIONS_CHANNEL_CAPACITY > 0,
+                    "transactions propagation queue capacity must be non-zero"
+                );
+                unsafe { NonZeroUsize::new_unchecked(TRANSACTIONS_CHANNEL_CAPACITY) }
+            })),
             txs_processor,
             allow_fast_sync_mode,
             allow_boost_sync_mode,
@@ -1531,12 +1538,22 @@ impl<S: Storage> P2pServer<S> {
                                         "No peer found in peerlist, selecting a random seed node"
                                     );
                                     let seed_nodes = get_seed_nodes(self.blockchain.get_network());
-                                    #[allow(clippy::expect_used)]
-                                    self.select_random_socket_address(
-                                        seed_nodes
-                                            .iter()
-                                            .map(|v| v.parse().expect("seed node socket address")),
-                                    )
+                                    // Safe parsing: filter out invalid seed node addresses with error logging
+                                    // Invalid addresses are skipped rather than causing panic
+                                    self.select_random_socket_address(seed_nodes.iter().filter_map(
+                                        |v| match v.parse::<SocketAddr>() {
+                                            Ok(addr) => Some(addr),
+                                            Err(e) => {
+                                                if log::log_enabled!(log::Level::Error) {
+                                                    error!(
+                                                        "Invalid seed node address '{}': {}",
+                                                        v, e
+                                                    );
+                                                }
+                                                None
+                                            }
+                                        },
+                                    ))
                                     .await
                                     .map(|v| (v, true))
                                 }

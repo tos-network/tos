@@ -183,15 +183,16 @@ where
         match method.as_str() {
             "subscribe" => {
                 let event = self.parse_event(&mut request)?;
-                // SAFETY: WebSocketSessionShared is inserted into context during session initialization
-                // and is always present for the lifetime of the WebSocket connection
-                #[allow(clippy::unwrap_used)]
-                self.subscribe_session_to_event(
-                    context.get::<WebSocketSessionShared<Self>>().unwrap(),
-                    event,
-                    request.id.clone(),
-                )
-                .await?;
+                // Get WebSocketSessionShared from context with error propagation
+                // This should always succeed if session is properly initialized
+                let session = context.get::<WebSocketSessionShared<Self>>().map_err(|_| {
+                    RpcResponseError::new(
+                        request.id.clone(),
+                        InternalRpcError::InternalError("WebSocket session not found"),
+                    )
+                })?;
+                self.subscribe_session_to_event(session, event, request.id.clone())
+                    .await?;
                 Ok(Some(json!(RpcResponse::new(
                     Cow::Borrowed(&request.id),
                     Cow::Owned(Value::Bool(true))
@@ -199,15 +200,16 @@ where
             }
             "unsubscribe" => {
                 let event = self.parse_event(&mut request)?;
-                // SAFETY: WebSocketSessionShared is inserted into context during session initialization
-                // and is always present for the lifetime of the WebSocket connection
-                #[allow(clippy::unwrap_used)]
-                self.unsubscribe_session_from_event(
-                    context.get::<WebSocketSessionShared<Self>>().unwrap(),
-                    event,
-                    request.id.clone(),
-                )
-                .await?;
+                // Get WebSocketSessionShared from context with error propagation
+                // This should always succeed if session is properly initialized
+                let session = context.get::<WebSocketSessionShared<Self>>().map_err(|_| {
+                    RpcResponseError::new(
+                        request.id.clone(),
+                        InternalRpcError::InternalError("WebSocket session not found"),
+                    )
+                })?;
+                self.unsubscribe_session_from_event(session, event, request.id.clone())
+                    .await?;
                 Ok(Some(json!(RpcResponse::new(
                     Cow::Borrowed(&request.id),
                     Cow::Owned(Value::Bool(true))

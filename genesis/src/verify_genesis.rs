@@ -7,7 +7,7 @@ fn main() {
     println!("Genesis hex: {genesis_hex}");
 
     // check if the hex string is valid
-    if genesis_hex.len() % 2 != 0 {
+    if !genesis_hex.len().is_multiple_of(2) {
         println!("Error: Hex string length is not even!");
         return;
     }
