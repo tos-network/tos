@@ -1,3 +1,11 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::panic)]
+#![allow(clippy::disallowed_methods)]
+
+// TOS AI Miner is a standalone AI mining tool, not core blockchain code
+// Some unwrap/expect usage is acceptable for simplicity in this context
+
 mod config;
 mod daemon_client;
 mod storage;

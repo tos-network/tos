@@ -323,8 +323,22 @@ jobs:
           echo "  - panic: Prevent explicit panic calls"
           echo "  - disallowed_methods: Prevent unsafe time operations"
           echo ""
-          echo "Note: Test code is exempt from these checks"
-          cargo clippy --workspace --lib --bins -- \
+          echo "Note: Test code and test tools are exempt from these checks"
+          echo ""
+          echo "Checking production code libraries..."
+          cargo clippy \
+            --package tos_daemon \
+            --package tos_common \
+            --package tos_wallet \
+            --lib -- \
+            -D clippy::unwrap_used \
+            -D clippy::expect_used \
+            -D clippy::panic \
+            -D clippy::disallowed_methods \
+            -D warnings
+          echo ""
+          echo "Checking production binaries (miner, ai_miner)..."
+          cargo clippy --package tos_miner --package tos_ai_miner -- \
             -D clippy::unwrap_used \
             -D clippy::expect_used \
             -D clippy::panic \

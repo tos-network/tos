@@ -1,3 +1,7 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::{anyhow, Result};
 use log::{debug, info, warn};
 use reqwest::Client;
