@@ -4265,7 +4265,7 @@ impl<S: Storage> Blockchain<S> {
                     {
                         // Link transaction to this block
                         if !chain_state
-                            .get_mut_storage()
+                            .get_mut_storage()?
                             .add_block_linked_to_tx_if_not_present(tx_hash, &hash)?
                         {
                             if log::log_enabled!(log::Level::Trace) {
@@ -4294,7 +4294,7 @@ impl<S: Storage> Blockchain<S> {
 
                             // Mark transaction as executed
                             chain_state
-                                .get_mut_storage()
+                                .get_mut_storage()?
                                 .mark_tx_as_executed_in_block(tx_hash, &hash)?;
 
                             // Remove from orphaned transactions if present
@@ -4412,7 +4412,7 @@ impl<S: Storage> Blockchain<S> {
                         // execute all txs
                         // Link the transaction hash to this block
                         if !chain_state
-                            .get_mut_storage()
+                            .get_mut_storage()?
                             .add_block_linked_to_tx_if_not_present(&tx_hash, &hash)?
                         {
                             if log::log_enabled!(log::Level::Trace) {
@@ -4503,7 +4503,7 @@ impl<S: Storage> Blockchain<S> {
 
                             // mark tx as executed
                             chain_state
-                                .get_mut_storage()
+                                .get_mut_storage()?
                                 .mark_tx_as_executed_in_block(&tx_hash, &hash)?;
 
                             // Delete the transaction from  the list if it was marked as orphaned
@@ -5791,7 +5791,7 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // Get storage for writing
-        let storage = applicable_state.get_mut_storage();
+        let storage = applicable_state.get_mut_storage()?;
 
         // ATOMICITY (P1): Start commit point for atomic batch writes
         // All subsequent writes will be buffered until end_commit_point(true)

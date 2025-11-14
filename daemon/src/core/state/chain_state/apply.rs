@@ -305,13 +305,12 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             environment: self.inner.environment,
             module,
             // SAFETY: ApplicableChainState always constructed with Mutable storage
-            // This is guaranteed by the constructor at line 407
-            #[allow(clippy::expect_used)]
+            // This is guaranteed by the constructor - if this fails, it indicates a programming error
             provider: self
                 .inner
                 .storage
                 .try_as_mut()
-                .expect("ApplicableChainState must have mutable storage"),
+                .map_err(|e| BlockchainError::ModuleError(e.to_string()))?,
         };
 
         Ok((contract_environment, state))
@@ -432,16 +431,14 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
     }
 
     // Get the storage used by the chain state
-    pub fn get_mut_storage(&mut self) -> &mut S {
+    // Returns an error if the storage is immutable (should never happen for ApplicableChainState)
+    pub fn get_mut_storage(&mut self) -> Result<&mut S, BlockchainError> {
         // SAFETY: ApplicableChainState always constructed with Mutable storage
-        // This is guaranteed by the constructor at line 407
-        #[allow(clippy::expect_used)]
-        {
-            self.inner
-                .storage
-                .try_as_mut()
-                .expect("ApplicableChainState must have mutable storage")
-        }
+        // This is guaranteed by the constructor, but we return an error instead of panicking
+        self.inner
+            .storage
+            .try_as_mut()
+            .map_err(|e| BlockchainError::ModuleError(e.to_string()))
     }
 
     // Get the contracts cache

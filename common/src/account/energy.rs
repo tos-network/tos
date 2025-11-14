@@ -291,8 +291,7 @@ impl EnergyResource {
             return 0;
         }
 
-        #[allow(unknown_lints, clippy::manual_is_multiple_of)]
-        if tos_amount % crate::config::COIN_VALUE != 0 {
+        if !tos_amount.is_multiple_of(crate::config::COIN_VALUE) {
             return 0;
         }
 

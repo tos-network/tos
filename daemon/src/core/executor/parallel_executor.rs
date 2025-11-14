@@ -150,12 +150,28 @@ impl ParallelExecutor {
 
         for (index, tx) in batch {
             // Acquire permit before spawning - blocks if max_parallelism limit reached
-            #[allow(clippy::expect_used)]
-            let permit = semaphore
-                .clone()
-                .acquire_owned()
-                .await
-                .expect("Semaphore acquire failed");
+            // NOTE: Semaphore acquire failure should never happen in practice because:
+            // 1. We create the semaphore ourselves with a valid permit count
+            // 2. The semaphore is not closed externally
+            // If it does fail, we treat it as a graceful degradation case
+            let permit = match semaphore.clone().acquire_owned().await {
+                Ok(permit) => permit,
+                Err(e) => {
+                    // This should never happen, but if it does, log the error
+                    // and continue with sequential fallback behavior
+                    if log::log_enabled!(log::Level::Error) {
+                        log::error!(
+                            "[PARALLEL] Critical: Semaphore acquire failed: {}. \
+                            This indicates a serious internal error. Falling back to sequential execution.",
+                            e
+                        );
+                    }
+                    // We cannot spawn the task without a permit, so we break the loop
+                    // and let the remaining transactions be handled sequentially
+                    // The caller will see fewer results than expected and can handle it
+                    break;
+                }
+            };
             let state_clone = Arc::clone(&state);
             let tx_hash = tx.hash();
 

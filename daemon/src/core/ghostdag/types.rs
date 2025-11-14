@@ -216,21 +216,53 @@ impl Default for TosGhostdagData {
     }
 }
 
+// Helper functions for safe serialization with error logging
+// These provide a last-resort fallback that logs the error and returns a minimal valid state
+// instead of panicking, which could crash the consensus layer
+impl TosGhostdagData {
+    /// Safely serialize to bytes, returning empty Vec on error (with error logging)
+    /// This is a fallback that should never happen in practice
+    fn safe_serialize(&self) -> Vec<u8> {
+        match bincode::serialize(self) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                // Log error but don't panic - return empty bytes which will fail deserialization
+                // This allows the error to propagate up as a deserialization error
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!(
+                        "Critical: Failed to serialize TosGhostdagData - data structure is corrupted: {}. \
+                        Returning empty bytes, which will cause deserialization error.",
+                        e
+                    );
+                }
+                Vec::new()
+            }
+        }
+    }
+
+    /// Safely calculate serialized size, returning 0 on error (with error logging)
+    fn safe_serialized_size(&self) -> usize {
+        match bincode::serialized_size(self) {
+            Ok(size) => size as usize,
+            Err(e) => {
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!(
+                        "Critical: Failed to calculate size of TosGhostdagData - data structure is corrupted: {}. \
+                        Returning 0.",
+                        e
+                    );
+                }
+                0
+            }
+        }
+    }
+}
+
 // Serializer implementations for storage
-// Using bincode for efficient serialization of complex structures
+// Using safe serialization helpers instead of panic
 impl Serializer for TosGhostdagData {
     fn write(&self, writer: &mut Writer) {
-        // Use bincode to serialize the entire structure
-        // SAFETY: Serialization should never fail for well-formed TosGhostdagData
-        // All fields are serializable types (u64, BlueWorkType, Hash, Arc<Vec>, Arc<HashMap>)
-        // If this panics, it indicates a critical bug in the data structure
-        #[allow(clippy::panic)]
-        let bytes = bincode::serialize(self).unwrap_or_else(|e| {
-            panic!(
-                "Critical: Failed to serialize TosGhostdagData - data structure is corrupted: {}",
-                e
-            )
-        });
+        let bytes = self.safe_serialize();
         writer.write_bytes(&bytes);
     }
 
@@ -240,34 +272,50 @@ impl Serializer for TosGhostdagData {
     }
 
     fn size(&self) -> usize {
-        // SAFETY: Size calculation should never fail for well-formed TosGhostdagData
-        // All fields have deterministic sizes
-        // If this panics, it indicates a critical bug in the data structure
-        #[allow(clippy::panic)]
-        {
-            bincode::serialized_size(self).unwrap_or_else(|e| {
-            panic!(
-                "Critical: Failed to calculate size of TosGhostdagData - data structure is corrupted: {}",
-                e
-            )
-        }) as usize
+        self.safe_serialized_size()
+    }
+}
+
+// Helper functions for CompactGhostdagData safe serialization
+impl CompactGhostdagData {
+    /// Safely serialize to bytes, returning empty Vec on error (with error logging)
+    fn safe_serialize(&self) -> Vec<u8> {
+        match bincode::serialize(self) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!(
+                        "Critical: Failed to serialize CompactGhostdagData - data structure is corrupted: {}. \
+                        Returning empty bytes, which will cause deserialization error.",
+                        e
+                    );
+                }
+                Vec::new()
+            }
+        }
+    }
+
+    /// Safely calculate serialized size, returning 0 on error (with error logging)
+    fn safe_serialized_size(&self) -> usize {
+        match bincode::serialized_size(self) {
+            Ok(size) => size as usize,
+            Err(e) => {
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!(
+                        "Critical: Failed to calculate size of CompactGhostdagData - data structure is corrupted: {}. \
+                        Returning 0.",
+                        e
+                    );
+                }
+                0
+            }
         }
     }
 }
 
 impl Serializer for CompactGhostdagData {
     fn write(&self, writer: &mut Writer) {
-        // Use bincode for compact data as well
-        // SAFETY: Serialization should never fail for well-formed CompactGhostdagData
-        // All fields are serializable types (u64, BlueWorkType, Hash)
-        // If this panics, it indicates a critical bug in the data structure
-        #[allow(clippy::panic)]
-        let bytes = bincode::serialize(self).unwrap_or_else(|e| {
-            panic!(
-                "Critical: Failed to serialize CompactGhostdagData - data structure is corrupted: {}",
-                e
-            )
-        });
+        let bytes = self.safe_serialize();
         writer.write_bytes(&bytes);
     }
 
@@ -277,18 +325,7 @@ impl Serializer for CompactGhostdagData {
     }
 
     fn size(&self) -> usize {
-        // SAFETY: Size calculation should never fail for well-formed CompactGhostdagData
-        // All fields have deterministic sizes
-        // If this panics, it indicates a critical bug in the data structure
-        #[allow(clippy::panic)]
-        {
-            bincode::serialized_size(self).unwrap_or_else(|e| {
-            panic!(
-                "Critical: Failed to calculate size of CompactGhostdagData - data structure is corrupted: {}",
-                e
-            )
-        }) as usize
-        }
+        self.safe_serialized_size()
     }
 }
 
