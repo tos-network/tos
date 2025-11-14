@@ -640,11 +640,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         if log::log_enabled!(log::Level::Trace) {
             // SAFE: Logging only - serialization failure logged as error instead of panic
             match serde_json::to_value(params) {
-                Ok(v) => trace!("Calling method '{}' with params: {}", method, v),
+                Ok(v) => trace!("Calling method '{method}' with params: {v}"),
                 Err(e) => trace!(
-                    "Calling method '{}' with params (serialization failed: {})",
-                    method,
-                    e
+                    "Calling method '{method}' with params (serialization failed: {e})"
                 ),
             }
         }
@@ -799,12 +797,12 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             .await
             .map_err(|_| {
                 // SAFE: Error context - use simple string formatting instead of json!()
-                let context = format!("method: {}, params: <serialized>", method);
+                let context = format!("method: {method}, params: <serialized>");
                 JsonRPCError::TimedOut(context)
             })?
             .map_err(|e| {
                 // SAFE: Error context - use simple string formatting instead of json!()
-                let context = format!("method: {}, params: <serialized>", method);
+                let context = format!("method: {method}, params: <serialized>");
                 JsonRPCError::NoResponse(context, e.to_string())
             })?;
 
@@ -828,11 +826,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         if log::log_enabled!(log::Level::Trace) {
             // SAFE: Logging only - serialization failure logged as error instead of panic
             match serde_json::to_value(params) {
-                Ok(v) => trace!("Notifying method '{}' with {}", method, v),
+                Ok(v) => trace!("Notifying method '{method}' with {v}"),
                 Err(e) => trace!(
-                    "Notifying method '{}' with params (serialization failed: {})",
-                    method,
-                    e
+                    "Notifying method '{method}' with params (serialization failed: {e})"
                 ),
             }
         }

@@ -1,3 +1,7 @@
+// RPC server modules use json! macro which internally uses unwrap
+// This is acceptable for JSON construction which should never fail for valid literals
+#![allow(clippy::disallowed_methods)]
+
 pub mod websocket;
 
 use actix_web::{

@@ -11,6 +11,7 @@ use anyhow::{Context as AnyContext, Result};
 pub struct NoOpHasher(u64);
 
 impl Hasher for NoOpHasher {
+    #[allow(clippy::panic)]
     fn write(&mut self, _bytes: &[u8]) {
         // SAFETY: This hasher is intended ONLY for TypeId, which should call write_u64().
         // TypeId is a u64 internally, so the standard Hasher::hash() implementation
@@ -20,7 +21,6 @@ impl Hasher for NoOpHasher {
         // In release builds, use no-op to avoid crashes in production (hash will be incorrect,
         // but this is acceptable as a graceful degradation if HashMap is accidentally misused).
         #[cfg(debug_assertions)]
-        #[allow(clippy::panic)]
         panic!("NoOpHasher::write called; this hasher only supports write_u64 for TypeId.");
         #[cfg(not(debug_assertions))]
         {

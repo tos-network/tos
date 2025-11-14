@@ -160,6 +160,10 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
             if f(&k, &v) {
                 self.remove_order_internal(&k)?;
 
+                // SAFETY: Arc::try_unwrap is safe here because we just removed from order (VecDeque)
+                // and this key is not in keys (HashMap) anymore (swapped out to tmp).
+                #[allow(clippy::disallowed_methods)]
+                #[allow(clippy::expect_used)]
                 let key = Arc::try_unwrap(k).expect("Failed to unwrap Arc");
                 Some((key, v))
             } else {
