@@ -20,6 +20,7 @@ impl Serializer for HashSet<Hash> {
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let total_size = reader.total_size();
+        #[allow(unknown_lints, clippy::manual_is_multiple_of)]
         if total_size % HASH_SIZE != 0 {
             if log::log_enabled!(log::Level::Error) {
                 error!("Invalid size: {total_size}, expected a multiple of 32 for hashes");
@@ -63,6 +64,7 @@ impl Serializer for HashSet<Cow<'_, Hash>> {
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let total_size = reader.total_size();
+        #[allow(unknown_lints, clippy::manual_is_multiple_of)]
         if total_size % 32 != 0 {
             if log::log_enabled!(log::Level::Error) {
                 error!("Invalid size: {total_size}, expected a multiple of 32 for hashes");

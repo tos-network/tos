@@ -6,10 +6,11 @@ use std::{
 
 use crate::serializer::{Reader, ReaderError, Serializer, Writer};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Network {
     // Production network
     // This is the main network where real transactions happen
+    #[default]
     Mainnet,
     // Test network
     // This is a stable environment for testing purposes
@@ -41,12 +42,6 @@ impl clap::ValueEnum for Network {
         input
             .parse()
             .map_err(|_| format!("Invalid network: {input}"))
-    }
-}
-
-impl Default for Network {
-    fn default() -> Self {
-        Self::Mainnet
     }
 }
 

@@ -124,6 +124,7 @@ pub fn calculate_tx_fee(
     let mut size_in_kb = tx_size as u64 / BYTES_PER_KB as u64;
 
     // we consume a full kb for fee
+    #[allow(unknown_lints, clippy::manual_is_multiple_of)]
     if tx_size % BYTES_PER_KB != 0 {
         size_in_kb += 1;
     }

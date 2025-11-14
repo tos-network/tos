@@ -123,6 +123,7 @@ impl EnergyBuilder {
             }
 
             // Check if amount is a whole number of TOS (no decimals)
+            #[allow(unknown_lints, clippy::manual_is_multiple_of)]
             if self.amount % crate::config::COIN_VALUE != 0 {
                 return Err("Freeze amount must be a whole number of TOS (no decimals)");
             }
@@ -139,6 +140,7 @@ impl EnergyBuilder {
             }
         } else {
             // Check if unfreeze amount is a whole number of TOS (no decimals)
+            #[allow(unknown_lints, clippy::manual_is_multiple_of)]
             if self.amount % crate::config::COIN_VALUE != 0 {
                 return Err("Unfreeze amount must be a whole number of TOS (no decimals)");
             }
