@@ -1,5 +1,6 @@
 pub mod getwork;
 pub mod rpc;
+pub mod websocket;
 
 use crate::core::{
     blockchain::Blockchain, config::RPCConfig, error::BlockchainError, storage::Storage,
@@ -22,7 +23,7 @@ use tos_common::{
     config,
     rpc::{
         server::{
-            json_rpc, websocket,
+            json_rpc, websocket as websocket_handler,
             websocket::{EventWebSocketHandler, WebSocketServer, WebSocketServerShared},
             RPCServerHandler, WebSocketServerHandler,
         },
@@ -142,7 +143,7 @@ impl<S: Storage> DaemonRpcServer<S> {
                     // WebSocket support
                     .route(
                         "/json_rpc",
-                        web::get().to(websocket::<
+                        web::get().to(websocket_handler::<
                             EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>,
                             DaemonRpcServer<S>,
                         >),

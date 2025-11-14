@@ -221,7 +221,15 @@ impl Default for TosGhostdagData {
 impl Serializer for TosGhostdagData {
     fn write(&self, writer: &mut Writer) {
         // Use bincode to serialize the entire structure
-        let bytes = bincode::serialize(self).expect("Failed to serialize TosGhostdagData");
+        // SAFETY: Serialization should never fail for well-formed TosGhostdagData
+        // All fields are serializable types (u64, BlueWorkType, Hash, Arc<Vec>, Arc<HashMap>)
+        // If this panics, it indicates a critical bug in the data structure
+        let bytes = bincode::serialize(self).unwrap_or_else(|e| {
+            panic!(
+                "Critical: Failed to serialize TosGhostdagData - data structure is corrupted: {}",
+                e
+            )
+        });
         writer.write_bytes(&bytes);
     }
 
@@ -231,14 +239,30 @@ impl Serializer for TosGhostdagData {
     }
 
     fn size(&self) -> usize {
-        bincode::serialized_size(self).expect("Failed to get size") as usize
+        // SAFETY: Size calculation should never fail for well-formed TosGhostdagData
+        // All fields have deterministic sizes
+        // If this panics, it indicates a critical bug in the data structure
+        bincode::serialized_size(self).unwrap_or_else(|e| {
+            panic!(
+                "Critical: Failed to calculate size of TosGhostdagData - data structure is corrupted: {}",
+                e
+            )
+        }) as usize
     }
 }
 
 impl Serializer for CompactGhostdagData {
     fn write(&self, writer: &mut Writer) {
         // Use bincode for compact data as well
-        let bytes = bincode::serialize(self).expect("Failed to serialize CompactGhostdagData");
+        // SAFETY: Serialization should never fail for well-formed CompactGhostdagData
+        // All fields are serializable types (u64, BlueWorkType, Hash)
+        // If this panics, it indicates a critical bug in the data structure
+        let bytes = bincode::serialize(self).unwrap_or_else(|e| {
+            panic!(
+                "Critical: Failed to serialize CompactGhostdagData - data structure is corrupted: {}",
+                e
+            )
+        });
         writer.write_bytes(&bytes);
     }
 
@@ -248,7 +272,15 @@ impl Serializer for CompactGhostdagData {
     }
 
     fn size(&self) -> usize {
-        bincode::serialized_size(self).expect("Failed to get size") as usize
+        // SAFETY: Size calculation should never fail for well-formed CompactGhostdagData
+        // All fields have deterministic sizes
+        // If this panics, it indicates a critical bug in the data structure
+        bincode::serialized_size(self).unwrap_or_else(|e| {
+            panic!(
+                "Critical: Failed to calculate size of CompactGhostdagData - data structure is corrupted: {}",
+                e
+            )
+        }) as usize
     }
 }
 

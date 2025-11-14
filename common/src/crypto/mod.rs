@@ -7,7 +7,9 @@ mod blue_work;
 
 pub mod bech32;
 pub mod elgamal;
+pub mod error;
 pub mod proofs;
+pub mod random;
 
 pub use address::*;
 pub use hash::*;
@@ -15,6 +17,7 @@ pub use hash::*;
 // pub use transcript::*;
 // pub use human_readable_proof::*;
 pub use blue_work::*;
+pub use error::CryptoError;
 
 pub use elgamal::{KeyPair, PrivateKey, Signature, SIGNATURE_SIZE};
 

@@ -47,7 +47,6 @@ use indexmap::IndexSet;
 use log::{debug, error, info, trace, warn};
 use lru::LruCache;
 use metrics::{counter, gauge, histogram};
-use rand::Rng;
 use serde_json::{json, Value};
 use std::{
     borrow::Cow,
@@ -60,6 +59,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use tos_common::crypto::random::secure_random_bytes;
 use tos_common::{
     api::{
         daemon::{
@@ -2277,8 +2277,8 @@ impl<S: Storage> Blockchain<S> {
         trace!("get block header template");
         let start = Instant::now();
 
-        let extra_nonce: [u8; EXTRA_NONCE_SIZE] =
-            rand::thread_rng().gen::<[u8; EXTRA_NONCE_SIZE]>(); // generate random bytes
+        // SECURITY: Use OsRng for cryptographically secure random nonce
+        let extra_nonce: [u8; EXTRA_NONCE_SIZE] = secure_random_bytes::<EXTRA_NONCE_SIZE>();
         let tips_set = storage.get_tips().await?;
         let current_height = self.get_blue_score();
 
@@ -2710,6 +2710,8 @@ impl<S: Storage> Blockchain<S> {
         // TTL increased to 300s (5 min) to allow slow miners and restarts
         // Miners can also use block_hex param in submit_block to bypass cache entirely
         if !selected_tx_objects.is_empty() {
+            // SAFETY: Non-consensus operation - system time used only for cache TTL
+            // This does not affect consensus validation or block acceptance
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -2760,6 +2762,8 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // Try to retrieve cached transactions by merkle root
+        // SAFETY: Non-consensus operation - system time used only for cache TTL
+        // This does not affect consensus validation or block acceptance
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

@@ -50,6 +50,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
 rand = { workspace = true }
+rand_core = { workspace = true }
 indexmap = { workspace = true }
 async-trait = { workspace = true }
 cfg-if = { workspace = true }
