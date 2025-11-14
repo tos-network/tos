@@ -117,12 +117,21 @@ impl RpcResponseError {
     pub fn to_json(&self) -> Value {
         // SAFE: Build JSON manually instead of using json!() macro to avoid unwrap
         let mut obj = serde_json::Map::new();
-        obj.insert("jsonrpc".to_string(), Value::String(JSON_RPC_VERSION.to_string()));
+        obj.insert(
+            "jsonrpc".to_string(),
+            Value::String(JSON_RPC_VERSION.to_string()),
+        );
         obj.insert("id".to_string(), self.get_id());
 
         let mut error_obj = serde_json::Map::new();
-        error_obj.insert("code".to_string(), Value::Number(self.error.get_code().into()));
-        error_obj.insert("message".to_string(), Value::String(format!("{:#}", self.error)));
+        error_obj.insert(
+            "code".to_string(),
+            Value::Number(self.error.get_code().into()),
+        );
+        error_obj.insert(
+            "message".to_string(),
+            Value::String(format!("{:#}", self.error)),
+        );
         obj.insert("error".to_string(), Value::Object(error_obj));
 
         Value::Object(obj)

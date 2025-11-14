@@ -69,10 +69,10 @@ where
                         let request = self.parse_request(value)?;
                         let response = match self.execute_method(&context, request).await {
                             // SAFE: Convert response to Value - use explicit conversion instead of json!()
-                            Ok(response) => serde_json::to_value(response)
-                                .unwrap_or_else(|e| {
-                                    RpcResponseError::new(None, InternalRpcError::SerializeResponse(e)).to_json()
-                                }),
+                            Ok(response) => serde_json::to_value(response).unwrap_or_else(|e| {
+                                RpcResponseError::new(None, InternalRpcError::SerializeResponse(e))
+                                    .to_json()
+                            }),
                             Err(e) => e.to_json(),
                         };
                         responses.push(response);
@@ -148,10 +148,12 @@ where
         Ok(if request.id.is_some() {
             // SAFE: Build response JSON manually instead of using json!() macro
             let mut obj = serde_json::Map::new();
-            obj.insert("jsonrpc".to_string(), Value::String(JSON_RPC_VERSION.to_string()));
+            obj.insert(
+                "jsonrpc".to_string(),
+                Value::String(JSON_RPC_VERSION.to_string()),
+            );
             // Convert Option<Id> to Value
-            let id_value = serde_json::to_value(&request.id)
-                .unwrap_or(Value::Null);
+            let id_value = serde_json::to_value(&request.id).unwrap_or(Value::Null);
             obj.insert("id".to_string(), id_value);
             obj.insert("result".to_string(), result);
             Some(Value::Object(obj))

@@ -641,7 +641,11 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             // SAFE: Logging only - serialization failure logged as error instead of panic
             match serde_json::to_value(params) {
                 Ok(v) => trace!("Calling method '{}' with params: {}", method, v),
-                Err(e) => trace!("Calling method '{}' with params (serialization failed: {})", method, e),
+                Err(e) => trace!(
+                    "Calling method '{}' with params (serialization failed: {})",
+                    method,
+                    e
+                ),
             }
         }
         self.send(method, None, params).await
@@ -823,7 +827,11 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             // SAFE: Logging only - serialization failure logged as error instead of panic
             match serde_json::to_value(params) {
                 Ok(v) => trace!("Notifying method '{}' with {}", method, v),
-                Err(e) => trace!("Notifying method '{}' with params (serialization failed: {})", method, e),
+                Err(e) => trace!(
+                    "Notifying method '{}' with params (serialization failed: {})",
+                    method,
+                    e
+                ),
             }
         }
         self.send_message_internal(None, method, params).await?;
