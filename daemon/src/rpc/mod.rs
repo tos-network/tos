@@ -1,6 +1,7 @@
 pub mod getwork;
 pub mod rpc;
 pub mod websocket;
+mod websocket_wrapper;
 
 use crate::core::{
     blockchain::Blockchain, config::RPCConfig, error::BlockchainError, storage::Storage,
@@ -23,7 +24,7 @@ use tos_common::{
     config,
     rpc::{
         server::{
-            json_rpc, websocket as websocket_handler,
+            json_rpc,
             websocket::{EventWebSocketHandler, WebSocketServer, WebSocketServerShared},
             RPCServerHandler, WebSocketServerHandler,
         },
@@ -32,6 +33,7 @@ use tos_common::{
     tokio::spawn_task,
     tokio::sync::Mutex,
 };
+use websocket::{WebSocketSecurity, WebSocketSecurityConfig};
 
 pub type SharedDaemonRpcServer<S> = Arc<DaemonRpcServer<S>>;
 
@@ -39,6 +41,7 @@ pub struct DaemonRpcServer<S: Storage> {
     handle: Mutex<Option<ServerHandle>>,
     websocket: WebSocketServerShared<EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>>,
     getwork: Option<WebSocketServerShared<GetWorkServer<S>>>,
+    websocket_security: Arc<WebSocketSecurity>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -79,10 +82,61 @@ impl<S: Storage> DaemonRpcServer<S> {
             config.notify_events_concurrency,
         ));
 
+        // Configure WebSocket security
+        let allowed_origins = config
+            .ws_allowed_origins
+            .as_ref()
+            .map(|origins| origins.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_else(|| vec!["http://localhost:3000".to_string()]);
+
+        let ws_security_config = WebSocketSecurityConfig {
+            allowed_origins,
+            require_auth: config.ws_require_auth,
+            max_message_size: config.ws_max_message_size,
+            max_subscriptions_per_connection: config.ws_max_subscriptions,
+            max_connections_per_ip_per_minute: config.ws_max_connections_per_minute,
+            max_messages_per_connection_per_second: config.ws_max_messages_per_second,
+        };
+
+        let websocket_security = Arc::new(WebSocketSecurity::new(ws_security_config));
+
+        if log::log_enabled!(log::Level::Info) {
+            info!("WebSocket security initialized with:");
+            info!(
+                "  - Origin validation: {:?}",
+                websocket_security.config().allowed_origins
+            );
+            info!(
+                "  - Require auth: {}",
+                websocket_security.config().require_auth
+            );
+            info!(
+                "  - Max message size: {} bytes",
+                websocket_security.config().max_message_size
+            );
+            info!(
+                "  - Max subscriptions: {}",
+                websocket_security.config().max_subscriptions_per_connection
+            );
+            info!(
+                "  - Connection rate limit: {}/min",
+                websocket_security
+                    .config()
+                    .max_connections_per_ip_per_minute
+            );
+            info!(
+                "  - Message rate limit: {}/sec",
+                websocket_security
+                    .config()
+                    .max_messages_per_connection_per_second
+            );
+        }
+
         let server = Arc::new(Self {
             handle: Mutex::new(None),
             websocket: ws,
             getwork,
+            websocket_security,
         });
 
         let prometheus = if config.prometheus.enable {
@@ -140,14 +194,8 @@ impl<S: Storage> DaemonRpcServer<S> {
                         "/json_rpc",
                         web::post().to(json_rpc::<Arc<Blockchain<S>>, DaemonRpcServer<S>>),
                     )
-                    // WebSocket support
-                    .route(
-                        "/json_rpc",
-                        web::get().to(websocket_handler::<
-                            EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>,
-                            DaemonRpcServer<S>,
-                        >),
-                    )
+                    // WebSocket support with security wrapper
+                    .route("/json_rpc", web::get().to(secure_websocket_endpoint::<S>))
                     .route(
                         "/getwork/{address}/{worker}",
                         web::get().to(getwork_endpoint::<S>),
@@ -172,6 +220,18 @@ impl<S: Storage> DaemonRpcServer<S> {
             }
             spawn_task("rpc-server", http_server);
         }
+
+        // Spawn cleanup task for WebSocket security rate limiters
+        {
+            let security = Arc::clone(&server.websocket_security);
+            spawn_task("websocket-security-cleanup", async move {
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(120)).await;
+                    security.cleanup().await;
+                }
+            });
+        }
+
         Ok(server)
     }
 
@@ -223,6 +283,10 @@ impl<S: Storage> DaemonRpcServer<S> {
     pub fn getwork_server(&self) -> &Option<WebSocketServerShared<GetWorkServer<S>>> {
         &self.getwork
     }
+
+    pub fn websocket_security(&self) -> &Arc<WebSocketSecurity> {
+        &self.websocket_security
+    }
 }
 
 impl<S: Storage> WebSocketServerHandler<EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>>
@@ -256,6 +320,20 @@ async fn prometheus_metrics(handle: Data<Option<PrometheusHandle>>) -> Result<Ht
         }
         None => HttpResponse::NotFound().body("Prometheus metrics are not enabled"),
     })
+}
+
+async fn secure_websocket_endpoint<S: Storage>(
+    server: Data<DaemonRpcServer<S>>,
+    request: HttpRequest,
+    stream: Payload,
+) -> Result<HttpResponse, Error> {
+    websocket_wrapper::secure_websocket_handler(
+        &server.websocket,
+        &server.websocket_security,
+        request,
+        stream,
+    )
+    .await
 }
 
 async fn getwork_endpoint<S: Storage>(

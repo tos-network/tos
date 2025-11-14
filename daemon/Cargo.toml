@@ -99,6 +99,8 @@ ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 libsecp256k1 = { version = "0.7", features = ["hmac"] }
 sha3 = "0.10"
 rand = "0.8"
+proptest = "1.4"
+arbitrary = { version = "1.3", features = ["derive"] }
 
 [[bench]]
 name = "tps"
@@ -110,6 +112,10 @@ harness = false
 
 [[bench]]
 name = "parallel_tps_comparison"
+harness = false
+
+[[bench]]
+name = "security_benchmarks"
 harness = false
 
 # Test Configuration

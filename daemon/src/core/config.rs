@@ -78,6 +78,22 @@ const fn default_compact_blocks_enabled() -> bool {
     COMPACT_BLOCKS_ENABLED
 }
 
+const fn default_ws_max_message_size() -> usize {
+    1024 * 1024 // 1MB
+}
+
+const fn default_ws_max_subscriptions() -> usize {
+    100
+}
+
+const fn default_ws_max_connections_per_minute() -> u32 {
+    100
+}
+
+const fn default_ws_max_messages_per_second() -> u32 {
+    10
+}
+
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct GetWorkConfig {
     /// Disable GetWork Server (WebSocket for miners).
@@ -145,6 +161,36 @@ pub struct RPCConfig {
     #[clap(name = "rpc-notify-events-concurrency", long, default_value_t = detect_available_parallelism())]
     #[serde(default = "detect_available_parallelism")]
     pub notify_events_concurrency: usize,
+    /// WebSocket Security: Allowed origins for CORS protection
+    /// Comma-separated list (e.g., "http://localhost:3000,https://app.example.com")
+    /// Use "*" to allow all origins (NOT RECOMMENDED for production)
+    #[clap(name = "rpc-ws-allowed-origins", long)]
+    #[serde(default)]
+    pub ws_allowed_origins: Option<String>,
+    /// WebSocket Security: Require authentication for write operations
+    #[clap(name = "rpc-ws-require-auth", long)]
+    #[serde(default)]
+    pub ws_require_auth: bool,
+    /// WebSocket Security: Maximum message size in bytes
+    #[clap(name = "rpc-ws-max-message-size", long, default_value_t = 1048576)]
+    #[serde(default = "default_ws_max_message_size")]
+    pub ws_max_message_size: usize,
+    /// WebSocket Security: Maximum subscriptions per connection
+    #[clap(name = "rpc-ws-max-subscriptions", long, default_value_t = 100)]
+    #[serde(default = "default_ws_max_subscriptions")]
+    pub ws_max_subscriptions: usize,
+    /// WebSocket Security: Maximum connections per IP per minute
+    #[clap(
+        name = "rpc-ws-max-connections-per-minute",
+        long,
+        default_value_t = 100
+    )]
+    #[serde(default = "default_ws_max_connections_per_minute")]
+    pub ws_max_connections_per_minute: u32,
+    /// WebSocket Security: Maximum messages per connection per second
+    #[clap(name = "rpc-ws-max-messages-per-second", long, default_value_t = 10)]
+    #[serde(default = "default_ws_max_messages_per_second")]
+    pub ws_max_messages_per_second: u32,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize, strum::Display)]

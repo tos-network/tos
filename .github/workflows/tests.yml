@@ -313,3 +313,22 @@ jobs:
           echo "Building Release"
           echo "=========================================="
           cargo build --workspace --release
+
+      - name: Build with strict warnings (production crates only)
+        run: |
+          echo "=========================================="
+          echo "Building with -D warnings (Strict Mode)"
+          echo "=========================================="
+          echo "Checking production crates for warnings..."
+          echo ""
+          echo "Excluded from strict mode:"
+          echo "  - test crates (ai_miner, testing-integration)"
+          echo "  - benches, examples, tests"
+          echo ""
+          RUSTFLAGS="-D warnings" cargo build \
+            --package tos_daemon \
+            --package tos_common \
+            --package tos_wallet \
+            --lib
+          RUSTFLAGS="-D warnings" cargo build \
+            --package tos_miner

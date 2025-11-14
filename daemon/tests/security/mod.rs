@@ -59,6 +59,7 @@ pub mod integration_security_tests;
 pub mod block_submission_tests;
 pub mod state_transaction_integration_tests;
 pub mod test_utilities;
+pub mod websocket_pentest;
 
 #[cfg(test)]
 mod meta_tests {

@@ -21,3 +21,21 @@ name = "ghostdag_fuzzer"
 path = "fuzz_targets/ghostdag_fuzzer.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_block_deserialize"
+path = "fuzz_targets/fuzz_block_deserialize.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_transaction_decode"
+path = "fuzz_targets/fuzz_transaction_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_contract_bytecode"
+path = "fuzz_targets/fuzz_contract_bytecode.rs"
+test = false
+doc = false
