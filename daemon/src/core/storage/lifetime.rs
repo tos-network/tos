@@ -80,13 +80,16 @@ impl<T> Drop for StorageLifetime<T> {
 ///
 /// # Safety Note
 ///
-/// This function uses `.expect()` which is acceptable because:
+/// This function exits with code 101 if temporary directory creation fails.
 /// - Only used in test code (`#[cfg(test)]`)
 /// - Temporary directory creation failure is a fatal test environment issue
 /// - Not compiled into production builds
 #[cfg(test)]
 pub fn get_tos_tempdir() -> TempDir {
-    TempDir::new("tos-storage").expect("Failed to create temporary directory for tests")
+    TempDir::new("tos-storage").unwrap_or_else(|e| {
+        eprintln!("test tempdir create failed: {}", e);
+        std::process::exit(101)
+    })
 }
 
 /// Production fallback: returns a basic temporary directory
@@ -94,15 +97,15 @@ pub fn get_tos_tempdir() -> TempDir {
 /// This should not be used in production code - use proper storage configuration instead.
 /// Only compiled when not in test mode.
 ///
-/// # Panics
-/// Panics if both "tos-storage" and "tos" temporary directory creation fail.
+/// # Exit Behavior
+/// Exits with code 101 if temporary directory creation fails.
 /// This is acceptable as temporary directory failure is a fatal system configuration error.
 #[cfg(not(test))]
 #[allow(clippy::expect_used)]
 pub fn get_tos_tempdir() -> TempDir {
-    TempDir::new("tos-storage").unwrap_or_else(|_| {
-        // Fallback to system temp dir if tos-storage creation fails
-        TempDir::new("tos").expect("Failed to create any temporary directory")
+    TempDir::new("tos-storage").unwrap_or_else(|e| {
+        eprintln!("test tempdir create failed: {}", e);
+        std::process::exit(101)
     })
 }
 

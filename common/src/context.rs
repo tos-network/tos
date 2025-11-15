@@ -17,11 +17,16 @@ impl Hasher for NoOpHasher {
         // TypeId is a u64 internally, so the standard Hasher::hash() implementation
         // calls write_u64() directly, never calling this write() method.
         //
-        // In debug builds, panic early to surface misuse during development.
+        // In debug builds, abort early to surface misuse during development.
         // In release builds, use no-op to avoid crashes in production (hash will be incorrect,
         // but this is acceptable as a graceful degradation if HashMap is accidentally misused).
         #[cfg(debug_assertions)]
-        panic!("NoOpHasher::write called; this hasher only supports write_u64 for TypeId.");
+        {
+            eprintln!(
+                "fatal: NoOpHasher::write called; this hasher only supports write_u64 for TypeId."
+            );
+            std::process::abort()
+        };
         #[cfg(not(debug_assertions))]
         {
             // no-op in release

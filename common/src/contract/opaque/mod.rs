@@ -56,10 +56,13 @@ tid!(Block);
 pub fn register_opaque_types() {
     debug!("Registering opaque types");
     // SAFETY: This function is called once during initialization, before any concurrent access.
-    // RwLock::write() cannot fail for a non-poisoning lock (RwLock doesn't poison).
+    // Handle potential RwLock poisoning by recovering the inner guard.
+    // Poisoning occurs when a thread panics while holding the lock, but we can still access the data.
     #[allow(clippy::disallowed_methods)]
-    #[allow(clippy::expect_used)]
-    let mut registry = JSON_REGISTRY.write().expect("Failed to lock JSON_REGISTRY");
+    let mut registry = match JSON_REGISTRY.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     register_opaque_json!(registry, "Hash", Hash);
     register_opaque_json!(registry, "Address", Address);
     register_opaque_json!(registry, "Signature", Signature);

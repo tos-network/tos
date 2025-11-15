@@ -6,6 +6,33 @@
 // TOS Miner is a standalone mining tool, not core blockchain code
 // Some unwrap/expect usage is acceptable for simplicity in this context
 
+use std::process::exit;
+trait OrExit<T> {
+    fn or_exit(self, msg: &str) -> T;
+}
+impl<T, E: std::fmt::Display> OrExit<T> for Result<T, E> {
+    fn or_exit(self, msg: &str) -> T {
+        match self {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("error: {}: {}", msg, e);
+                exit(2)
+            }
+        }
+    }
+}
+impl<T> OrExit<T> for Option<T> {
+    fn or_exit(self, msg: &str) -> T {
+        match self {
+            Some(v) => v,
+            None => {
+                eprintln!("error: {}: none", msg);
+                exit(2)
+            }
+        }
+    }
+}
+
 pub mod config;
 
 use crate::config::DEFAULT_DAEMON_ADDRESS;
@@ -429,12 +456,12 @@ fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
         for _ in 0..bench {
             let job = MinerWork::new(Hash::zero(), get_current_time_in_millis());
             let mut worker = Worker::new();
-            worker.set_work(job, algorithm).unwrap();
+            worker.set_work(job, algorithm).or_exit("unwrap");
 
             let handle = thread::spawn(move || {
                 for _ in 0..iterations {
-                    let _ = worker.get_pow_hash().unwrap();
-                    worker.increase_nonce().unwrap();
+                    let _ = worker.get_pow_hash().or_exit("unwrap");
+                    worker.increase_nonce().or_exit("unwrap");
                 }
             });
             handles.push(handle);
@@ -442,7 +469,10 @@ fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
 
         for handle in handles {
             // wait on all threads
-            handle.join().unwrap();
+            handle.join().unwrap_or_else(|e| {
+                eprintln!("error: thread join failed: {:?}", e);
+                std::process::exit(2)
+            });
         }
         let duration = start.elapsed().as_millis();
         let hashrate = format_hashrate(1000f64 / (duration as f64 / (bench * iterations) as f64));
@@ -586,7 +616,10 @@ async fn handle_websocket_message(
                     let block = MinerWork::from_hex(&job.miner_work)
                         .context("Error while decoding new job received from daemon")?;
                     CURRENT_TOPO_HEIGHT.store(job.topoheight, Ordering::SeqCst);
-                    JOB_ELAPSED.write().unwrap().replace(Instant::now());
+                    JOB_ELAPSED
+                        .write()
+                        .or_exit("unwrap")
+                        .replace(Instant::now());
 
                     if let Err(e) = job_sender.send(ThreadNotification::NewJob(
                         job.algorithm,
@@ -686,7 +719,7 @@ fn start_thread(
                     // u16 support up to 65535 threads
                     new_job.set_thread_id_u16(id);
                     let initial_timestamp = new_job.get_timestamp();
-                    worker.set_work(new_job, algorithm).unwrap();
+                    worker.set_work(new_job, algorithm).or_exit("unwrap");
 
                     let difficulty_target = match compute_difficulty_target(&expected_difficulty) {
                         Ok(value) => value,
@@ -699,10 +732,10 @@ fn start_thread(
                     };
 
                     // Solve block
-                    hash = worker.get_pow_hash().unwrap();
+                    hash = worker.get_pow_hash().or_exit("unwrap");
                     let mut tries = 0;
                     while !check_difficulty_against_target(&hash, &difficulty_target) {
-                        worker.increase_nonce().unwrap();
+                        worker.increase_nonce().or_exit("unwrap");
                         // check if we have a new job pending
                         // Only update every N iterations to avoid too much CPU usage
                         if tries % UPDATE_EVERY_NONCE == 0 {
@@ -711,18 +744,18 @@ fn start_thread(
                             }
                             if let Ok(instant) = JOB_ELAPSED.read() {
                                 if let Some(instant) = instant.as_ref() {
-                                    worker.set_timestamp(initial_timestamp + instant.elapsed().as_millis() as u64).unwrap();
+                                    worker.set_timestamp(initial_timestamp + instant.elapsed().as_millis() as u64).or_exit("unwrap");
                                 }
                             }
                             HASHRATE_COUNTER.fetch_add(UPDATE_EVERY_NONCE as usize, Ordering::SeqCst);
                         }
 
-                        hash = worker.get_pow_hash().unwrap();
+                        hash = worker.get_pow_hash().or_exit("unwrap");
                         tries += 1;
                     }
 
                     // compute the reference hash for easier finding of the block
-                    let block_hash = worker.get_block_hash().unwrap();
+                    let block_hash = worker.get_block_hash().or_exit("unwrap");
 
                     // Check if there's a newer job available before submitting
                     // This prevents submitting stale blocks that will be rejected
@@ -737,7 +770,7 @@ fn start_thread(
                         info!("Thread #{}: block {} found at height {} with difficulty {}", id, block_hash, height, format_difficulty(difficulty_from_hash(&hash)));
                     }
 
-                    let job = worker.take_work().unwrap();
+                    let job = worker.take_work().or_exit("unwrap");
                     if block_sender.blocking_send(job).is_err() {
                         if log::log_enabled!(log::Level::Error) {
                             error!("Mining Thread #{id}: error while sending block found with hash {block_hash}");

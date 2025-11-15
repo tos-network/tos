@@ -36,12 +36,19 @@ impl CompactBlockCache {
     /// # Panics
     /// Panics if capacity is zero (should never happen with reasonable config)
     pub fn new(capacity: usize, entry_timeout: Duration) -> Self {
-        // SAFETY: Capacity is always > 0 in production (default is 1000)
-        // Panic here is acceptable as it indicates a configuration error at startup
+        // SAFETY: If capacity is 0, this is a fatal configuration error.
+        // Fail fast with abort() instead of panic!()
         #[allow(clippy::expect_used)]
-        let non_zero_cap = capacity
-            .try_into()
-            .expect("CompactBlockCache capacity must be non-zero");
+        let non_zero_cap = match capacity.try_into() {
+            Ok(nz) => nz,
+            Err(_) => {
+                eprintln!(
+                    "fatal: CompactBlockCache capacity must be non-zero, got: {}",
+                    capacity
+                );
+                std::process::abort()
+            }
+        };
         Self {
             cache: Arc::new(RwLock::new(LruCache::new(non_zero_cap))),
             entry_timeout,

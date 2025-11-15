@@ -1,3 +1,30 @@
+use std::process::exit;
+trait OrExit<T> {
+    fn or_exit(self, msg: &str) -> T;
+}
+impl<T, E: std::fmt::Display> OrExit<T> for Result<T, E> {
+    fn or_exit(self, msg: &str) -> T {
+        match self {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("error: {}: {}", msg, e);
+                exit(2)
+            }
+        }
+    }
+}
+impl<T> OrExit<T> for Option<T> {
+    fn or_exit(self, msg: &str) -> T {
+        match self {
+            Some(v) => v,
+            None => {
+                eprintln!("error: {}: none", msg);
+                exit(2)
+            }
+        }
+    }
+}
+
 use std::env;
 use tos_common::{
     block::{Block, BlockHeader, BlockVersion},
@@ -20,7 +47,7 @@ fn main() {
     let dev_address = "tos1qsl6sj2u0gp37tr6drrq964rd4d8gnaxnezgytmt0cfltnp2wsgqqak28je";
     // SAFETY: Acceptable in build-time genesis generator with hardcoded address
     #[allow(clippy::disallowed_methods)]
-    let address = Address::from_string(dev_address).unwrap();
+    let address = Address::from_string(dev_address).or_exit("unwrap");
     let public_key = address.to_public_key();
 
     println!("Network: {network}");

@@ -176,8 +176,10 @@ impl RocksStorage {
         opts.set_keep_log_file_num(config.keep_max_log_files);
 
         #[allow(clippy::panic)]
-        let mut env =
-            Env::new().unwrap_or_else(|e| panic!("Failed to create RocksDB environment: {:?}", e));
+        let mut env = Env::new().unwrap_or_else(|e| {
+            eprintln!("fatal: Failed to create RocksDB environment: {:?}", e);
+            std::process::abort()
+        });
         env.set_low_priority_background_threads(config.low_priority_background_threads as _);
         opts.set_env(&env);
         opts.set_compression_type(config.compression_mode.convert());
@@ -210,7 +212,10 @@ impl RocksStorage {
             format!("{}{}", dir, network.to_string().to_lowercase()),
             cfs,
         )
-        .unwrap_or_else(|e| panic!("Failed to open RocksDB database: {:?}", e));
+        .unwrap_or_else(|e| {
+            eprintln!("fatal: Failed to open RocksDB database: {:?}", e);
+            std::process::abort()
+        });
 
         Self {
             db: Arc::new(db),

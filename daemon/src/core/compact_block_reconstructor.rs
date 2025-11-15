@@ -150,11 +150,27 @@ impl CompactBlockReconstructor {
         }
 
         // All transactions found! Reconstruct the full block
-        #[allow(clippy::expect_used)]
-        let complete_transactions: Vec<Arc<Transaction>> = transactions
-            .into_iter()
-            .map(|opt_tx| opt_tx.expect("All transactions should be present"))
-            .collect();
+        // Defensive check: if any transaction is still missing, request full block
+        let mut complete_transactions = Vec::with_capacity(transactions.len());
+        for opt_tx in transactions {
+            match opt_tx {
+                Some(tx) => complete_transactions.push(tx),
+                None => {
+                    // Unexpected: transaction still missing after check above
+                    // Request full block instead of panicking
+                    debug!(
+                        "Compact block {} still missing transaction after verification; requesting full block",
+                        block_hash
+                    );
+                    return Ok(ReconstructionResult::MissingTransactions(
+                        MissingTransactionsRequest {
+                            block_hash: block_hash.clone(),
+                            missing_indices: Vec::new(),
+                        },
+                    ));
+                }
+            }
+        }
 
         let block = Block::new(
             Immutable::Owned(compact_block.header),

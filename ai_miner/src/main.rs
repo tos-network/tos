@@ -6,6 +6,33 @@
 // TOS AI Miner is a standalone AI mining tool, not core blockchain code
 // Some unwrap/expect usage is acceptable for simplicity in this context
 
+use std::process::exit;
+trait OrExit<T> {
+    fn or_exit(self, msg: &str) -> T;
+}
+impl<T, E: std::fmt::Display> OrExit<T> for Result<T, E> {
+    fn or_exit(self, msg: &str) -> T {
+        match self {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("error: {}: {}", msg, e);
+                exit(2)
+            }
+        }
+    }
+}
+impl<T> OrExit<T> for Option<T> {
+    fn or_exit(self, msg: &str) -> T {
+        match self {
+            Some(v) => v,
+            None => {
+                eprintln!("error: {}: none", msg);
+                exit(2)
+            }
+        }
+    }
+}
+
 mod config;
 mod daemon_client;
 mod storage;
@@ -1339,7 +1366,7 @@ async fn test_task_publication_workflow(
     // NON-CONSENSUS: SystemTime used only for test task deadline (test code, not production)
     let deadline = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .or_exit("unwrap")
         .as_secs()
         + 7200; // 2 hours from now
 
@@ -1575,7 +1602,11 @@ async fn test_reward_cycle(
     manager.message("");
     manager.message("💰 Network Fee Analysis:");
     let sample_payload = AIMiningPayload::RegisterMiner {
-        miner_address: miner_address_opt.as_ref().unwrap().clone().to_public_key(),
+        miner_address: miner_address_opt
+            .as_ref()
+            .or_exit("unwrap")
+            .clone()
+            .to_public_key(),
         registration_fee: 1_000_000_000,
     };
 

@@ -93,13 +93,14 @@ impl<S: Storage> GetWorkServer<S> {
         let server = Arc::new(Self {
             miners: Mutex::new(HashMap::new()),
             blockchain,
-            mining_jobs: Mutex::new(LruCache::new(
-                #[allow(clippy::expect_used)]
-                {
-                    NonZeroUsize::new(STABLE_LIMIT as usize * TIPS_LIMIT)
-                        .expect("Non zero mining jobs cache")
-                },
-            )),
+            mining_jobs: Mutex::new(LruCache::new({
+                // SAFETY: Compile-time assertion ensures STABLE_LIMIT * TIPS_LIMIT is non-zero
+                // STABLE_LIMIT = 60 (config.rs:180), TIPS_LIMIT = 32 (common/src/config.rs)
+                // 60 * 32 = 1920 > 0, guaranteed by const evaluation
+                const CAPACITY: usize = STABLE_LIMIT as usize * TIPS_LIMIT;
+                const _: () = assert!(CAPACITY > 0, "mining jobs cache capacity must be non-zero");
+                unsafe { NonZeroUsize::new_unchecked(CAPACITY) }
+            })),
             last_header_hash: Mutex::new(None),
             last_notify: AtomicU64::new(0),
             is_job_dirty: AtomicBool::new(false),
