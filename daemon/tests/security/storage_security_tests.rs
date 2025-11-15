@@ -20,7 +20,7 @@ async fn test_v20_concurrent_balance_updates_safe() {
     // 2. 10 threads simultaneously add 100 each
     // 3. Final balance should be 2000 (not less due to lost updates)
 
-    use tos_testing_integration::utils::storage_helpers::{
+    use tos_testing_framework::utilities::{
         create_test_rocksdb_storage,
         setup_account_rocksdb,
     };

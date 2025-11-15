@@ -26,6 +26,7 @@ textwrap = "0.16"
 
 # TOS dependencies for TestBlockchain
 tos_common = { path = "../common" }
+tos_daemon = { path = "../daemon" }
 
 [dev-dependencies]
 proptest = "1.4"

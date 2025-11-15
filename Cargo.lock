@@ -5334,29 +5334,8 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tos_common",
- "tracing",
-]
-
-[[package]]
-name = "tos-testing-integration"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "dashmap",
- "log",
- "parking_lot 0.12.5",
- "rand 0.8.5",
- "reqwest 0.12.24",
- "serde",
- "serde_json",
- "tempdir",
- "thiserror 1.0.69",
- "tokio",
- "tokio-test",
- "tos_common",
  "tos_daemon",
- "tos_wallet",
+ "tracing",
 ]
 
 [[package]]
@@ -5507,7 +5486,7 @@ dependencies = [
  "tos-program-runtime",
  "tos-syscalls",
  "tos-tbpf",
- "tos-testing-integration",
+ "tos-testing-framework",
  "tos_common",
  "x25519-dalek",
  "xxhash-rust",

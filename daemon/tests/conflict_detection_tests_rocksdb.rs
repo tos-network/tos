@@ -44,7 +44,7 @@ use tos_daemon::core::{
     storage::{BalanceProvider, NonceProvider},
 };
 use tos_environment::Environment;
-use tos_testing_integration::utils::storage_helpers::{
+use tos_testing_framework::utilities::{
     create_test_rocksdb_storage, setup_account_rocksdb,
 };
 

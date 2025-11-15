@@ -39,7 +39,7 @@ use tos_daemon::core::{
 use tos_daemon::tako_integration::TakoContractExecutor;
 
 use tos_environment::Environment;
-use tos_testing_integration::create_test_storage_with_funded_accounts;
+use tos_testing_framework::utilities::create_test_storage_with_funded_accounts;
 
 /// Mock account state for transaction building
 struct MockAccountState {

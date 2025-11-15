@@ -368,7 +368,7 @@ async fn test_optimal_parallelism() {
 // MIGRATED TO ROCKSDB: Now uses RocksDB storage instead of Sled to avoid deadlock issues
 async fn test_high_concurrency_lock_stress() {
     use tos_daemon::core::storage::rocksdb::RocksStorage;
-    use tos_testing_integration::utils::storage_helpers::create_test_rocksdb_storage;
+    use tos_testing_framework::utilities::create_test_rocksdb_storage;
 
     // Create RocksDB storage (no deadlock risk)
     let storage_arc: std::sync::Arc<tos_common::tokio::sync::RwLock<RocksStorage>> =

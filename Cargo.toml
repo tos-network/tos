@@ -8,7 +8,6 @@ members = [
     "daemon",
     "genesis",
     "ai_miner",
-    "testing-integration",
     "testing-framework"]
 
 [workspace.dependencies]

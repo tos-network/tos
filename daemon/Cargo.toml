@@ -94,7 +94,7 @@ tempdir = "*"
 criterion = "0.6.0"
 rayon = "1.8"
 sysinfo = "0.32"
-tos-testing-integration = { path = "../testing-integration" }
+tos-testing-framework = { path = "../testing-framework" }
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 libsecp256k1 = { version = "0.7", features = ["hmac"] }
 sha3 = "0.10"

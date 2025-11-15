@@ -29,7 +29,7 @@ use tos_common::{config::COIN_VALUE, crypto::Hash};
 use tos_daemon::core::storage::NetworkProvider;
 
 use tos_environment::Environment;
-use tos_testing_integration::create_test_storage_with_funded_accounts;
+use tos_testing_framework::utilities::create_test_storage_with_funded_accounts;
 
 /// Test 1: Verify ParallelChainState can be created and used correctly
 /// This is a sanity check that the parallel state infrastructure works
