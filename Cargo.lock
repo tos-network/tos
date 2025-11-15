@@ -5333,6 +5333,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-test",
+ "tos-kernel",
  "tos_common",
  "tos_daemon",
  "tracing",

@@ -226,6 +226,102 @@ async fn test_consensus_convergence() -> Result<()> {
 - Fork resolution
 - Byzantine behavior
 
+### Smart Contract Testing
+
+Test TAKO smart contracts with real RocksDB storage.
+
+```rust
+use tos_testing_framework::utilities::{
+    create_contract_test_storage, execute_test_contract, get_contract_storage,
+};
+use tos_common::crypto::{Hash, KeyPair};
+
+#[tokio::test]
+async fn test_smart_contract() -> Result<()> {
+    // Create test storage with funded account
+    let account = KeyPair::new();
+    let storage = create_contract_test_storage(&account, 1_000_000).await?;
+
+    // Load contract bytecode
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/hello_world.so");
+
+    // Execute contract
+    let contract_hash = Hash::zero();
+    let result = execute_test_contract(bytecode, &storage, 1, &contract_hash).await?;
+
+    // Verify execution
+    assert_eq!(result.return_value, 0);
+    assert!(result.compute_units_used > 0);
+
+    // Read contract storage
+    let value = get_contract_storage(&storage, contract_hash, b"key", 1).await?;
+
+    Ok(())
+}
+```
+
+**Use Cases:**
+- Contract execution testing
+- Storage persistence verification
+- Compute unit consumption tracking
+- Contract state transitions
+- Cross-contract calls (CPI)
+
+**Available Helpers:**
+
+- `create_contract_test_storage()` - Create RocksDB storage with funded account
+- `execute_test_contract()` - Execute contract bytecode with real TAKO VM
+- `get_contract_storage()` - Read contract persistent storage
+- `fund_test_account()` - Fund additional test accounts
+- `contract_exists()` - Check if contract is deployed at topoheight
+
+**Example: Testing Contract Storage**
+
+```rust
+use tos_testing_framework::utilities::{
+    create_contract_test_storage, execute_test_contract, get_contract_storage,
+};
+
+#[tokio::test]
+async fn test_counter_contract() -> Result<()> {
+    let account = KeyPair::new();
+    let storage = create_contract_test_storage(&account, 1_000_000).await?;
+
+    // Load counter contract
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/counter.so");
+    let contract_hash = Hash::zero();
+
+    // Execute contract at different topoheights
+    for topoheight in 1..=5 {
+        let result = execute_test_contract(
+            bytecode,
+            &storage,
+            topoheight,
+            &contract_hash
+        ).await?;
+
+        assert_eq!(result.return_value, 0);
+
+        // Verify storage increments
+        let count = get_contract_storage(
+            &storage,
+            contract_hash,
+            b"count",
+            topoheight
+        ).await?;
+
+        if let Some(value) = count {
+            // Counter should increment at each topoheight
+            println!("Count at topoheight {}: {:?}", topoheight, value);
+        }
+    }
+
+    Ok(())
+}
+```
+
+See `testing-framework/tests/contract_integration_example.rs` for complete examples.
+
 ## Advanced Features
 
 ### Network Partitions
@@ -471,6 +567,7 @@ for i in 1..network.node_count() {
 
 - Component-level unit tests (Tier 1)
 - Integration tests with single daemon (Tier 2)
+- **Smart contract testing with real TAKO VM and RocksDB storage**
 - Multi-node consensus convergence (Tier 3)
 - Network partitions and healing (Tier 3)
 - Block propagation (Tier 3)

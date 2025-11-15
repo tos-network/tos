@@ -28,6 +28,9 @@ textwrap = "0.16"
 tos_common = { path = "../common" }
 tos_daemon = { path = "../daemon" }
 
+# TAKO dependencies for contract testing
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", branch = "main" }
+
 [dev-dependencies]
 proptest = "1.4"
 tokio-test = "0.4"

@@ -212,7 +212,10 @@ pub async fn create_test_storage_with_funded_accounts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tos_common::{config::COIN_VALUE, serializer::Reader};
+    use tos_common::{
+        config::COIN_VALUE,
+        serializer::{Reader, Serializer},
+    };
 
     fn create_test_pubkey(seed: u8) -> CompressedPublicKey {
         let data = [seed; 32];
