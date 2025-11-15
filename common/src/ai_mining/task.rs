@@ -159,15 +159,12 @@ impl AIMiningTask {
 
     /// Get the best answer based on validation scores
     pub fn get_best_answer(&self) -> Option<&SubmittedAnswer> {
-        // SAFETY: unwrap in max_by_key is safe because we filter for is_some() first
-        #[allow(clippy::disallowed_methods)]
-        #[allow(clippy::unwrap_used)]
-        {
-            self.submitted_answers
-                .iter()
-                .filter(|answer| answer.average_score.is_some())
-                .max_by_key(|answer| answer.average_score.unwrap())
-        }
+        // Use filter_map to avoid .unwrap() - semantically equivalent but safer
+        self.submitted_answers
+            .iter()
+            .filter_map(|answer| answer.average_score.map(|score| (score, answer)))
+            .max_by_key(|(score, _)| *score)
+            .map(|(_, answer)| answer)
     }
 
     /// Mark task as completed if deadline has passed or best answer found
