@@ -1,0 +1,20 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Test artifacts
+/test-data/
+/test-output/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

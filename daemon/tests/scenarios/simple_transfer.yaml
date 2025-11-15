@@ -1,0 +1,62 @@
+# Simple Transfer Scenario
+# Tests basic transfer between two accounts with all assertion modes
+
+name: "Simple Transfer"
+description: "Alice transfers 100 TOS to Bob, testing eq/within/compare assertions"
+
+genesis:
+  network: "devnet"
+  accounts:
+    - name: "alice"
+      balance: "1000000000000"  # 1000 TOS (no underscores)
+    - name: "bob"
+      balance: "0"
+
+steps:
+  # Execute transfer
+  - action: "transfer"
+    from: "alice"
+    to: "bob"
+    amount: "100000000000"  # 100 TOS
+    fee: "50"
+    expect:
+      status: "success"
+
+  # Mine block to confirm transaction
+  - action: "mine_block"
+
+  # Test exact assertion
+  - action: "assert_balance"
+    account: "bob"
+    eq: "100000000000"
+
+  # Test within tolerance assertion (accounting for fees)
+  - action: "assert_balance"
+    account: "alice"
+    within:
+      target: "899999999950"  # 1000 - 100 - 0.00000050 fee
+      tolerance: "2000"
+
+  # Test comparison assertions
+  - action: "assert_balance"
+    account: "alice"
+    compare:
+      gte: "899999999000"
+
+  - action: "assert_balance"
+    account: "alice"
+    compare:
+      lte: "900000000000"
+
+  # Nonce checks
+  - action: "assert_nonce"
+    account: "alice"
+    eq: 1
+
+  - action: "assert_nonce"
+    account: "bob"
+    eq: 0
+
+invariants:
+  - "balance_conservation"
+  - "nonce_monotonicity"

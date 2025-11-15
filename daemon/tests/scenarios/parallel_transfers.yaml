@@ -1,0 +1,78 @@
+# Parallel Transfers
+# Tests multiple independent transfers in the same block
+
+name: "Parallel Transfers"
+description: "Multiple independent transfers that can execute in parallel"
+
+genesis:
+  network: "devnet"
+  accounts:
+    - name: "alice"
+      balance: "1000000000000"  # 1000 TOS
+    - name: "bob"
+      balance: "1000000000000"   # 1000 TOS
+    - name: "charlie"
+      balance: "0"
+    - name: "david"
+      balance: "0"
+
+steps:
+  # Alice → Charlie (independent)
+  - action: "transfer"
+    from: "alice"
+    to: "charlie"
+    amount: "100000000000"  # 100 TOS
+    fee: "50"
+
+  # Bob → David (independent, can run in parallel)
+  - action: "transfer"
+    from: "bob"
+    to: "david"
+    amount: "200000000000"  # 200 TOS
+    fee: "50"
+
+  # Mine block with both transactions
+  - action: "mine_block"
+
+  # Verify all balances
+  - action: "assert_balance"
+    account: "alice"
+    within:
+      target: "899999999950"
+      tolerance: "100"
+
+  - action: "assert_balance"
+    account: "bob"
+    within:
+      target: "799999999950"
+      tolerance: "100"
+
+  - action: "assert_balance"
+    account: "charlie"
+    eq: "100000000000"
+
+  - action: "assert_balance"
+    account: "david"
+    eq: "200000000000"
+
+  # All senders should have nonce=1
+  - action: "assert_nonce"
+    account: "alice"
+    eq: 1
+
+  - action: "assert_nonce"
+    account: "bob"
+    eq: 1
+
+  # Receivers should have nonce=0
+  - action: "assert_nonce"
+    account: "charlie"
+    eq: 0
+
+  - action: "assert_nonce"
+    account: "david"
+    eq: 0
+
+invariants:
+  - "balance_conservation"
+  - "nonce_monotonicity"

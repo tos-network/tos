@@ -1,0 +1,68 @@
+# Receive-Then-Spend Chain
+# Tests that received funds can be spent in the same block
+
+name: "Receive-Then-Spend Chain"
+description: "Test that received funds are immediately available for spending in same block"
+
+genesis:
+  network: "devnet"
+  accounts:
+    - name: "alice"
+      balance: "1000000000000"  # 1000 TOS
+    - name: "bob"
+      balance: "0"
+    - name: "charlie"
+      balance: "0"
+
+steps:
+  # Alice sends 100 TOS to Bob
+  - action: "transfer"
+    from: "alice"
+    to: "bob"
+    amount: "100000000000"
+    fee: "50"
+
+  # Bob immediately spends 50 TOS to Charlie (using received funds!)
+  - action: "transfer"
+    from: "bob"
+    to: "charlie"
+    amount: "50000000000"
+    fee: "50"
+
+  # Mine block containing both transactions
+  - action: "mine_block"
+
+  # Verify balances using within tolerance
+  - action: "assert_balance"
+    account: "alice"
+    within:
+      target: "899999999950"  # 1000 - 100 - fee
+      tolerance: "100"
+
+  - action: "assert_balance"
+    account: "bob"
+    within:
+      target: "49999999900"  # 100 - 50 - fee
+      tolerance: "100"
+
+  # Charlie should have exactly 50 TOS
+  - action: "assert_balance"
+    account: "charlie"
+    eq: "50000000000"
+
+  # Nonce checks
+  - action: "assert_nonce"
+    account: "alice"
+    eq: 1
+
+  - action: "assert_nonce"
+    account: "bob"
+    eq: 1
+
+  - action: "assert_nonce"
+    account: "charlie"
+    eq: 0
+
+invariants:
+  - "balance_conservation"
+  - "nonce_monotonicity"

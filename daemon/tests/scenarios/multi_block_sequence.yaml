@@ -1,0 +1,89 @@
+# Multi-Block Sequence
+# Tests multiple blocks with sequential operations
+
+name: "Multi-Block Sequence"
+description: "Multiple blocks with transfers and assertions"
+
+genesis:
+  network: "devnet"
+  accounts:
+    - name: "alice"
+      balance: "1000000000000"  # 1000 TOS
+    - name: "bob"
+      balance: "500000000000"   # 500 TOS
+
+steps:
+  # Block 1: Alice → Bob
+  - action: "transfer"
+    from: "alice"
+    to: "bob"
+    amount: "100000000000"
+    fee: "50"
+
+  - action: "mine_block"
+
+  - action: "assert_balance"
+    account: "bob"
+    within:
+      target: "600000000000"  # 500 + 100
+      tolerance: "100"
+
+  # Block 2: Bob → Alice (sending back)
+  - action: "transfer"
+    from: "bob"
+    to: "alice"
+    amount: "50000000000"
+    fee: "50"
+
+  - action: "mine_block"
+
+  - action: "assert_balance"
+    account: "alice"
+    within:
+      target: "949999999950"  # 1000 - 100 - fee + 50
+      tolerance: "200"
+
+  - action: "assert_balance"
+    account: "bob"
+    within:
+      target: "549999999900"  # 500 + 100 - 50 - fee
+      tolerance: "200"
+
+  # Block 3: Both send (independent)
+  - action: "transfer"
+    from: "alice"
+    to: "bob"
+    amount: "25000000000"
+    fee: "50"
+
+  - action: "transfer"
+    from: "bob"
+    to: "alice"
+    amount: "25000000000"
+    fee: "50"
+
+  - action: "mine_block"
+
+  # After 3 blocks, check final state
+  - action: "assert_nonce"
+    account: "alice"
+    eq: 2
+
+  - action: "assert_nonce"
+    account: "bob"
+    eq: 2
+
+  # Balances should be approximately back to near-original (minus fees)
+  - action: "assert_balance"
+    account: "alice"
+    compare:
+      gte: "949999999000"  # At least 950 TOS (minus some fees)
+
+  - action: "assert_balance"
+    account: "bob"
+    compare:
+      gte: "549999999000"  # At least 550 TOS (minus some fees)
+
+invariants:
+  - "balance_conservation"
+  - "nonce_monotonicity"
