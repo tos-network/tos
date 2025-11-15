@@ -8,8 +8,8 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
 // Import our waiter implementations directly
-use tos_testing_framework::tier2_integration::waiters::{wait_for_block, wait_for_tx};
-use tos_testing_framework::tier2_integration::{Hash, NodeRpc, Transaction, TxId};
+use tos_testing_framework::tier2_integration::waiters::wait_for_block;
+use tos_testing_framework::tier2_integration::{Hash, NodeRpc};
 use tos_testing_framework::tier3_e2e::waiters::{wait_all_heights_equal, wait_all_tips_equal};
 
 // Mock node implementation
@@ -29,10 +29,6 @@ impl TestNode {
     async fn set_height(&self, h: u64) {
         *self.height.lock().await = h;
     }
-
-    async fn set_tips(&self, tips: Vec<Hash>) {
-        *self.tips.lock().await = tips;
-    }
 }
 
 #[async_trait]
@@ -45,8 +41,12 @@ impl NodeRpc for TestNode {
         Ok(self.tips.lock().await.clone())
     }
 
-    async fn get_transaction(&self, _txid: &TxId) -> Result<Option<Transaction>> {
-        Ok(None)
+    async fn get_balance(&self, _address: &Hash) -> Result<u64> {
+        Ok(1_000_000)
+    }
+
+    async fn get_nonce(&self, _address: &Hash) -> Result<u64> {
+        Ok(0)
     }
 }
 
@@ -61,8 +61,12 @@ impl NodeRpc for &TestNode {
         (*self).get_tips().await
     }
 
-    async fn get_transaction(&self, txid: &TxId) -> Result<Option<Transaction>> {
-        (*self).get_transaction(txid).await
+    async fn get_balance(&self, address: &Hash) -> Result<u64> {
+        (*self).get_balance(address).await
+    }
+
+    async fn get_nonce(&self, address: &Hash) -> Result<u64> {
+        (*self).get_nonce(address).await
     }
 }
 
@@ -93,7 +97,7 @@ async fn test_wait_for_block_with_progression() {
 
 #[tokio::test]
 async fn test_wait_all_tips_equal_basic() {
-    let common_tips = vec![[1u8; 32]];
+    let common_tips = vec![Hash::new([1u8; 32])];
     let nodes = vec![
         TestNode::new(100, common_tips.clone()),
         TestNode::new(100, common_tips.clone()),

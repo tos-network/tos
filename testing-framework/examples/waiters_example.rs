@@ -10,14 +10,13 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::Duration;
 
 // Import the testing framework waiter primitives
-use tos_testing_framework::tier2_integration::waiters::{wait_for_block, wait_for_tx};
-use tos_testing_framework::tier2_integration::{Hash, NodeRpc, Transaction, TxId};
+use tos_testing_framework::tier2_integration::waiters::wait_for_block;
+use tos_testing_framework::tier2_integration::{Hash, NodeRpc};
 use tos_testing_framework::tier3_e2e::waiters::{wait_all_heights_equal, wait_all_tips_equal};
 
 // ============================================================================
@@ -31,7 +30,6 @@ struct MockNode {
     id: usize,
     height: Arc<Mutex<u64>>,
     tips: Arc<Mutex<Vec<Hash>>>,
-    transactions: Arc<Mutex<HashMap<TxId, Transaction>>>,
 }
 
 impl MockNode {
@@ -39,8 +37,7 @@ impl MockNode {
         Self {
             id,
             height: Arc::new(Mutex::new(initial_height)),
-            tips: Arc::new(Mutex::new(vec![[id as u8; 32]])),
-            transactions: Arc::new(Mutex::new(HashMap::new())),
+            tips: Arc::new(Mutex::new(vec![Hash::new([id as u8; 32])])),
         }
     }
 
@@ -49,19 +46,6 @@ impl MockNode {
         let mut height = self.height.lock().await;
         *height += 1;
         println!("  Node {} mined block at height {}", self.id, *height);
-    }
-
-    /// Simulate adding a transaction to a mined block
-    async fn add_transaction(&self, txid: TxId) {
-        let tx = Transaction { id: txid };
-        self.transactions.lock().await.insert(txid, tx);
-        println!("  Node {} included transaction {:?}", self.id, &txid[..4]);
-    }
-
-    /// Synchronize tips with another node (simulate consensus)
-    async fn sync_tips(&self, other: &MockNode) {
-        let other_tips = other.tips.lock().await.clone();
-        *self.tips.lock().await = other_tips;
     }
 
     /// Set tips explicitly
@@ -80,8 +64,12 @@ impl NodeRpc for MockNode {
         Ok(self.tips.lock().await.clone())
     }
 
-    async fn get_transaction(&self, txid: &TxId) -> Result<Option<Transaction>> {
-        Ok(self.transactions.lock().await.get(txid).cloned())
+    async fn get_balance(&self, _address: &Hash) -> Result<u64> {
+        Ok(1_000_000)
+    }
+
+    async fn get_nonce(&self, _address: &Hash) -> Result<u64> {
+        Ok(0)
     }
 }
 
@@ -96,8 +84,12 @@ impl NodeRpc for &MockNode {
         (*self).get_tips().await
     }
 
-    async fn get_transaction(&self, txid: &TxId) -> Result<Option<Transaction>> {
-        (*self).get_transaction(txid).await
+    async fn get_balance(&self, address: &Hash) -> Result<u64> {
+        (*self).get_balance(address).await
+    }
+
+    async fn get_nonce(&self, address: &Hash) -> Result<u64> {
+        (*self).get_nonce(address).await
     }
 }
 
@@ -145,55 +137,11 @@ async fn example_wait_for_block() -> Result<()> {
 }
 
 // ============================================================================
-// Example 2: wait_for_tx - Transaction Inclusion Waiting
-// ============================================================================
-
-async fn example_wait_for_tx() -> Result<()> {
-    println!("\n=== Example 2: wait_for_tx (Tier 2) ===\n");
-
-    let node = Arc::new(MockNode::new(1, 200));
-    let txid = [42u8; 32];
-
-    println!("Initial state:");
-    println!("  Transaction {:?}... not yet in blockchain", &txid[..4]);
-
-    // Simulate transaction being included after mining 3 blocks
-    let node_clone = node.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        println!("\nMining blocks...");
-        node_clone.mine_block().await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        node_clone.mine_block().await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        // Transaction gets included in block 203
-        node_clone.add_transaction(txid).await;
-        node_clone.mine_block().await;
-    });
-
-    println!("\n❌ OLD WAY (non-deterministic):");
-    println!("  tokio::time::sleep(Duration::from_secs(3)).await;  // Hope it's enough");
-    println!("  let tx = node.get_transaction(&txid).await?.unwrap();");
-
-    println!("\n✅ NEW WAY (deterministic with wait_for_tx):");
-    println!("  wait_for_tx(&node, &txid, Duration::from_secs(5)).await?;");
-
-    // Use wait_for_tx instead of sleep
-    wait_for_tx(&*node, &txid, Duration::from_secs(5)).await?;
-
-    println!("\n✓ Success! Transaction {:?}... was included", &txid[..4]);
-    println!("  Test waited exactly until transaction was confirmed.");
-
-    Ok(())
-}
-
-// ============================================================================
-// Example 3: wait_all_tips_equal - Multi-Node Consensus
+// Example 2: wait_all_tips_equal - Multi-Node Consensus
 // ============================================================================
 
 async fn example_wait_all_tips_equal() -> Result<()> {
-    println!("\n=== Example 3: wait_all_tips_equal (Tier 3) ===\n");
+    println!("\n=== Example 2: wait_all_tips_equal (Tier 3) ===\n");
 
     // Create a 5-node network
     let node0 = Arc::new(MockNode::new(0, 100));
@@ -203,11 +151,11 @@ async fn example_wait_all_tips_equal() -> Result<()> {
     let node4 = Arc::new(MockNode::new(4, 100));
 
     println!("Initial state: 5 nodes with different tip sets");
-    println!("  Node 0 tips: {:?}", &node0.get_tips().await?[0][..4]);
-    println!("  Node 1 tips: {:?}", &node1.get_tips().await?[0][..4]);
-    println!("  Node 2 tips: {:?}", &node2.get_tips().await?[0][..4]);
-    println!("  Node 3 tips: {:?}", &node3.get_tips().await?[0][..4]);
-    println!("  Node 4 tips: {:?}", &node4.get_tips().await?[0][..4]);
+    println!("  Node 0 tips: {:?}", &node0.get_tips().await?[0]);
+    println!("  Node 1 tips: {:?}", &node1.get_tips().await?[0]);
+    println!("  Node 2 tips: {:?}", &node2.get_tips().await?[0]);
+    println!("  Node 3 tips: {:?}", &node3.get_tips().await?[0]);
+    println!("  Node 4 tips: {:?}", &node4.get_tips().await?[0]);
 
     // Simulate network partition healing and consensus convergence
     let nodes = vec![
@@ -223,7 +171,7 @@ async fn example_wait_all_tips_equal() -> Result<()> {
         println!("\nSimulating partition healing and consensus convergence...");
 
         // All nodes converge to the same tips
-        let common_tips = vec![[99u8; 32], [100u8; 32]];
+        let common_tips = vec![Hash::new([99u8; 32]), Hash::new([100u8; 32])];
         for (i, node) in nodes.iter().enumerate() {
             tokio::time::sleep(Duration::from_millis(100)).await;
             node.set_tips(common_tips.clone()).await;
@@ -249,11 +197,11 @@ async fn example_wait_all_tips_equal() -> Result<()> {
 }
 
 // ============================================================================
-// Example 4: wait_all_heights_equal - Simpler Height Convergence
+// Example 3: wait_all_heights_equal - Simpler Height Convergence
 // ============================================================================
 
 async fn example_wait_all_heights_equal() -> Result<()> {
-    println!("\n=== Example 4: wait_all_heights_equal (Tier 3) ===\n");
+    println!("\n=== Example 3: wait_all_heights_equal (Tier 3) ===\n");
 
     let node0 = Arc::new(MockNode::new(0, 100));
     let node1 = Arc::new(MockNode::new(1, 95));
@@ -300,11 +248,11 @@ async fn example_wait_all_heights_equal() -> Result<()> {
 }
 
 // ============================================================================
-// Example 5: Real-World Test Pattern - Network Partition & Recovery
+// Example 4: Real-World Test Pattern - Network Partition & Recovery
 // ============================================================================
 
 async fn example_network_partition_recovery() -> Result<()> {
-    println!("\n=== Example 5: Network Partition & Recovery Pattern ===\n");
+    println!("\n=== Example 4: Network Partition & Recovery Pattern ===\n");
 
     // Setup: 5-node network
     let nodes: Vec<Arc<MockNode>> = (0..5).map(|i| Arc::new(MockNode::new(i, 100))).collect();
@@ -358,7 +306,7 @@ async fn example_network_partition_recovery() -> Result<()> {
             tokio::time::sleep(Duration::from_millis(200)).await;
 
             // All nodes converge to group A's chain (higher blue work)
-            let common_tips = vec![[0xAA; 32]];
+            let common_tips = vec![Hash::new([0xAA; 32])];
             for node in &nodes {
                 node.set_tips(common_tips.clone()).await;
             }
@@ -387,7 +335,6 @@ async fn main() -> Result<()> {
     println!("╚════════════════════════════════════════════════════════════╝");
 
     example_wait_for_block().await?;
-    example_wait_for_tx().await?;
     example_wait_all_tips_equal().await?;
     example_wait_all_heights_equal().await?;
     example_network_partition_recovery().await?;
