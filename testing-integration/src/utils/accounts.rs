@@ -80,6 +80,11 @@ pub fn setup_multiple_accounts(storage: &MockStorage, balances: Vec<u64>) -> Vec
             // Create deterministic test accounts
             let data = [i as u8; 32];
             let mut reader = Reader::new(&data);
+
+            // SAFETY: This is a test utility creating deterministic accounts from fixed-size data.
+            // The [u8; 32] array is always valid input for CompressedPublicKey::read().
+            // If this fails, it indicates a broken test setup and should panic early.
+            #[allow(clippy::expect_used, clippy::disallowed_methods)]
             let account = tos_common::crypto::elgamal::CompressedPublicKey::read(&mut reader)
                 .expect("Failed to create test pubkey");
 

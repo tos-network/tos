@@ -127,7 +127,14 @@ use tos_daemon::core::{
 /// flush_storage_and_wait(&storage).await;
 /// ```
 pub async fn create_test_storage() -> Arc<tos_common::tokio::sync::RwLock<SledStorage>> {
+    // SAFETY: This is a test utility function. If temp directory creation fails,
+    // the test environment is broken and should panic early with a clear message.
+    #[allow(clippy::unwrap_used, clippy::disallowed_methods)]
     let temp_dir = TempDir::new("tos_parallel_test").unwrap();
+
+    // SAFETY: This is test setup with valid parameters (temp directory exists, reasonable config).
+    // If storage creation fails, it indicates environment issues and should panic early.
+    #[allow(clippy::unwrap_used, clippy::disallowed_methods)]
     let storage = SledStorage::new(
         temp_dir.path().to_string_lossy().to_string(),
         Some(1024 * 1024),
@@ -150,10 +157,16 @@ pub async fn create_test_storage() -> Arc<tos_common::tokio::sync::RwLock<SledSt
             None,
         );
         let versioned: VersionedAssetData = Versioned::new(asset_data, Some(0));
-        storage_write
-            .add_asset(&TOS_ASSET, 0, versioned)
-            .await
-            .unwrap();
+
+        // SAFETY: This is test setup on a freshly created storage. Adding the TOS asset
+        // should always succeed. If it fails, test setup is broken and should panic.
+        #[allow(clippy::unwrap_used, clippy::disallowed_methods)]
+        {
+            storage_write
+                .add_asset(&TOS_ASSET, 0, versioned)
+                .await
+                .unwrap();
+        }
     }
 
     storage_arc
@@ -535,6 +548,9 @@ mod tests {
 /// }
 /// ```
 pub async fn create_test_rocksdb_storage() -> Arc<tos_common::tokio::sync::RwLock<RocksStorage>> {
+    // SAFETY: This is a test utility function. If temp directory creation fails,
+    // the test environment is broken and should panic early with a clear message.
+    #[allow(clippy::expect_used, clippy::disallowed_methods)]
     let temp_dir = TempDir::new("tos_test_rocksdb").expect("Failed to create temp directory");
     let dir_path = temp_dir.path().to_string_lossy().to_string();
 
@@ -557,10 +573,16 @@ pub async fn create_test_rocksdb_storage() -> Arc<tos_common::tokio::sync::RwLoc
         None,
     );
     let versioned: VersionedAssetData = Versioned::new(asset_data, Some(0));
-    storage
-        .add_asset(&TOS_ASSET, 0, versioned)
-        .await
-        .expect("Failed to register TOS asset");
+
+    // SAFETY: This is test setup on a freshly created storage. Adding the TOS asset
+    // should always succeed. If it fails, test setup is broken and should panic.
+    #[allow(clippy::expect_used, clippy::disallowed_methods)]
+    {
+        storage
+            .add_asset(&TOS_ASSET, 0, versioned)
+            .await
+            .expect("Failed to register TOS asset");
+    }
 
     // Store temp_dir to prevent cleanup (move ownership)
     std::mem::forget(temp_dir);

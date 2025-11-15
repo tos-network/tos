@@ -50,16 +50,31 @@ impl TestDaemon {
     /// This allocates ports using the OS and creates a temporary directory
     /// that will be automatically cleaned up when the TestDaemon is dropped.
     pub fn new_random() -> Self {
+        // SAFETY: This is a test utility function. If temp directory creation fails,
+        // the test environment is broken and should panic early with a clear message.
+        #[allow(clippy::expect_used, clippy::disallowed_methods)]
         let temp_dir = TempDir::new("tos_test_daemon").expect("Failed to create temp directory");
 
         // Allocate random ports using OS
+        // SAFETY: This is a test setup function. If OS port allocation fails,
+        // the test environment is not functional and should panic early.
+        #[allow(clippy::expect_used, clippy::disallowed_methods)]
         let rpc_listener =
             std::net::TcpListener::bind("127.0.0.1:0").expect("Failed to bind RPC port");
+
+        // SAFETY: TcpListener::bind() succeeded, so local_addr() will always return Ok.
+        // This is immediately after successful bind, so unwrap is safe.
+        #[allow(clippy::unwrap_used, clippy::disallowed_methods)]
         let rpc_port = rpc_listener.local_addr().unwrap().port();
         drop(rpc_listener);
 
+        // SAFETY: Same as RPC port - this is test setup, failures should panic early.
+        #[allow(clippy::expect_used, clippy::disallowed_methods)]
         let p2p_listener =
             std::net::TcpListener::bind("127.0.0.1:0").expect("Failed to bind P2P port");
+
+        // SAFETY: TcpListener::bind() succeeded, so local_addr() will always return Ok.
+        #[allow(clippy::unwrap_used, clippy::disallowed_methods)]
         let p2p_port = p2p_listener.local_addr().unwrap().port();
         drop(p2p_listener);
 
