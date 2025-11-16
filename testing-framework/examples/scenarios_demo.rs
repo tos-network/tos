@@ -332,10 +332,10 @@ steps:
     let scenario = parse_scenario(yaml)?;
 
     println!("Creating executor...");
-    let mut executor = ScenarioExecutor::new(&scenario).await?;
+    let mut executor = ScenarioExecutor::new();
 
     println!("Executing scenario: {}", scenario.name);
-    executor.execute(&scenario).await?;
+    executor.execute(scenario).await?;
 
     println!("✓ Scenario executed successfully");
     println!();
