@@ -25,9 +25,7 @@ use tos_common::{
 };
 use tos_daemon::core::state::parallel_chain_state::ParallelChainState;
 use tos_environment::Environment;
-use tos_testing_framework::utilities::{
-    create_test_rocksdb_storage, setup_account_rocksdb,
-};
+use tos_testing_framework::utilities::{create_test_rocksdb_storage, setup_account_rocksdb};
 
 /// Helper to create a dummy block for ParallelChainState
 fn create_dummy_block() -> Block {

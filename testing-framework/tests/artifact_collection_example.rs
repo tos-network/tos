@@ -234,8 +234,8 @@ async fn example_transaction_history_capture() -> Result<()> {
         tip_height: 2,
         tip_hash: "0xtxhash".to_string(),
         balances: HashMap::from([
-            ("alice".to_string(), 500), // Started with ~3000, sent 3000
-            ("bob".to_string(), 2000),  // Received 1000+1500, sent 500
+            ("alice".to_string(), 500),   // Started with ~3000, sent 3000
+            ("bob".to_string(), 2000),    // Received 1000+1500, sent 500
             ("charlie".to_string(), 500), // Received 2000, sent 1500
         ]),
         nonces: HashMap::from([
@@ -270,11 +270,11 @@ async fn example_partition_state_capture() -> Result<()> {
     let topology = TopologySnapshot {
         node_count: 5,
         connections: HashMap::from([
-            (0, vec![1]),       // Group A
-            (1, vec![0]),       // Group A
-            (2, vec![3, 4]),    // Group B
-            (3, vec![2, 4]),    // Group B
-            (4, vec![2, 3]),    // Group B
+            (0, vec![1]),    // Group A
+            (1, vec![0]),    // Group A
+            (2, vec![3, 4]), // Group B
+            (3, vec![2, 4]), // Group B
+            (4, vec![2, 3]), // Group B
         ]),
         partitions: vec![Partition {
             group_a: vec![0, 1],
@@ -367,7 +367,11 @@ mod replay_tests {
 
         // Create another RNG with the same seed
         let rng2 = TestRng::with_seed(seed);
-        assert_eq!(value1, rng2.gen::<u64>(), "Same seed should produce same first value");
+        assert_eq!(
+            value1,
+            rng2.gen::<u64>(),
+            "Same seed should produce same first value"
+        );
 
         Ok(())
     }

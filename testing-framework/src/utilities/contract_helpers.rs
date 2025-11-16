@@ -75,8 +75,9 @@ pub async fn execute_test_contract(
         );
     }
 
-    let result = TakoExecutor::execute_simple(bytecode, &mut *storage_write, topoheight, contract_hash)
-        .context("Contract execution failed")?;
+    let result =
+        TakoExecutor::execute_simple(bytecode, &mut *storage_write, topoheight, contract_hash)
+            .context("Contract execution failed")?;
 
     if log::log_enabled!(log::Level::Debug) {
         log::debug!(
@@ -175,7 +176,11 @@ pub async fn contract_exists(
 ) -> Result<bool> {
     let storage_read = storage.read().await;
     // Use ContractStorage trait method explicitly
-    match <RocksStorage as ContractStorage>::has_contract(&*storage_read, &contract_hash, topoheight) {
+    match <RocksStorage as ContractStorage>::has_contract(
+        &*storage_read,
+        &contract_hash,
+        topoheight,
+    ) {
         Ok(exists) => Ok(exists),
         // ContractNotFound means the contract doesn't exist, return false
         Err(e) => {
