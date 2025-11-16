@@ -22,6 +22,7 @@ use tokio::time::{self, Duration, Instant};
 ///
 /// ```rust
 /// use std::sync::Arc;
+/// use tokio::time::Duration;
 /// use tos_testing_framework::orchestrator::clock::{Clock, SystemClock};
 ///
 /// #[tokio::main]
@@ -79,6 +80,7 @@ pub trait Clock: Send + Sync {
 ///
 /// ```rust
 /// use std::sync::Arc;
+/// use tokio::time::Duration;
 /// use tos_testing_framework::orchestrator::clock::{Clock, SystemClock};
 ///
 /// async fn production_code(clock: Arc<dyn Clock>) {
