@@ -137,12 +137,12 @@ jobs:
           echo "=========================================="
           cargo test --workspace --tests --release --no-fail-fast
 
-      - name: Run testing-integration tests in Release mode
+      - name: Run testing-framework integration tests in Release mode
         run: |
           echo "=========================================="
-          echo "Running testing-integration Package Tests"
+          echo "Running testing-framework Integration Tests"
           echo "=========================================="
-          cargo test --package tos-testing-integration --release --no-fail-fast
+          cargo test --package tos-testing-framework --tests --release --no-fail-fast
 
   # Parallel execution tests (critical for blockchain performance)
   parallel-execution-tests:
