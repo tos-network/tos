@@ -5,9 +5,10 @@
 
 use tos_testing_framework::prelude::*;
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn test_framework_basic_imports() {
     // Verify clock abstraction works
+    // PausedClock::new() calls time::pause() internally
     let clock = Arc::new(PausedClock::new());
     let start = clock.now();
 

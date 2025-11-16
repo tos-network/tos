@@ -78,7 +78,7 @@ steps:
 "#;
     assert!(parse_scenario(bad_yaml1).is_err());
 
-    // Unknown account
+    // Unknown 'from' account (to accounts are auto-created)
     let bad_yaml2 = r#"
 name: "Bad"
 genesis:
@@ -86,7 +86,7 @@ genesis:
     - { name: "alice", balance: 1000 }
 steps:
   - action: "transfer"
-    from: "alice"
+    from: "charlie"
     to: "bob"
     amount: 100
     fee: 1
