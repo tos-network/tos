@@ -25,8 +25,8 @@ pub mod contract_helpers;
 // Re-export commonly used utilities
 pub use artifacts::{ArtifactCollector, TestArtifact};
 pub use contract_helpers::{
-    contract_exists, create_contract_test_storage, execute_test_contract, fund_test_account,
-    get_contract_storage,
+    contract_exists, create_contract_test_storage, execute_test_contract,
+    execute_test_contract_with_input, fund_test_account, get_contract_storage,
 };
 pub use daemon_helpers::{
     create_test_rocksdb_storage, create_test_storage_with_funded_accounts, setup_account_rocksdb,

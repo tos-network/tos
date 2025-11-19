@@ -64,20 +64,58 @@ pub async fn execute_test_contract(
     topoheight: TopoHeight,
     contract_hash: &Hash,
 ) -> Result<ExecutionResult> {
+    execute_test_contract_with_input(bytecode, storage, topoheight, contract_hash, &[]).await
+}
+
+/// Execute a TAKO contract for testing with custom input data
+///
+/// This is an extended version of `execute_test_contract` that allows passing
+/// input data to the contract. Use this when testing contracts that accept parameters.
+///
+/// # Arguments
+///
+/// * `bytecode` - The compiled contract bytecode (ELF format)
+/// * `storage` - The RocksDB storage instance
+/// * `topoheight` - Current topoheight for versioned reads
+/// * `contract_hash` - Hash identifier for the contract
+/// * `input_data` - Input data to pass to the contract (can be empty &[])
+///
+/// # Returns
+///
+/// * `ExecutionResult` - Result with return_value, compute_units_used, logs, etc.
+pub async fn execute_test_contract_with_input(
+    bytecode: &[u8],
+    storage: &Arc<RwLock<RocksStorage>>,
+    topoheight: TopoHeight,
+    contract_hash: &Hash,
+    input_data: &[u8],
+) -> Result<ExecutionResult> {
     let mut storage_write = storage.write().await;
 
     if log::log_enabled!(log::Level::Debug) {
         log::debug!(
-            "Executing contract {} at topoheight {} ({} bytes)",
+            "Executing contract {} at topoheight {} ({} bytes bytecode, {} bytes input)",
             contract_hash,
             topoheight,
-            bytecode.len()
+            bytecode.len(),
+            input_data.len()
         );
     }
 
-    let result =
-        TakoExecutor::execute_simple(bytecode, &mut *storage_write, topoheight, contract_hash)
-            .context("Contract execution failed")?;
+    // Use TakoExecutor::execute directly to pass input_data
+    let result = TakoExecutor::execute(
+        bytecode,
+        &mut *storage_write,
+        topoheight,
+        contract_hash,
+        &Hash::zero(),  // block_hash
+        0,              // block_height
+        &Hash::zero(),  // tx_hash
+        &Hash::zero(),  // tx_sender
+        input_data,     // input_data (key fix!)
+        None,           // compute_budget (use default)
+    )
+    .context("Contract execution failed")?;
 
     if log::log_enabled!(log::Level::Debug) {
         log::debug!(
