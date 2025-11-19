@@ -50,7 +50,7 @@ async fn test_erc1155_initialization() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     let mut init_params = vec![OP_INITIALIZE];
@@ -75,7 +75,7 @@ async fn test_erc1155_mint_single() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -108,7 +108,7 @@ async fn test_erc1155_mint_batch() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -132,7 +132,7 @@ async fn test_erc1155_burn_single() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -174,7 +174,7 @@ async fn test_erc1155_safe_transfer_from() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -217,7 +217,7 @@ async fn test_erc1155_batch_transfer() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -241,7 +241,7 @@ async fn test_erc1155_set_approval_for_all() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -272,7 +272,7 @@ async fn test_erc1155_balance_of() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -303,7 +303,7 @@ async fn test_erc1155_balance_of_batch() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -327,7 +327,7 @@ async fn test_erc1155_is_approved_for_all() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -358,7 +358,7 @@ async fn test_erc1155_uri() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     // Initialize with URI
@@ -393,7 +393,7 @@ async fn test_erc1155_transfer_unauthorized() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     // Initialize and mint
@@ -424,7 +424,7 @@ async fn test_erc1155_burn_insufficient_balance() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -448,7 +448,7 @@ async fn test_erc1155_multiple_token_types() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -474,7 +474,7 @@ async fn test_erc1155_transfer_to_zero_address() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -498,7 +498,7 @@ async fn test_erc1155_storage_persistence() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     for topoheight in 1..=5 {
@@ -521,7 +521,7 @@ async fn test_erc1155_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/erc1155_openzeppelin.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)

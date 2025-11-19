@@ -41,7 +41,7 @@ async fn test_vesting_wallet_initialization() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Initialize with:
@@ -72,7 +72,7 @@ async fn test_vesting_wallet_query_beneficiary() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -105,7 +105,7 @@ async fn test_vesting_wallet_query_start() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -138,7 +138,7 @@ async fn test_vesting_wallet_query_duration() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -171,7 +171,7 @@ async fn test_vesting_wallet_release_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -209,7 +209,7 @@ async fn test_vesting_wallet_release_unauthorized() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -246,7 +246,7 @@ async fn test_vesting_wallet_query_released() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -279,7 +279,7 @@ async fn test_vesting_wallet_query_releasable() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -314,7 +314,7 @@ async fn test_vesting_wallet_query_vested_amount() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -349,7 +349,7 @@ async fn test_vesting_wallet_linear_vesting() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -378,7 +378,7 @@ async fn test_vesting_wallet_zero_duration() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Attempt initialization with zero duration
@@ -405,7 +405,7 @@ async fn test_vesting_wallet_zero_beneficiary() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Attempt initialization with zero beneficiary
@@ -433,7 +433,7 @@ async fn test_vesting_wallet_storage_persistence() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     for topoheight in 1..=5 {
@@ -457,7 +457,7 @@ async fn test_vesting_wallet_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Measure initialization

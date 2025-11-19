@@ -28,7 +28,7 @@ async fn test_reentrancy_guard_normal_withdrawal() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
 
     // Deposit
@@ -63,7 +63,7 @@ async fn test_reentrancy_guard_blocks_reentrant_call() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
 
     // Attempt reentrancy (simulated)
@@ -88,7 +88,7 @@ async fn test_reentrancy_guard_sequential_calls() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
 
     // Multiple sequential withdrawals (not reentrant)
@@ -112,7 +112,7 @@ async fn test_reentrancy_guard_state_management() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
 
     // Test guard unlocks after function completes
@@ -141,7 +141,7 @@ async fn test_reentrancy_guard_query_during_lock() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
 
     // Query balance (read-only, should work even during lock)
@@ -165,7 +165,7 @@ async fn test_reentrancy_guard_nested_prevention() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
 
     // TODO: Test nested call prevention when contract supports CPI
@@ -189,7 +189,7 @@ async fn test_reentrancy_guard_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -211,7 +211,7 @@ async fn test_reentrancy_guard_storage_persistence() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
 
     // Execute operations across multiple topoheights

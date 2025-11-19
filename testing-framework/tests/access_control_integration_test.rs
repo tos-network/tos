@@ -51,7 +51,7 @@ async fn test_access_control_initialization() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     let init_params = vec![OP_INITIALIZE];
@@ -74,7 +74,7 @@ async fn test_access_control_grant_role_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -108,7 +108,7 @@ async fn test_access_control_grant_role_unauthorized() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     // Initialize with admin
@@ -144,7 +144,7 @@ async fn test_access_control_revoke_role_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -184,7 +184,7 @@ async fn test_access_control_renounce_role_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -227,7 +227,7 @@ async fn test_access_control_has_role_query() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -258,7 +258,7 @@ async fn test_access_control_set_role_admin() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -289,7 +289,7 @@ async fn test_access_control_get_role_admin() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -322,7 +322,7 @@ async fn test_access_control_role_hierarchy() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -350,7 +350,7 @@ async fn test_access_control_default_admin_role() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     // Initialize (deployer gets DEFAULT_ADMIN_ROLE)
@@ -375,7 +375,7 @@ async fn test_access_control_multiple_roles() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -400,7 +400,7 @@ async fn test_access_control_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)

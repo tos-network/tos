@@ -52,7 +52,7 @@ async fn test_ownable_initialization() {
         .unwrap();
 
     // TODO: Replace with actual ownable.so when built
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/ownable.so");
     let contract_hash = Hash::zero();
 
     // Initialize contract (no input data = auto-init with deployer as owner)
@@ -84,7 +84,7 @@ async fn test_ownable_query_owner() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/ownable.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -120,7 +120,7 @@ async fn test_ownable_transfer_ownership_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/ownable.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -160,7 +160,7 @@ async fn test_ownable_transfer_ownership_unauthorized() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/ownable.so");
     let contract_hash = Hash::zero();
 
     // Initialize with owner
@@ -202,7 +202,7 @@ async fn test_ownable_transfer_to_zero_address() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/ownable.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -239,7 +239,7 @@ async fn test_ownable_renounce_ownership_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/ownable.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -275,7 +275,7 @@ async fn test_ownable_renounce_ownership_unauthorized() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/ownable.so");
     let contract_hash = Hash::zero();
 
     // Initialize with owner
@@ -318,7 +318,7 @@ async fn test_ownable_transfer_chain() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/ownable.so");
     let contract_hash = Hash::zero();
 
     // Initialize with owner1
@@ -353,7 +353,7 @@ async fn test_ownable_storage_persistence() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/ownable.so");
     let contract_hash = Hash::zero();
 
     // Execute at multiple topoheights
@@ -385,7 +385,7 @@ async fn test_ownable_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("../../daemon/tests/fixtures/ownable.so");
     let contract_hash = Hash::zero();
 
     // Measure initialization
