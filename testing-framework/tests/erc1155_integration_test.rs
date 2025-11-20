@@ -5,7 +5,9 @@
 // Tests for OpenZeppelin-style ERC1155 standard (multi-token)
 
 use tos_common::crypto::{Hash, KeyPair};
-use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract_with_input};
+use tos_testing_framework::utilities::{
+    create_contract_test_storage, execute_test_contract_with_input,
+};
 
 fn keypair_to_hash(keypair: &KeyPair) -> Hash {
     Hash::new(*keypair.get_public_key().compress().as_bytes())
@@ -68,9 +70,16 @@ async fn test_erc1155_initialization() {
     init_params.extend(encode_string("https://token-cdn.example.com/{id}.json"));
 
     let deployer_hash = keypair_to_hash(&deployer);
-    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
-        .await
-        .unwrap();
+    let result = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &deployer_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.return_value, 0);
 }
@@ -93,19 +102,35 @@ async fn test_erc1155_mint_single() {
     // Initialize
     let minter_hash = keypair_to_hash(&minter);
     let init_params = vec![OP_INITIALIZE];
-    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &minter_hash, &init_params)
-        .await
-        .unwrap();
+    let _result1 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &minter_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     // Mint token ID 1, amount 100
     let mut mint_params = vec![OP_MINT];
-    mint_params.extend(encode_address(recipient.get_public_key().compress().as_bytes()));
+    mint_params.extend(encode_address(
+        recipient.get_public_key().compress().as_bytes(),
+    ));
     mint_params.extend(encode_u128(1)); // token ID
     mint_params.extend(encode_u128(100)); // amount
 
-    let result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &minter_hash, &mint_params)
-        .await
-        .unwrap();
+    let result2 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        2,
+        &contract_hash,
+        &minter_hash,
+        &mint_params,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result2.return_value, 0);
 }
@@ -128,9 +153,16 @@ async fn test_erc1155_mint_batch() {
     // Initialize
     let minter_hash = keypair_to_hash(&minter);
     let init_params = vec![OP_INITIALIZE];
-    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &minter_hash, &init_params)
-        .await
-        .unwrap();
+    let _result1 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &minter_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     // TODO: Mint batch of tokens when contract is ready
     // token IDs: [1, 2, 3]
@@ -154,18 +186,32 @@ async fn test_erc1155_burn_single() {
     // Initialize
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let _result1 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     // Mint
     let mut mint_params = vec![OP_MINT];
     mint_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
     mint_params.extend(encode_u128(1));
     mint_params.extend(encode_u128(100));
-    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &mint_params)
-        .await
-        .unwrap();
+    let _result2 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        2,
+        &contract_hash,
+        &owner_hash,
+        &mint_params,
+    )
+    .await
+    .unwrap();
 
     // Burn
     let mut burn_params = vec![OP_BURN];
@@ -173,9 +219,16 @@ async fn test_erc1155_burn_single() {
     burn_params.extend(encode_u128(1));
     burn_params.extend(encode_u128(50));
 
-    let result3 = execute_test_contract_with_input(bytecode, &storage, 3, &contract_hash, &owner_hash, &burn_params)
-        .await
-        .unwrap();
+    let result3 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        3,
+        &contract_hash,
+        &owner_hash,
+        &burn_params,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result3.return_value, 0);
 }
@@ -198,29 +251,52 @@ async fn test_erc1155_safe_transfer_from() {
     // Initialize
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let _result1 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     // Mint to owner
     let mut mint_params = vec![OP_MINT];
     mint_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
     mint_params.extend(encode_u128(1));
     mint_params.extend(encode_u128(100));
-    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &mint_params)
-        .await
-        .unwrap();
+    let _result2 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        2,
+        &contract_hash,
+        &owner_hash,
+        &mint_params,
+    )
+    .await
+    .unwrap();
 
     // Transfer
     let mut transfer_params = vec![OP_SAFE_TRANSFER_FROM];
     transfer_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
-    transfer_params.extend(encode_address(recipient.get_public_key().compress().as_bytes()));
+    transfer_params.extend(encode_address(
+        recipient.get_public_key().compress().as_bytes(),
+    ));
     transfer_params.extend(encode_u128(1));
     transfer_params.extend(encode_u128(50));
 
-    let result3 = execute_test_contract_with_input(bytecode, &storage, 3, &contract_hash, &owner_hash, &transfer_params)
-        .await
-        .unwrap();
+    let result3 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        3,
+        &contract_hash,
+        &owner_hash,
+        &transfer_params,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result3.return_value, 0);
 }
@@ -242,9 +318,16 @@ async fn test_erc1155_batch_transfer() {
 
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let result = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.return_value, 0);
 
@@ -269,18 +352,34 @@ async fn test_erc1155_set_approval_for_all() {
     // Initialize
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let _result1 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     // Set approval
     let mut approval_params = vec![OP_SET_APPROVAL_FOR_ALL];
-    approval_params.extend(encode_address(operator.get_public_key().compress().as_bytes()));
+    approval_params.extend(encode_address(
+        operator.get_public_key().compress().as_bytes(),
+    ));
     approval_params.extend(&[1u8]); // approved = true
 
-    let result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &approval_params)
-        .await
-        .unwrap();
+    let result2 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        2,
+        &contract_hash,
+        &owner_hash,
+        &approval_params,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result2.return_value, 0);
 }
@@ -302,18 +401,32 @@ async fn test_erc1155_balance_of() {
     // Initialize
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let _result1 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     // Query balance
     let mut query_params = vec![OP_BALANCE_OF];
     query_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
     query_params.extend(encode_u128(1)); // token ID
 
-    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &query_params)
-        .await
-        .unwrap();
+    let _result2 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        2,
+        &contract_hash,
+        &owner_hash,
+        &query_params,
+    )
+    .await
+    .unwrap();
 
     // TODO: Verify return_data when contract is ready
 }
@@ -334,9 +447,16 @@ async fn test_erc1155_balance_of_batch() {
 
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let result = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.return_value, 0);
 
@@ -361,18 +481,34 @@ async fn test_erc1155_is_approved_for_all() {
     // Initialize
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let _result1 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     // Query approval
     let mut query_params = vec![OP_IS_APPROVED_FOR_ALL];
     query_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
-    query_params.extend(encode_address(operator.get_public_key().compress().as_bytes()));
+    query_params.extend(encode_address(
+        operator.get_public_key().compress().as_bytes(),
+    ));
 
-    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &query_params)
-        .await
-        .unwrap();
+    let _result2 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        2,
+        &contract_hash,
+        &owner_hash,
+        &query_params,
+    )
+    .await
+    .unwrap();
 
     // TODO: Verify return_data when contract is ready
 }
@@ -395,17 +531,31 @@ async fn test_erc1155_uri() {
     let owner_hash = keypair_to_hash(&owner);
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_string("https://token-cdn.example.com/{id}.json"));
-    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let _result1 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     // Query URI
     let mut query_params = vec![OP_URI];
     query_params.extend(encode_u128(1)); // token ID
 
-    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &query_params)
-        .await
-        .unwrap();
+    let _result2 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        2,
+        &contract_hash,
+        &owner_hash,
+        &query_params,
+    )
+    .await
+    .unwrap();
 
     // TODO: Verify return_data contains URI when contract is ready
 }
@@ -430,9 +580,16 @@ async fn test_erc1155_transfer_unauthorized() {
     // Initialize and mint
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let _result1 = execute_test_contract_with_input(bytecode, &storage_owner, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let _result1 = execute_test_contract_with_input(
+        bytecode,
+        &storage_owner,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     // Attacker attempts transfer
     let storage_attacker = create_contract_test_storage(&attacker, 10_000_000)
@@ -441,9 +598,16 @@ async fn test_erc1155_transfer_unauthorized() {
 
     let attacker_hash = keypair_to_hash(&attacker);
     let init_params2 = vec![OP_INITIALIZE];
-    let _result2 = execute_test_contract_with_input(bytecode, &storage_attacker, 2, &contract_hash, &attacker_hash, &init_params2)
-        .await
-        .unwrap();
+    let _result2 = execute_test_contract_with_input(
+        bytecode,
+        &storage_attacker,
+        2,
+        &contract_hash,
+        &attacker_hash,
+        &init_params2,
+    )
+    .await
+    .unwrap();
 
     // TODO: Verify error = ERR_NOT_OWNER_OR_APPROVED when contract is ready
 }
@@ -464,9 +628,16 @@ async fn test_erc1155_burn_insufficient_balance() {
 
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let result = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.return_value, 0);
 
@@ -490,9 +661,16 @@ async fn test_erc1155_multiple_token_types() {
 
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let result = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.return_value, 0);
 
@@ -518,9 +696,16 @@ async fn test_erc1155_transfer_to_zero_address() {
 
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let result = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.return_value, 0);
 
@@ -548,9 +733,16 @@ async fn test_erc1155_storage_persistence() {
 
     // Initialize once at topoheight 1
     let init_params = vec![OP_INITIALIZE];
-    let result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let result1 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
     assert_eq!(result1.return_value, 0, "Initialization should succeed");
 
     // Mint tokens at topoheight 2
@@ -561,9 +753,16 @@ async fn test_erc1155_storage_persistence() {
     mint_params.extend(encode_u128(token_id));
     mint_params.extend(encode_u128(amount));
 
-    let result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &mint_params)
-        .await
-        .unwrap();
+    let result2 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        2,
+        &contract_hash,
+        &owner_hash,
+        &mint_params,
+    )
+    .await
+    .unwrap();
     assert_eq!(result2.return_value, 0, "Mint should succeed");
 
     // Query balance at topoheight 3 - verify storage persisted
@@ -571,9 +770,16 @@ async fn test_erc1155_storage_persistence() {
     balance_params.extend(encode_address(recipient_hash.as_bytes()));
     balance_params.extend(encode_u128(token_id));
 
-    let result3 = execute_test_contract_with_input(bytecode, &storage, 3, &contract_hash, &owner_hash, &balance_params)
-        .await
-        .unwrap();
+    let result3 = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        3,
+        &contract_hash,
+        &owner_hash,
+        &balance_params,
+    )
+    .await
+    .unwrap();
     assert_eq!(result3.return_value, 0, "Balance query should succeed");
     // TODO: Verify return_data contains balance when contract returns data
 }
@@ -594,9 +800,16 @@ async fn test_erc1155_compute_units() {
 
     let owner_hash = keypair_to_hash(&owner);
     let init_params = vec![OP_INITIALIZE];
-    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
-        .await
-        .unwrap();
+    let result = execute_test_contract_with_input(
+        bytecode,
+        &storage,
+        1,
+        &contract_hash,
+        &owner_hash,
+        &init_params,
+    )
+    .await
+    .unwrap();
 
     assert!(result.compute_units_used > 0);
     assert!(result.compute_units_used < 1_000_000);

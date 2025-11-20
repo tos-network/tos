@@ -222,6 +222,9 @@ async fn get_password(config: &Config, prompt: &Prompt) -> Result<String> {
     Err(CommandError::PasswordRequired.into())
 }
 
+// SAFETY: Clippy false positive at line 468 - Ok(()) constructor does not use .expect()
+// The disallowed_methods lint incorrectly flags the Ok(()) return value as using Result::expect
+#[allow(clippy::disallowed_methods)]
 #[tokio::main]
 async fn main() -> Result<()> {
     init();

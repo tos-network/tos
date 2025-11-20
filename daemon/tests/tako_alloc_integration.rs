@@ -154,6 +154,7 @@ fn test_alloc_basic_vec_operations() {
         &contract_hash,
         &block_hash,
         0, // block_height
+        0, // block_timestamp
         &tx_hash,
         &tx_sender,
         &[],  // input_data

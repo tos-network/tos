@@ -20,15 +20,21 @@ use tos_common::crypto::{Hash, KeyPair};
 use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract};
 
 // Instruction opcodes (from ownable contract)
+#[allow(dead_code)]
 const OP_TRANSFER_OWNERSHIP: u8 = 0x00;
+#[allow(dead_code)]
 const OP_RENOUNCE_OWNERSHIP: u8 = 0x01;
+#[allow(dead_code)]
 const OP_OWNER: u8 = 0x10;
 
 // Error codes
+#[allow(dead_code)]
 const ERR_UNAUTHORIZED: u64 = 1001;
+#[allow(dead_code)]
 const ERR_ZERO_ADDRESS: u64 = 1002;
 
 // Helper function to encode address parameter
+#[allow(dead_code)]
 fn encode_address(address: &[u8; 32]) -> Vec<u8> {
     address.to_vec()
 }
@@ -93,7 +99,7 @@ async fn test_ownable_query_owner() {
         .unwrap();
 
     // Query owner
-    let mut query_params = vec![OP_OWNER];
+    let _query_params = vec![OP_OWNER];
     let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
         .await
         .unwrap();
@@ -115,7 +121,7 @@ async fn test_ownable_query_owner() {
 #[tokio::test]
 async fn test_ownable_transfer_ownership_success() {
     let current_owner = KeyPair::new();
-    let new_owner = KeyPair::new();
+    let _new_owner = KeyPair::new();
     let storage = create_contract_test_storage(&current_owner, 10_000_000)
         .await
         .unwrap();
@@ -129,10 +135,9 @@ async fn test_ownable_transfer_ownership_success() {
         .unwrap();
 
     // Transfer ownership to new_owner
-    let mut transfer_params = vec![OP_TRANSFER_OWNERSHIP];
-    transfer_params.extend(encode_address(
-        new_owner.get_public_key().compress().as_bytes(),
-    ));
+    let _transfer_params = vec![OP_TRANSFER_OWNERSHIP];
+    // Note: transfer_params would be used when contract API supports input
+    // _transfer_params.extend(encode_address(new_owner.get_public_key().compress().as_bytes()));
 
     let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
         .await
@@ -155,7 +160,7 @@ async fn test_ownable_transfer_ownership_success() {
 async fn test_ownable_transfer_ownership_unauthorized() {
     let owner = KeyPair::new();
     let non_owner = KeyPair::new();
-    let new_owner = KeyPair::new();
+    let _new_owner = KeyPair::new();
     let storage = create_contract_test_storage(&owner, 10_000_000)
         .await
         .unwrap();
@@ -173,10 +178,9 @@ async fn test_ownable_transfer_ownership_unauthorized() {
         .await
         .unwrap();
 
-    let mut transfer_params = vec![OP_TRANSFER_OWNERSHIP];
-    transfer_params.extend(encode_address(
-        new_owner.get_public_key().compress().as_bytes(),
-    ));
+    let _transfer_params = vec![OP_TRANSFER_OWNERSHIP];
+    // Note: transfer_params would be used when contract API supports input
+    // _transfer_params.extend(encode_address(new_owner.get_public_key().compress().as_bytes()));
 
     let _result2 = execute_test_contract(bytecode, &storage_nonowner, 2, &contract_hash)
         .await
@@ -211,8 +215,9 @@ async fn test_ownable_transfer_to_zero_address() {
         .unwrap();
 
     // Attempt transfer to zero address
-    let mut transfer_params = vec![OP_TRANSFER_OWNERSHIP];
-    transfer_params.extend(encode_address(&[0u8; 32]));
+    let _transfer_params = vec![OP_TRANSFER_OWNERSHIP];
+    // Note: transfer_params would be used when contract API supports input
+    // _transfer_params.extend(encode_address(&[0u8; 32]));
 
     let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
         .await
@@ -248,7 +253,8 @@ async fn test_ownable_renounce_ownership_success() {
         .unwrap();
 
     // Renounce ownership
-    let renounce_params = vec![OP_RENOUNCE_OWNERSHIP];
+    let _renounce_params = vec![OP_RENOUNCE_OWNERSHIP];
+    // Note: renounce_params would be used when contract API supports input
 
     let result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
         .await
@@ -288,7 +294,8 @@ async fn test_ownable_renounce_ownership_unauthorized() {
         .await
         .unwrap();
 
-    let renounce_params = vec![OP_RENOUNCE_OWNERSHIP];
+    let _renounce_params = vec![OP_RENOUNCE_OWNERSHIP];
+    // Note: renounce_params would be used when contract API supports input
 
     let _result2 = execute_test_contract(bytecode, &storage_nonowner, 2, &contract_hash)
         .await
@@ -311,8 +318,8 @@ async fn test_ownable_renounce_ownership_unauthorized() {
 #[tokio::test]
 async fn test_ownable_transfer_chain() {
     let owner1 = KeyPair::new();
-    let owner2 = KeyPair::new();
-    let owner3 = KeyPair::new();
+    let _owner2 = KeyPair::new();
+    let _owner3 = KeyPair::new();
 
     let storage1 = create_contract_test_storage(&owner1, 10_000_000)
         .await

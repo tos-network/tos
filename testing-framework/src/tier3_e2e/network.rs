@@ -62,9 +62,10 @@ use tokio::sync::RwLock;
 use tokio::time::Duration;
 
 /// Network topology defining connectivity between nodes
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum NetworkTopology {
     /// All nodes can communicate with all other nodes (default)
+    #[default]
     FullMesh,
 
     /// Nodes form a ring (0→1→2→...→N→0)
@@ -73,12 +74,6 @@ pub enum NetworkTopology {
     /// Custom topology defined by adjacency list
     /// Map: node_id → list of connected peer node_ids
     Custom(HashMap<usize, Vec<usize>>),
-}
-
-impl Default for NetworkTopology {
-    fn default() -> Self {
-        Self::FullMesh
-    }
 }
 
 /// Handle to a single node in the network

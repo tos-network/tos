@@ -275,7 +275,6 @@ impl DeterministicTestEnv {
     /// ```rust
     /// use tos_testing_framework::orchestrator::DeterministicTestEnv;
     ///
-    /// #[test]
     /// fn test_seed_logging() {
     ///     let env = DeterministicTestEnv::new_time_paused();
     ///     println!("Using seed: 0x{:016x}", env.seed());

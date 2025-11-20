@@ -64,7 +64,15 @@ pub async fn execute_test_contract(
     topoheight: TopoHeight,
     contract_hash: &Hash,
 ) -> Result<ExecutionResult> {
-    execute_test_contract_with_input(bytecode, storage, topoheight, contract_hash, &Hash::zero(), &[]).await
+    execute_test_contract_with_input(
+        bytecode,
+        storage,
+        topoheight,
+        contract_hash,
+        &Hash::zero(),
+        &[],
+    )
+    .await
 }
 
 /// Execute a TAKO contract for testing with custom input data
@@ -113,13 +121,13 @@ pub async fn execute_test_contract_with_input(
         &mut *storage_write,
         topoheight,
         contract_hash,
-        &Hash::zero(),  // block_hash
-        0,              // block_height
+        &Hash::zero(),   // block_hash
+        0,               // block_height
         block_timestamp, // block_timestamp
-        &Hash::zero(),  // tx_hash
-        tx_sender,      // tx_sender
-        input_data,     // input_data
-        None,           // compute_budget (use default)
+        &Hash::zero(),   // tx_hash
+        tx_sender,       // tx_sender
+        input_data,      // input_data
+        None,            // compute_budget (use default)
     )
     .context("Contract execution failed")?;
 
@@ -136,9 +144,9 @@ pub async fn execute_test_contract_with_input(
     // For tests, we must manually persist the cache here so subsequent executions can read the data.
     //
     // For testing purposes, we deploy a minimal contract entry if it doesn't exist yet.
+    use std::borrow::Cow;
     use tos_common::versioned_type::Versioned;
     use tos_daemon::core::storage::ContractDataProvider;
-    use std::borrow::Cow;
 
     // Check if contract exists, if not create a minimal entry for testing
     use tos_common::contract::ContractStorage;
@@ -241,9 +249,7 @@ pub async fn get_contract_storage(
         .context("Failed to load contract storage")?;
 
     // Extract the value from Option<(TopoHeight, Option<ValueCell>)>
-    Ok(result.and_then(|(_, value_opt)| {
-        value_opt.and_then(|v| v.as_bytes().ok().map(|bytes| bytes.clone()))
-    }))
+    Ok(result.and_then(|(_, value_opt)| value_opt.and_then(|v| v.as_bytes().ok().cloned())))
 }
 
 /// Check if a contract exists at a given topoheight

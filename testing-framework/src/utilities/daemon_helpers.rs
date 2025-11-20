@@ -51,6 +51,8 @@ use super::TempRocksDB;
 ///     let parallel_state = ParallelChainState::new(storage.clone(), 0).await.unwrap();
 /// }
 /// ```
+// SAFETY: Test helper function - expect() is appropriate for test initialization
+#[allow(clippy::disallowed_methods, clippy::expect_used)]
 pub async fn create_test_rocksdb_storage() -> Arc<RwLock<RocksStorage>> {
     // Create temporary directory with RAII cleanup
     let temp_db = TempRocksDB::new().expect("Failed to create temporary RocksDB directory");

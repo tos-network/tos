@@ -20,7 +20,6 @@
 use tos_common::crypto::{Hash, KeyPair};
 use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract};
 
-#[allow(dead_code)]
 /// ERC20 Function Selectors (first 4 bytes of function signature hash)
 ///
 /// In a real implementation, these would be:
@@ -29,23 +28,39 @@ use tos_testing_framework::utilities::{create_contract_test_storage, execute_tes
 /// etc.
 ///
 /// For this test, we'll use simple discriminants:
+#[allow(dead_code)]
 const FN_INITIALIZE: u8 = 0x00;
+#[allow(dead_code)]
 const FN_TRANSFER: u8 = 0x01;
+#[allow(dead_code)]
 const FN_APPROVE: u8 = 0x02;
+#[allow(dead_code)]
 const FN_TRANSFER_FROM: u8 = 0x03;
+#[allow(dead_code)]
 const FN_MINT: u8 = 0x04;
+#[allow(dead_code)]
 const FN_BURN: u8 = 0x05;
+#[allow(dead_code)]
 const FN_BALANCE_OF: u8 = 0x10;
+#[allow(dead_code)]
 const FN_ALLOWANCE: u8 = 0x11;
+#[allow(dead_code)]
 const FN_TOTAL_SUPPLY: u8 = 0x12;
+#[allow(dead_code)]
 const FN_NAME: u8 = 0x13;
+#[allow(dead_code)]
 const FN_SYMBOL: u8 = 0x14;
+#[allow(dead_code)]
 const FN_DECIMALS: u8 = 0x15;
 
 /// Error codes expected from contract
+#[allow(dead_code)]
 const ERR_INSUFFICIENT_BALANCE: u64 = 1;
+#[allow(dead_code)]
 const ERR_INSUFFICIENT_ALLOWANCE: u64 = 2;
+#[allow(dead_code)]
 const ERR_UNAUTHORIZED: u64 = 3;
+#[allow(dead_code)]
 const ERR_INVALID_RECIPIENT: u64 = 4;
 
 /// Helper function to create instruction data
@@ -379,7 +394,9 @@ async fn test_erc20_openzeppelin_approve() {
     // Approve spender for 100 tokens
     // approve(spender_address, 100)
     let mut approve_params = Vec::new();
-    approve_params.extend(encode_address(spender.get_public_key().compress().as_bytes()));
+    approve_params.extend(encode_address(
+        spender.get_public_key().compress().as_bytes(),
+    ));
     approve_params.extend(encode_u64(100));
 
     // TODO: When contract supports instruction data, execute approve
@@ -502,7 +519,9 @@ async fn test_erc20_openzeppelin_mint_access_control() {
     // Owner mints tokens
     // mint(recipient_address, 500)
     let mut mint_params = Vec::new();
-    mint_params.extend(encode_address(recipient.get_public_key().compress().as_bytes()));
+    mint_params.extend(encode_address(
+        recipient.get_public_key().compress().as_bytes(),
+    ));
     mint_params.extend(encode_u64(500));
 
     // TODO: When contract supports instruction data:
@@ -619,7 +638,11 @@ async fn test_erc20_openzeppelin_storage_persistence() {
             .await
             .unwrap();
 
-        assert_eq!(result.return_value, 0, "Operation {} should succeed", topoheight);
+        assert_eq!(
+            result.return_value, 0,
+            "Operation {} should succeed",
+            topoheight
+        );
 
         if log::log_enabled!(log::Level::Debug) {
             log::debug!(

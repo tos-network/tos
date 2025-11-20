@@ -329,7 +329,7 @@ impl TakoExecutor {
                 log_messages,
                 events,
                 transfers,
-                cache,  // Return cache for test persistence
+                cache, // Return cache for test persistence
             });
         }
 
@@ -442,7 +442,7 @@ impl TakoExecutor {
                     log_messages,
                     events,
                     transfers,
-                    cache,  // Return cache for test persistence
+                    cache, // Return cache for test persistence
                 })
             }
             ProgramResult::Err(err) => {

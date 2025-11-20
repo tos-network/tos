@@ -203,6 +203,7 @@ fn main() {
         &contract_hash,
         &block_hash,
         block_height,
+        0, // block_timestamp
         &tx_hash,
         &tx_sender,
         input_data,

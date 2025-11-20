@@ -370,7 +370,7 @@ impl ScenarioExecutor {
     async fn check_invariant(&mut self, _invariant: &str) -> Result<()> {
         // TODO: Implement invariant checking
         // For now, just log
-        self.log(format!("  Invariant check: (not yet implemented)"));
+        self.log("  Invariant check: (not yet implemented)".to_string());
         Ok(())
     }
 

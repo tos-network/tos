@@ -164,8 +164,8 @@ impl TestBlockchainBuilder {
         let mut bytes = [0u8; 32];
         bytes[0] = id;
         // Fill rest with pattern for easier debugging
-        for i in 1..32 {
-            bytes[i] = (id.wrapping_mul(i as u8)).wrapping_add(i as u8);
+        for (i, byte) in bytes.iter_mut().enumerate().skip(1) {
+            *byte = (id.wrapping_mul(i as u8)).wrapping_add(i as u8);
         }
         Hash::new(bytes)
     }

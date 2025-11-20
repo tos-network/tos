@@ -37,7 +37,6 @@ use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 /// ```rust
 /// use tos_testing_framework::orchestrator::rng::TestRng;
 ///
-/// #[test]
 /// fn test_with_rng() {
 ///     let rng = TestRng::new_from_env_or_random();
 ///
@@ -72,7 +71,6 @@ use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 /// ```rust
 /// use tos_testing_framework::orchestrator::rng::TestRng;
 ///
-/// #[test]
 /// fn test_with_fixed_seed() {
 ///     let rng = TestRng::with_seed(0x1234567890abcdef);
 ///
@@ -157,7 +155,6 @@ impl TestRng {
     /// ```rust
     /// use tos_testing_framework::orchestrator::rng::TestRng;
     ///
-    /// #[test]
     /// fn test_example() {
     ///     let rng = TestRng::new_from_env_or_random();
     ///     // Seed is logged to stderr:
@@ -205,7 +202,6 @@ impl TestRng {
     /// ```rust
     /// use tos_testing_framework::orchestrator::rng::TestRng;
     ///
-    /// #[test]
     /// fn test_with_seed_logging() {
     ///     let rng = TestRng::new_from_env_or_random();
     ///
