@@ -207,6 +207,7 @@ fn test_hello_world_with_compute_budget() {
             &contract_hash,
             &block_hash,
             0,
+            0,
             &tx_hash,
             &tx_sender,
             &[],

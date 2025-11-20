@@ -113,6 +113,7 @@ pub struct Db {
     target_os = "unknown"
 )))]
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum DbError {
     // No errors defined for non-WASM targets (using parking_lot, which doesn't poison)
 }

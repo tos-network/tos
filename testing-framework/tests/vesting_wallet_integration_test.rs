@@ -5,21 +5,26 @@
 // Tests for OpenZeppelin-style token vesting wallet with linear release schedule
 
 use tos_common::crypto::{Hash, KeyPair};
-use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract};
+use tos_common::serializer::Serializer;
+use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract_with_input};
 
 const OP_INITIALIZE: u8 = 0x00;
 const OP_RELEASE: u8 = 0x01;
-const OP_BENEFICIARY: u8 = 0x10;
-const OP_START: u8 = 0x11;
-const OP_DURATION: u8 = 0x12;
-const OP_RELEASED: u8 = 0x13;
-const OP_RELEASABLE: u8 = 0x14;
-const OP_VESTED_AMOUNT: u8 = 0x15;
+const OP_VESTED_AMOUNT: u8 = 0x10;
+const OP_RELEASABLE: u8 = 0x11;
+const OP_RELEASED: u8 = 0x12;
+const OP_BENEFICIARY: u8 = 0x13;
+const OP_START: u8 = 0x14;
+const OP_DURATION: u8 = 0x15;
+const OP_END: u8 = 0x16;
+const OP_TOTAL_ALLOCATION: u8 = 0x17;
 
 const ERR_NOT_BENEFICIARY: u64 = 1001;
-const ERR_ZERO_DURATION: u64 = 1002;
-const ERR_ZERO_BENEFICIARY: u8 = 1003;
-const ERR_NO_TOKENS_DUE: u64 = 1004;
+const ERR_NO_TOKENS: u64 = 1002;
+const ERR_ALREADY_INITIALIZED: u64 = 1003;
+const ERR_NOT_INITIALIZED: u64 = 1004;
+const ERR_INVALID_INSTRUCTION: u64 = 1005;
+const ERR_INVALID_PARAMS: u64 = 1006;
 
 fn encode_address(address: &[u8; 32]) -> Vec<u8> {
     address.to_vec()
@@ -44,16 +49,21 @@ async fn test_vesting_wallet_initialization() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize with:
     // - beneficiary
     // - start: timestamp (e.g., current time)
     // - duration: 365 days in seconds (31536000)
+    // - total_allocation: 1,000,000 tokens
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
     init_params.extend(encode_u64(1700000000)); // start timestamp
     init_params.extend(encode_u64(31536000)); // 365 days duration
+    init_params.extend(encode_u64(1_000_000)); // total allocation
 
-    let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
@@ -75,18 +85,22 @@ async fn test_vesting_wallet_query_beneficiary() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
     init_params.extend(encode_u64(1700000000));
     init_params.extend(encode_u64(31536000));
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    init_params.extend(encode_u64(1_000_000));
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
     // Query beneficiary
     let query_params = vec![OP_BENEFICIARY];
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &deployer_hash, &query_params)
         .await
         .unwrap();
 
@@ -108,18 +122,22 @@ async fn test_vesting_wallet_query_start() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
     init_params.extend(encode_u64(1700000000));
     init_params.extend(encode_u64(31536000));
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    init_params.extend(encode_u64(1_000_000));
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
     // Query start time
     let query_params = vec![OP_START];
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &deployer_hash, &query_params)
         .await
         .unwrap();
 
@@ -141,18 +159,22 @@ async fn test_vesting_wallet_query_duration() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
     init_params.extend(encode_u64(1700000000));
     init_params.extend(encode_u64(31536000));
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    init_params.extend(encode_u64(1_000_000));
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
     // Query duration
     let query_params = vec![OP_DURATION];
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &deployer_hash, &query_params)
         .await
         .unwrap();
 
@@ -167,28 +189,31 @@ async fn test_vesting_wallet_query_duration() {
 async fn test_vesting_wallet_release_success() {
     let deployer = KeyPair::new();
     let beneficiary = KeyPair::new();
-    let storage_beneficiary = create_contract_test_storage(&beneficiary, 10_000_000)
+    // Use shared storage so both transactions see the same state
+    let storage = create_contract_test_storage(&deployer, 10_000_000)
         .await
         .unwrap();
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert keypairs to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+    let beneficiary_hash = Hash::from_bytes(beneficiary.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
-    let storage_deployer = create_contract_test_storage(&deployer, 10_000_000)
-        .await
-        .unwrap();
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
-    init_params.extend(encode_u64(1700000000));
-    init_params.extend(encode_u64(31536000));
-    let _result1 = execute_test_contract(bytecode, &storage_deployer, 1, &contract_hash)
+    init_params.extend(encode_u64(1)); // start at timestamp 1 (vesting started long ago)
+    init_params.extend(encode_u64(1)); // duration 1 second (already fully vested)
+    init_params.extend(encode_u64(1_000_000));
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
-    // Beneficiary releases tokens
+    // Beneficiary releases tokens (should succeed since fully vested)
     let release_params = vec![OP_RELEASE];
-    let result2 = execute_test_contract(bytecode, &storage_beneficiary, 2, &contract_hash)
+    let result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &beneficiary_hash, &release_params)
         .await
         .unwrap();
 
@@ -205,29 +230,30 @@ async fn test_vesting_wallet_release_unauthorized() {
     let beneficiary = KeyPair::new();
     let non_beneficiary = KeyPair::new();
 
-    let storage_deployer = create_contract_test_storage(&deployer, 10_000_000)
+    // Use shared storage so state persists
+    let storage = create_contract_test_storage(&deployer, 10_000_000)
         .await
         .unwrap();
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
     init_params.extend(encode_u64(1700000000));
     init_params.extend(encode_u64(31536000));
-    let _result1 = execute_test_contract(bytecode, &storage_deployer, 1, &contract_hash)
+    init_params.extend(encode_u64(1_000_000));
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
     // Non-beneficiary attempts release
-    let storage_nonbeneficiary = create_contract_test_storage(&non_beneficiary, 10_000_000)
-        .await
-        .unwrap();
-
     let release_params = vec![OP_RELEASE];
-    let _result2 = execute_test_contract(bytecode, &storage_nonbeneficiary, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &deployer_hash, &release_params)
         .await
         .unwrap();
 
@@ -249,18 +275,22 @@ async fn test_vesting_wallet_query_released() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
     init_params.extend(encode_u64(1700000000));
     init_params.extend(encode_u64(31536000));
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    init_params.extend(encode_u64(1_000_000));
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
     // Query released amount (should be 0 initially)
     let query_params = vec![OP_RELEASED];
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &deployer_hash, &query_params)
         .await
         .unwrap();
 
@@ -282,12 +312,16 @@ async fn test_vesting_wallet_query_releasable() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
     init_params.extend(encode_u64(1700000000));
     init_params.extend(encode_u64(31536000));
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    init_params.extend(encode_u64(1_000_000));
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
@@ -295,7 +329,7 @@ async fn test_vesting_wallet_query_releasable() {
     let mut query_params = vec![OP_RELEASABLE];
     query_params.extend(encode_u64(1700000000 + 15768000)); // 6 months later
 
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &deployer_hash, &query_params)
         .await
         .unwrap();
 
@@ -317,12 +351,16 @@ async fn test_vesting_wallet_query_vested_amount() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
     init_params.extend(encode_u64(1700000000));
     init_params.extend(encode_u64(31536000));
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    init_params.extend(encode_u64(1_000_000));
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
@@ -330,7 +368,7 @@ async fn test_vesting_wallet_query_vested_amount() {
     let mut query_params = vec![OP_VESTED_AMOUNT];
     query_params.extend(encode_u64(1700000000 + 31536000)); // After full duration
 
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &deployer_hash, &query_params)
         .await
         .unwrap();
 
@@ -352,18 +390,54 @@ async fn test_vesting_wallet_linear_vesting() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
-    let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
+    // Initialize vesting wallet
+    let mut init_params = vec![OP_INITIALIZE];
+    init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
+    init_params.extend(encode_u64(1700000000)); // start
+    init_params.extend(encode_u64(1000)); // duration: 1000 seconds for easier testing
+    init_params.extend(encode_u64(1_000_000)); // total allocation
+
+    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
+    assert_eq!(result.return_value, 0, "Initialization should succeed");
+
+    // Test vested amount at different timestamps:
+    // - 0% at start (1700000000)
+    let mut query_params = vec![OP_VESTED_AMOUNT];
+    query_params.extend(encode_u64(1700000000)); // exactly at start
+    let result = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &deployer_hash, &query_params)
+        .await
+        .unwrap();
     assert_eq!(result.return_value, 0);
 
-    // TODO: Test linear vesting at different timestamps:
-    // - 0% at start
-    // - 25% at 1/4 duration
-    // - 50% at 1/2 duration
-    // - 75% at 3/4 duration
-    // - 100% at end
+    // - 25% at 1/4 duration (1700000000 + 250)
+    let mut query_params = vec![OP_VESTED_AMOUNT];
+    query_params.extend(encode_u64(1700000250));
+    let _result = execute_test_contract_with_input(bytecode, &storage, 3, &contract_hash, &deployer_hash, &query_params)
+        .await
+        .unwrap();
+    // TODO: Verify return_data = 250,000 (25%)
+
+    // - 50% at 1/2 duration (1700000000 + 500)
+    let mut query_params = vec![OP_VESTED_AMOUNT];
+    query_params.extend(encode_u64(1700000500));
+    let _result = execute_test_contract_with_input(bytecode, &storage, 4, &contract_hash, &deployer_hash, &query_params)
+        .await
+        .unwrap();
+    // TODO: Verify return_data = 500,000 (50%)
+
+    // - 100% at end (1700000000 + 1000)
+    let mut query_params = vec![OP_VESTED_AMOUNT];
+    query_params.extend(encode_u64(1700001000));
+    let _result = execute_test_contract_with_input(bytecode, &storage, 5, &contract_hash, &deployer_hash, &query_params)
+        .await
+        .unwrap();
+    // TODO: Verify return_data = 1,000,000 (100%)
 }
 
 // ============================================================================
@@ -381,13 +455,17 @@ async fn test_vesting_wallet_zero_duration() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
     // Attempt initialization with zero duration
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
     init_params.extend(encode_u64(1700000000));
     init_params.extend(encode_u64(0)); // Zero duration
+    init_params.extend(encode_u64(1_000_000));
 
-    let _result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let _result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
@@ -408,13 +486,17 @@ async fn test_vesting_wallet_zero_beneficiary() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
     // Attempt initialization with zero beneficiary
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(&[0u8; 32])); // Zero address
     init_params.extend(encode_u64(1700000000));
     init_params.extend(encode_u64(31536000));
+    init_params.extend(encode_u64(1_000_000));
 
-    let _result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let _result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 
@@ -436,12 +518,30 @@ async fn test_vesting_wallet_storage_persistence() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
-    for topoheight in 1..=5 {
-        let result = execute_test_contract(bytecode, &storage, topoheight, &contract_hash)
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
+    // Initialize once at topoheight 1
+    let mut init_params = vec![OP_INITIALIZE];
+    init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
+    init_params.extend(encode_u64(1700000000));
+    init_params.extend(encode_u64(31536000));
+    init_params.extend(encode_u64(1_000_000));
+
+    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
+        .await
+        .unwrap();
+    assert_eq!(result.return_value, 0, "Initialization should succeed");
+
+    // Query beneficiary at different topoheights to verify storage persistence
+    for topoheight in 2..=5 {
+        let query_params = vec![OP_BENEFICIARY];
+        let result = execute_test_contract_with_input(bytecode, &storage, topoheight, &contract_hash, &deployer_hash, &query_params)
             .await
             .unwrap();
 
-        assert_eq!(result.return_value, 0);
+        assert_eq!(result.return_value, 0, "Query should succeed at topoheight {}", topoheight);
+        // TODO: Verify return_data matches beneficiary address
     }
 }
 
@@ -460,13 +560,17 @@ async fn test_vesting_wallet_compute_units() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
+    // Convert deployer public key to Hash for tx_sender
+    let deployer_hash = Hash::from_bytes(deployer.get_public_key().compress().as_bytes()).unwrap();
+
     // Measure initialization
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(beneficiary.get_public_key().compress().as_bytes()));
     init_params.extend(encode_u64(1700000000));
     init_params.extend(encode_u64(31536000));
+    init_params.extend(encode_u64(1_000_000));
 
-    let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_hash, &init_params)
         .await
         .unwrap();
 

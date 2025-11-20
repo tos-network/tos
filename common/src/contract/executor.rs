@@ -85,6 +85,7 @@ pub trait ContractExecutor: Send + Sync {
     /// * `contract_hash` - Hash of the contract being executed
     /// * `block_hash` - Current block hash
     /// * `block_height` - Current block height
+    /// * `block_timestamp` - Current block timestamp (Unix timestamp in seconds)
     /// * `tx_hash` - Transaction hash
     /// * `tx_sender` - Transaction sender's address (as Hash)
     /// * `max_gas` - Maximum gas allowed for this execution
@@ -108,6 +109,7 @@ pub trait ContractExecutor: Send + Sync {
         contract_hash: &Hash,
         block_hash: &Hash,
         block_height: u64,
+        block_timestamp: u64,
         tx_hash: &Hash,
         tx_sender: &Hash,
         max_gas: u64,
@@ -150,6 +152,7 @@ impl ContractExecutor for NoOpExecutor {
         _contract_hash: &Hash,
         _block_hash: &Hash,
         _block_height: u64,
+        _block_timestamp: u64,
         _tx_hash: &Hash,
         _tx_sender: &Hash,
         _max_gas: u64,

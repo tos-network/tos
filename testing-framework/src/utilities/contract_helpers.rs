@@ -64,7 +64,7 @@ pub async fn execute_test_contract(
     topoheight: TopoHeight,
     contract_hash: &Hash,
 ) -> Result<ExecutionResult> {
-    execute_test_contract_with_input(bytecode, storage, topoheight, contract_hash, &[]).await
+    execute_test_contract_with_input(bytecode, storage, topoheight, contract_hash, &Hash::zero(), &[]).await
 }
 
 /// Execute a TAKO contract for testing with custom input data
@@ -78,6 +78,7 @@ pub async fn execute_test_contract(
 /// * `storage` - The RocksDB storage instance
 /// * `topoheight` - Current topoheight for versioned reads
 /// * `contract_hash` - Hash identifier for the contract
+/// * `tx_sender` - Transaction sender address (caller of the contract)
 /// * `input_data` - Input data to pass to the contract (can be empty &[])
 ///
 /// # Returns
@@ -88,6 +89,7 @@ pub async fn execute_test_contract_with_input(
     storage: &Arc<RwLock<RocksStorage>>,
     topoheight: TopoHeight,
     contract_hash: &Hash,
+    tx_sender: &Hash,
     input_data: &[u8],
 ) -> Result<ExecutionResult> {
     let mut storage_write = storage.write().await;
@@ -103,16 +105,20 @@ pub async fn execute_test_contract_with_input(
     }
 
     // Use TakoExecutor::execute directly to pass input_data
-    let result = TakoExecutor::execute(
+    // Use a reasonable default timestamp for testing (2024-01-01 00:00:00 UTC = 1704067200)
+    let block_timestamp = 1704067200u64;
+
+    let mut result = TakoExecutor::execute(
         bytecode,
         &mut *storage_write,
         topoheight,
         contract_hash,
         &Hash::zero(),  // block_hash
         0,              // block_height
+        block_timestamp, // block_timestamp
         &Hash::zero(),  // tx_hash
-        &Hash::zero(),  // tx_sender
-        input_data,     // input_data (key fix!)
+        tx_sender,      // tx_sender
+        input_data,     // input_data
         None,           // compute_budget (use default)
     )
     .context("Contract execution failed")?;
@@ -123,6 +129,47 @@ pub async fn execute_test_contract_with_input(
             result.return_value,
             result.compute_units_used
         );
+    }
+
+    // Persist contract storage cache to storage (CRITICAL for test execution!)
+    // NOTE: In production, cache persistence is handled by the transaction apply phase.
+    // For tests, we must manually persist the cache here so subsequent executions can read the data.
+    //
+    // For testing purposes, we deploy a minimal contract entry if it doesn't exist yet.
+    use tos_common::versioned_type::Versioned;
+    use tos_daemon::core::storage::ContractDataProvider;
+    use std::borrow::Cow;
+
+    // Check if contract exists, if not create a minimal entry for testing
+    use tos_common::contract::ContractStorage;
+    if !ContractStorage::has_contract(&*storage_write, contract_hash, topoheight).unwrap_or(false) {
+        // Create minimal TAKO contract for testing (just so we can save contract data)
+        use tos_daemon::core::storage::ContractProvider;
+        use tos_kernel::Module;
+
+        let test_module = Module::from_bytecode(bytecode.to_vec());
+        storage_write
+            .set_last_contract_to(
+                contract_hash,
+                topoheight,
+                &Versioned::new(Some(Cow::Owned(test_module)), None),
+            )
+            .await
+            .context("Failed to create test contract entry")?;
+    }
+
+    for (key, (state, value)) in result.cache.storage.drain() {
+        if state.should_be_stored() {
+            storage_write
+                .set_last_contract_data_to(
+                    contract_hash,
+                    &key,
+                    topoheight,
+                    &Versioned::new(value, state.get_topoheight()),
+                )
+                .await
+                .context("Failed to persist contract storage")?;
+        }
     }
 
     Ok(result)

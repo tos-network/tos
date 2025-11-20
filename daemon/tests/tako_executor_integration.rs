@@ -157,6 +157,7 @@ async fn test_tako_executor_hello_world() {
             &Hash::zero(), // contract_hash
             &Hash::zero(), // block_hash
             0,             // block_height
+            0,             // block_timestamp
             &Hash::zero(), // tx_hash
             &Hash::zero(), // tx_sender
             200_000,       // max_gas
@@ -221,6 +222,7 @@ async fn test_multi_executor_execution() {
             &Hash::zero(),
             &Hash::zero(),
             0,
+            0,
             &Hash::zero(),
             &Hash::zero(),
             200_000,
@@ -257,6 +259,7 @@ async fn test_gas_metering() {
                 100,
                 &Hash::zero(),
                 &Hash::zero(),
+                0,
                 0,
                 &Hash::zero(),
                 &Hash::zero(),
@@ -297,6 +300,7 @@ async fn test_contract_with_storage() {
             100,
             &Hash::zero(),
             &Hash::zero(),
+            0,
             0,
             &Hash::zero(),
             &Hash::zero(),

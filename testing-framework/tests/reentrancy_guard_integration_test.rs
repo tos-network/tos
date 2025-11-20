@@ -5,7 +5,7 @@
 // Tests demonstrating reentrancy attack prevention following OpenZeppelin pattern
 
 use tos_common::crypto::{Hash, KeyPair};
-use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract};
+use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract, execute_test_contract_with_input};
 
 const OP_WITHDRAW: u8 = 0x01;
 const OP_DEPOSIT: u8 = 0x02;
@@ -30,12 +30,13 @@ async fn test_reentrancy_guard_normal_withdrawal() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
+    let tx_sender = Hash::zero();  // Sender address
 
     // Deposit
     let mut deposit_params = vec![OP_DEPOSIT];
     deposit_params.extend(encode_u64(1000));
 
-    let result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &tx_sender, &deposit_params)
         .await
         .unwrap();
 
@@ -45,7 +46,7 @@ async fn test_reentrancy_guard_normal_withdrawal() {
     let mut withdraw_params = vec![OP_WITHDRAW];
     withdraw_params.extend(encode_u64(500));
 
-    let result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &tx_sender, &withdraw_params)
         .await
         .unwrap();
 
@@ -65,6 +66,7 @@ async fn test_reentrancy_guard_blocks_reentrant_call() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
+    let tx_sender = Hash::zero();
 
     // Attempt reentrancy (simulated)
     // TODO: When contract is ready, test actual reentrancy attack
@@ -90,6 +92,7 @@ async fn test_reentrancy_guard_sequential_calls() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
+    let tx_sender = Hash::zero();
 
     // Multiple sequential withdrawals (not reentrant)
     for i in 1..=5 {
@@ -114,6 +117,7 @@ async fn test_reentrancy_guard_state_management() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
+    let tx_sender = Hash::zero();
 
     // Test guard unlocks after function completes
     let result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -143,11 +147,12 @@ async fn test_reentrancy_guard_query_during_lock() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
+    let tx_sender = Hash::zero();
 
     // Query balance (read-only, should work even during lock)
     let query_params = vec![OP_GET_BALANCE];
 
-    let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &tx_sender, &query_params)
         .await
         .unwrap();
 
@@ -167,6 +172,7 @@ async fn test_reentrancy_guard_nested_prevention() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
+    let tx_sender = Hash::zero();
 
     // TODO: Test nested call prevention when contract supports CPI
     // Expected: First call succeeds, nested call fails with ERR_REENTRANT_CALL
@@ -191,6 +197,7 @@ async fn test_reentrancy_guard_compute_units() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
+    let tx_sender = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
         .await
@@ -213,6 +220,7 @@ async fn test_reentrancy_guard_storage_persistence() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
+    let tx_sender = Hash::zero();
 
     // Execute operations across multiple topoheights
     for topoheight in 1..=5 {

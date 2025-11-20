@@ -47,10 +47,12 @@ pub const DEFAULT_COMPUTE_BUDGET: u64 = 200_000;
 /// Prevents excessive computation. Can be increased for complex contracts.
 pub const MAX_COMPUTE_BUDGET: u64 = 10_000_000;
 
-/// Stack size for contract execution (16KB)
+/// Stack size for contract execution (256KB)
 ///
-/// Matches TBPF's default stack size.
-const STACK_SIZE: usize = 16 * 1024;
+/// Matches TBPF's VM configuration: 4KB per frame × 64 max call depth = 256KB
+/// This prevents StackAccessViolation errors when contracts use deep call stacks
+/// or allocate large stack variables (e.g., OpenZeppelin vesting-wallet contract)
+const STACK_SIZE: usize = 256 * 1024;
 
 /// Heap size for dynamic memory allocation (32KB)
 ///
@@ -103,6 +105,10 @@ pub struct ExecutionResult {
     pub events: Vec<tos_program_runtime::Event>,
     /// Transfers requested via the AccountProvider interface during execution
     pub transfers: Vec<TransferOutput>,
+    /// Contract storage cache (for manual persistence in test environments)
+    /// NOTE: In production, cache persistence is handled by the transaction apply phase.
+    /// For testing, this cache must be manually persisted to storage after execution.
+    pub cache: tos_common::contract::ContractCache,
 }
 
 impl TakoExecutor {
@@ -140,6 +146,7 @@ impl TakoExecutor {
         contract_hash: &Hash,
         block_hash: &Hash,
         block_height: u64,
+        block_timestamp: u64,
         tx_hash: &Hash,
         tx_sender: &Hash,  // Using Hash type for sender (32 bytes)
         input_data: &[u8], // Contract input parameters (entry point, user data)
@@ -209,6 +216,7 @@ impl TakoExecutor {
             *contract_hash.as_bytes(),
             *block_hash.as_bytes(),
             block_height,
+            block_timestamp,
             *tx_hash.as_bytes(),
             *tx_sender.as_bytes(),
             &mut storage,
@@ -321,6 +329,7 @@ impl TakoExecutor {
                 log_messages,
                 events,
                 transfers,
+                cache,  // Return cache for test persistence
             });
         }
 
@@ -414,13 +423,15 @@ impl TakoExecutor {
             ProgramResult::Ok(return_value) => {
                 if log::log_enabled!(log::Level::Info) {
                     info!(
-                        "TOS Kernel(TAKO) execution succeeded: return_value={}, instructions={}, compute_units={}, return_data_size={}, log_count={}, event_count={}",
+                        "TOS Kernel(TAKO) execution succeeded: return_value={}, instructions={}, compute_units={}, return_data_size={}, log_count={}, event_count={}, stack_allocated={}KB, heap_allocated={}KB",
                         return_value,
                         instruction_count,
                         compute_units_used,
                         return_data.as_ref().map(|d| d.len()).unwrap_or(0),
                         log_messages.len(),
-                        events.len()
+                        events.len(),
+                        STACK_SIZE / 1024,
+                        HEAP_SIZE / 1024
                     );
                 }
                 Ok(ExecutionResult {
@@ -431,16 +442,19 @@ impl TakoExecutor {
                     log_messages,
                     events,
                     transfers,
+                    cache,  // Return cache for test persistence
                 })
             }
             ProgramResult::Err(err) => {
                 let execution_error =
                     TakoExecutionError::from_ebpf_error(err, instruction_count, compute_units_used);
                 error!(
-                    "TOS Kernel(TAKO) execution failed: category={}, error={}, log_count={}",
+                    "TOS Kernel(TAKO) execution failed: category={}, error={}, log_count={}, stack_allocated={}KB, heap_allocated={}KB",
                     execution_error.category(),
                     execution_error.user_message(),
-                    log_messages.len()
+                    log_messages.len(),
+                    STACK_SIZE / 1024,
+                    HEAP_SIZE / 1024
                 );
                 // Note: Log messages are lost on error for now
                 // Future: Could extend TakoExecutionError to include log_messages for debugging
@@ -466,6 +480,7 @@ impl TakoExecutor {
             contract_hash,
             &Hash::zero(), // block_hash
             0,             // block_height
+            0,             // block_timestamp
             &Hash::zero(), // tx_hash
             &Hash::zero(), // tx_sender
             &[],           // input_data
@@ -620,6 +635,7 @@ mod tests {
             100,
             &Hash::zero(),
             &Hash::zero(),
+            0,
             0,
             &Hash::zero(),
             &Hash::zero(),

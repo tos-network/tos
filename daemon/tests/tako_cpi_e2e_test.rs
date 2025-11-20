@@ -196,6 +196,7 @@ async fn test_cpi_e2e_basic_invocation() {
             &caller_hash,  // caller contract hash
             &Hash::zero(), // block_hash
             0,             // block_height
+            0,             // block_timestamp
             &Hash::zero(), // tx_hash
             &Hash::zero(), // tx_sender
             2_000_000,     // max_gas (2M compute units for CPI)
@@ -301,6 +302,7 @@ async fn test_cpi_e2e_storage_operations() {
                 &callee_hash,
                 &Hash::zero(),
                 0,
+                0,
                 &Hash::zero(),
                 &Hash::zero(),
                 200_000,
@@ -379,6 +381,7 @@ async fn test_cpi_e2e_compute_budget_tracking() {
                 &callee_hash,
                 &Hash::zero(),
                 0,
+                0,
                 &Hash::zero(),
                 &Hash::zero(),
                 budget,
@@ -444,6 +447,7 @@ async fn test_cpi_e2e_performance_metrics() {
             100,
             &caller_hash,
             &Hash::zero(),
+            0,
             0,
             &Hash::zero(),
             &Hash::zero(),

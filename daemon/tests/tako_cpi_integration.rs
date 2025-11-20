@@ -234,6 +234,7 @@ async fn test_cpi_basic_invocation() {
             &Hash::zero(), // contract_hash (caller)
             &Hash::zero(), // block_hash
             0,             // block_height
+            0,             // block_timestamp
             &Hash::zero(), // tx_hash
             &Hash::zero(), // tx_sender
             2_000_000,     // max_gas (2M compute units for CPI)
@@ -347,6 +348,7 @@ async fn test_callee_standalone() {
             100,
             &Hash::zero(),
             &Hash::zero(),
+            0,
             0,
             &Hash::zero(),
             &Hash::zero(),

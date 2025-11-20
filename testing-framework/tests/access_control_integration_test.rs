@@ -5,7 +5,7 @@
 // Tests for OpenZeppelin-style Role-Based Access Control (RBAC) system
 
 use tos_common::crypto::{Hash, KeyPair};
-use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract};
+use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract, execute_test_contract_with_input};
 
 const OP_INITIALIZE: u8 = 0x00;
 const OP_GRANT_ROLE: u8 = 0x01;
@@ -53,9 +53,10 @@ async fn test_access_control_initialization() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let deployer_address = Hash::new(*deployer.get_public_key().compress().as_bytes());
 
     let init_params = vec![OP_INITIALIZE];
-    let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_address, &init_params)
         .await
         .unwrap();
 
@@ -76,18 +77,20 @@ async fn test_access_control_grant_role_success() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
-    // Initialize
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    // Initialize (admin becomes DEFAULT_ADMIN_ROLE)
+    let init_params = vec![OP_INITIALIZE];
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &init_params)
         .await
         .unwrap();
 
-    // Grant MINTER_ROLE to user
+    // Grant MINTER_ROLE to user (called by admin, same topoheight to see previous changes)
     let mut grant_params = vec![OP_GRANT_ROLE];
     grant_params.extend(encode_role(&minter_role()));
     grant_params.extend(encode_address(user.get_public_key().compress().as_bytes()));
 
-    let result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let result2 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &grant_params)
         .await
         .unwrap();
 
@@ -104,32 +107,31 @@ async fn test_access_control_grant_role_unauthorized() {
     let non_admin = KeyPair::new();
     let user = KeyPair::new();
 
-    let storage_admin = create_contract_test_storage(&admin, 10_000_000)
+    let storage = create_contract_test_storage(&admin, 10_000_000)
         .await
         .unwrap();
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
+    let non_admin_address = Hash::new(*non_admin.get_public_key().compress().as_bytes());
 
     // Initialize with admin
-    let _result1 = execute_test_contract(bytecode, &storage_admin, 1, &contract_hash)
+    let init_params = vec![OP_INITIALIZE];
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &init_params)
         .await
         .unwrap();
 
-    // Non-admin attempts to grant role
-    let storage_nonadmin = create_contract_test_storage(&non_admin, 10_000_000)
-        .await
-        .unwrap();
-
+    // Non-admin attempts to grant role (should fail, same topoheight to see previous changes)
     let mut grant_params = vec![OP_GRANT_ROLE];
     grant_params.extend(encode_role(&minter_role()));
     grant_params.extend(encode_address(user.get_public_key().compress().as_bytes()));
 
-    let _result2 = execute_test_contract(bytecode, &storage_nonadmin, 2, &contract_hash)
+    let result2 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &non_admin_address, &grant_params)
         .await
         .unwrap();
 
-    // TODO: Verify error = ERR_MISSING_ROLE when contract is ready
+    assert_eq!(result2.return_value, ERR_MISSING_ROLE, "Should fail with ERR_MISSING_ROLE");
 }
 
 // ============================================================================
@@ -146,9 +148,11 @@ async fn test_access_control_revoke_role_success() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
     // Initialize
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let init_params = vec![OP_INITIALIZE];
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &init_params)
         .await
         .unwrap();
 
@@ -156,7 +160,7 @@ async fn test_access_control_revoke_role_success() {
     let mut grant_params = vec![OP_GRANT_ROLE];
     grant_params.extend(encode_role(&minter_role()));
     grant_params.extend(encode_address(user.get_public_key().compress().as_bytes()));
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &grant_params)
         .await
         .unwrap();
 
@@ -165,7 +169,7 @@ async fn test_access_control_revoke_role_success() {
     revoke_params.extend(encode_role(&minter_role()));
     revoke_params.extend(encode_address(user.get_public_key().compress().as_bytes()));
 
-    let result3 = execute_test_contract(bytecode, &storage, 3, &contract_hash)
+    let result3 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &revoke_params)
         .await
         .unwrap();
 
@@ -180,15 +184,18 @@ async fn test_access_control_revoke_role_success() {
 async fn test_access_control_renounce_role_success() {
     let admin = KeyPair::new();
     let user = KeyPair::new();
-    let storage_admin = create_contract_test_storage(&admin, 10_000_000)
+    let storage = create_contract_test_storage(&admin, 10_000_000)
         .await
         .unwrap();
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
+    let user_address = Hash::new(*user.get_public_key().compress().as_bytes());
 
     // Initialize
-    let _result1 = execute_test_contract(bytecode, &storage_admin, 1, &contract_hash)
+    let init_params = vec![OP_INITIALIZE];
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &init_params)
         .await
         .unwrap();
 
@@ -196,19 +203,15 @@ async fn test_access_control_renounce_role_success() {
     let mut grant_params = vec![OP_GRANT_ROLE];
     grant_params.extend(encode_role(&minter_role()));
     grant_params.extend(encode_address(user.get_public_key().compress().as_bytes()));
-    let _result2 = execute_test_contract(bytecode, &storage_admin, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &grant_params)
         .await
         .unwrap();
 
     // User renounces their own role
-    let storage_user = create_contract_test_storage(&user, 10_000_000)
-        .await
-        .unwrap();
-
     let mut renounce_params = vec![OP_RENOUNCE_ROLE];
     renounce_params.extend(encode_role(&minter_role()));
 
-    let result3 = execute_test_contract(bytecode, &storage_user, 3, &contract_hash)
+    let result3 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &user_address, &renounce_params)
         .await
         .unwrap();
 
@@ -229,9 +232,11 @@ async fn test_access_control_has_role_query() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
     // Initialize
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let init_params = vec![OP_INITIALIZE];
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &init_params)
         .await
         .unwrap();
 
@@ -240,7 +245,7 @@ async fn test_access_control_has_role_query() {
     query_params.extend(encode_role(&minter_role()));
     query_params.extend(encode_address(user.get_public_key().compress().as_bytes()));
 
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &query_params)
         .await
         .unwrap();
 
@@ -260,9 +265,11 @@ async fn test_access_control_set_role_admin() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
     // Initialize
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let init_params = vec![OP_INITIALIZE];
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &init_params)
         .await
         .unwrap();
 
@@ -271,7 +278,7 @@ async fn test_access_control_set_role_admin() {
     set_admin_params.extend(encode_role(&pauser_role()));
     set_admin_params.extend(encode_role(&minter_role()));
 
-    let result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let result2 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &set_admin_params)
         .await
         .unwrap();
 
@@ -291,9 +298,11 @@ async fn test_access_control_get_role_admin() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
     // Initialize
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let init_params = vec![OP_INITIALIZE];
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &init_params)
         .await
         .unwrap();
 
@@ -301,7 +310,7 @@ async fn test_access_control_get_role_admin() {
     let mut query_params = vec![OP_GET_ROLE_ADMIN];
     query_params.extend(encode_role(&minter_role()));
 
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &query_params)
         .await
         .unwrap();
 
@@ -315,8 +324,8 @@ async fn test_access_control_get_role_admin() {
 #[tokio::test]
 async fn test_access_control_role_hierarchy() {
     let admin = KeyPair::new();
-    let minter_admin = KeyPair::new();
-    let minter = KeyPair::new();
+    let _minter_admin = KeyPair::new();
+    let _minter = KeyPair::new();
 
     let storage = create_contract_test_storage(&admin, 10_000_000)
         .await
@@ -324,9 +333,11 @@ async fn test_access_control_role_hierarchy() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
     // Initialize
-    let result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let init_params = vec![OP_INITIALIZE];
+    let result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &init_params)
         .await
         .unwrap();
 
@@ -352,9 +363,11 @@ async fn test_access_control_default_admin_role() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let deployer_address = Hash::new(*deployer.get_public_key().compress().as_bytes());
 
     // Initialize (deployer gets DEFAULT_ADMIN_ROLE)
-    let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let init_params = vec![OP_INITIALIZE];
+    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &deployer_address, &init_params)
         .await
         .unwrap();
 
@@ -370,16 +383,18 @@ async fn test_access_control_default_admin_role() {
 #[tokio::test]
 async fn test_access_control_multiple_roles() {
     let admin = KeyPair::new();
-    let user = KeyPair::new();
+    let _user = KeyPair::new();
     let storage = create_contract_test_storage(&admin, 10_000_000)
         .await
         .unwrap();
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
     // Initialize
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let init_params = vec![OP_INITIALIZE];
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &init_params)
         .await
         .unwrap();
 
@@ -402,8 +417,10 @@ async fn test_access_control_compute_units() {
 
     let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
     let contract_hash = Hash::zero();
+    let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
-    let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let init_params = vec![OP_INITIALIZE];
+    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &admin_address, &init_params)
         .await
         .unwrap();
 

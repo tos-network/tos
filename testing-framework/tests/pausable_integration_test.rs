@@ -12,7 +12,8 @@
 // - Error handling (unauthorized, wrong state)
 
 use tos_common::crypto::{Hash, KeyPair};
-use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract};
+use tos_common::serializer::Serializer;
+use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract_with_input};
 
 // Instruction opcodes
 const OP_INITIALIZE: u8 = 0x00;
@@ -20,12 +21,6 @@ const OP_PAUSE: u8 = 0x01;
 const OP_UNPAUSE: u8 = 0x02;
 const OP_PAUSED: u8 = 0x10;
 const OP_OWNER: u8 = 0x11;
-
-// Error codes
-const ERR_PAUSED: u64 = 1001;
-const ERR_NOT_PAUSED: u64 = 1002;
-const ERR_UNAUTHORIZED: u64 = 1003;
-const ERR_NOT_INITIALIZED: u64 = 1005;
 
 fn encode_address(address: &[u8; 32]) -> Vec<u8> {
     address.to_vec()
@@ -49,7 +44,10 @@ async fn test_pausable_initialization() {
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
 
-    let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    // Convert owner public key to Hash for tx_sender
+    let owner_hash = Hash::from_bytes(owner.get_public_key().compress().as_bytes()).unwrap();
+
+    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
         .await
         .unwrap();
 
@@ -70,17 +68,20 @@ async fn test_pausable_pause_success() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
+    // Convert owner public key to Hash for tx_sender
+    let owner_hash = Hash::from_bytes(owner.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
 
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
         .await
         .unwrap();
 
     // Pause
     let pause_params = vec![OP_PAUSE];
-    let result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &pause_params)
         .await
         .unwrap();
 
@@ -101,21 +102,25 @@ async fn test_pausable_unpause_success() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
+    // Convert owner public key to Hash for tx_sender
+    let owner_hash = Hash::from_bytes(owner.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
         .await
         .unwrap();
 
     // Pause
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let pause_params = vec![OP_PAUSE];
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &pause_params)
         .await
         .unwrap();
 
     // Unpause
     let unpause_params = vec![OP_UNPAUSE];
-    let result3 = execute_test_contract(bytecode, &storage, 3, &contract_hash)
+    let result3 = execute_test_contract_with_input(bytecode, &storage, 3, &contract_hash, &owner_hash, &unpause_params)
         .await
         .unwrap();
 
@@ -136,16 +141,19 @@ async fn test_pausable_query_paused_state() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
+    // Convert owner public key to Hash for tx_sender
+    let owner_hash = Hash::from_bytes(owner.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
         .await
         .unwrap();
 
     // Query paused (should be false initially)
     let query_params = vec![OP_PAUSED];
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &query_params)
         .await
         .unwrap();
 
@@ -168,10 +176,14 @@ async fn test_pausable_pause_unauthorized() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
+    // Convert public keys to Hash for tx_sender
+    let owner_hash = Hash::from_bytes(owner.get_public_key().compress().as_bytes()).unwrap();
+    let non_owner_hash = Hash::from_bytes(non_owner.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize with owner
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
-    let _result1 = execute_test_contract(bytecode, &storage_owner, 1, &contract_hash)
+    let _result1 = execute_test_contract_with_input(bytecode, &storage_owner, 1, &contract_hash, &owner_hash, &init_params)
         .await
         .unwrap();
 
@@ -181,7 +193,7 @@ async fn test_pausable_pause_unauthorized() {
         .unwrap();
 
     let pause_params = vec![OP_PAUSE];
-    let _result2 = execute_test_contract(bytecode, &storage_nonowner, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage_nonowner, 2, &contract_hash, &non_owner_hash, &pause_params)
         .await
         .unwrap();
 
@@ -202,21 +214,25 @@ async fn test_pausable_double_pause() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
+    // Convert owner public key to Hash for tx_sender
+    let owner_hash = Hash::from_bytes(owner.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
         .await
         .unwrap();
 
     // First pause
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let pause_params = vec![OP_PAUSE];
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &pause_params)
         .await
         .unwrap();
 
     // Second pause (should fail)
-    let pause_params = vec![OP_PAUSE];
-    let _result3 = execute_test_contract(bytecode, &storage, 3, &contract_hash)
+    let pause_params2 = vec![OP_PAUSE];
+    let _result3 = execute_test_contract_with_input(bytecode, &storage, 3, &contract_hash, &owner_hash, &pause_params2)
         .await
         .unwrap();
 
@@ -237,16 +253,19 @@ async fn test_pausable_unpause_without_pause() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
+    // Convert owner public key to Hash for tx_sender
+    let owner_hash = Hash::from_bytes(owner.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
         .await
         .unwrap();
 
     // Unpause without pausing first (should fail)
     let unpause_params = vec![OP_UNPAUSE];
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &unpause_params)
         .await
         .unwrap();
 
@@ -267,10 +286,13 @@ async fn test_pausable_multiple_cycles() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
+    // Convert owner public key to Hash for tx_sender
+    let owner_hash = Hash::from_bytes(owner.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
-    let result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
         .await
         .unwrap();
 
@@ -296,16 +318,19 @@ async fn test_pausable_query_owner() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
+    // Convert owner public key to Hash for tx_sender
+    let owner_hash = Hash::from_bytes(owner.get_public_key().compress().as_bytes()).unwrap();
+
     // Initialize
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
-    let _result1 = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let _result1 = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
         .await
         .unwrap();
 
     // Query owner
     let query_params = vec![OP_OWNER];
-    let _result2 = execute_test_contract(bytecode, &storage, 2, &contract_hash)
+    let _result2 = execute_test_contract_with_input(bytecode, &storage, 2, &contract_hash, &owner_hash, &query_params)
         .await
         .unwrap();
 
@@ -326,10 +351,13 @@ async fn test_pausable_compute_units() {
     let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
+    // Convert owner public key to Hash for tx_sender
+    let owner_hash = Hash::from_bytes(owner.get_public_key().compress().as_bytes()).unwrap();
+
     // Measure initialization
     let mut init_params = vec![OP_INITIALIZE];
     init_params.extend(encode_address(owner.get_public_key().compress().as_bytes()));
-    let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
+    let result = execute_test_contract_with_input(bytecode, &storage, 1, &contract_hash, &owner_hash, &init_params)
         .await
         .unwrap();
 

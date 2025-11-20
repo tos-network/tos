@@ -29,7 +29,8 @@ tos_common = { path = "../common" }
 tos_daemon = { path = "../daemon" }
 
 # TAKO dependencies for contract testing
-tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", branch = "main" }
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "191b808b6d5c7cf3a50dac74971b1006cffe887b" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "191b808b6d5c7cf3a50dac74971b1006cffe887b" }
 
 [dev-dependencies]
 proptest = "1.4"

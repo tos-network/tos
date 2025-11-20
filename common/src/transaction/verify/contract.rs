@@ -86,7 +86,9 @@ impl Transaction {
         // Get block information from chain state
         let topoheight = chain_state.topoheight;
         let block_hash = chain_state.block_hash;
-        let _block = chain_state.block;
+        let block = chain_state.block;
+        // Convert timestamp from milliseconds to seconds for contract execution
+        let block_timestamp = block.get_header().get_timestamp() / 1000;
 
         // Convert invoke type to parameters
         // For TOS Kernel(TAKO), we pass execution metadata as parameters
@@ -109,6 +111,7 @@ impl Transaction {
                     contract,
                     block_hash,
                     topoheight, // Use topoheight as block_height for now
+                    block_timestamp,
                     tx_hash,
                     &tx_sender_hash,
                     max_gas,
