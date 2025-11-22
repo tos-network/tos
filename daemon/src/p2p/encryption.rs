@@ -119,6 +119,13 @@ impl Encryption {
         }
         let cipher_state = lock.as_mut().ok_or(EncryptionError::WriteNotReady)?;
 
+        // SECURITY FIX: Prevent nonce overflow by checking before use
+        // While we rotate keys every 1GB (making this practically impossible),
+        // we add an explicit check to mathematically eliminate nonce reuse risk
+        if cipher_state.nonce == u64::MAX {
+            return Err(EncryptionError::InvalidNonce);
+        }
+
         // fill our buffer
         cipher_state.nonce_buffer[0..8].copy_from_slice(&cipher_state.nonce.to_be_bytes());
 
@@ -145,6 +152,13 @@ impl Encryption {
             trace!("peer cipher locked");
         }
         let cipher_state = lock.as_mut().ok_or(EncryptionError::ReadNotReady)?;
+
+        // SECURITY FIX: Prevent nonce overflow by checking before use
+        // While we rotate keys every 1GB (making this practically impossible),
+        // we add an explicit check to mathematically eliminate nonce reuse risk
+        if cipher_state.nonce == u64::MAX {
+            return Err(EncryptionError::InvalidNonce);
+        }
 
         // fill our buffer
         cipher_state.nonce_buffer[0..8].copy_from_slice(&cipher_state.nonce.to_be_bytes());

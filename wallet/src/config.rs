@@ -16,7 +16,9 @@ use crate::precomputed_tables;
 use tos_common::prompt::{default_logs_datetime_format, LogLevel, ModuleConfig};
 
 pub const DIR_PATH: &str = "wallets/";
-pub const XSWD_BIND_ADDRESS: &str = "0.0.0.0:44325";
+// SECURITY FIX: Default to localhost-only binding to prevent unauthorized remote access
+// Use --xswd-bind-address 0.0.0.0:44325 to explicitly enable external access
+pub const XSWD_BIND_ADDRESS: &str = "127.0.0.1:44325";
 pub const PASSWORD_HASH_SIZE: usize = 32;
 pub const SALT_SIZE: usize = 32;
 pub const KEY_SIZE: usize = 32;
@@ -373,6 +375,11 @@ pub struct Config {
     #[clap(long)]
     #[serde(default)]
     pub light_mode: bool,
+    /// XSWD Server bind address (default: 127.0.0.1:44325)
+    /// SECURITY WARNING: Binding to 0.0.0.0 exposes wallet to network. Only use for trusted networks.
+    #[cfg(feature = "api_server")]
+    #[clap(long)]
+    pub xswd_bind_address: Option<String>,
     /// Force the wallet to use a stable balance only during transactions creation.
     /// This will prevent the wallet to use unstable balance and prevent any orphaned transaction due to DAG reorg.
     /// This is only working if the wallet is in online mode.

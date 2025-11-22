@@ -698,7 +698,7 @@ async fn apply_config(
                 }
             }
         } else if config.enable_xswd {
-            match wallet.enable_xswd().await {
+            match wallet.enable_xswd(config.xswd_bind_address.clone()).await {
                 Ok(receiver) => {
                     if let Some(receiver) = receiver {
                         // Only clone when its necessary
@@ -4084,7 +4084,8 @@ async fn start_xswd(manager: &CommandManager, _: ArgumentManager) -> Result<(), 
         let context = manager.get_context().lock()?;
         context.get::<Arc<Wallet>>()?.clone()
     };
-    match wallet.enable_xswd().await {
+    // Use default bind address (127.0.0.1:44325) for interactive command
+    match wallet.enable_xswd(None).await {
         Ok(receiver) => {
             if let Some(receiver) = receiver {
                 let prompt = manager.get_prompt().clone();

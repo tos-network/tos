@@ -111,20 +111,43 @@ impl AppState {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+// XSWD v2.0: Application data with Ed25519 signature verification
+// This struct contains all information about an application requesting wallet access
+// Security: Permissions are now cryptographically bound to the application's public key
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ApplicationData {
-    // Application ID in hexadecimal format
-    id: String,
-    // Name of the app
-    name: String,
-    // Small description of the app
-    description: String,
-    // URL of the app if exists
-    url: Option<String>,
+    // Application ID in hexadecimal format (64 chars = 32 bytes)
+    pub(super) id: String,
+    // Name of the app (max 32 chars)
+    pub(super) name: String,
+    // Small description of the app (max 255 chars)
+    pub(super) description: String,
+    // URL of the app if exists (max 255 chars, must start with http:// or https://)
+    pub(super) url: Option<String>,
     // Permissions per RPC method
     // This is useful to request in one time all permissions
     #[serde(default)]
-    permissions: IndexSet<String>,
+    pub(super) permissions: IndexSet<String>,
+
+    // XSWD v2.0: Ed25519 signature verification fields
+    // Application's Ed25519 public key (32 bytes)
+    // This binds permissions to the application's cryptographic identity
+    #[serde(with = "hex::serde")]
+    pub public_key: [u8; 32],
+
+    // Unix timestamp when this ApplicationData was created (seconds since epoch)
+    // Used to prevent replay attacks (must be within 5 minutes of current time)
+    pub timestamp: u64,
+
+    // Random nonce to prevent replay attacks within the valid time window
+    // Each application registration must use a unique nonce
+    pub nonce: u64,
+
+    // Ed25519 signature over all fields above
+    // Signature = Ed25519Sign(private_key, serialize_for_signing(id || name || description || url || permissions || public_key || timestamp || nonce))
+    // This proves the application controls the private key corresponding to public_key
+    #[serde(with = "hex::serde")]
+    pub signature: [u8; 64],
 }
 
 impl ApplicationData {
@@ -147,6 +170,68 @@ impl ApplicationData {
     pub fn get_permissions(&self) -> &IndexSet<String> {
         &self.permissions
     }
+
+    pub fn get_public_key(&self) -> &[u8; 32] {
+        &self.public_key
+    }
+
+    pub fn get_timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    pub fn get_nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    pub fn get_signature(&self) -> &[u8; 64] {
+        &self.signature
+    }
+
+    // XSWD v2.0: Serialize ApplicationData for Ed25519 signature verification
+    // This function produces deterministic byte representation of all fields (except signature)
+    // The signature is computed over the output of this function
+    //
+    // Format: id || name || description || url_present || url || permissions_len || permissions || public_key || timestamp || nonce
+    // All strings are encoded as UTF-8, numbers as little-endian bytes
+    pub fn serialize_for_signing(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+
+        // Field 1: id (String)
+        buf.extend_from_slice(self.id.as_bytes());
+
+        // Field 2: name (String)
+        buf.extend_from_slice(self.name.as_bytes());
+
+        // Field 3: description (String)
+        buf.extend_from_slice(self.description.as_bytes());
+
+        // Field 4: url (Option<String>)
+        if let Some(url) = &self.url {
+            buf.push(1); // URL present
+            buf.extend_from_slice(url.as_bytes());
+        } else {
+            buf.push(0); // URL not present
+        }
+
+        // Field 5: permissions (IndexSet<String>)
+        // Format: count (u16) followed by each permission string
+        buf.extend_from_slice(&(self.permissions.len() as u16).to_le_bytes());
+        for perm in &self.permissions {
+            buf.extend_from_slice(perm.as_bytes());
+            buf.push(0); // Null terminator for each permission
+        }
+
+        // Field 6: public_key ([u8; 32])
+        buf.extend_from_slice(&self.public_key);
+
+        // Field 7: timestamp (u64)
+        buf.extend_from_slice(&self.timestamp.to_le_bytes());
+
+        // Field 8: nonce (u64)
+        buf.extend_from_slice(&self.nonce.to_le_bytes());
+
+        buf
+    }
 }
 
 impl Serializer for ApplicationData {
@@ -157,12 +242,22 @@ impl Serializer for ApplicationData {
         let url = Option::read(reader)?;
         let permissions = IndexSet::read(reader)?;
 
+        // XSWD v2.0: Read Ed25519 signature fields
+        let public_key = reader.read_bytes(32)?;
+        let timestamp = reader.read_u64()?;
+        let nonce = reader.read_u64()?;
+        let signature = reader.read_bytes(64)?;
+
         Ok(Self {
             id,
             name,
             description,
             url,
             permissions,
+            public_key,
+            timestamp,
+            nonce,
+            signature,
         })
     }
 
@@ -172,6 +267,12 @@ impl Serializer for ApplicationData {
         self.description.write(writer);
         self.url.write(writer);
         self.permissions.write(writer);
+
+        // XSWD v2.0: Write Ed25519 signature fields
+        self.public_key.write(writer);
+        self.timestamp.write(writer);
+        self.nonce.write(writer);
+        self.signature.write(writer);
     }
 }
 

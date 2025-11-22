@@ -1,6 +1,7 @@
 mod error;
 mod relayer;
 mod types;
+mod verification;
 
 use anyhow::Error;
 use async_trait::async_trait;
@@ -94,6 +95,10 @@ where
     where
         P: XSWDProvider,
     {
+        // XSWD v2.0: CRITICAL SECURITY CHECK - Verify Ed25519 signature first
+        // This must happen before any other validation to prevent processing of unsigned data
+        verification::verify_application_signature(app_data)?;
+
         if app_data.get_id().len() != 64 {
             return Err(XSWDError::InvalidApplicationId);
         }

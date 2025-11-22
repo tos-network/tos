@@ -676,6 +676,7 @@ impl Wallet {
     #[cfg(feature = "api_server")]
     pub async fn enable_xswd(
         self: &Arc<Self>,
+        bind_address: Option<String>,
     ) -> Result<Option<UnboundedReceiver<XSWDEvent>>, Error> {
         let receiver = self.init_xswd_channel().await;
 
@@ -686,7 +687,7 @@ impl Wallet {
         let mut rpc_handler = RPCHandler::new(self.clone());
         register_rpc_methods(&mut rpc_handler);
 
-        *lock = Some(APIServer::XSWD(XSWDServer::new(rpc_handler)?));
+        *lock = Some(APIServer::XSWD(XSWDServer::new(rpc_handler, bind_address)?));
 
         Ok(receiver)
     }
