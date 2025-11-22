@@ -331,8 +331,9 @@ impl OptimizedTxSelector {
         >,
     {
         // SECURITY FIX: Use Arc::clone() instead of unsafe transmute
-        // Reviewer feedback: "少量 Arc clone 的开销相对'共识模板生成'这条热路径来说几乎可以忽略，
-        // 换来的好处是完全丢掉这一块 unsafe"
+        // Reviewer feedback: "The small Arc clone overhead is negligible compared to
+        // the consensus template generation hot path, and the benefit is completely
+        // eliminating this unsafe block"
         //
         // Performance analysis:
         // - Arc::clone() only increments atomic refcount (1 atomic operation per TX)
