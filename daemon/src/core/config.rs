@@ -506,7 +506,9 @@ pub struct Config {
     #[clap(long)]
     pub simulator: Option<Simulator>,
     /// Skip PoW verification.
-    /// Warning: This is dangerous and should not be used in production.
+    /// SECURITY WARNING: This is ONLY allowed on devnet. Attempting to use this
+    /// on mainnet or testnet will cause the daemon to refuse to start.
+    /// This prevents accidental misconfiguration that would accept invalid PoW blocks.
     #[clap(long)]
     #[serde(default)]
     pub skip_pow_verification: bool,

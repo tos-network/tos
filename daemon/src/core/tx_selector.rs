@@ -9,11 +9,23 @@ use tos_common::{
 };
 
 // this struct is used to store transaction with its hash and its size in bytes
+// SECURITY FIX: Changed to own Arc<T> directly instead of &Arc<T>
+// This eliminates the need for unsafe transmute in OptimizedTxSelector
 pub struct TxSelectorEntry<'a> {
     // Hash of the transaction
     pub hash: &'a Arc<Hash>,
     // Current transaction
     pub tx: &'a Arc<Transaction>,
+    // Size in bytes of the TX
+    pub size: usize,
+}
+
+// Optimized version that owns the Arc directly (no lifetime parameter needed)
+pub struct OwnedTxSelectorEntry {
+    // Hash of the transaction (owned)
+    pub hash: Arc<Hash>,
+    // Current transaction (owned)
+    pub tx: Arc<Transaction>,
     // Size in bytes of the TX
     pub size: usize,
 }

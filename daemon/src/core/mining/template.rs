@@ -7,7 +7,6 @@ use super::{
 };
 use crate::core::{
     blockdag, error::BlockchainError, hard_fork::get_version_at_height, storage::Storage,
-    tx_selector::TxSelectorEntry,
 };
 use log::{debug, warn};
 use std::sync::Arc;
@@ -310,9 +309,10 @@ pub struct CacheStats {
 }
 
 /// Transaction selector with pre-computed fee ordering
+/// SECURITY FIX: Uses OwnedTxSelectorEntry to avoid unsafe transmute
 pub struct OptimizedTxSelector {
-    /// Pre-sorted transaction entries by fee
-    entries: Vec<TxSelectorEntry<'static>>,
+    /// Pre-sorted transaction entries by fee (owned Arc references)
+    entries: Vec<crate::core::tx_selector::OwnedTxSelectorEntry>,
     /// Current index in the sorted list
     index: usize,
 }
@@ -330,44 +330,23 @@ impl OptimizedTxSelector {
             ),
         >,
     {
-        let mut entries: Vec<TxSelectorEntry> = iter
-            .map(|(size, hash, tx)| {
-                // SAFETY: Lifetime extension from 'a to 'static for Arc references
-                //
-                // Invariants that must hold:
-                // 1. Arc references are stable - Arc<T> stores data on the heap with a stable address
-                // 2. Arc guarantees the data won't be freed while any reference exists
-                // 3. The underlying data (Hash and Transaction) remain valid as long as the Arc exists
-                // 4. TxSelectorEntry is an ephemeral struct used only during transaction selection
-                // 5. The selector is consumed before the original Arc references go out of scope
-                //
-                // Why safe alternatives don't work:
-                // - Cannot store &'a Arc<T> in TxSelectorEntry because:
-                //   * Would require generic lifetime parameter on struct
-                //   * Would prevent entries.sort_by() due to lifetime constraints
-                //   * Cannot return &'b mut TxSelectorEntry<'a> from next() method
-                // - Cannot clone Arc<T> because:
-                //   * Unnecessary memory overhead (atomic refcount increment)
-                //   * Performance impact in hot path (mining template generation)
-                //
-                // Memory safety guarantees:
-                // - No use-after-free: Arc keeps data alive, transmute only extends borrow lifetime
-                // - No dangling pointers: Arc<T> pointer is stable for the lifetime of the Arc
-                // - No data races: Arc uses atomic refcounting, safe for concurrent access
-                //
-                // Usage pattern:
-                // 1. Create OptimizedTxSelector from iterator over Arc references
-                // 2. Sort entries by fee (requires 'static lifetime for comparison)
-                // 3. Consume selector via next() during template generation
-                // 4. Selector dropped before original Arc references go out of scope
-                //
-                // Verified by: Manual review 2025-11-14, standard usage pattern in production
-                TxSelectorEntry {
-                    hash: unsafe { std::mem::transmute(hash) },
-                    tx: unsafe { std::mem::transmute(tx) },
+        // SECURITY FIX: Use Arc::clone() instead of unsafe transmute
+        // Reviewer feedback: "少量 Arc clone 的开销相对'共识模板生成'这条热路径来说几乎可以忽略，
+        // 换来的好处是完全丢掉这一块 unsafe"
+        //
+        // Performance analysis:
+        // - Arc::clone() only increments atomic refcount (1 atomic operation per TX)
+        // - Typical block has ~100-1000 TXs, so ~100-1000 atomic increments
+        // - Total overhead: ~1-10 microseconds (negligible vs block template generation time)
+        // - Safety benefit: Eliminates entire class of potential lifetime bugs
+        let mut entries: Vec<crate::core::tx_selector::OwnedTxSelectorEntry> = iter
+            .map(
+                |(size, hash, tx)| crate::core::tx_selector::OwnedTxSelectorEntry {
+                    hash: Arc::clone(hash),
+                    tx: Arc::clone(tx),
                     size,
-                }
-            })
+                },
+            )
             .collect();
 
         // Sort by fee in descending order
@@ -381,7 +360,7 @@ impl OptimizedTxSelector {
     }
 
     /// Get the next transaction with highest fee
-    pub fn next(&mut self) -> Option<&TxSelectorEntry<'_>> {
+    pub fn next(&mut self) -> Option<&crate::core::tx_selector::OwnedTxSelectorEntry> {
         if self.index < self.entries.len() {
             let entry = &self.entries[self.index];
             self.index += 1;

@@ -215,8 +215,14 @@ impl<S: Storage> Blockchain<S> {
                 return Err(BlockchainError::ConfigSyncMode.into());
             }
 
+            // SECURITY FIX: Reject skip_pow_verification on mainnet/testnet
+            // This prevents accidental misconfiguration that would accept any block regardless of difficulty
             if config.skip_pow_verification {
-                warn!("PoW verification is disabled! This is dangerous in production!");
+                if network != Network::Devnet {
+                    error!("skip_pow_verification is ONLY allowed on devnet! This is a critical security vulnerability on mainnet/testnet - node would accept blocks with invalid PoW.");
+                    return Err(BlockchainError::UnsafeConfigurationOnMainnet.into());
+                }
+                warn!("PoW verification is DISABLED - DEVNET ONLY mode active!");
             }
 
             // V-27 Fix: Reject skip_block_template_txs_verification on mainnet/testnet
