@@ -242,7 +242,7 @@ pub async fn get_contract_storage(
     let storage_read = storage.read().await;
 
     // Convert bytes to ValueCell
-    let key_cell = ValueCell::from_bytes(key)?;
+    let key_cell = ValueCell::Bytes(key.to_vec());
 
     let result = storage_read
         .load_data(&contract_hash, &key_cell, topoheight)

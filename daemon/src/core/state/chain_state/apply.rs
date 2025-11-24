@@ -29,7 +29,7 @@ use tos_common::{
     },
     versioned_type::VersionedState,
 };
-use tos_kernel::Environment;
+use tos_kernel::{Environment, Module};
 
 use super::{ChainState, Echange, StorageReference};
 
@@ -150,7 +150,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     async fn set_contract_module(
         &mut self,
         hash: &Hash,
-        module: &'a tos_kernel::Module,
+        module: &'a Module,
     ) -> Result<(), BlockchainError> {
         self.inner.set_contract_module(hash, module).await
     }
@@ -162,7 +162,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     async fn get_contract_module_with_environment(
         &self,
         hash: &Hash,
-    ) -> Result<(&tos_kernel::Module, &Environment), BlockchainError> {
+    ) -> Result<(&Module, &Environment), BlockchainError> {
         self.inner.get_contract_module_with_environment(hash).await
     }
 }
