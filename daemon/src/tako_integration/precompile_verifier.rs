@@ -128,7 +128,7 @@ const MAX_INSTRUCTION_DATA_SIZE: usize = 1024 * 1024; // 1 MB
 ///         &all_datas,
 ///     )?;
 /// }
-/// # Ok::<(), TakoExecutionError>(())
+/// # Ok::<(), tos_daemon::tako_integration::TakoExecutionError>(())
 /// ```
 pub fn verify_precompile_instruction(
     invoke_context: &InvokeContext,
