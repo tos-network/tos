@@ -120,5 +120,5 @@ invariants:
 
 ## Reference
 
-See: `/Users/tomisetsu/tos-network/memo/02-Testing/TOS_TESTING_FRAMEWORK_V3.md`
+See: `~/tos-network/memo/02-Testing/TOS_TESTING_FRAMEWORK_V3.md`
 - Section 9.1-9.4: DSL format and parser specification

@@ -8,7 +8,7 @@
 
 ## Overview
 
-This document describes the implementation of waiter primitives and utilities for the TOS Testing Framework V3.0, as specified in `/Users/tomisetsu/tos-network/memo/02-Testing/TOS_TESTING_FRAMEWORK_V3.md`.
+This document describes the implementation of waiter primitives and utilities for the TOS Testing Framework V3.0, as specified in `~/tos-network/memo/02-Testing/TOS_TESTING_FRAMEWORK_V3.md`.
 
 ## Components Implemented
 
@@ -26,7 +26,7 @@ This document describes the implementation of waiter primitives and utilities fo
 - Async methods for non-blocking RPC operations
 - Result-based error handling for robust test failures
 
-**Location**: `/Users/tomisetsu/tos-network/tos/testing-framework/src/tier2_integration/mod.rs`
+**Location**: `~/tos-network/tos/testing-framework/src/tier2_integration/mod.rs`
 
 ---
 
@@ -86,7 +86,7 @@ let txid = node.submit_transaction(tx).await?;
 wait_for_tx(&node, &txid, Duration::from_secs(30)).await?;
 ```
 
-**Location**: `/Users/tomisetsu/tos-network/tos/testing-framework/src/tier2_integration/waiters.rs`
+**Location**: `~/tos-network/tos/testing-framework/src/tier2_integration/waiters.rs`
 
 **Tests**: 4 comprehensive unit tests included
 
@@ -141,7 +141,7 @@ pub async fn wait_all_heights_equal<N: NodeRpc>(
 
 **Use Case**: Simpler convergence check when tip hash agreement isn't critical
 
-**Location**: `/Users/tomisetsu/tos-network/tos/testing-framework/src/tier3_e2e/waiters.rs`
+**Location**: `~/tos-network/tos/testing-framework/src/tier3_e2e/waiters.rs`
 
 **Tests**: 7 comprehensive unit tests included
 
@@ -192,7 +192,7 @@ async fn test_blockchain_storage() {
 pub fn create_temp_rocksdb() -> Result<TempRocksDB>
 ```
 
-**Location**: `/Users/tomisetsu/tos-network/tos/testing-framework/src/utilities/storage.rs`
+**Location**: `~/tos-network/tos/testing-framework/src/utilities/storage.rs`
 
 **Tests**: 8 comprehensive unit tests including panic safety
 
@@ -200,7 +200,7 @@ pub fn create_temp_rocksdb() -> Result<TempRocksDB>
 
 ## Example: Comprehensive Waiters Demo
 
-**Location**: `/Users/tomisetsu/tos-network/tos/testing-framework/examples/waiters_example.rs`
+**Location**: `~/tos-network/tos/testing-framework/examples/waiters_example.rs`
 
 **Run with**: `cargo run --example waiters_example`
 
@@ -237,7 +237,7 @@ use tos_testing_framework::prelude::*;
 // - TempRocksDB
 ```
 
-**Location**: `/Users/tomisetsu/tos-network/tos/testing-framework/src/prelude.rs`
+**Location**: `~/tos-network/tos/testing-framework/src/prelude.rs`
 
 ---
 
@@ -319,7 +319,7 @@ testing-framework/
 
 ### Integration Tests
 
-**Location**: `/Users/tomisetsu/tos-network/tos/testing-framework/tests/waiter_integration_test.rs`
+**Location**: `~/tos-network/tos/testing-framework/tests/waiter_integration_test.rs`
 
 **Tests**:
 - End-to-end waiter behavior

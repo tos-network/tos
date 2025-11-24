@@ -20,6 +20,13 @@ miner_wallet.db/
 publisher_wallet.db/
 final_test_wallet/
 
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
 
 # ignore all profiling files
 flamegraph.svg

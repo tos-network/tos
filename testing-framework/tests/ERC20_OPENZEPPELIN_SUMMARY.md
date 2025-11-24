@@ -285,7 +285,7 @@ cat ~/tos-network/tos/testing-framework/tests/HOW_TO_RUN_ERC20_OPENZEPPELIN_TEST
 ## Files Created
 
 ### Test Code
-- **Location**: `/Users/tomisetsu/tos-network/tos/testing-framework/tests/`
+- **Location**: `~/tos-network/tos/testing-framework/tests/`
 - **Main File**: `erc20_openzeppelin_test.rs` (1,100+ lines)
 
 ### Documentation
@@ -448,7 +448,7 @@ All tests designed to be ready for contract implementation. Minor TODOs:
 
 ## Contact & Support
 
-**Test File**: `/Users/tomisetsu/tos-network/tos/testing-framework/tests/erc20_openzeppelin_test.rs`
+**Test File**: `~/tos-network/tos/testing-framework/tests/erc20_openzeppelin_test.rs`
 
 **Documentation**:
 - Full Report: `ERC20_OPENZEPPELIN_TEST_REPORT.md`
