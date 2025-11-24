@@ -132,7 +132,10 @@ where
     F: FnOnce() -> Fut,
     Fut: Future<Output = ()>,
 {
-    Runtime::new().unwrap().block_on(f());
+    match Runtime::new() {
+        Ok(runtime) => runtime.block_on(f()),
+        Err(e) => panic!("Failed to create tokio runtime for doc test: {}", e),
+    }
 }
 
 /// Create a test account hash for doc-tests
@@ -403,11 +406,7 @@ where
 /// assert_approx_eq(expected, actual, 10).unwrap();
 /// ```
 pub fn assert_approx_eq(expected: u64, actual: u64, tolerance: u64) -> Result<()> {
-    let diff = if actual > expected {
-        actual - expected
-    } else {
-        expected - actual
-    };
+    let diff = actual.abs_diff(expected);
 
     if diff > tolerance {
         anyhow::bail!(

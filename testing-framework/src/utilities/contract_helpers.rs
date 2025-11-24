@@ -13,7 +13,6 @@ use tos_common::{
     block::TopoHeight,
     contract::ContractStorage,
     crypto::{Hash, KeyPair},
-    serializer::Serializer,
 };
 use tos_daemon::{
     core::{error::BlockchainError, storage::rocksdb::RocksStorage},
