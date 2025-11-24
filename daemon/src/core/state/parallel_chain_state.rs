@@ -113,9 +113,13 @@ pub struct TransactionResult {
 /// Once deadlock model is validated (or if we migrate to async-native storage),
 /// we can increase semaphore permits for better read parallelism:
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use std::sync::Arc;
+/// # use tos_common::tokio::sync::Semaphore;
 /// // FUTURE: Allow multiple concurrent storage reads
 /// let storage_semaphore = Arc::new(Semaphore::new(num_cpus::get()));
+/// # // Example demonstrates future optimization pattern
+/// # assert!(storage_semaphore.available_permits() > 0);
 /// ```
 ///
 /// **Before increasing permits, verify:**

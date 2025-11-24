@@ -39,6 +39,12 @@ pub mod versioned_type;
 
 pub mod tokio;
 
+// TODO: Fix doc_test_helpers module - currently broken due to outdated trait implementations
+// The module has been temporarily disabled to allow doc-tests to run.
+// It needs to be updated to match current ContractProvider and ContractExecutor traits.
+// #[cfg(any(test, doctest))]
+// pub mod doc_test_helpers;
+
 #[cfg(feature = "rpc")]
 pub mod rpc;
 

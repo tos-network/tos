@@ -31,22 +31,37 @@
 //!
 //! ## TOS Kernel(TAKO) Decoder
 //!
-//! The TOS Kernel(TAKO) side should decode as follows:
+//! The TOS Kernel(TAKO) side should decode the invocation parameters.
+//! Here's an example demonstrating the encoding/decoding roundtrip:
 //!
-//! ```rust,ignore
-//! fn decode_invocation(params: &[u8]) -> Result<InvocationType, Error> {
+//! ```rust
+//! use tos_common::transaction::encoding::{encode_entry_point, encode_hook};
+//! use tos_common::transaction::encoding::{ENTRY_POINT_DISCRIMINATOR, HOOK_DISCRIMINATOR};
+//!
+//! // Example decoder function
+//! fn decode_invocation(params: &[u8]) -> Result<String, &'static str> {
 //!     match params.first() {
-//!         Some(0x00) if params.len() >= 3 => {
+//!         Some(&ENTRY_POINT_DISCRIMINATOR) if params.len() >= 3 => {
 //!             let entry_id = u16::from_le_bytes([params[1], params[2]]);
-//!             Ok(InvocationType::Entry(entry_id))
+//!             Ok(format!("Entry({})", entry_id))
 //!         }
-//!         Some(0x01) if params.len() >= 2 => {
+//!         Some(&HOOK_DISCRIMINATOR) if params.len() >= 2 => {
 //!             let hook_id = params[1];
-//!             Ok(InvocationType::Hook(hook_id))
+//!             Ok(format!("Hook({})", hook_id))
 //!         }
-//!         _ => Err(Error::InvalidInvocationType)
+//!         _ => Err("InvalidInvocationType")
 //!     }
 //! }
+//!
+//! // Test encoding and decoding roundtrip
+//! let entry_encoded = encode_entry_point(1234);
+//! assert_eq!(decode_invocation(&entry_encoded).unwrap(), "Entry(1234)");
+//!
+//! let hook_encoded = encode_hook(42);
+//! assert_eq!(decode_invocation(&hook_encoded).unwrap(), "Hook(42)");
+//!
+//! // Test invalid discriminator
+//! assert!(decode_invocation(&[0xFF]).is_err());
 //! ```
 //!
 //! ## Future Extensions

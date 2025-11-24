@@ -37,20 +37,47 @@ use tos_tbpf::error::EbpfError;
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// use tako_integration::TosStorageAdapter;
+/// ```no_run
+/// use tos_daemon::tako_integration::TosStorageAdapter;
+/// use tos_program_runtime::storage::StorageProvider;
+/// use tos_common::contract::{ContractProvider, ContractCache};
+/// use tos_common::crypto::Hash;
+/// use tos_common::block::TopoHeight;
+///
+/// # // Mock provider for demonstration
+/// # struct MockProvider;
+/// # impl ContractProvider for MockProvider {
+/// #     fn get_contract_balance_for_asset(&self, _: &Hash, _: &Hash, _: TopoHeight) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> { Ok(None) }
+/// #     fn get_account_balance_for_asset(&self, _: &tos_common::crypto::PublicKey, _: &Hash, _: TopoHeight) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> { Ok(None) }
+/// #     fn asset_exists(&self, _: &Hash, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
+/// #     fn load_asset_data(&self, _: &Hash, _: TopoHeight) -> Result<Option<(TopoHeight, tos_common::asset::AssetData)>, anyhow::Error> { Ok(None) }
+/// #     fn load_asset_supply(&self, _: &Hash, _: TopoHeight) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> { Ok(None) }
+/// #     fn account_exists(&self, _: &tos_common::crypto::PublicKey, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
+/// #     fn load_contract_module(&self, _: &Hash, _: TopoHeight) -> Result<Option<Vec<u8>>, anyhow::Error> { Ok(None) }
+/// # }
+/// # impl tos_common::contract::ContractStorage for MockProvider {
+/// #     fn load_data(&self, _: &Hash, _: &tos_kernel::ValueCell, _: TopoHeight) -> Result<Option<(TopoHeight, Option<tos_kernel::ValueCell>)>, anyhow::Error> { Ok(None) }
+/// #     fn load_data_latest_topoheight(&self, _: &Hash, _: &tos_kernel::ValueCell, _: TopoHeight) -> Result<Option<TopoHeight>, anyhow::Error> { Ok(None) }
+/// #     fn has_data(&self, _: &Hash, _: &tos_kernel::ValueCell, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
+/// #     fn has_contract(&self, _: &Hash, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
+/// # }
 ///
 /// // Create adapter
+/// let provider = MockProvider;
+/// let contract_hash = Hash::zero();
+/// let mut cache = ContractCache::default();
+/// let topoheight = 100;
+///
 /// let mut adapter = TosStorageAdapter::new(
-///     &mut tos_provider,
+///     &provider,
 ///     &contract_hash,
 ///     &mut cache,
 ///     topoheight,
 /// );
 ///
 /// // TOS Kernel(TAKO) will call these methods via syscalls
-/// adapter.get(&contract_hash.as_bytes(), b"balance")?;
-/// adapter.set(&contract_hash.as_bytes(), b"balance", b"1000")?;
+/// adapter.get(contract_hash.as_bytes(), b"balance").ok();
+/// adapter.set(contract_hash.as_bytes(), b"balance", b"1000").ok();
 /// ```
 pub struct TosStorageAdapter<'a> {
     /// TOS contract provider (backend storage)

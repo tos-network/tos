@@ -31,14 +31,24 @@ use super::{ExecutionResult, TakoExecutor};
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// use tos_daemon::tako_integration::TakoContractExecutor;
 /// use tos_common::contract::ContractExecutor;
+/// use std::sync::Arc;
 ///
+/// # // Mock ParallelChainState for demonstration
+/// # struct ParallelChainState;
+/// # impl ParallelChainState {
+/// #     fn new(_storage: u32, _executor: Arc<dyn ContractExecutor>) -> Self {
+/// #         Self
+/// #     }
+/// # }
+///
+/// // Create TAKO contract executor
 /// let executor = TakoContractExecutor::new();
 ///
 /// // Inject into transaction state
-/// let state = ParallelChainState::new(..., Arc::new(executor));
+/// let state = ParallelChainState::new(0, Arc::new(executor));
 /// ```
 pub struct TakoContractExecutor;
 

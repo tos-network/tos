@@ -73,23 +73,27 @@ pub struct TransactionCost {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// use tos_daemon::tako_integration::transaction_cost::estimate_transaction_cost;
 ///
+/// # // Create minimal test data
+/// # let contract_bytecode = vec![0u8; 5_000]; // 5KB contract
+/// # let ed25519_id = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+/// # let instruction_data = vec![1u8, 0u8];
+///
 /// // Transaction with contract and precompile
-/// let contract_bytecode = include_bytes!("contract.so");
-/// let ed25519_id = [3, 0, 0, ...]; // Ed25519 program ID
-/// let precompiles = vec![(&ed25519_id, &[1u8, 0])]; // 1 signature
+/// let precompiles = vec![(&ed25519_id, instruction_data.as_slice())]; // 1 Ed25519 signature
 ///
 /// let cost = estimate_transaction_cost(
-///     Some(contract_bytecode),
+///     Some(&contract_bytecode),
 ///     &precompiles
-/// )?;
+/// ).unwrap();
 ///
+/// // Display cost breakdown
 /// println!("Total cost: {} CU", cost.total_cost);
-/// println!("  Base: {} CU", cost.base_cost);
-/// println!("  Contract: {} CU", cost.contract_cost);
-/// println!("  Precompile: {} CU", cost.precompile_cost);
+/// println!("  Base: {} CU", cost.base_cost);        // 5,000 CU
+/// println!("  Contract: {} CU", cost.contract_cost);  // 50,000 CU (5KB × 10,000)
+/// println!("  Precompile: {} CU", cost.precompile_cost); // 2,280 CU (1 Ed25519 sig)
 /// ```
 pub fn estimate_transaction_cost(
     contract_bytecode: Option<&[u8]>,

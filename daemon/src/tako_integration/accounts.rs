@@ -33,16 +33,45 @@ use tos_tbpf::error::EbpfError;
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// use tako_integration::TosAccountAdapter;
+/// ```no_run
+/// use tos_daemon::tako_integration::TosAccountAdapter;
+/// use tos_program_runtime::storage::AccountProvider;
+/// use tos_common::contract::ContractProvider;
+/// use tos_common::crypto::Hash;
+/// use tos_common::block::TopoHeight;
 ///
-/// let adapter = TosAccountAdapter::new(&tos_provider, topoheight);
+/// # // Mock provider for demonstration
+/// # struct MockProvider;
+/// # impl ContractProvider for MockProvider {
+/// #     fn get_contract_balance_for_asset(&self, _: &Hash, _: &Hash, _: TopoHeight) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> { Ok(None) }
+/// #     fn get_account_balance_for_asset(&self, _: &tos_common::crypto::PublicKey, _: &Hash, _: TopoHeight) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> { Ok(Some((100, 5000))) }
+/// #     fn asset_exists(&self, _: &Hash, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(true) }
+/// #     fn load_asset_data(&self, _: &Hash, _: TopoHeight) -> Result<Option<(TopoHeight, tos_common::asset::AssetData)>, anyhow::Error> { Ok(None) }
+/// #     fn load_asset_supply(&self, _: &Hash, _: TopoHeight) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> { Ok(None) }
+/// #     fn account_exists(&self, _: &tos_common::crypto::PublicKey, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(true) }
+/// #     fn load_contract_module(&self, _: &Hash, _: TopoHeight) -> Result<Option<Vec<u8>>, anyhow::Error> { Ok(None) }
+/// # }
+/// # impl tos_common::contract::ContractStorage for MockProvider {
+/// #     fn load_data(&self, _: &Hash, _: &tos_kernel::ValueCell, _: TopoHeight) -> Result<Option<(TopoHeight, Option<tos_kernel::ValueCell>)>, anyhow::Error> { Ok(None) }
+/// #     fn load_data_latest_topoheight(&self, _: &Hash, _: &tos_kernel::ValueCell, _: TopoHeight) -> Result<Option<TopoHeight>, anyhow::Error> { Ok(None) }
+/// #     fn has_data(&self, _: &Hash, _: &tos_kernel::ValueCell, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
+/// #     fn has_contract(&self, _: &Hash, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
+/// # }
+///
+/// // Create adapter
+/// let provider = MockProvider;
+/// let topoheight = 100;
+/// let adapter = TosAccountAdapter::new(&provider, topoheight);
 ///
 /// // Get balance of an account (native asset)
-/// let balance = adapter.get_balance(&account_address)?;
+/// let account_address = [1u8; 32];
+/// let balance = adapter.get_balance(&account_address).ok();
 ///
 /// // Transfer from contract to user (native asset)
-/// adapter.transfer(&contract_address, &user_address, 1000)?;
+/// let contract_address = [2u8; 32];
+/// let user_address = [3u8; 32];
+/// let mut adapter = TosAccountAdapter::new(&provider, topoheight);
+/// adapter.transfer(&contract_address, &user_address, 1000).ok();
 /// ```
 pub struct TosAccountAdapter<'a> {
     /// TOS contract provider (backend)

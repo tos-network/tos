@@ -51,27 +51,53 @@ pub struct ContractExecutionResult {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```rust
 /// use tos_common::contract::{ContractExecutor, ContractExecutionResult};
+/// use tos_common::crypto::Hash;
+/// use tos_common::block::TopoHeight;
+/// use async_trait::async_trait;
+/// use anyhow::Result;
 ///
 /// struct MyExecutor;
 ///
 /// #[async_trait]
 /// impl ContractExecutor for MyExecutor {
-///     async fn execute<P: ContractProvider>(
+///     async fn execute(
 ///         &self,
-///         bytecode: &[u8],
-///         provider: &mut P,
-///         // ... other parameters
+///         _bytecode: &[u8],
+///         _provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+///         _topoheight: TopoHeight,
+///         _contract_hash: &Hash,
+///         _block_hash: &Hash,
+///         _block_height: u64,
+///         _block_timestamp: u64,
+///         _tx_hash: &Hash,
+///         _tx_sender: &Hash,
+///         _max_gas: u64,
+///         _parameters: Option<Vec<u8>>,
 ///     ) -> Result<ContractExecutionResult> {
 ///         // Execute bytecode and return result
 ///         Ok(ContractExecutionResult {
 ///             gas_used: 1000,
 ///             exit_code: Some(0),
 ///             return_data: None,
+///             transfers: vec![],
 ///         })
 ///     }
+///
+///     fn supports_format(&self, _bytecode: &[u8]) -> bool {
+///         true
+///     }
+///
+///     fn name(&self) -> &'static str {
+///         "MyExecutor"
+///     }
 /// }
+///
+/// // Verify the executor can be created
+/// let executor = MyExecutor;
+/// assert_eq!(executor.name(), "MyExecutor");
+/// assert!(executor.supports_format(&[]));
 /// ```
 #[async_trait]
 pub trait ContractExecutor: Send + Sync {

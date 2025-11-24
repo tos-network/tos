@@ -74,6 +74,9 @@ pub mod scenarios;
 // Convenient re-exports for common usage
 pub mod prelude;
 
+// Doc-test helpers (always available since this is a testing framework)
+pub mod doc_test_helpers;
+
 // Re-export commonly used types at crate root
 pub use orchestrator::{Clock, DeterministicTestEnv, PausedClock, SystemClock, TestRng};
 pub use tier1_component::{TestBlockchain, TestBlockchainBuilder};

@@ -68,21 +68,45 @@ const HEAP_SIZE: usize = 32 * 1024;
 ///
 /// # Example
 ///
-/// ```ignore
-/// use tako_integration::TakoExecutor;
+/// ```no_run
+/// use tos_daemon::tako_integration::TakoExecutor;
+/// use tos_common::crypto::Hash;
 ///
+/// # // Mock provider for doc-test (not actually functional)
+/// # struct MockProvider;
+/// # impl tos_common::contract::ContractProvider for MockProvider {
+/// #     fn get_contract_balance_for_asset(&self, _: &Hash, _: &Hash, _: u64) -> Result<Option<(u64, u64)>, anyhow::Error> { Ok(None) }
+/// #     fn get_account_balance_for_asset(&self, _: &tos_common::crypto::PublicKey, _: &Hash, _: u64) -> Result<Option<(u64, u64)>, anyhow::Error> { Ok(None) }
+/// #     fn asset_exists(&self, _: &Hash, _: u64) -> Result<bool, anyhow::Error> { Ok(false) }
+/// #     fn load_asset_data(&self, _: &Hash, _: u64) -> Result<Option<(u64, tos_common::asset::AssetData)>, anyhow::Error> { Ok(None) }
+/// #     fn load_asset_supply(&self, _: &Hash, _: u64) -> Result<Option<(u64, u64)>, anyhow::Error> { Ok(None) }
+/// #     fn account_exists(&self, _: &tos_common::crypto::PublicKey, _: u64) -> Result<bool, anyhow::Error> { Ok(false) }
+/// #     fn load_contract_module(&self, _: &Hash, _: u64) -> Result<Option<Vec<u8>>, anyhow::Error> { Ok(None) }
+/// # }
+/// # impl tos_common::contract::ContractStorage for MockProvider {
+/// #     fn load_data(&self, _: &Hash, _: &tos_kernel::ValueCell, _: u64) -> Result<Option<(u64, Option<tos_kernel::ValueCell>)>, anyhow::Error> { Ok(None) }
+/// #     fn load_data_latest_topoheight(&self, _: &Hash, _: &tos_kernel::ValueCell, _: u64) -> Result<Option<u64>, anyhow::Error> { Ok(None) }
+/// #     fn has_data(&self, _: &Hash, _: &tos_kernel::ValueCell, _: u64) -> Result<bool, anyhow::Error> { Ok(false) }
+/// #     fn has_contract(&self, _: &Hash, _: u64) -> Result<bool, anyhow::Error> { Ok(false) }
+/// # }
+/// #
+/// let bytecode = b"\x7FELF"; // Minimal ELF header (for demonstration)
+/// let mut provider = MockProvider;
+///
+/// // Execute TAKO contract
 /// let result = TakoExecutor::execute(
-///     contract_bytecode,
+///     bytecode,
 ///     &mut provider,
-///     topoheight,
-///     &contract_hash,
-///     &block_hash,
-///     block_height,
-///     &tx_hash,
-///     &tx_sender,
-///     input_data,
-///     compute_budget,
-/// )?;
+///     100,              // topoheight
+///     &Hash::zero(),    // contract_hash
+///     &Hash::zero(),    // block_hash
+///     1000,             // block_height
+///     1700000000,       // block_timestamp
+///     &Hash::zero(),    // tx_hash
+///     &Hash::zero(),    // tx_sender
+///     &[],              // input_data (entry point + args)
+///     Some(200_000),    // compute_budget
+/// );
 /// ```
 pub struct TakoExecutor;
 

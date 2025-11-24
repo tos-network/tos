@@ -21,20 +21,42 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
-//! use tako_integration::precompile_verifier::verify_transaction_precompiles;
+//! ```ignore
+//! use tos_daemon::tako_integration::precompile_verifier::verify_precompile_instruction;
+//! use tos_program_runtime::InvokeContext;
+//!
+//! # // Mock transaction and execution infrastructure
+//! # struct Transaction {
+//! #     instructions: Vec<Instruction>,
+//! # }
+//! # struct Instruction {
+//! #     program_id: [u8; 32],
+//! #     data: Vec<u8>,
+//! # }
+//! # fn execute_transaction(_tx: Transaction) -> Result<(), anyhow::Error> {
+//! #     Ok(())
+//! # }
 //!
 //! // In transaction processor, before execution:
+//! # let transaction = Transaction { instructions: vec![] };
+//! # let invoke_context = unsafe { std::mem::zeroed::<InvokeContext>() };
+//! let all_datas: Vec<&[u8]> = transaction.instructions
+//!     .iter()
+//!     .map(|ix| ix.data.as_slice())
+//!     .collect();
+//!
 //! for instruction in &transaction.instructions {
-//!     verify_transaction_precompiles(
+//!     verify_precompile_instruction(
+//!         &invoke_context,
 //!         &instruction.program_id,
 //!         &instruction.data,
-//!         &all_instruction_datas,
+//!         &all_datas,
 //!     )?;
 //! }
 //!
 //! // Then execute transaction normally
 //! execute_transaction(transaction)?;
+//! # Ok::<(), anyhow::Error>(())
 //! ```
 
 use tos_program_runtime::InvokeContext;
@@ -77,8 +99,22 @@ const MAX_INSTRUCTION_DATA_SIZE: usize = 1024 * 1024; // 1 MB
 /// The cost is charged during transaction cost estimation for scheduling.
 ///
 /// # Example
-/// ```rust,ignore
+/// ```no_run
+/// use tos_daemon::tako_integration::precompile_verifier::verify_precompile_instruction;
+/// use tos_program_runtime::InvokeContext;
+///
+/// # // Mock transaction structure
+/// # struct Transaction {
+/// #     instructions: Vec<Instruction>,
+/// # }
+/// # struct Instruction {
+/// #     program_id: [u8; 32],
+/// #     data: Vec<u8>,
+/// # }
+///
 /// // In TOS transaction processor
+/// # let transaction = Transaction { instructions: vec![] };
+/// # let invoke_context = unsafe { std::mem::zeroed::<InvokeContext>() };
 /// let all_datas: Vec<&[u8]> = transaction.instructions
 ///     .iter()
 ///     .map(|ix| ix.data.as_slice())
@@ -92,6 +128,7 @@ const MAX_INSTRUCTION_DATA_SIZE: usize = 1024 * 1024; // 1 MB
 ///         &all_datas,
 ///     )?;
 /// }
+/// # Ok::<(), crate::tako_integration::error::TakoExecutionError>(())
 /// ```
 pub fn verify_precompile_instruction(
     invoke_context: &InvokeContext,
@@ -171,13 +208,34 @@ pub fn verify_precompile_instruction(
 /// * `Err(TakoExecutionError)` if any verification fails
 ///
 /// # Example
-/// ```rust,ignore
-/// let instructions: Vec<([u8; 32], Vec<u8>)> = transaction.instructions
-///     .iter()
-///     .map(|ix| (ix.program_id, ix.data.clone()))
-///     .collect();
+/// ```no_run
+/// use tos_daemon::tako_integration::verify_all_precompiles;
+/// use tos_program_runtime::{InvokeContext, storage::{NoOpStorage, NoOpAccounts, NoOpContractLoader}};
+/// use tos_tbpf::{program::BuiltinProgram, vm::Config};
+/// use std::sync::Arc;
 ///
-/// verify_all_precompiles(&invoke_context, &instructions)?;
+/// # // Create test context
+/// # let mut storage = NoOpStorage;
+/// # let mut accounts = NoOpAccounts;
+/// # let contract_loader = NoOpContractLoader;
+/// # let config = Config::default();
+/// # let loader = Arc::new(BuiltinProgram::<InvokeContext>::new_loader(config));
+/// # let invoke_context = InvokeContext::new(
+/// #     100_000,
+/// #     [1u8; 32],
+/// #     &mut storage,
+/// #     &mut accounts,
+/// #     &contract_loader,
+/// #     loader,
+/// # );
+///
+/// // Collect instructions from transaction
+/// let instructions: Vec<([u8; 32], Vec<u8>)> = vec![
+///     ([3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], vec![0u8, 0u8]),
+/// ];
+///
+/// // Verify all precompiles in the transaction
+/// verify_all_precompiles(&invoke_context, &instructions).unwrap();
 /// ```
 pub fn verify_all_precompiles(
     invoke_context: &InvokeContext,
@@ -215,14 +273,35 @@ pub fn verify_all_precompiles(
 /// - secp256r1: 4,800 CU per signature
 ///
 /// # Example
-/// ```rust,ignore
-/// let instructions: Vec<([u8; 32], Vec<u8>)> = transaction.instructions
-///     .iter()
-///     .map(|ix| (ix.program_id, ix.data.clone()))
-///     .collect();
+/// ```no_run
+/// use tos_daemon::tako_integration::estimate_precompile_cost;
+/// use tos_program_runtime::{InvokeContext, storage::{NoOpStorage, NoOpAccounts, NoOpContractLoader}};
+/// use tos_tbpf::{program::BuiltinProgram, vm::Config};
+/// use std::sync::Arc;
 ///
+/// # // Create test context
+/// # let mut storage = NoOpStorage;
+/// # let mut accounts = NoOpAccounts;
+/// # let contract_loader = NoOpContractLoader;
+/// # let config = Config::default();
+/// # let loader = Arc::new(BuiltinProgram::<InvokeContext>::new_loader(config));
+/// # let invoke_context = InvokeContext::new(
+/// #     100_000,
+/// #     [1u8; 32],
+/// #     &mut storage,
+/// #     &mut accounts,
+/// #     &contract_loader,
+/// #     loader,
+/// # );
+///
+/// // Collect instructions from transaction
+/// let instructions: Vec<([u8; 32], Vec<u8>)> = vec![
+///     ([3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], vec![2u8, 0u8]), // 2 Ed25519 sigs
+/// ];
+///
+/// // Estimate precompile cost (2 * 2,280 = 4,560 CU)
 /// let precompile_cost = estimate_precompile_cost(&invoke_context, &instructions);
-/// let total_cost = base_cost + contract_cost + precompile_cost;
+/// let total_cost = 5_000 + 10_000 + precompile_cost; // base + contract + precompile
 /// ```
 pub fn estimate_precompile_cost(
     invoke_context: &InvokeContext,

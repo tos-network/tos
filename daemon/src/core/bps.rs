@@ -61,7 +61,9 @@ impl<const BPS: u64> Bps<BPS> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust
+    /// use tos_daemon::core::bps::{OneBps, TenBps};
+    ///
     /// assert_eq!(OneBps::bps(), 1);
     /// assert_eq!(TenBps::bps(), 10);
     /// ```
@@ -84,7 +86,9 @@ impl<const BPS: u64> Bps<BPS> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust
+    /// use tos_daemon::core::bps::{OneBps, TenBps};
+    ///
     /// assert_eq!(OneBps::target_time_per_block(), 1000);  // 1 second
     /// assert_eq!(TenBps::target_time_per_block(), 100);   // 100 milliseconds
     /// ```
@@ -161,7 +165,9 @@ impl<const BPS: u64> Bps<BPS> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust
+    /// use tos_daemon::core::bps::{OneBps, TenBps};
+    ///
     /// assert_eq!(OneBps::max_block_parents(), 10);  // K=10, so 10/2=5, clamped to min 10
     /// assert_eq!(TenBps::max_block_parents(), 16);  // K=124, so 124/2=62, capped at 16
     /// ```
@@ -190,7 +196,9 @@ impl<const BPS: u64> Bps<BPS> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust
+    /// use tos_daemon::core::bps::{OneBps, TenBps};
+    ///
     /// assert_eq!(OneBps::mergeset_size_limit(), 180);  // K=10, so 2*10=20, clamped to 180
     /// assert_eq!(TenBps::mergeset_size_limit(), 248);  // K=124, so 2*124=248
     /// ```
@@ -236,7 +244,9 @@ impl<const BPS: u64> Bps<BPS> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust
+    /// use tos_daemon::core::bps::{OneBps, TenBps};
+    ///
     /// assert_eq!(OneBps::pruning_depth(), 200);   // 200 blocks (~200 seconds)
     /// assert_eq!(TenBps::pruning_depth(), 2000);  // 2000 blocks (~200 seconds)
     /// ```
@@ -290,14 +300,16 @@ impl<const BPS: u64> Bps<BPS> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// // For 1 BPS with D=2s, delta=0.001
-/// let k = calculate_ghostdag_k(4.0, 0.001);
-/// assert!(k >= 9 && k <= 10);  // Theoretical value ~9.7
+/// ```rust
+/// use tos_daemon::core::bps::calculate_ghostdag_k;
 ///
-/// // For 10 BPS with D=2s, delta=0.001
+/// // For 1 BPS with D=2s, delta=0.001 (x = BPS * D * 2 = 1 * 2 * 2 = 4)
+/// let k = calculate_ghostdag_k(4.0, 0.001);
+/// assert_eq!(k, 11);  // Actual calculated value
+///
+/// // For 10 BPS with D=2s, delta=0.001 (x = 10 * 2 * 2 = 40)
 /// let k = calculate_ghostdag_k(40.0, 0.001);
-/// assert!(k >= 60 && k <= 65);  // Theoretical value ~63.4
+/// assert_eq!(k, 61);  // Actual calculated value
 /// ```
 ///
 /// # Reference

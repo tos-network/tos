@@ -34,12 +34,42 @@ use tos_tbpf::error::EbpfError;
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// use tako_integration::TosContractLoaderAdapter;
+/// ```no_run
+/// use tos_daemon::tako_integration::TosContractLoaderAdapter;
+/// use tos_program_runtime::storage::ContractLoader;
+/// use tos_common::block::TopoHeight;
+/// use tos_common::contract::ContractProvider;
 ///
-/// let loader = TosContractLoaderAdapter::new(storage, topoheight);
+/// # // Mock storage provider for demonstration
+/// # use tos_common::contract::ContractStorage;
+/// # struct MockStorage;
+/// # impl ContractStorage for MockStorage {
+/// #     fn contains_contract(&self, _: &tos_common::crypto::Hash, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
+/// #     fn store_contract(&mut self, _: &tos_common::crypto::Hash, _: &[u8], _: TopoHeight) -> Result<(), anyhow::Error> { Ok(()) }
+/// #     fn delete_contract(&mut self, _: &tos_common::crypto::Hash, _: TopoHeight) -> Result<(), anyhow::Error> { Ok(()) }
+/// # }
+/// # impl ContractProvider for MockStorage {
+/// #     fn get_contract_balance_for_asset(
+/// #         &self, _: &tos_common::crypto::Hash, _: &tos_common::crypto::Hash, _: TopoHeight
+/// #     ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> { Ok(None) }
+/// #     fn get_account_balance_for_asset(
+/// #         &self, _: &tos_common::crypto::PublicKey, _: &tos_common::crypto::Hash, _: TopoHeight
+/// #     ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> { Ok(None) }
+/// #     fn asset_exists(&self, _: &tos_common::crypto::Hash, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
+/// #     fn load_asset_data(&self, _: &tos_common::crypto::Hash, _: TopoHeight) -> Result<Option<(TopoHeight, tos_common::asset::AssetData)>, anyhow::Error> { Ok(None) }
+/// #     fn load_asset_supply(&self, _: &tos_common::crypto::Hash, _: TopoHeight) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> { Ok(None) }
+/// #     fn account_exists(&self, _: &tos_common::crypto::PublicKey, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
+/// #     fn load_contract_module(&self, _: &tos_common::crypto::Hash, _: TopoHeight) -> Result<Option<Vec<u8>>, anyhow::Error> { Ok(None) }
+/// # }
+///
+/// // Create loader adapter
+/// let storage = MockStorage;
+/// let topoheight = 100;
+/// let loader = TosContractLoaderAdapter::new(&storage, topoheight);
+///
+/// // Load a contract for CPI
+/// let contract_hash = [0u8; 32];
 /// let result = loader.load_contract(&contract_hash);
-/// // Currently returns "unsupported" error with guidance
 /// ```
 pub struct TosContractLoaderAdapter<'a> {
     /// TOS storage backend

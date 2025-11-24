@@ -19,3 +19,7 @@ pub mod rpc;
 
 // TOS Kernel(TAKO) integration module
 pub mod tako_integration;
+
+// Doc-test helpers (always available for doc-tests to work)
+// These are minimal mocks suitable for documentation examples
+pub mod doc_test_helpers;

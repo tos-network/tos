@@ -17,24 +17,31 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
-//! use websocket::security::{WebSocketSecurity, WebSocketSecurityConfig};
-//!
+//! ```rust
+//! # use tos_daemon::rpc::websocket::security::{WebSocketSecurity, WebSocketSecurityConfig};
+//! # use std::net::{IpAddr, Ipv4Addr};
+//! # tokio::runtime::Runtime::new().unwrap().block_on(async {
 //! let config = WebSocketSecurityConfig {
 //!     allowed_origins: vec!["http://localhost:3000".to_string()],
 //!     require_auth: true,
 //!     max_message_size: 1048576, // 1MB
 //!     max_subscriptions_per_connection: 100,
+//!     ..Default::default()
 //! };
 //!
 //! let security = WebSocketSecurity::new(config);
 //!
 //! // Validate origin
-//! security.validate_origin(request.headers().get("Origin"))?;
+//! let origin = Some("http://localhost:3000");
+//! security.validate_origin(origin).expect("origin should be valid");
 //!
 //! // Check rate limits
-//! security.check_connection_rate(peer_ip)?;
-//! security.check_message_rate(connection_id)?;
+//! let peer_ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+//! security.check_connection_rate(peer_ip).await.expect("connection rate OK");
+//!
+//! let connection_id = 12345u64;
+//! security.check_message_rate(connection_id).await.expect("message rate OK");
+//! # });
 //! ```
 
 use std::{

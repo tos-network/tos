@@ -138,11 +138,25 @@ fn is_precompile_program_id(program_id: &[u8; 32]) -> bool {
 ///
 /// Use this to calculate total transaction cost including precompiles:
 ///
-/// ```rust,ignore
-/// let base_cost = 5_000; // Base transaction cost
-/// let contract_cost = estimate_contract_execution_cost(&transaction);
-/// let precompile_cost = estimate_transaction_precompile_cost(&instructions)?;
-/// let total_cost = base_cost + contract_cost + precompile_cost;
+/// ```no_run
+/// use tos_daemon::tako_integration::precompile_cost::{TransactionCostEstimator, estimate_transaction_precompile_cost};
+///
+/// # // Create minimal test data
+/// # let ed25519_id = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+/// # let instruction_data = vec![1u8, 0u8];
+/// # let instructions = vec![(&ed25519_id, instruction_data.as_slice())];
+///
+/// // Create estimator with default base cost (5,000 CU)
+/// let estimator = TransactionCostEstimator::new();
+///
+/// // Estimate contract execution cost (example: 10,000 CU)
+/// let contract_cost = 10_000u64;
+///
+/// // Calculate total cost including precompiles
+/// let total_cost = estimator.estimate_total_cost(&instructions, contract_cost).unwrap();
+///
+/// // Expected: base (5,000) + contract (10,000) + precompile (2,280) = 17,280 CU
+/// assert_eq!(total_cost, 17_280);
 /// ```
 pub struct TransactionCostEstimator {
     base_cost: u64,
