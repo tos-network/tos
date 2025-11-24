@@ -21,8 +21,8 @@
 //!
 //! # Usage
 //!
-//! ```ignore
-//! use tos_daemon::tako_integration::precompile_verifier::verify_precompile_instruction;
+//! ```no_run
+//! use tos_daemon::tako_integration::verify_precompile_instruction;
 //! use tos_program_runtime::InvokeContext;
 //!
 //! # // Mock transaction and execution infrastructure
@@ -100,7 +100,7 @@ const MAX_INSTRUCTION_DATA_SIZE: usize = 1024 * 1024; // 1 MB
 ///
 /// # Example
 /// ```no_run
-/// use tos_daemon::tako_integration::precompile_verifier::verify_precompile_instruction;
+/// use tos_daemon::tako_integration::{verify_precompile_instruction, TakoExecutionError};
 /// use tos_program_runtime::InvokeContext;
 ///
 /// # // Mock transaction structure
@@ -128,7 +128,7 @@ const MAX_INSTRUCTION_DATA_SIZE: usize = 1024 * 1024; // 1 MB
 ///         &all_datas,
 ///     )?;
 /// }
-/// # Ok::<(), crate::tako_integration::error::TakoExecutionError>(())
+/// # Ok::<(), TakoExecutionError>(())
 /// ```
 pub fn verify_precompile_instruction(
     invoke_context: &InvokeContext,
