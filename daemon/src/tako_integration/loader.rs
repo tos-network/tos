@@ -42,11 +42,13 @@ use tos_tbpf::error::EbpfError;
 ///
 /// # // Mock storage provider for demonstration
 /// # use tos_common::contract::ContractStorage;
+/// # use tos_kernel::ValueCell;
 /// # struct MockStorage;
 /// # impl ContractStorage for MockStorage {
-/// #     fn contains_contract(&self, _: &tos_common::crypto::Hash, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
-/// #     fn store_contract(&mut self, _: &tos_common::crypto::Hash, _: &[u8], _: TopoHeight) -> Result<(), anyhow::Error> { Ok(()) }
-/// #     fn delete_contract(&mut self, _: &tos_common::crypto::Hash, _: TopoHeight) -> Result<(), anyhow::Error> { Ok(()) }
+/// #     fn load_data(&self, _: &tos_common::crypto::Hash, _: &ValueCell, _: TopoHeight) -> Result<Option<(TopoHeight, Option<ValueCell>)>, anyhow::Error> { Ok(None) }
+/// #     fn load_data_latest_topoheight(&self, _: &tos_common::crypto::Hash, _: &ValueCell, _: TopoHeight) -> Result<Option<TopoHeight>, anyhow::Error> { Ok(None) }
+/// #     fn has_data(&self, _: &tos_common::crypto::Hash, _: &ValueCell, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
+/// #     fn has_contract(&self, _: &tos_common::crypto::Hash, _: TopoHeight) -> Result<bool, anyhow::Error> { Ok(false) }
 /// # }
 /// # impl ContractProvider for MockStorage {
 /// #     fn get_contract_balance_for_asset(
