@@ -249,6 +249,16 @@ impl TakoExecutor {
             loader.clone(),
         );
 
+        // 7. Inject instant randomness for randomness syscalls
+        // CRITICAL: This must be set before contract execution to prevent
+        // tos_get_instant_random from returning error code 1
+        invoke_context.instant_random = Some(Self::generate_instant_randomness(
+            block_hash.as_bytes(),
+            block_height,
+            block_timestamp,
+            tx_hash.as_bytes(),
+        ));
+
         // Account for entry contract bytecode in loaded data size tracking
         // This is done AFTER creating InvokeContext (post-load accounting pattern)
         // because the bytecode is loaded before InvokeContext exists
@@ -510,6 +520,68 @@ impl TakoExecutor {
             &[],           // input_data
             None,          // compute_budget (use default)
         )
+    }
+
+    /// Generate instant randomness for randomness syscalls
+    ///
+    /// Uses multi-layer entropy from TOS blockchain state:
+    /// - Block hash: GHOSTDAG + POW entropy
+    /// - Block height: Temporal entropy
+    /// - Block timestamp: Additional temporal entropy
+    /// - Transaction hash: Per-transaction entropy
+    ///
+    /// This implements TOS's instant randomness model which is:
+    /// - Unpredictable: No advance knowledge due to POW randomness
+    /// - Unbiasable: Cannot skip blocks in GHOSTDAG (all blocks count)
+    /// - Deterministic: Same inputs produce same randomness
+    /// - 0-delay: Available immediately
+    ///
+    /// # Security Properties
+    ///
+    /// For contracts requiring high-value randomness (>$1000), use the
+    /// delayed randomness syscalls (commit/reveal) instead, which provide
+    /// 10-second delay and future block entropy.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_hash` - 32-byte block hash from GHOSTDAG
+    /// * `block_height` - Block height in the chain
+    /// * `block_timestamp` - Unix timestamp of the block
+    /// * `tx_hash` - 32-byte transaction hash
+    ///
+    /// # Returns
+    ///
+    /// 32-byte array of cryptographically secure random data
+    fn generate_instant_randomness(
+        block_hash: &[u8],
+        block_height: u64,
+        block_timestamp: u64,
+        tx_hash: &[u8],
+    ) -> [u8; 32] {
+        use sha3::{Digest, Keccak256};
+
+        // Combine multiple entropy sources using Keccak256
+        let mut hasher = Keccak256::new();
+
+        // Entropy source 1: Block hash (GHOSTDAG + POW entropy)
+        hasher.update(b"INSTANT_RANDOM_V1");
+        hasher.update(block_hash);
+
+        // Entropy source 2: Block height (temporal entropy)
+        hasher.update(block_height.to_le_bytes());
+
+        // Entropy source 3: Block timestamp (additional temporal entropy)
+        hasher.update(block_timestamp.to_le_bytes());
+
+        // Entropy source 4: Transaction hash (per-transaction entropy)
+        hasher.update(tx_hash);
+
+        // Finalize to 32-byte random value
+        let result = hasher.finalize();
+        let mut random = [0u8; 32];
+        random.copy_from_slice(&result);
+
+        random
     }
 }
 
