@@ -46,7 +46,10 @@ impl ContractProvider for MockProvider {
         _topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, u64)>> {
         let balances = self.balances.lock().unwrap();
-        let balance = balances.get(&(*contract.as_bytes(), *asset.as_bytes())).copied().unwrap_or(1000000);
+        let balance = balances
+            .get(&(*contract.as_bytes(), *asset.as_bytes()))
+            .copied()
+            .unwrap_or(1000000);
         Ok(Some((100, balance)))
     }
 
@@ -144,7 +147,10 @@ fn test_transient_storage_loads() {
         .expect("Failed to read test_transient_storage.so - ensure it exists in tests/fixtures/");
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Transient Storage contract loaded: {} bytes", bytecode.len());
+        log::info!(
+            "Transient Storage contract loaded: {} bytes",
+            bytecode.len()
+        );
     }
 
     // Verify ELF magic
@@ -179,10 +185,17 @@ fn test_transient_storage_execution() {
         Ok(exec_result) => {
             println!("✅ Transient Storage tests succeeded!");
             println!("  Return value: {}", exec_result.return_value);
-            println!("  Instructions executed: {}", exec_result.instructions_executed);
+            println!(
+                "  Instructions executed: {}",
+                exec_result.instructions_executed
+            );
             println!("  Compute units used: {}", exec_result.compute_units_used);
 
-            assert_eq!(exec_result.return_value, 0, "Transient storage tests failed with code {}", exec_result.return_value);
+            assert_eq!(
+                exec_result.return_value, 0,
+                "Transient storage tests failed with code {}",
+                exec_result.return_value
+            );
             println!("✓ All transient storage tests passed");
         }
         Err(e) => {
@@ -249,10 +262,17 @@ fn test_balance_transfer_execution() {
         Ok(exec_result) => {
             println!("✅ Balance/Transfer tests succeeded!");
             println!("  Return value: {}", exec_result.return_value);
-            println!("  Instructions executed: {}", exec_result.instructions_executed);
+            println!(
+                "  Instructions executed: {}",
+                exec_result.instructions_executed
+            );
             println!("  Compute units used: {}", exec_result.compute_units_used);
 
-            assert_eq!(exec_result.return_value, 0, "Balance/transfer tests failed with code {}", exec_result.return_value);
+            assert_eq!(
+                exec_result.return_value, 0,
+                "Balance/transfer tests failed with code {}",
+                exec_result.return_value
+            );
             println!("✓ All balance/transfer tests passed");
         }
         Err(e) => {
@@ -315,10 +335,17 @@ fn test_code_ops_execution() {
         Ok(exec_result) => {
             println!("✅ Code Operations tests succeeded!");
             println!("  Return value: {}", exec_result.return_value);
-            println!("  Instructions executed: {}", exec_result.instructions_executed);
+            println!(
+                "  Instructions executed: {}",
+                exec_result.instructions_executed
+            );
             println!("  Compute units used: {}", exec_result.compute_units_used);
 
-            assert_eq!(exec_result.return_value, 0, "Code operations tests failed with code {}", exec_result.return_value);
+            assert_eq!(
+                exec_result.return_value, 0,
+                "Code operations tests failed with code {}",
+                exec_result.return_value
+            );
             println!("✓ All code operations tests passed");
         }
         Err(e) => {
@@ -377,10 +404,17 @@ fn test_events_execution() {
         Ok(exec_result) => {
             println!("✅ Event Emission tests succeeded!");
             println!("  Return value: {}", exec_result.return_value);
-            println!("  Instructions executed: {}", exec_result.instructions_executed);
+            println!(
+                "  Instructions executed: {}",
+                exec_result.instructions_executed
+            );
             println!("  Compute units used: {}", exec_result.compute_units_used);
 
-            assert_eq!(exec_result.return_value, 0, "Event emission tests failed with code {}", exec_result.return_value);
+            assert_eq!(
+                exec_result.return_value, 0,
+                "Event emission tests failed with code {}",
+                exec_result.return_value
+            );
             println!("✓ All event emission tests passed");
         }
         Err(e) => {
@@ -439,10 +473,17 @@ fn test_environment_execution() {
         Ok(exec_result) => {
             println!("✅ Environment tests succeeded!");
             println!("  Return value: {}", exec_result.return_value);
-            println!("  Instructions executed: {}", exec_result.instructions_executed);
+            println!(
+                "  Instructions executed: {}",
+                exec_result.instructions_executed
+            );
             println!("  Compute units used: {}", exec_result.compute_units_used);
 
-            assert_eq!(exec_result.return_value, 0, "Environment tests failed with code {}", exec_result.return_value);
+            assert_eq!(
+                exec_result.return_value, 0,
+                "Environment tests failed with code {}",
+                exec_result.return_value
+            );
             println!("✓ All environment tests passed");
         }
         Err(e) => {
@@ -462,7 +503,11 @@ fn test_all_syscalls_summary() {
     println!("╚══════════════════════════════════════════════════════════════╝\n");
 
     let test_contracts = vec![
-        ("test_transient_storage.so", "Transient Storage (EIP-1153)", 5),
+        (
+            "test_transient_storage.so",
+            "Transient Storage (EIP-1153)",
+            5,
+        ),
         ("test_balance_transfer.so", "Balance/Transfer Operations", 6),
         ("test_code_ops.so", "Code Operations (EXTCODE*)", 7),
         ("test_events.so", "Event Emission (LOG0-LOG4)", 9),
@@ -476,7 +521,12 @@ fn test_all_syscalls_summary() {
         let path = format!("tests/fixtures/{}", filename);
         match std::fs::read(&path) {
             Ok(bytecode) => {
-                println!("✓ {} ({} tests) - {} bytes", name, test_count, bytecode.len());
+                println!(
+                    "✓ {} ({} tests) - {} bytes",
+                    name,
+                    test_count,
+                    bytecode.len()
+                );
                 total_tests += test_count;
                 passed_contracts += 1;
             }
@@ -489,8 +539,15 @@ fn test_all_syscalls_summary() {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║  Summary                                                     ║");
     println!("╠══════════════════════════════════════════════════════════════╣");
-    println!("║  Contracts Loaded: {}/{}                                    ║", passed_contracts, test_contracts.len());
-    println!("║  Total Test Cases: {}                                        ║", total_tests);
+    println!(
+        "║  Contracts Loaded: {}/{}                                    ║",
+        passed_contracts,
+        test_contracts.len()
+    );
+    println!(
+        "║  Total Test Cases: {}                                        ║",
+        total_tests
+    );
     println!("║                                                              ║");
     println!("║  Syscalls Tested:                                            ║");
     println!("║    • tos_tstore, tos_tload                                   ║");

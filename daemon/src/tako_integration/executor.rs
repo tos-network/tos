@@ -415,7 +415,7 @@ impl TakoExecutor {
 
         // 9. Execute contract
         debug!("Executing contract bytecode via TBPF VM");
-        let (instruction_count, result) = vm.execute_program(&executable, true);  // true = interpreter mode
+        let (instruction_count, result) = vm.execute_program(&executable, true); // true = interpreter mode
 
         // 10. Calculate compute units used (before dropping invoke_context)
         let compute_units_used = compute_budget - invoke_context.get_remaining();

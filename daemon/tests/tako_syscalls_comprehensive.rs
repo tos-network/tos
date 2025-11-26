@@ -16,7 +16,6 @@
 /// - Uses TOS testing-framework for realistic blockchain environment
 /// - Tests actual contract execution through TakoExecutor
 /// - Verifies syscall behavior against expected EVM semantics
-
 use anyhow::Result;
 use tos_common::{
     asset::AssetData,
@@ -145,12 +144,7 @@ impl ContractStorage for TestProvider {
         Ok(Some(self.block_height))
     }
 
-    fn has_data(
-        &self,
-        contract: &Hash,
-        key: &ValueCell,
-        _topoheight: TopoHeight,
-    ) -> Result<bool> {
+    fn has_data(&self, contract: &Hash, key: &ValueCell, _topoheight: TopoHeight) -> Result<bool> {
         let key_bytes = bincode::serialize(key)?;
         Ok(self.storage.contains_key(&(contract.clone(), key_bytes)))
     }
@@ -352,7 +346,10 @@ fn test_environment_syscalls() {
     // - tos_get_caller (get transaction sender)
 
     let tx_sender = Hash::new([0x33; 32]);
-    println!("Transaction sender: {}", hex::encode(tx_sender.as_ref() as &[u8]));
+    println!(
+        "Transaction sender: {}",
+        hex::encode(tx_sender.as_ref() as &[u8])
+    );
 
     println!("\n✅ Environment syscalls registered:");
     println!("   tos_get_caller - Get msg.sender equivalent");
@@ -375,10 +372,18 @@ fn test_syscalls_integration_status() {
         ("Randomness", "✅ TESTED", "randomness_edge_cases.rs"),
         ("Return Data", "✅ TESTED", "CPI tests"),
         ("Input Data", "⚠️  INDIRECT", "All tests"),
-        ("Blockchain Info", "⚠️  PARTIAL", "This file (infrastructure)"),
+        (
+            "Blockchain Info",
+            "⚠️  PARTIAL",
+            "This file (infrastructure)",
+        ),
         ("Crypto", "⚠️  PARTIAL", "This file (infrastructure)"),
         ("Memory Ops", "⚠️  INDIRECT", "All tests"),
-        ("Transient Storage", "📝 READY", "This file (infrastructure)"),
+        (
+            "Transient Storage",
+            "📝 READY",
+            "This file (infrastructure)",
+        ),
         ("Balance/Transfer", "📝 READY", "Needs contract"),
         ("Code Operations", "📝 READY", "This file (infrastructure)"),
         ("Event Emission", "📝 READY", "This file (infrastructure)"),
