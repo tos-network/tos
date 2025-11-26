@@ -642,7 +642,7 @@ dependencies = [
  "axum-core",
  "bytes",
  "futures-util",
- "http 1.3.1",
+ "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "itoa",
@@ -668,7 +668,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures-util",
- "http 1.3.1",
+ "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "mime",
@@ -765,7 +765,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "regex",
@@ -2151,7 +2151,7 @@ dependencies = [
  "fnv",
  "futures-core",
  "futures-sink",
- "http 1.3.1",
+ "http 1.4.0",
  "indexmap 2.12.1",
  "slab",
  "tokio",
@@ -2294,12 +2294,11 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.3.1"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4a85d31aea989eead29a3aaf9e1115a180df8282431156e533de47660892565"
+checksum = "e3ba2a386d7f85a81f119ad7498ebe444d2e22c2af0b86b069416ace48b3311a"
 dependencies = [
  "bytes",
- "fnv",
  "itoa",
 ]
 
@@ -2321,7 +2320,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1efedce1fb8e6913f23e0c92de8e62cd5b772a67e7b3946df930a62566c93184"
 dependencies = [
  "bytes",
- "http 1.3.1",
+ "http 1.4.0",
 ]
 
 [[package]]
@@ -2332,7 +2331,7 @@ checksum = "b021d93e26becf5dc7e1b75b1bed1fd93124b374ceb73f43d4d4eafec896a64a"
 dependencies = [
  "bytes",
  "futures-core",
- "http 1.3.1",
+ "http 1.4.0",
  "http-body 1.0.1",
  "pin-project-lite",
 ]
@@ -2405,7 +2404,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "h2 0.4.12",
- "http 1.3.1",
+ "http 1.4.0",
  "http-body 1.0.1",
  "httparse",
  "httpdate",
@@ -2437,7 +2436,7 @@ version = "0.27.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3c93eb611681b207e1fe55d5a71ecf91572ec8a6705cdb6857f7d8d5242cf58"
 dependencies = [
- "http 1.3.1",
+ "http 1.4.0",
  "hyper 1.8.1",
  "hyper-util",
  "rustls 0.23.35",
@@ -2501,7 +2500,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "http 1.3.1",
+ "http 1.4.0",
  "http-body 1.0.1",
  "hyper 1.8.1",
  "ipnet",
@@ -3690,7 +3689,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn",
@@ -4013,7 +4012,7 @@ dependencies = [
  "encoding_rs",
  "futures-core",
  "h2 0.4.12",
- "http 1.3.1",
+ "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "hyper 1.8.1",
@@ -4748,7 +4747,7 @@ dependencies = [
 [[package]]
 name = "tako-sdk"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=2153998#215399836abd491a96ae190b800631ab30256508"
+source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
 
 [[package]]
 name = "tap"
@@ -5044,7 +5043,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "http 1.3.1",
+ "http 1.4.0",
  "httparse",
  "js-sys",
  "rustls 0.23.35",
@@ -5134,7 +5133,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "h2 0.4.12",
- "http 1.3.1",
+ "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "hyper 1.8.1",
@@ -5155,23 +5154,23 @@ dependencies = [
 [[package]]
 name = "tos-builder"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=2153998#215399836abd491a96ae190b800631ab30256508"
+source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
 dependencies = [
  "anyhow",
  "log",
  "thiserror 2.0.17",
  "tos-environment",
- "tos-types",
+ "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
 ]
 
 [[package]]
 name = "tos-bytecode"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=2153998#215399836abd491a96ae190b800631ab30256508"
+source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
 dependencies = [
  "indexmap 2.12.1",
  "serde",
- "tos-types",
+ "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
 ]
 
 [[package]]
@@ -5211,14 +5210,14 @@ dependencies = [
 [[package]]
 name = "tos-environment"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=2153998#215399836abd491a96ae190b800631ab30256508"
+source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
 dependencies = [
  "anyhow",
  "better_any",
  "hashbrown 0.15.5",
  "indexmap 2.12.1",
  "thiserror 2.0.17",
- "tos-types",
+ "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
 ]
 
 [[package]]
@@ -5237,7 +5236,7 @@ dependencies = [
 [[package]]
 name = "tos-kernel"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=2153998#215399836abd491a96ae190b800631ab30256508"
+source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
 dependencies = [
  "indexmap 2.12.1",
  "log",
@@ -5245,13 +5244,24 @@ dependencies = [
  "tos-builder",
  "tos-bytecode",
  "tos-environment",
- "tos-types",
+ "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
 ]
 
 [[package]]
 name = "tos-poseidon"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=2153998#215399836abd491a96ae190b800631ab30256508"
+source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
+dependencies = [
+ "ark-bn254",
+ "ark-ff",
+ "light-poseidon",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "tos-poseidon"
+version = "0.1.0"
+source = "git+https://github.com/tos-network/tako?rev=95b9892#95b98927d9a78f236ecdcbd9dfea598bce914dcc"
 dependencies = [
  "ark-bn254",
  "ark-ff",
@@ -5262,7 +5272,7 @@ dependencies = [
 [[package]]
 name = "tos-precompiles"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=2153998#215399836abd491a96ae190b800631ab30256508"
+source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
 dependencies = [
  "bincode",
  "blst",
@@ -5274,13 +5284,31 @@ dependencies = [
  "sha3",
  "thiserror 2.0.17",
  "tos-crypto 0.1.0 (git+https://github.com/tos-network/tos-crypto?rev=e487d8d9ee70c9ab34c974dc5e4a3c67c0856e0f)",
- "tos-types",
+ "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
+]
+
+[[package]]
+name = "tos-precompiles"
+version = "0.2.1"
+source = "git+https://github.com/tos-network/tako?rev=95b9892#95b98927d9a78f236ecdcbd9dfea598bce914dcc"
+dependencies = [
+ "bincode",
+ "blst",
+ "ed25519-dalek",
+ "libsecp256k1",
+ "p256",
+ "serde",
+ "sha2 0.10.9",
+ "sha3",
+ "thiserror 2.0.17",
+ "tos-crypto 0.1.0 (git+https://github.com/tos-network/tos-crypto?rev=e487d8d9ee70c9ab34c974dc5e4a3c67c0856e0f)",
+ "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=95b9892)",
 ]
 
 [[package]]
 name = "tos-program-runtime"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=2153998#215399836abd491a96ae190b800631ab30256508"
+source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -5288,14 +5316,29 @@ dependencies = [
  "log",
  "serde",
  "thiserror 2.0.17",
- "tos-precompiles",
- "tos-tbpf",
+ "tos-precompiles 0.2.1 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
+ "tos-tbpf 0.13.0 (git+https://github.com/tos-network/tbpf?rev=c157da4)",
+]
+
+[[package]]
+name = "tos-program-runtime"
+version = "0.2.1"
+source = "git+https://github.com/tos-network/tako?rev=95b9892#95b98927d9a78f236ecdcbd9dfea598bce914dcc"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "hex",
+ "log",
+ "serde",
+ "thiserror 2.0.17",
+ "tos-precompiles 0.2.1 (git+https://github.com/tos-network/tako?rev=95b9892)",
+ "tos-tbpf 0.13.0 (git+https://github.com/tos-network/tbpf?rev=1bca151)",
 ]
 
 [[package]]
 name = "tos-syscalls"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=2153998#215399836abd491a96ae190b800631ab30256508"
+source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -5319,15 +5362,63 @@ dependencies = [
  "sha2 0.10.9",
  "sha3",
  "thiserror 2.0.17",
- "tos-poseidon",
- "tos-program-runtime",
- "tos-tbpf",
+ "tos-poseidon 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
+ "tos-program-runtime 0.2.1 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
+ "tos-tbpf 0.13.0 (git+https://github.com/tos-network/tbpf?rev=c157da4)",
+]
+
+[[package]]
+name = "tos-syscalls"
+version = "0.2.1"
+source = "git+https://github.com/tos-network/tako?rev=95b9892#95b98927d9a78f236ecdcbd9dfea598bce914dcc"
+dependencies = [
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff",
+ "ark-serialize",
+ "base64 0.22.1",
+ "blake2",
+ "blake3",
+ "blst",
+ "c-kzg",
+ "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?rev=0ca0e1a1cab7c08733e35cfedc33fc68db2058be)",
+ "hex",
+ "libsecp256k1",
+ "log",
+ "num-bigint",
+ "num-modular",
+ "num-traits",
+ "p256",
+ "ripemd",
+ "serde",
+ "sha2 0.10.9",
+ "sha3",
+ "thiserror 2.0.17",
+ "tos-poseidon 0.1.0 (git+https://github.com/tos-network/tako?rev=95b9892)",
+ "tos-program-runtime 0.2.1 (git+https://github.com/tos-network/tako?rev=95b9892)",
+ "tos-tbpf 0.13.0 (git+https://github.com/tos-network/tbpf?rev=1bca151)",
 ]
 
 [[package]]
 name = "tos-tbpf"
 version = "0.13.0"
-source = "git+https://github.com/tos-network/tbpf?rev=75acb46581af830edf9fe6c7034c5a0e6283e4f0#75acb46581af830edf9fe6c7034c5a0e6283e4f0"
+source = "git+https://github.com/tos-network/tbpf?rev=1bca151#1bca151c5d3a73f53603f7c0693d8290d98d4caf"
+dependencies = [
+ "byteorder",
+ "combine",
+ "hash32",
+ "libc",
+ "log",
+ "rand 0.8.5",
+ "rustc-demangle",
+ "thiserror 2.0.17",
+ "winapi",
+]
+
+[[package]]
+name = "tos-tbpf"
+version = "0.13.0"
+source = "git+https://github.com/tos-network/tbpf?rev=c157da4#c157da47c5991eab1cbf02f67f0bd0fe0f074f15"
 dependencies = [
  "byteorder",
  "combine",
@@ -5362,7 +5453,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tos-kernel",
- "tos-syscalls",
+ "tos-syscalls 0.2.1 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
  "tos_common",
  "tos_daemon",
  "tracing",
@@ -5371,7 +5462,21 @@ dependencies = [
 [[package]]
 name = "tos-types"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=2153998#215399836abd491a96ae190b800631ab30256508"
+source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
+dependencies = [
+ "anyhow",
+ "indexmap 2.12.1",
+ "itertools 0.14.0",
+ "lazy_static",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "tos-types"
+version = "0.1.0"
+source = "git+https://github.com/tos-network/tako?rev=95b9892#95b98927d9a78f236ecdcbd9dfea598bce914dcc"
 dependencies = [
  "anyhow",
  "indexmap 2.12.1",
@@ -5513,9 +5618,9 @@ dependencies = [
  "tokio-socks",
  "tos-environment",
  "tos-kernel",
- "tos-program-runtime",
- "tos-syscalls",
- "tos-tbpf",
+ "tos-program-runtime 0.2.1 (git+https://github.com/tos-network/tako?rev=95b9892)",
+ "tos-syscalls 0.2.1 (git+https://github.com/tos-network/tako?rev=95b9892)",
+ "tos-tbpf 0.13.0 (git+https://github.com/tos-network/tbpf?rev=1bca151)",
  "tos-testing-framework",
  "tos_common",
  "x25519-dalek",
@@ -5625,14 +5730,14 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.6.6"
+version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adc82fd73de2a9722ac5da747f12383d2bfdb93591ee6c58486e0097890f05f2"
+checksum = "9cf146f99d442e8e68e585f5d798ccd3cad9a7835b917e09728880a862706456"
 dependencies = [
  "bitflags 2.10.0",
  "bytes",
  "futures-util",
- "http 1.3.1",
+ "http 1.4.0",
  "http-body 1.0.1",
  "iri-string",
  "pin-project-lite",
@@ -5715,7 +5820,7 @@ checksum = "4793cb5e56680ecbb1d843515b23b6de9a75eb04b66643e256a396d43be33c13"
 dependencies = [
  "bytes",
  "data-encoding",
- "http 1.3.1",
+ "http 1.4.0",
  "httparse",
  "log",
  "rand 0.9.2",
@@ -5734,7 +5839,7 @@ checksum = "eadc29d668c91fcc564941132e17b28a7ceb2f3ebf0b9dae3e03fd7a6748eb0d"
 dependencies = [
  "bytes",
  "data-encoding",
- "http 1.3.1",
+ "http 1.4.0",
  "httparse",
  "log",
  "rand 0.9.2",
@@ -6520,18 +6625,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.28"
+version = "0.8.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43fa6694ed34d6e57407afbccdeecfa268c470a7d2a5b0cf49ce9fcc345afb90"
+checksum = "4ea879c944afe8a2b25fef16bb4ba234f47c694565e97383b36f3a878219065c"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.28"
+version = "0.8.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c640b22cd9817fae95be82f0d2f90b11f7605f6c319d16705c459b27ac2cbc26"
+checksum = "cf955aa904d6040f70dc8e9384444cb1030aed272ba3cb09bbc4ab9e7c1f34f5"
 dependencies = [
  "proc-macro2",
  "quote",
