@@ -213,7 +213,8 @@ impl TakoExecutor {
         // 4. Create TBPF loader with syscalls (needed for InvokeContext creation)
         // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml
         // This provides 10-50x performance improvement over interpreter-only execution
-        let config = Config::default();
+        let mut config = Config::default();
+        config.max_call_depth = 64; // Standard limit
         let mut loader = BuiltinProgram::<InvokeContext>::new_loader(config.clone());
         tos_syscalls::register_syscalls(&mut loader).map_err(|e| {
             TakoExecutionError::SyscallRegistrationFailed {
@@ -414,7 +415,7 @@ impl TakoExecutor {
 
         // 9. Execute contract
         debug!("Executing contract bytecode via TBPF VM");
-        let (instruction_count, result) = vm.execute_program(&executable, true);
+        let (instruction_count, result) = vm.execute_program(&executable, true);  // true = interpreter mode
 
         // 10. Calculate compute units used (before dropping invoke_context)
         let compute_units_used = compute_budget - invoke_context.get_remaining();
