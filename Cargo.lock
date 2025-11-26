@@ -4747,7 +4747,7 @@ dependencies = [
 [[package]]
 name = "tako-sdk"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
+source = "git+https://github.com/tos-network/tako?rev=e8d3d0b#e8d3d0bdce1eb4e20c06469816c5ebf2b565f2c1"
 
 [[package]]
 name = "tap"
@@ -5154,23 +5154,23 @@ dependencies = [
 [[package]]
 name = "tos-builder"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
+source = "git+https://github.com/tos-network/tako?rev=e8d3d0b#e8d3d0bdce1eb4e20c06469816c5ebf2b565f2c1"
 dependencies = [
  "anyhow",
  "log",
  "thiserror 2.0.17",
  "tos-environment",
- "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
+ "tos-types",
 ]
 
 [[package]]
 name = "tos-bytecode"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
+source = "git+https://github.com/tos-network/tako?rev=e8d3d0b#e8d3d0bdce1eb4e20c06469816c5ebf2b565f2c1"
 dependencies = [
  "indexmap 2.12.1",
  "serde",
- "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
+ "tos-types",
 ]
 
 [[package]]
@@ -5210,14 +5210,14 @@ dependencies = [
 [[package]]
 name = "tos-environment"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
+source = "git+https://github.com/tos-network/tako?rev=e8d3d0b#e8d3d0bdce1eb4e20c06469816c5ebf2b565f2c1"
 dependencies = [
  "anyhow",
  "better_any",
  "hashbrown 0.15.5",
  "indexmap 2.12.1",
  "thiserror 2.0.17",
- "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
+ "tos-types",
 ]
 
 [[package]]
@@ -5236,7 +5236,7 @@ dependencies = [
 [[package]]
 name = "tos-kernel"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
+source = "git+https://github.com/tos-network/tako?rev=e8d3d0b#e8d3d0bdce1eb4e20c06469816c5ebf2b565f2c1"
 dependencies = [
  "indexmap 2.12.1",
  "log",
@@ -5244,24 +5244,13 @@ dependencies = [
  "tos-builder",
  "tos-bytecode",
  "tos-environment",
- "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
+ "tos-types",
 ]
 
 [[package]]
 name = "tos-poseidon"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
-dependencies = [
- "ark-bn254",
- "ark-ff",
- "light-poseidon",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "tos-poseidon"
-version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=95b9892#95b98927d9a78f236ecdcbd9dfea598bce914dcc"
+source = "git+https://github.com/tos-network/tako?rev=e8d3d0b#e8d3d0bdce1eb4e20c06469816c5ebf2b565f2c1"
 dependencies = [
  "ark-bn254",
  "ark-ff",
@@ -5272,7 +5261,7 @@ dependencies = [
 [[package]]
 name = "tos-precompiles"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
+source = "git+https://github.com/tos-network/tako?rev=e8d3d0b#e8d3d0bdce1eb4e20c06469816c5ebf2b565f2c1"
 dependencies = [
  "bincode",
  "blst",
@@ -5284,31 +5273,13 @@ dependencies = [
  "sha3",
  "thiserror 2.0.17",
  "tos-crypto 0.1.0 (git+https://github.com/tos-network/tos-crypto?rev=e487d8d9ee70c9ab34c974dc5e4a3c67c0856e0f)",
- "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
-]
-
-[[package]]
-name = "tos-precompiles"
-version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=95b9892#95b98927d9a78f236ecdcbd9dfea598bce914dcc"
-dependencies = [
- "bincode",
- "blst",
- "ed25519-dalek",
- "libsecp256k1",
- "p256",
- "serde",
- "sha2 0.10.9",
- "sha3",
- "thiserror 2.0.17",
- "tos-crypto 0.1.0 (git+https://github.com/tos-network/tos-crypto?rev=e487d8d9ee70c9ab34c974dc5e4a3c67c0856e0f)",
- "tos-types 0.1.0 (git+https://github.com/tos-network/tako?rev=95b9892)",
+ "tos-types",
 ]
 
 [[package]]
 name = "tos-program-runtime"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
+source = "git+https://github.com/tos-network/tako?rev=e8d3d0b#e8d3d0bdce1eb4e20c06469816c5ebf2b565f2c1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -5316,29 +5287,14 @@ dependencies = [
  "log",
  "serde",
  "thiserror 2.0.17",
- "tos-precompiles 0.2.1 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
- "tos-tbpf 0.13.0 (git+https://github.com/tos-network/tbpf?rev=c157da4)",
-]
-
-[[package]]
-name = "tos-program-runtime"
-version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=95b9892#95b98927d9a78f236ecdcbd9dfea598bce914dcc"
-dependencies = [
- "anyhow",
- "bincode",
- "hex",
- "log",
- "serde",
- "thiserror 2.0.17",
- "tos-precompiles 0.2.1 (git+https://github.com/tos-network/tako?rev=95b9892)",
- "tos-tbpf 0.13.0 (git+https://github.com/tos-network/tbpf?rev=1bca151)",
+ "tos-precompiles",
+ "tos-tbpf",
 ]
 
 [[package]]
 name = "tos-syscalls"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
+source = "git+https://github.com/tos-network/tako?rev=e8d3d0b#e8d3d0bdce1eb4e20c06469816c5ebf2b565f2c1"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -5362,63 +5318,15 @@ dependencies = [
  "sha2 0.10.9",
  "sha3",
  "thiserror 2.0.17",
- "tos-poseidon 0.1.0 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
- "tos-program-runtime 0.2.1 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
- "tos-tbpf 0.13.0 (git+https://github.com/tos-network/tbpf?rev=c157da4)",
-]
-
-[[package]]
-name = "tos-syscalls"
-version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=95b9892#95b98927d9a78f236ecdcbd9dfea598bce914dcc"
-dependencies = [
- "ark-bn254",
- "ark-ec",
- "ark-ff",
- "ark-serialize",
- "base64 0.22.1",
- "blake2",
- "blake3",
- "blst",
- "c-kzg",
- "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?rev=0ca0e1a1cab7c08733e35cfedc33fc68db2058be)",
- "hex",
- "libsecp256k1",
- "log",
- "num-bigint",
- "num-modular",
- "num-traits",
- "p256",
- "ripemd",
- "serde",
- "sha2 0.10.9",
- "sha3",
- "thiserror 2.0.17",
- "tos-poseidon 0.1.0 (git+https://github.com/tos-network/tako?rev=95b9892)",
- "tos-program-runtime 0.2.1 (git+https://github.com/tos-network/tako?rev=95b9892)",
- "tos-tbpf 0.13.0 (git+https://github.com/tos-network/tbpf?rev=1bca151)",
+ "tos-poseidon",
+ "tos-program-runtime",
+ "tos-tbpf",
 ]
 
 [[package]]
 name = "tos-tbpf"
 version = "0.13.0"
 source = "git+https://github.com/tos-network/tbpf?rev=1bca151#1bca151c5d3a73f53603f7c0693d8290d98d4caf"
-dependencies = [
- "byteorder",
- "combine",
- "hash32",
- "libc",
- "log",
- "rand 0.8.5",
- "rustc-demangle",
- "thiserror 2.0.17",
- "winapi",
-]
-
-[[package]]
-name = "tos-tbpf"
-version = "0.13.0"
-source = "git+https://github.com/tos-network/tbpf?rev=c157da4#c157da47c5991eab1cbf02f67f0bd0fe0f074f15"
 dependencies = [
  "byteorder",
  "combine",
@@ -5453,7 +5361,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tos-kernel",
- "tos-syscalls 0.2.1 (git+https://github.com/tos-network/tako?rev=5bcc0ad)",
+ "tos-syscalls",
  "tos_common",
  "tos_daemon",
  "tracing",
@@ -5462,21 +5370,7 @@ dependencies = [
 [[package]]
 name = "tos-types"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=5bcc0ad#5bcc0ad225e92069c5c197e573e9e852082107f0"
-dependencies = [
- "anyhow",
- "indexmap 2.12.1",
- "itertools 0.14.0",
- "lazy_static",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "tos-types"
-version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=95b9892#95b98927d9a78f236ecdcbd9dfea598bce914dcc"
+source = "git+https://github.com/tos-network/tako?rev=e8d3d0b#e8d3d0bdce1eb4e20c06469816c5ebf2b565f2c1"
 dependencies = [
  "anyhow",
  "indexmap 2.12.1",
@@ -5618,9 +5512,9 @@ dependencies = [
  "tokio-socks",
  "tos-environment",
  "tos-kernel",
- "tos-program-runtime 0.2.1 (git+https://github.com/tos-network/tako?rev=95b9892)",
- "tos-syscalls 0.2.1 (git+https://github.com/tos-network/tako?rev=95b9892)",
- "tos-tbpf 0.13.0 (git+https://github.com/tos-network/tbpf?rev=1bca151)",
+ "tos-program-runtime",
+ "tos-syscalls",
+ "tos-tbpf",
  "tos-testing-framework",
  "tos_common",
  "x25519-dalek",
