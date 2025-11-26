@@ -146,7 +146,7 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
     fn get_balance(&self, address: &[u8; 32]) -> Result<u64, EbpfError> {
         let pubkey = Self::address_to_pubkey(address)?;
 
-        let balance = self
+        let actual_balance = self
             .provider
             .get_account_balance_for_asset(&pubkey, &self.native_asset, self.topoheight)
             .map_err(|e| {
@@ -154,10 +154,38 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
                     std::io::ErrorKind::Other,
                     format!("Failed to get account balance: {}", e),
                 )))
-            })?;
+            })?
+            .map(|(_, bal)| bal)
+            .unwrap_or(0);
 
-        // Return balance or 0 if account doesn't exist
-        Ok(balance.map(|(_, bal)| bal).unwrap_or(0))
+        // Apply pending balance deltas to get virtual balance
+        // This ensures that balance queries during execution see the effects of prior transfers
+        let delta = self.balance_deltas.get(&pubkey).unwrap_or(&0);
+        let virtual_balance = match delta.cmp(&0) {
+            std::cmp::Ordering::Less => {
+                // Negative delta: subtract from balance
+                let abs_delta = delta.unsigned_abs();
+                if abs_delta > actual_balance as u128 {
+                    // This shouldn't happen if transfers were validated correctly
+                    return Ok(0);
+                }
+                actual_balance - (abs_delta as u64)
+            }
+            std::cmp::Ordering::Greater => {
+                // Positive delta: add to balance
+                if *delta > u64::MAX as i128 {
+                    // Cap at u64::MAX
+                    return Ok(u64::MAX);
+                }
+                actual_balance.saturating_add(*delta as u64)
+            }
+            std::cmp::Ordering::Equal => {
+                // Zero delta: return actual balance
+                actual_balance
+            }
+        };
+
+        Ok(virtual_balance)
     }
 
     fn transfer(&mut self, from: &[u8; 32], to: &[u8; 32], amount: u64) -> Result<(), EbpfError> {

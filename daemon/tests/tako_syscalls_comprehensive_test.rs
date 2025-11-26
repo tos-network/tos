@@ -1,4 +1,6 @@
 use anyhow::Result;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tos_common::{
     asset::AssetData,
     block::TopoHeight,
@@ -7,23 +9,45 @@ use tos_common::{
 };
 use tos_daemon::tako_integration::TakoExecutor;
 
-/// Mock provider for testing (read-only, writes go to ContractCache)
-struct MockProvider;
+/// Mock provider for testing with state tracking
+struct MockProvider {
+    /// Track balances for contracts and accounts: (address, asset) -> balance
+    balances: Arc<Mutex<HashMap<([u8; 32], [u8; 32]), u64>>>,
+    /// Track contract bytecode: contract_hash -> bytecode
+    contracts: Arc<Mutex<HashMap<[u8; 32], Vec<u8>>>>,
+}
 
 impl MockProvider {
     fn new() -> Self {
-        Self
+        Self {
+            balances: Arc::new(Mutex::new(HashMap::new())),
+            contracts: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Set initial balance for a contract/account
+    fn set_balance(&self, address: &[u8; 32], asset: &[u8; 32], balance: u64) {
+        let mut balances = self.balances.lock().unwrap();
+        balances.insert((*address, *asset), balance);
+    }
+
+    /// Set contract bytecode
+    fn set_contract(&self, contract_hash: &[u8; 32], bytecode: Vec<u8>) {
+        let mut contracts = self.contracts.lock().unwrap();
+        contracts.insert(*contract_hash, bytecode);
     }
 }
 
 impl ContractProvider for MockProvider {
     fn get_contract_balance_for_asset(
         &self,
-        _contract: &Hash,
-        _asset: &Hash,
+        contract: &Hash,
+        asset: &Hash,
         _topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, u64)>> {
-        Ok(Some((100, 1000000)))
+        let balances = self.balances.lock().unwrap();
+        let balance = balances.get(&(*contract.as_bytes(), *asset.as_bytes())).copied().unwrap_or(1000000);
+        Ok(Some((100, balance)))
     }
 
     fn get_account_balance_for_asset(
@@ -61,10 +85,11 @@ impl ContractProvider for MockProvider {
 
     fn load_contract_module(
         &self,
-        _contract: &Hash,
+        contract: &Hash,
         _topoheight: TopoHeight,
     ) -> Result<Option<Vec<u8>>> {
-        Ok(None)
+        let contracts = self.contracts.lock().unwrap();
+        Ok(contracts.get(contract.as_bytes()).cloned())
     }
 }
 
@@ -210,7 +235,12 @@ fn test_balance_transfer_execution() {
 
     let mut provider = MockProvider::new();
     let contract_hash = Hash::zero();
+    let native_asset = Hash::zero();
     let topoheight = 100;
+
+    // Set initial balance for the contract
+    provider.set_balance(contract_hash.as_bytes(), native_asset.as_bytes(), 10000);
+    println!("✓ Set initial contract balance: 10000");
 
     // Execute entrypoint (runs all 6 tests)
     let result = TakoExecutor::execute_simple(&bytecode, &mut provider, topoheight, &contract_hash);
@@ -273,6 +303,10 @@ fn test_code_ops_execution() {
     let mut provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
+
+    // Register the contract bytecode so get_external_code_size returns actual size
+    provider.set_contract(contract_hash.as_bytes(), bytecode.clone());
+    println!("✓ Registered contract bytecode: {} bytes", bytecode.len());
 
     // Execute entrypoint (runs all 7 tests)
     let result = TakoExecutor::execute_simple(&bytecode, &mut provider, topoheight, &contract_hash);
