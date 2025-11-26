@@ -826,3 +826,184 @@ Stop the daemon, then run:
 ```bash
 ./target/debug/tos_miner --miner-address tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u --daemon-address 127.0.0.1:8080 --num-threads 1
 ```
+
+## Dependency Management
+
+### Updating TAKO Project Dependencies
+
+**IMPORTANT**: When updating TAKO (TOS Kernel) dependencies, you MUST update the `rev` value consistently across ALL workspace packages to prevent type mismatches and compilation errors.
+
+#### TAKO Dependencies Location
+
+The TOS project references TAKO from three Cargo.toml files:
+
+1. **daemon/Cargo.toml** - Core daemon dependencies (tos-kernel, tos-program-runtime, tos-syscalls, tako-sdk, tos-environment)
+2. **common/Cargo.toml** - Common library dependencies (tos-kernel, tos-crypto)
+3. **testing-framework/Cargo.toml** - Test framework dependencies (tos-kernel, tos-syscalls)
+
+#### Update Workflow
+
+When TAKO project is updated and pushed to GitHub, follow these steps to update TOS dependencies:
+
+**Step 1: Get the latest TAKO commit hash**
+
+```bash
+cd ~/tos-network/tako
+git log --oneline -1
+# Example output: e8d3d0b Add test contracts to examples/
+```
+
+**Step 2: Update all TAKO references in TOS workspace**
+
+Update the `rev` value in these three files:
+
+**File: daemon/Cargo.toml**
+```toml
+# TOS Kernel - TOS Kernel(TAKO) runtime
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "e8d3d0b" }
+tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", rev = "e8d3d0b" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "e8d3d0b" }
+tako-sdk = { package = "tako-sdk", git = "https://github.com/tos-network/tako", rev = "e8d3d0b" }
+tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", rev = "e8d3d0b" }
+```
+
+**File: common/Cargo.toml**
+```toml
+# TOS Kernel - Simplified re-export crate in TAKO
+tos-kernel = { git = "https://github.com/tos-network/tako", rev = "e8d3d0b" }
+```
+
+**File: testing-framework/Cargo.toml**
+```toml
+# TAKO dependencies for contract testing
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "e8d3d0b" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "e8d3d0b" }
+```
+
+**Step 3: Verify compilation**
+
+```bash
+cd ~/tos-network/tos
+cargo check -p tos_daemon
+# Expected: Successful compilation with 0 warnings, 0 errors
+```
+
+**Step 4: Run tests**
+
+```bash
+cargo test --test tako_syscalls_comprehensive_test
+# Expected: All tests passing
+```
+
+**Step 5: Commit and push**
+
+```bash
+git add Cargo.lock daemon/Cargo.toml common/Cargo.toml testing-framework/Cargo.toml
+git commit -m "chore(deps): Update tako dependency to <commit-hash>
+
+Updated tako references consistently across all workspace packages:
+- daemon/Cargo.toml: <commit-hash>
+- common/Cargo.toml: <commit-hash>
+- testing-framework/Cargo.toml: <commit-hash>
+
+<Brief description of changes in TAKO>
+
+All integration tests passing.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+
+git push
+```
+
+#### Common Pitfalls
+
+**❌ MISTAKE: Inconsistent TAKO versions**
+
+If you update only some files and leave others with old versions, you'll get hundreds of compilation errors like:
+
+```
+error[E0308]: mismatched types
+  --> daemon/src/tako_integration/executor.rs:123:45
+   |
+   | expected struct `tos_kernel::types::Address` (tos-kernel v0.1.0 @ rev e8d3d0b)
+   |    found struct `tos_kernel::types::Address` (tos-kernel v0.1.0 @ rev 5bcc0ad)
+```
+
+**Root cause**: Different workspace packages are using different TAKO versions, causing type incompatibility.
+
+**✅ SOLUTION**: Always update ALL three Cargo.toml files together with the same `rev` value.
+
+#### Version History Tracking
+
+When updating TAKO dependencies, document the version in commit messages:
+
+```bash
+# Good commit message
+chore(deps): Update tako dependency to e8d3d0b (test contracts)
+
+Updated tako references consistently across all workspace packages.
+
+This update includes 6 test contracts added to tako examples/:
+- simple-v3-test: Basic contract structure validation
+- test-balance-transfer: Balance & transfer syscalls (6 tests)
+- test-code-ops: Code inspection syscalls (7 tests)
+- test-environment: Environment data syscalls (5 tests)
+- test-events: Event emission LOG0-LOG4 (5 tests)
+- test-transient-storage: EIP-1153 storage (5 tests)
+
+No API changes from previous rev 95b9892, only test contracts added.
+All 11 tako syscall integration tests passing (100%).
+```
+
+#### Verification Script
+
+Use this script to verify all TAKO references are consistent:
+
+```bash
+#!/bin/bash
+# verify_tako_versions.sh
+
+echo "Checking TAKO dependency versions..."
+
+# Extract all tako rev values
+daemon_revs=$(grep 'git = "https://github.com/tos-network/tako"' daemon/Cargo.toml | grep -o 'rev = "[^"]*"' | sort -u)
+common_revs=$(grep 'git = "https://github.com/tos-network/tako"' common/Cargo.toml | grep -o 'rev = "[^"]*"' | sort -u)
+testing_revs=$(grep 'git = "https://github.com/tos-network/tako"' testing-framework/Cargo.toml | grep -o 'rev = "[^"]*"' | sort -u)
+
+echo "daemon/Cargo.toml TAKO versions:"
+echo "$daemon_revs"
+echo ""
+echo "common/Cargo.toml TAKO versions:"
+echo "$common_revs"
+echo ""
+echo "testing-framework/Cargo.toml TAKO versions:"
+echo "$testing_revs"
+echo ""
+
+# Check if all are the same
+all_revs=$(echo -e "$daemon_revs\n$common_revs\n$testing_revs" | sort -u)
+count=$(echo "$all_revs" | wc -l | tr -d ' ')
+
+if [ "$count" -eq 1 ]; then
+    echo "✅ All TAKO dependencies are consistent: $all_revs"
+    exit 0
+else
+    echo "❌ TAKO dependencies are INCONSISTENT!"
+    echo "Different versions found:"
+    echo "$all_revs"
+    exit 1
+fi
+```
+
+#### Quick Reference
+
+| Task | Command |
+|------|---------|
+| **Check current TAKO version** | `grep 'tako.*rev' daemon/Cargo.toml` |
+| **Get latest TAKO commit** | `cd ~/tos-network/tako && git log -1 --format="%h %s"` |
+| **Update all TAKO refs** | Edit 3 Cargo.toml files with same `rev` value |
+| **Verify compilation** | `cargo check -p tos_daemon` |
+| **Run integration tests** | `cargo test --test tako_syscalls_comprehensive_test` |
+| **Verify consistency** | `./verify_tako_versions.sh` |
