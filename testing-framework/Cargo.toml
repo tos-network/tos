@@ -30,8 +30,8 @@ tos_daemon = { path = "../daemon" }
 
 # TAKO dependencies for contract testing
 # Updated to rev e8d3d0b (v0.2.1 - Test contracts + syscall fixes)
-tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "e8d3d0b" }
-tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "e8d3d0b" }
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "3a743af" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "3a743af" }
 
 [dev-dependencies]
 proptest = "1.4"

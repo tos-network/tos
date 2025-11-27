@@ -34,7 +34,10 @@ use tos_tbpf::{
     vm::{Config, ContextObject, EbpfVm},
 };
 
-use super::{TakoExecutionError, TosAccountAdapter, TosContractLoaderAdapter, TosStorageAdapter};
+use super::{
+    SVMFeatureSet, TakoExecutionError, TosAccountAdapter, TosContractLoaderAdapter,
+    TosStorageAdapter,
+};
 
 /// Default compute budget for contract execution (200,000 compute units)
 ///
@@ -136,7 +139,10 @@ pub struct ExecutionResult {
 }
 
 impl TakoExecutor {
-    /// Execute a TOS Kernel(TAKO) contract
+    /// Execute a TOS Kernel(TAKO) contract with production feature set
+    ///
+    /// This method uses the production feature set (V0-V3 support) by default.
+    /// For custom feature flags, use `execute_with_features()`.
     ///
     /// # Arguments
     ///
@@ -176,14 +182,78 @@ impl TakoExecutor {
         input_data: &[u8], // Contract input parameters (entry point, user data)
         compute_budget: Option<u64>,
     ) -> Result<ExecutionResult, TakoExecutionError> {
+        // Use production feature set (V0-V3) by default, matching Solana
+        Self::execute_with_features(
+            bytecode,
+            provider,
+            topoheight,
+            contract_hash,
+            block_hash,
+            block_height,
+            block_timestamp,
+            tx_hash,
+            tx_sender,
+            input_data,
+            compute_budget,
+            &SVMFeatureSet::production(),
+        )
+    }
+
+    /// Execute a TOS Kernel(TAKO) contract with custom feature set
+    ///
+    /// This method allows specifying which TBPF versions are enabled,
+    /// matching Solana's dynamic version control via SVMFeatureSet.
+    ///
+    /// # TBPF Version Support
+    ///
+    /// | Version | e_flags | Features |
+    /// |---------|---------|----------|
+    /// | V0 | 0 | Legacy format |
+    /// | V1 | 1 | Dynamic stack frames |
+    /// | V2 | 2 | Arithmetic improvements |
+    /// | V3 | 3 | Static syscalls, stricter ELF |
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use tos_daemon::tako_integration::{TakoExecutor, SVMFeatureSet};
+    ///
+    /// // Execute with V3-only support
+    /// let features = SVMFeatureSet::v3_only();
+    /// let result = TakoExecutor::execute_with_features(
+    ///     bytecode, provider, topoheight, contract_hash,
+    ///     block_hash, block_height, block_timestamp,
+    ///     tx_hash, tx_sender, input_data, compute_budget,
+    ///     &features,
+    /// );
+    /// ```
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_with_features(
+        bytecode: &[u8],
+        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        topoheight: TopoHeight,
+        contract_hash: &Hash,
+        block_hash: &Hash,
+        block_height: u64,
+        block_timestamp: u64,
+        tx_hash: &Hash,
+        tx_sender: &Hash,  // Using Hash type for sender (32 bytes)
+        input_data: &[u8], // Contract input parameters (entry point, user data)
+        compute_budget: Option<u64>,
+        feature_set: &SVMFeatureSet,
+    ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
 
-        info!(
-            "TOS Kernel(TAKO) execution starting: contract={}, compute_budget={}, bytecode_size={}",
-            contract_hash,
-            compute_budget.unwrap_or(DEFAULT_COMPUTE_BUDGET),
-            bytecode.len()
-        );
+        if log::log_enabled!(log::Level::Info) {
+            info!(
+                "TOS Kernel(TAKO) execution starting: contract={}, compute_budget={}, bytecode_size={}, tbpf_versions={:?}..={:?}",
+                contract_hash,
+                compute_budget.unwrap_or(DEFAULT_COMPUTE_BUDGET),
+                bytecode.len(),
+                feature_set.min_tbpf_version(),
+                feature_set.max_tbpf_version()
+            );
+        }
 
         // 1. Validate compute budget
         let compute_budget = compute_budget.unwrap_or(DEFAULT_COMPUTE_BUDGET);
@@ -213,8 +283,14 @@ impl TakoExecutor {
         // 4. Create TBPF loader with syscalls (needed for InvokeContext creation)
         // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml
         // This provides 10-50x performance improvement over interpreter-only execution
+        //
+        // TBPF Version Configuration (aligned with Solana):
+        // - enabled_tbpf_versions: Controls which ELF e_flags values are accepted
+        // - aligned_memory_mapping: Controlled by stricter_abi_and_runtime_constraints
         let mut config = Config::default();
         config.max_call_depth = 64; // Standard limit
+        config.enabled_tbpf_versions = feature_set.enabled_tbpf_versions();
+        config.aligned_memory_mapping = feature_set.use_aligned_memory_mapping();
         let mut loader = BuiltinProgram::<InvokeContext>::new_loader(config.clone());
         tos_syscalls::register_syscalls(&mut loader).map_err(|e| {
             TakoExecutionError::SyscallRegistrationFailed {
