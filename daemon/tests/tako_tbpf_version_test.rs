@@ -11,6 +11,16 @@
 //! | V1 | 1 | Dynamic stack frames (SIMD-0166) |
 //! | V2 | 2 | Arithmetic improvements (SIMD-0174) |
 //! | V3 | 3 | Static syscalls, stricter ELF (SIMD-0178) |
+//!
+//! # Note on V3 Instruction Encoding
+//!
+//! As of sbpf commit ea33a5c (2025-10-07), SBPF V3 uses upstream eBPF encoding:
+//! - EXIT (0x95) is used uniformly across all versions (V0-V3)
+//! - The previously proposed RETURN (0x9d) from SIMD-0377 was removed
+//!
+//! Our test fixture `minimal.so` was compiled with an older toolchain that
+//! uses RETURN (0x9d), so V3 execution tests may fail with UnsupportedInstruction.
+//! This is expected until we recompile with the updated toolchain.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -323,8 +333,9 @@ fn test_v3_contract_loads_with_production_features() {
     let contract_hash = Hash::zero();
 
     // Production features (V0-V3) should allow V3 contract to load
-    // Note: The contract may fail at execution due to V3-specific instructions
-    // (SIMD-0377 exit opcode 0x9d), but ELF loading should succeed
+    // Note: Our test fixture was compiled with older toolchain using RETURN (0x9d)
+    // which was later removed from sbpf in commit ea33a5c. Current sbpf/tbpf
+    // uses EXIT (0x95) uniformly across all versions.
     let result = TakoExecutor::execute_with_features(
         &bytecode,
         &mut provider,
@@ -340,9 +351,9 @@ fn test_v3_contract_loads_with_production_features() {
         &SVMFeatureSet::production(),
     );
 
-    // V3 contract loads but may fail at execution due to V3-specific opcodes
-    // This is expected behavior - ELF version check passes, but interpreter
-    // may not support all V3 instructions yet (e.g., SIMD-0377 exit opcode)
+    // V3 contract ELF loading should succeed (version check passes)
+    // Execution may fail due to obsolete RETURN (0x9d) instruction in test fixture
+    // This will be fixed when test contracts are recompiled with updated toolchain
     if result.is_err() {
         let err = result.unwrap_err();
         let err_str = err.to_string();
@@ -352,8 +363,9 @@ fn test_v3_contract_loads_with_production_features() {
             "V3 contract should pass version check with production features: {}",
             err_str
         );
+        // Expected: UnsupportedInstruction due to RETURN (0x9d) in old test fixture
         println!(
-            "V3 contract passed version check, execution error (expected): {}",
+            "V3 contract passed version check, execution error (expected due to obsolete RETURN opcode): {}",
             err_str
         );
     } else {
@@ -368,6 +380,7 @@ fn test_v3_contract_loads_with_v3_only_features() {
     let contract_hash = Hash::zero();
 
     // V3-only features should allow V3 contract to load
+    // Same note as above: test fixture uses obsolete RETURN (0x9d) opcode
     let result = TakoExecutor::execute_with_features(
         &bytecode,
         &mut provider,
@@ -383,7 +396,7 @@ fn test_v3_contract_loads_with_v3_only_features() {
         &SVMFeatureSet::v3_only(),
     );
 
-    // Similar to above - version check should pass
+    // Version check should pass, execution may fail due to obsolete opcode
     if result.is_err() {
         let err = result.unwrap_err();
         let err_str = err.to_string();
@@ -393,7 +406,7 @@ fn test_v3_contract_loads_with_v3_only_features() {
             err_str
         );
         println!(
-            "V3 contract passed version check with V3-only features, execution error: {}",
+            "V3 contract passed version check with V3-only features, execution error (expected): {}",
             err_str
         );
     } else {

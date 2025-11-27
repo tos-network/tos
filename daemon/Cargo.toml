@@ -14,13 +14,13 @@ autobenches = false
 [dependencies]
 tos_common = { path = "../common", features = ["prompt", "clap", "rpc-server", "tokio"] }
 
-# TOS Kernel - TOS Kernel(TAKO) runtime (v0.2.1 - V3 RETURN instruction support)
-tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "3a743af" }
-tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", rev = "3a743af" }
-tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "3a743af" }
-tako-sdk = { package = "tako-sdk", git = "https://github.com/tos-network/tako", rev = "3a743af" }
-tos-tbpf = { git = "https://github.com/tos-network/tbpf", rev = "3ce0421", features = ["jit"] }
-tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", rev = "3a743af" }
+# TOS Kernel - TOS Kernel(TAKO) runtime (v0.2.1 - upstream eBPF encoding aligned)
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "e337dd3" }
+tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", rev = "e337dd3" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "e337dd3" }
+tako-sdk = { package = "tako-sdk", git = "https://github.com/tos-network/tako", rev = "e337dd3" }
+tos-tbpf = { git = "https://github.com/tos-network/tbpf", rev = "628071b", features = ["jit"] }
+tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", rev = "e337dd3" }
 
 # Database backends
 sled = "0.34.7"
