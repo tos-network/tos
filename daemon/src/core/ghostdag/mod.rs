@@ -32,12 +32,28 @@ use crate::core::storage::{
 };
 use async_trait::async_trait;
 
-/// Trait combining the minimal storage requirements for GHOSTDAG algorithm
-/// This allows GHOSTDAG to work with both full Storage implementations
-/// and lightweight providers like ChainValidatorProvider
+/// Trait combining the minimal storage requirements for GHOSTDAG algorithm.
 ///
-/// NOTE: get_block_header_by_hash is available via DifficultyProvider supertrait
-/// (returns Immutable<BlockHeader> which can be dereferenced)
+/// This trait is intentionally minimal to allow lightweight views (e.g. chain validators)
+/// to re-use the full GHOSTDAG algorithm without depending on the full Storage API.
+/// This ensures that chain sync validation uses exactly the same GHOSTDAG computation
+/// as the consensus layer, avoiding any divergence in blue_score/blue_work calculations.
+///
+/// # Supertraits
+/// - `DifficultyProvider`: Provides `get_block_header_by_hash` for difficulty/bits access
+/// - `GhostdagDataProvider`: Provides access to cached GHOSTDAG data
+/// - `ReachabilityDataProvider`: Provides DAG reachability queries
+///
+/// # Example
+/// ```ignore
+/// // Full storage implements this automatically via blanket impl
+/// let storage: &dyn Storage = ...;
+/// ghostdag.ghostdag(storage, parents).await?;
+///
+/// // Lightweight provider (e.g. ChainValidatorProvider) can also be used
+/// let provider: &dyn GhostdagStorageProvider = ...;
+/// ghostdag.ghostdag(provider, parents).await?;
+/// ```
 #[async_trait]
 pub trait GhostdagStorageProvider:
     DifficultyProvider + GhostdagDataProvider + ReachabilityDataProvider + Sync + Send

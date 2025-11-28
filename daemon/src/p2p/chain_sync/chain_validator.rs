@@ -36,9 +36,25 @@ struct BlockData {
     p: VarUint,
 }
 
-// Chain validator is used to validate the blocks received from the network
-// We store the blocks in topological order and we verify the proof of work validity
-// This is doing only minimal checks and valid chain order based on topoheight and difficulty
+/// Chain validator for validating blocks received from network peers during sync.
+///
+/// # GHOSTDAG Consensus Design
+///
+/// The chain validator does NOT maintain its own notion of blue_score/blue_work.
+/// It always derives them from the canonical GHOSTDAG implementation to avoid
+/// divergence from the consensus layer. This is critical for consensus safety:
+///
+/// - `blue_score` and `blue_work` are computed using `blockchain.get_ghostdag().ghostdag()`
+/// - The `ChainValidatorProvider` implements `GhostdagStorageProvider` to allow GHOSTDAG
+///   to access blocks that are in the validation cache but not yet committed to storage
+/// - Header claims for `blue_score` and `blue_work` are verified against GHOSTDAG output
+/// - Chain selection uses GHOSTDAG `blue_work` (not legacy cumulative difficulty)
+///
+/// # Storage Access
+///
+/// During validation, parent blocks may not yet be in persistent storage (they're in
+/// `self.blocks` cache). The `ChainValidatorProvider` wrapper handles this by checking
+/// the in-memory cache first before falling back to storage.
 pub struct ChainValidator<'a, S: Storage> {
     // store all blocks data in topological order
     blocks: HashMap<Arc<Hash>, BlockData>,

@@ -3099,7 +3099,7 @@ impl<S: Storage> Blockchain<S> {
         if expected_blue_score != block.get_blue_score() {
             if log::log_enabled!(log::Level::Debug) {
                 debug!(
-                    "Invalid block blue_score {}, expected {} for this block {} (GHOSTDAG validation)",
+                    "Invalid block blue_score: actual={}, ghostdag_expected={} for block {} (GHOSTDAG validation)",
                     block.get_blue_score(), expected_blue_score, block_hash
                 );
             }
