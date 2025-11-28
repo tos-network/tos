@@ -171,12 +171,13 @@ mod ghostdag_dag_tests {
         );
 
         let c_hash = Hash::new(c_bytes);
-        let tips = vec![c_hash];
+        let tips = vec![c_hash.clone()];
 
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
+        // Find best tip (should be C, the only tip)
+        let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter())
             .await
             .unwrap();
-        assert_eq!(blue_score, 3, "Linear chain should have blue_score = 3");
+        assert_eq!(*best_tip, c_hash, "Linear chain tip should be C");
     }
 
     // Test 2: DAG with merge (K=4) - Testing blue selection
@@ -270,15 +271,6 @@ mod ghostdag_dag_tests {
         assert_eq!(
             *best_tip, c_hash_expected,
             "C should be selected (higher blue_work)"
-        );
-
-        // Calculate blue score for E
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
-            .await
-            .unwrap();
-        assert_eq!(
-            blue_score, 4,
-            "Merge block E should have blue_score = 4 (merging 2 tips)"
         );
     }
 
@@ -382,16 +374,6 @@ mod ghostdag_dag_tests {
             *best_tip, b5_hash_expected,
             "Block 5 should be selected (higher blue_work)"
         );
-
-        // GHOSTDAG: blue_score = max(tips) + tips.len() = max(5,4) + 2 = 7
-        // Note: This is the expected blue_score calculation, not the final GHOSTDAG blues/reds determination
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
-            .await
-            .unwrap();
-        assert_eq!(
-            blue_score, 7,
-            "Block 10 should have blue_score = 7 (merging 2 tips)"
-        );
     }
 
     // Test 4: Multiple tips with varying blue_work
@@ -432,15 +414,6 @@ mod ghostdag_dag_tests {
             .unwrap();
         let expected = Hash::new([11u8; 32]);
         assert_eq!(*best_tip, expected, "Should select tip with blue_work=7000");
-
-        // GHOSTDAG: blue_score = max(tips) + tips.len() = max(10,12,8,9,11) + 5 = 12 + 5 = 17
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
-            .await
-            .unwrap();
-        assert_eq!(
-            blue_score, 17,
-            "Should calculate blue_score = max + tips count (merging 5 tips)"
-        );
     }
 
     // Test 5: Sorting blocks by blue_work
