@@ -332,7 +332,7 @@ async fn find_block_at_daa_score<S: GhostdagStorageProvider>(
 /// # Formula
 /// new_difficulty = (current_difficulty × expected_time) / actual_time
 /// Then clamp to [current/4, current×4]
-fn apply_difficulty_adjustment(
+pub(crate) fn apply_difficulty_adjustment(
     current_difficulty: &Difficulty,
     expected_time: u64,
     actual_time: u64,
@@ -1655,7 +1655,8 @@ mod daa_security_audit_tests {
         let min_actual_time = (DAA_WINDOW_SIZE / 2) * TARGET_TIME_PER_BLOCK;
 
         // Call the real function with the minimum floored time
-        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, min_actual_time);
+        let result =
+            apply_difficulty_adjustment(&current_difficulty, expected_time, min_actual_time);
         assert!(result.is_ok(), "apply_difficulty_adjustment should succeed");
 
         let new_difficulty = result.unwrap();

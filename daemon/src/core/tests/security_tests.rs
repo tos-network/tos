@@ -441,14 +441,13 @@ mod security_tests {
             has_data // unwrap_or(false) would make this false when data missing
         };
 
-        let new_error_behavior =
-            |has_data: bool, hash: &Hash| -> Result<bool, BlockchainError> {
-                // NEW SECURE CODE:
-                if !has_data {
-                    return Err(BlockchainError::ReachabilityDataMissing(hash.clone()));
-                }
-                Ok(true)
-            };
+        let new_error_behavior = |has_data: bool, hash: &Hash| -> Result<bool, BlockchainError> {
+            // NEW SECURE CODE:
+            if !has_data {
+                return Err(BlockchainError::ReachabilityDataMissing(hash.clone()));
+            }
+            Ok(true)
+        };
 
         // Old behavior: missing data → false (silent failure)
         assert_eq!(
