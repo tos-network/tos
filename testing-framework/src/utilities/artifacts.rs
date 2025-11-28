@@ -5,6 +5,10 @@
 // This module provides utilities for collecting test failure artifacts,
 // enabling reproduction and debugging of failed tests.
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -408,6 +412,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_artifact_collector_creation() {
         let collector = ArtifactCollector::new("test_example");
@@ -416,6 +421,7 @@ mod tests {
         assert!(collector.metadata.failure_reason.is_none());
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_set_rng_seed() {
         let mut collector = ArtifactCollector::new("test_example");
@@ -423,6 +429,7 @@ mod tests {
         assert_eq!(collector.metadata.rng_seed, Some(0x1234567890abcdef));
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_set_failure_reason() {
         let mut collector = ArtifactCollector::new("test_example");
@@ -433,6 +440,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_save_topology() {
         let mut collector = ArtifactCollector::new("test_example");
@@ -447,6 +455,7 @@ mod tests {
         assert_eq!(collector.topology.unwrap().node_count, 2);
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_add_blockchain_state() {
         let mut collector = ArtifactCollector::new("test_example");
@@ -466,6 +475,7 @@ mod tests {
         assert_eq!(collector.blockchain_states[0].tip_height, 5);
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_add_transaction() {
         let mut collector = ArtifactCollector::new("test_example");
@@ -485,6 +495,7 @@ mod tests {
         assert_eq!(collector.transactions[0].amount, 1000);
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_capture_log() {
         let mut collector = ArtifactCollector::new("test_example");
@@ -496,6 +507,7 @@ mod tests {
         assert_eq!(collector.logs[1].level, "INFO");
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_save_and_load_artifact() -> Result<()> {
         let temp_dir = tempfile::tempdir()?;
@@ -521,6 +533,7 @@ mod tests {
         Ok(())
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_artifact_serialization() {
         let mut collector = ArtifactCollector::new("test_serialization");

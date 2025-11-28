@@ -331,6 +331,10 @@ fn validate_scenario(scenario: &TestScenario) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
 
     #[test]

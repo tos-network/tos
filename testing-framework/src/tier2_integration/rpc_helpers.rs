@@ -357,6 +357,8 @@ pub async fn assert_not_tip<N: NodeRpc>(node: &N, block_hash: &Hash) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
     use crate::orchestrator::SystemClock;
     use crate::tier1_component::TestBlockchainBuilder;

@@ -8,6 +8,11 @@
 //!
 //! Run with: cargo run --example scenarios_demo
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(unused)]
+
 use anyhow::Result;
 use tos_testing_framework::scenarios::{parse_scenario, ScenarioExecutor};
 

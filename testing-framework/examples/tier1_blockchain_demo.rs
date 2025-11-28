@@ -5,6 +5,12 @@
 //!
 //! Run with: `cargo run --example tier1_blockchain_demo`
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(unused)]
+#![allow(clippy::needless_range_loop)]
+
 use std::sync::Arc;
 use tos_common::crypto::Hash;
 use tos_testing_framework::orchestrator::{Clock, PausedClock, SystemClock};

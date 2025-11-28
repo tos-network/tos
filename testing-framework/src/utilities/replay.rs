@@ -5,6 +5,10 @@
 // This module provides utilities for loading and replaying test artifacts
 // to reproduce failures and debug issues.
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+
 use super::artifacts::{ArtifactCollector, TestArtifact};
 use anyhow::Result;
 use std::path::Path;
@@ -245,6 +249,7 @@ mod tests {
     };
     use std::collections::HashMap;
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_load_artifact() -> Result<()> {
         let temp_dir = tempfile::tempdir()?;
@@ -352,6 +357,7 @@ mod tests {
         assert!(validate_artifact(&artifact).is_err());
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[test]
     fn test_validate_artifact_supply_mismatch() {
         let artifact = TestArtifact {

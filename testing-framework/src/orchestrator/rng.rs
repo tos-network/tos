@@ -331,6 +331,7 @@ impl TestRng {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 
@@ -371,7 +372,7 @@ mod tests {
         // Test inclusive range
         for _ in 0..100 {
             let value = rng.gen_range(1..=10);
-            assert!(value >= 1 && value <= 10);
+            assert!((1..=10).contains(&value));
         }
     }
 
@@ -515,7 +516,7 @@ mod tests {
         // Test with negative range
         for _ in 0..100 {
             let value = rng.gen_range(-100..100);
-            assert!(value >= -100 && value < 100);
+            assert!((-100..100).contains(&value));
         }
     }
 
@@ -758,7 +759,7 @@ mod tests {
 
         for _ in 0..100 {
             let value = rng.gen_range(0.0..1.0);
-            assert!(value >= 0.0 && value < 1.0);
+            assert!((0.0..1.0).contains(&value));
         }
     }
 }

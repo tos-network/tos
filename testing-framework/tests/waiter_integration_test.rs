@@ -1,3 +1,7 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::useless_vec)]
 // Integration test for waiter primitives
 // This tests the waiters in isolation from other framework components
 

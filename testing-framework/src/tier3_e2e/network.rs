@@ -715,6 +715,9 @@ impl Default for LocalTosNetworkBuilder {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use crate::tier1_component::TestTransaction;
@@ -1156,7 +1159,7 @@ mod tests {
 
         // All nodes should have alice's nonce as 3
         for i in 0..5 {
-            assert_eq!(network.node(i).get_nonce(&alice_addr).await.unwrap(), 3);
+            assert_eq!(network.node(i).get_nonce(alice_addr).await.unwrap(), 3);
         }
     }
 }

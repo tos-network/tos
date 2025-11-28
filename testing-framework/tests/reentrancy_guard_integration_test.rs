@@ -1,3 +1,8 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::useless_vec)]
+
 // File: testing-framework/tests/reentrancy_guard_integration_test.rs
 //
 // ReentrancyGuard Contract Integration Tests

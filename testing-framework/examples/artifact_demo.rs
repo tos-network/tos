@@ -3,6 +3,12 @@
 // This example demonstrates how to use the artifact collection system
 // to capture test failure state for debugging and reproduction.
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(unused)]
+#![allow(clippy::unnecessary_cast)]
+
 use anyhow::Result;
 use std::collections::HashMap;
 use tos_testing_framework::utilities::artifacts::{

@@ -465,6 +465,11 @@ impl TestScenario {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::expect_used)]
+    #![allow(clippy::assertions_on_constants)]
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
 
     #[test]

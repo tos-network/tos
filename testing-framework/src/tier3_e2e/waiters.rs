@@ -209,6 +209,9 @@ pub async fn wait_all_heights_equal<N: NodeRpc>(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
@@ -268,7 +271,7 @@ mod tests {
     #[tokio::test]
     async fn test_wait_all_tips_equal_immediate() {
         let common_tips = vec![create_test_hash(1), create_test_hash(2)];
-        let nodes = vec![
+        let nodes = [
             MockNode::new(common_tips.clone(), 100),
             MockNode::new(common_tips.clone(), 100),
             MockNode::new(common_tips.clone(), 100),
@@ -298,7 +301,7 @@ mod tests {
         });
 
         // Wait for convergence
-        let nodes = vec![node1, node2, node3];
+        let nodes = [node1, node2, node3];
         let result = wait_all_tips_equal(&nodes, Duration::from_secs(2)).await;
         assert!(result.is_ok());
     }
@@ -309,7 +312,7 @@ mod tests {
         let node2 = MockNode::new(vec![create_test_hash(2)], 100);
 
         // Nodes never converge, should timeout
-        let nodes = vec![node1, node2];
+        let nodes = [node1, node2];
         let result = wait_all_tips_equal(&nodes, Duration::from_millis(100)).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Timeout"));
@@ -328,7 +331,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_wait_all_heights_equal_immediate() {
-        let nodes = vec![
+        let nodes = [
             MockNode::new(vec![], 100),
             MockNode::new(vec![], 100),
             MockNode::new(vec![], 100),
@@ -354,7 +357,7 @@ mod tests {
             *node3_height.lock().await = 100;
         });
 
-        let nodes = vec![node1, node2, node3];
+        let nodes = [node1, node2, node3];
         let result = wait_all_heights_equal(&nodes, Duration::from_secs(2)).await;
         assert!(result.is_ok());
     }

@@ -8,6 +8,12 @@
 // Run this example with:
 //   cargo run --example waiters_example
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(unused)]
+#![allow(clippy::useless_vec)]
+
 use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;

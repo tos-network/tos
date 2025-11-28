@@ -8,6 +8,10 @@
 //! - Chain reorganization
 //! - Byzantine behavior detection
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+
 use crate::tier1_component::TestTransaction;
 use crate::tier2_integration::rpc_helpers::*;
 use crate::tier2_integration::NodeRpc;

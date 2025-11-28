@@ -73,6 +73,8 @@ pub async fn wait_for_block<N: NodeRpc>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
     use async_trait::async_trait;
     use std::sync::Arc;

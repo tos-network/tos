@@ -9,6 +9,8 @@
 //!
 //! All tests use TestDaemon for in-process testing with deterministic behavior.
 
+#![allow(clippy::disallowed_methods)]
+
 use crate::orchestrator::{Clock, PausedClock};
 use crate::tier1_component::{TestBlockchainBuilder, TestTransaction};
 use crate::tier2_integration::rpc_helpers::*;

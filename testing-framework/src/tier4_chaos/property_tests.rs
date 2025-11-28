@@ -29,6 +29,12 @@
 //!
 //! All tests use seeded RNG and can be reproduced by setting TOS_TEST_SEED environment variable.
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+// Allow assertions in test code - tests should fail loudly
+#![cfg_attr(test, allow(clippy::assertions_on_constants))]
+
 // Note: Some imports are used only in test code below
 #[allow(unused_imports)]
 use crate::orchestrator::SystemClock;
@@ -46,12 +52,14 @@ use tos_common::crypto::Hash;
 
 // Helper functions
 
+#[allow(dead_code)]
 fn create_test_hash(id: u8) -> Hash {
     let mut bytes = [0u8; 32];
     bytes[0] = id;
     Hash::new(bytes)
 }
 
+#[allow(dead_code)]
 fn create_test_tx(
     sender: Hash,
     recipient: Hash,

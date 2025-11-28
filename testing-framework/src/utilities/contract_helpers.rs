@@ -6,6 +6,10 @@
 // For testing purposes, we use the simpler execute_simple approach rather than
 // full contract deployment, as it's faster and doesn't require Module parsing.
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -309,6 +313,7 @@ mod tests {
     use tos_daemon::core::storage::BalanceProvider;
 
     /// Test creating storage with funded account
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_create_contract_test_storage() {
         let account = KeyPair::new();
@@ -329,6 +334,7 @@ mod tests {
     }
 
     /// Test funding accounts
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_fund_account() {
         let storage = create_test_rocksdb_storage().await;
@@ -350,6 +356,7 @@ mod tests {
     }
 
     /// Test contract existence check
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_contract_exists() {
         let storage = create_test_rocksdb_storage().await;

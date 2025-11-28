@@ -1,3 +1,7 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::useless_vec)]
 //! Standalone test for scenarios parser
 //!
 //! Tests parser functionality independently of TestBlockchain
