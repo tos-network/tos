@@ -1,8 +1,7 @@
 use crate::core::{
     blockchain::Blockchain,
-    blockdag,
     error::BlockchainError,
-    ghostdag::{self, BlueWorkType, CompactGhostdagData, KType, TosGhostdagData},
+    ghostdag::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData},
     hard_fork::{get_pow_algorithm_for_version, get_version_at_height},
     storage::{
         BlocksAtHeightProvider, DagOrderProvider, DifficultyProvider, GhostdagDataProvider,
@@ -163,24 +162,6 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             return Err(BlockchainError::InvalidBlockVersion);
         }
 
-        // GHOSTDAG: Verify the block blue_score by tips
-        let blue_score_at_tips =
-            blockdag::calculate_blue_score_at_tips(&provider, header.get_parents().iter()).await?;
-        if blue_score_at_tips != header.get_blue_score() {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Block {} has blue_score {} while expected blue_score is {}",
-                    hash,
-                    header.get_blue_score(),
-                    blue_score_at_tips
-                );
-            }
-            return Err(BlockchainError::InvalidBlockHeight(
-                blue_score_at_tips,
-                header.get_blue_score(),
-            ));
-        }
-
         let tips = header.get_parents();
         let tips_count = tips.len();
 
@@ -213,27 +194,6 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             }
         }
 
-        // GHOSTDAG: Verify the block blue_score by tips
-        {
-            let blue_score_by_tips =
-                blockdag::calculate_blue_score_at_tips(&provider, header.get_parents().iter())
-                    .await?;
-            if blue_score_by_tips != header.get_blue_score() {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Block {} has blue_score {} while expected blue_score is {}",
-                        hash,
-                        header.get_blue_score(),
-                        blue_score_by_tips
-                    );
-                }
-                return Err(BlockchainError::InvalidBlockHeight(
-                    blue_score_by_tips,
-                    header.get_blue_score(),
-                ));
-            }
-        }
-
         let algorithm = get_pow_algorithm_for_version(version);
         let pow_hash = header.get_pow_hash(algorithm)?;
         if log::log_enabled!(log::Level::Trace) {
@@ -260,22 +220,52 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             );
         }
 
-        // GHOSTDAG: Calculate blue_work for consensus chain selection
-        // blue_work = max(parent.blue_work) + difficulty of this block
-        // This is the correct metric for DAG chain selection
-        let blue_work = {
-            let mut max_parent_blue_work = BlueWorkType::zero();
-            for parent_hash in header.get_parents().iter() {
-                let parent_blue_work = provider.get_ghostdag_blue_work(parent_hash).await?;
-                if parent_blue_work > max_parent_blue_work {
-                    max_parent_blue_work = parent_blue_work;
-                }
+        // GHOSTDAG: Compute full GHOSTDAG data for correct blue_score and blue_work validation
+        //
+        // CONSENSUS FIX: Use full GHOSTDAG algorithm instead of simplified formulas
+        // The correct formulas from daemon/src/core/ghostdag/mod.rs:301-328:
+        //   blue_score = parent.blue_score + mergeset_blues.len()
+        //   blue_work = parent.blue_work + Σ(work(mergeset_blues))
+        //
+        // This ensures chain_validator uses the SAME calculation as consensus layer,
+        // preventing incorrect chain selection during sync (could reject valid heavier chains
+        // or accept lighter chains as heavier).
+        //
+        // Performance note: Full GHOSTDAG is more expensive than simplified formula,
+        // but necessary for consensus correctness. The overhead is acceptable because:
+        //   1. Chain sync validates blocks once, not on every query
+        //   2. GHOSTDAG computation is O(k²) where k is typically small (~18)
+        //   3. Parent GHOSTDAG data is cached in storage
+        //
+        // Note: We use &*storage (underlying storage) instead of &provider because:
+        //   - The GHOSTDAG function requires the full Storage trait
+        //   - Parent blocks have already been validated and exist in storage
+        //   - ChainValidatorProvider only implements partial provider traits
+        let ghostdag_data = self
+            .blockchain
+            .get_ghostdag()
+            .ghostdag(&*storage, header.get_parents())
+            .await?;
+
+        // Verify blue_score matches header claim
+        let expected_blue_score = ghostdag_data.blue_score;
+        if expected_blue_score != header.get_blue_score() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has blue_score {} while expected blue_score is {} (GHOSTDAG)",
+                    hash,
+                    header.get_blue_score(),
+                    expected_blue_score
+                );
             }
-            // Add this block's difficulty (converted to work) to the max parent blue_work
-            // Use the GHOSTDAG calc_work_from_difficulty function to properly convert
-            let block_work = ghostdag::calc_work_from_difficulty(&difficulty);
-            max_parent_blue_work + block_work
-        };
+            return Err(BlockchainError::InvalidBlockHeight(
+                expected_blue_score,
+                header.get_blue_score(),
+            ));
+        }
+
+        // Use GHOSTDAG-computed blue_work for chain comparison
+        let blue_work = ghostdag_data.blue_work;
 
         if log::log_enabled!(log::Level::Debug) {
             debug!("Block {} - blue_work: {}", hash, blue_work);

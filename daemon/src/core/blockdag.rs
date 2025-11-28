@@ -64,13 +64,33 @@ where
     }
 }
 
-// GHOSTDAG: Calculate the expected blue score for a block with given tips
+// DEPRECATED: This function uses an incorrect formula for blue_score calculation
 //
-// In GHOSTDAG, blue_score is calculated as max(tips.blue_score) + tips.len().
-// This is the DAG equivalent of height calculation, but accounts for mergeset size.
+// WARNING: DO NOT USE FOR CONSENSUS-CRITICAL CODE
 //
-// For a DAG with multiple parents, this finds the parent with highest blue_score
-// and adds the number of tips being merged (the mergeset size).
+// This function incorrectly calculates blue_score as:
+//   blue_score = max(parent.blue_score) + parents.len()
+//
+// The CORRECT formula (from GHOSTDAG) is:
+//   blue_score = max(parent.blue_score) + mergeset_blues.len()
+//
+// The difference is that some parents may be colored RED (not blue) in GHOSTDAG,
+// and only BLUE blocks in the mergeset contribute to the blue_score increment.
+//
+// For correct blue_score calculation, use:
+//   - ghostdag.ghostdag(storage, parents).await?.blue_score (recommended)
+//   - See daemon/src/core/ghostdag/mod.rs:301-308 for the correct implementation
+//
+// This function is kept for backward compatibility but should NOT be used for:
+//   - Block validation (use GHOSTDAG data instead)
+//   - Template generation (use GHOSTDAG data instead)
+//   - Any consensus-critical calculation
+//
+// LEGACY ONLY - marked for removal in future versions
+#[deprecated(
+    since = "0.1.0",
+    note = "Use ghostdag.ghostdag() instead - this function uses incorrect formula (parents.len() instead of mergeset_blues.len())"
+)]
 pub async fn calculate_blue_score_at_tips<'a, G, I>(
     provider: &G,
     tips: I,

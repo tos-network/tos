@@ -6,7 +6,8 @@ use super::{
     stats::MiningStats,
 };
 use crate::core::{
-    blockdag, error::BlockchainError, hard_fork::get_version_at_height, storage::Storage,
+    blockdag, error::BlockchainError, ghostdag::TosGhostdag, hard_fork::get_version_at_height,
+    storage::Storage,
 };
 use log::{debug, warn};
 use std::sync::Arc;
@@ -39,6 +40,9 @@ pub struct BlockTemplateGenerator {
 
     /// Network (for version calculation)
     network: Network,
+
+    /// GHOSTDAG manager for correct blue_score calculation
+    ghostdag: Arc<TosGhostdag>,
 }
 
 impl BlockTemplateGenerator {
@@ -50,12 +54,14 @@ impl BlockTemplateGenerator {
     /// * `template_ttl_ms` - How long to cache templates (milliseconds)
     /// * `stats` - Mining statistics tracker
     /// * `network` - Network (for version calculation)
+    /// * `ghostdag` - GHOSTDAG manager for correct blue_score calculation
     pub fn new(
         ghostdag_cache_size: usize,
         tip_cache_size: usize,
         template_ttl_ms: u64,
         stats: Arc<MiningStats>,
         network: Network,
+        ghostdag: Arc<TosGhostdag>,
     ) -> Self {
         Self {
             ghostdag_cache: GhostdagCache::new(ghostdag_cache_size),
@@ -64,6 +70,7 @@ impl BlockTemplateGenerator {
             stats,
             template_ttl_ms,
             network,
+            ghostdag,
         }
     }
 
@@ -265,10 +272,15 @@ impl BlockTemplateGenerator {
             timestamp = current_timestamp;
         }
 
-        // GHOSTDAG: Use blue_score instead of legacy height
-        let blue_score =
-            blockdag::calculate_blue_score_at_tips(storage, sorted_tips.iter()).await?;
+        // GHOSTDAG: Calculate correct blue_score using full GHOSTDAG algorithm
+        // CRITICAL CONSENSUS FIX: Use GHOSTDAG to compute blue_score correctly
+        // The blue_score is: max(parent.blue_score) + mergeset_blues.len()
+        // NOT max(parent.blue_score) + parents.len() (old incorrect formula)
+        //
+        // See daemon/src/core/ghostdag/mod.rs:301-308 for the algorithm
         let sorted_tips_vec: Vec<Hash> = sorted_tips.into_iter().collect();
+        let ghostdag_data = self.ghostdag.ghostdag(storage, &sorted_tips_vec).await?;
+        let blue_score = ghostdag_data.blue_score;
         let version = get_version_at_height(&self.network, blue_score);
 
         let block = BlockHeader::new_simple(
@@ -390,13 +402,19 @@ impl OptimizedTxSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::ghostdag::TosGhostdag;
+    use crate::core::reachability::TosReachability;
+    use tos_common::crypto::Hash;
     use tos_common::tokio;
 
     #[tokio::test]
     async fn test_block_template_generator_creation() {
         let stats = MiningStats::new(100);
         let network = tos_common::network::Network::Mainnet;
-        let generator = BlockTemplateGenerator::new(1000, 100, 5000, stats, network);
+        let genesis_hash = Hash::new([0u8; 32]);
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = Arc::new(TosGhostdag::new(10, genesis_hash, reachability));
+        let generator = BlockTemplateGenerator::new(1000, 100, 5000, stats, network, ghostdag);
 
         let cache_stats = generator.get_cache_stats().await;
         assert_eq!(cache_stats.ghostdag_cache_size, 0);
@@ -406,7 +424,10 @@ mod tests {
     async fn test_clear_caches() {
         let stats = MiningStats::new(100);
         let network = tos_common::network::Network::Mainnet;
-        let generator = BlockTemplateGenerator::new(1000, 100, 5000, stats, network);
+        let genesis_hash = Hash::new([0u8; 32]);
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = Arc::new(TosGhostdag::new(10, genesis_hash, reachability));
+        let generator = BlockTemplateGenerator::new(1000, 100, 5000, stats, network, ghostdag);
 
         generator.clear_caches().await;
 
