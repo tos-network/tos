@@ -127,6 +127,15 @@ pub async fn create_minimal_blockchain() -> Result<MinimalBlockchain> {
 ///     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 /// });
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if the tokio runtime cannot be created.
+/// This is acceptable because:
+/// 1. This is a testing-only helper function
+/// 2. Runtime creation failure is a fatal error in test context
+/// 3. Tests should fail loudly rather than silently
+#[allow(clippy::panic)]
 pub fn run_doc_test_async<F, Fut>(f: F)
 where
     F: FnOnce() -> Fut,

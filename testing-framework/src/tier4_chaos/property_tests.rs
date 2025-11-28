@@ -29,11 +29,18 @@
 //!
 //! All tests use seeded RNG and can be reproduced by setting TOS_TEST_SEED environment variable.
 
+// Note: Some imports are used only in test code below
+#[allow(unused_imports)]
 use crate::orchestrator::SystemClock;
+#[allow(unused_imports)]
 use crate::tier1_component::{TestBlockchainBuilder, TestTransaction};
+#[allow(unused_imports)]
 use crate::tier2_integration::strategies::*;
+#[allow(unused_imports)]
 use proptest::prelude::*;
+#[allow(unused_imports)]
 use proptest::test_runner::TestCaseError;
+#[allow(unused_imports)]
 use std::sync::Arc;
 use tos_common::crypto::Hash;
 
