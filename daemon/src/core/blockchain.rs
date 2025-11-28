@@ -3151,18 +3151,21 @@ impl<S: Storage> Blockchain<S> {
             let previous_timestamp = storage.get_timestamp_for_block_hash(&hash).await?;
             parent_timestamps.push(previous_timestamp);
 
-            // Block timestamp can't be less than any parent
-            if block.get_timestamp() < previous_timestamp {
+            // SECURITY FIX: Block timestamp must be STRICTLY GREATER than any parent
+            // Per Kaspa reference (post_pow_validation.rs:10-27), timestamp > past_median_time
+            // This prevents timestamp manipulation attacks where miners create blocks with
+            // identical timestamps to manipulate DAA window calculations.
+            if block.get_timestamp() <= previous_timestamp {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "Invalid block timestamp {}, parent {} has timestamp {} which is greater",
+                        "Invalid block timestamp {}, must be strictly greater than parent {} timestamp {}",
                         block.get_timestamp(),
                         hash,
                         previous_timestamp
                     );
                 }
                 return Err(BlockchainError::TimestampIsLessThanParent(
-                    block.get_timestamp(),
+                    previous_timestamp,
                 ));
             }
 
@@ -3183,14 +3186,16 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        // V-21 Fix: For multiple parents, check median-time-past
+        // SECURITY FIX: For multiple parents, check median-time-past with strict inequality
+        // Per Kaspa reference (post_pow_validation.rs), timestamp must be > past_median_time
         if tips_count > 1 {
             parent_timestamps.sort_unstable();
             let median_timestamp = parent_timestamps[tips_count / 2];
-            if block.get_timestamp() < median_timestamp {
+            // Strict greater-than check to prevent timestamp manipulation
+            if block.get_timestamp() <= median_timestamp {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "Invalid block timestamp {}, less than median parent time {}",
+                        "Invalid block timestamp {}, must be strictly greater than median parent time {}",
                         block.get_timestamp(),
                         median_timestamp
                     );

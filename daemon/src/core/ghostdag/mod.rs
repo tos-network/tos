@@ -449,32 +449,35 @@ impl TosGhostdag {
                     continue;
                 }
 
-                // Try to use reachability service to check if parent is in selected_parent's past
-                // If reachability data doesn't exist yet (during migration), fall back to blue_score heuristic
-                let is_in_past = match (
-                    storage.has_reachability_data(parent).await,
-                    storage.has_reachability_data(&selected_parent).await,
-                ) {
-                    (Ok(true), Ok(true)) => {
-                        // Both blocks have reachability data - use accurate DAG ancestry check
-                        self.reachability
-                            .is_dag_ancestor_of(storage, parent, &selected_parent)
-                            .await?
-                    }
-                    _ => {
-                        // Fall back to conservative heuristic for blocks without reachability data
-                        // NOTE: This heuristic is intentionally conservative and known to be imprecise.
-                        // GHOSTDAG allows blue_score jumps when merging multiple tips (blue_score = max(tips) + tips.len()),
-                        // so blocks can have large blue_score differences without being many "generations" apart.
-                        // Threshold set to 50 to avoid false positives - better to miss optimization than cause errors.
-                        // This fallback is only used during initial sync before reachability data is populated.
-                        // Primary code path uses accurate is_dag_ancestor_of() check above.
-                        let parent_data = storage.get_ghostdag_data(parent).await?;
-                        let selected_parent_data =
-                            storage.get_ghostdag_data(&selected_parent).await?;
-                        parent_data.blue_score + 50 < selected_parent_data.blue_score
-                    }
-                };
+                // SECURITY FIX: Require reachability data for deterministic consensus
+                // Per Kaspa reference (mergeset.rs), BFS only uses reachability.is_dag_ancestor_of()
+                // without any heuristic fallback. This ensures all nodes compute identical mergesets.
+                //
+                // Previous code had a blue_score heuristic fallback that could cause consensus
+                // divergence: nodes with/without reachability data would compute different mergesets,
+                // leading to different blue_score/blue_work values and potential chain splits.
+                //
+                // If reachability data is missing, fail fast - the node should rebuild reachability
+                // or wait for sync to complete before participating in consensus.
+                let has_parent_reachability = storage.has_reachability_data(parent).await?;
+                let has_selected_parent_reachability =
+                    storage.has_reachability_data(&selected_parent).await?;
+
+                if !has_parent_reachability || !has_selected_parent_reachability {
+                    return Err(BlockchainError::ReachabilityDataMissing(
+                        if !has_parent_reachability {
+                            parent.clone()
+                        } else {
+                            selected_parent.clone()
+                        },
+                    ));
+                }
+
+                // Use accurate DAG ancestry check (deterministic)
+                let is_in_past = self
+                    .reachability
+                    .is_dag_ancestor_of(storage, parent, &selected_parent)
+                    .await?;
 
                 if is_in_past {
                     past.insert(parent.clone());
@@ -583,24 +586,32 @@ impl TosGhostdag {
                 candidate_blue_anticone_size += 1;
 
                 // Check k-cluster condition 1: candidate's blue anticone must be ≤ k
-                // BUGFIX: Changed >= to > (off-by-one error fix)
-                // K-cluster rule allows up to K blues in anticone, reject only at K+1
+                // SECURITY FIX: Per Kaspa reference (protocol.rs:211-213), if the candidate's
+                // blue anticone exceeds k, mark it as red (don't throw error).
+                // Kaspa: "if *candidate_blue_anticone_size > k { return ColoringState::Red; }"
                 if candidate_blue_anticone_size > self.k {
-                    return Err(BlockchainError::KClusterViolation {
-                        block: candidate.clone(),
-                        anticone_size: candidate_blue_anticone_size as usize,
-                        k: self.k,
-                    });
+                    // Don't throw error - just mark as red (return false)
+                    // This matches Kaspa's behavior of returning ColoringState::Red
+                    return Ok((
+                        false,
+                        candidate_blue_anticone_size,
+                        candidate_blues_anticone_sizes,
+                    ));
                 }
 
                 // Check k-cluster condition 2: existing blue's anticone + candidate must be ≤ k
-                // BUGFIX: Changed >= to > (off-by-one error fix)
-                if blue_anticone_size > self.k {
-                    return Err(BlockchainError::KClusterViolation {
-                        block: blue.clone(),
-                        anticone_size: (blue_anticone_size + 1) as usize,
-                        k: self.k,
-                    });
+                // SECURITY FIX: Per Kaspa reference (protocol.rs:216-220), if an existing blue
+                // already has k blues in its anticone, adding the candidate would make it k+1,
+                // violating the k-cluster property. So we check == k, not > k.
+                // Kaspa: "if peer_blue_anticone_size == k { return ColoringState::Red; }"
+                if blue_anticone_size >= self.k {
+                    // Don't throw error - just mark as red (return false)
+                    // This matches Kaspa's behavior of returning ColoringState::Red
+                    return Ok((
+                        false,
+                        candidate_blue_anticone_size,
+                        candidate_blues_anticone_sizes,
+                    ));
                 }
 
                 // Record updated anticone size for this blue
