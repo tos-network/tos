@@ -2810,11 +2810,28 @@ impl<S: Storage> Blockchain<S> {
         Err(BlockchainError::UnsupportedOperation)
     }
 
-    // Add a new block in chain
-    // Note that this will lock Storage and Mempool
-    // Verification is done using read guards,
-    // once the block is fully verified, we can include it
-    // in our chain by acquiring a write guard
+    /// Add a new block to the chain.
+    ///
+    /// This is the central entry point for all block additions (P2P, RPC, local mining).
+    /// It locks Storage and Mempool during verification, using read guards initially,
+    /// then acquires write guards once the block is fully verified.
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - The block to add.
+    /// * `block_hash` - Optional pre-computed hash. **IMPORTANT**: If provided, this hash
+    ///   will be verified against `block.hash()`. Callers should prefer passing `None` to
+    ///   let this function compute the hash, unless they have a cached value that was
+    ///   already verified (e.g., from a trusted source). Passing an incorrect hash will
+    ///   result in `BlockchainError::BlockHashMismatch`.
+    /// * `broadcast` - How to broadcast the block to peers.
+    /// * `mining` - Whether this block comes from local mining.
+    ///
+    /// # Security
+    ///
+    /// This function performs mandatory hash verification regardless of the caller.
+    /// Even if `block_hash` is provided, the hash is recomputed and compared to prevent
+    /// DAG poisoning attacks from malicious peers sending valid blocks with wrong hashes.
     pub async fn add_new_block(
         &self,
         block: Block,

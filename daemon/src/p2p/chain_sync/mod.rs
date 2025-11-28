@@ -326,10 +326,13 @@ impl<S: Storage> P2pServer<S> {
                             ResponseHelper::Requested(block, hash) => {
                                 // SECURITY FIX: Verify block hash matches before any processing
                                 // This prevents chain poisoning attacks from malicious peers
+                                // NOTE: Using warn! here to avoid log spam from malicious peers;
+                                // core layer (add_new_block) retains error! for canonical logging
+                                // TODO: Add metrics counter p2p_block_hash_mismatch_total
                                 let computed_hash = block.hash();
                                 if computed_hash != *hash {
-                                    if log::log_enabled!(log::Level::Error) {
-                                        error!(
+                                    if log::log_enabled!(log::Level::Warn) {
+                                        warn!(
                                             "Block hash mismatch from peer! Expected: {}, Computed: {}. Rejecting block.",
                                             hash, computed_hash
                                         );
@@ -781,10 +784,13 @@ impl<S: Storage> P2pServer<S> {
                                     ResponseHelper::Requested(block, hash) => {
                                         // SECURITY FIX: Verify block hash matches before any processing
                                         // This prevents chain poisoning attacks from malicious peers
+                                        // NOTE: Using warn! here to avoid log spam from malicious peers;
+                                        // core layer (add_new_block) retains error! for canonical logging
+                                        // TODO: Add metrics counter p2p_block_hash_mismatch_total
                                         let computed_hash = block.hash();
                                         if computed_hash != *hash {
-                                            if log::log_enabled!(log::Level::Error) {
-                                                error!(
+                                            if log::log_enabled!(log::Level::Warn) {
+                                                warn!(
                                                     "Block hash mismatch from peer! Expected: {}, Computed: {}. Rejecting block.",
                                                     hash, computed_hash
                                                 );
