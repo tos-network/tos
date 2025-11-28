@@ -2832,11 +2832,28 @@ impl<S: Storage> Blockchain<S> {
             return Err(BlockchainError::InvalidBlockVersion);
         }
 
-        // Either check or use the precomputed one
-        let block_hash = if let Some(hash) = block_hash {
-            hash
+        // SECURITY FIX: Always compute the block hash and verify it matches the caller-provided hash.
+        // This prevents malicious peers from sending a valid block body labeled with a different hash,
+        // which would cause the block to be stored under the wrong ID and poison the DAG.
+        // The caller-provided hash is now treated as untrusted input that must be validated.
+        let computed_hash = block.hash();
+        let block_hash = if let Some(provided_hash) = block_hash {
+            // Verify the provided hash matches the computed hash
+            if *provided_hash != computed_hash {
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "Block hash mismatch! Caller provided: {}, computed: {}. Rejecting block.",
+                        provided_hash, computed_hash
+                    );
+                }
+                return Err(BlockchainError::BlockHashMismatch(
+                    (*provided_hash).clone(),
+                    computed_hash,
+                ));
+            }
+            provided_hash
         } else {
-            Immutable::Owned(block.hash())
+            Immutable::Owned(computed_hash)
         };
 
         // Semaphore is required to ensure sequential verification of blocks
