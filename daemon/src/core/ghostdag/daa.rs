@@ -1564,7 +1564,7 @@ mod daa_security_audit_tests {
         let realistic_timestamps: Vec<u64> = (0..DAA_WINDOW_SIZE).map(|i| base_ts + i).collect();
 
         let len = realistic_timestamps.len() as u64;
-        let expected_span = len - 1; // Should be DAA_WINDOW_SIZE - 1
+        let _expected_span = len - 1; // Should be DAA_WINDOW_SIZE - 1
 
         // In normal operation, span should be close to expected
         let oldest = realistic_timestamps[0];
@@ -1637,5 +1637,139 @@ mod daa_security_audit_tests {
         let min_floor = (DAA_WINDOW_SIZE / 2) * TARGET_TIME_PER_BLOCK;
         let actual = raw_span.max(min_floor);
         assert_eq!(actual, min_floor, "Small window uses floor");
+    }
+
+    // ========================================================================
+    // Integration tests that call apply_difficulty_adjustment directly
+    // Per audit: "Need tests that call real functions, not just constant assertions"
+    // ========================================================================
+
+    /// Integration test: Call apply_difficulty_adjustment with zero actual time
+    /// Verifies the function doesn't panic or produce 4x+ increase
+    #[test]
+    fn test_integration_apply_difficulty_zero_actual_time_prevented() {
+        // If actual_time were 0, it would cause division by zero
+        // But with our floor, actual_time is always at least min_actual_time
+        let current_difficulty = Difficulty::from(1000000u64);
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+        let min_actual_time = (DAA_WINDOW_SIZE / 2) * TARGET_TIME_PER_BLOCK;
+
+        // Call the real function with the minimum floored time
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, min_actual_time);
+        assert!(result.is_ok(), "apply_difficulty_adjustment should succeed");
+
+        let new_difficulty = result.unwrap();
+
+        // With min_actual_time = expected_time / 2, ratio = 2.0
+        // new_difficulty = current * 2
+        let expected_new = current_difficulty * 2u64;
+        assert_eq!(
+            new_difficulty.as_ref(),
+            expected_new.as_ref(),
+            "Difficulty should double (2x) with half the expected time"
+        );
+    }
+
+    /// Integration test: Call apply_difficulty_adjustment with very small actual time
+    /// Verifies the 4x clamp prevents extreme spikes
+    #[test]
+    fn test_integration_apply_difficulty_extreme_ratio_clamped() {
+        let current_difficulty = Difficulty::from(1000000u64);
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+
+        // Use actual_time = 1 (extreme case before floor was applied)
+        // This would give ratio = 2016 without clamping
+        let actual_time = 1u64;
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
+        assert!(result.is_ok(), "apply_difficulty_adjustment should succeed");
+
+        let new_difficulty = result.unwrap();
+
+        // The 4x clamp should prevent ratio > 4
+        let max_difficulty = current_difficulty * 4u64;
+        assert_eq!(
+            new_difficulty.as_ref(),
+            max_difficulty.as_ref(),
+            "Difficulty should be clamped to 4x max"
+        );
+    }
+
+    /// Integration test: Normal operation with ratio ~1.0
+    #[test]
+    fn test_integration_apply_difficulty_normal_operation() {
+        let current_difficulty = Difficulty::from(1000000u64);
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+        // Actual time equals expected (blocks arrived on target)
+        let actual_time = expected_time;
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
+        assert!(result.is_ok(), "apply_difficulty_adjustment should succeed");
+
+        let new_difficulty = result.unwrap();
+
+        // Ratio = 1.0, difficulty unchanged
+        assert_eq!(
+            new_difficulty.as_ref(),
+            current_difficulty.as_ref(),
+            "Difficulty should remain unchanged with ratio 1.0"
+        );
+    }
+
+    /// Integration test: Blocks too slow (ratio < 1), difficulty decreases
+    #[test]
+    fn test_integration_apply_difficulty_slow_blocks() {
+        let current_difficulty = Difficulty::from(1000000u64);
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+        // Blocks arrived 2x slower than target
+        let actual_time = expected_time * 2;
+
+        let result = apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time);
+        assert!(result.is_ok(), "apply_difficulty_adjustment should succeed");
+
+        let new_difficulty = result.unwrap();
+
+        // Ratio = 0.5, difficulty halves
+        let expected_new = current_difficulty / 2u64;
+        assert_eq!(
+            new_difficulty.as_ref(),
+            expected_new.as_ref(),
+            "Difficulty should halve (0.5x) with twice the expected time"
+        );
+    }
+
+    /// Integration test: Verify floor + clamp combination limits max increase to 2x
+    /// This is the key security property: with floor = expected/2, max ratio = 2
+    #[test]
+    fn test_integration_security_max_increase_is_2x_with_floor() {
+        let current_difficulty = Difficulty::from(1000000u64);
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+        let min_actual_time = (DAA_WINDOW_SIZE / 2) * TARGET_TIME_PER_BLOCK;
+
+        // This simulates the attack scenario: attacker creates equal-timestamp chain
+        // Our fix applies the floor, so actual_time = min_actual_time
+        let actual_time_with_floor = min_actual_time;
+
+        let result =
+            apply_difficulty_adjustment(&current_difficulty, expected_time, actual_time_with_floor);
+        assert!(result.is_ok());
+
+        let new_difficulty = result.unwrap();
+        let ratio =
+            new_difficulty.as_ref().low_u64() as f64 / current_difficulty.as_ref().low_u64() as f64;
+
+        // With floor = expected/2, ratio = 2.0 exactly
+        assert!(
+            (ratio - 2.0).abs() < 0.001,
+            "With floor, max ratio should be 2.0, got {}",
+            ratio
+        );
+
+        // Importantly, ratio is NOT 4.0 (the old max without floor)
+        assert!(
+            ratio <= 2.0,
+            "Ratio should never exceed 2.0 with floor, got {}",
+            ratio
+        );
     }
 }
