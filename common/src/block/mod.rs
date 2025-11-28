@@ -24,7 +24,20 @@ pub type TopoHeight = u64;
 
 pub const EXTRA_NONCE_SIZE: usize = 32;
 pub const HEADER_WORK_SIZE: usize = 73;
-pub const BLOCK_WORK_SIZE: usize = 112; // 32 + 8 + 8 + 32 + 32 = 112
+
+// MINER_WORK_SIZE: Size of the miner-controlled fields in the block header
+// Used by MinerWork for stratum mining protocol
+// 32 (work_hash) + 8 (timestamp) + 8 (nonce) + 32 (extra_nonce) + 32 (miner) = 112 bytes
+pub const MINER_WORK_SIZE: usize = 112;
+
+// SECURITY FIX: Updated BLOCK_WORK_SIZE to include ALL GHOSTDAG consensus fields in block hash
+// This follows Kaspa's security model where all header fields are hash-protected
+// to prevent peer manipulation during block propagation.
+//
+// Base fields (miner-controlled): 112 bytes (MINER_WORK_SIZE)
+// Added GHOSTDAG fields: 8 (daa_score) + 32 (blue_work) + 4 (bits) + 32 (pruning_point) + 32 (accepted_id_merkle_root) + 32 (utxo_commitment) = 140 bytes
+// New total: 112 + 140 = 252 bytes
+pub const BLOCK_WORK_SIZE: usize = 252;
 
 // Get combined hash for tips
 // This is used to get a hash that is unique for a set of tips

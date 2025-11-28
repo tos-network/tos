@@ -11,7 +11,7 @@ use std::{
 };
 use tos_common::{
     block::{Block, BlockVersion},
-    crypto::Hash,
+    crypto::{Hash, Hashable},
     immutable::Immutable,
     time::{get_current_time_in_millis, TimestampMillis},
     tokio::{select, time::interval, Executor, Scheduler},
@@ -44,11 +44,14 @@ impl<S: Storage> P2pServer<S> {
     // we send up to CHAIN_SYNC_REQUEST_MAX_BLOCKS blocks id (combinaison of block hash and topoheight)
     // we add at the end the genesis block to be sure to be on the same chain as others peers
     // its used to find a common point with the peer to which we ask the chain
+    // SECURITY FIX: Removed skip_stable_height_check parameter
+    // Previously, sync errors could grant the next peer elevated privileges to bypass
+    // stable height checks. This was a vulnerability allowing colluding peers to
+    // cause deep rewinds. Now only priority peers can bypass stable height checks.
     pub async fn request_sync_chain_for(
         &self,
         peer: &Arc<Peer>,
         last_chain_sync: &mut TimestampMillis,
-        skip_stable_height_check: bool,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("Requesting chain from {}", peer);
@@ -102,7 +105,7 @@ impl<S: Storage> P2pServer<S> {
         // Update last chain sync time
         *last_chain_sync = get_current_time_in_millis();
 
-        self.handle_chain_response(peer, response, requested_max_size, skip_stable_height_check)
+        self.handle_chain_response(peer, response, requested_max_size)
             .await
     }
 
@@ -320,7 +323,24 @@ impl<S: Storage> P2pServer<S> {
                 Some(res) = scheduler.next() => {
                     let future = async move {
                         match res? {
-                            ResponseHelper::Requested(block, hash) => self.blockchain.add_new_block(block, Some(hash), BroadcastOption::Miners, false).await,
+                            ResponseHelper::Requested(block, hash) => {
+                                // SECURITY FIX: Verify block hash matches before any processing
+                                // This prevents chain poisoning attacks from malicious peers
+                                let computed_hash = block.hash();
+                                if computed_hash != *hash {
+                                    if log::log_enabled!(log::Level::Error) {
+                                        error!(
+                                            "Block hash mismatch from peer! Expected: {}, Computed: {}. Rejecting block.",
+                                            hash, computed_hash
+                                        );
+                                    }
+                                    return Err(P2pError::BlockHashMismatch {
+                                        expected: (*hash).clone(),
+                                        actual: computed_hash,
+                                    }.into());
+                                }
+                                self.blockchain.add_new_block(block, Some(hash), BroadcastOption::Miners, false).await
+                            },
                             ResponseHelper::NotRequested(hash) => self.try_re_execution_block(hash).await,
                         }
                     };
@@ -379,12 +399,12 @@ impl<S: Storage> P2pServer<S> {
     // It also contains a CommonPoint which is a block hash point where we have the same topoheight as our peer
     // Based on the lowest height of the chain sent, we may need to rewind some blocks
     // NOTE: Only a priority node can rewind below the stable height
+    // SECURITY FIX: Removed skip_stable_height_check parameter to prevent colluding peer attacks
     async fn handle_chain_response(
         &self,
         peer: &Arc<Peer>,
         mut response: ChainResponse,
         requested_max_size: usize,
-        skip_stable_height_check: bool,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("handle chain response from {}", peer);
@@ -444,8 +464,10 @@ impl<S: Storage> P2pServer<S> {
                 );
             }
             // We are under the stable height, rewind is necessary
-            let mut count = if skip_stable_height_check
-                || peer.is_priority()
+            // SECURITY FIX: Only priority peers can bypass stable height check
+            // Previously skip_stable_height_check could be set based on previous sync errors,
+            // allowing colluding peers to cause deep rewinds
+            let mut count = if peer.is_priority()
                 || lowest_height <= self.blockchain.get_stable_blue_score()
             {
                 let our_topoheight = self.blockchain.get_topo_height();
@@ -497,7 +519,7 @@ impl<S: Storage> P2pServer<S> {
 
         if pop_count > 0 {
             if log::log_enabled!(log::Level::Warn) {
-                warn!("{} sent us a pop count request of {} with {} blocks (common point: {} at {}, skip stable: {})", peer, pop_count, blocks_len, common_point.get_hash(), common_topoheight, skip_stable_height_check);
+                warn!("{} sent us a pop count request of {} with {} blocks (common point: {} at {})", peer, pop_count, blocks_len, common_point.get_hash(), common_topoheight);
             }
         }
 
@@ -505,10 +527,12 @@ impl<S: Storage> P2pServer<S> {
         let peer_topoheight = peer.get_topoheight();
         let our_stable_topoheight = self.blockchain.get_stable_topoheight();
 
+        // SECURITY FIX: Removed skip_stable_height_check from the condition
+        // Only priority peers or when common_topoheight < our_stable_topoheight can trigger rewind
         if pop_count > 0
             && peer_topoheight > our_previous_topoheight
             && peer.get_height() >= our_previous_height
-            && (skip_stable_height_check || common_topoheight < our_stable_topoheight)
+            && common_topoheight < our_stable_topoheight
             // then, verify if it's a priority node, otherwise, check if we are connected to a priority node so only him can rewind us
             && (peer.is_priority() || !self.is_connected_to_a_synced_priority_node().await)
         {
@@ -749,6 +773,23 @@ impl<S: Storage> P2pServer<S> {
                             match res {
                                 Ok(response) => match response {
                                     ResponseHelper::Requested(block, hash) => {
+                                        // SECURITY FIX: Verify block hash matches before any processing
+                                        // This prevents chain poisoning attacks from malicious peers
+                                        let computed_hash = block.hash();
+                                        if computed_hash != *hash {
+                                            if log::log_enabled!(log::Level::Error) {
+                                                error!(
+                                                    "Block hash mismatch from peer! Expected: {}, Computed: {}. Rejecting block.",
+                                                    hash, computed_hash
+                                                );
+                                            }
+                                            self.object_tracker.mark_group_as_fail(group_id).await;
+                                            return Err(P2pError::BlockHashMismatch {
+                                                expected: (*hash).clone(),
+                                                actual: computed_hash,
+                                            }.into());
+                                        }
+
                                         // Lets ensure that the block is not already in chain
                                         // This may happen if we try to chain sync with peer
                                         // while we got the block through propagation

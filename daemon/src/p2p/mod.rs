@@ -1255,9 +1255,11 @@ impl<S: Storage> P2pServer<S> {
                         false
                     }
                 } else {
-                    let previous_err = previous_peer.map(|(_, _, err)| err).unwrap_or(false);
+                    // SECURITY FIX: Removed previous_err from request_sync_chain_for call
+                    // Previously, sync errors could grant the next peer elevated privileges
+                    // to bypass stable height checks (colluding peer attack vector)
                     if let Err(e) = self
-                        .request_sync_chain_for(&peer, &mut last_chain_sync, previous_err)
+                        .request_sync_chain_for(&peer, &mut last_chain_sync)
                         .await
                     {
                         peer.clear_objects_requested().await;
@@ -1269,6 +1271,7 @@ impl<S: Storage> P2pServer<S> {
                         false
                     }
                 };
+                // Keep tracking previous peer for other purposes (e.g., avoiding same peer selection)
                 previous_peer = Some((peer.get_id(), peer.is_priority(), err));
                 // We are not syncing anymore
                 self.set_chain_syncing(false);

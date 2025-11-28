@@ -294,14 +294,47 @@ impl BlockHeader {
         hash(&self.get_work())
     }
 
-    /// Get serialized header for POW calculation
+    /// Get serialized header for POW calculation and block hash
+    ///
+    /// # Security Model
+    ///
+    /// This function includes ALL consensus-critical fields in the serialization,
+    /// following Kaspa's security model. This prevents peers from tampering with
+    /// any field during block propagation.
+    ///
+    /// ## Hash-Protected Fields:
+    /// - `work_hash` (covers: version, blue_score, parents, merkle_root)
+    /// - `timestamp`
+    /// - `nonce`
+    /// - `extra_nonce`
+    /// - `miner`
+    /// - `daa_score` (GHOSTDAG)
+    /// - `blue_work` (GHOSTDAG)
+    /// - `bits` (difficulty)
+    /// - `pruning_point` (GHOSTDAG)
+    /// - `accepted_id_merkle_root` (future use)
+    /// - `utxo_commitment` (future use)
     fn get_serialized_header(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(BLOCK_WORK_SIZE);
-        bytes.extend(self.get_work_hash().to_bytes());
-        bytes.extend(self.timestamp.to_be_bytes());
-        bytes.extend(self.nonce.to_be_bytes());
-        bytes.extend(self.extra_nonce);
-        bytes.extend(self.miner.as_bytes());
+
+        // Original fields (immutable work commitment)
+        bytes.extend(self.get_work_hash().to_bytes()); // 32 bytes
+        bytes.extend(self.timestamp.to_be_bytes()); // 8 bytes
+        bytes.extend(self.nonce.to_be_bytes()); // 8 bytes
+        bytes.extend(self.extra_nonce); // 32 bytes
+        bytes.extend(self.miner.as_bytes()); // 32 bytes
+
+        // SECURITY FIX: Include GHOSTDAG fields (previously excluded)
+        // These fields are now hash-protected to prevent peer manipulation
+        bytes.extend(self.daa_score.to_le_bytes()); // 8 bytes
+        // U256::to_little_endian returns 32 bytes in little-endian format
+        bytes.extend(self.blue_work.to_little_endian()); // 32 bytes (U256)
+        bytes.extend(self.bits.to_le_bytes()); // 4 bytes
+        bytes.extend(self.pruning_point.as_bytes()); // 32 bytes
+
+        // Future commitment fields (included for forward compatibility)
+        bytes.extend(self.accepted_id_merkle_root.as_bytes()); // 32 bytes
+        bytes.extend(self.utxo_commitment.as_bytes()); // 32 bytes
 
         debug_assert!(
             bytes.len() == BLOCK_WORK_SIZE,
