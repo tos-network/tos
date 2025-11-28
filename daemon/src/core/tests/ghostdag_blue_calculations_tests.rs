@@ -1,3 +1,4 @@
+#![allow(clippy::unimplemented)]
 // GHOSTDAG Blue Score and Blue Work Calculation Tests
 //
 // These unit tests verify correct blue_score and blue_work calculations
