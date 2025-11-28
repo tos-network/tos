@@ -626,4 +626,108 @@ mod tests {
         // Test get_all_parents (should return all 3 parents)
         assert_eq!(header.get_all_parents().len(), 3);
     }
+
+    /// Test that get_serialized_header() returns exactly BLOCK_WORK_SIZE bytes.
+    /// This ensures the security fix (including all GHOSTDAG fields) is maintained.
+    #[test]
+    fn test_serialized_header_length() {
+        let miner = KeyPair::new().get_public_key().compress();
+        let header = BlockHeader::new_simple(
+            BlockVersion::V0,
+            vec![Hash::zero()],
+            1234567890,
+            [0u8; 32],
+            miner,
+            Hash::zero(),
+        );
+
+        let serialized = header.get_serialized_header();
+        assert_eq!(
+            serialized.len(),
+            BLOCK_WORK_SIZE,
+            "get_serialized_header() must return exactly BLOCK_WORK_SIZE ({}) bytes, got {}",
+            BLOCK_WORK_SIZE,
+            serialized.len()
+        );
+    }
+
+    /// Test that modifying any GHOSTDAG field changes the block hash.
+    /// This verifies that the security fix properly includes all consensus fields.
+    #[test]
+    fn test_ghostdag_fields_affect_hash() {
+        use primitive_types::U256;
+        let miner = KeyPair::new().get_public_key().compress();
+
+        // Create a base header
+        let base_header = BlockHeader::new(
+            BlockVersion::V0,
+            vec![vec![Hash::zero()]],
+            100, // blue_score
+            100, // daa_score
+            U256::from(1000),
+            Hash::zero(), // pruning_point
+            1234567890,
+            0x1d00ffff, // bits
+            [0u8; 32],
+            miner.clone(),
+            Hash::zero(), // hash_merkle_root
+            Hash::zero(), // accepted_id_merkle_root
+            Hash::zero(), // utxo_commitment
+        );
+        let base_hash = base_header.hash();
+
+        // Test 1: Changing daa_score changes the hash
+        let mut header_daa = base_header.clone();
+        header_daa.daa_score = 200;
+        assert_ne!(
+            header_daa.hash(),
+            base_hash,
+            "Changing daa_score must change the block hash"
+        );
+
+        // Test 2: Changing blue_work changes the hash
+        let mut header_blue_work = base_header.clone();
+        header_blue_work.blue_work = U256::from(2000);
+        assert_ne!(
+            header_blue_work.hash(),
+            base_hash,
+            "Changing blue_work must change the block hash"
+        );
+
+        // Test 3: Changing bits changes the hash
+        let mut header_bits = base_header.clone();
+        header_bits.bits = 0x1c00ffff;
+        assert_ne!(
+            header_bits.hash(),
+            base_hash,
+            "Changing bits must change the block hash"
+        );
+
+        // Test 4: Changing pruning_point changes the hash
+        let mut header_pruning = base_header.clone();
+        header_pruning.pruning_point = Hash::new([1u8; 32]);
+        assert_ne!(
+            header_pruning.hash(),
+            base_hash,
+            "Changing pruning_point must change the block hash"
+        );
+
+        // Test 5: Changing accepted_id_merkle_root changes the hash
+        let mut header_accepted = base_header.clone();
+        header_accepted.accepted_id_merkle_root = Hash::new([2u8; 32]);
+        assert_ne!(
+            header_accepted.hash(),
+            base_hash,
+            "Changing accepted_id_merkle_root must change the block hash"
+        );
+
+        // Test 6: Changing utxo_commitment changes the hash
+        let mut header_utxo = base_header.clone();
+        header_utxo.utxo_commitment = Hash::new([3u8; 32]);
+        assert_ne!(
+            header_utxo.hash(),
+            base_hash,
+            "Changing utxo_commitment must change the block hash"
+        );
+    }
 }
