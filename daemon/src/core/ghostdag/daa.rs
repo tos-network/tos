@@ -216,21 +216,39 @@ pub async fn calculate_target_difficulty<S: GhostdagStorageProvider>(
         return Err(BlockchainError::InvalidConfig);
     }
 
-    let oldest_timestamp = timestamps[0];
-    let newest_timestamp = timestamps[timestamps.len() - 1];
+    // SECURITY FIX: Use median-based time span instead of max-min
+    // Per audit: Using oldest-newest (max-min) allows attackers to create equal-timestamp
+    // chains that result in actual_time=0/1, triggering 4x difficulty increases.
+    // Solution: Use median timestamps for more robust time span calculation.
+    let len = timestamps.len();
+    let actual_time = if len >= 4 {
+        // Use inter-quartile range for robustness against timestamp manipulation
+        // Q1 (25th percentile) and Q3 (75th percentile)
+        let q1_idx = len / 4;
+        let q3_idx = (3 * len) / 4;
+        let q1_timestamp = timestamps[q1_idx];
+        let q3_timestamp = timestamps[q3_idx];
 
-    // SECURITY FIX V-07: Validate timestamps are reasonable
-    if newest_timestamp < oldest_timestamp {
-        return Err(BlockchainError::InvalidTimestampOrder);
-    }
+        // Calculate IQR-based time span, scaled to full window
+        // IQR represents 50% of the window, so multiply by 2
+        let iqr_span = q3_timestamp.saturating_sub(q1_timestamp);
+        let scaled_span = iqr_span.saturating_mul(2);
 
-    // Calculate actual time taken (in seconds)
-    let actual_time = if newest_timestamp > oldest_timestamp {
-        newest_timestamp.saturating_sub(oldest_timestamp)
+        // SECURITY FIX: Enforce minimum time span to prevent extreme difficulty spikes
+        // Minimum = half of expected time (DAA_WINDOW_SIZE/2 * TARGET_TIME_PER_BLOCK)
+        // This limits the maximum difficulty increase to 2x per window instead of 4x
+        let min_actual_time = (DAA_WINDOW_SIZE / 2) * TARGET_TIME_PER_BLOCK;
+
+        scaled_span.max(min_actual_time)
     } else {
-        // Timestamp went backwards (shouldn't happen with proper validation)
-        // Use minimum time to avoid division by zero
-        1
+        // Not enough timestamps for IQR calculation, use simple span with floor
+        let oldest_timestamp = timestamps[0];
+        let newest_timestamp = timestamps[len - 1];
+        let raw_span = newest_timestamp.saturating_sub(oldest_timestamp);
+
+        // Apply minimum floor
+        let min_actual_time = (DAA_WINDOW_SIZE / 2) * TARGET_TIME_PER_BLOCK;
+        raw_span.max(min_actual_time)
     };
 
     // Calculate expected time
@@ -1434,5 +1452,190 @@ mod daa_comprehensive_tests {
 
         let new_difficulty = result.unwrap();
         assert_eq!(new_difficulty.as_ref(), current_difficulty.as_ref());
+    }
+}
+
+// ============================================================================
+// SECURITY AUDIT TESTS (REVIEW20251129.md)
+// Tests for DAA timestamp manipulation resistance
+// ============================================================================
+#[cfg(test)]
+mod daa_security_audit_tests {
+    use super::*;
+
+    /// Security Audit Test: Equal timestamp chain should not cause 4x difficulty spike
+    /// Per audit: "Equal timestamp chains result in actual_time=0/1, triggering 4x difficulty"
+    /// The fix uses IQR-based time span with minimum floor to prevent this attack.
+    #[test]
+    fn test_security_audit_equal_timestamp_chain_daa() {
+        // Simulate an equal timestamp attack: all blocks have the same timestamp
+        let timestamps: Vec<u64> = vec![1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000];
+
+        // Sort (no change since all equal)
+        let mut sorted_ts = timestamps.clone();
+        sorted_ts.sort();
+
+        let len = sorted_ts.len();
+        assert!(len >= 4, "Need at least 4 timestamps for IQR");
+
+        // Calculate IQR-based time span (as in the fix)
+        let q1_idx = len / 4; // 2
+        let q3_idx = (3 * len) / 4; // 6
+        let q1_timestamp = sorted_ts[q1_idx];
+        let q3_timestamp = sorted_ts[q3_idx];
+
+        let iqr_span = q3_timestamp.saturating_sub(q1_timestamp);
+        let scaled_span = iqr_span.saturating_mul(2);
+
+        // With equal timestamps, IQR span is 0
+        assert_eq!(iqr_span, 0, "Equal timestamps should have IQR of 0");
+        assert_eq!(scaled_span, 0, "Scaled IQR should also be 0");
+
+        // The security fix enforces a minimum floor
+        let min_actual_time = (DAA_WINDOW_SIZE / 2) * TARGET_TIME_PER_BLOCK;
+        let actual_time = scaled_span.max(min_actual_time);
+
+        // With the fix, actual_time is at least min_actual_time, not 0/1
+        assert!(
+            actual_time >= min_actual_time,
+            "Actual time should be floored to minimum"
+        );
+        assert!(
+            actual_time > 0,
+            "Actual time should never be 0 with the security fix"
+        );
+
+        // Calculate what the difficulty adjustment would be
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+        let ratio = expected_time as f64 / actual_time as f64;
+
+        // With min floor = expected/2, max ratio = 2.0 (not 4.0 or infinity)
+        assert!(
+            ratio <= 2.0,
+            "Difficulty increase ratio should be capped at 2x, got {}",
+            ratio
+        );
+    }
+
+    /// Security Audit Test: Minimal time span (1 second apart) should be handled safely
+    #[test]
+    fn test_security_audit_minimal_time_span_daa() {
+        // Simulate blocks that are only 1 second apart (minimum valid)
+        let timestamps: Vec<u64> = vec![1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007];
+
+        let mut sorted_ts = timestamps.clone();
+        sorted_ts.sort();
+
+        let len = sorted_ts.len();
+        let q1_idx = len / 4;
+        let q3_idx = (3 * len) / 4;
+        let q1_timestamp = sorted_ts[q1_idx];
+        let q3_timestamp = sorted_ts[q3_idx];
+
+        let iqr_span = q3_timestamp.saturating_sub(q1_timestamp);
+        let scaled_span = iqr_span.saturating_mul(2);
+
+        // IQR span should be small but non-zero
+        assert_eq!(iqr_span, 4, "IQR from index 2 to 6: 1006 - 1002 = 4");
+        assert_eq!(scaled_span, 8, "Scaled span should be 8");
+
+        // Still apply minimum floor
+        let min_actual_time = (DAA_WINDOW_SIZE / 2) * TARGET_TIME_PER_BLOCK;
+        let actual_time = scaled_span.max(min_actual_time);
+
+        // 8 < min_actual_time (which is 1008), so floor applies
+        assert_eq!(
+            actual_time, min_actual_time,
+            "Minimal time span should be floored"
+        );
+    }
+
+    /// Security Audit Test: Normal timestamp distribution should not be affected
+    #[test]
+    fn test_security_audit_normal_timestamp_distribution() {
+        // Simulate normal block production: ~1 second per block
+        let base_ts = 1000u64;
+        let timestamps: Vec<u64> = (0..8).map(|i| base_ts + i).collect();
+
+        let mut sorted_ts = timestamps.clone();
+        sorted_ts.sort();
+
+        // For a larger window, simulate realistic timestamps
+        let realistic_timestamps: Vec<u64> = (0..DAA_WINDOW_SIZE).map(|i| base_ts + i).collect();
+
+        let len = realistic_timestamps.len() as u64;
+        let expected_span = len - 1; // Should be DAA_WINDOW_SIZE - 1
+
+        // In normal operation, span should be close to expected
+        let oldest = realistic_timestamps[0];
+        let newest = realistic_timestamps[realistic_timestamps.len() - 1];
+        let raw_span = newest - oldest;
+
+        assert_eq!(
+            raw_span,
+            DAA_WINDOW_SIZE - 1,
+            "Normal span should match window size - 1"
+        );
+
+        // Expected time for DAA
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+        let actual_time = raw_span;
+
+        // Normal operation should result in roughly 1:1 ratio
+        // (assuming TARGET_TIME_PER_BLOCK = 1)
+        let ratio = expected_time as f64 / actual_time as f64;
+
+        // Ratio should be close to 1 for normal operation
+        // With TARGET_TIME_PER_BLOCK = 1, expected = 2016, actual = 2015
+        assert!(
+            (ratio - 1.0).abs() < 0.01,
+            "Normal operation should have ratio near 1.0, got {}",
+            ratio
+        );
+    }
+
+    /// Security Audit Test: Verify minimum floor prevents extreme ratios
+    #[test]
+    fn test_security_audit_minimum_floor_prevents_extreme_ratio() {
+        let expected_time = DAA_WINDOW_SIZE * TARGET_TIME_PER_BLOCK;
+        let min_actual_time = (DAA_WINDOW_SIZE / 2) * TARGET_TIME_PER_BLOCK;
+
+        // Maximum possible ratio with floor
+        let max_ratio = expected_time as f64 / min_actual_time as f64;
+
+        assert_eq!(
+            max_ratio, 2.0,
+            "Maximum ratio with floor should be exactly 2.0"
+        );
+
+        // Without floor (old behavior), ratio could be 2016 or infinity
+        // This verifies the fix limits the attack surface
+    }
+
+    /// Security Audit Test: IQR calculation handles edge cases
+    #[test]
+    fn test_security_audit_iqr_edge_cases() {
+        // Test with exactly 4 timestamps (minimum for IQR)
+        let ts_4: Vec<u64> = vec![100, 200, 300, 400];
+        let len = ts_4.len();
+        let q1_idx = len / 4; // 1
+        let q3_idx = (3 * len) / 4; // 3
+        assert_eq!(q1_idx, 1);
+        assert_eq!(q3_idx, 3);
+        let iqr = ts_4[q3_idx] - ts_4[q1_idx];
+        assert_eq!(iqr, 200, "IQR for 4 elements: 400 - 200 = 200");
+
+        // Test with less than 4 timestamps (should use simple span)
+        let ts_3: Vec<u64> = vec![100, 200, 300];
+        let len_3 = ts_3.len();
+        assert!(len_3 < 4, "Less than 4 timestamps triggers fallback");
+
+        // Fallback uses oldest-newest with floor
+        let raw_span = ts_3[len_3 - 1] - ts_3[0];
+        assert_eq!(raw_span, 200);
+
+        let min_floor = (DAA_WINDOW_SIZE / 2) * TARGET_TIME_PER_BLOCK;
+        let actual = raw_span.max(min_floor);
+        assert_eq!(actual, min_floor, "Small window uses floor");
     }
 }

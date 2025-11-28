@@ -561,25 +561,30 @@ impl TosGhostdag {
 
             // Check if blue and candidate are in each other's anticone
             // Two blocks are in each other's anticone if neither is an ancestor of the other
-            let is_in_anticone = if storage.has_reachability_data(blue).await.unwrap_or(false)
-                && storage
-                    .has_reachability_data(candidate)
-                    .await
-                    .unwrap_or(false)
-            {
-                // Use reachability data for accurate anticone check
-                !self
+            //
+            // SECURITY FIX: Require reachability data for deterministic consensus.
+            // Per audit: Using unwrap_or(false) or fallback assumptions causes non-deterministic
+            // behavior where nodes with/without reachability data produce different results.
+            // All nodes must have reachability data for consensus-critical k-cluster checks.
+            let has_blue_reachability = storage.has_reachability_data(blue).await?;
+            let has_candidate_reachability = storage.has_reachability_data(candidate).await?;
+
+            if !has_blue_reachability {
+                return Err(BlockchainError::ReachabilityDataMissing(blue.clone()));
+            }
+            if !has_candidate_reachability {
+                return Err(BlockchainError::ReachabilityDataMissing(candidate.clone()));
+            }
+
+            // Use reachability data for accurate anticone check
+            let is_in_anticone = !self
+                .reachability
+                .is_dag_ancestor_of(storage, blue, candidate)
+                .await?
+                && !self
                     .reachability
-                    .is_dag_ancestor_of(storage, blue, candidate)
-                    .await?
-                    && !self
-                        .reachability
-                        .is_dag_ancestor_of(storage, candidate, blue)
-                        .await?
-            } else {
-                // Fallback: conservative assumption (all blues in anticone)
-                true
-            };
+                    .is_dag_ancestor_of(storage, candidate, blue)
+                    .await?;
 
             if is_in_anticone {
                 // Candidate and this blue are in each other's anticone
