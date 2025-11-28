@@ -467,18 +467,17 @@ impl<S: Storage> P2pServer<S> {
             // SECURITY FIX: Only priority peers can bypass stable height check
             // Previously skip_stable_height_check could be set based on previous sync errors,
             // allowing colluding peers to cause deep rewinds
-            let mut count = if peer.is_priority()
-                || lowest_height <= self.blockchain.get_stable_blue_score()
-            {
-                let our_topoheight = self.blockchain.get_topo_height();
-                if our_topoheight > expected_common_topoheight {
-                    our_topoheight - expected_common_topoheight
+            let mut count =
+                if peer.is_priority() || lowest_height <= self.blockchain.get_stable_blue_score() {
+                    let our_topoheight = self.blockchain.get_topo_height();
+                    if our_topoheight > expected_common_topoheight {
+                        our_topoheight - expected_common_topoheight
+                    } else {
+                        expected_common_topoheight - our_topoheight
+                    }
                 } else {
-                    expected_common_topoheight - our_topoheight
-                }
-            } else {
-                0
-            };
+                    0
+                };
 
             if let Some(pruned_topo) = storage.get_pruned_topoheight().await? {
                 let available_diff = self.blockchain.get_topo_height() - pruned_topo;
@@ -519,7 +518,14 @@ impl<S: Storage> P2pServer<S> {
 
         if pop_count > 0 {
             if log::log_enabled!(log::Level::Warn) {
-                warn!("{} sent us a pop count request of {} with {} blocks (common point: {} at {})", peer, pop_count, blocks_len, common_point.get_hash(), common_topoheight);
+                warn!(
+                    "{} sent us a pop count request of {} with {} blocks (common point: {} at {})",
+                    peer,
+                    pop_count,
+                    blocks_len,
+                    common_point.get_hash(),
+                    common_topoheight
+                );
             }
         }
 

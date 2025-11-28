@@ -327,7 +327,7 @@ impl BlockHeader {
         // SECURITY FIX: Include GHOSTDAG fields (previously excluded)
         // These fields are now hash-protected to prevent peer manipulation
         bytes.extend(self.daa_score.to_le_bytes()); // 8 bytes
-        // U256::to_little_endian returns 32 bytes in little-endian format
+                                                    // U256::to_little_endian returns 32 bytes in little-endian format
         bytes.extend(self.blue_work.to_little_endian()); // 32 bytes (U256)
         bytes.extend(self.bits.to_le_bytes()); // 4 bytes
         bytes.extend(self.pruning_point.as_bytes()); // 32 bytes
