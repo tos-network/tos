@@ -19,7 +19,7 @@ pub use interval::Interval;
 pub use store::ReachabilityData;
 
 use crate::core::error::BlockchainError;
-use crate::core::storage::Storage;
+use crate::core::storage::{ReachabilityDataProvider, Storage};
 use tos_common::crypto::Hash;
 
 /// Binary search result for reachability queries
@@ -66,7 +66,7 @@ impl TosReachability {
     ///
     /// # Complexity
     /// O(1) - constant time interval check
-    pub async fn is_chain_ancestor_of<S: Storage>(
+    pub async fn is_chain_ancestor_of<S: ReachabilityDataProvider>(
         &self,
         storage: &S,
         this: &Hash,
@@ -88,7 +88,7 @@ impl TosReachability {
     ///
     /// # Complexity
     /// O(log(|future_covering_set|)) for non-chain queries
-    pub async fn is_dag_ancestor_of<S: Storage>(
+    pub async fn is_dag_ancestor_of<S: ReachabilityDataProvider>(
         &self,
         storage: &S,
         this: &Hash,
@@ -118,7 +118,7 @@ impl TosReachability {
     /// Returns either:
     /// - Found(hash, index): The hash at the index that contains the descendant
     /// - NotFound(index): The index where the descendant should be inserted
-    async fn binary_search_descendant<S: Storage>(
+    async fn binary_search_descendant<S: ReachabilityDataProvider>(
         &self,
         storage: &S,
         ordered_hashes: &[Hash],

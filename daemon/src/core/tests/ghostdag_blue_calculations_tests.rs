@@ -71,10 +71,7 @@ mod ghostdag_blue_calculations_tests {
                 .ok_or_else(|| BlockchainError::BlockNotFound(hash.clone()))
         }
 
-        async fn get_ghostdag_selected_parent(
-            &self,
-            hash: &Hash,
-        ) -> Result<Hash, BlockchainError> {
+        async fn get_ghostdag_selected_parent(&self, hash: &Hash) -> Result<Hash, BlockchainError> {
             self.ghostdag_data
                 .get(hash.as_bytes())
                 .map(|data| data.selected_parent.clone())
@@ -421,7 +418,10 @@ mod ghostdag_blue_calculations_tests {
         let work_high = calc_work_from_difficulty(&diff_high);
 
         // Higher difficulty produces higher work
-        assert!(work_high > work_low, "Higher difficulty should produce higher work");
+        assert!(
+            work_high > work_low,
+            "Higher difficulty should produce higher work"
+        );
 
         // Block A (low difficulty)
         let a_bytes = [b'A'; 32];
@@ -459,7 +459,10 @@ mod ghostdag_blue_calculations_tests {
         );
 
         // Verify B's blue_work is correct
-        let b_data = provider.get_ghostdag_data(&Hash::new(b_bytes)).await.unwrap();
+        let b_data = provider
+            .get_ghostdag_data(&Hash::new(b_bytes))
+            .await
+            .unwrap();
         assert_eq!(
             b_data.blue_work,
             work_low + work_high,
@@ -467,7 +470,10 @@ mod ghostdag_blue_calculations_tests {
         );
 
         // Verify blue_work is monotonically increasing
-        let a_data = provider.get_ghostdag_data(&Hash::new(a_bytes)).await.unwrap();
+        let a_data = provider
+            .get_ghostdag_data(&Hash::new(a_bytes))
+            .await
+            .unwrap();
         assert!(
             b_data.blue_work > a_data.blue_work,
             "Child's blue_work must be greater than parent's"
@@ -538,8 +544,14 @@ mod ghostdag_blue_calculations_tests {
         // Verify blue_work calculation matches expected formula:
         // blue_work = parent.blue_work + sum(work(mergeset_blues))
 
-        let b_data = provider.get_ghostdag_data(&Hash::new(b_bytes)).await.unwrap();
-        let a_data = provider.get_ghostdag_data(&Hash::new(a_bytes)).await.unwrap();
+        let b_data = provider
+            .get_ghostdag_data(&Hash::new(b_bytes))
+            .await
+            .unwrap();
+        let a_data = provider
+            .get_ghostdag_data(&Hash::new(a_bytes))
+            .await
+            .unwrap();
 
         // For block B:
         // mergeset_blues = [A]

@@ -1,11 +1,14 @@
 use crate::core::{
     blockchain::Blockchain,
     error::BlockchainError,
-    ghostdag::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData},
+    ghostdag::{
+        BlueWorkType, CompactGhostdagData, GhostdagStorageProvider, KType, TosGhostdagData,
+    },
     hard_fork::{get_pow_algorithm_for_version, get_version_at_height},
+    reachability::ReachabilityData,
     storage::{
         BlocksAtHeightProvider, DagOrderProvider, DifficultyProvider, GhostdagDataProvider,
-        MerkleHashProvider, PrunedTopoheightProvider, Storage,
+        MerkleHashProvider, PrunedTopoheightProvider, ReachabilityDataProvider, Storage,
     },
 };
 use async_trait::async_trait;
@@ -28,6 +31,8 @@ struct BlockData {
     topoheight: TopoHeight,
     difficulty: Difficulty,
     blue_work: BlueWorkType, // GHOSTDAG: Used for consensus chain selection
+    blue_score: u64,         // GHOSTDAG: blue_score for this block
+    ghostdag_data: Arc<TosGhostdagData>, // GHOSTDAG: Full ghostdag data for correct validation
     p: VarUint,
 }
 
@@ -235,16 +240,17 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         // but necessary for consensus correctness. The overhead is acceptable because:
         //   1. Chain sync validates blocks once, not on every query
         //   2. GHOSTDAG computation is O(k²) where k is typically small (~18)
-        //   3. Parent GHOSTDAG data is cached in storage
+        //   3. Parent GHOSTDAG data is cached in ChainValidatorProvider
         //
-        // Note: We use &*storage (underlying storage) instead of &provider because:
-        //   - The GHOSTDAG function requires the full Storage trait
-        //   - Parent blocks have already been validated and exist in storage
-        //   - ChainValidatorProvider only implements partial provider traits
+        // CONSENSUS FIX: Use &provider instead of &*storage
+        // ChainValidatorProvider now implements GhostdagStorageProvider trait, allowing
+        // GHOSTDAG to find parent blocks in the chain validator cache (not just storage).
+        // This is critical for validating chains of blocks during sync where parent
+        // blocks may not yet be in storage.
         let ghostdag_data = self
             .blockchain
             .get_ghostdag()
-            .ghostdag(&*storage, header.get_parents())
+            .ghostdag(&provider, header.get_parents())
             .await?;
 
         // Verify blue_score matches header claim
@@ -286,6 +292,8 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
                 topoheight,
                 difficulty,
                 blue_work, // GHOSTDAG: Used for consensus chain selection
+                blue_score: expected_blue_score, // GHOSTDAG: blue_score from GHOSTDAG computation
+                ghostdag_data: Arc::new(ghostdag_data), // GHOSTDAG: Full data for correct validation
                 p,
             },
         );
@@ -582,20 +590,32 @@ impl<S: Storage> MerkleHashProvider for ChainValidatorProvider<'_, S> {
 }
 
 // GHOSTDAG Data Provider implementation (TIP-2 Phase 1)
-// Delegates all GHOSTDAG operations to underlying storage
+// Checks chain validator cache first, then falls back to underlying storage
 #[async_trait]
 impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
     async fn get_ghostdag_blue_score(&self, hash: &Hash) -> Result<u64, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.blue_score);
+        }
         trace!("fallback on storage for get_ghostdag_blue_score");
         self.storage.get_ghostdag_blue_score(hash).await
     }
 
     async fn get_ghostdag_blue_work(&self, hash: &Hash) -> Result<BlueWorkType, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.blue_work);
+        }
         trace!("fallback on storage for get_ghostdag_blue_work");
         self.storage.get_ghostdag_blue_work(hash).await
     }
 
     async fn get_ghostdag_selected_parent(&self, hash: &Hash) -> Result<Hash, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.ghostdag_data.selected_parent.clone());
+        }
         trace!("fallback on storage for get_ghostdag_selected_parent");
         self.storage.get_ghostdag_selected_parent(hash).await
     }
@@ -604,6 +624,10 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.ghostdag_data.mergeset_blues.clone());
+        }
         trace!("fallback on storage for get_ghostdag_mergeset_blues");
         self.storage.get_ghostdag_mergeset_blues(hash).await
     }
@@ -612,6 +636,10 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.ghostdag_data.mergeset_reds.clone());
+        }
         trace!("fallback on storage for get_ghostdag_mergeset_reds");
         self.storage.get_ghostdag_mergeset_reds(hash).await
     }
@@ -620,6 +648,10 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<Arc<std::collections::HashMap<Hash, KType>>, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.ghostdag_data.blues_anticone_sizes.clone());
+        }
         trace!("fallback on storage for get_ghostdag_blues_anticone_sizes");
         self.storage.get_ghostdag_blues_anticone_sizes(hash).await
     }
@@ -628,6 +660,10 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<Arc<TosGhostdagData>, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.ghostdag_data.clone());
+        }
         trace!("fallback on storage for get_ghostdag_data");
         self.storage.get_ghostdag_data(hash).await
     }
@@ -636,11 +672,23 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<CompactGhostdagData, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(CompactGhostdagData {
+                blue_score: data.blue_score,
+                blue_work: data.blue_work,
+                selected_parent: data.ghostdag_data.selected_parent.clone(),
+            });
+        }
         trace!("fallback on storage for get_ghostdag_compact_data");
         self.storage.get_ghostdag_compact_data(hash).await
     }
 
     async fn has_ghostdag_data(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        // Check cache first
+        if self.parent.blocks.contains_key(hash) {
+            return Ok(true);
+        }
         trace!("fallback on storage for has_ghostdag_data");
         self.storage.has_ghostdag_data(hash).await
     }
@@ -655,5 +703,58 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
 
     async fn delete_ghostdag_data(&mut self, _: &Hash) -> Result<(), BlockchainError> {
         Err(BlockchainError::UnsupportedOperation)
+    }
+}
+
+// Reachability Data Provider implementation for GHOSTDAG
+// ChainValidator doesn't store reachability data, so we always fall back to storage
+#[async_trait]
+impl<S: Storage> ReachabilityDataProvider for ChainValidatorProvider<'_, S> {
+    async fn get_reachability_data(
+        &self,
+        hash: &Hash,
+    ) -> Result<ReachabilityData, BlockchainError> {
+        trace!("fallback on storage for get_reachability_data");
+        self.storage.get_reachability_data(hash).await
+    }
+
+    async fn has_reachability_data(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        trace!("fallback on storage for has_reachability_data");
+        self.storage.has_reachability_data(hash).await
+    }
+
+    async fn set_reachability_data(
+        &mut self,
+        _: &Hash,
+        _: &ReachabilityData,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::UnsupportedOperation)
+    }
+
+    async fn delete_reachability_data(&mut self, _: &Hash) -> Result<(), BlockchainError> {
+        Err(BlockchainError::UnsupportedOperation)
+    }
+
+    async fn get_reindex_root(&self) -> Result<Hash, BlockchainError> {
+        trace!("fallback on storage for get_reindex_root");
+        self.storage.get_reindex_root().await
+    }
+
+    async fn set_reindex_root(&mut self, _: Hash) -> Result<(), BlockchainError> {
+        Err(BlockchainError::UnsupportedOperation)
+    }
+}
+
+// GhostdagStorageProvider implementation
+// This allows GHOSTDAG algorithm to use ChainValidatorProvider as storage
+// Required for correct chain validation during sync
+//
+// NOTE: get_block_header_by_hash is provided via DifficultyProvider supertrait
+// (implemented above for ChainValidatorProvider)
+#[async_trait]
+impl<S: Storage> GhostdagStorageProvider for ChainValidatorProvider<'_, S> {
+    async fn has_block_with_hash(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        // Check cache first, then storage
+        Ok(self.parent.blocks.contains_key(hash) || self.storage.has_block_with_hash(hash).await?)
     }
 }
