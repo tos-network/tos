@@ -27,7 +27,49 @@ use tos_common::difficulty::Difficulty;
 
 use crate::core::error::BlockchainError;
 use crate::core::reachability::TosReachability;
-use crate::core::storage::Storage;
+use crate::core::storage::{
+    DifficultyProvider, GhostdagDataProvider, ReachabilityDataProvider, Storage,
+};
+use async_trait::async_trait;
+
+/// Trait combining the minimal storage requirements for GHOSTDAG algorithm.
+///
+/// This trait is intentionally minimal to allow lightweight views (e.g. chain validators)
+/// to re-use the full GHOSTDAG algorithm without depending on the full Storage API.
+/// This ensures that chain sync validation uses exactly the same GHOSTDAG computation
+/// as the consensus layer, avoiding any divergence in blue_score/blue_work calculations.
+///
+/// # Supertraits
+/// - `DifficultyProvider`: Provides `get_block_header_by_hash` for difficulty/bits access
+/// - `GhostdagDataProvider`: Provides access to cached GHOSTDAG data
+/// - `ReachabilityDataProvider`: Provides DAG reachability queries
+///
+/// # Example
+/// ```ignore
+/// // Full storage implements this automatically via blanket impl
+/// let storage: &dyn Storage = ...;
+/// ghostdag.ghostdag(storage, parents).await?;
+///
+/// // Lightweight provider (e.g. ChainValidatorProvider) can also be used
+/// let provider: &dyn GhostdagStorageProvider = ...;
+/// ghostdag.ghostdag(provider, parents).await?;
+/// ```
+#[async_trait]
+pub trait GhostdagStorageProvider:
+    DifficultyProvider + GhostdagDataProvider + ReachabilityDataProvider + Sync + Send
+{
+    /// Check if a block exists in storage
+    async fn has_block_with_hash(&self, hash: &Hash) -> Result<bool, BlockchainError>;
+}
+
+/// Blanket implementation for all types that implement Storage
+#[async_trait]
+impl<T: Storage> GhostdagStorageProvider for T {
+    async fn has_block_with_hash(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        use crate::core::storage::BlockProvider;
+        BlockProvider::has_block_with_hash(self, hash).await
+    }
+}
 
 /// Calculate work from difficulty
 ///
@@ -194,7 +236,7 @@ impl TosGhostdag {
     ///
     /// # Returns
     /// Hash of the selected parent (the one with highest blue_work)
-    pub async fn find_selected_parent<S: Storage>(
+    pub async fn find_selected_parent<S: GhostdagStorageProvider>(
         &self,
         storage: &S,
         parents: impl IntoIterator<Item = Hash>,
@@ -250,7 +292,7 @@ impl TosGhostdag {
     /// 6. Calculate blue_work = parent.blue_work + sum(work of blues in mergeset)
     ///
     /// See: https://eprint.iacr.org/2018/104.pdf
-    pub async fn ghostdag<S: Storage>(
+    pub async fn ghostdag<S: GhostdagStorageProvider>(
         &self,
         storage: &S,
         parents: &[Hash],
@@ -263,7 +305,7 @@ impl TosGhostdag {
         // SECURITY FIX V-05: Validate all parents exist before processing
         for parent_hash in parents.iter() {
             // Check if parent block exists in storage
-            if !storage.has_block_with_hash(parent_hash).await? {
+            if !GhostdagStorageProvider::has_block_with_hash(storage, parent_hash).await? {
                 return Err(BlockchainError::ParentNotFound(parent_hash.clone()));
             }
         }
@@ -354,7 +396,7 @@ impl TosGhostdag {
     }
 
     /// Sort blocks by blue work (topological order)
-    async fn sort_blocks<S: Storage>(
+    async fn sort_blocks<S: GhostdagStorageProvider>(
         &self,
         storage: &S,
         blocks: Vec<Hash>,
@@ -375,7 +417,7 @@ impl TosGhostdag {
     ///
     /// Phase 2 complete implementation: Uses BFS with reachability service to accurately
     /// determine which blocks are in the past of the selected parent.
-    async fn ordered_mergeset_without_selected_parent<S: Storage>(
+    async fn ordered_mergeset_without_selected_parent<S: GhostdagStorageProvider>(
         &self,
         storage: &S,
         selected_parent: Hash,
@@ -454,7 +496,7 @@ impl TosGhostdag {
     /// Expects `block` to be in the blue set of `context`.
     ///
     /// Walks the selected parent chain until finding the block in blues_anticone_sizes map.
-    async fn blue_anticone_size<S: Storage>(
+    async fn blue_anticone_size<S: GhostdagStorageProvider>(
         &self,
         storage: &S,
         block: &Hash,
@@ -491,7 +533,7 @@ impl TosGhostdag {
     /// Where anticone(B, S) = blocks in S that are neither ancestors nor descendants of B
     ///
     /// Returns: (is_blue, blue_anticone_size, blues_anticone_sizes_map)
-    async fn check_blue_candidate<S: Storage>(
+    async fn check_blue_candidate<S: GhostdagStorageProvider>(
         &self,
         storage: &S,
         new_block_data: &TosGhostdagData,

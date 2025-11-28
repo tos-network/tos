@@ -30,3 +30,6 @@ mod ghostdag_json_tests;
 
 #[cfg(test)]
 mod bps_integration_tests;
+
+#[cfg(test)]
+mod ghostdag_blue_calculations_tests;

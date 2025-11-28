@@ -1,12 +1,14 @@
 use crate::core::{
     blockchain::Blockchain,
-    blockdag,
     error::BlockchainError,
-    ghostdag::{self, BlueWorkType, CompactGhostdagData, KType, TosGhostdagData},
+    ghostdag::{
+        BlueWorkType, CompactGhostdagData, GhostdagStorageProvider, KType, TosGhostdagData,
+    },
     hard_fork::{get_pow_algorithm_for_version, get_version_at_height},
+    reachability::ReachabilityData,
     storage::{
         BlocksAtHeightProvider, DagOrderProvider, DifficultyProvider, GhostdagDataProvider,
-        MerkleHashProvider, PrunedTopoheightProvider, Storage,
+        MerkleHashProvider, PrunedTopoheightProvider, ReachabilityDataProvider, Storage,
     },
 };
 use async_trait::async_trait;
@@ -29,12 +31,30 @@ struct BlockData {
     topoheight: TopoHeight,
     difficulty: Difficulty,
     blue_work: BlueWorkType, // GHOSTDAG: Used for consensus chain selection
+    blue_score: u64,         // GHOSTDAG: blue_score for this block
+    ghostdag_data: Arc<TosGhostdagData>, // GHOSTDAG: Full ghostdag data for correct validation
     p: VarUint,
 }
 
-// Chain validator is used to validate the blocks received from the network
-// We store the blocks in topological order and we verify the proof of work validity
-// This is doing only minimal checks and valid chain order based on topoheight and difficulty
+/// Chain validator for validating blocks received from network peers during sync.
+///
+/// # GHOSTDAG Consensus Design
+///
+/// The chain validator does NOT maintain its own notion of blue_score/blue_work.
+/// It always derives them from the canonical GHOSTDAG implementation to avoid
+/// divergence from the consensus layer. This is critical for consensus safety:
+///
+/// - `blue_score` and `blue_work` are computed using `blockchain.get_ghostdag().ghostdag()`
+/// - The `ChainValidatorProvider` implements `GhostdagStorageProvider` to allow GHOSTDAG
+///   to access blocks that are in the validation cache but not yet committed to storage
+/// - Header claims for `blue_score` and `blue_work` are verified against GHOSTDAG output
+/// - Chain selection uses GHOSTDAG `blue_work` (not legacy cumulative difficulty)
+///
+/// # Storage Access
+///
+/// During validation, parent blocks may not yet be in persistent storage (they're in
+/// `self.blocks` cache). The `ChainValidatorProvider` wrapper handles this by checking
+/// the in-memory cache first before falling back to storage.
 pub struct ChainValidator<'a, S: Storage> {
     // store all blocks data in topological order
     blocks: HashMap<Arc<Hash>, BlockData>,
@@ -163,24 +183,6 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             return Err(BlockchainError::InvalidBlockVersion);
         }
 
-        // GHOSTDAG: Verify the block blue_score by tips
-        let blue_score_at_tips =
-            blockdag::calculate_blue_score_at_tips(&provider, header.get_parents().iter()).await?;
-        if blue_score_at_tips != header.get_blue_score() {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Block {} has blue_score {} while expected blue_score is {}",
-                    hash,
-                    header.get_blue_score(),
-                    blue_score_at_tips
-                );
-            }
-            return Err(BlockchainError::InvalidBlockHeight(
-                blue_score_at_tips,
-                header.get_blue_score(),
-            ));
-        }
-
         let tips = header.get_parents();
         let tips_count = tips.len();
 
@@ -213,27 +215,6 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             }
         }
 
-        // GHOSTDAG: Verify the block blue_score by tips
-        {
-            let blue_score_by_tips =
-                blockdag::calculate_blue_score_at_tips(&provider, header.get_parents().iter())
-                    .await?;
-            if blue_score_by_tips != header.get_blue_score() {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Block {} has blue_score {} while expected blue_score is {}",
-                        hash,
-                        header.get_blue_score(),
-                        blue_score_by_tips
-                    );
-                }
-                return Err(BlockchainError::InvalidBlockHeight(
-                    blue_score_by_tips,
-                    header.get_blue_score(),
-                ));
-            }
-        }
-
         let algorithm = get_pow_algorithm_for_version(version);
         let pow_hash = header.get_pow_hash(algorithm)?;
         if log::log_enabled!(log::Level::Trace) {
@@ -260,22 +241,53 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             );
         }
 
-        // GHOSTDAG: Calculate blue_work for consensus chain selection
-        // blue_work = max(parent.blue_work) + difficulty of this block
-        // This is the correct metric for DAG chain selection
-        let blue_work = {
-            let mut max_parent_blue_work = BlueWorkType::zero();
-            for parent_hash in header.get_parents().iter() {
-                let parent_blue_work = provider.get_ghostdag_blue_work(parent_hash).await?;
-                if parent_blue_work > max_parent_blue_work {
-                    max_parent_blue_work = parent_blue_work;
-                }
+        // GHOSTDAG: Compute full GHOSTDAG data for correct blue_score and blue_work validation
+        //
+        // CONSENSUS FIX: Use full GHOSTDAG algorithm instead of simplified formulas
+        // The correct formulas from daemon/src/core/ghostdag/mod.rs:301-328:
+        //   blue_score = parent.blue_score + mergeset_blues.len()
+        //   blue_work = parent.blue_work + Σ(work(mergeset_blues))
+        //
+        // This ensures chain_validator uses the SAME calculation as consensus layer,
+        // preventing incorrect chain selection during sync (could reject valid heavier chains
+        // or accept lighter chains as heavier).
+        //
+        // Performance note: Full GHOSTDAG is more expensive than simplified formula,
+        // but necessary for consensus correctness. The overhead is acceptable because:
+        //   1. Chain sync validates blocks once, not on every query
+        //   2. GHOSTDAG computation is O(k²) where k is typically small (~18)
+        //   3. Parent GHOSTDAG data is cached in ChainValidatorProvider
+        //
+        // CONSENSUS FIX: Use &provider instead of &*storage
+        // ChainValidatorProvider now implements GhostdagStorageProvider trait, allowing
+        // GHOSTDAG to find parent blocks in the chain validator cache (not just storage).
+        // This is critical for validating chains of blocks during sync where parent
+        // blocks may not yet be in storage.
+        let ghostdag_data = self
+            .blockchain
+            .get_ghostdag()
+            .ghostdag(&provider, header.get_parents())
+            .await?;
+
+        // Verify blue_score matches header claim
+        let expected_blue_score = ghostdag_data.blue_score;
+        if expected_blue_score != header.get_blue_score() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has blue_score {} while expected blue_score is {} (GHOSTDAG)",
+                    hash,
+                    header.get_blue_score(),
+                    expected_blue_score
+                );
             }
-            // Add this block's difficulty (converted to work) to the max parent blue_work
-            // Use the GHOSTDAG calc_work_from_difficulty function to properly convert
-            let block_work = ghostdag::calc_work_from_difficulty(&difficulty);
-            max_parent_blue_work + block_work
-        };
+            return Err(BlockchainError::InvalidBlockHeight(
+                expected_blue_score,
+                header.get_blue_score(),
+            ));
+        }
+
+        // Use GHOSTDAG-computed blue_work for chain comparison
+        let blue_work = ghostdag_data.blue_work;
 
         if log::log_enabled!(log::Level::Debug) {
             debug!("Block {} - blue_work: {}", hash, blue_work);
@@ -296,6 +308,8 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
                 topoheight,
                 difficulty,
                 blue_work, // GHOSTDAG: Used for consensus chain selection
+                blue_score: expected_blue_score, // GHOSTDAG: blue_score from GHOSTDAG computation
+                ghostdag_data: Arc::new(ghostdag_data), // GHOSTDAG: Full data for correct validation
                 p,
             },
         );
@@ -592,20 +606,32 @@ impl<S: Storage> MerkleHashProvider for ChainValidatorProvider<'_, S> {
 }
 
 // GHOSTDAG Data Provider implementation (TIP-2 Phase 1)
-// Delegates all GHOSTDAG operations to underlying storage
+// Checks chain validator cache first, then falls back to underlying storage
 #[async_trait]
 impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
     async fn get_ghostdag_blue_score(&self, hash: &Hash) -> Result<u64, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.blue_score);
+        }
         trace!("fallback on storage for get_ghostdag_blue_score");
         self.storage.get_ghostdag_blue_score(hash).await
     }
 
     async fn get_ghostdag_blue_work(&self, hash: &Hash) -> Result<BlueWorkType, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.blue_work);
+        }
         trace!("fallback on storage for get_ghostdag_blue_work");
         self.storage.get_ghostdag_blue_work(hash).await
     }
 
     async fn get_ghostdag_selected_parent(&self, hash: &Hash) -> Result<Hash, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.ghostdag_data.selected_parent.clone());
+        }
         trace!("fallback on storage for get_ghostdag_selected_parent");
         self.storage.get_ghostdag_selected_parent(hash).await
     }
@@ -614,6 +640,10 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.ghostdag_data.mergeset_blues.clone());
+        }
         trace!("fallback on storage for get_ghostdag_mergeset_blues");
         self.storage.get_ghostdag_mergeset_blues(hash).await
     }
@@ -622,6 +652,10 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<Arc<Vec<Hash>>, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.ghostdag_data.mergeset_reds.clone());
+        }
         trace!("fallback on storage for get_ghostdag_mergeset_reds");
         self.storage.get_ghostdag_mergeset_reds(hash).await
     }
@@ -630,6 +664,10 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<Arc<std::collections::HashMap<Hash, KType>>, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.ghostdag_data.blues_anticone_sizes.clone());
+        }
         trace!("fallback on storage for get_ghostdag_blues_anticone_sizes");
         self.storage.get_ghostdag_blues_anticone_sizes(hash).await
     }
@@ -638,6 +676,10 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<Arc<TosGhostdagData>, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(data.ghostdag_data.clone());
+        }
         trace!("fallback on storage for get_ghostdag_data");
         self.storage.get_ghostdag_data(hash).await
     }
@@ -646,11 +688,23 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<CompactGhostdagData, BlockchainError> {
+        // Check cache first
+        if let Some(data) = self.parent.blocks.get(hash) {
+            return Ok(CompactGhostdagData {
+                blue_score: data.blue_score,
+                blue_work: data.blue_work,
+                selected_parent: data.ghostdag_data.selected_parent.clone(),
+            });
+        }
         trace!("fallback on storage for get_ghostdag_compact_data");
         self.storage.get_ghostdag_compact_data(hash).await
     }
 
     async fn has_ghostdag_data(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        // Check cache first
+        if self.parent.blocks.contains_key(hash) {
+            return Ok(true);
+        }
         trace!("fallback on storage for has_ghostdag_data");
         self.storage.has_ghostdag_data(hash).await
     }
@@ -665,5 +719,58 @@ impl<S: Storage> GhostdagDataProvider for ChainValidatorProvider<'_, S> {
 
     async fn delete_ghostdag_data(&mut self, _: &Hash) -> Result<(), BlockchainError> {
         Err(BlockchainError::UnsupportedOperation)
+    }
+}
+
+// Reachability Data Provider implementation for GHOSTDAG
+// ChainValidator doesn't store reachability data, so we always fall back to storage
+#[async_trait]
+impl<S: Storage> ReachabilityDataProvider for ChainValidatorProvider<'_, S> {
+    async fn get_reachability_data(
+        &self,
+        hash: &Hash,
+    ) -> Result<ReachabilityData, BlockchainError> {
+        trace!("fallback on storage for get_reachability_data");
+        self.storage.get_reachability_data(hash).await
+    }
+
+    async fn has_reachability_data(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        trace!("fallback on storage for has_reachability_data");
+        self.storage.has_reachability_data(hash).await
+    }
+
+    async fn set_reachability_data(
+        &mut self,
+        _: &Hash,
+        _: &ReachabilityData,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::UnsupportedOperation)
+    }
+
+    async fn delete_reachability_data(&mut self, _: &Hash) -> Result<(), BlockchainError> {
+        Err(BlockchainError::UnsupportedOperation)
+    }
+
+    async fn get_reindex_root(&self) -> Result<Hash, BlockchainError> {
+        trace!("fallback on storage for get_reindex_root");
+        self.storage.get_reindex_root().await
+    }
+
+    async fn set_reindex_root(&mut self, _: Hash) -> Result<(), BlockchainError> {
+        Err(BlockchainError::UnsupportedOperation)
+    }
+}
+
+// GhostdagStorageProvider implementation
+// This allows GHOSTDAG algorithm to use ChainValidatorProvider as storage
+// Required for correct chain validation during sync
+//
+// NOTE: get_block_header_by_hash is provided via DifficultyProvider supertrait
+// (implemented above for ChainValidatorProvider)
+#[async_trait]
+impl<S: Storage> GhostdagStorageProvider for ChainValidatorProvider<'_, S> {
+    async fn has_block_with_hash(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        // Check cache first, then storage
+        Ok(self.parent.blocks.contains_key(hash) || self.storage.has_block_with_hash(hash).await?)
     }
 }

@@ -204,95 +204,7 @@ mod ghostdag_consensus_tests {
         );
     }
 
-    // Test 5: calculate_blue_score_at_tips - Basic case
-    #[tokio::test]
-    async fn test_calculate_blue_score_at_tips_basic() {
-        let mut provider = SimpleMockProvider::new();
-
-        let tip1_bytes = [1u8; 32];
-        let tip2_bytes = [2u8; 32];
-        let tip1 = Hash::new(tip1_bytes);
-        let tip2 = Hash::new(tip2_bytes);
-
-        // tip1 has blue_score = 100
-        provider.set_blue_score(tip1_bytes, 100);
-        // tip2 has blue_score = 150 (higher)
-        provider.set_blue_score(tip2_bytes, 150);
-
-        let tips = vec![tip1, tip2];
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
-            .await
-            .unwrap();
-
-        // GHOSTDAG: blue_score = max(tips) + tips.len() = max(100, 150) + 2 = 152
-        assert_eq!(
-            blue_score, 152,
-            "Blue score should be max + tips count (merging 2 tips)"
-        );
-    }
-
-    // Test 6: calculate_blue_score_at_tips - Single tip
-    #[tokio::test]
-    async fn test_calculate_blue_score_at_tips_single() {
-        let mut provider = SimpleMockProvider::new();
-
-        let tip_bytes = [1u8; 32];
-        let tip = Hash::new(tip_bytes);
-        provider.set_blue_score(tip_bytes, 100);
-
-        let tips = vec![tip];
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
-            .await
-            .unwrap();
-
-        // Expected: 100 + 1 = 101
-        assert_eq!(blue_score, 101, "Blue score should be tip + 1");
-    }
-
-    // Test 7: calculate_blue_score_at_tips - Empty tips (genesis)
-    #[tokio::test]
-    async fn test_calculate_blue_score_at_tips_empty() {
-        let provider = SimpleMockProvider::new();
-
-        let tips: Vec<Hash> = vec![];
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
-            .await
-            .unwrap();
-
-        // Expected: 0 (genesis case)
-        assert_eq!(blue_score, 0, "Empty tips should return 0");
-    }
-
-    // Test 8: calculate_blue_score_at_tips - All tips same blue_score
-    #[tokio::test]
-    async fn test_calculate_blue_score_at_tips_same_score() {
-        let mut provider = SimpleMockProvider::new();
-
-        let tip1_bytes = [1u8; 32];
-        let tip2_bytes = [2u8; 32];
-        let tip3_bytes = [3u8; 32];
-        let tip1 = Hash::new(tip1_bytes);
-        let tip2 = Hash::new(tip2_bytes);
-        let tip3 = Hash::new(tip3_bytes);
-
-        // All have same blue_score
-        provider.set_blue_score(tip1_bytes, 100);
-        provider.set_blue_score(tip2_bytes, 100);
-        provider.set_blue_score(tip3_bytes, 100);
-
-        let tips = vec![tip1, tip2, tip3];
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
-            .await
-            .unwrap();
-
-        // GHOSTDAG: blue_score = max(tips) + tips.len() = 100 + 3 = 103
-        assert_eq!(
-            blue_score, 103,
-            "Should handle same blue_score correctly (merging 3 tips)"
-        );
-    }
-
-    // Test 9: Sorting by blue_work
+    // Test 5: Sorting by blue_work
     #[tokio::test]
     async fn test_sort_by_blue_work() {
         let hash1 = Hash::new([1u8; 32]);
@@ -348,7 +260,7 @@ mod ghostdag_consensus_tests {
         provider.set_blue_work(block3_bytes, BlueWorkType::from(3000u64));
         provider.set_blue_score(block3_bytes, 2);
 
-        // Test 1: Find best tip
+        // Find best tip by blue_work
         let tips = vec![block2, block3];
         let best_tip = blockdag::find_best_tip_by_blue_work(&provider, tips.iter())
             .await
@@ -356,16 +268,6 @@ mod ghostdag_consensus_tests {
         assert_eq!(
             *best_tip, block2_expected,
             "Block2 should be selected (highest blue_work)"
-        );
-
-        // Test 2: Calculate blue score for next block
-        // GHOSTDAG: blue_score = max(tips) + tips.len() = max(2,2) + 2 = 4
-        let next_blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
-            .await
-            .unwrap();
-        assert_eq!(
-            next_blue_score, 4,
-            "Next block should have blue_score = 4 (merging 2 tips)"
         );
     }
 
@@ -415,16 +317,6 @@ mod ghostdag_consensus_tests {
             *best_tip, expected_hash,
             "Should handle many tips efficiently"
         );
-
-        // Calculate blue score should also work
-        // GHOSTDAG: blue_score = max(tips) + tips.len() = 49 + 50 = 99
-        let blue_score = blockdag::calculate_blue_score_at_tips(&provider, tips.iter())
-            .await
-            .unwrap();
-        assert_eq!(
-            blue_score, 99,
-            "Should calculate correctly for many tips (merging 50 tips)"
-        );
     }
 
     #[test]
@@ -434,7 +326,7 @@ mod ghostdag_consensus_tests {
         println!();
         println!("Test Coverage:");
         println!("  [OK] find_best_tip_by_blue_work - All scenarios");
-        println!("  [OK] calculate_blue_score_at_tips - All scenarios");
+        println!("  [OK] sort_ascending_by_blue_work");
         println!("  [OK] Edge cases (empty, single, many tips)");
         println!("  [OK] Error handling (unknown blocks)");
         println!("  [OK] Stress test (50 tips)");

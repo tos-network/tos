@@ -1784,6 +1784,9 @@ impl<S: Storage> Blockchain<S> {
         trace!("get difficulty at tips");
 
         // GHOSTDAG: Get the blue_score at the tips
+        // NOTE: This is used for difficulty calculation in template generation
+        // The actual block validation uses proper GHOSTDAG calculation (see line ~3083)
+        #[allow(deprecated)]
         let blue_score =
             blockdag::calculate_blue_score_at_tips(provider, tips.clone().into_iter()).await?;
 
@@ -1911,6 +1914,12 @@ impl<S: Storage> Blockchain<S> {
     // Returns the storage used for blockchain
     pub fn get_storage(&self) -> &RwLock<S> {
         &self.storage
+    }
+
+    // Returns the GHOSTDAG consensus manager
+    // Used for computing blue_score and blue_work during chain sync validation
+    pub fn get_ghostdag(&self) -> &Arc<TosGhostdag> {
+        &self.ghostdag
     }
 
     // Returns the blockchain mempool used
@@ -3044,9 +3053,16 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        // GHOSTDAG: Use blue_score calculation instead of legacy height
-        // This is the correct way to validate block blue_score in a DAG with multiple parents
-        // DEBUG: Log parent details for validation
+        // GHOSTDAG: Validate blue_score using full GHOSTDAG algorithm
+        // CRITICAL CONSENSUS FIX: We must compute the full GHOSTDAG data to get the correct blue_score
+        // The blue_score is calculated as: max(parent.blue_score) + mergeset_blues.len()
+        // NOT max(parent.blue_score) + parents.len() (which was the old incorrect formula)
+        //
+        // This is because in GHOSTDAG, some parents may be colored RED (not blue), and only
+        // the BLUE blocks in the mergeset contribute to the blue_score increment.
+        //
+        // See daemon/src/core/ghostdag/mod.rs:301-308 for the correct implementation:
+        // blue_score = parent_data.blue_score + new_block_data.mergeset_blues.len()
         if log::log_enabled!(log::Level::Debug) {
             debug!(
                 "Validation: block {} has {} parents, claims blue_score={}",
@@ -3071,18 +3087,29 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        let block_blue_score_by_tips =
-            blockdag::calculate_blue_score_at_tips(&*storage, block.get_parents().iter()).await?;
-        if block_blue_score_by_tips != block.get_blue_score() {
+        // Compute full GHOSTDAG data to get the correct blue_score
+        // This accounts for blue/red coloring and gives us the accurate mergeset_blues count
+        let ghostdag_data = self
+            .ghostdag
+            .ghostdag(&*storage, block.get_parents())
+            .await?;
+
+        let expected_blue_score = ghostdag_data.blue_score;
+
+        if expected_blue_score != block.get_blue_score() {
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Invalid block blue_score {}, expected {} for this block {} (GHOSTDAG validation)",
-                   block.get_blue_score(), block_blue_score_by_tips, block_hash);
+                debug!(
+                    "Invalid block blue_score: actual={}, ghostdag_expected={} for block {} (GHOSTDAG validation)",
+                    block.get_blue_score(), expected_blue_score, block_hash
+                );
             }
             return Err(BlockchainError::InvalidBlockHeight(
-                block_blue_score_by_tips,
+                expected_blue_score,
                 block.get_blue_score(),
             ));
         }
+
+        let block_blue_score_by_tips = expected_blue_score;
 
         let stable_height = self.get_stable_blue_score();
         if tips_count > 0 {

@@ -6,7 +6,7 @@ use tos_common::crypto::Hash;
 use tos_common::difficulty::Difficulty;
 
 use crate::core::error::BlockchainError;
-use crate::core::storage::Storage;
+use crate::core::ghostdag::GhostdagStorageProvider;
 
 /// DAA window size - number of blocks to consider for difficulty adjustment
 pub const DAA_WINDOW_SIZE: u64 = 2016;
@@ -46,7 +46,7 @@ pub const MAX_DIFFICULTY_RATIO: f64 = 4.0;
 /// 3. For each blue in mergeset, check if it's within the DAA window
 /// 4. Count blues within window, collect blues outside window
 /// 5. daa_score = parent_daa_score + count_of_blues_in_window
-pub async fn calculate_daa_score<S: Storage>(
+pub async fn calculate_daa_score<S: GhostdagStorageProvider>(
     storage: &S,
     selected_parent: &Hash,
     mergeset_blues: &[Hash],
@@ -112,7 +112,7 @@ pub async fn calculate_daa_score<S: Storage>(
 ///
 /// # Returns
 /// Set of block hashes that are within the DAA window
-async fn find_daa_window_blocks<S: Storage>(
+async fn find_daa_window_blocks<S: GhostdagStorageProvider>(
     storage: &S,
     start_block: &Hash,
     window_boundary_score: u64,
@@ -175,7 +175,7 @@ async fn find_daa_window_blocks<S: Storage>(
 /// 5. Adjust difficulty:
 ///    new_difficulty = old_difficulty * (expected_time / actual_time)
 /// 6. Clamp adjustment to [MIN_RATIO, MAX_RATIO] to prevent extreme changes
-pub async fn calculate_target_difficulty<S: Storage>(
+pub async fn calculate_target_difficulty<S: GhostdagStorageProvider>(
     storage: &S,
     selected_parent: &Hash,
     daa_score: u64,
@@ -262,7 +262,7 @@ pub async fn calculate_target_difficulty<S: Storage>(
 ///
 /// # Returns
 /// Hash of a block with the target DAA score
-async fn find_block_at_daa_score<S: Storage>(
+async fn find_block_at_daa_score<S: GhostdagStorageProvider>(
     storage: &S,
     start_block: &Hash,
     target_score: u64,
