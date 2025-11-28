@@ -1,3 +1,7 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::useless_vec)]
 // File: testing-framework/tests/erc20_scenario_test.rs
 //
 // ERC20 End-to-End Scenario Tests

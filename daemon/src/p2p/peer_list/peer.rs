@@ -369,8 +369,24 @@ impl Peer {
         self.connection.is_out()
     }
 
-    // Get the priority flag of the peer
-    // If the peer is a seed node or added manually by the user, it should be trusted
+    /// Get the priority flag of the peer.
+    ///
+    /// # Security Note
+    ///
+    /// Priority peers are trusted by **local configuration only** (seed nodes or manually
+    /// added by the operator). Only priority peers can trigger deep rewinds below the
+    /// stable height during chain sync.
+    ///
+    /// **WARNING**: Do NOT promote arbitrary remote peers to priority based on their
+    /// sync behavior or any other dynamic metric. This could be exploited by attackers
+    /// to gain elevated privileges and trigger unwanted chain reorganizations.
+    ///
+    /// The priority flag should only be set:
+    /// - For seed nodes defined in the network configuration
+    /// - For peers explicitly added by the node operator via CLI/config
+    ///
+    /// TODO: Consider adding metrics `deep_rewind_triggered_total{reason="priority_peer"}`
+    /// to monitor when priority peers trigger deep rewinds.
     pub fn is_priority(&self) -> bool {
         self.priority
     }

@@ -328,6 +328,7 @@ pub use clock::{Clock, PausedClock, SystemClock};
 pub use rng::TestRng;
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use tokio::time::Duration;

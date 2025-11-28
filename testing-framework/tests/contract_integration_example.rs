@@ -1,3 +1,7 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::useless_vec)]
 // File: testing-framework/tests/contract_integration_example.rs
 //
 // Example Contract Integration Test

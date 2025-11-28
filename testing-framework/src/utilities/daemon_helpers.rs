@@ -5,6 +5,10 @@
 // Migrated from deprecated testing-integration package.
 // These helpers provide RocksDB storage utilities specifically for daemon integration tests.
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -219,12 +223,14 @@ mod tests {
         serializer::{Reader, Serializer},
     };
 
+    #[allow(clippy::expect_used)]
     fn create_test_pubkey(seed: u8) -> CompressedPublicKey {
         let data = [seed; 32];
         let mut reader = Reader::new(&data);
         CompressedPublicKey::read(&mut reader).expect("Failed to create test pubkey")
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_create_rocksdb_storage() {
         let storage = create_test_rocksdb_storage().await;
@@ -235,6 +241,7 @@ mod tests {
         assert_eq!(asset.get().get_decimals(), COIN_DECIMALS);
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_setup_account_rocksdb() {
         let storage = create_test_rocksdb_storage().await;
@@ -255,6 +262,7 @@ mod tests {
         assert_eq!(nonce.get_nonce(), 5);
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_create_test_storage_with_funded_accounts() {
         // Create storage with 5 funded accounts
@@ -286,6 +294,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::unwrap_used, clippy::assertions_on_constants)]
     #[tokio::test]
     async fn test_rocksdb_no_deadlock_immediate_use() {
         // This test verifies RocksDB can be used immediately without delays

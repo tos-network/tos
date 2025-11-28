@@ -6,6 +6,10 @@
 // All temporary directories are automatically cleaned up when dropped,
 // preventing test pollution and disk space leaks.
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -178,6 +182,7 @@ mod tests {
     use super::*;
     use std::fs;
 
+    #[allow(clippy::unwrap_used)]
     #[test]
     fn test_temp_rocksdb_creation() {
         let temp_db = create_temp_rocksdb().unwrap();
@@ -193,6 +198,7 @@ mod tests {
         assert!(test_file.exists());
     }
 
+    #[allow(clippy::unwrap_used)]
     #[test]
     fn test_temp_rocksdb_cleanup() {
         let path_clone;
@@ -210,6 +216,7 @@ mod tests {
         assert!(!path_clone.exists());
     }
 
+    #[allow(clippy::unwrap_used)]
     #[test]
     fn test_temp_rocksdb_path_methods() {
         let temp_db = create_temp_rocksdb().unwrap();
@@ -223,6 +230,7 @@ mod tests {
         assert_eq!(path_ref, path_buf.as_path());
     }
 
+    #[allow(clippy::unwrap_used)]
     #[test]
     fn test_multiple_temp_rocksdb_instances() {
         let temp_db1 = create_temp_rocksdb().unwrap();
@@ -240,6 +248,7 @@ mod tests {
         assert!(temp_db3.path().exists());
     }
 
+    #[allow(clippy::unwrap_used)]
     #[test]
     fn test_create_temp_dir() {
         let temp_dir = create_temp_dir("test_custom_").unwrap();
@@ -254,6 +263,7 @@ mod tests {
         assert!(dir_name.starts_with("test_custom_"));
     }
 
+    #[allow(clippy::unwrap_used)]
     #[test]
     #[should_panic(expected = "test panic")]
     fn test_temp_rocksdb_cleanup_on_panic() {
@@ -262,6 +272,7 @@ mod tests {
         panic!("test panic");
     }
 
+    #[allow(clippy::unwrap_used)]
     #[tokio::test]
     async fn test_temp_rocksdb_async_usage() {
         let temp_db = create_temp_rocksdb().unwrap();

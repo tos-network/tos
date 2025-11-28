@@ -224,6 +224,12 @@ pub enum BlockchainError {
     TxNonceAlreadyUsed(Nonce, Hash),
     #[error("Invalid hash, expected {}, got {}", _0, _1)]
     InvalidHash(Hash, Hash),
+    #[error(
+        "Block hash mismatch: caller provided {}, but block.hash() computed {}",
+        _0,
+        _1
+    )]
+    BlockHashMismatch(Hash, Hash),
     #[error("Invalid previous block hash, expected {}, got {}", _0, _1)]
     InvalidPreviousBlockHash(Hash, Hash),
     #[error("Block size is more than limit, expected maximum: {}, got {}", _0, _1)]

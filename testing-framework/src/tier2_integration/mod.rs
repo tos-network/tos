@@ -87,6 +87,8 @@ pub trait NodeRpc: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
 
     fn create_test_hash(id: u8) -> Hash {
@@ -121,6 +123,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::unwrap_used)]
     async fn test_mock_node_rpc() {
         let node = MockNode {
             tip_height: 100,

@@ -47,6 +47,12 @@
 //! TOS_TEST_SEED=0xa3f5c8e1b2d94706 cargo test test_name
 //! ```
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+// Allow assertions in test code - tests should fail loudly
+#![cfg_attr(test, allow(clippy::assertions_on_constants))]
+
 pub mod property_tests;
 
 #[cfg(test)]

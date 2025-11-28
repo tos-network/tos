@@ -178,6 +178,8 @@ pub enum P2pError {
     InvalidObjectResponse(Hash),
     #[error("Invalid object response type for request")]
     InvalidObjectResponseType,
+    #[error("Block hash mismatch: expected {expected}, computed {actual}")]
+    BlockHashMismatch { expected: Hash, actual: Hash },
     #[error("Error while receiving blocker response in boost sync mode: {}", _0)]
     BoostSyncModeBlockerResponseError(#[from] RecvError),
     #[error("Error while waiting on blocker in boost sync mode")]

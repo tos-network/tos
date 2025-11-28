@@ -15,6 +15,8 @@
 //! All tests use seeded RNG for full reproducibility. Failed tests can be
 //! reproduced by setting the `PROPTEST_RNG_SEED` environment variable.
 
+#![allow(clippy::disallowed_methods)]
+
 use crate::orchestrator::SystemClock;
 use crate::tier1_component::{TestBlockchain, TestBlockchainBuilder, TestTransaction};
 use crate::tier2_integration::strategies::*;

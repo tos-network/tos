@@ -10,7 +10,7 @@ use std::{borrow::Cow, str::FromStr};
 use thiserror::Error;
 use tos_hash::{v1, v2, Error as TosHashError};
 
-use super::{BlockHeader, BLOCK_WORK_SIZE, EXTRA_NONCE_SIZE};
+use super::{BlockHeader, EXTRA_NONCE_SIZE, MINER_WORK_SIZE};
 
 pub enum WorkVariant {
     Uninitialized,
@@ -96,7 +96,7 @@ pub struct MinerWork<'a> {
 // Based on the variant, the worker can compute the POW hash
 // It is used by the miner to efficiently switch context in case of algorithm change
 pub struct Worker<'a> {
-    work: Option<(MinerWork<'a>, [u8; BLOCK_WORK_SIZE])>,
+    work: Option<(MinerWork<'a>, [u8; MINER_WORK_SIZE])>,
     variant: WorkVariant,
 }
 
@@ -146,7 +146,7 @@ impl<'a> Worker<'a> {
             }
         }
 
-        let mut slice = [0u8; BLOCK_WORK_SIZE];
+        let mut slice = [0u8; MINER_WORK_SIZE];
         slice.copy_from_slice(&work.to_bytes());
 
         self.work = Some((work, slice));
@@ -193,7 +193,7 @@ impl<'a> Worker<'a> {
                 // Compute the POW hash
                 let mut input = v1::AlignedInput::default();
                 let slice = input.as_mut_slice()?;
-                slice[0..BLOCK_WORK_SIZE].copy_from_slice(work.as_ref());
+                slice[0..MINER_WORK_SIZE].copy_from_slice(work.as_ref());
                 v1::tos_hash(slice, scratch_pad).map(Hash::new)?
             }
             WorkVariant::V2(scratch_pad) => v2::tos_hash(work, scratch_pad).map(Hash::new)?,
@@ -313,7 +313,7 @@ impl<'a> Serializer for MinerWork<'a> {
         writer.write_u64(&self.nonce); // 40 + 8 = 48
         writer.write_bytes(&self.extra_nonce); // 48 + 32 = 80
 
-        // 80 + 32 = 112
+        // 80 + 32 = 112 (MINER_WORK_SIZE)
         if let Some(miner) = &self.miner {
             miner.write(writer);
         } else {
@@ -322,19 +322,19 @@ impl<'a> Serializer for MinerWork<'a> {
         }
 
         debug_assert!(
-            writer.total_write() == BLOCK_WORK_SIZE,
-            "invalid block work size, expected {}, got {}",
-            BLOCK_WORK_SIZE,
+            writer.total_write() == MINER_WORK_SIZE,
+            "invalid miner work size, expected {}, got {}",
+            MINER_WORK_SIZE,
             writer.total_write()
         );
     }
 
     fn read(reader: &mut Reader) -> Result<MinerWork<'a>, ReaderError> {
-        if reader.total_size() != BLOCK_WORK_SIZE {
+        if reader.total_size() != MINER_WORK_SIZE {
             if log::log_enabled!(log::Level::Debug) {
                 debug!(
-                    "invalid block work size, expected {}, got {}",
-                    BLOCK_WORK_SIZE,
+                    "invalid miner work size, expected {}, got {}",
+                    MINER_WORK_SIZE,
                     reader.total_size()
                 );
             }
@@ -357,7 +357,7 @@ impl<'a> Serializer for MinerWork<'a> {
     }
 
     fn size(&self) -> usize {
-        BLOCK_WORK_SIZE
+        MINER_WORK_SIZE
     }
 }
 
@@ -390,7 +390,8 @@ mod tests {
 
         let mut input = v1::AlignedInput::default();
         let slice = input.as_mut_slice().unwrap();
-        slice[0..BLOCK_WORK_SIZE].copy_from_slice(&work.to_bytes());
+        // Use MINER_WORK_SIZE (112 bytes) for miner work, not BLOCK_WORK_SIZE (252 bytes)
+        slice[0..MINER_WORK_SIZE].copy_from_slice(&work.to_bytes());
         let expected_hash = v1::tos_hash(slice, &mut v1::ScratchPad::default())
             .map(Hash::new)
             .unwrap();

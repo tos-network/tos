@@ -1,3 +1,8 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::useless_vec)]
+
 // File: testing-framework/tests/erc20_openzeppelin_test.rs
 //
 // ERC20 OpenZeppelin Integration Tests
@@ -25,7 +30,7 @@ use tos_testing_framework::utilities::{create_contract_test_storage, execute_tes
 /// In a real implementation, these would be:
 /// - transfer(address,uint256) = keccak256("transfer(address,uint256)")[0..4]
 /// - approve(address,uint256) = keccak256("approve(address,uint256)")[0..4]
-/// etc.
+/// - etc.
 ///
 /// For this test, we'll use simple discriminants:
 #[allow(dead_code)]

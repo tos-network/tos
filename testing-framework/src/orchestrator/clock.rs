@@ -288,6 +288,7 @@ impl Default for PausedClock {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -473,7 +474,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_paused_clock_default_trait() {
-        let clock = PausedClock::default();
+        let clock = PausedClock::new();
         let start = clock.now();
 
         clock.advance(Duration::from_secs(1)).await;

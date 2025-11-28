@@ -149,6 +149,36 @@ To see the full history and exact changes, please refer to the commits history d
 - Deterministic execution for consensus safety
 - Comprehensive test coverage (150+ tests)
 
+- **[SECURITY FIX] P2P Chain Sync Security Audit (PR #12)** - Third-party audit by Codex
+
+  **Finding 1: skip_stable_height_check bypass (Medium Severity)**
+  - **Issue**: Malicious peer could exploit `skip_stable_height_check` flag to trigger deep rewinds
+  - **Fix**: Removed `skip_stable_height_check` parameter entirely; only `peer.is_priority()` can now trigger deep rewinds
+  - **Impact**: Prevents state-based privilege escalation attacks
+
+  **Finding 2: add_new_block trusts caller-provided hash (High Severity)**
+  - **Issue**: Block hash from P2P peers was trusted without verification in core layer
+  - **Fix**: Central hash verification in `add_new_block()` - computes `block.hash()` and validates against caller-provided hash
+  - **Defense-in-depth**: P2P layer also validates hash before calling core layer
+  - **New error**: `BlockchainError::BlockHashMismatch` and `P2pError::BlockHashMismatch`
+  - **Impact**: Prevents DAG poisoning via mislabeled blocks
+
+  **Finding 3: Header hash doesn't cover all GHOSTDAG fields (Medium Severity)**
+  - **Issue**: Only 112 bytes of header data were hashed (miner-controlled fields)
+  - **Fix**: Extended to 252 bytes, now including all GHOSTDAG consensus fields:
+    - `daa_score` (8 bytes)
+    - `blue_work` (32 bytes, U256)
+    - `bits` (4 bytes)
+    - `pruning_point` (32 bytes)
+    - `accepted_id_merkle_root` (32 bytes)
+    - `utxo_commitment` (32 bytes)
+  - **Compatibility**: `MINER_WORK_SIZE` (112 bytes) preserved for miner protocol compatibility
+  - **Impact**: Prevents block hash collisions on consensus fields
+
+  **BREAKING CHANGE**: Block header hash format changed. All previous blocks are invalid under the new hash scheme.
+
+  **ACTION REQUIRED**: Full devnet reset is required. Do not reuse old databases.
+
 ### Known Issues
 
 - ⚠️ One doctest failure in `syscalls/src/poseidon.rs:101` (uses old `tos_sdk` name)

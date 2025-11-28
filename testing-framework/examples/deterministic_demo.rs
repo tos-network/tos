@@ -11,6 +11,11 @@
 // To reproduce with a specific seed:
 //   TOS_TEST_SEED=0x1234567890abcdef cargo run --example deterministic_demo
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(unused)]
+
 use std::sync::Arc;
 use tokio::time::Duration;
 use tos_testing_framework::orchestrator::{Clock, DeterministicTestEnv, PausedClock, SystemClock};

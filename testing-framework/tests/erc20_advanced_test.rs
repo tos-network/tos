@@ -1,3 +1,8 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::useless_vec)]
+
 // File: testing-framework/tests/erc20_advanced_test.rs
 //
 // Advanced ERC20 Token Integration Tests
@@ -276,7 +281,7 @@ async fn test_erc20_gas_estimation() {
     let max_variance = avg / 10; // 10% tolerance
 
     for (i, &cu) in compute_units.iter().enumerate() {
-        let diff = if cu > avg { cu - avg } else { avg - cu };
+        let diff = cu.abs_diff(avg);
         assert!(
             diff <= max_variance,
             "Execution {} compute units {} differs too much from average {}",

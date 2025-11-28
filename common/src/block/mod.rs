@@ -24,7 +24,51 @@ pub type TopoHeight = u64;
 
 pub const EXTRA_NONCE_SIZE: usize = 32;
 pub const HEADER_WORK_SIZE: usize = 73;
-pub const BLOCK_WORK_SIZE: usize = 112; // 32 + 8 + 8 + 32 + 32 = 112
+
+/// Size of the miner-controlled fields in the block header (legacy/miner protocol).
+///
+/// Used by `MinerWork` for stratum mining protocol compatibility.
+/// This is the 112-byte prefix that existing miner implementations work with.
+///
+/// **WARNING**: Do NOT change this value without a miner protocol migration plan.
+/// Existing miners depend on this exact size for PoW calculation.
+///
+/// Breakdown: 32 (work_hash) + 8 (timestamp) + 8 (nonce) + 32 (extra_nonce) + 32 (miner) = 112 bytes
+pub const MINER_WORK_SIZE: usize = 112;
+
+/// Size of the full header serialization used for consensus hashing.
+///
+/// **SECURITY FIX (PR #12)**: Extended from 112 to 252 bytes to include ALL GHOSTDAG
+/// consensus fields in the block hash. This follows Kaspa's security model where all
+/// header fields are hash-protected to prevent peer manipulation during block propagation.
+///
+/// # Relationship with MINER_WORK_SIZE
+///
+/// - `BLOCK_WORK_SIZE` (252 bytes): Full header hash for consensus - used by nodes to
+///   verify block identity. Changing any consensus field changes the block hash.
+///
+/// - `MINER_WORK_SIZE` (112 bytes): Legacy prefix for miner PoW work - used by external
+///   miners. Miners only need to vary nonce/timestamp/extra_nonce within this prefix.
+///
+/// # Breakdown
+///
+/// Base fields (miner-controlled): 112 bytes (MINER_WORK_SIZE)
+/// - work_hash: 32 bytes
+/// - timestamp: 8 bytes
+/// - nonce: 8 bytes
+/// - extra_nonce: 32 bytes
+/// - miner: 32 bytes
+///
+/// Added GHOSTDAG fields: 140 bytes
+/// - daa_score: 8 bytes
+/// - blue_work: 32 bytes (U256)
+/// - bits: 4 bytes
+/// - pruning_point: 32 bytes
+/// - accepted_id_merkle_root: 32 bytes
+/// - utxo_commitment: 32 bytes
+///
+/// Total: 112 + 140 = 252 bytes
+pub const BLOCK_WORK_SIZE: usize = 252;
 
 // Get combined hash for tips
 // This is used to get a hash that is unique for a set of tips
