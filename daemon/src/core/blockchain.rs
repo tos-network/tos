@@ -30,7 +30,7 @@ use crate::{
         difficulty,
         error::BlockchainError,
         executor::ParallelExecutor,
-        ghostdag::TosGhostdag,
+        ghostdag::{GhostdagStorageProvider, TosGhostdag},
         hard_fork::*,
         mempool::Mempool,
         nonce_checker::NonceChecker,
@@ -1825,13 +1825,17 @@ impl<S: Storage> Blockchain<S> {
     // Same for its parent, then calculate the difficulty between the two timestamps
     // For Block C, take the timestamp and difficulty from parent block B, and then from parent of B, take the timestamp
     // We take the difficulty from the biggest tip, but compute the solve time from the newest tips
+    //
+    // KASPA-ALIGNED: This function now runs GHOSTDAG on the tips to get the accurate
+    // candidate block's blue_score (including mergeset_blues contribution), ensuring
+    // correct version selection and difficulty calculation at hard fork boundaries.
     pub async fn get_difficulty_at_tips<'a, P, I>(
         &self,
         provider: &P,
         tips: I,
     ) -> Result<(Difficulty, VarUint), BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider + GhostdagDataProvider,
+        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider + GhostdagDataProvider + GhostdagStorageProvider,
         I: IntoIterator<Item = &'a Hash> + ExactSizeIterator + Clone,
         I::IntoIter: ExactSizeIterator,
     {
@@ -1847,41 +1851,21 @@ impl<S: Storage> Blockchain<S> {
             ));
         }
 
-        // SECURITY FIX: Use actual GHOSTDAG blue_score from best tip instead of deprecated estimate
-        // The deprecated calculate_blue_score_at_tips() used max(parent.blue_score) + tips.len(),
-        // which attackers could inflate by submitting blocks with many parents.
-        // Now we use the stored blue_score from the best tip (selected by blue_work).
-        // Search the highest difficulty available (using GHOSTDAG blue_work - TIP-2 Phase 1)
-        let best_tip = {
-            let tips_vec: Vec<_> = tips.clone().into_iter().collect();
-            let mut best_hash = tips_vec[0];
-            let mut best_blue_work = provider.get_ghostdag_blue_work(best_hash).await?;
+        // KASPA-ALIGNED: Run GHOSTDAG on tips to get accurate candidate block data
+        // This includes the correct blue_score = parent.blue_score + mergeset_blues.len()
+        // which is essential for version selection at hard fork boundaries.
+        let tips_vec: Vec<Hash> = tips.clone().into_iter().cloned().collect();
+        let ghostdag_data = self.ghostdag.ghostdag(provider, &tips_vec).await?;
 
-            for &tip in tips_vec.iter().skip(1) {
-                let blue_work = provider.get_ghostdag_blue_work(tip).await?;
-                if blue_work > best_blue_work {
-                    best_blue_work = blue_work;
-                    best_hash = tip;
-                }
-            }
-            best_hash
-        };
+        // Use the GHOSTDAG-computed blue_score for version selection
+        // This correctly accounts for multi-parent mergeset contributions
+        let candidate_blue_score = ghostdag_data.blue_score;
 
-        // SECURITY FIX: Compute prospective blue_score for the candidate block
-        // The candidate block's blue_score = parent.blue_score + mergeset_blues.len()
-        // Since we don't run full GHOSTDAG here, we use a conservative estimate:
-        // prospective_blue_score = best_tip.blue_score + 1 (minimum possible for single-parent blocks)
-        // For multi-parent blocks, the actual blue_score may be higher, but version selection
-        // typically changes at specific heights, so +1 is usually sufficient for hard fork detection.
-        // This prevents using the parent's blue_score directly which would be off-by-one.
-        let parent_blue_score = provider.get_ghostdag_blue_score(best_tip).await?;
-        let prospective_blue_score = parent_blue_score.saturating_add(1);
-
-        // Get the version at the prospective blue_score (used as height for version calculation)
-        let (has_hard_fork, version) = has_hard_fork_at_height(self.get_network(), prospective_blue_score);
+        // Get the version at the candidate blue_score (used as height for version calculation)
+        let (has_hard_fork, version) = has_hard_fork_at_height(self.get_network(), candidate_blue_score);
 
         // if simulator is enabled or we are too low in blue_score, don't calculate difficulty
-        if prospective_blue_score <= 1 || self.is_simulator_enabled() {
+        if candidate_blue_score <= 1 || self.is_simulator_enabled() {
             let difficulty = difficulty::get_minimum_difficulty(self.get_network(), version);
             return Ok((difficulty, difficulty::get_covariance_p(version)));
         }
@@ -1895,6 +1879,8 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
+        // Use selected parent from GHOSTDAG (best tip by blue_work)
+        let best_tip = &ghostdag_data.selected_parent;
         let biggest_difficulty = provider.get_difficulty_for_block_hash(best_tip).await?;
 
         // Search the newest tip available to determine the real solve time
@@ -1946,7 +1932,7 @@ impl<S: Storage> Blockchain<S> {
         tips: I,
     ) -> Result<(Difficulty, VarUint), BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider + GhostdagDataProvider,
+        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider + GhostdagDataProvider + GhostdagStorageProvider,
         I: IntoIterator<Item = &'a Hash> + ExactSizeIterator + Clone,
         I::IntoIter: ExactSizeIterator,
     {
