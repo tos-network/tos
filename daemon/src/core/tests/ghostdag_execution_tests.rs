@@ -335,6 +335,13 @@ mod ghostdag_execution_tests {
         Hash::new([value; 32])
     }
 
+    /// Create a unique hash from a u64 value (supports more than 256 unique hashes)
+    fn create_test_hash_u64(value: u64) -> Hash {
+        let mut bytes = [0u8; 32];
+        bytes[0..8].copy_from_slice(&value.to_le_bytes());
+        Hash::new(bytes)
+    }
+
     /// Create a test public key from raw bytes
     fn create_test_pubkey() -> CompressedPublicKey {
         let data = [0u8; 32];
@@ -797,6 +804,286 @@ mod ghostdag_execution_tests {
     }
 
     // =========================================================================
+    // TEST 4: calculate_target_difficulty execution tests
+    // Per security audit: Need tests that call calculate_target_difficulty
+    // through real storage traversal to verify floor logic works end-to-end
+    // =========================================================================
+
+    /// Helper to create a chain of blocks for DAA testing
+    /// Creates blocks with specified timestamps, all building on genesis
+    async fn create_daa_chain(
+        storage: &mut MockGhostdagStorage,
+        genesis_hash: &Hash,
+        block_count: u64,
+        timestamp_fn: impl Fn(u64) -> u64,
+    ) -> Vec<Hash> {
+        let mut hashes = Vec::new();
+        let mut parent_hash = genesis_hash.clone();
+
+        for i in 1..=block_count {
+            // Use u64 hash function to support more than 256 blocks
+            let block_hash = create_test_hash_u64(i);
+            let timestamp = timestamp_fn(i);
+            let block_header = create_test_header(timestamp, vec![parent_hash.clone()]);
+
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+            let block_ghostdag = TosGhostdagData::new(
+                i, // blue_score
+                work,
+                i, // daa_score
+                parent_hash.clone(),
+                vec![parent_hash.clone()],
+                Vec::new(),
+                HashMap::new(),
+                Vec::new(),
+            );
+
+            // Create reachability data with proper interval
+            let interval_size = u64::MAX / (block_count + 2);
+            let start = i * interval_size;
+            let end = start + interval_size - 1;
+            let block_reachability = ReachabilityData {
+                parent: parent_hash.clone(),
+                interval: Interval::new(start, end),
+                height: i,
+                children: Vec::new(),
+                future_covering_set: Vec::new(),
+            };
+
+            storage.add_block(
+                block_hash.clone(),
+                block_header,
+                block_ghostdag,
+                block_reachability,
+                Difficulty::from(1000u64),
+            );
+            storage.set_past_blocks(block_hash.clone(), vec![parent_hash.clone()]);
+
+            hashes.push(block_hash.clone());
+            parent_hash = block_hash;
+        }
+
+        hashes
+    }
+
+    #[tokio::test]
+    async fn test_execution_calculate_target_difficulty_before_window_full() {
+        use crate::core::ghostdag::daa::{calculate_target_difficulty, DAA_WINDOW_SIZE};
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+
+        // Create a few blocks (less than DAA_WINDOW_SIZE)
+        let block_count = 10u64;
+        let hashes = create_daa_chain(&mut storage, &genesis_hash, block_count, |i| i * 1000).await;
+
+        let last_hash = hashes.last().unwrap();
+        let daa_score = block_count;
+
+        // Before window is full, should return parent's difficulty
+        assert!(
+            daa_score < DAA_WINDOW_SIZE,
+            "Test requires daa_score < DAA_WINDOW_SIZE"
+        );
+
+        let result = calculate_target_difficulty(&storage, last_hash, daa_score).await;
+
+        assert!(
+            result.is_ok(),
+            "calculate_target_difficulty should succeed: {:?}",
+            result.err()
+        );
+
+        let difficulty = result.unwrap();
+
+        // Should return parent's difficulty (which is 1000 for all our test blocks)
+        assert_eq!(
+            difficulty.as_ref().low_u64(),
+            1000u64,
+            "Before window full, should use parent's difficulty"
+        );
+
+        println!(
+            "TEST PASSED: calculate_target_difficulty returns parent difficulty before window full"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution_calculate_target_difficulty_equal_timestamps_floor_applied() {
+        use crate::core::ghostdag::daa::{
+            calculate_target_difficulty, DAA_WINDOW_SIZE, TARGET_TIME_PER_BLOCK,
+        };
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+
+        // Create DAA_WINDOW_SIZE + 10 blocks with EQUAL timestamps
+        // This simulates the attack scenario from the security audit
+        let block_count = DAA_WINDOW_SIZE + 10;
+
+        // All blocks have the same timestamp (attack scenario)
+        let same_timestamp = 1000000u64;
+        let hashes = create_daa_chain(&mut storage, &genesis_hash, block_count, |_i| {
+            same_timestamp
+        })
+        .await;
+
+        let last_hash = hashes.last().unwrap();
+        let daa_score = block_count;
+
+        // Call calculate_target_difficulty
+        let result = calculate_target_difficulty(&storage, last_hash, daa_score).await;
+
+        assert!(
+            result.is_ok(),
+            "calculate_target_difficulty should succeed with equal timestamps: {:?}",
+            result.err()
+        );
+
+        let new_difficulty = result.unwrap();
+        let base_difficulty = Difficulty::from(1000u64);
+
+        // With floor protection, max increase is 2x, not 4x
+        let max_allowed = base_difficulty * 2u64;
+
+        // Get ratio
+        let ratio =
+            new_difficulty.as_ref().low_u64() as f64 / base_difficulty.as_ref().low_u64() as f64;
+
+        println!(
+            "Equal timestamps test: base={}, new={}, ratio={}",
+            base_difficulty.as_ref().low_u64(),
+            new_difficulty.as_ref().low_u64(),
+            ratio
+        );
+
+        // CRITICAL ASSERTION: Floor should limit increase to 2x
+        assert!(
+            ratio <= 2.01,
+            "With floor protection, difficulty ratio should be <= 2.0, got {}",
+            ratio
+        );
+
+        println!("TEST PASSED: calculate_target_difficulty floor limits increase to 2x with equal timestamps");
+    }
+
+    #[tokio::test]
+    async fn test_execution_calculate_target_difficulty_normal_timestamps() {
+        use crate::core::ghostdag::daa::{
+            calculate_target_difficulty, DAA_WINDOW_SIZE, TARGET_TIME_PER_BLOCK,
+        };
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+
+        // Create DAA_WINDOW_SIZE + 10 blocks with normal 1-second intervals
+        let block_count = DAA_WINDOW_SIZE + 10;
+
+        // Normal timestamps: 1 second per block (in seconds, not milliseconds)
+        // BlockHeader.get_timestamp() returns seconds
+        let base_timestamp = 1000000u64;
+        let hashes = create_daa_chain(&mut storage, &genesis_hash, block_count, |i| {
+            base_timestamp + i * TARGET_TIME_PER_BLOCK // seconds, 1 second per block
+        })
+        .await;
+
+        let last_hash = hashes.last().unwrap();
+        let daa_score = block_count;
+
+        // Call calculate_target_difficulty
+        let result = calculate_target_difficulty(&storage, last_hash, daa_score).await;
+
+        assert!(
+            result.is_ok(),
+            "calculate_target_difficulty should succeed with normal timestamps: {:?}",
+            result.err()
+        );
+
+        let new_difficulty = result.unwrap();
+        let base_difficulty = Difficulty::from(1000u64);
+
+        // Get ratio
+        let ratio =
+            new_difficulty.as_ref().low_u64() as f64 / base_difficulty.as_ref().low_u64() as f64;
+
+        println!(
+            "Normal timestamps test: base={}, new={}, ratio={}",
+            base_difficulty.as_ref().low_u64(),
+            new_difficulty.as_ref().low_u64(),
+            ratio
+        );
+
+        // With normal 1-second block times, ratio should be close to 1.0
+        // Allow some tolerance due to integer arithmetic and IQR calculation
+        // IQR-based span may differ slightly from raw span
+        assert!(
+            (ratio - 1.0).abs() < 0.5,
+            "With normal timestamps, difficulty ratio should be ~1.0, got {}",
+            ratio
+        );
+
+        println!(
+            "TEST PASSED: calculate_target_difficulty maintains stable difficulty with normal timestamps"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution_calculate_target_difficulty_small_window_uses_floor() {
+        use crate::core::ghostdag::daa::{
+            calculate_target_difficulty, DAA_WINDOW_SIZE, TARGET_TIME_PER_BLOCK,
+        };
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+
+        // Create exactly DAA_WINDOW_SIZE blocks (just at the threshold)
+        let block_count = DAA_WINDOW_SIZE;
+
+        // Create with equal timestamps (worst case)
+        let same_timestamp = 1000000u64;
+        let hashes = create_daa_chain(&mut storage, &genesis_hash, block_count, |_i| {
+            same_timestamp
+        })
+        .await;
+
+        let last_hash = hashes.last().unwrap();
+        let daa_score = block_count;
+
+        // This is exactly at window size boundary
+        assert_eq!(daa_score, DAA_WINDOW_SIZE);
+
+        let result = calculate_target_difficulty(&storage, last_hash, daa_score).await;
+
+        assert!(
+            result.is_ok(),
+            "calculate_target_difficulty should succeed at window boundary: {:?}",
+            result.err()
+        );
+
+        let new_difficulty = result.unwrap();
+        let base_difficulty = Difficulty::from(1000u64);
+
+        let ratio =
+            new_difficulty.as_ref().low_u64() as f64 / base_difficulty.as_ref().low_u64() as f64;
+
+        println!(
+            "Window boundary test: base={}, new={}, ratio={}",
+            base_difficulty.as_ref().low_u64(),
+            new_difficulty.as_ref().low_u64(),
+            ratio
+        );
+
+        // Even at the exact window boundary with equal timestamps, floor should apply
+        assert!(
+            ratio <= 2.01,
+            "At window boundary with equal timestamps, ratio should be <= 2.0, got {}",
+            ratio
+        );
+
+        println!("TEST PASSED: calculate_target_difficulty applies floor at window boundary");
+    }
+
+    // =========================================================================
     // Summary test
     // =========================================================================
 
@@ -831,6 +1118,24 @@ mod ghostdag_execution_tests {
         println!("6. test_execution_k_cluster_exceeds_k_marks_red");
         println!("   -> Calls ghostdag() with k+2 parallel blocks");
         println!("   -> Verifies k-cluster constraint marks excess as red");
+        println!();
+        println!("7. test_execution_calculate_target_difficulty_before_window_full");
+        println!("   -> Calls calculate_target_difficulty() with daa_score < DAA_WINDOW_SIZE");
+        println!("   -> Verifies parent difficulty is returned");
+        println!();
+        println!("8. test_execution_calculate_target_difficulty_equal_timestamps_floor_applied");
+        println!(
+            "   -> Calls calculate_target_difficulty() with equal timestamps (attack scenario)"
+        );
+        println!("   -> Verifies floor limits max increase to 2x, not 4x");
+        println!();
+        println!("9. test_execution_calculate_target_difficulty_normal_timestamps");
+        println!("   -> Calls calculate_target_difficulty() with 1-second intervals");
+        println!("   -> Verifies difficulty ratio ~1.0 for normal operation");
+        println!();
+        println!("10. test_execution_calculate_target_difficulty_small_window_uses_floor");
+        println!("   -> Calls calculate_target_difficulty() at exact window boundary");
+        println!("   -> Verifies floor applies even at boundary");
         println!();
     }
 }
