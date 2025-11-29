@@ -23,6 +23,7 @@ use tos_daemon::tako_integration::TakoExecutor;
 /// Mock provider for testing with state tracking
 struct MockProvider {
     /// Track storage: (contract_hash, key) -> value
+    #[allow(dead_code)]
     storage: Arc<Mutex<HashMap<([u8; 32], Vec<u8>), Vec<u8>>>>,
     /// Track balances: (address, asset) -> balance
     balances: Arc<Mutex<HashMap<([u8; 32], [u8; 32]), u64>>>,

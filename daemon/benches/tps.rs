@@ -11,6 +11,7 @@
 //! Note: Balance simplification improves TPS by removing encryption/proof overhead.
 
 #![allow(clippy::enum_variant_names)]
+#![allow(clippy::disallowed_methods)]
 
 use async_trait::async_trait;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
