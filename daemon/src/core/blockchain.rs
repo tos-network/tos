@@ -988,7 +988,8 @@ impl<S: Storage> Blockchain<S> {
 
         if located_sync_topoheight > last_pruned_topoheight {
             // Create pruning checkpoint for crash recovery
-            let mut checkpoint = PruningCheckpoint::new(last_pruned_topoheight, located_sync_topoheight);
+            let mut checkpoint =
+                PruningCheckpoint::new(last_pruned_topoheight, located_sync_topoheight);
             storage.set_pruning_checkpoint(&checkpoint).await?;
 
             if log::log_enabled!(log::Level::Info) {
@@ -1237,7 +1238,9 @@ impl<S: Storage> Blockchain<S> {
                 checkpoint.phase = PruningPhase::VersionedDataCleanup;
                 storage.set_pruning_checkpoint(&checkpoint).await?;
 
-                storage.delete_versioned_data_below_topoheight(end_topo, true).await?;
+                storage
+                    .delete_versioned_data_below_topoheight(end_topo, true)
+                    .await?;
             }
             PruningPhase::GhostdagCleanup => {
                 // Resume GHOSTDAG cleanup
@@ -1253,14 +1256,18 @@ impl<S: Storage> Blockchain<S> {
                 checkpoint.phase = PruningPhase::VersionedDataCleanup;
                 storage.set_pruning_checkpoint(&checkpoint).await?;
 
-                storage.delete_versioned_data_below_topoheight(end_topo, true).await?;
+                storage
+                    .delete_versioned_data_below_topoheight(end_topo, true)
+                    .await?;
             }
             PruningPhase::VersionedDataCleanup => {
                 // Resume versioned data cleanup
                 if log::log_enabled!(log::Level::Info) {
                     info!("Resuming versioned data cleanup to {}", end_topo);
                 }
-                storage.delete_versioned_data_below_topoheight(end_topo, true).await?;
+                storage
+                    .delete_versioned_data_below_topoheight(end_topo, true)
+                    .await?;
             }
             PruningPhase::Complete => {
                 // Should not reach here, but handle gracefully

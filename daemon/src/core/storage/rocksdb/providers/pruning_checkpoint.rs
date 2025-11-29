@@ -63,7 +63,8 @@ mod tests {
     use tos_common::network::Network;
 
     fn create_test_storage() -> (RocksStorage, TempDir) {
-        let tmp_dir = TempDir::new("rocks-pruning-checkpoint-test").expect("Failed to create temp dir");
+        let tmp_dir =
+            TempDir::new("rocks-pruning-checkpoint-test").expect("Failed to create temp dir");
         let config = crate::core::config::RocksDBConfig::default();
         let storage = RocksStorage::new(
             tmp_dir.path().to_str().expect("Invalid temp dir path"),
@@ -79,25 +80,40 @@ mod tests {
         let (mut storage, _tmp_dir) = create_test_storage();
 
         // Initially no checkpoint
-        let checkpoint = storage.get_pruning_checkpoint().await.expect("Failed to get checkpoint");
+        let checkpoint = storage
+            .get_pruning_checkpoint()
+            .await
+            .expect("Failed to get checkpoint");
         assert!(checkpoint.is_none());
 
         // Set checkpoint
         let checkpoint = PruningCheckpoint::new(100, 500);
-        storage.set_pruning_checkpoint(&checkpoint).await.expect("Failed to set checkpoint");
+        storage
+            .set_pruning_checkpoint(&checkpoint)
+            .await
+            .expect("Failed to set checkpoint");
 
         // Read it back
-        let loaded = storage.get_pruning_checkpoint().await.expect("Failed to get checkpoint");
+        let loaded = storage
+            .get_pruning_checkpoint()
+            .await
+            .expect("Failed to get checkpoint");
         assert!(loaded.is_some());
         let loaded = loaded.expect("Expected checkpoint");
         assert_eq!(loaded.start_topoheight, 100);
         assert_eq!(loaded.target_topoheight, 500);
 
         // Clear it
-        storage.clear_pruning_checkpoint().await.expect("Failed to clear checkpoint");
+        storage
+            .clear_pruning_checkpoint()
+            .await
+            .expect("Failed to clear checkpoint");
 
         // Should be gone
-        let checkpoint = storage.get_pruning_checkpoint().await.expect("Failed to get checkpoint");
+        let checkpoint = storage
+            .get_pruning_checkpoint()
+            .await
+            .expect("Failed to get checkpoint");
         assert!(checkpoint.is_none());
     }
 
@@ -106,19 +122,38 @@ mod tests {
         let (mut storage, _tmp_dir) = create_test_storage();
 
         // No checkpoint = no incomplete pruning
-        assert!(!storage.has_incomplete_pruning().await.expect("Failed to check"));
+        assert!(!storage
+            .has_incomplete_pruning()
+            .await
+            .expect("Failed to check"));
 
         // Set incomplete checkpoint
         let checkpoint = PruningCheckpoint::new(0, 100);
-        storage.set_pruning_checkpoint(&checkpoint).await.expect("Failed to set");
-        assert!(storage.has_incomplete_pruning().await.expect("Failed to check"));
+        storage
+            .set_pruning_checkpoint(&checkpoint)
+            .await
+            .expect("Failed to set");
+        assert!(storage
+            .has_incomplete_pruning()
+            .await
+            .expect("Failed to check"));
 
         // Complete the checkpoint
-        let mut checkpoint = storage.get_pruning_checkpoint().await.expect("Failed to get").expect("Expected checkpoint");
+        let mut checkpoint = storage
+            .get_pruning_checkpoint()
+            .await
+            .expect("Failed to get")
+            .expect("Expected checkpoint");
         checkpoint.phase = crate::core::storage::PruningPhase::Complete;
-        storage.set_pruning_checkpoint(&checkpoint).await.expect("Failed to set");
+        storage
+            .set_pruning_checkpoint(&checkpoint)
+            .await
+            .expect("Failed to set");
 
         // Should not be incomplete anymore
-        assert!(!storage.has_incomplete_pruning().await.expect("Failed to check"));
+        assert!(!storage
+            .has_incomplete_pruning()
+            .await
+            .expect("Failed to check"));
     }
 }

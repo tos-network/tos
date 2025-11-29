@@ -51,7 +51,9 @@ impl Serializer for PruningPhase {
         writer.write_u8(*self as u8);
     }
 
-    fn read(reader: &mut tos_common::serializer::Reader) -> Result<Self, tos_common::serializer::ReaderError> {
+    fn read(
+        reader: &mut tos_common::serializer::Reader,
+    ) -> Result<Self, tos_common::serializer::ReaderError> {
         let value = reader.read_u8()?;
         match value {
             0 => Ok(Self::BlockDeletion),
@@ -160,7 +162,9 @@ impl Serializer for PruningCheckpoint {
         writer.write_u64(&self.started_at);
     }
 
-    fn read(reader: &mut tos_common::serializer::Reader) -> Result<Self, tos_common::serializer::ReaderError> {
+    fn read(
+        reader: &mut tos_common::serializer::Reader,
+    ) -> Result<Self, tos_common::serializer::ReaderError> {
         let target_topoheight = reader.read_u64()?;
         let current_position = reader.read_u64()?;
         let phase = PruningPhase::read(reader)?;
