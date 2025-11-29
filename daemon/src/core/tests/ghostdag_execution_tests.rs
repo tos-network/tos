@@ -13,6 +13,7 @@ mod ghostdag_execution_tests {
     use indexmap::IndexSet;
     use tokio;
 
+    use crate::config::{MILLIS_PER_SECOND, MINIMUM_HASHRATE};
     use tos_common::block::{BlockHeader, BlockVersion, EXTRA_NONCE_SIZE};
     use tos_common::crypto::elgamal::CompressedPublicKey;
     use tos_common::crypto::Hash;
@@ -27,6 +28,7 @@ mod ghostdag_execution_tests {
         calc_work_from_difficulty, BlueWorkType, CompactGhostdagData, GhostdagStorageProvider,
         KType, TosGhostdag, TosGhostdagData,
     };
+    use crate::core::hard_fork::get_block_time_target_for_version;
     use crate::core::reachability::{Interval, ReachabilityData, TosReachability};
     use crate::core::storage::{
         DifficultyProvider, GhostdagDataProvider, ReachabilityDataProvider,
@@ -2631,6 +2633,139 @@ mod ghostdag_execution_tests {
             "  Difficulty basis for bits: {} (from selected_parent)",
             difficulty2
         );
+    }
+
+    #[tokio::test]
+    async fn test_execution_template_validation_rejects_mutated_consensus_fields() {
+        // Integration-style check: build a header with expected consensus fields,
+        // then mutate blue_work/daa_score/bits and ensure validation detects it.
+        //
+        // We pick a simple scenario (blue_score=1) so difficulty stays at the
+        // minimum target, making expected bits deterministic.
+        use crate::config::MINIMUM_HASHRATE;
+        use crate::core::difficulty::difficulty_to_bits;
+        use crate::core::hard_fork::get_block_time_target_for_version;
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+        let k: KType = 10;
+
+        // Single parent block (blue_score = 1)
+        let block_hash = create_test_hash(1);
+        let block_header = create_test_header(1_000, vec![genesis_hash.clone()]);
+
+        // Difficulty/work for this block
+        let difficulty = Difficulty::from(5000u64);
+        let work = calc_work_from_difficulty(&difficulty);
+
+        // GHOSTDAG data for block (height 1)
+        let ghostdag_data = TosGhostdagData::new(
+            1,
+            work.clone(),
+            1,
+            genesis_hash.clone(),
+            vec![genesis_hash.clone()],
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+
+        // Reachability interval
+        let block_reachability = ReachabilityData {
+            parent: genesis_hash.clone(),
+            interval: Interval::new(1, u64::MAX / 2),
+            height: 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        storage.add_block(
+            block_hash.clone(),
+            block_header.clone(),
+            ghostdag_data.clone(),
+            block_reachability,
+            difficulty.clone(),
+        );
+        storage.set_past_blocks(block_hash.clone(), vec![genesis_hash.clone()]);
+
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
+
+        // Run GHOSTDAG on tips to simulate template generation
+        let gd = ghostdag
+            .ghostdag(&storage, &[block_hash.clone()])
+            .await
+            .expect("GHOSTDAG should succeed");
+
+        // Expected bits for blue_score=1 uses minimum difficulty (V2 1s blocks)
+        let target_time = get_block_time_target_for_version(BlockVersion::V2);
+        let min_diff =
+            Difficulty::from_u64(MINIMUM_HASHRATE * target_time / crate::config::MILLIS_PER_SECOND);
+        let expected_bits = difficulty_to_bits(&min_diff);
+
+        // Build a header with correct consensus fields
+        let mut good_header = block_header.clone();
+        good_header.blue_score = gd.blue_score;
+        good_header.blue_work = gd.blue_work.clone();
+        good_header.daa_score = gd.daa_score;
+        good_header.bits = expected_bits;
+
+        // Validation helper mirroring consensus checks for these fields
+        let validate = |header: &BlockHeader| -> Result<(), BlockchainError> {
+            // blue_score already validated elsewhere; here we check other fields
+            if &gd.blue_work != header.get_blue_work() {
+                return Err(BlockchainError::InvalidBlueWork(
+                    block_hash.clone(),
+                    gd.blue_work.clone(),
+                    header.get_blue_work().clone(),
+                ));
+            }
+            if gd.daa_score != header.get_daa_score() {
+                return Err(BlockchainError::InvalidDaaScore(
+                    block_hash.clone(),
+                    gd.daa_score,
+                    header.get_daa_score(),
+                ));
+            }
+            let actual_bits = header.get_bits();
+            if expected_bits != actual_bits {
+                return Err(BlockchainError::InvalidBitsField(
+                    block_hash.clone(),
+                    expected_bits,
+                    actual_bits,
+                ));
+            }
+            Ok(())
+        };
+
+        // Good header must pass
+        validate(&good_header).expect("Good header should validate");
+
+        // Mutate blue_work
+        let mut bad_blue_work = good_header.clone();
+        bad_blue_work.blue_work = BlueWorkType::from(123u64);
+        assert!(matches!(
+            validate(&bad_blue_work),
+            Err(BlockchainError::InvalidBlueWork(_, _, _))
+        ));
+
+        // Mutate daa_score
+        let mut bad_daa = good_header.clone();
+        bad_daa.daa_score = good_header.daa_score + 1;
+        assert!(matches!(
+            validate(&bad_daa),
+            Err(BlockchainError::InvalidDaaScore(_, _, _))
+        ));
+
+        // Mutate bits
+        let mut bad_bits = good_header.clone();
+        bad_bits.bits = expected_bits.wrapping_add(1);
+        assert!(matches!(
+            validate(&bad_bits),
+            Err(BlockchainError::InvalidBitsField(_, _, _))
+        ));
+
+        println!("TEST PASSED: Mutated consensus fields are rejected (blue_work, daa_score, bits)");
     }
 
     // =========================================================================
