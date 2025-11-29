@@ -1867,15 +1867,21 @@ impl<S: Storage> Blockchain<S> {
             best_hash
         };
 
-        // SECURITY FIX: Get blue_score from best tip's stored GHOSTDAG data
-        // This prevents attackers from inflating blue_score by submitting blocks with many parents
-        let blue_score = provider.get_ghostdag_blue_score(best_tip).await?;
+        // SECURITY FIX: Compute prospective blue_score for the candidate block
+        // The candidate block's blue_score = parent.blue_score + mergeset_blues.len()
+        // Since we don't run full GHOSTDAG here, we use a conservative estimate:
+        // prospective_blue_score = best_tip.blue_score + 1 (minimum possible for single-parent blocks)
+        // For multi-parent blocks, the actual blue_score may be higher, but version selection
+        // typically changes at specific heights, so +1 is usually sufficient for hard fork detection.
+        // This prevents using the parent's blue_score directly which would be off-by-one.
+        let parent_blue_score = provider.get_ghostdag_blue_score(best_tip).await?;
+        let prospective_blue_score = parent_blue_score.saturating_add(1);
 
-        // Get the version at the current blue_score (used as height for version calculation)
-        let (has_hard_fork, version) = has_hard_fork_at_height(self.get_network(), blue_score);
+        // Get the version at the prospective blue_score (used as height for version calculation)
+        let (has_hard_fork, version) = has_hard_fork_at_height(self.get_network(), prospective_blue_score);
 
         // if simulator is enabled or we are too low in blue_score, don't calculate difficulty
-        if blue_score <= 1 || self.is_simulator_enabled() {
+        if prospective_blue_score <= 1 || self.is_simulator_enabled() {
             let difficulty = difficulty::get_minimum_difficulty(self.get_network(), version);
             return Ok((difficulty, difficulty::get_covariance_p(version)));
         }
