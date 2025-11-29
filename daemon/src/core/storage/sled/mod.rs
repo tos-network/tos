@@ -46,6 +46,8 @@ pub(super) const BLOCKS_EXECUTION_ORDER_COUNT: &[u8; 4] = b"EBLK";
 // AI Mining state keys
 pub(super) const AI_MINING_STATE_TOPOHEIGHT: &[u8; 4] = b"AIMT";
 pub(super) const CONTRACTS_COUNT: &[u8; 4] = b"CCON";
+// Pruning checkpoint for crash recovery
+pub(super) const PRUNING_CHECKPOINT: &[u8; 4] = b"PRCK";
 // Reserved for future database versioning/migration functionality
 #[allow(dead_code)]
 pub(super) const DB_VERSION: &[u8; 4] = b"VRSN";

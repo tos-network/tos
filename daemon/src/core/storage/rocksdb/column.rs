@@ -136,6 +136,10 @@ pub enum Column {
     // Reachability data for DAG ancestry queries (TIP-2 Phase 2)
     // {block_hash} => {ReachabilityData}
     ReachabilityData,
+
+    // Pruning checkpoint for crash recovery
+    // PRUNING_CHECKPOINT => {PruningCheckpoint}
+    PruningCheckpoint,
 }
 
 impl Column {

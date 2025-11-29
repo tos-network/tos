@@ -36,6 +36,7 @@ pub trait Storage:
     + ContractInfoProvider + ContractBalanceProvider + VersionedProvider + SupplyProvider
     + CacheProvider + StateProvider + EnergyProvider + AIMiningProvider + GhostdagDataProvider
     + ReachabilityDataProvider // TIP-2 Phase 2: Reachability service
+    + PruningCheckpointProvider // Crash recovery for pruning operations
     + Sync + Send + 'static {
     // delete block at topoheight, and all pointers (hash_at_topo, topo_by_hash, reward, supply, diff, cumulative diff...)
     async fn delete_block_at_topoheight(&mut self, topoheight: TopoHeight) -> Result<(Hash, Immutable<BlockHeader>, Vec<(Hash, Immutable<Transaction>)>), BlockchainError>;

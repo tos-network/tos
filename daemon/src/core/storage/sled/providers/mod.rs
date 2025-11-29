@@ -17,6 +17,7 @@ mod multisig;
 mod network;
 mod nonce;
 mod pruned_topoheight;
+mod pruning_checkpoint;
 mod reachability;
 mod state;
 mod tips_provider;
