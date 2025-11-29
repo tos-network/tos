@@ -258,6 +258,7 @@ impl<'de> Deserialize<'de> for VarUint {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::VarUint;
     use crate::serializer::{Reader, Serializer};
@@ -315,6 +316,7 @@ mod tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod proptests {
     use super::*;
     use proptest::prelude::*;

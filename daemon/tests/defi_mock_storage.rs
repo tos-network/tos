@@ -3,6 +3,8 @@
 // This module provides a MockProvider that implements actual storage
 // using HashMap, enabling full stateful testing of smart contracts.
 
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::Result;
 use std::cell::RefCell;
 use std::collections::HashMap;

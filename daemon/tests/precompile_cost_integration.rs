@@ -3,6 +3,8 @@
 //! These tests verify that the cost estimation functions correctly calculate
 //! compute units for precompile instructions in various scenarios.
 
+#![allow(clippy::disallowed_methods)]
+
 use tos_daemon::tako_integration::precompile_cost::{
     costs, estimate_single_precompile_cost, estimate_transaction_precompile_cost,
     TransactionCostEstimator,

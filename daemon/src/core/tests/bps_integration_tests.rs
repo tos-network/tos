@@ -13,20 +13,9 @@ use tos_common::block::BlockVersion;
 
 #[test]
 fn test_bps_hard_fork_integration() {
-    // V0 should use legacy 60-second blocks
-    assert_eq!(get_block_time_target_for_version(BlockVersion::V0), 60_000);
-
-    // V1/V2/V3 should use OneBps configuration (1 second blocks)
+    // Baseline should use OneBps configuration (1 second blocks)
     assert_eq!(
-        get_block_time_target_for_version(BlockVersion::V1),
-        OneBps::target_time_per_block()
-    );
-    assert_eq!(
-        get_block_time_target_for_version(BlockVersion::V2),
-        OneBps::target_time_per_block()
-    );
-    assert_eq!(
-        get_block_time_target_for_version(BlockVersion::V3),
+        get_block_time_target_for_version(BlockVersion::Baseline),
         OneBps::target_time_per_block()
     );
 
@@ -161,18 +150,12 @@ fn test_bps_mergeset_size_limit_bounds() {
 
 #[test]
 fn test_bps_relationship_to_block_versions() {
-    // Ensure all modern block versions use consistent BPS configuration
+    // Ensure Baseline block version uses consistent BPS configuration
 
-    let v1_target = get_block_time_target_for_version(BlockVersion::V1);
-    let v2_target = get_block_time_target_for_version(BlockVersion::V2);
-    let v3_target = get_block_time_target_for_version(BlockVersion::V3);
+    let baseline_target = get_block_time_target_for_version(BlockVersion::Baseline);
 
-    // All should be equal (OneBps)
-    assert_eq!(v1_target, v2_target);
-    assert_eq!(v2_target, v3_target);
-
-    // All should be 1000ms
-    assert_eq!(v1_target, 1000);
+    // Should be 1000ms (OneBps)
+    assert_eq!(baseline_target, 1000);
 }
 
 #[test]

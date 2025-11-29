@@ -66,6 +66,7 @@ fn hash_pair(left: &Hash, right: &Hash) -> Hash {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use crate::crypto::elgamal::CompressedPublicKey;

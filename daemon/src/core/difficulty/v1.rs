@@ -1,3 +1,7 @@
+// VERSION UNIFICATION: V1 difficulty algorithm is no longer used
+// Kept for reference and potential legacy compatibility
+#![allow(dead_code)]
+
 use crate::core::difficulty::kalman_filter;
 use humantime::format_duration;
 use log::trace;

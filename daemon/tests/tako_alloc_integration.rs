@@ -1,4 +1,5 @@
 #![allow(clippy::unimplemented)]
+#![allow(clippy::disallowed_methods)]
 //! Integration tests for tos-alloc library
 //!
 //! Tests dynamic memory allocation in actual TOS Kernel(TAKO) with heap regions

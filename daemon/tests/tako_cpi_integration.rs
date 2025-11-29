@@ -1,10 +1,12 @@
-#![allow(clippy::type_complexity)]
+//! TOS Kernel(TAKO) CPI Integration Tests
+//!
+//! Tests Cross-Program Invocation (CPI) functionality with TOS Kernel(TAKO) contracts.
+//! This demonstrates that TAKO contracts can invoke other TAKO contracts and
+//! pass data between them.
 
-/// TOS Kernel(TAKO) CPI Integration Tests
-///
-/// Tests Cross-Program Invocation (CPI) functionality with TOS Kernel(TAKO) contracts.
-/// This demonstrates that TAKO contracts can invoke other TAKO contracts and
-/// pass data between them.
+#![allow(clippy::type_complexity)]
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tos_common::{

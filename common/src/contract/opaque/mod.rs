@@ -90,6 +90,7 @@ impl Serializer for OpaqueWrapper {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use crate::crypto::KeyPair;
 

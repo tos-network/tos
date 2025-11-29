@@ -3,6 +3,8 @@
 //! Tests the following contracts that were converted from tako-storage to tako-sdk:
 //! - factory-pattern
 //! - governance
+
+#![allow(clippy::disallowed_methods)]
 //! - multisig-wallet
 //! - staking-contract
 //! - timelock

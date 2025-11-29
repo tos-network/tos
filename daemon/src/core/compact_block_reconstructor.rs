@@ -344,7 +344,7 @@ mod tests {
         let miner = CompressedPublicKey::read(&mut reader).unwrap();
 
         let header = BlockHeader::new_simple(
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             parents,
             1234567890,
             [0u8; 32],

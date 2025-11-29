@@ -902,8 +902,8 @@ impl<S: Storage> Blockchain<S> {
                 .await?;
             (block, difficulty)
         };
-        let algorithm = get_pow_algorithm_for_version(header.get_version());
-        let mut hash = header.get_pow_hash(algorithm)?;
+        // VERSION UNIFICATION: Algorithm parameter removed, always uses V2
+        let mut hash = header.get_pow_hash()?;
         let mut current_height = self.get_blue_score();
         while !self.is_simulator_enabled() && !check_difficulty(&hash, &difficulty)? {
             if self.get_blue_score() != current_height {
@@ -914,7 +914,7 @@ impl<S: Storage> Blockchain<S> {
             // SAFE: Block production (not validation) - miner sets timestamp using local clock
             // The network will validate this timestamp is reasonable during block validation
             header.timestamp = get_current_time_in_millis();
-            hash = header.get_pow_hash(algorithm)?;
+            hash = header.get_pow_hash()?;
         }
 
         let block = self
@@ -1848,7 +1848,7 @@ impl<S: Storage> Blockchain<S> {
         if tips.len() == 0 {
             // Genesis difficulty
             trace!("genesis difficulty");
-            let version = BlockVersion::V0;
+            let version = BlockVersion::Baseline;
             return Ok((
                 GENESIS_BLOCK_DIFFICULTY,
                 difficulty::get_covariance_p(version),
@@ -2642,7 +2642,8 @@ impl<S: Storage> Blockchain<S> {
             // Keep track of processed sources to avoid re-verifying them
             let mut processed_sources = HashSet::new();
 
-            let is_v3_enabled = block.get_version() >= BlockVersion::V3;
+            // VERSION UNIFICATION: All features enabled with Baseline
+            let is_v3_enabled = true;
 
             // If we are not skipping block template TXs verification,
             // we need to detect any orphaned TXs that were processed in the tips
@@ -3392,8 +3393,8 @@ impl<S: Storage> Blockchain<S> {
             Hash::zero()
         } else {
             let start = Instant::now();
-            let algorithm = get_pow_algorithm_for_version(version);
-            let hash = block.get_pow_hash(algorithm)?;
+            // VERSION UNIFICATION: Algorithm parameter removed, always uses V2
+            let hash = block.get_pow_hash()?;
 
             histogram!("tos_block_pow_ms").record(start.elapsed().as_millis() as f64);
             hash
@@ -3436,15 +3437,11 @@ impl<S: Storage> Blockchain<S> {
                 trace!("verifying {} TXs in block {}", txs_len, block_hash);
             }
 
-            // V2 helps us to determine if we should retrieve all TXs from parents
-            // that are not only executed, but also just in block tips to prevent re integration
-            // as we know that if current block would be accepted, its tips would be also executed in DAG
-            let is_v2_enabled = version >= BlockVersion::V2;
-            // V3 group transactions from orphaned blocks per source to re inject them for verification
-            // This is required in case of complex DAG reorgs where we have orphaned blocks with TXs referencing to
-            // each other
-            // Because these TXs were already verified, their cost should be amortized by the batching verification
-            let is_v3_enabled = version >= BlockVersion::V3;
+            // VERSION UNIFICATION: All features enabled with Baseline
+            // V2: Retrieve all TXs from parents (not only executed) to prevent re-integration
+            // V3: Group transactions from orphaned blocks per source for verification
+            let is_v2_enabled = true;
+            let is_v3_enabled = true;
 
             // All transactions grouped per source key
             // used for batch verifications

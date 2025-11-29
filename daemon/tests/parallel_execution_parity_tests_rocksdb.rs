@@ -3,6 +3,8 @@
 //! These tests are migrated from parallel_execution_parity_tests.rs to use RocksDB
 //! instead of SledStorage, eliminating deadlock issues.
 //!
+
+#![allow(clippy::disallowed_methods)]
 //! Tests verify that parallel execution produces identical results to sequential
 //! execution for common transfer scenarios.
 //!
@@ -127,7 +129,7 @@ fn create_dummy_block() -> (Block, Hash) {
     let miner = CompressedPublicKey::read(&mut reader).expect("Failed to create test pubkey");
 
     let header = BlockHeader::new_simple(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],
         0,
         [0u8; EXTRA_NONCE_SIZE],
@@ -229,7 +231,7 @@ async fn execute_sequential(
         environment,
         topoheight.saturating_sub(1),
         topoheight,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         0,
         block_hash,
         block,
@@ -285,7 +287,7 @@ async fn execute_parallel(
         environment,
         topoheight.saturating_sub(1),
         topoheight,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )

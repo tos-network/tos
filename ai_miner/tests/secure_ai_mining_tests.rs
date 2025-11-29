@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::Result;
 use tos_ai_miner::transaction_builder::AIMiningTransactionBuilder;
 use tos_common::{

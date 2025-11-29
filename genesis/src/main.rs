@@ -55,9 +55,10 @@ fn main() {
     println!("Developer public key: {}", public_key.to_hex());
 
     // Create genesis block header with different timestamps for different networks
+    // VERSION UNIFICATION: All networks use Baseline version from genesis
     let (version, timestamp) = match network {
-        "testnet" => (BlockVersion::V1, 1696132639000u64), // Testnet starts with V1 (1s blocks)
-        _ => (BlockVersion::V2, 1752336822401u64),         // Mainnet timestamp
+        "testnet" => (BlockVersion::Baseline, 1696132639000u64), // Testnet timestamp
+        _ => (BlockVersion::Baseline, 1752336822401u64),         // Mainnet timestamp
     };
 
     let header = BlockHeader::new_simple(

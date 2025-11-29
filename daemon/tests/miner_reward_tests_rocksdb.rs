@@ -3,6 +3,8 @@
 //! This test suite validates miner reward handling in parallel execution,
 //! ensuring rewards are immediately available and correctly merged with existing balances.
 //!
+
+#![allow(clippy::disallowed_methods)]
 //! Test Coverage:
 //! 1. Reward Immediate Availability - Miner can spend rewards in same block
 //! 2. Reward Merge Detection - Rewards correctly add to existing balance
@@ -29,7 +31,7 @@ fn create_dummy_block(miner_key: &KeyPair) -> Block {
 
     let miner = miner_key.get_public_key().compress();
     let header = BlockHeader::new(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],                  // parents_by_level
         0,                       // blue_score
         0,                       // daa_score
@@ -94,7 +96,7 @@ async fn test_reward_immediate_availability_parallel_vs_sequential() {
         environment,
         0, // stable_topoheight
         1, // topoheight
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -188,7 +190,7 @@ async fn test_reward_merge_not_overwrite() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -289,7 +291,7 @@ async fn test_reward_transaction_order_equivalence() {
         environment.clone(),
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block.clone(),
         block_hash,
     )
@@ -410,7 +412,7 @@ async fn test_developer_split_regression() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -564,7 +566,7 @@ async fn test_concurrent_reward_and_transfer() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -651,7 +653,7 @@ async fn test_miner_reward_applied_once() {
         environment,
         0, // stable_topoheight
         1, // topoheight
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )

@@ -8,6 +8,8 @@
 // - Conflict detection performance
 // - Transaction account extraction
 //
+
+#![allow(clippy::disallowed_methods)]
 // NOTE: These are infrastructure benchmarks measuring overhead and scalability.
 // They do NOT require real signed transactions or full blockchain state.
 
@@ -250,7 +252,7 @@ fn create_test_pubkey(bytes: [u8; 32]) -> CompressedPublicKey {
 fn create_dummy_block() -> (Block, Hash) {
     let miner = create_test_pubkey([0u8; 32]);
     let header = BlockHeader::new_simple(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],                  // No parents
         0,                       // Timestamp 0
         [0u8; EXTRA_NONCE_SIZE], // Zero extra nonce
@@ -295,7 +297,7 @@ fn bench_parallel_state_creation(c: &mut Criterion) {
                     environment,
                     0, // stable_topoheight
                     1, // topoheight
-                    BlockVersion::V0,
+                    BlockVersion::Baseline,
                     block,
                     block_hash,
                 )
@@ -345,7 +347,7 @@ fn bench_parallel_executor_batch_sizes(c: &mut Criterion) {
                             environment,
                             0,
                             1,
-                            BlockVersion::V0,
+                            BlockVersion::Baseline,
                             block,
                             block_hash,
                         )
@@ -505,7 +507,7 @@ fn bench_executor_parallelism(c: &mut Criterion) {
                             environment,
                             0,
                             1,
-                            BlockVersion::V0,
+                            BlockVersion::Baseline,
                             block,
                             block_hash,
                         )
@@ -560,7 +562,7 @@ fn bench_state_commit(c: &mut Criterion) {
                             environment,
                             0,
                             1,
-                            BlockVersion::V0,
+                            BlockVersion::Baseline,
                             block,
                             block_hash,
                         )
@@ -618,7 +620,7 @@ fn bench_memory_overhead(c: &mut Criterion) {
                     Arc::clone(&environment),
                     0,
                     1,
-                    BlockVersion::V0,
+                    BlockVersion::Baseline,
                     block1,
                     block_hash1,
                 )
@@ -630,7 +632,7 @@ fn bench_memory_overhead(c: &mut Criterion) {
                     Arc::clone(&environment),
                     1,
                     2,
-                    BlockVersion::V0,
+                    BlockVersion::Baseline,
                     block2,
                     block_hash2,
                 )
@@ -642,7 +644,7 @@ fn bench_memory_overhead(c: &mut Criterion) {
                     environment,
                     2,
                     3,
-                    BlockVersion::V0,
+                    BlockVersion::Baseline,
                     block3,
                     block_hash3,
                 )

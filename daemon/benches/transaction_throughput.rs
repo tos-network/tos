@@ -4,6 +4,8 @@
 //
 // Run with: cargo run --release --bin tps_benchmark
 
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;

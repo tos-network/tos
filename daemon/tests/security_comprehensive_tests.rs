@@ -3,6 +3,8 @@
 //! This module provides end-to-end security testing across module boundaries.
 //! These tests verify that security properties hold when multiple components interact.
 //!
+
+#![allow(clippy::disallowed_methods)]
 //! Test categories:
 //! 1. Consensus security (double-spend, balance manipulation)
 //! 2. Network security (malicious blocks, invalid transactions)

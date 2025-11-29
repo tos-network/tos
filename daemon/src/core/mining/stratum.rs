@@ -287,7 +287,7 @@ mod tests {
             .unwrap_or_else(|e| panic!("Failed to read test public key: {:?}", e));
 
         let header = BlockHeader::new_simple(
-            BlockVersion::V1,
+            BlockVersion::Baseline,
             vec![Hash::new([0u8; 32])],
             1234567890,
             [0u8; EXTRA_NONCE_SIZE],
@@ -308,7 +308,8 @@ mod tests {
         assert_eq!(job.job_id, "job_001");
         assert_eq!(job.height, 100);
         assert_eq!(job.topoheight, 150);
-        assert_eq!(job.version, 1);
+        // VERSION UNIFICATION: Baseline = 0
+        assert_eq!(job.version, 0);
         assert!(!job.clean_jobs);
     }
 

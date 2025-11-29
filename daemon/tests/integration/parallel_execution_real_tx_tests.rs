@@ -133,7 +133,7 @@ fn create_dummy_block() -> (Block, Hash) {
     let miner = CompressedPublicKey::read(&mut reader).expect("Failed to create test pubkey");
 
     let header = BlockHeader::new_simple(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],
         0,
         [0u8; EXTRA_NONCE_SIZE],
@@ -326,7 +326,7 @@ async fn test_parallel_execution_with_conflicts() {
         Arc::clone(&environment),
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         hash,
     )
@@ -481,7 +481,7 @@ async fn test_parallel_execution_non_conflicting() {
         Arc::clone(&environment),
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         hash,
     )
@@ -614,7 +614,7 @@ async fn test_parallel_execution_balance_verification() {
         Arc::clone(&environment),
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         hash,
     )

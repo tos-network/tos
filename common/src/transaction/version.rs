@@ -85,6 +85,7 @@ impl<'de> serde::Deserialize<'de> for TxVersion {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

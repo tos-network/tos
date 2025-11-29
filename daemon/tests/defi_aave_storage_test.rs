@@ -1,11 +1,14 @@
-/// Aave V3 Pool Storage Integration Test (Low-Level VM API)
-///
-/// This test uses the low-level TAKO VM API with InMemoryStorage
-/// to properly test stateful contract operations.
-///
-/// Unlike the high-level DeFi tests that use TakoExecutor::execute(),
-/// this test directly creates the VM, InvokeContext, and InMemoryStorage,
-/// ensuring storage operations work correctly.
+//! Aave V3 Pool Storage Integration Test (Low-Level VM API)
+//!
+//! This test uses the low-level TAKO VM API with InMemoryStorage
+//! to properly test stateful contract operations.
+//!
+//! Unlike the high-level DeFi tests that use TakoExecutor::execute(),
+//! this test directly creates the VM, InvokeContext, and InMemoryStorage,
+//! ensuring storage operations work correctly.
+
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::Arc;
 use tos_program_runtime::{
     invoke_context::InvokeContext,

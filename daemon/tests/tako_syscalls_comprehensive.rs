@@ -1,21 +1,24 @@
-/// Comprehensive TAKO Syscalls Integration Tests
-///
-/// This test suite provides thorough coverage of TAKO syscalls using the TOS testing framework.
-/// It focuses on high-priority syscalls that lack integration tests.
-///
-/// Test Coverage:
-/// 1. Transient Storage (EIP-1153) - tload/tstore
-/// 2. Blockchain Information - block height, hash, timestamp, etc.
-/// 3. Basic Cryptographic Operations - blake3, sha256, keccak256, secp256k1
-/// 4. Event Emission - log events
-/// 5. Environment - caller information
-/// 6. Code Operations - extcodesize, extcodehash, extcodecopy
-/// 7. Memory Operations - memcpy, memmove, memcmp, memset
-///
-/// Architecture:
-/// - Uses TOS testing-framework for realistic blockchain environment
-/// - Tests actual contract execution through TakoExecutor
-/// - Verifies syscall behavior against expected EVM semantics
+//! Comprehensive TAKO Syscalls Integration Tests
+//!
+//! This test suite provides thorough coverage of TAKO syscalls using the TOS testing framework.
+//! It focuses on high-priority syscalls that lack integration tests.
+//!
+//! Test Coverage:
+//! 1. Transient Storage (EIP-1153) - tload/tstore
+//! 2. Blockchain Information - block height, hash, timestamp, etc.
+//! 3. Basic Cryptographic Operations - blake3, sha256, keccak256, secp256k1
+//! 4. Event Emission - log events
+//! 5. Environment - caller information
+//! 6. Code Operations - extcodesize, extcodehash, extcodecopy
+//! 7. Memory Operations - memcpy, memmove, memcmp, memset
+//!
+//! Architecture:
+//! - Uses TOS testing-framework for realistic blockchain environment
+//! - Tests actual contract execution through TakoExecutor
+//! - Verifies syscall behavior against expected EVM semantics
+
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::Result;
 use tos_common::{
     asset::AssetData,

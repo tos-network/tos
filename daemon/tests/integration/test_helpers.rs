@@ -97,7 +97,7 @@ impl BlockBuilder {
         Self {
             timestamp: 0,
             parents: vec![],
-            version: BlockVersion::V0,
+            version: BlockVersion::Baseline,
             extra_nonce: [0u8; EXTRA_NONCE_SIZE],
             miner,
             hash_merkle_root: Hash::zero(),

@@ -198,7 +198,7 @@ impl BlockchainTestHarness {
         // Create genesis block header
         let miner = create_test_pubkey([0u8; 32]);
         let genesis_header = BlockHeader::new_simple(
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             vec![],
             1600000000000, // Fixed genesis timestamp
             [0u8; EXTRA_NONCE_SIZE],
@@ -260,7 +260,7 @@ impl BlockchainTestHarness {
         };
 
         let header = BlockHeader::new_simple(
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             vec![self.current_tip.clone()],
             self.current_timestamp,
             [0u8; EXTRA_NONCE_SIZE],

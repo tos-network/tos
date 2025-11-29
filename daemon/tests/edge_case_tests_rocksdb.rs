@@ -3,6 +3,8 @@
 //! This test suite validates ParallelChainState behavior under edge conditions:
 //! - Empty accounts (zero balance, zero nonce)
 //! - Boundary values (u64::MAX, u64::MIN)
+
+#![allow(clippy::disallowed_methods)]
 //! - Account creation and destruction
 //! - Zero-value transfers
 //! - Maximum nonce values
@@ -32,7 +34,7 @@ fn create_dummy_block() -> Block {
 
     let miner = KeyPair::new().get_public_key().compress();
     let header = BlockHeader::new(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],                  // parents_by_level
         0,                       // blue_score
         0,                       // daa_score
@@ -100,7 +102,7 @@ async fn test_empty_account_creation() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -153,7 +155,7 @@ async fn test_zero_value_transfer() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -238,7 +240,7 @@ async fn test_maximum_balance_values() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -315,7 +317,7 @@ async fn test_maximum_nonce_values() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -403,7 +405,7 @@ async fn test_multiple_empty_accounts() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )

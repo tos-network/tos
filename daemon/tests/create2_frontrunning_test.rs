@@ -3,6 +3,8 @@
 //! This test suite validates the mempool-layer CREATE2 address reservation mechanism
 //! that prevents multiple transactions from deploying to the same deterministic address
 //! within the same block.
+
+#![allow(clippy::disallowed_methods)]
 //!
 //! Test Coverage:
 //! 1. Mempool Initialization - Verifies reserved_contracts field is initialized

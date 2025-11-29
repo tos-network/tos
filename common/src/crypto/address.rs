@@ -288,6 +288,7 @@ impl Display for Address {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use crate::crypto::KeyPair;
 

@@ -89,7 +89,7 @@ fn create_test_block_with_txs(
     };
 
     let header = BlockHeader::new_simple(
-        tos_common::block::BlockVersion::V0,
+        tos_common::block::BlockVersion::Baseline,
         parents,
         timestamp,
         [0u8; EXTRA_NONCE_SIZE],

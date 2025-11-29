@@ -64,6 +64,7 @@ impl Serializer for ExtraDataType {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use crate::{serializer::Serializer, transaction::extra_data::ExtraDataType};
 

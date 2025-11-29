@@ -3,6 +3,8 @@
 //! This module uses proptest to verify critical invariants hold across
 //! random inputs. Property-based testing helps discover edge cases that
 //! traditional unit tests might miss.
+
+#![allow(clippy::disallowed_methods)]
 //!
 //! Properties tested:
 //! - Balance invariants (never negative, conservation)

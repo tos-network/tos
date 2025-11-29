@@ -43,10 +43,8 @@ fn main() {
                 block.get_header().get_hash_merkle_root()
             );
             println!("Block work hash: {}", block.get_header().get_work_hash());
-            println!(
-                "Block POW hash (V2): {:?}",
-                block.get_pow_hash(tos_common::block::Algorithm::V2)
-            );
+            // VERSION UNIFICATION: Algorithm parameter removed, always uses V2
+            println!("Block POW hash: {:?}", block.get_pow_hash());
             println!("Block hash: {}", block.hash());
         }
         Err(e) => {

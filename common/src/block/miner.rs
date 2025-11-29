@@ -3,82 +3,29 @@ use crate::{
     serializer::{Reader, ReaderError, Serializer, Writer},
     time::TimestampMillis,
 };
-use core::fmt;
 use log::debug;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, str::FromStr};
+use std::borrow::Cow;
 use thiserror::Error;
 use tos_hash::{v2, Error as TosHashError};
 
 use super::{BlockHeader, EXTRA_NONCE_SIZE, MINER_WORK_SIZE};
 
+/// Work variant for PoW calculation.
+///
+/// VERSION UNIFICATION: Only V2 algorithm is supported.
+/// V1 has been removed as MINER_WORK_SIZE=252 bytes is incompatible with V1 (requires 200 bytes).
 pub enum WorkVariant {
+    /// Worker not initialized yet
     Uninitialized,
-    /// V1 is deprecated and incompatible with MINER_WORK_SIZE=252 bytes.
-    /// Kept for algorithm matching but will return an error if used.
-    V1,
+    /// V2 PoW algorithm (tos-hash v2) - the only supported algorithm
     V2(v2::ScratchPad),
 }
 
 impl WorkVariant {
-    pub fn get_algorithm(&self) -> Option<Algorithm> {
-        Some(match self {
-            WorkVariant::Uninitialized => return None,
-            WorkVariant::V1 => Algorithm::V1,
-            WorkVariant::V2(_) => Algorithm::V2,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-#[repr(u8)]
-pub enum Algorithm {
-    V1 = 0,
-    V2 = 1,
-}
-
-impl FromStr for Algorithm {
-    type Err = &'static str;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "tos/v1" => Ok(Algorithm::V1),
-            "tos/v2" => Ok(Algorithm::V2),
-            _ => Err("invalid algorithm"),
-        }
-    }
-}
-
-impl Serialize for Algorithm {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.to_string().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Algorithm {
-    fn deserialize<D>(deserializer: D) -> Result<Algorithm, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Algorithm::from_str(&s).map_err(serde::de::Error::custom)
-    }
-}
-
-impl fmt::Display for Algorithm {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Algorithm::V1 => "tos/v1",
-                Algorithm::V2 => "tos/v2",
-            }
-        )
+    /// Check if the worker is initialized
+    pub fn is_initialized(&self) -> bool {
+        matches!(self, WorkVariant::V2(_))
     }
 }
 
@@ -135,10 +82,6 @@ pub enum WorkerError {
     Uninitialized,
     #[error("missing miner work")]
     MissingWork,
-    #[error(
-        "PoW v1 algorithm is incompatible with MINER_WORK_SIZE=252 bytes (requires 200 bytes)"
-    )]
-    V1Incompatible,
     #[error(transparent)]
     HashError(#[from] TosHashError),
 }
@@ -163,28 +106,19 @@ impl<'a> Worker<'a> {
         self.work.take().map(|(work, _)| work)
     }
 
-    // Switch the current context to a new work
-    pub fn set_work(&mut self, work: MinerWork<'a>, kind: Algorithm) -> Result<(), WorkerError> {
-        // Check if the algorithm changed or if it must be initialized
-        if self.variant.get_algorithm() != Some(kind) {
-            match kind {
-                Algorithm::V1 => {
-                    // V1 is deprecated but kept for algorithm matching
-                    self.variant = WorkVariant::V1;
-                }
-                Algorithm::V2 => {
-                    let scratch_pad = v2::ScratchPad::default();
-                    self.variant = WorkVariant::V2(scratch_pad);
-                }
-            }
+    /// Set the current work for mining.
+    ///
+    /// VERSION UNIFICATION: Algorithm parameter removed, always uses V2.
+    pub fn set_work(&mut self, work: MinerWork<'a>) {
+        // Initialize V2 scratchpad if not already initialized
+        if !self.variant.is_initialized() {
+            self.variant = WorkVariant::V2(v2::ScratchPad::default());
         }
 
         let mut slice = [0u8; MINER_WORK_SIZE];
         slice.copy_from_slice(&work.to_bytes());
 
         self.work = Some((work, slice));
-
-        Ok(())
     }
 
     // Increase the nonce of the current work
@@ -213,7 +147,9 @@ impl<'a> Worker<'a> {
         Ok(())
     }
 
-    // Compute the POW hash based on the current work
+    /// Compute the POW hash based on the current work.
+    ///
+    /// VERSION UNIFICATION: Always uses V2 algorithm.
     pub fn get_pow_hash(&mut self) -> Result<Hash, WorkerError> {
         let work = match self.work.as_ref() {
             Some((_, input)) => input,
@@ -222,11 +158,6 @@ impl<'a> Worker<'a> {
 
         let hash = match &mut self.variant {
             WorkVariant::Uninitialized => return Err(WorkerError::Uninitialized),
-            WorkVariant::V1 => {
-                // V1 algorithm requires 200-byte input but MINER_WORK_SIZE is now 252 bytes.
-                // V1 is deprecated and incompatible with the new unified work size.
-                return Err(WorkerError::V1Incompatible);
-            }
             WorkVariant::V2(scratch_pad) => v2::tos_hash(work, scratch_pad).map(Hash::new)?,
         };
 
@@ -468,6 +399,7 @@ impl<'a> Serializer for MinerWork<'a> {
 impl Hashable for MinerWork<'_> {}
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use crate::crypto::KeyPair;
     use primitive_types::U256;
@@ -507,7 +439,7 @@ mod tests {
         let block_hash = work.hash();
 
         let mut worker = Worker::new();
-        worker.set_work(work.clone(), Algorithm::V2).unwrap();
+        worker.set_work(work.clone());
 
         let worker_hash = worker.get_pow_hash().unwrap();
         let next_worker_hash = worker.get_pow_hash().unwrap();
@@ -574,7 +506,7 @@ mod tests {
 
         // Create a BlockHeader with all fields
         let mut header = BlockHeader::new(
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             vec![parents.clone()],
             blue_score,
             daa_score,

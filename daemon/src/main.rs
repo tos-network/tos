@@ -18,9 +18,7 @@ use core::{
     blockchain::{get_block_reward, Blockchain, BroadcastOption},
     blockdag,
     config::{Config as InnerConfig, StorageBackend},
-    hard_fork::{
-        get_block_time_target_for_version, get_pow_algorithm_for_version, get_version_at_height,
-    },
+    hard_fork::{get_block_time_target_for_version, get_version_at_height},
     state::ChainState,
     storage::{RocksStorage, SledStorage, Storage},
 };
@@ -1918,10 +1916,8 @@ async fn status<S: Storage>(
         accounts_count, transactions_count, blocks_count, assets, contracts
     ));
     manager.message(format!("Block Version: {}", version));
-    manager.message(format!(
-        "POW Algorithm: {}",
-        get_pow_algorithm_for_version(version)
-    ));
+    // VERSION UNIFICATION: Algorithm is always V2
+    manager.message("POW Algorithm: V2".to_string());
     manager.message(format!("Snapshot: {}", snapshot));
 
     manager.message(format!("Tips ({}):", tips.len()));

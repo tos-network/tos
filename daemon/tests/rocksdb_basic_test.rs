@@ -3,6 +3,8 @@
 //! This test verifies that the RocksDB storage backend works correctly
 //! without deadlocks when setting up accounts and creating ParallelChainState.
 
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::Arc;
 use tempdir::TempDir;
 use tos_common::tokio::sync::RwLock;
@@ -132,7 +134,7 @@ async fn test_rocksdb_no_deadlock() {
     // Create a minimal dummy block header
     let miner = KeyPair::new().get_public_key().compress();
     let dummy_header = BlockHeader::new(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],                  // parents_by_level
         0,                       // blue_score
         0,                       // daa_score
@@ -159,7 +161,7 @@ async fn test_rocksdb_no_deadlock() {
         environment,
         0, // stable_topoheight (previous)
         1, // topoheight
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )

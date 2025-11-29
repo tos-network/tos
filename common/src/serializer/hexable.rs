@@ -47,6 +47,7 @@ impl<'de, T: Serializer + Deserialize<'de>> Deserialize<'de> for Hexable<T> {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use crate::serializer::{Reader, ReaderError, Writer};

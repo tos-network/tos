@@ -11,9 +11,7 @@ use crate::{
     core::{
         blockchain::{get_block_dev_fee, get_block_reward, Blockchain, BroadcastOption},
         error::BlockchainError,
-        hard_fork::{
-            get_block_time_target_for_version, get_pow_algorithm_for_version, get_version_at_height,
-        },
+        hard_fork::{get_block_time_target_for_version, get_version_at_height},
         mempool::Mempool,
         storage::*,
     },
@@ -795,7 +793,7 @@ async fn get_block_template<S: Storage>(
         .await
         .context("Error while retrieving difficulty at tips")?;
     let height = block.blue_score;
-    let algorithm = get_pow_algorithm_for_version(block.version);
+    // VERSION UNIFICATION: Algorithm field removed, always uses V2
     let topoheight = blockchain.get_topo_height();
 
     // Calculate blue_score for the new block: max(tips' blue_scores) + number of tips
@@ -815,7 +813,6 @@ async fn get_block_template<S: Storage>(
 
     Ok(json!(GetBlockTemplateResult {
         template: block.to_hex(),
-        algorithm,
         height,
         topoheight,
         difficulty,
@@ -855,7 +852,7 @@ async fn get_miner_work<S: Storage>(
 
         (diff_result.0, blue_score)
     };
-    let version = header.get_version();
+    // VERSION UNIFICATION: Removed version variable, algorithm is always V2
     let height = blue_score;
 
     let mut work = MinerWork::from_block(header);
@@ -876,12 +873,11 @@ async fn get_miner_work<S: Storage>(
         work.set_miner(Cow::Owned(address.into_owned().to_public_key()));
     }
 
-    let algorithm = get_pow_algorithm_for_version(version);
+    // VERSION UNIFICATION: Algorithm field removed, always uses V2
     let topoheight = blockchain.get_topo_height();
 
     Ok(json!(GetMinerWorkResult {
         miner_work: work.to_hex(),
-        algorithm,
         difficulty,
         height,
         topoheight,

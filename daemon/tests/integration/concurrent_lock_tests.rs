@@ -40,7 +40,7 @@ fn create_dummy_block() -> (Block, Hash) {
     let miner = CompressedPublicKey::read(&mut reader).expect("Failed to create test pubkey");
 
     let header = BlockHeader::new_simple(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],
         0,
         [0u8; EXTRA_NONCE_SIZE],
@@ -85,7 +85,7 @@ async fn test_no_deadlock_on_parallel_state_creation() {
                 environment.clone(),
                 0,
                 1,
-                BlockVersion::V0,
+                BlockVersion::Baseline,
                 block,
                 block_hash,
             ),
@@ -129,7 +129,7 @@ async fn test_parallel_executor_no_deadlock_empty_batch() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -312,7 +312,7 @@ async fn test_parallel_state_creation_under_load() {
                     env_clone,
                     0,
                     i as u64,
-                    BlockVersion::V0,
+                    BlockVersion::Baseline,
                     block,
                     block_hash,
                 ),

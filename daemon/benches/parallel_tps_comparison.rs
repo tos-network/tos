@@ -14,6 +14,8 @@
 // - NO f64 in consensus-critical paths (use u64 for TPS, u128 for ratios)
 // - Follow CLAUDE.md code quality standards
 
+#![allow(clippy::disallowed_methods)]
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -74,7 +76,7 @@ fn create_test_pubkey(bytes: [u8; 32]) -> CompressedPublicKey {
 fn create_minimal_block() -> Block {
     let miner = create_test_pubkey([0u8; 32]);
     let header = BlockHeader::new_simple(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],                  // No parents
         0,                       // timestamp
         [0u8; EXTRA_NONCE_SIZE], // extra_nonce
@@ -373,7 +375,7 @@ fn bench_sequential_10_txs(c: &mut Criterion) {
                     environment,
                     0, // stable_topoheight
                     1, // topoheight
-                    BlockVersion::V0,
+                    BlockVersion::Baseline,
                     block,
                     block_hash,
                 )
@@ -423,7 +425,7 @@ fn bench_parallel_10_txs(c: &mut Criterion) {
                     environment,
                     0,
                     1,
-                    BlockVersion::V0,
+                    BlockVersion::Baseline,
                     block,
                     block_hash,
                 )
@@ -473,7 +475,7 @@ fn bench_sequential_100_txs(c: &mut Criterion) {
                     environment,
                     0,
                     1,
-                    BlockVersion::V0,
+                    BlockVersion::Baseline,
                     block,
                     block_hash,
                 )
@@ -523,7 +525,7 @@ fn bench_parallel_100_txs(c: &mut Criterion) {
                     environment,
                     0,
                     1,
-                    BlockVersion::V0,
+                    BlockVersion::Baseline,
                     block,
                     block_hash,
                 )
@@ -574,7 +576,7 @@ fn bench_conflict_ratio(c: &mut Criterion) {
                     environment,
                     0,
                     1,
-                    BlockVersion::V0,
+                    BlockVersion::Baseline,
                     block,
                     block_hash,
                 )
@@ -611,7 +613,7 @@ fn bench_conflict_ratio(c: &mut Criterion) {
                     environment,
                     0,
                     1,
-                    BlockVersion::V0,
+                    BlockVersion::Baseline,
                     block,
                     block_hash,
                 )
@@ -666,7 +668,7 @@ fn bench_tps_comparison(c: &mut Criterion) {
                             environment,
                             0,
                             1,
-                            BlockVersion::V0,
+                            BlockVersion::Baseline,
                             block,
                             block_hash,
                         )
@@ -708,7 +710,7 @@ fn bench_tps_comparison(c: &mut Criterion) {
                             environment,
                             0,
                             1,
-                            BlockVersion::V0,
+                            BlockVersion::Baseline,
                             block,
                             block_hash,
                         )

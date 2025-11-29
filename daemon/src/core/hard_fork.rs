@@ -1,14 +1,12 @@
 use super::bps::OneBps;
-use crate::config::{get_hard_forks, MILLIS_PER_SECOND};
+use crate::config::get_hard_forks;
 use anyhow::Result;
 use tos_common::{
-    api::daemon::HardFork,
-    block::{Algorithm, BlockVersion},
-    network::Network,
-    transaction::TxVersion,
+    api::daemon::HardFork, block::BlockVersion, network::Network, transaction::TxVersion,
 };
 
 // Get the hard fork at a given height
+// VERSION UNIFICATION: With single Baseline version, this always returns the same hard fork
 pub fn get_hard_fork_at_height(network: &Network, height: u64) -> Option<&HardFork> {
     let mut hardfork: Option<&HardFork> = None;
     for conf in get_hard_forks(network) {
@@ -24,25 +22,23 @@ pub fn get_hard_fork_at_height(network: &Network, height: u64) -> Option<&HardFo
 
 // Get the version of the hard fork at a given height
 // and returns true if there is a hard fork (version change) at that height
+// VERSION UNIFICATION: Always returns Baseline
 pub fn has_hard_fork_at_height(network: &Network, height: u64) -> (bool, BlockVersion) {
     match get_hard_fork_at_height(network, height) {
         Some(hard_fork) => (hard_fork.height == height, hard_fork.version),
-        None => (false, BlockVersion::V0),
+        None => (false, BlockVersion::Baseline),
     }
 }
 
 // This function returns the block version at a given height
+// VERSION UNIFICATION: Always returns Baseline
 pub fn get_version_at_height(network: &Network, height: u64) -> BlockVersion {
     has_hard_fork_at_height(network, height).1
 }
 
-// This function returns the PoW algorithm at a given version
-pub const fn get_pow_algorithm_for_version(version: BlockVersion) -> Algorithm {
-    match version {
-        BlockVersion::V0 => Algorithm::V1,
-        _ => Algorithm::V2,
-    }
-}
+// VERSION UNIFICATION: PoW algorithm function removed.
+// V2 algorithm is now the only algorithm, hardcoded in pow_hash().
+// Callers should call header.get_pow_hash() directly without algorithm parameter.
 
 // This function returns the block time target for a given version
 //
@@ -50,19 +46,15 @@ pub const fn get_pow_algorithm_for_version(version: BlockVersion) -> Algorithm {
 // Uses the BPS (Blocks Per Second) configuration system for type-safe,
 // compile-time calculation of all BPS-dependent parameters.
 //
-// V0: 60 seconds (legacy - kept for backward compatibility with genesis)
-// V1/V2/V3: 1 second (OneBps configuration - high throughput with GHOSTDAG K=10)
+// VERSION UNIFICATION: All blocks use 1-second target (OneBps)
 //
 // Rationale:
 // - OneBps (1 BPS) provides good balance between throughput and network convergence
 // - All GHOSTDAG parameters (K=10, finality depth, etc.) automatically calculated
 // - Block reward automatically adjusts proportionally via get_block_reward()
 // - Future BPS changes only require updating the type alias (e.g., TwoBps)
-pub const fn get_block_time_target_for_version(version: BlockVersion) -> u64 {
-    match version {
-        BlockVersion::V0 => 60 * MILLIS_PER_SECOND, // Legacy: 60 seconds
-        BlockVersion::V1 | BlockVersion::V2 | BlockVersion::V3 => OneBps::target_time_per_block(), // 1000ms (1 BPS)
-    }
+pub const fn get_block_time_target_for_version(_version: BlockVersion) -> u64 {
+    OneBps::target_time_per_block() // 1000ms (1 BPS)
 }
 
 // This function checks if a version is matching the requirements
@@ -181,209 +173,123 @@ mod tests {
 
     #[test]
     fn test_has_hard_fork_at_height() {
-        // Updated for new devnet/testnet configuration: V1 at height 0 (1-second blocks)
+        // VERSION UNIFICATION: Only one hard fork at height 0 with Baseline version
         let (hard_fork, version) = has_hard_fork_at_height(&Network::Testnet, 0);
         assert_eq!(hard_fork, true);
-        assert_eq!(version, BlockVersion::V1);
+        assert_eq!(version, BlockVersion::Baseline);
 
         let (hard_fork, version) = has_hard_fork_at_height(&Network::Testnet, 1);
         assert_eq!(hard_fork, false);
-        assert_eq!(version, BlockVersion::V1);
+        assert_eq!(version, BlockVersion::Baseline);
 
         let (hard_fork, version) = has_hard_fork_at_height(&Network::Testnet, 10);
-        assert_eq!(hard_fork, true);
-        assert_eq!(version, BlockVersion::V2);
-
-        let (hard_fork, version) = has_hard_fork_at_height(&Network::Testnet, 11);
         assert_eq!(hard_fork, false);
-        assert_eq!(version, BlockVersion::V2);
+        assert_eq!(version, BlockVersion::Baseline);
+
+        let (hard_fork, version) = has_hard_fork_at_height(&Network::Testnet, 100);
+        assert_eq!(hard_fork, false);
+        assert_eq!(version, BlockVersion::Baseline);
     }
 
     #[test]
     fn test_get_version_at_height() {
+        // VERSION UNIFICATION: All heights return Baseline for all networks
         // Mainnet
         assert_eq!(
             get_version_at_height(&Network::Mainnet, 0),
-            BlockVersion::V2
+            BlockVersion::Baseline
         );
         assert_eq!(
             get_version_at_height(&Network::Mainnet, 435_000),
-            BlockVersion::V2
+            BlockVersion::Baseline
         );
         assert_eq!(
             get_version_at_height(&Network::Mainnet, 2_000_000),
-            BlockVersion::V2
+            BlockVersion::Baseline
         );
 
-        // Testnet - Updated for new devnet/testnet configuration: V1 at height 0 (1-second blocks)
+        // Testnet
         assert_eq!(
             get_version_at_height(&Network::Testnet, 0),
-            BlockVersion::V1
+            BlockVersion::Baseline
         );
         assert_eq!(
             get_version_at_height(&Network::Testnet, 9),
-            BlockVersion::V1
+            BlockVersion::Baseline
         );
         assert_eq!(
             get_version_at_height(&Network::Testnet, 10),
-            BlockVersion::V2
+            BlockVersion::Baseline
         );
         assert_eq!(
             get_version_at_height(&Network::Testnet, 15),
-            BlockVersion::V3
+            BlockVersion::Baseline
         );
     }
 
-    #[test]
-    fn test_get_pow_algorithm_for_version() {
-        assert_eq!(
-            get_pow_algorithm_for_version(BlockVersion::V0),
-            Algorithm::V1
-        );
-        assert_eq!(
-            get_pow_algorithm_for_version(BlockVersion::V1),
-            Algorithm::V2
-        );
-    }
+    // VERSION UNIFICATION: test_get_pow_algorithm_for_version removed
+    // PoW algorithm is now hardcoded to V2 in pow_hash(), no function to test
 
     #[test]
     fn test_is_tx_version_allowed_in_block_version() {
-        // All block versions now support T0
+        // VERSION UNIFICATION: Only Baseline version exists, supports T0
         assert!(is_tx_version_allowed_in_block_version(
             TxVersion::T0,
-            BlockVersion::V0
-        ));
-        assert!(is_tx_version_allowed_in_block_version(
-            TxVersion::T0,
-            BlockVersion::V1
-        ));
-        assert!(is_tx_version_allowed_in_block_version(
-            TxVersion::T0,
-            BlockVersion::V2
-        ));
-        assert!(is_tx_version_allowed_in_block_version(
-            TxVersion::T0,
-            BlockVersion::V3
+            BlockVersion::Baseline
         ));
     }
 
     #[test]
     fn test_version_enabled() {
-        // Mainnet - V1 and V2 are enabled from height 0
+        // VERSION UNIFICATION: Only Baseline is enabled from height 0
+        // Mainnet
         assert!(is_version_enabled_at_height(
             &Network::Mainnet,
             0,
-            BlockVersion::V0
-        ));
-        assert!(is_version_enabled_at_height(
-            &Network::Mainnet,
-            0,
-            BlockVersion::V1
-        ));
-        assert!(is_version_enabled_at_height(
-            &Network::Mainnet,
-            0,
-            BlockVersion::V2
-        ));
-
-        assert!(is_version_enabled_at_height(
-            &Network::Mainnet,
-            435_000,
-            BlockVersion::V1
+            BlockVersion::Baseline
         ));
         assert!(is_version_enabled_at_height(
             &Network::Mainnet,
             435_000,
-            BlockVersion::V2
+            BlockVersion::Baseline
         ));
         assert!(is_version_enabled_at_height(
             &Network::Mainnet,
             2_000_000,
-            BlockVersion::V2
+            BlockVersion::Baseline
         ));
 
-        // V3 is not yet enabled
-        assert!(!is_version_enabled_at_height(
-            &Network::Mainnet,
-            2_000_000,
-            BlockVersion::V3
-        ));
-
-        // Testnet - Updated for new devnet/testnet configuration: V1 at height 0 (1-second blocks)
-        assert!(!is_version_enabled_at_height(
-            &Network::Testnet,
-            0,
-            BlockVersion::V0
-        ));
+        // Testnet
         assert!(is_version_enabled_at_height(
             &Network::Testnet,
             0,
-            BlockVersion::V1
-        ));
-        assert!(!is_version_enabled_at_height(
-            &Network::Testnet,
-            0,
-            BlockVersion::V2
-        ));
-
-        assert!(!is_version_enabled_at_height(
-            &Network::Testnet,
-            9,
-            BlockVersion::V0
+            BlockVersion::Baseline
         ));
         assert!(is_version_enabled_at_height(
             &Network::Testnet,
             9,
-            BlockVersion::V1
-        ));
-        assert!(!is_version_enabled_at_height(
-            &Network::Testnet,
-            9,
-            BlockVersion::V2
-        ));
-
-        assert!(!is_version_enabled_at_height(
-            &Network::Testnet,
-            10,
-            BlockVersion::V0
+            BlockVersion::Baseline
         ));
         assert!(is_version_enabled_at_height(
             &Network::Testnet,
             10,
-            BlockVersion::V1
-        ));
-        assert!(is_version_enabled_at_height(
-            &Network::Testnet,
-            10,
-            BlockVersion::V2
+            BlockVersion::Baseline
         ));
     }
 
     #[test]
     fn test_get_block_time_target_for_version() {
         use super::super::bps::OneBps;
+        use crate::config::MILLIS_PER_SECOND;
 
-        // V0 kept at 60s for genesis compatibility
+        // VERSION UNIFICATION: All versions use OneBps configuration (1 second blocks)
         assert_eq!(
-            get_block_time_target_for_version(BlockVersion::V0),
-            60 * MILLIS_PER_SECOND
-        );
-
-        // TIP-BPS: All subsequent versions use OneBps configuration (1 second blocks)
-        assert_eq!(
-            get_block_time_target_for_version(BlockVersion::V1),
-            OneBps::target_time_per_block()
-        );
-        assert_eq!(
-            get_block_time_target_for_version(BlockVersion::V2),
-            OneBps::target_time_per_block()
-        );
-        assert_eq!(
-            get_block_time_target_for_version(BlockVersion::V3),
+            get_block_time_target_for_version(BlockVersion::Baseline),
             OneBps::target_time_per_block()
         );
 
         // Verify OneBps is 1000ms (1 second)
         assert_eq!(OneBps::target_time_per_block(), 1000);
+        assert_eq!(OneBps::target_time_per_block(), MILLIS_PER_SECOND);
     }
 }

@@ -3,6 +3,8 @@
 //! This test suite validates ParallelChainState performance under high load:
 //! - Large account sets (100, 500, 1000+ accounts)
 //! - Concurrent operations stress testing
+
+#![allow(clippy::disallowed_methods)]
 //! - Memory usage validation
 //! - State commit performance
 //!
@@ -33,7 +35,7 @@ fn create_dummy_block() -> Block {
 
     let miner = KeyPair::new().get_public_key().compress();
     let header = BlockHeader::new(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],                  // parents_by_level
         0,                       // blue_score
         0,                       // daa_score
@@ -93,7 +95,7 @@ async fn test_stress_100_accounts() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -182,7 +184,7 @@ async fn test_stress_500_accounts() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -278,7 +280,7 @@ async fn test_stress_1000_accounts() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -368,7 +370,7 @@ async fn test_stress_concurrent_modifications() {
             environment,
             0,
             1,
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             dummy_block,
             block_hash,
         )
@@ -463,7 +465,7 @@ async fn test_stress_rapid_state_cycles() {
             Arc::clone(&environment),
             cycle,     // stable_topoheight
             cycle + 1, // topoheight
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             dummy_block,
             block_hash,
         )
