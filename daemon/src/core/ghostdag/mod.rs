@@ -9,9 +9,8 @@ mod tests_extended;
 #[cfg(test)]
 mod tests_comprehensive;
 
-// Integration tests require MockStorage which is not yet fully implemented
-// #[cfg(test)]
-// mod tests_integration;
+// Integration tests are in daemon/src/core/tests/ghostdag_execution_tests.rs
+// which has a working MockGhostdagStorage implementation
 
 pub use daa::{
     calculate_daa_score, calculate_target_difficulty, DAA_WINDOW_SIZE, TARGET_TIME_PER_BLOCK,
