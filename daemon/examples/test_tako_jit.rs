@@ -10,7 +10,6 @@
 //!   cargo run --release --example test_tako_jit
 
 #![allow(clippy::disallowed_methods)]
-
 // Allow clippy lints for example code
 #![allow(clippy::type_complexity)]
 #![allow(clippy::unnecessary_literal_unwrap)]
