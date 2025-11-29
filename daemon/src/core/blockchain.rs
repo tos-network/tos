@@ -194,6 +194,60 @@ pub struct Blockchain<S: Storage> {
     executor: Arc<dyn tos_common::contract::ContractExecutor>,
 }
 
+// ============================================================================
+// Standalone timestamp validation functions
+// Extracted from Blockchain::pre_verify_block for testability
+// ============================================================================
+
+/// Validate that a block's timestamp is strictly greater than all parent timestamps
+/// and (for multi-parent blocks) strictly greater than the median parent timestamp.
+///
+/// Per security audit: Block timestamp must be STRICTLY GREATER than:
+/// 1. Any parent timestamp (prevents same-timestamp chains)
+/// 2. Median parent timestamp for multi-parent blocks (median-time-past rule)
+///
+/// This is a pure function that can be tested without a full Blockchain instance.
+///
+/// # Arguments
+/// * `block_timestamp` - The timestamp of the block being validated
+/// * `parent_timestamps` - Timestamps of all parent blocks
+///
+/// # Returns
+/// * `Ok(())` if timestamp is valid
+/// * `Err(BlockchainError::TimestampIsLessThanParent)` if invalid
+pub(crate) fn validate_block_timestamp(
+    block_timestamp: u64,
+    parent_timestamps: &[u64],
+) -> Result<(), BlockchainError> {
+    if parent_timestamps.is_empty() {
+        // Genesis block or edge case - no parents to validate against
+        return Ok(());
+    }
+
+    // Check 1: Block timestamp must be STRICTLY GREATER than ANY parent timestamp
+    // Per blockchain.rs:3154-3170, timestamp > previous_timestamp for all parents
+    for &parent_ts in parent_timestamps {
+        if block_timestamp <= parent_ts {
+            return Err(BlockchainError::TimestampIsLessThanParent(parent_ts));
+        }
+    }
+
+    // Check 2: For multi-parent blocks, timestamp must be > median(parent_timestamps)
+    // Per blockchain.rs:3189-3204
+    if parent_timestamps.len() > 1 {
+        let mut sorted = parent_timestamps.to_vec();
+        sorted.sort_unstable();
+        let median_timestamp = sorted[sorted.len() / 2];
+
+        // Strict greater-than check per Kaspa reference
+        if block_timestamp <= median_timestamp {
+            return Err(BlockchainError::TimestampIsLessThanParent(median_timestamp));
+        }
+    }
+
+    Ok(())
+}
+
 impl<S: Storage> Blockchain<S> {
     pub async fn new(mut config: Config, network: Network, storage: S) -> Result<Arc<Self>, Error> {
         // Do some checks on config params
@@ -3146,28 +3200,11 @@ impl<S: Storage> Blockchain<S> {
 
         // V-21 Fix: Validate timestamp against all parents
         // For multi-parent blocks, use median-time-past to prevent manipulation
+        // Collect parent timestamps first, then validate using the extracted function
         let mut parent_timestamps = Vec::with_capacity(tips_count);
         for hash in block.get_parents() {
             let previous_timestamp = storage.get_timestamp_for_block_hash(&hash).await?;
             parent_timestamps.push(previous_timestamp);
-
-            // SECURITY FIX: Block timestamp must be STRICTLY GREATER than any parent
-            // Per Kaspa reference (post_pow_validation.rs:10-27), timestamp > past_median_time
-            // This prevents timestamp manipulation attacks where miners create blocks with
-            // identical timestamps to manipulate DAA window calculations.
-            if block.get_timestamp() <= previous_timestamp {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Invalid block timestamp {}, must be strictly greater than parent {} timestamp {}",
-                        block.get_timestamp(),
-                        hash,
-                        previous_timestamp
-                    );
-                }
-                return Err(BlockchainError::TimestampIsLessThanParent(
-                    previous_timestamp,
-                ));
-            }
 
             if log::log_enabled!(log::Level::Trace) {
                 trace!("calculate distance from mainchain for tips: {}", hash);
@@ -3186,22 +3223,19 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        // SECURITY FIX: For multiple parents, check median-time-past with strict inequality
-        // Per Kaspa reference (post_pow_validation.rs), timestamp must be > past_median_time
-        if tips_count > 1 {
-            parent_timestamps.sort_unstable();
-            let median_timestamp = parent_timestamps[tips_count / 2];
-            // Strict greater-than check to prevent timestamp manipulation
-            if block.get_timestamp() <= median_timestamp {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Invalid block timestamp {}, must be strictly greater than median parent time {}",
-                        block.get_timestamp(),
-                        median_timestamp
-                    );
-                }
-                return Err(BlockchainError::TimestampIsLessThanParent(median_timestamp));
+        // SECURITY FIX: Validate timestamp using the extracted function
+        // This ensures the same logic is used in production and tests.
+        // Per Kaspa reference (post_pow_validation.rs:10-27), timestamp > past_median_time
+        // and timestamp > any parent timestamp.
+        if let Err(e) = validate_block_timestamp(block.get_timestamp(), &parent_timestamps) {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Invalid block timestamp {}: {:?}",
+                    block.get_timestamp(),
+                    e
+                );
             }
+            return Err(e);
         }
 
         if tips_count > 1 {

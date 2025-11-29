@@ -1087,47 +1087,55 @@ mod ghostdag_execution_tests {
     // TEST 5: Multi-parent timestamp strictly greater-than validation
     // Per security audit: Block timestamp must be > ALL parent timestamps
     // and > median parent timestamp for multi-parent blocks
+    //
+    // NOTE: These tests call the REAL validate_block_timestamp() function
+    // extracted from blockchain.rs for testability.
     // =========================================================================
+
+    use crate::core::blockchain::validate_block_timestamp;
 
     #[test]
     fn test_execution_timestamp_strictly_greater_than_all_parents() {
         // Per blockchain.rs:3147-3165, block timestamp must be STRICTLY GREATER
         // than ANY parent timestamp. This prevents timestamp manipulation attacks.
+        //
+        // This test calls the REAL validate_block_timestamp() function.
 
-        let parent1_timestamp = 1000u64;
-        let parent2_timestamp = 1500u64;
-        let parent3_timestamp = 1200u64;
+        let parent_timestamps = vec![1000u64, 1500, 1200];
 
-        // The block must have timestamp > max(parent_timestamps)
-        let min_valid_timestamp = parent2_timestamp + 1; // 1501
-
-        // Test cases:
-        // 1. Timestamp equal to max parent -> INVALID
-        let invalid_timestamp = parent2_timestamp; // 1500
+        // Test case 1: Timestamp equal to max parent -> INVALID
+        let invalid_timestamp = 1500u64; // Equal to max parent
+        let result = validate_block_timestamp(invalid_timestamp, &parent_timestamps);
         assert!(
-            invalid_timestamp <= parent2_timestamp,
-            "Equal timestamp should be rejected"
+            result.is_err(),
+            "Timestamp equal to max parent should be rejected"
         );
+        match result {
+            Err(BlockchainError::TimestampIsLessThanParent(ts)) => {
+                assert_eq!(ts, 1500, "Error should contain the parent timestamp that was violated");
+            }
+            _ => panic!("Expected TimestampIsLessThanParent error"),
+        }
 
-        // 2. Timestamp between parents but not greater than max -> INVALID
-        let also_invalid = 1300u64; // Between parent3 and parent2
+        // Test case 2: Timestamp between parents but not greater than max -> INVALID
+        let also_invalid = 1300u64; // Between some parents but < max
+        let result = validate_block_timestamp(also_invalid, &parent_timestamps);
         assert!(
-            also_invalid <= parent2_timestamp,
+            result.is_err(),
             "Timestamp between parents but <= max should be rejected"
         );
 
-        // 3. Timestamp strictly greater than all parents -> VALID
+        // Test case 3: Timestamp strictly greater than all parents -> VALID
         let valid_timestamp = 1501u64;
+        let result = validate_block_timestamp(valid_timestamp, &parent_timestamps);
         assert!(
-            valid_timestamp > parent1_timestamp
-                && valid_timestamp > parent2_timestamp
-                && valid_timestamp > parent3_timestamp,
-            "Valid timestamp must be > ALL parent timestamps"
+            result.is_ok(),
+            "Timestamp > all parents should be accepted: {:?}",
+            result.err()
         );
 
         println!(
-            "TEST PASSED: Multi-parent timestamp validation requires > ALL parents (min valid = {})",
-            min_valid_timestamp
+            "TEST PASSED: validate_block_timestamp() correctly enforces > ALL parents"
         );
     }
 
@@ -1135,58 +1143,99 @@ mod ghostdag_execution_tests {
     fn test_execution_timestamp_strictly_greater_than_median() {
         // Per blockchain.rs:3190-3204, for multi-parent blocks, timestamp must also be
         // STRICTLY GREATER than median parent timestamp.
+        //
+        // This test calls the REAL validate_block_timestamp() function.
 
         // 5 parent timestamps (odd count for clear median)
-        let mut parent_timestamps = vec![1000u64, 1100, 1200, 1300, 1400];
-        parent_timestamps.sort_unstable();
-        let median = parent_timestamps[parent_timestamps.len() / 2]; // 1200
+        let parent_timestamps = vec![1000u64, 1100, 1200, 1300, 1400];
+        let mut sorted = parent_timestamps.clone();
+        sorted.sort_unstable();
+        let median = sorted[sorted.len() / 2]; // 1200
+        let max_parent = *sorted.iter().max().unwrap(); // 1400
 
-        // Test cases:
-        // 1. Timestamp equal to median -> INVALID
+        // Test case 1: Timestamp equal to median (but also <= max) -> INVALID
+        // Note: With parents [1000, 1100, 1200, 1300, 1400], timestamp 1200 is <= 1400
         let invalid_timestamp = median; // 1200
+        let result = validate_block_timestamp(invalid_timestamp, &parent_timestamps);
         assert!(
-            invalid_timestamp <= median,
-            "Timestamp equal to median should be rejected"
+            result.is_err(),
+            "Timestamp equal to median (and <= max) should be rejected"
         );
 
-        // 2. Timestamp > median but <= max parent -> Still need to check max
-        let max_parent = *parent_timestamps.iter().max().unwrap(); // 1400
-        let needs_max_check = 1300u64; // > median but < max
-        assert!(
-            needs_max_check > median,
-            "This passes median check"
-        );
-        assert!(
-            needs_max_check <= max_parent,
-            "But fails max parent check"
-        );
-
-        // 3. Timestamp > median AND > max parent -> VALID
+        // Test case 2: Timestamp > max parent -> VALID (also > median automatically)
         let valid_timestamp = 1401u64;
+        let result = validate_block_timestamp(valid_timestamp, &parent_timestamps);
         assert!(
-            valid_timestamp > median && valid_timestamp > max_parent,
-            "Valid timestamp must be > median AND > max parent"
+            result.is_ok(),
+            "Timestamp > max parent should be accepted: {:?}",
+            result.err()
+        );
+
+        // Test case 3: Edge case - 2 parents, median is the higher one
+        let two_parents = vec![1000u64, 2000];
+        let _median_of_two = two_parents[two_parents.len() / 2]; // 2000 (index 1)
+        let timestamp_between = 1500u64;
+        let result = validate_block_timestamp(timestamp_between, &two_parents);
+        assert!(
+            result.is_err(),
+            "Timestamp between two parents should be rejected (fails > max check)"
         );
 
         println!(
-            "TEST PASSED: Multi-parent timestamp requires > median ({}) AND > max parent ({})",
+            "TEST PASSED: validate_block_timestamp() correctly enforces > median ({}) AND > max ({})",
             median, max_parent
         );
     }
 
+    #[test]
+    fn test_execution_timestamp_validation_edge_cases() {
+        // Additional edge cases for validate_block_timestamp()
+
+        // Edge case 1: Single parent - no median check needed
+        let single_parent = vec![1000u64];
+        let result = validate_block_timestamp(1001, &single_parent);
+        assert!(result.is_ok(), "Single parent: timestamp > parent should pass");
+
+        let result = validate_block_timestamp(1000, &single_parent);
+        assert!(result.is_err(), "Single parent: timestamp == parent should fail");
+
+        let result = validate_block_timestamp(999, &single_parent);
+        assert!(result.is_err(), "Single parent: timestamp < parent should fail");
+
+        // Edge case 2: Empty parents (genesis-like) - should pass
+        let no_parents: Vec<u64> = vec![];
+        let result = validate_block_timestamp(0, &no_parents);
+        assert!(result.is_ok(), "No parents: any timestamp should pass");
+
+        // Edge case 3: All parents have same timestamp
+        let same_timestamps = vec![1000u64, 1000, 1000];
+        let result = validate_block_timestamp(1000, &same_timestamps);
+        assert!(result.is_err(), "Equal to all parents should fail");
+
+        let result = validate_block_timestamp(1001, &same_timestamps);
+        assert!(result.is_ok(), "Just above all parents should pass");
+
+        // Edge case 4: Large timestamp difference
+        let large_diff = vec![1u64, 1_000_000_000];
+        let result = validate_block_timestamp(1_000_000_001, &large_diff);
+        assert!(result.is_ok(), "Large timestamp > max should pass");
+
+        println!("TEST PASSED: validate_block_timestamp() handles all edge cases correctly");
+    }
+
     #[tokio::test]
     async fn test_execution_multi_parent_timestamp_validation_integration() {
-        // Integration test: verify timestamp validation through MockStorage
+        // Integration test: verify timestamp validation through MockStorage + real function
         // This simulates the actual validation path in blockchain.rs
 
         let mut storage = create_genesis_storage();
         let genesis_hash = Hash::zero();
 
         // Create 3 parent blocks with different timestamps
-        let parent_timestamps = [1000u64, 1500, 1200];
+        let parent_timestamps_array = [1000u64, 1500, 1200];
         let mut parent_hashes = Vec::new();
 
-        for (i, &ts) in parent_timestamps.iter().enumerate() {
+        for (i, &ts) in parent_timestamps_array.iter().enumerate() {
             let parent_hash = create_test_hash((i + 1) as u8);
             let parent_header = create_test_header(ts, vec![genesis_hash.clone()]);
 
@@ -1224,37 +1273,41 @@ mod ghostdag_execution_tests {
             parent_hashes.push(parent_hash);
         }
 
-        // Verify we can retrieve timestamps correctly
-        let max_parent_ts = parent_timestamps.iter().max().unwrap();
-        let mut sorted_ts = parent_timestamps.to_vec();
-        sorted_ts.sort_unstable();
-        let median_ts = sorted_ts[sorted_ts.len() / 2];
-
-        println!(
-            "Parent timestamps: {:?}, max={}, median={}",
-            parent_timestamps, max_parent_ts, median_ts
-        );
-
-        // Verify timestamp retrieval from mock storage
-        for (i, hash) in parent_hashes.iter().enumerate() {
-            let retrieved_ts = storage
+        // Retrieve timestamps from storage and validate using REAL function
+        let mut retrieved_timestamps = Vec::new();
+        for hash in parent_hashes.iter() {
+            let ts = storage
                 .get_timestamp_for_block_hash(hash)
                 .await
                 .expect("Should retrieve timestamp");
-            assert_eq!(
-                retrieved_ts, parent_timestamps[i],
-                "Retrieved timestamp should match"
-            );
+            retrieved_timestamps.push(ts);
         }
 
-        // Document the validation rule:
-        // A valid block timestamp T must satisfy:
-        // 1. T > parent_ts for ALL parents
-        // 2. T > median(parent_timestamps) for multi-parent blocks
-        let min_valid = max_parent_ts + 1;
+        // Verify timestamps match what we stored
+        assert_eq!(
+            retrieved_timestamps, parent_timestamps_array.to_vec(),
+            "Retrieved timestamps should match stored values"
+        );
+
+        // Now test the REAL validate_block_timestamp function with retrieved data
+        let max_parent_ts = *retrieved_timestamps.iter().max().unwrap();
+
+        // Invalid: equal to max
+        let result = validate_block_timestamp(max_parent_ts, &retrieved_timestamps);
+        assert!(
+            result.is_err(),
+            "Timestamp equal to max retrieved parent should fail"
+        );
+
+        // Valid: strictly greater than all
+        let result = validate_block_timestamp(max_parent_ts + 1, &retrieved_timestamps);
+        assert!(
+            result.is_ok(),
+            "Timestamp > max retrieved parent should pass"
+        );
+
         println!(
-            "TEST PASSED: Minimum valid timestamp for block with parents {:?} is {}",
-            parent_timestamps, min_valid
+            "TEST PASSED: Integration test with MockStorage + validate_block_timestamp()"
         );
     }
 
@@ -1584,12 +1637,13 @@ mod ghostdag_execution_tests {
         println!("   -> Calls calculate_target_difficulty() at exact window boundary");
         println!("   -> Verifies floor applies even at boundary");
         println!();
-        println!("11-13. test_execution_timestamp_strictly_greater_than_*");
+        println!("11-14. test_execution_timestamp_* (calls REAL validate_block_timestamp())");
         println!("   -> Verifies block timestamp must be > ALL parent timestamps");
         println!("   -> Verifies block timestamp must be > median(parent_timestamps)");
-        println!("   -> Integration test with MockStorage for multi-parent validation");
+        println!("   -> Edge cases: single parent, no parents, same timestamps, large diff");
+        println!("   -> Integration test with MockStorage + real validation function");
         println!();
-        println!("14-16. test_execution_k_cluster_anticone_*");
+        println!("15-17. test_execution_k_cluster_anticone_*");
         println!("   -> Tests k-cluster boundary: anticone=k triggers red");
         println!("   -> Tests k-cluster boundary: anticone=k-1 stays blue");
         println!("   -> Tests mergeset_blues limit enforcement (max k+1)");
