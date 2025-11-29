@@ -209,7 +209,17 @@ impl<S: Storage> GetWorkServer<S> {
                 // the correct blue_score based on the tips at that moment
                 let blue_score = header.get_blue_score();
 
-                let job = MinerWork::new(header.get_work_hash(), get_current_time_in_millis());
+                // Create MinerWork with all GHOSTDAG consensus fields from the header
+                let job = MinerWork::new(
+                    header.get_work_hash(),
+                    get_current_time_in_millis(),
+                    header.get_daa_score(),
+                    header.get_blue_work().clone(),
+                    header.get_bits(),
+                    header.get_pruning_point().clone(),
+                    header.accepted_id_merkle_root.clone(),
+                    header.utxo_commitment.clone(),
+                );
                 (header.get_version(), job, blue_score, *diff, blue_score)
             } else {
                 // generate a mining job
@@ -237,9 +247,19 @@ impl<S: Storage> GetWorkServer<S> {
                     (header, difficulty, blue_score)
                 };
 
-                let job = MinerWork::new(header.get_work_hash(), get_current_time_in_millis());
-                let height = blue_score;
+                // Create MinerWork with all GHOSTDAG consensus fields from the header
                 let version = header.get_version();
+                let job = MinerWork::new(
+                    header.get_work_hash(),
+                    get_current_time_in_millis(),
+                    header.get_daa_score(),
+                    header.get_blue_work().clone(),
+                    header.get_bits(),
+                    header.get_pruning_point().clone(),
+                    header.accepted_id_merkle_root.clone(),
+                    header.utxo_commitment.clone(),
+                );
+                let height = blue_score;
 
                 // save the mining job, and set it as last job
                 let header_work_hash = job.get_header_work_hash();
@@ -334,9 +354,19 @@ impl<S: Storage> GetWorkServer<S> {
             (header, difficulty, blue_score)
         };
 
-        let job = MinerWork::new(header.get_work_hash(), header.timestamp);
-        let height = blue_score;
+        // Create MinerWork with all GHOSTDAG consensus fields from the header
         let version = header.get_version();
+        let job = MinerWork::new(
+            header.get_work_hash(),
+            header.timestamp,
+            header.get_daa_score(),
+            header.get_blue_work().clone(),
+            header.get_bits(),
+            header.get_pruning_point().clone(),
+            header.accepted_id_merkle_root.clone(),
+            header.utxo_commitment.clone(),
+        );
+        let height = blue_score;
 
         // get the algorithm for the current version
         let algorithm = get_pow_algorithm_for_version(version);

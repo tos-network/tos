@@ -319,7 +319,7 @@ impl BlockHeader {
     /// - `pruning_point` (GHOSTDAG)
     /// - `accepted_id_merkle_root` (future use)
     /// - `utxo_commitment` (future use)
-    fn get_serialized_header(&self) -> Vec<u8> {
+    pub fn get_serialized_header(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(BLOCK_WORK_SIZE);
 
         // Original fields (immutable work commitment)

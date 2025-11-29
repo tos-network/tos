@@ -70,7 +70,7 @@ use tos_common::{
     async_handler,
     block::{Algorithm, MinerWork, Worker},
     config::VERSION,
-    crypto::{Address, Hash},
+    crypto::{Address, BlueWorkType, Hash},
     difficulty::{
         check_difficulty_against_target, compute_difficulty_target, difficulty_from_hash,
         Difficulty,
@@ -454,7 +454,17 @@ fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
         let start = Instant::now();
         let mut handles = vec![];
         for _ in 0..bench {
-            let job = MinerWork::new(Hash::zero(), get_current_time_in_millis());
+            // For benchmarking, use zero values for all fields
+            let job = MinerWork::new(
+                Hash::zero(),
+                get_current_time_in_millis(),
+                0,                    // daa_score
+                BlueWorkType::zero(), // blue_work
+                0,                    // bits
+                Hash::zero(),         // pruning_point
+                Hash::zero(),         // accepted_id_merkle_root
+                Hash::zero(),         // utxo_commitment
+            );
             let mut worker = Worker::new();
             worker.set_work(job, algorithm).or_exit("unwrap");
 

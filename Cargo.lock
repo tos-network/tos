@@ -5404,7 +5404,7 @@ dependencies = [
 
 [[package]]
 name = "tos_common"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "actix-rt",
  "actix-web",
@@ -5463,7 +5463,7 @@ dependencies = [
 
 [[package]]
 name = "tos_daemon"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -5532,7 +5532,7 @@ dependencies = [
 
 [[package]]
 name = "tos_miner"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -5549,7 +5549,7 @@ dependencies = [
 
 [[package]]
 name = "tos_wallet"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "actix-web",
  "actix-web-httpauth",

@@ -25,16 +25,28 @@ pub type TopoHeight = u64;
 pub const EXTRA_NONCE_SIZE: usize = 32;
 pub const HEADER_WORK_SIZE: usize = 73;
 
-/// Size of the miner-controlled fields in the block header (legacy/miner protocol).
+/// Size of the miner work structure for PoW calculation.
 ///
-/// Used by `MinerWork` for stratum mining protocol compatibility.
-/// This is the 112-byte prefix that existing miner implementations work with.
+/// **SECURITY FIX**: Extended from 112 to 252 bytes to match `BLOCK_WORK_SIZE`.
+/// This ensures MinerWork and BlockHeader use identical serialization for PoW,
+/// following Kaspa's security model where ALL consensus fields are hash-protected.
 ///
-/// **WARNING**: Do NOT change this value without a miner protocol migration plan.
-/// Existing miners depend on this exact size for PoW calculation.
+/// This change is REQUIRED because PR #15 added GHOSTDAG fields to the block hash
+/// calculation. Without this change, miners compute a different PoW hash than validators.
 ///
-/// Breakdown: 32 (work_hash) + 8 (timestamp) + 8 (nonce) + 32 (extra_nonce) + 32 (miner) = 112 bytes
-pub const MINER_WORK_SIZE: usize = 112;
+/// Breakdown (total 252 bytes = BLOCK_WORK_SIZE):
+/// - work_hash: 32 bytes (covers: version, blue_score, parents, merkle_root)
+/// - timestamp: 8 bytes
+/// - nonce: 8 bytes
+/// - extra_nonce: 32 bytes
+/// - miner: 32 bytes
+/// - daa_score: 8 bytes (GHOSTDAG)
+/// - blue_work: 32 bytes (U256, GHOSTDAG)
+/// - bits: 4 bytes (difficulty)
+/// - pruning_point: 32 bytes (GHOSTDAG)
+/// - accepted_id_merkle_root: 32 bytes
+/// - utxo_commitment: 32 bytes
+pub const MINER_WORK_SIZE: usize = BLOCK_WORK_SIZE;
 
 /// Size of the full header serialization used for consensus hashing.
 ///

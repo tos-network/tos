@@ -263,42 +263,51 @@ mod security_tests {
         // Verify that GHOSTDAG fields are included in the block hash.
         // This is documented in common/src/block/header.rs:get_serialized_header()
         //
-        // BEFORE FIX: Only 112 bytes hashed (miner-controlled fields only)
-        // AFTER FIX: 252 bytes hashed (all GHOSTDAG consensus fields)
+        // The security fix unified MINER_WORK_SIZE with BLOCK_WORK_SIZE.
+        // Now both BlockHeader and MinerWork serialize to 252 bytes with all fields.
         //
-        // Fields now included in hash:
-        // - daa_score (8 bytes)
-        // - blue_work (32 bytes, U256)
-        // - bits (4 bytes)
-        // - pruning_point (32 bytes)
-        // - accepted_id_merkle_root (32 bytes)
-        // - utxo_commitment (32 bytes)
+        // Fields included in hash (252 bytes total):
+        // - work_hash: 32 bytes
+        // - timestamp: 8 bytes
+        // - nonce: 8 bytes
+        // - extra_nonce: 32 bytes
+        // - miner: 32 bytes
+        // - daa_score: 8 bytes
+        // - blue_work: 32 bytes (U256)
+        // - bits: 4 bytes
+        // - pruning_point: 32 bytes
+        // - accepted_id_merkle_root: 32 bytes
+        // - utxo_commitment: 32 bytes
 
         use tos_common::block::{BLOCK_WORK_SIZE, MINER_WORK_SIZE};
 
-        // Verify the size constants
+        // After unification, MINER_WORK_SIZE == BLOCK_WORK_SIZE == 252 bytes
         assert_eq!(
-            MINER_WORK_SIZE, 112,
-            "MINER_WORK_SIZE should be 112 bytes (miner protocol compatibility)"
+            MINER_WORK_SIZE, 252,
+            "MINER_WORK_SIZE should be 252 bytes (unified with BLOCK_WORK_SIZE)"
         );
         assert_eq!(
             BLOCK_WORK_SIZE, 252,
             "BLOCK_WORK_SIZE should be 252 bytes (includes all GHOSTDAG fields)"
         );
+        assert_eq!(
+            MINER_WORK_SIZE, BLOCK_WORK_SIZE,
+            "MINER_WORK_SIZE and BLOCK_WORK_SIZE must be equal"
+        );
 
         // Document the breakdown
-        println!("\n=== PR #12 Security Fix: Header Hash Coverage ===\n");
-        println!("Finding 3: Header hash didn't cover all GHOSTDAG fields");
+        println!("\n=== Security Fix: Unified Header Hash Coverage ===\n");
+        println!("MinerWork and BlockHeader now serialize to same 252 bytes.");
         println!();
-        println!("Hash Coverage Breakdown:");
-        println!("  Base (MINER_WORK_SIZE = 112 bytes):");
+        println!("Hash Coverage Breakdown (MINER_WORK_SIZE = BLOCK_WORK_SIZE = 252 bytes):");
+        println!("  Base fields (112 bytes):");
         println!("    - work_hash: 32 bytes");
         println!("    - timestamp: 8 bytes");
         println!("    - nonce: 8 bytes");
         println!("    - extra_nonce: 32 bytes");
         println!("    - miner: 32 bytes");
         println!();
-        println!("  Added GHOSTDAG Fields (140 bytes):");
+        println!("  GHOSTDAG consensus fields (140 bytes):");
         println!("    - daa_score: 8 bytes");
         println!("    - blue_work: 32 bytes (U256)");
         println!("    - bits: 4 bytes");
@@ -306,9 +315,10 @@ mod security_tests {
         println!("    - accepted_id_merkle_root: 32 bytes");
         println!("    - utxo_commitment: 32 bytes");
         println!();
-        println!("  Total (BLOCK_WORK_SIZE = {} bytes)", BLOCK_WORK_SIZE);
+        println!("  Total: {} bytes", BLOCK_WORK_SIZE);
         println!();
         println!("✅ All GHOSTDAG consensus fields are now hash-protected");
+        println!("✅ MinerWork and BlockHeader serializations are identical");
     }
 
     // =====================================================================
