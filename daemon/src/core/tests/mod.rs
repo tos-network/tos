@@ -33,3 +33,6 @@ mod bps_integration_tests;
 
 #[cfg(test)]
 mod ghostdag_blue_calculations_tests;
+
+#[cfg(test)]
+mod ghostdag_execution_tests;

@@ -214,6 +214,8 @@ pub enum BlockchainError {
     TimestampIsInFuture(TimestampMillis, TimestampMillis), // left is expected, right is got
     #[error("Block height mismatch, expected {}, got {}.", _0, _1)]
     InvalidBlockHeight(u64, u64),
+    #[error("Reachability data missing for block {}. Node must rebuild reachability index before participating in consensus.", _0)]
+    ReachabilityDataMissing(Hash),
     #[error("Block height is zero which is not allowed")]
     BlockHeightZeroNotAllowed,
     #[error("Block height is in stable height which is not allowed")]
