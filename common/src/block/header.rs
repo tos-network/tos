@@ -213,6 +213,11 @@ impl BlockHeader {
         &self.blue_work
     }
 
+    /// Get bits (compact difficulty representation)
+    pub fn get_bits(&self) -> u32 {
+        self.bits
+    }
+
     pub fn get_timestamp(&self) -> TimestampMillis {
         self.timestamp
     }

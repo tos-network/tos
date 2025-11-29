@@ -288,6 +288,16 @@ pub enum BlockchainError {
     InvalidBlueScore(Hash, u64, u64),
     #[error("Invalid blue_work for block {}: expected {}, got {}", _0, _1, _2)]
     InvalidBlueWork(Hash, BlueWorkType, BlueWorkType),
+    #[error(
+        "Block {} has multiple parent levels ({} levels), only single level (level 0) is allowed",
+        _0,
+        _1
+    )]
+    InvalidParentsLevelCount(Hash, usize),
+    #[error("Block {} has invalid bits field: expected {}, got {}", _0, _1, _2)]
+    InvalidBitsField(Hash, u32, u32),
+    #[error("Block {} has invalid daa_score: expected {}, got {}", _0, _1, _2)]
+    InvalidDaaScore(Hash, u64, u64),
     #[error(transparent)]
     ErrorStd(#[from] std::io::Error),
     #[error(transparent)]
