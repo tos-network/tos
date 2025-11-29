@@ -1835,7 +1835,11 @@ impl<S: Storage> Blockchain<S> {
         tips: I,
     ) -> Result<(Difficulty, VarUint), BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider + GhostdagDataProvider + GhostdagStorageProvider,
+        P: DifficultyProvider
+            + DagOrderProvider
+            + PrunedTopoheightProvider
+            + GhostdagDataProvider
+            + GhostdagStorageProvider,
         I: IntoIterator<Item = &'a Hash> + ExactSizeIterator + Clone,
         I::IntoIter: ExactSizeIterator,
     {
@@ -1862,7 +1866,8 @@ impl<S: Storage> Blockchain<S> {
         let candidate_blue_score = ghostdag_data.blue_score;
 
         // Get the version at the candidate blue_score (used as height for version calculation)
-        let (has_hard_fork, version) = has_hard_fork_at_height(self.get_network(), candidate_blue_score);
+        let (has_hard_fork, version) =
+            has_hard_fork_at_height(self.get_network(), candidate_blue_score);
 
         // if simulator is enabled or we are too low in blue_score, don't calculate difficulty
         if candidate_blue_score <= 1 || self.is_simulator_enabled() {
@@ -1932,7 +1937,11 @@ impl<S: Storage> Blockchain<S> {
         tips: I,
     ) -> Result<(Difficulty, VarUint), BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider + GhostdagDataProvider + GhostdagStorageProvider,
+        P: DifficultyProvider
+            + DagOrderProvider
+            + PrunedTopoheightProvider
+            + GhostdagDataProvider
+            + GhostdagStorageProvider,
         I: IntoIterator<Item = &'a Hash> + ExactSizeIterator + Clone,
         I::IntoIter: ExactSizeIterator,
     {

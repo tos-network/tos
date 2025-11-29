@@ -1615,10 +1615,10 @@ mod ghostdag_execution_tests {
         let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
         let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
         let block1_ghostdag = TosGhostdagData::new(
-            1,                        // blue_score = 0 + 1 (genesis + 1)
+            1, // blue_score = 0 + 1 (genesis + 1)
             work,
-            1,                        // daa_score
-            genesis_hash.clone(),     // selected_parent
+            1,                          // daa_score
+            genesis_hash.clone(),       // selected_parent
             vec![genesis_hash.clone()], // mergeset_blues
             Vec::new(),
             HashMap::new(),
@@ -1658,7 +1658,8 @@ mod ghostdag_execution_tests {
                     "Single parent blue_score should be parent.blue_score + 1 = 2"
                 );
                 assert_eq!(
-                    data.mergeset_blues.len(), 1,
+                    data.mergeset_blues.len(),
+                    1,
                     "Single parent should have 1 blue in mergeset"
                 );
                 assert!(
@@ -1801,9 +1802,7 @@ mod ghostdag_execution_tests {
                         data.blue_score, 3,
                         "With 2 blue parents at score 1, new block should have score 3"
                     );
-                    println!(
-                        "TEST PASSED: Diamond pattern blue_score = 3 (1 + 2 mergeset blues)"
-                    );
+                    println!("TEST PASSED: Diamond pattern blue_score = 3 (1 + 2 mergeset blues)");
                 } else {
                     println!(
                         "Note: Only {} blues in mergeset (some may be in anticone), blue_score = {}",
@@ -1899,7 +1898,9 @@ mod ghostdag_execution_tests {
                     assert!(
                         data.blue_score > naive_estimate,
                         "With {} blue parents, blue_score ({}) should exceed naive estimate ({})",
-                        data.mergeset_blues.len(), data.blue_score, naive_estimate
+                        data.mergeset_blues.len(),
+                        data.blue_score,
+                        naive_estimate
                     );
                     println!(
                         "TEST PASSED: Multi-parent blue_score ({}) > naive +1 estimate ({})",
@@ -1998,12 +1999,8 @@ mod ghostdag_execution_tests {
                     "Chain tip blue_score should be 10 + 1 = 11"
                 );
 
-                println!(
-                    "TEST PASSED: Chain tip at blue_score=10, new block at blue_score=11"
-                );
-                println!(
-                    "This demonstrates correct blue_score tracking for hard fork boundaries"
-                );
+                println!("TEST PASSED: Chain tip at blue_score=10, new block at blue_score=11");
+                println!("This demonstrates correct blue_score tracking for hard fork boundaries");
             }
             Err(e) => {
                 panic!("GHOSTDAG failed: {:?}", e);
@@ -2094,9 +2091,7 @@ mod ghostdag_execution_tests {
             "Template and validation mergeset_blues count must match"
         );
 
-        println!(
-            "TEST PASSED: Single parent GHOSTDAG consistency verified"
-        );
+        println!("TEST PASSED: Single parent GHOSTDAG consistency verified");
         println!(
             "  blue_score: {}, blue_work: {}, daa_score: {}",
             template_data.blue_score, template_data.blue_work, template_data.daa_score
@@ -2181,24 +2176,51 @@ mod ghostdag_execution_tests {
         let tips = vec![block1_hash.clone(), block2_hash.clone()];
 
         // Run GHOSTDAG multiple times - must be deterministic
-        let run1 = ghostdag.ghostdag(&storage, &tips).await.expect("Run 1 should succeed");
-        let run2 = ghostdag.ghostdag(&storage, &tips).await.expect("Run 2 should succeed");
-        let run3 = ghostdag.ghostdag(&storage, &tips).await.expect("Run 3 should succeed");
+        let run1 = ghostdag
+            .ghostdag(&storage, &tips)
+            .await
+            .expect("Run 1 should succeed");
+        let run2 = ghostdag
+            .ghostdag(&storage, &tips)
+            .await
+            .expect("Run 2 should succeed");
+        let run3 = ghostdag
+            .ghostdag(&storage, &tips)
+            .await
+            .expect("Run 3 should succeed");
 
         // All runs must produce identical results
-        assert_eq!(run1.blue_score, run2.blue_score, "Runs 1 and 2 blue_score must match");
-        assert_eq!(run2.blue_score, run3.blue_score, "Runs 2 and 3 blue_score must match");
-        assert_eq!(run1.blue_work, run2.blue_work, "Runs 1 and 2 blue_work must match");
-        assert_eq!(run2.blue_work, run3.blue_work, "Runs 2 and 3 blue_work must match");
-        assert_eq!(run1.selected_parent, run2.selected_parent, "Runs 1 and 2 selected_parent must match");
-        assert_eq!(run2.selected_parent, run3.selected_parent, "Runs 2 and 3 selected_parent must match");
-
-        println!(
-            "TEST PASSED: Multi-parent GHOSTDAG determinism verified across 3 runs"
+        assert_eq!(
+            run1.blue_score, run2.blue_score,
+            "Runs 1 and 2 blue_score must match"
         );
+        assert_eq!(
+            run2.blue_score, run3.blue_score,
+            "Runs 2 and 3 blue_score must match"
+        );
+        assert_eq!(
+            run1.blue_work, run2.blue_work,
+            "Runs 1 and 2 blue_work must match"
+        );
+        assert_eq!(
+            run2.blue_work, run3.blue_work,
+            "Runs 2 and 3 blue_work must match"
+        );
+        assert_eq!(
+            run1.selected_parent, run2.selected_parent,
+            "Runs 1 and 2 selected_parent must match"
+        );
+        assert_eq!(
+            run2.selected_parent, run3.selected_parent,
+            "Runs 2 and 3 selected_parent must match"
+        );
+
+        println!("TEST PASSED: Multi-parent GHOSTDAG determinism verified across 3 runs");
         println!(
             "  blue_score: {}, mergeset_blues: {}, mergeset_reds: {}",
-            run1.blue_score, run1.mergeset_blues.len(), run1.mergeset_reds.len()
+            run1.blue_score,
+            run1.mergeset_blues.len(),
+            run1.mergeset_reds.len()
         );
     }
 
@@ -2264,29 +2286,74 @@ mod ghostdag_execution_tests {
         let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
 
         // Run with original order
-        let order1 = vec![block_hashes[0].clone(), block_hashes[1].clone(), block_hashes[2].clone()];
-        let result1 = ghostdag.ghostdag(&storage, &order1).await.expect("Order 1 should succeed");
+        let order1 = vec![
+            block_hashes[0].clone(),
+            block_hashes[1].clone(),
+            block_hashes[2].clone(),
+        ];
+        let result1 = ghostdag
+            .ghostdag(&storage, &order1)
+            .await
+            .expect("Order 1 should succeed");
 
         // Run with reversed order
-        let order2 = vec![block_hashes[2].clone(), block_hashes[1].clone(), block_hashes[0].clone()];
-        let result2 = ghostdag.ghostdag(&storage, &order2).await.expect("Order 2 should succeed");
+        let order2 = vec![
+            block_hashes[2].clone(),
+            block_hashes[1].clone(),
+            block_hashes[0].clone(),
+        ];
+        let result2 = ghostdag
+            .ghostdag(&storage, &order2)
+            .await
+            .expect("Order 2 should succeed");
 
         // Run with shuffled order
-        let order3 = vec![block_hashes[1].clone(), block_hashes[2].clone(), block_hashes[0].clone()];
-        let result3 = ghostdag.ghostdag(&storage, &order3).await.expect("Order 3 should succeed");
+        let order3 = vec![
+            block_hashes[1].clone(),
+            block_hashes[2].clone(),
+            block_hashes[0].clone(),
+        ];
+        let result3 = ghostdag
+            .ghostdag(&storage, &order3)
+            .await
+            .expect("Order 3 should succeed");
 
         // Consensus-critical fields must match across all orderings
-        assert_eq!(result1.blue_score, result2.blue_score, "Order 1 and 2 blue_score must match");
-        assert_eq!(result2.blue_score, result3.blue_score, "Order 2 and 3 blue_score must match");
-        assert_eq!(result1.blue_work, result2.blue_work, "Order 1 and 2 blue_work must match");
-        assert_eq!(result2.blue_work, result3.blue_work, "Order 2 and 3 blue_work must match");
-        assert_eq!(result1.daa_score, result2.daa_score, "Order 1 and 2 daa_score must match");
-        assert_eq!(result2.daa_score, result3.daa_score, "Order 2 and 3 daa_score must match");
+        assert_eq!(
+            result1.blue_score, result2.blue_score,
+            "Order 1 and 2 blue_score must match"
+        );
+        assert_eq!(
+            result2.blue_score, result3.blue_score,
+            "Order 2 and 3 blue_score must match"
+        );
+        assert_eq!(
+            result1.blue_work, result2.blue_work,
+            "Order 1 and 2 blue_work must match"
+        );
+        assert_eq!(
+            result2.blue_work, result3.blue_work,
+            "Order 2 and 3 blue_work must match"
+        );
+        assert_eq!(
+            result1.daa_score, result2.daa_score,
+            "Order 1 and 2 daa_score must match"
+        );
+        assert_eq!(
+            result2.daa_score, result3.daa_score,
+            "Order 2 and 3 daa_score must match"
+        );
 
         // With different blue_work values, selected_parent should also be deterministic
         // (highest blue_work wins regardless of order)
-        assert_eq!(result1.selected_parent, result2.selected_parent, "With distinct blue_work, selected_parent should match");
-        assert_eq!(result2.selected_parent, result3.selected_parent, "With distinct blue_work, selected_parent should match");
+        assert_eq!(
+            result1.selected_parent, result2.selected_parent,
+            "With distinct blue_work, selected_parent should match"
+        );
+        assert_eq!(
+            result2.selected_parent, result3.selected_parent,
+            "With distinct blue_work, selected_parent should match"
+        );
 
         // Verify the highest blue_work block was selected
         assert_eq!(
@@ -2294,9 +2361,7 @@ mod ghostdag_execution_tests {
             "Block with highest difficulty (block3) should be selected parent"
         );
 
-        println!(
-            "TEST PASSED: Consensus-critical GHOSTDAG fields are order-independent"
-        );
+        println!("TEST PASSED: Consensus-critical GHOSTDAG fields are order-independent");
         println!(
             "  All orderings produce: blue_score={}, blue_work={}, selected_parent={}",
             result1.blue_score, result1.blue_work, result1.selected_parent
@@ -2315,10 +2380,10 @@ mod ghostdag_execution_tests {
 
         // Test various difficulty values
         let test_difficulties = vec![
-            Difficulty::from(100u64),      // Very low
-            Difficulty::from(1000u64),     // Low
-            Difficulty::from(10000u64),    // Medium
-            Difficulty::from(1_000_000u64), // High
+            Difficulty::from(100u64),           // Very low
+            Difficulty::from(1000u64),          // Low
+            Difficulty::from(10000u64),         // Medium
+            Difficulty::from(1_000_000u64),     // High
             Difficulty::from(1_000_000_000u64), // Very high
         ];
 
@@ -2413,11 +2478,11 @@ mod ghostdag_execution_tests {
 
         // Wrong bits values that would be rejected
         let wrong_bits_values = vec![
-            0u32,                    // Zero bits
-            expected_bits + 1,       // Off by one
+            0u32,                          // Zero bits
+            expected_bits + 1,             // Off by one
             expected_bits.wrapping_sub(1), // Off by one (other direction)
-            expected_bits ^ 0xFF,    // Corrupted low byte
-            expected_bits ^ 0xFF00,  // Corrupted high byte
+            expected_bits ^ 0xFF,          // Corrupted low byte
+            expected_bits ^ 0xFF00,        // Corrupted high byte
         ];
 
         for wrong_bits in wrong_bits_values {
@@ -2425,7 +2490,8 @@ mod ghostdag_execution_tests {
                 // This demonstrates what validation checks
                 println!(
                     "  Validation would REJECT: expected_bits={}, wrong_bits={} (diff={})",
-                    expected_bits, wrong_bits,
+                    expected_bits,
+                    wrong_bits,
                     (expected_bits as i64) - (wrong_bits as i64)
                 );
                 assert_ne!(
@@ -2524,7 +2590,10 @@ mod ghostdag_execution_tests {
         let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
 
         let tips = vec![block1_hash.clone(), block2_hash.clone()];
-        let ghostdag_data = ghostdag.ghostdag(&storage, &tips).await.expect("GHOSTDAG should succeed");
+        let ghostdag_data = ghostdag
+            .ghostdag(&storage, &tips)
+            .await
+            .expect("GHOSTDAG should succeed");
 
         // Verify multi-parent handling
         assert!(
@@ -2548,16 +2617,15 @@ mod ghostdag_execution_tests {
 
         // The difficulty for bits calculation would be based on selected_parent's difficulty
         // This matches what get_difficulty_at_tips does after running GHOSTDAG
-        println!(
-            "TEST PASSED: Multi-parent GHOSTDAG for bits calculation"
-        );
+        println!("TEST PASSED: Multi-parent GHOSTDAG for bits calculation");
         println!(
             "  selected_parent: {} (blue_work: {})",
             ghostdag_data.selected_parent, work2
         );
         println!(
             "  mergeset_blues.len(): {}, blue_score: {}",
-            ghostdag_data.mergeset_blues.len(), ghostdag_data.blue_score
+            ghostdag_data.mergeset_blues.len(),
+            ghostdag_data.blue_score
         );
         println!(
             "  Difficulty basis for bits: {} (from selected_parent)",
