@@ -65,7 +65,7 @@ pub fn create_dummy_block() -> (Block, Hash) {
     let miner = CompressedPublicKey::read(&mut reader).expect("Failed to create test pubkey");
 
     let header = BlockHeader::new_simple(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],
         0,
         [0u8; EXTRA_NONCE_SIZE],

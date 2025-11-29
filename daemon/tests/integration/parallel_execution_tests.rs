@@ -34,7 +34,7 @@ fn create_dummy_block() -> (Block, Hash) {
     let miner = CompressedPublicKey::read(&mut reader).expect("Failed to create test pubkey");
 
     let header = BlockHeader::new_simple(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],
         0,
         [0u8; EXTRA_NONCE_SIZE],
@@ -79,7 +79,7 @@ async fn test_parallel_chain_state_initialization() {
         environment,
         0, // stable_topoheight
         1, // topoheight
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -114,7 +114,7 @@ async fn test_parallel_executor_empty_batch() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -150,7 +150,7 @@ async fn test_parallel_state_getters() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -316,7 +316,7 @@ async fn test_parallel_state_modification_simulation() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -377,7 +377,7 @@ async fn test_parallel_executor_batch_size_verification() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -420,7 +420,7 @@ async fn test_parallel_state_network_caching() {
             environment.clone(),
             0,
             1,
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             block,
             block_hash,
         )
@@ -463,7 +463,7 @@ async fn test_parallel_state_network_caching() {
             environment,
             0,
             1,
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             block2,
             block_hash2,
         )
@@ -526,7 +526,7 @@ async fn test_parallel_executor_parallelism_configuration() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )

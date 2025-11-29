@@ -154,7 +154,7 @@ fn create_dummy_block() -> (Block, Hash) {
     let miner = CompressedPublicKey::read(&mut reader).expect("Failed to create test pubkey");
 
     let header = BlockHeader::new_simple(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],
         0,
         [0u8; EXTRA_NONCE_SIZE],
@@ -170,7 +170,7 @@ fn create_dummy_block() -> (Block, Hash) {
 /// Create a block whose miner field matches the provided key.
 fn create_block_for_miner(miner: &CompressedPublicKey) -> (Block, Hash) {
     let header = BlockHeader::new_simple(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],
         0,
         [0u8; EXTRA_NONCE_SIZE],
@@ -347,7 +347,7 @@ async fn execute_sequential(
         environment,
         topoheight.saturating_sub(1),
         topoheight,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         0,
         block_hash,
         block,
@@ -383,7 +383,7 @@ async fn execute_parallel(
         environment,
         topoheight.saturating_sub(1),
         topoheight,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -424,7 +424,7 @@ async fn execute_sequential_with_reward(
         environment,
         topoheight.saturating_sub(1),
         topoheight,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         0,
         block_hash,
         block,
@@ -462,7 +462,7 @@ async fn execute_parallel_with_reward(
         environment,
         topoheight.saturating_sub(1),
         topoheight,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -574,7 +574,7 @@ async fn execute_sequential_rocksdb(
         environment,
         topoheight.saturating_sub(1),
         topoheight,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         0,
         block_hash,
         block,
@@ -608,7 +608,7 @@ async fn execute_parallel_rocksdb(
         environment,
         topoheight.saturating_sub(1),
         topoheight,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )

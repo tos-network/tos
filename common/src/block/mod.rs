@@ -12,7 +12,7 @@ pub use compact::{
 };
 pub use header::BlockHeader;
 pub use merkle::calculate_merkle_root;
-pub use miner::{Algorithm, MinerWork, Worker};
+pub use miner::{MinerWork, Worker};
 pub use version::BlockVersion;
 
 use crate::crypto::{Hash, HASH_SIZE};

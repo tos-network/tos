@@ -33,7 +33,7 @@ fn create_dummy_block(miner_key: &KeyPair) -> Block {
 
     let miner = miner_key.get_public_key().compress();
     let header = BlockHeader::new(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],                  // parents_by_level
         0,                       // blue_score
         0,                       // daa_score
@@ -96,7 +96,7 @@ async fn test_nonce_increments_correctly() {
         environment,
         0, // stable_topoheight
         1, // topoheight
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -208,7 +208,7 @@ async fn test_staged_nonces_not_committed_until_success() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )
@@ -334,7 +334,7 @@ async fn test_nonce_rollback_on_failure() {
         Arc::clone(&environment),
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block1,
         block_hash1,
     )
@@ -389,7 +389,7 @@ async fn test_nonce_rollback_on_failure() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block2,
         block_hash2,
     )
@@ -470,7 +470,7 @@ async fn test_concurrent_nonce_updates() {
             environment,
             0,
             1,
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             block,
             block_hash,
         )
@@ -612,7 +612,7 @@ async fn test_nonce_ordering_preserved() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         block,
         block_hash,
     )

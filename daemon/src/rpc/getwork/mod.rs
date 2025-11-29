@@ -4,7 +4,6 @@ use crate::{
     config::{dev_public_key, STABLE_LIMIT},
     core::{
         blockchain::{Blockchain, BroadcastOption},
-        hard_fork::get_pow_algorithm_for_version,
         storage::Storage,
     },
 };
@@ -187,7 +186,8 @@ impl<S: Storage> GetWorkServer<S> {
         key: &PublicKey,
     ) -> Result<(), anyhow::Error> {
         debug!("Sending new job to miner");
-        let (version, mut job, height, difficulty, blue_score) = {
+        // VERSION UNIFICATION: Removed version from tuple, algorithm is always V2
+        let (mut job, height, difficulty, blue_score) = {
             if log::log_enabled!(log::Level::Debug) {
                 debug!("locking last header hash for new job");
             }
@@ -220,7 +220,7 @@ impl<S: Storage> GetWorkServer<S> {
                     header.accepted_id_merkle_root.clone(),
                     header.utxo_commitment.clone(),
                 );
-                (header.get_version(), job, blue_score, *diff, blue_score)
+                (job, blue_score, *diff, blue_score)
             } else {
                 // generate a mining job
                 let (header, difficulty, blue_score) = {
@@ -248,7 +248,6 @@ impl<S: Storage> GetWorkServer<S> {
                 };
 
                 // Create MinerWork with all GHOSTDAG consensus fields from the header
-                let version = header.get_version();
                 let job = MinerWork::new(
                     header.get_work_hash(),
                     get_current_time_in_millis(),
@@ -271,7 +270,7 @@ impl<S: Storage> GetWorkServer<S> {
                     mining_jobs.put(header_work_hash.clone(), (header, difficulty));
                 }
 
-                (version, job, height, difficulty, blue_score)
+                (job, height, difficulty, blue_score)
             }
         };
 
@@ -279,14 +278,12 @@ impl<S: Storage> GetWorkServer<S> {
         job.set_miner(Cow::Borrowed(key));
         OsRng.fill_bytes(job.get_extra_nonce());
 
-        // get the algorithm for the current version
-        let algorithm = get_pow_algorithm_for_version(version);
+        // VERSION UNIFICATION: Algorithm field removed, always uses V2
         let topoheight = self.blockchain.get_topo_height();
 
         debug!("Sending job to new miner");
         session
             .send_json(Response::NewJob(GetMinerWorkResult {
-                algorithm,
                 miner_work: job.to_hex(),
                 height,
                 topoheight,
@@ -355,7 +352,7 @@ impl<S: Storage> GetWorkServer<S> {
         };
 
         // Create MinerWork with all GHOSTDAG consensus fields from the header
-        let version = header.get_version();
+        // VERSION UNIFICATION: Removed version variable, algorithm is always V2
         let job = MinerWork::new(
             header.get_work_hash(),
             header.timestamp,
@@ -368,8 +365,7 @@ impl<S: Storage> GetWorkServer<S> {
         );
         let height = blue_score;
 
-        // get the algorithm for the current version
-        let algorithm = get_pow_algorithm_for_version(version);
+        // VERSION UNIFICATION: Algorithm field removed, always uses V2
         // Also send the node topoheight to miners
         // This is for visual purposes only
         let topoheight = self.blockchain.get_topo_height();
@@ -380,7 +376,6 @@ impl<S: Storage> GetWorkServer<S> {
             if let Some(rpc) = rpc.as_ref() {
                 let value = GetBlockTemplateResult {
                     template: header.to_hex(),
-                    algorithm,
                     height,
                     topoheight,
                     difficulty,
@@ -430,7 +425,6 @@ impl<S: Storage> GetWorkServer<S> {
 
                         if let Err(e) = addr
                             .send_json(Response::NewJob(GetMinerWorkResult {
-                                algorithm,
                                 miner_work: template,
                                 height,
                                 topoheight,

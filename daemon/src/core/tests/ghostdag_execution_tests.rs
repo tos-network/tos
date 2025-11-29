@@ -354,7 +354,7 @@ mod ghostdag_execution_tests {
     /// Create a test block header
     fn create_test_header(timestamp: u64, parents: Vec<Hash>) -> BlockHeader {
         BlockHeader::new_simple(
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             parents,
             timestamp,
             [0u8; EXTRA_NONCE_SIZE],
@@ -2697,8 +2697,8 @@ mod ghostdag_execution_tests {
             .await
             .expect("GHOSTDAG should succeed");
 
-        // Expected bits for blue_score=1 uses minimum difficulty (V2 1s blocks)
-        let target_time = get_block_time_target_for_version(BlockVersion::V2);
+        // Expected bits for blue_score=1 uses minimum difficulty (Baseline 1s blocks)
+        let target_time = get_block_time_target_for_version(BlockVersion::Baseline);
         let min_diff =
             Difficulty::from_u64(MINIMUM_HASHRATE * target_time / crate::config::MILLIS_PER_SECOND);
         let expected_bits = difficulty_to_bits(&min_diff);

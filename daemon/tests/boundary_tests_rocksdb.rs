@@ -36,7 +36,7 @@ fn create_dummy_block() -> Block {
 
     let miner = KeyPair::new().get_public_key().compress();
     let header = BlockHeader::new(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],                  // parents_by_level
         0,                       // blue_score
         0,                       // daa_score
@@ -85,7 +85,7 @@ async fn test_balance_transition_to_zero() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -155,7 +155,7 @@ async fn test_balance_transition_from_zero() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -231,7 +231,7 @@ async fn test_nonce_sequential_boundary() {
             Arc::clone(&environment),
             i,     // stable_topoheight
             i + 1, // topoheight
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             dummy_block,
             block_hash,
         )
@@ -306,7 +306,7 @@ async fn test_multiple_asset_types() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -386,7 +386,7 @@ async fn test_cache_invalidation_on_reload() {
             Arc::clone(&environment),
             0,
             1,
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             dummy_block,
             block_hash,
         )
@@ -418,7 +418,7 @@ async fn test_cache_invalidation_on_reload() {
             environment,
             1,
             2,
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             dummy_block,
             block_hash,
         )
@@ -478,7 +478,7 @@ async fn test_same_account_multiple_operations() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )

@@ -3,7 +3,7 @@ mod direction;
 use super::{default_true_value, DataElement, RPCContractOutput, RPCTransaction};
 use crate::{
     account::{Nonce, VersionedBalance, VersionedNonce},
-    block::{Algorithm, BlockVersion, TopoHeight, EXTRA_NONCE_SIZE},
+    block::{BlockVersion, TopoHeight, EXTRA_NONCE_SIZE},
     crypto::{Address, BlueWorkType, Hash},
     difficulty::Difficulty,
     network::Network,
@@ -197,8 +197,7 @@ pub struct GetBlockTemplateResult {
     // block_template is Block Header in hexadecimal format
     // miner jobs can be created from it
     pub template: String,
-    // Algorithm to use for the POW challenge
-    pub algorithm: Algorithm,
+    // VERSION UNIFICATION: Algorithm field removed, always uses V2
     // Blockchain height
     pub height: u64,
     // Topoheight of the daemon
@@ -211,8 +210,7 @@ pub struct GetBlockTemplateResult {
 
 #[derive(Serialize, Deserialize, PartialEq)]
 pub struct GetMinerWorkResult {
-    // algorithm to use
-    pub algorithm: Algorithm,
+    // VERSION UNIFICATION: Algorithm field removed, always uses V2
     // template is miner job in hex format
     pub miner_work: String,
     // block height

@@ -2,7 +2,7 @@
 //
 // This is a BREAKING CHANGE from the legacy chain-based format.
 
-use super::{Algorithm, MinerWork, EXTRA_NONCE_SIZE};
+use super::{MinerWork, EXTRA_NONCE_SIZE};
 use crate::{
     block::{BlockVersion, BLOCK_WORK_SIZE, HEADER_WORK_SIZE},
     config::{MAX_PARENT_LEVELS, TIPS_LIMIT},
@@ -351,9 +351,11 @@ impl BlockHeader {
         bytes
     }
 
-    /// Compute the block POW hash
-    pub fn get_pow_hash(&self, algorithm: Algorithm) -> Result<Hash, TosHashError> {
-        pow_hash(&self.get_serialized_header(), algorithm)
+    /// Compute the block POW hash.
+    ///
+    /// VERSION UNIFICATION: Algorithm parameter removed, always uses V2.
+    pub fn get_pow_hash(&self) -> Result<Hash, TosHashError> {
+        pow_hash(&self.get_serialized_header())
     }
 
     // REMOVED: All deprecated legacy methods
@@ -560,8 +562,14 @@ mod tests {
         let miner = KeyPair::new().get_public_key().compress();
         let parents = vec![Hash::zero()];
 
-        let header =
-            BlockHeader::new_simple(BlockVersion::V0, parents, 0, [0u8; 32], miner, Hash::zero());
+        let header = BlockHeader::new_simple(
+            BlockVersion::Baseline,
+            parents,
+            0,
+            [0u8; 32],
+            miner,
+            Hash::zero(),
+        );
 
         let serialized = header.to_bytes();
         assert!(serialized.len() == header.size());
@@ -576,7 +584,7 @@ mod tests {
         let parents_by_level = vec![vec![Hash::zero()]];
 
         let header = BlockHeader::new(
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             parents_by_level,
             100, // blue_score
             100, // daa_score
@@ -610,7 +618,7 @@ mod tests {
         ];
 
         let header = BlockHeader::new(
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             parents_by_level.clone(),
             0,
             0,
@@ -638,7 +646,7 @@ mod tests {
     fn test_serialized_header_length() {
         let miner = KeyPair::new().get_public_key().compress();
         let header = BlockHeader::new_simple(
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             vec![Hash::zero()],
             1234567890,
             [0u8; 32],
@@ -665,7 +673,7 @@ mod tests {
 
         // Create a base header
         let base_header = BlockHeader::new(
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             vec![vec![Hash::zero()]],
             100, // blue_score
             100, // daa_score

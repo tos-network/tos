@@ -302,7 +302,7 @@ mod tests {
         let parents = vec![vec![Hash::new([0u8; 32])]]; // Level 0 parents
         let miner = CompressedPublicKey::new(CompressedRistretto([1u8; 32]));
         let header = BlockHeader::new(
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             parents,              // parents_by_level
             100,                  // blue_score
             100,                  // daa_score

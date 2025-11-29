@@ -42,7 +42,7 @@ fn create_dummy_block() -> Block {
 
     let miner = KeyPair::new().get_public_key().compress();
     let header = BlockHeader::new(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],                  // parents_by_level
         0,                       // blue_score
         0,                       // daa_score
@@ -121,7 +121,7 @@ async fn test_rocksdb_invalid_signature_setup() {
         environment,
         0, // stable_topoheight
         1, // topoheight
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -210,7 +210,7 @@ async fn test_rocksdb_receiver_balance_setup() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -274,7 +274,7 @@ async fn test_rocksdb_fee_deduction_setup() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -356,7 +356,7 @@ async fn test_rocksdb_max_parallelism_setup() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -394,7 +394,7 @@ async fn test_gas_fee_saturation() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -438,7 +438,7 @@ async fn test_burned_supply_limit() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -506,7 +506,7 @@ async fn test_fuzz_concurrent_counter_updates() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )

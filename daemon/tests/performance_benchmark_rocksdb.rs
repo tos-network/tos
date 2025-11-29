@@ -110,7 +110,7 @@ async fn setup_account(
 fn create_dummy_block() -> (Block, Hash) {
     let miner = KeyPair::new().get_public_key().compress();
     let dummy_header = BlockHeader::new(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],
         0,
         0,
@@ -881,7 +881,7 @@ async fn benchmark_parallel_chain_state_creation() {
             Arc::clone(&environment),
             i as u64,
             i as u64 + 1,
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             dummy_block.clone(),
             block_hash.clone(),
         )
@@ -975,7 +975,7 @@ async fn benchmark_parallel_chain_state_commit() {
             environment,
             0,
             1,
-            BlockVersion::V0,
+            BlockVersion::Baseline,
             dummy_block,
             block_hash,
         )
@@ -1103,7 +1103,7 @@ async fn benchmark_account_loading() {
         environment,
         0,
         1,
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )

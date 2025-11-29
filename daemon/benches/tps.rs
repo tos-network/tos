@@ -350,7 +350,7 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
     }
 
     fn get_block_version(&self) -> BlockVersion {
-        BlockVersion::V0
+        BlockVersion::Baseline
     }
 
     async fn set_multisig_state(

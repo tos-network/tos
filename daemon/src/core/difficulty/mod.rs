@@ -80,7 +80,7 @@ fn kalman_filter(
 
 // Calculate the required difficulty for the next block based on the solve time of the previous block
 // We are using a Kalman filter to estimate the hashrate and adjust the difficulty
-// This function will determine which algorithm to use based on the version
+// VERSION UNIFICATION: Always uses V2 algorithm
 pub fn calculate_difficulty(
     parent_timestamp: TimestampMillis,
     timestamp: TimestampMillis,
@@ -92,31 +92,20 @@ pub fn calculate_difficulty(
     let solve_time = (timestamp - parent_timestamp).max(1);
 
     let block_time_target = get_block_time_target_for_version(version);
-    match version {
-        BlockVersion::V0 => v1::calculate_difficulty(
-            solve_time,
-            previous_difficulty,
-            p,
-            minimum_difficulty,
-            block_time_target,
-        ),
-        _ => v2::calculate_difficulty(
-            solve_time,
-            previous_difficulty,
-            p,
-            minimum_difficulty,
-            block_time_target,
-        ),
-    }
+    // VERSION UNIFICATION: Always use V2 difficulty algorithm
+    v2::calculate_difficulty(
+        solve_time,
+        previous_difficulty,
+        p,
+        minimum_difficulty,
+        block_time_target,
+    )
 }
 
 // Get the process noise covariance based on the version
-// It is used by first blocks on a new version
-pub fn get_covariance_p(version: BlockVersion) -> VarUint {
-    match version {
-        BlockVersion::V0 => v1::P,
-        _ => v2::P,
-    }
+// VERSION UNIFICATION: Always returns V2 covariance
+pub fn get_covariance_p(_version: BlockVersion) -> VarUint {
+    v2::P
 }
 
 // Get the difficulty based on the hashrate and block time target
@@ -135,25 +124,17 @@ pub const fn get_minimum_difficulty(_network: &Network, version: BlockVersion) -
 }
 
 // Get minimum difficulty at hard fork
-// Only mainnet has hard fork difficulty adjustments
-// All networks use the same MINIMUM_HASHRATE for consistency
+// VERSION UNIFICATION: With single Baseline version, only genesis has difficulty
 pub const fn get_difficulty_at_hard_fork(
-    network: &Network,
+    _network: &Network,
     version: BlockVersion,
 ) -> Option<Difficulty> {
-    match network {
-        Network::Mainnet => match version {
-            BlockVersion::V0 | BlockVersion::V1 | BlockVersion::V2 => {
-                let block_time_target = get_block_time_target_for_version(version);
-                Some(get_difficulty_with_target(
-                    MINIMUM_HASHRATE,
-                    block_time_target,
-                ))
-            }
-            BlockVersion::V3 => None,
-        },
-        _ => None,
-    }
+    // Only genesis (Baseline at height 0) sets initial difficulty
+    let block_time_target = get_block_time_target_for_version(version);
+    Some(get_difficulty_with_target(
+        MINIMUM_HASHRATE,
+        block_time_target,
+    ))
 }
 
 #[cfg(test)]
@@ -165,28 +146,18 @@ mod tests {
 
     #[test]
     fn test_difficulty_at_hard_fork() {
-        // 200 H/s for V0 with 60s target = 200 * 60,000 / 1000 = 12,000
+        // VERSION UNIFICATION: All blocks use Baseline version with 1s target
+        // 200 H/s for Baseline with 1s target = 200 * 1,000 / 1000 = 200
         assert_eq!(
-            get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V0).unwrap(),
-            Difficulty::from_u64(MINIMUM_HASHRATE * 60)
+            get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::Baseline).unwrap(),
+            Difficulty::from_u64(MINIMUM_HASHRATE)
         );
 
-        // TIP-1 deprecated: V1/V2/V3 use 1s blocks
-        // 200 H/s for V2 with 1s target = 200 * 1,000 / 1000 = 200
+        // VERSION UNIFICATION: Testnet also uses Baseline version
         assert_eq!(
-            get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V2).unwrap(),
-            Difficulty::from_u64(1 * MINIMUM_HASHRATE)
+            get_difficulty_at_hard_fork(&Network::Testnet, BlockVersion::Baseline).unwrap(),
+            Difficulty::from_u64(MINIMUM_HASHRATE)
         );
-
-        // testnet returns None for all versions
-        for version in [
-            BlockVersion::V0,
-            BlockVersion::V1,
-            BlockVersion::V2,
-            BlockVersion::V3,
-        ] {
-            assert!(get_difficulty_at_hard_fork(&Network::Testnet, version).is_none());
-        }
     }
 
     #[test]

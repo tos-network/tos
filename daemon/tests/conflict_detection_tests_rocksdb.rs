@@ -50,7 +50,7 @@ use tos_testing_framework::utilities::{create_test_rocksdb_storage, setup_accoun
 fn create_dummy_block() -> Block {
     let miner = KeyPair::new().get_public_key().compress();
     let header = BlockHeader::new(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         vec![],                  // parents_by_level
         0,                       // blue_score
         0,                       // daa_score
@@ -114,7 +114,7 @@ async fn test_balance_conflict_detection() {
         environment,
         0, // stable_topoheight
         1, // topoheight
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -280,7 +280,7 @@ async fn test_nonce_conflict_detection() {
         environment,
         0, // stable_topoheight
         1, // topoheight
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -432,7 +432,7 @@ async fn test_read_write_conflict_detection() {
         environment,
         0, // stable_topoheight
         1, // topoheight
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -663,7 +663,7 @@ async fn test_independent_transaction_isolation() {
         environment,
         0, // stable_topoheight
         1, // topoheight
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )
@@ -843,7 +843,7 @@ async fn test_conflict_resolution_with_miner_rewards() {
         environment,
         0, // stable_topoheight
         1, // topoheight
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         dummy_block,
         block_hash,
     )

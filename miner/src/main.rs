@@ -68,7 +68,7 @@ use tokio_tungstenite::{
 use tos_common::{
     api::daemon::{GetMinerWorkResult, SubmitMinerWorkParams},
     async_handler,
-    block::{Algorithm, MinerWork, Worker},
+    block::{MinerWork, Worker},
     config::VERSION,
     crypto::{Address, BlueWorkType, Hash},
     difficulty::{
@@ -171,9 +171,9 @@ pub struct LogConfig {
 
 #[derive(Parser, Serialize, Deserialize)]
 pub struct BenchmarkConfig {
-    /// Enable the benchmark mode with the specified algorithm
+    /// Enable the benchmark mode (always uses V2 algorithm)
     #[clap(long)]
-    benchmark: Option<Algorithm>,
+    benchmark: bool,
     /// Iterations to run the benchmark
     #[clap(long, default_value_t = 100)]
     #[serde(default = "default_iterations")]
@@ -223,9 +223,9 @@ pub struct Config {
 
 #[derive(Clone)]
 enum ThreadNotification<'a> {
-    NewJob(Algorithm, MinerWork<'a>, Difficulty, u64), // POW algorithm, block work, difficulty, height
-    WebSocketClosed,                                   // WebSocket connection has been closed
-    Exit,                                              // all threads must stop
+    NewJob(MinerWork<'a>, Difficulty, u64), // block work, difficulty, height (V2 algorithm only)
+    WebSocketClosed,                        // WebSocket connection has been closed
+    Exit,                                   // all threads must stop
 }
 
 #[derive(Serialize, Deserialize)]
@@ -321,11 +321,11 @@ async fn main() -> Result<()> {
         info!("Total threads to use: {threads} (detected: {detected_threads})");
     }
 
-    if let Some(algorithm) = config.benchmark.benchmark {
+    if config.benchmark.benchmark {
         if log::log_enabled!(log::Level::Info) {
-            info!("Benchmark mode enabled, miner will try up to {threads} threads");
+            info!("Benchmark mode enabled, miner will try up to {threads} threads (V2 algorithm)");
         }
-        benchmark(threads as usize, config.benchmark.iterations, algorithm);
+        benchmark(threads as usize, config.benchmark.iterations);
         info!("Benchmark finished");
         return Ok(());
     }
@@ -442,7 +442,8 @@ async fn broadcast_stats_task(broadcast_address: String) -> Result<()> {
 
 // Benchmark the miner with the specified number of threads and iterations
 // It will output the total time, total iterations, time per PoW and hashrate for each number of threads
-fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
+// VERSION UNIFICATION: Algorithm parameter removed, always uses V2
+fn benchmark(threads: usize, iterations: usize) {
     if log::log_enabled!(log::Level::Info) {
         info!(
             "{0: <10} | {1: <10} | {2: <16} | {3: <13} | {4: <13}",
@@ -466,7 +467,7 @@ fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
                 Hash::zero(),         // utxo_commitment
             );
             let mut worker = Worker::new();
-            worker.set_work(job, algorithm).or_exit("unwrap");
+            worker.set_work(job);
 
             let handle = thread::spawn(move || {
                 for _ in 0..iterations {
@@ -631,8 +632,8 @@ async fn handle_websocket_message(
                         .or_exit("unwrap")
                         .replace(Instant::now());
 
+                    // VERSION UNIFICATION: Algorithm parameter removed, always uses V2
                     if let Err(e) = job_sender.send(ThreadNotification::NewJob(
-                        job.algorithm,
                         block,
                         job.difficulty,
                         job.height,
@@ -721,7 +722,8 @@ fn start_thread(
                     }
                     break 'main;
                 },
-                ThreadNotification::NewJob(algorithm, mut new_job, expected_difficulty, height) => {
+                // VERSION UNIFICATION: Algorithm parameter removed, always uses V2
+                ThreadNotification::NewJob(mut new_job, expected_difficulty, height) => {
                     if log::log_enabled!(log::Level::Debug) {
                         debug!("Mining Thread #{id} received a new job");
                     }
@@ -729,7 +731,7 @@ fn start_thread(
                     // u16 support up to 65535 threads
                     new_job.set_thread_id_u16(id);
                     let initial_timestamp = new_job.get_timestamp();
-                    worker.set_work(new_job, algorithm).or_exit("unwrap");
+                    worker.set_work(new_job);
 
                     let difficulty_target = match compute_difficulty_target(&expected_difficulty) {
                         Ok(value) => value,

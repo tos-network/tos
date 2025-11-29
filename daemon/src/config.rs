@@ -322,49 +322,14 @@ pub const COMPACT_BLOCK_CACHE_CAPACITY: usize = 100;
 pub const COMPACT_BLOCK_CACHE_TIMEOUT_SECS: u64 = 60;
 
 // Hard Forks configured
-const HARD_FORKS: [HardFork; 3] = [
-    HardFork {
-        height: 0,
-        version: BlockVersion::V0,
-        changelog: "Initial version",
-        version_requirement: None,
-    },
-    HardFork {
-        height: 0,
-        version: BlockVersion::V1,
-        changelog: "tos-hash v2",
-        version_requirement: None,
-    },
-    HardFork {
-        height: 0,
-        version: BlockVersion::V2,
-        changelog: "MultiSig, P2P",
-        version_requirement: None,
-    },
-];
-
-// Testnet / Stagenet / Devnet hard forks
-// Note: V0 (60s blocks) removed from devnet - starts directly with V1 (1s blocks)
-const OTHERS_NETWORK_HARD_FORKS: [HardFork; 3] = [
-    HardFork {
-        height: 0,
-        version: BlockVersion::V1,
-        changelog: "tos-hash v2, 1-second blocks",
-        version_requirement: None,
-    },
-    HardFork {
-        height: 10,
-        version: BlockVersion::V2,
-        changelog: "MultiSig, P2P",
-        version_requirement: Some(">=1.16.0"),
-    },
-    HardFork {
-        height: 15,
-        version: BlockVersion::V3,
-        changelog: "Smart Contracts",
-        version_requirement: Some(">=1.16.0"),
-    },
-];
+// VERSION UNIFICATION: All networks use a single Baseline version from genesis
+// All features (PoW v2, MultiSig, P2P, Smart Contracts, 1s blocks) are enabled from height 0
+const HARD_FORKS: [HardFork; 1] = [HardFork {
+    height: 0,
+    version: BlockVersion::Baseline,
+    changelog: "Unified baseline with all features enabled",
+    version_requirement: None,
+}];
 
 // Mainnet seed nodes
 const MAINNET_SEED_NODES: [&str; 7] = [
@@ -392,18 +357,20 @@ const TESTNET_SEED_NODES: [&str; 1] = [
 
 // Genesis block to have the same starting point for every nodes
 // Genesis block in hexadecimal format
-const MAINNET_GENESIS_BLOCK: &str = "0200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000197ff69f0810000000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a7410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-const TESTNET_GENESIS_BLOCK: &str = "010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000018ae96229180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a7410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+// VERSION UNIFICATION: All networks use BlockVersion::Baseline = 0
+const MAINNET_GENESIS_BLOCK: &str = "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000197ff69f0810000000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a7410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+const TESTNET_GENESIS_BLOCK: &str = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000018ae96229180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a7410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
 // Genesis block hash for both networks
 // It must be the same as the hash of the genesis block
+// VERSION UNIFICATION: Regenerated with BlockVersion::Baseline = 0
 const MAINNET_GENESIS_BLOCK_HASH: Hash = Hash::new([
-    125, 128, 19, 122, 147, 246, 47, 66, 57, 103, 85, 40, 152, 255, 81, 116, 36, 181, 100, 245,
-    104, 139, 242, 106, 2, 115, 76, 58, 136, 231, 211, 171,
+    161, 221, 50, 10, 122, 23, 195, 96, 108, 0, 72, 146, 44, 166, 253, 201, 227, 77, 197, 141, 91,
+    191, 196, 80, 56, 163, 218, 5, 27, 178, 97, 144,
 ]);
 const TESTNET_GENESIS_BLOCK_HASH: Hash = Hash::new([
-    126, 75, 58, 199, 125, 227, 189, 220, 151, 221, 57, 169, 84, 28, 131, 20, 6, 150, 91, 156, 106,
-    138, 89, 155, 242, 31, 88, 90, 130, 109, 114, 181,
+    161, 20, 212, 199, 38, 206, 145, 255, 216, 208, 93, 166, 51, 145, 184, 73, 233, 104, 28, 49,
+    145, 75, 31, 118, 210, 193, 190, 232, 149, 198, 59, 53,
 ]);
 
 // Genesis block getter
@@ -454,11 +421,9 @@ pub const fn get_seed_nodes(network: &Network) -> &[&str] {
 }
 
 // Get hard forks based on the network
-pub const fn get_hard_forks(network: &Network) -> &[HardFork] {
-    match network {
-        Network::Mainnet => &HARD_FORKS,
-        _ => &OTHERS_NETWORK_HARD_FORKS,
-    }
+// VERSION UNIFICATION: All networks use the same single hard fork configuration
+pub const fn get_hard_forks(_network: &Network) -> &[HardFork] {
+    &HARD_FORKS
 }
 
 // Static checks
@@ -478,3 +443,103 @@ static_assert!(
     CHAIN_SYNC_RESPONSE_MAX_BLOCKS <= u16::MAX as usize,
     "Chain sync response max blocks must be less than or equal to u16::MAX"
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tos_common::{
+        block::Block,
+        crypto::Hashable,
+        serializer::{Reader, Serializer},
+    };
+
+    /// Test that MAINNET_GENESIS_BLOCK can be deserialized and its hash matches MAINNET_GENESIS_BLOCK_HASH
+    #[test]
+    fn test_mainnet_genesis_block_integrity() {
+        // Decode the hex string to bytes
+        let genesis_bytes =
+            hex::decode(MAINNET_GENESIS_BLOCK).expect("MAINNET_GENESIS_BLOCK should be valid hex");
+
+        // Deserialize the block
+        let mut reader = Reader::new(&genesis_bytes);
+        let block = Block::read(&mut reader)
+            .expect("MAINNET_GENESIS_BLOCK should deserialize to a valid Block");
+
+        // Verify the block version is Baseline (0)
+        assert_eq!(
+            block.get_header().get_version(),
+            BlockVersion::Baseline,
+            "Mainnet genesis block should have Baseline version"
+        );
+
+        // Compute the hash and verify it matches
+        let computed_hash = block.get_header().hash();
+        assert_eq!(
+            computed_hash, MAINNET_GENESIS_BLOCK_HASH,
+            "Computed mainnet genesis block hash should match MAINNET_GENESIS_BLOCK_HASH"
+        );
+    }
+
+    /// Test that TESTNET_GENESIS_BLOCK can be deserialized and its hash matches TESTNET_GENESIS_BLOCK_HASH
+    #[test]
+    fn test_testnet_genesis_block_integrity() {
+        // Decode the hex string to bytes
+        let genesis_bytes =
+            hex::decode(TESTNET_GENESIS_BLOCK).expect("TESTNET_GENESIS_BLOCK should be valid hex");
+
+        // Deserialize the block
+        let mut reader = Reader::new(&genesis_bytes);
+        let block = Block::read(&mut reader)
+            .expect("TESTNET_GENESIS_BLOCK should deserialize to a valid Block");
+
+        // Verify the block version is Baseline (0)
+        assert_eq!(
+            block.get_header().get_version(),
+            BlockVersion::Baseline,
+            "Testnet genesis block should have Baseline version"
+        );
+
+        // Compute the hash and verify it matches
+        let computed_hash = block.get_header().hash();
+        assert_eq!(
+            computed_hash, TESTNET_GENESIS_BLOCK_HASH,
+            "Computed testnet genesis block hash should match TESTNET_GENESIS_BLOCK_HASH"
+        );
+    }
+
+    /// Test that get_hex_genesis_block returns correct values for each network
+    #[test]
+    fn test_get_hex_genesis_block() {
+        assert_eq!(
+            get_hex_genesis_block(&Network::Mainnet),
+            Some(MAINNET_GENESIS_BLOCK)
+        );
+        assert_eq!(
+            get_hex_genesis_block(&Network::Testnet),
+            Some(TESTNET_GENESIS_BLOCK)
+        );
+        assert_eq!(
+            get_hex_genesis_block(&Network::Stagenet),
+            Some(TESTNET_GENESIS_BLOCK)
+        );
+        assert_eq!(get_hex_genesis_block(&Network::Devnet), None);
+    }
+
+    /// Test that get_genesis_block_hash returns correct values for each network
+    #[test]
+    fn test_get_genesis_block_hash() {
+        assert_eq!(
+            get_genesis_block_hash(&Network::Mainnet),
+            Some(&MAINNET_GENESIS_BLOCK_HASH)
+        );
+        assert_eq!(
+            get_genesis_block_hash(&Network::Testnet),
+            Some(&TESTNET_GENESIS_BLOCK_HASH)
+        );
+        assert_eq!(
+            get_genesis_block_hash(&Network::Stagenet),
+            Some(&TESTNET_GENESIS_BLOCK_HASH)
+        );
+        assert_eq!(get_genesis_block_hash(&Network::Devnet), None);
+    }
+}

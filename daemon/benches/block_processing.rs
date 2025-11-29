@@ -102,7 +102,7 @@ fn create_mock_block(index: u64, parents: Vec<Hash>, tx_count: usize) -> Block {
     let tips = parents.clone();
 
     Block::new(
-        BlockVersion::V0,
+        BlockVersion::Baseline,
         1 + index,
         timestamp,
         tos_common::config::GENESIS_BLOCK_DIFFICULTY,

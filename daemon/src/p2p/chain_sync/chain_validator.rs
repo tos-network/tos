@@ -4,7 +4,7 @@ use crate::core::{
     ghostdag::{
         BlueWorkType, CompactGhostdagData, GhostdagStorageProvider, KType, TosGhostdagData,
     },
-    hard_fork::{get_pow_algorithm_for_version, get_version_at_height},
+    hard_fork::get_version_at_height,
     reachability::ReachabilityData,
     storage::{
         BlocksAtHeightProvider, DagOrderProvider, DifficultyProvider, GhostdagDataProvider,
@@ -215,8 +215,8 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             }
         }
 
-        let algorithm = get_pow_algorithm_for_version(version);
-        let pow_hash = header.get_pow_hash(algorithm)?;
+        // VERSION UNIFICATION: Algorithm parameter removed, always uses V2
+        let pow_hash = header.get_pow_hash()?;
         if log::log_enabled!(log::Level::Trace) {
             trace!("POW hash: {}", pow_hash);
         }
