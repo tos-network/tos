@@ -1069,6 +1069,9 @@ impl<S: Storage> Blockchain<S> {
     }
 
     // Helper function to prune blocks with checkpoint tracking
+    //
+    // Invariant: `checkpoint.current_position` always stores the *next* topoheight to process.
+    // This ensures crash recovery never re-deletes already pruned blocks.
     async fn prune_blocks_with_checkpoint(
         &self,
         storage: &mut S,
@@ -1084,12 +1087,19 @@ impl<S: Storage> Blockchain<S> {
                 trace!("Pruning block at topoheight {}", topo);
             }
 
-            // Delete block data
-            let _ = storage.delete_block_at_topoheight(topo).await?;
+            // Delete block data and get the block hash for GHOSTDAG cleanup
+            let (block_hash, _, _) = storage.delete_block_at_topoheight(topo).await?;
+
+            // Also delete GHOSTDAG data for this block during Phase 1
+            // This is more efficient than a separate Phase 2 pass
+            if storage.has_ghostdag_data(&block_hash).await? {
+                storage.delete_ghostdag_data(&block_hash).await?;
+            }
 
             // Update checkpoint periodically for crash recovery
+            // IMPORTANT: Store topo + 1 (next to process) to avoid re-deleting on crash recovery
             if (topo - start_topo) % CHECKPOINT_INTERVAL == 0 && topo > start_topo {
-                checkpoint.current_position = topo;
+                checkpoint.current_position = topo + 1;
                 storage.set_pruning_checkpoint(checkpoint).await?;
 
                 if log::log_enabled!(log::Level::Debug) {
@@ -1104,6 +1114,7 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // Final checkpoint update for this phase
+        // current_position = end_topo means all topoheights in [start_topo, end_topo) are processed
         checkpoint.current_position = end_topo;
         storage.set_pruning_checkpoint(checkpoint).await?;
 
@@ -1120,7 +1131,13 @@ impl<S: Storage> Blockchain<S> {
     }
 
     // Helper function to prune GHOSTDAG data with checkpoint tracking
-    // Phase 2: GHOSTDAG data pruning - delete GHOSTDAG data for pruned blocks
+    // Phase 2: GHOSTDAG data cleanup - safety net for any orphaned GHOSTDAG entries
+    //
+    // Note: Most GHOSTDAG data is now deleted in Phase 1 (prune_blocks_with_checkpoint).
+    // This phase exists as a safety net to clean up any orphaned GHOSTDAG entries that
+    // may have been missed (e.g., from DAG branches not in the topoheight index).
+    //
+    // Invariant: `checkpoint.current_position` always stores the *next* topoheight to process.
     async fn prune_ghostdag_with_checkpoint(
         &self,
         storage: &mut S,
@@ -1132,20 +1149,15 @@ impl<S: Storage> Blockchain<S> {
         const CHECKPOINT_INTERVAL: u64 = 100;
         let mut deleted_count = 0u64;
 
-        // Collect block hashes that were pruned (we need them to delete GHOSTDAG data)
-        // Since blocks are already deleted, we need to track which hashes to delete
-        // during block deletion phase. For now, we iterate over the range and try to
-        // delete any remaining GHOSTDAG data.
-
-        // Note: In practice, GHOSTDAG data should be deleted along with block data.
-        // This phase is for cleanup of any orphaned GHOSTDAG entries.
+        // Since blocks are already deleted in Phase 1 (along with their GHOSTDAG data),
+        // this phase only catches orphaned GHOSTDAG entries from blocks that were not
+        // in the topoheight index (e.g., DAG branches that were never part of the main chain).
         for topo in start_topo..end_topo {
             // Try to get the hash at this topoheight (may not exist if already pruned)
-            // We use a best-effort approach here since blocks may have been deleted
             match storage.get_hash_at_topo_height(topo).await {
                 Ok(hash) => {
-                    // Check if GHOSTDAG data exists and delete it
-                    if storage.has_ghostdag_data(&hash).await.unwrap_or(false) {
+                    // Check if GHOSTDAG data exists and delete it (with proper error handling)
+                    if storage.has_ghostdag_data(&hash).await? {
                         storage.delete_ghostdag_data(&hash).await?;
                         deleted_count += 1;
                     }
@@ -1157,8 +1169,9 @@ impl<S: Storage> Blockchain<S> {
             }
 
             // Update checkpoint periodically
+            // IMPORTANT: Store topo + 1 (next to process) to avoid re-processing on crash recovery
             if (topo - start_topo) % CHECKPOINT_INTERVAL == 0 && topo > start_topo {
-                checkpoint.current_position = topo;
+                checkpoint.current_position = topo + 1;
                 storage.set_pruning_checkpoint(checkpoint).await?;
             }
         }
@@ -1169,7 +1182,7 @@ impl<S: Storage> Blockchain<S> {
 
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Pruned {} GHOSTDAG entries from {} to {} in {}ms",
+                "Pruned {} orphaned GHOSTDAG entries from {} to {} in {}ms",
                 deleted_count,
                 start_topo,
                 end_topo,

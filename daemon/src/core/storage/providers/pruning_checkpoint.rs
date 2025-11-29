@@ -187,18 +187,49 @@ impl Serializer for PruningCheckpoint {
 }
 
 /// Provider trait for pruning checkpoint operations
+///
+/// # Durability Requirements
+///
+/// Implementations MUST ensure durability for crash recovery correctness:
+///
+/// - `set_pruning_checkpoint` MUST use synchronous/durable writes (e.g., fsync).
+///   If the method returns `Ok(())`, the checkpoint MUST be persisted to stable
+///   storage before any subsequent block deletions occur.
+///
+/// - `clear_pruning_checkpoint` MUST also be durable to prevent stale checkpoints
+///   from causing unnecessary recovery on restart.
+///
+/// # Checkpoint Semantics
+///
+/// The `current_position` field in `PruningCheckpoint` represents the **next**
+/// topoheight to process, not the last processed one. This invariant ensures
+/// that crash recovery never re-deletes already pruned blocks.
+///
+/// For example:
+/// - `current_position = 100` means topoheights 0..100 have been processed
+/// - On crash recovery, pruning resumes from topoheight 100
 #[async_trait]
 pub trait PruningCheckpointProvider {
     /// Get the current pruning checkpoint if one exists
     async fn get_pruning_checkpoint(&self) -> Result<Option<PruningCheckpoint>, BlockchainError>;
 
     /// Set or update the pruning checkpoint
+    ///
+    /// # Durability
+    ///
+    /// This method MUST ensure the checkpoint is durably persisted before returning.
+    /// Implementations should use synchronous writes (e.g., RocksDB with `sync: true`
+    /// or explicit fsync) to guarantee crash recovery correctness.
     async fn set_pruning_checkpoint(
         &mut self,
         checkpoint: &PruningCheckpoint,
     ) -> Result<(), BlockchainError>;
 
     /// Clear the pruning checkpoint (called when pruning completes)
+    ///
+    /// # Durability
+    ///
+    /// This method MUST ensure the checkpoint removal is durably persisted.
     async fn clear_pruning_checkpoint(&mut self) -> Result<(), BlockchainError>;
 
     /// Check if there is an incomplete pruning operation
