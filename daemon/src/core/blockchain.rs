@@ -3211,63 +3211,70 @@ impl<S: Storage> Blockchain<S> {
             ));
         }
 
-        // SECURITY FIX: Validate blue_work field matches GHOSTDAG computation
-        // This prevents attackers from forging blue_work values
-        let expected_blue_work = &ghostdag_data.blue_work;
-        if expected_blue_work != block.get_blue_work() {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Invalid block blue_work: actual={}, ghostdag_expected={} for block {}",
-                    block.get_blue_work(),
-                    expected_blue_work,
-                    block_hash
-                );
-            }
-            return Err(BlockchainError::InvalidBlueWork(
-                block_hash.into_owned(),
-                expected_blue_work.clone(),
-                block.get_blue_work().clone(),
-            ));
-        }
+        // SECURITY FIX: Validate blue_work, daa_score, and bits fields
+        // Genesis blocks (tips_count == 0) are exempt as they use default values (all zeros)
+        // and are trusted by design - their hash is hardcoded per network.
+        let is_genesis = tips_count == 0;
 
-        // SECURITY FIX: Validate daa_score field matches GHOSTDAG computation
-        // This prevents attackers from manipulating DAA calculations
-        let expected_daa_score = ghostdag_data.daa_score;
-        if expected_daa_score != block.get_daa_score() {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Invalid block daa_score: actual={}, ghostdag_expected={} for block {}",
-                    block.get_daa_score(),
+        if !is_genesis {
+            // Validate blue_work field matches GHOSTDAG computation
+            // This prevents attackers from forging blue_work values
+            let expected_blue_work = &ghostdag_data.blue_work;
+            if expected_blue_work != block.get_blue_work() {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Invalid block blue_work: actual={}, ghostdag_expected={} for block {}",
+                        block.get_blue_work(),
+                        expected_blue_work,
+                        block_hash
+                    );
+                }
+                return Err(BlockchainError::InvalidBlueWork(
+                    block_hash.into_owned(),
+                    expected_blue_work.clone(),
+                    block.get_blue_work().clone(),
+                ));
+            }
+
+            // Validate daa_score field matches GHOSTDAG computation
+            // This prevents attackers from manipulating DAA calculations
+            let expected_daa_score = ghostdag_data.daa_score;
+            if expected_daa_score != block.get_daa_score() {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Invalid block daa_score: actual={}, ghostdag_expected={} for block {}",
+                        block.get_daa_score(),
+                        expected_daa_score,
+                        block_hash
+                    );
+                }
+                return Err(BlockchainError::InvalidDaaScore(
+                    block_hash.into_owned(),
                     expected_daa_score,
-                    block_hash
-                );
+                    block.get_daa_score(),
+                ));
             }
-            return Err(BlockchainError::InvalidDaaScore(
-                block_hash.into_owned(),
-                expected_daa_score,
-                block.get_daa_score(),
-            ));
-        }
 
-        // SECURITY FIX: Validate bits field matches expected difficulty
-        // This prevents miners from forging difficulty claims in the header
-        let (expected_difficulty, _) = self
-            .get_difficulty_at_tips(&*storage, block.get_parents().iter())
-            .await?;
-        let expected_bits = difficulty::difficulty_to_bits(&expected_difficulty);
-        let actual_bits = block.get_bits();
-        if expected_bits != actual_bits {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Invalid block bits: actual={}, expected={} for block {}",
-                    actual_bits, expected_bits, block_hash
-                );
+            // Validate bits field matches expected difficulty
+            // This prevents miners from forging difficulty claims in the header
+            let (expected_difficulty, _) = self
+                .get_difficulty_at_tips(&*storage, block.get_parents().iter())
+                .await?;
+            let expected_bits = difficulty::difficulty_to_bits(&expected_difficulty);
+            let actual_bits = block.get_bits();
+            if expected_bits != actual_bits {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Invalid block bits: actual={}, expected={} for block {}",
+                        actual_bits, expected_bits, block_hash
+                    );
+                }
+                return Err(BlockchainError::InvalidBitsField(
+                    block_hash.into_owned(),
+                    expected_bits,
+                    actual_bits,
+                ));
             }
-            return Err(BlockchainError::InvalidBitsField(
-                block_hash.into_owned(),
-                expected_bits,
-                actual_bits,
-            ));
         }
 
         let block_blue_score_by_tips = expected_blue_score;
