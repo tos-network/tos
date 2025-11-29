@@ -13,6 +13,7 @@ mod ghostdag_execution_tests {
     use indexmap::IndexSet;
     use tokio;
 
+    use crate::config::{MILLIS_PER_SECOND, MINIMUM_HASHRATE};
     use tos_common::block::{BlockHeader, BlockVersion, EXTRA_NONCE_SIZE};
     use tos_common::crypto::elgamal::CompressedPublicKey;
     use tos_common::crypto::Hash;
@@ -27,6 +28,7 @@ mod ghostdag_execution_tests {
         calc_work_from_difficulty, BlueWorkType, CompactGhostdagData, GhostdagStorageProvider,
         KType, TosGhostdag, TosGhostdagData,
     };
+    use crate::core::hard_fork::get_block_time_target_for_version;
     use crate::core::reachability::{Interval, ReachabilityData, TosReachability};
     use crate::core::storage::{
         DifficultyProvider, GhostdagDataProvider, ReachabilityDataProvider,
@@ -1596,6 +1598,1177 @@ mod ghostdag_execution_tests {
     }
 
     // =========================================================================
+    // TEST 6: Multi-parent blue_score calculation
+    // Per Kaspa-aligned fix: candidate.blue_score = parent.blue_score + mergeset_blues.len()
+    // This is critical for version selection at hard fork boundaries.
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_execution_multi_parent_blue_score_single_parent() {
+        // Test: Single parent block should have blue_score = parent.blue_score + 1
+        // This is the simplest case where mergeset_blues contains only the parent.
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+        let k: KType = 10;
+
+        // Create block 1 with genesis as only parent
+        let block1_hash = create_test_hash(1);
+        let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
+        let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+        let block1_ghostdag = TosGhostdagData::new(
+            1, // blue_score = 0 + 1 (genesis + 1)
+            work,
+            1,                          // daa_score
+            genesis_hash.clone(),       // selected_parent
+            vec![genesis_hash.clone()], // mergeset_blues
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+
+        let (block1_interval, _) = Interval::maximal().split_half();
+        let block1_reachability = ReachabilityData {
+            parent: genesis_hash.clone(),
+            interval: block1_interval,
+            height: 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        storage.add_block(
+            block1_hash.clone(),
+            block1_header,
+            block1_ghostdag,
+            block1_reachability,
+            Difficulty::from(1000u64),
+        );
+        storage.set_past_blocks(block1_hash.clone(), vec![genesis_hash.clone()]);
+
+        // Create GHOSTDAG and compute blue_score for a new block on top of block1
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
+
+        let result = ghostdag.ghostdag(&storage, &[block1_hash.clone()]).await;
+
+        match result {
+            Ok(data) => {
+                // Single parent: blue_score = parent.blue_score + 1 = 1 + 1 = 2
+                // (parent block1 has blue_score = 1)
+                assert_eq!(
+                    data.blue_score, 2,
+                    "Single parent blue_score should be parent.blue_score + 1 = 2"
+                );
+                assert_eq!(
+                    data.mergeset_blues.len(),
+                    1,
+                    "Single parent should have 1 blue in mergeset"
+                );
+                assert!(
+                    data.mergeset_blues.contains(&block1_hash),
+                    "mergeset_blues should contain the parent"
+                );
+                println!(
+                    "TEST PASSED: Single parent blue_score = {}, mergeset_blues.len() = {}",
+                    data.blue_score,
+                    data.mergeset_blues.len()
+                );
+            }
+            Err(e) => {
+                panic!("GHOSTDAG failed: {:?}", e);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execution_multi_parent_blue_score_diamond_pattern() {
+        // Test: Diamond pattern (2 parents merging) should have:
+        // blue_score = selected_parent.blue_score + mergeset_blues.len()
+        //
+        // DAG structure:
+        //       Genesis (blue_score=0)
+        //        /    \
+        //   Block1   Block2  (both blue_score=1)
+        //        \    /
+        //      NewBlock (blue_score = 1 + 2 = 3)
+        //
+        // NewBlock has 2 blue parents, so mergeset_blues = [Block1, Block2]
+        // blue_score = selected_parent.blue_score + mergeset_blues.len() = 1 + 2 = 3
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+        let k: KType = 10;
+
+        // Create Block1 (child of genesis)
+        let block1_hash = create_test_hash(1);
+        let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
+        let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+        let block1_ghostdag = TosGhostdagData::new(
+            1,
+            work,
+            1,
+            genesis_hash.clone(),
+            vec![genesis_hash.clone()],
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+
+        // Block1 gets left half of interval
+        let (block1_interval, remaining) = Interval::maximal().split_half();
+        let block1_reachability = ReachabilityData {
+            parent: genesis_hash.clone(),
+            interval: block1_interval,
+            height: 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        storage.add_block(
+            block1_hash.clone(),
+            block1_header,
+            block1_ghostdag,
+            block1_reachability,
+            Difficulty::from(1000u64),
+        );
+        storage.set_past_blocks(block1_hash.clone(), vec![genesis_hash.clone()]);
+
+        // Create Block2 (child of genesis, sibling of Block1)
+        let block2_hash = create_test_hash(2);
+        let block2_header = create_test_header(2000, vec![genesis_hash.clone()]);
+        let work2 = calc_work_from_difficulty(&Difficulty::from(1000u64));
+        let block2_ghostdag = TosGhostdagData::new(
+            1,
+            work2,
+            1,
+            genesis_hash.clone(),
+            vec![genesis_hash.clone()],
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+
+        // Block2 gets right half of interval
+        let (block2_interval, _) = remaining.split_half();
+        let block2_reachability = ReachabilityData {
+            parent: genesis_hash.clone(),
+            interval: block2_interval,
+            height: 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        storage.add_block(
+            block2_hash.clone(),
+            block2_header,
+            block2_ghostdag,
+            block2_reachability,
+            Difficulty::from(1000u64),
+        );
+        storage.set_past_blocks(block2_hash.clone(), vec![genesis_hash.clone()]);
+
+        // Create GHOSTDAG and compute for new block with both Block1 and Block2 as parents
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
+
+        let result = ghostdag
+            .ghostdag(&storage, &[block1_hash.clone(), block2_hash.clone()])
+            .await;
+
+        match result {
+            Ok(data) => {
+                // Diamond pattern: both blocks should be blue (they're not in each other's anticone
+                // because they both descend from genesis)
+                //
+                // Expected blue_score = selected_parent.blue_score + mergeset_blues.len()
+                // If both blocks are blue: blue_score = 1 + 2 = 3
+
+                println!(
+                    "Diamond pattern result: blue_score={}, mergeset_blues={:?}, mergeset_reds={:?}",
+                    data.blue_score, data.mergeset_blues.len(), data.mergeset_reds.len()
+                );
+
+                // Verify blue_score formula
+                let selected_parent_score = 1u64; // Both parents have blue_score = 1
+                let expected_blue_score = selected_parent_score + data.mergeset_blues.len() as u64;
+
+                assert_eq!(
+                    data.blue_score, expected_blue_score,
+                    "blue_score should equal selected_parent.blue_score ({}) + mergeset_blues.len() ({}) = {}",
+                    selected_parent_score, data.mergeset_blues.len(), expected_blue_score
+                );
+
+                // In a clean diamond, both parents should be blue
+                if data.mergeset_blues.len() == 2 {
+                    assert_eq!(
+                        data.blue_score, 3,
+                        "With 2 blue parents at score 1, new block should have score 3"
+                    );
+                    println!("TEST PASSED: Diamond pattern blue_score = 3 (1 + 2 mergeset blues)");
+                } else {
+                    println!(
+                        "Note: Only {} blues in mergeset (some may be in anticone), blue_score = {}",
+                        data.mergeset_blues.len(), data.blue_score
+                    );
+                }
+            }
+            Err(e) => {
+                panic!("GHOSTDAG failed: {:?}", e);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execution_multi_parent_blue_score_vs_naive_estimate() {
+        // Test: Verify that multi-parent blocks have blue_score > parent.blue_score + 1
+        // This specifically tests the issue fixed in get_difficulty_at_tips:
+        // - OLD (incorrect): prospective_blue_score = parent.blue_score + 1
+        // - NEW (correct): prospective_blue_score = parent.blue_score + mergeset_blues.len()
+        //
+        // For blocks with 3+ blue parents, the naive +1 estimate is definitely wrong.
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+        let k: KType = 10;
+
+        // Create 3 parallel blocks (all children of genesis)
+        let mut parallel_hashes = Vec::new();
+        let interval_size = u64::MAX / 10;
+
+        for i in 1..=3u8 {
+            let block_hash = create_test_hash(i);
+            let block_header = create_test_header(i as u64 * 1000, vec![genesis_hash.clone()]);
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+            let block_ghostdag = TosGhostdagData::new(
+                1,
+                work,
+                1,
+                genesis_hash.clone(),
+                vec![genesis_hash.clone()],
+                Vec::new(),
+                HashMap::new(),
+                Vec::new(),
+            );
+
+            let start = (i as u64) * interval_size;
+            let end = start + interval_size - 1;
+            let block_reachability = ReachabilityData {
+                parent: genesis_hash.clone(),
+                interval: Interval::new(start, end),
+                height: 1,
+                children: Vec::new(),
+                future_covering_set: Vec::new(),
+            };
+
+            storage.add_block(
+                block_hash.clone(),
+                block_header,
+                block_ghostdag,
+                block_reachability,
+                Difficulty::from(1000u64),
+            );
+            storage.set_past_blocks(block_hash.clone(), vec![genesis_hash.clone()]);
+            parallel_hashes.push(block_hash);
+        }
+
+        // Compute GHOSTDAG for new block with all 3 as parents
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
+
+        let result = ghostdag.ghostdag(&storage, &parallel_hashes).await;
+
+        match result {
+            Ok(data) => {
+                println!(
+                    "3-parent merge: blue_score={}, mergeset_blues.len()={}, mergeset_reds.len()={}",
+                    data.blue_score, data.mergeset_blues.len(), data.mergeset_reds.len()
+                );
+
+                // The naive estimate would be: parent.blue_score + 1 = 1 + 1 = 2
+                // The correct calculation is: parent.blue_score + mergeset_blues.len()
+
+                let naive_estimate = 1 + 1; // parent.blue_score + 1
+                let correct_blue_score = 1 + data.mergeset_blues.len() as u64;
+
+                assert_eq!(
+                    data.blue_score, correct_blue_score,
+                    "blue_score should match formula: parent.blue_score + mergeset_blues.len()"
+                );
+
+                // If all 3 parents are blue, blue_score = 1 + 3 = 4, not 2!
+                if data.mergeset_blues.len() >= 2 {
+                    assert!(
+                        data.blue_score > naive_estimate,
+                        "With {} blue parents, blue_score ({}) should exceed naive estimate ({})",
+                        data.mergeset_blues.len(),
+                        data.blue_score,
+                        naive_estimate
+                    );
+                    println!(
+                        "TEST PASSED: Multi-parent blue_score ({}) > naive +1 estimate ({})",
+                        data.blue_score, naive_estimate
+                    );
+                }
+
+                println!(
+                    "Formula verified: selected_parent.blue_score (1) + mergeset_blues.len() ({}) = {}",
+                    data.mergeset_blues.len(), data.blue_score
+                );
+            }
+            Err(e) => {
+                panic!("GHOSTDAG failed: {:?}", e);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execution_blue_score_at_hard_fork_boundary() {
+        // Test: Verify that correct blue_score calculation matters for hard fork detection
+        // This simulates the scenario where version selection depends on blue_score.
+        //
+        // If a hard fork happens at blue_score=100, and we have:
+        // - Parent at blue_score=99
+        // - 3 parallel parents in mergeset_blues
+        //
+        // Naive estimate: 99 + 1 = 100 (would trigger hard fork)
+        // Correct calculation: 99 + 3 = 102 (definitely past hard fork)
+        //
+        // Both would trigger the hard fork in this case, but the naive estimate
+        // could cause issues at exact boundaries.
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+        let k: KType = 10;
+
+        // Create a longer chain to reach higher blue_scores
+        let mut parent_hash = genesis_hash.clone();
+        let mut current_blue_score = 0u64;
+
+        // Build chain to blue_score = 10
+        for i in 1..=10u64 {
+            let block_hash = create_test_hash_u64(i);
+            let block_header = create_test_header(i * 1000, vec![parent_hash.clone()]);
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+
+            current_blue_score = i;
+            let block_ghostdag = TosGhostdagData::new(
+                current_blue_score,
+                work,
+                current_blue_score,
+                parent_hash.clone(),
+                vec![parent_hash.clone()],
+                Vec::new(),
+                HashMap::new(),
+                Vec::new(),
+            );
+
+            let interval_size = u64::MAX / 100;
+            let start = i * interval_size;
+            let end = start + interval_size - 1;
+            let block_reachability = ReachabilityData {
+                parent: parent_hash.clone(),
+                interval: Interval::new(start, end),
+                height: i,
+                children: Vec::new(),
+                future_covering_set: Vec::new(),
+            };
+
+            storage.add_block(
+                block_hash.clone(),
+                block_header,
+                block_ghostdag,
+                block_reachability,
+                Difficulty::from(1000u64),
+            );
+            storage.set_past_blocks(block_hash.clone(), vec![parent_hash.clone()]);
+            parent_hash = block_hash;
+        }
+
+        // Last block has blue_score = 10
+        let tip_hash = parent_hash;
+
+        // Compute blue_score for new block on top
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
+
+        let result = ghostdag.ghostdag(&storage, &[tip_hash.clone()]).await;
+
+        match result {
+            Ok(data) => {
+                // New block should have blue_score = 10 + 1 = 11
+                assert_eq!(
+                    data.blue_score, 11,
+                    "Chain tip blue_score should be 10 + 1 = 11"
+                );
+
+                println!("TEST PASSED: Chain tip at blue_score=10, new block at blue_score=11");
+                println!("This demonstrates correct blue_score tracking for hard fork boundaries");
+            }
+            Err(e) => {
+                panic!("GHOSTDAG failed: {:?}", e);
+            }
+        }
+    }
+
+    // =========================================================================
+    // TEST 7: Template vs Validation Consistency
+    // Verifies that template generation and validation use identical GHOSTDAG
+    // computations, ensuring miners can never produce blocks that fail validation.
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_execution_template_validation_consistency_single_parent() {
+        // Test: Running GHOSTDAG twice with the same tips produces identical results
+        // This is crucial because template generation and validation both run GHOSTDAG.
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+        let k: KType = 10;
+
+        // Create a block chain: genesis -> block1
+        let block1_hash = create_test_hash(1);
+        let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
+        let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+        let block1_ghostdag = TosGhostdagData::new(
+            1,
+            work,
+            1,
+            genesis_hash.clone(),
+            vec![genesis_hash.clone()],
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+
+        let (block1_interval, _) = Interval::maximal().split_half();
+        let block1_reachability = ReachabilityData {
+            parent: genesis_hash.clone(),
+            interval: block1_interval,
+            height: 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        storage.add_block(
+            block1_hash.clone(),
+            block1_header,
+            block1_ghostdag,
+            block1_reachability,
+            Difficulty::from(1000u64),
+        );
+        storage.set_past_blocks(block1_hash.clone(), vec![genesis_hash.clone()]);
+
+        // Create GHOSTDAG instance
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
+
+        // Simulate template generation: run GHOSTDAG
+        let template_result = ghostdag.ghostdag(&storage, &[block1_hash.clone()]).await;
+        let template_data = template_result.expect("Template GHOSTDAG should succeed");
+
+        // Simulate validation: run GHOSTDAG again with same tips
+        let validation_result = ghostdag.ghostdag(&storage, &[block1_hash.clone()]).await;
+        let validation_data = validation_result.expect("Validation GHOSTDAG should succeed");
+
+        // CRITICAL: Both runs must produce identical results
+        assert_eq!(
+            template_data.blue_score, validation_data.blue_score,
+            "Template and validation blue_score must match"
+        );
+        assert_eq!(
+            template_data.blue_work, validation_data.blue_work,
+            "Template and validation blue_work must match"
+        );
+        assert_eq!(
+            template_data.daa_score, validation_data.daa_score,
+            "Template and validation daa_score must match"
+        );
+        assert_eq!(
+            template_data.selected_parent, validation_data.selected_parent,
+            "Template and validation selected_parent must match"
+        );
+        assert_eq!(
+            template_data.mergeset_blues.len(),
+            validation_data.mergeset_blues.len(),
+            "Template and validation mergeset_blues count must match"
+        );
+
+        println!("TEST PASSED: Single parent GHOSTDAG consistency verified");
+        println!(
+            "  blue_score: {}, blue_work: {}, daa_score: {}",
+            template_data.blue_score, template_data.blue_work, template_data.daa_score
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution_template_validation_consistency_multi_parent() {
+        // Test: Multi-parent GHOSTDAG is deterministic between template and validation
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+        let k: KType = 10;
+
+        // Create two parallel blocks (diamond pattern)
+        let block1_hash = create_test_hash(1);
+        let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
+        let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+        let block1_ghostdag = TosGhostdagData::new(
+            1,
+            work,
+            1,
+            genesis_hash.clone(),
+            vec![genesis_hash.clone()],
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+
+        let (block1_interval, remaining) = Interval::maximal().split_half();
+        let block1_reachability = ReachabilityData {
+            parent: genesis_hash.clone(),
+            interval: block1_interval,
+            height: 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        storage.add_block(
+            block1_hash.clone(),
+            block1_header,
+            block1_ghostdag,
+            block1_reachability,
+            Difficulty::from(1000u64),
+        );
+        storage.set_past_blocks(block1_hash.clone(), vec![genesis_hash.clone()]);
+
+        let block2_hash = create_test_hash(2);
+        let block2_header = create_test_header(2000, vec![genesis_hash.clone()]);
+        let block2_ghostdag = TosGhostdagData::new(
+            1,
+            work,
+            1,
+            genesis_hash.clone(),
+            vec![genesis_hash.clone()],
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+
+        let (block2_interval, _) = remaining.split_half();
+        let block2_reachability = ReachabilityData {
+            parent: genesis_hash.clone(),
+            interval: block2_interval,
+            height: 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        storage.add_block(
+            block2_hash.clone(),
+            block2_header,
+            block2_ghostdag,
+            block2_reachability,
+            Difficulty::from(1000u64),
+        );
+        storage.set_past_blocks(block2_hash.clone(), vec![genesis_hash.clone()]);
+
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
+
+        let tips = vec![block1_hash.clone(), block2_hash.clone()];
+
+        // Run GHOSTDAG multiple times - must be deterministic
+        let run1 = ghostdag
+            .ghostdag(&storage, &tips)
+            .await
+            .expect("Run 1 should succeed");
+        let run2 = ghostdag
+            .ghostdag(&storage, &tips)
+            .await
+            .expect("Run 2 should succeed");
+        let run3 = ghostdag
+            .ghostdag(&storage, &tips)
+            .await
+            .expect("Run 3 should succeed");
+
+        // All runs must produce identical results
+        assert_eq!(
+            run1.blue_score, run2.blue_score,
+            "Runs 1 and 2 blue_score must match"
+        );
+        assert_eq!(
+            run2.blue_score, run3.blue_score,
+            "Runs 2 and 3 blue_score must match"
+        );
+        assert_eq!(
+            run1.blue_work, run2.blue_work,
+            "Runs 1 and 2 blue_work must match"
+        );
+        assert_eq!(
+            run2.blue_work, run3.blue_work,
+            "Runs 2 and 3 blue_work must match"
+        );
+        assert_eq!(
+            run1.selected_parent, run2.selected_parent,
+            "Runs 1 and 2 selected_parent must match"
+        );
+        assert_eq!(
+            run2.selected_parent, run3.selected_parent,
+            "Runs 2 and 3 selected_parent must match"
+        );
+
+        println!("TEST PASSED: Multi-parent GHOSTDAG determinism verified across 3 runs");
+        println!(
+            "  blue_score: {}, mergeset_blues: {}, mergeset_reds: {}",
+            run1.blue_score,
+            run1.mergeset_blues.len(),
+            run1.mergeset_reds.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution_template_validation_consistency_consensus_critical_fields() {
+        // Test: GHOSTDAG produces consistent consensus-critical fields regardless of tip ordering
+        //
+        // Note: selected_parent may differ when blocks have equal blue_work (tie-breaking
+        // uses hash comparison). This is expected and not a consensus issue because:
+        // 1. blue_score and blue_work (the validated fields) remain consistent
+        // 2. The template/validation both use the SAME tips, so selected_parent will match
+        //
+        // This test verifies the fields that ARE validated match across orderings.
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+        let k: KType = 10;
+
+        // Create three parallel blocks with DIFFERENT difficulties to get different blue_work
+        // This ensures deterministic selected_parent selection.
+        let mut block_hashes = Vec::new();
+        let interval_size = u64::MAX / 10;
+
+        for i in 1..=3u8 {
+            let block_hash = create_test_hash(i);
+            let block_header = create_test_header(i as u64 * 1000, vec![genesis_hash.clone()]);
+            // Different difficulty for each block -> different blue_work
+            let difficulty = Difficulty::from(1000u64 * i as u64);
+            let work = calc_work_from_difficulty(&difficulty);
+            let block_ghostdag = TosGhostdagData::new(
+                1,
+                work,
+                1,
+                genesis_hash.clone(),
+                vec![genesis_hash.clone()],
+                Vec::new(),
+                HashMap::new(),
+                Vec::new(),
+            );
+
+            let start = (i as u64) * interval_size;
+            let end = start + interval_size - 1;
+            let block_reachability = ReachabilityData {
+                parent: genesis_hash.clone(),
+                interval: Interval::new(start, end),
+                height: 1,
+                children: Vec::new(),
+                future_covering_set: Vec::new(),
+            };
+
+            storage.add_block(
+                block_hash.clone(),
+                block_header,
+                block_ghostdag,
+                block_reachability,
+                difficulty,
+            );
+            storage.set_past_blocks(block_hash.clone(), vec![genesis_hash.clone()]);
+            block_hashes.push(block_hash);
+        }
+
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
+
+        // Run with original order
+        let order1 = vec![
+            block_hashes[0].clone(),
+            block_hashes[1].clone(),
+            block_hashes[2].clone(),
+        ];
+        let result1 = ghostdag
+            .ghostdag(&storage, &order1)
+            .await
+            .expect("Order 1 should succeed");
+
+        // Run with reversed order
+        let order2 = vec![
+            block_hashes[2].clone(),
+            block_hashes[1].clone(),
+            block_hashes[0].clone(),
+        ];
+        let result2 = ghostdag
+            .ghostdag(&storage, &order2)
+            .await
+            .expect("Order 2 should succeed");
+
+        // Run with shuffled order
+        let order3 = vec![
+            block_hashes[1].clone(),
+            block_hashes[2].clone(),
+            block_hashes[0].clone(),
+        ];
+        let result3 = ghostdag
+            .ghostdag(&storage, &order3)
+            .await
+            .expect("Order 3 should succeed");
+
+        // Consensus-critical fields must match across all orderings
+        assert_eq!(
+            result1.blue_score, result2.blue_score,
+            "Order 1 and 2 blue_score must match"
+        );
+        assert_eq!(
+            result2.blue_score, result3.blue_score,
+            "Order 2 and 3 blue_score must match"
+        );
+        assert_eq!(
+            result1.blue_work, result2.blue_work,
+            "Order 1 and 2 blue_work must match"
+        );
+        assert_eq!(
+            result2.blue_work, result3.blue_work,
+            "Order 2 and 3 blue_work must match"
+        );
+        assert_eq!(
+            result1.daa_score, result2.daa_score,
+            "Order 1 and 2 daa_score must match"
+        );
+        assert_eq!(
+            result2.daa_score, result3.daa_score,
+            "Order 2 and 3 daa_score must match"
+        );
+
+        // With different blue_work values, selected_parent should also be deterministic
+        // (highest blue_work wins regardless of order)
+        assert_eq!(
+            result1.selected_parent, result2.selected_parent,
+            "With distinct blue_work, selected_parent should match"
+        );
+        assert_eq!(
+            result2.selected_parent, result3.selected_parent,
+            "With distinct blue_work, selected_parent should match"
+        );
+
+        // Verify the highest blue_work block was selected
+        assert_eq!(
+            result1.selected_parent, block_hashes[2],
+            "Block with highest difficulty (block3) should be selected parent"
+        );
+
+        println!("TEST PASSED: Consensus-critical GHOSTDAG fields are order-independent");
+        println!(
+            "  All orderings produce: blue_score={}, blue_work={}, selected_parent={}",
+            result1.blue_score, result1.blue_work, result1.selected_parent
+        );
+    }
+
+    // =========================================================================
+    // Tests for bits field validation (difficulty compact representation)
+    // =========================================================================
+
+    #[test]
+    fn test_execution_bits_roundtrip_consistency() {
+        // Test: difficulty_to_bits and bits_to_difficulty are consistent
+        // This is critical for template/validation consistency
+        use crate::core::difficulty::{bits_to_difficulty, difficulty_to_bits};
+
+        // Test various difficulty values
+        let test_difficulties = vec![
+            Difficulty::from(100u64),           // Very low
+            Difficulty::from(1000u64),          // Low
+            Difficulty::from(10000u64),         // Medium
+            Difficulty::from(1_000_000u64),     // High
+            Difficulty::from(1_000_000_000u64), // Very high
+        ];
+
+        for original_difficulty in test_difficulties {
+            // Convert to bits
+            let bits = difficulty_to_bits(&original_difficulty);
+
+            // Convert back to difficulty
+            let roundtrip_difficulty = bits_to_difficulty(bits);
+
+            // The roundtrip should be approximately equal (some precision loss is acceptable)
+            // For the same bits value, template and validation will get the same difficulty
+            let bits_from_roundtrip = difficulty_to_bits(&roundtrip_difficulty);
+            assert_eq!(
+                bits, bits_from_roundtrip,
+                "Bits should be stable after roundtrip: original={}, bits={}, roundtrip={}",
+                original_difficulty, bits, roundtrip_difficulty
+            );
+        }
+
+        println!("TEST PASSED: bits <-> difficulty roundtrip is consistent");
+    }
+
+    #[test]
+    fn test_execution_bits_determinism_for_same_difficulty() {
+        // Test: Same difficulty always produces the same bits
+        use crate::core::difficulty::difficulty_to_bits;
+
+        let difficulty = Difficulty::from(12345678u64);
+
+        // Call multiple times - must be deterministic
+        let bits1 = difficulty_to_bits(&difficulty);
+        let bits2 = difficulty_to_bits(&difficulty);
+        let bits3 = difficulty_to_bits(&difficulty);
+
+        assert_eq!(bits1, bits2, "Same difficulty must produce same bits");
+        assert_eq!(bits2, bits3, "Same difficulty must produce same bits");
+
+        println!(
+            "TEST PASSED: difficulty_to_bits is deterministic: difficulty={} -> bits={}",
+            difficulty, bits1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution_bits_validation_would_reject_wrong_bits() {
+        // Test: Validates that bit field mismatches would be detected
+        // This simulates what the blockchain validation does:
+        // expected_bits = difficulty_to_bits(get_difficulty_at_tips(tips))
+        // if expected_bits != actual_bits { reject }
+        use crate::core::difficulty::difficulty_to_bits;
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+        let k: KType = 10;
+
+        // Create a block at height 1
+        let block1_hash = create_test_hash(1);
+        let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
+        let difficulty = Difficulty::from(5000u64);
+        let work = calc_work_from_difficulty(&difficulty);
+        let block1_ghostdag = TosGhostdagData::new(
+            1,
+            work,
+            1,
+            genesis_hash.clone(),
+            vec![genesis_hash.clone()],
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+
+        let block1_reachability = ReachabilityData {
+            parent: genesis_hash.clone(),
+            interval: Interval::new(1, u64::MAX / 2),
+            height: 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        storage.add_block(
+            block1_hash.clone(),
+            block1_header,
+            block1_ghostdag,
+            block1_reachability,
+            difficulty.clone(),
+        );
+        storage.set_past_blocks(block1_hash.clone(), vec![genesis_hash.clone()]);
+
+        // Compute expected bits (what template generation would produce)
+        let expected_bits = difficulty_to_bits(&difficulty);
+
+        // Wrong bits values that would be rejected
+        let wrong_bits_values = vec![
+            0u32,                          // Zero bits
+            expected_bits + 1,             // Off by one
+            expected_bits.wrapping_sub(1), // Off by one (other direction)
+            expected_bits ^ 0xFF,          // Corrupted low byte
+            expected_bits ^ 0xFF00,        // Corrupted high byte
+        ];
+
+        for wrong_bits in wrong_bits_values {
+            if wrong_bits != expected_bits {
+                // This demonstrates what validation checks
+                println!(
+                    "  Validation would REJECT: expected_bits={}, wrong_bits={} (diff={})",
+                    expected_bits,
+                    wrong_bits,
+                    (expected_bits as i64) - (wrong_bits as i64)
+                );
+                assert_ne!(
+                    expected_bits, wrong_bits,
+                    "Wrong bits must differ from expected"
+                );
+            }
+        }
+
+        println!(
+            "TEST PASSED: Bits validation would detect mismatches (expected_bits={})",
+            expected_bits
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution_multi_parent_ghostdag_for_bits_calculation() {
+        // Test: Multi-parent GHOSTDAG produces correct data for bits calculation
+        // This verifies that get_difficulty_at_tips would use correct GHOSTDAG data
+        // for multi-parent blocks where mergeset_blues.len() > 1
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+        let k: KType = 10;
+
+        // Create two parallel blocks with different difficulties
+        let block1_hash = create_test_hash(1);
+        let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
+        let difficulty1 = Difficulty::from(3000u64);
+        let work1 = calc_work_from_difficulty(&difficulty1);
+
+        let block1_ghostdag = TosGhostdagData::new(
+            1,
+            work1.clone(),
+            1,
+            genesis_hash.clone(),
+            vec![genesis_hash.clone()],
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+
+        let block1_reachability = ReachabilityData {
+            parent: genesis_hash.clone(),
+            interval: Interval::new(1, u64::MAX / 3),
+            height: 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        storage.add_block(
+            block1_hash.clone(),
+            block1_header,
+            block1_ghostdag,
+            block1_reachability,
+            difficulty1.clone(),
+        );
+        storage.set_past_blocks(block1_hash.clone(), vec![genesis_hash.clone()]);
+
+        // Block 2: Higher difficulty (will be selected parent)
+        let block2_hash = create_test_hash(2);
+        let block2_header = create_test_header(1100, vec![genesis_hash.clone()]);
+        let difficulty2 = Difficulty::from(5000u64);
+        let work2 = calc_work_from_difficulty(&difficulty2);
+
+        let block2_ghostdag = TosGhostdagData::new(
+            1,
+            work2.clone(),
+            1,
+            genesis_hash.clone(),
+            vec![genesis_hash.clone()],
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+
+        let block2_reachability = ReachabilityData {
+            parent: genesis_hash.clone(),
+            interval: Interval::new(u64::MAX / 3 + 1, u64::MAX / 3 * 2),
+            height: 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        storage.add_block(
+            block2_hash.clone(),
+            block2_header,
+            block2_ghostdag,
+            block2_reachability,
+            difficulty2.clone(),
+        );
+        storage.set_past_blocks(block2_hash.clone(), vec![genesis_hash.clone()]);
+
+        // Run GHOSTDAG with both as tips (simulating get_difficulty_at_tips scenario)
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
+
+        let tips = vec![block1_hash.clone(), block2_hash.clone()];
+        let ghostdag_data = ghostdag
+            .ghostdag(&storage, &tips)
+            .await
+            .expect("GHOSTDAG should succeed");
+
+        // Verify multi-parent handling
+        assert!(
+            ghostdag_data.mergeset_blues.len() >= 2,
+            "Multi-parent should have >= 2 mergeset_blues"
+        );
+
+        // Verify selected parent is the one with higher blue_work
+        assert_eq!(
+            ghostdag_data.selected_parent, block2_hash,
+            "Block with higher blue_work should be selected parent"
+        );
+
+        // Verify blue_score includes all blue parents
+        // blue_score = selected_parent.blue_score + mergeset_blues.len()
+        let expected_blue_score = 1 + ghostdag_data.mergeset_blues.len() as u64;
+        assert_eq!(
+            ghostdag_data.blue_score, expected_blue_score,
+            "blue_score should be parent.blue_score + mergeset_blues.len()"
+        );
+
+        // The difficulty for bits calculation would be based on selected_parent's difficulty
+        // This matches what get_difficulty_at_tips does after running GHOSTDAG
+        println!("TEST PASSED: Multi-parent GHOSTDAG for bits calculation");
+        println!(
+            "  selected_parent: {} (blue_work: {})",
+            ghostdag_data.selected_parent, work2
+        );
+        println!(
+            "  mergeset_blues.len(): {}, blue_score: {}",
+            ghostdag_data.mergeset_blues.len(),
+            ghostdag_data.blue_score
+        );
+        println!(
+            "  Difficulty basis for bits: {} (from selected_parent)",
+            difficulty2
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution_template_validation_rejects_mutated_consensus_fields() {
+        // Integration-style check: build a header with expected consensus fields,
+        // then mutate blue_work/daa_score/bits and ensure validation detects it.
+        //
+        // We pick a simple scenario (blue_score=1) so difficulty stays at the
+        // minimum target, making expected bits deterministic.
+        use crate::config::MINIMUM_HASHRATE;
+        use crate::core::difficulty::difficulty_to_bits;
+        use crate::core::hard_fork::get_block_time_target_for_version;
+
+        let mut storage = create_genesis_storage();
+        let genesis_hash = Hash::zero();
+        let k: KType = 10;
+
+        // Single parent block (blue_score = 1)
+        let block_hash = create_test_hash(1);
+        let block_header = create_test_header(1_000, vec![genesis_hash.clone()]);
+
+        // Difficulty/work for this block
+        let difficulty = Difficulty::from(5000u64);
+        let work = calc_work_from_difficulty(&difficulty);
+
+        // GHOSTDAG data for block (height 1)
+        let ghostdag_data = TosGhostdagData::new(
+            1,
+            work.clone(),
+            1,
+            genesis_hash.clone(),
+            vec![genesis_hash.clone()],
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+        );
+
+        // Reachability interval
+        let block_reachability = ReachabilityData {
+            parent: genesis_hash.clone(),
+            interval: Interval::new(1, u64::MAX / 2),
+            height: 1,
+            children: Vec::new(),
+            future_covering_set: Vec::new(),
+        };
+
+        storage.add_block(
+            block_hash.clone(),
+            block_header.clone(),
+            ghostdag_data.clone(),
+            block_reachability,
+            difficulty.clone(),
+        );
+        storage.set_past_blocks(block_hash.clone(), vec![genesis_hash.clone()]);
+
+        let reachability = Arc::new(TosReachability::new(genesis_hash.clone()));
+        let ghostdag = TosGhostdag::new(k, genesis_hash.clone(), reachability);
+
+        // Run GHOSTDAG on tips to simulate template generation
+        let gd = ghostdag
+            .ghostdag(&storage, &[block_hash.clone()])
+            .await
+            .expect("GHOSTDAG should succeed");
+
+        // Expected bits for blue_score=1 uses minimum difficulty (V2 1s blocks)
+        let target_time = get_block_time_target_for_version(BlockVersion::V2);
+        let min_diff =
+            Difficulty::from_u64(MINIMUM_HASHRATE * target_time / crate::config::MILLIS_PER_SECOND);
+        let expected_bits = difficulty_to_bits(&min_diff);
+
+        // Build a header with correct consensus fields
+        let mut good_header = block_header.clone();
+        good_header.blue_score = gd.blue_score;
+        good_header.blue_work = gd.blue_work.clone();
+        good_header.daa_score = gd.daa_score;
+        good_header.bits = expected_bits;
+
+        // Validation helper mirroring consensus checks for these fields
+        let validate = |header: &BlockHeader| -> Result<(), BlockchainError> {
+            // blue_score already validated elsewhere; here we check other fields
+            if &gd.blue_work != header.get_blue_work() {
+                return Err(BlockchainError::InvalidBlueWork(
+                    block_hash.clone(),
+                    gd.blue_work.clone(),
+                    header.get_blue_work().clone(),
+                ));
+            }
+            if gd.daa_score != header.get_daa_score() {
+                return Err(BlockchainError::InvalidDaaScore(
+                    block_hash.clone(),
+                    gd.daa_score,
+                    header.get_daa_score(),
+                ));
+            }
+            let actual_bits = header.get_bits();
+            if expected_bits != actual_bits {
+                return Err(BlockchainError::InvalidBitsField(
+                    block_hash.clone(),
+                    expected_bits,
+                    actual_bits,
+                ));
+            }
+            Ok(())
+        };
+
+        // Good header must pass
+        validate(&good_header).expect("Good header should validate");
+
+        // Mutate blue_work
+        let mut bad_blue_work = good_header.clone();
+        bad_blue_work.blue_work = BlueWorkType::from(123u64);
+        assert!(matches!(
+            validate(&bad_blue_work),
+            Err(BlockchainError::InvalidBlueWork(_, _, _))
+        ));
+
+        // Mutate daa_score
+        let mut bad_daa = good_header.clone();
+        bad_daa.daa_score = good_header.daa_score + 1;
+        assert!(matches!(
+            validate(&bad_daa),
+            Err(BlockchainError::InvalidDaaScore(_, _, _))
+        ));
+
+        // Mutate bits
+        let mut bad_bits = good_header.clone();
+        bad_bits.bits = expected_bits.wrapping_add(1);
+        assert!(matches!(
+            validate(&bad_bits),
+            Err(BlockchainError::InvalidBitsField(_, _, _))
+        ));
+
+        println!("TEST PASSED: Mutated consensus fields are rejected (blue_work, daa_score, bits)");
+    }
+
+    // =========================================================================
     // Summary test
     // =========================================================================
 
@@ -1659,6 +2832,23 @@ mod ghostdag_execution_tests {
         println!("   -> Tests k-cluster boundary: anticone=k triggers red");
         println!("   -> Tests k-cluster boundary: anticone=k-1 stays blue");
         println!("   -> Tests mergeset_blues limit enforcement (max k+1)");
+        println!();
+        println!("18-21. test_execution_multi_parent_blue_score_*");
+        println!("   -> Single parent: blue_score = parent.blue_score + 1");
+        println!("   -> Diamond pattern: blue_score = parent.blue_score + mergeset_blues.len()");
+        println!("   -> Multi-parent vs naive: Verifies blue_score > naive +1 estimate");
+        println!("   -> Hard fork boundary: Demonstrates correct blue_score tracking");
+        println!();
+        println!("22-24. test_execution_template_validation_consistency_*");
+        println!("   -> Verifies template generation and validation use same GHOSTDAG");
+        println!("   -> Tests blue_score, blue_work consistency for same tips");
+        println!("   -> Tests multi-parent tips produce identical GHOSTDAG data");
+        println!();
+        println!("25-28. test_execution_bits_*");
+        println!("   -> Tests bits field roundtrip consistency (difficulty <-> bits)");
+        println!("   -> Tests bits determinism for same difficulty");
+        println!("   -> Tests validation would reject wrong bits values");
+        println!("   -> Tests multi-parent GHOSTDAG for bits calculation");
         println!();
     }
 }

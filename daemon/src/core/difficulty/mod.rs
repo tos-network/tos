@@ -17,6 +17,9 @@ use tos_common::{
     varuint::VarUint,
 };
 
+// Re-export difficulty conversion functions from tos_common
+pub use tos_common::difficulty::{bits_to_difficulty, difficulty_to_bits};
+
 use super::hard_fork::get_block_time_target_for_version;
 use crate::config::{MILLIS_PER_SECOND, MINIMUM_HASHRATE};
 

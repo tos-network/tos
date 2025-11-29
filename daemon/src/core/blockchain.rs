@@ -30,7 +30,7 @@ use crate::{
         difficulty,
         error::BlockchainError,
         executor::ParallelExecutor,
-        ghostdag::TosGhostdag,
+        ghostdag::{GhostdagStorageProvider, TosGhostdag},
         hard_fork::*,
         mempool::Mempool,
         nonce_checker::NonceChecker,
@@ -1825,39 +1825,52 @@ impl<S: Storage> Blockchain<S> {
     // Same for its parent, then calculate the difficulty between the two timestamps
     // For Block C, take the timestamp and difficulty from parent block B, and then from parent of B, take the timestamp
     // We take the difficulty from the biggest tip, but compute the solve time from the newest tips
+    //
+    // KASPA-ALIGNED: This function now runs GHOSTDAG on the tips to get the accurate
+    // candidate block's blue_score (including mergeset_blues contribution), ensuring
+    // correct version selection and difficulty calculation at hard fork boundaries.
     pub async fn get_difficulty_at_tips<'a, P, I>(
         &self,
         provider: &P,
         tips: I,
     ) -> Result<(Difficulty, VarUint), BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider + GhostdagDataProvider,
+        P: DifficultyProvider
+            + DagOrderProvider
+            + PrunedTopoheightProvider
+            + GhostdagDataProvider
+            + GhostdagStorageProvider,
         I: IntoIterator<Item = &'a Hash> + ExactSizeIterator + Clone,
         I::IntoIter: ExactSizeIterator,
     {
         trace!("get difficulty at tips");
 
-        // GHOSTDAG: Get the blue_score at the tips
-        // NOTE: This is used for difficulty calculation in template generation
-        // The actual block validation uses proper GHOSTDAG calculation (see line ~3083)
-        #[allow(deprecated)]
-        let blue_score =
-            blockdag::calculate_blue_score_at_tips(provider, tips.clone().into_iter()).await?;
-
-        // Get the version at the current blue_score (used as height for version calculation)
-        let (has_hard_fork, version) = has_hard_fork_at_height(self.get_network(), blue_score);
-
         if tips.len() == 0 {
             // Genesis difficulty
             trace!("genesis difficulty");
+            let version = BlockVersion::V0;
             return Ok((
                 GENESIS_BLOCK_DIFFICULTY,
                 difficulty::get_covariance_p(version),
             ));
         }
 
+        // KASPA-ALIGNED: Run GHOSTDAG on tips to get accurate candidate block data
+        // This includes the correct blue_score = parent.blue_score + mergeset_blues.len()
+        // which is essential for version selection at hard fork boundaries.
+        let tips_vec: Vec<Hash> = tips.clone().into_iter().cloned().collect();
+        let ghostdag_data = self.ghostdag.ghostdag(provider, &tips_vec).await?;
+
+        // Use the GHOSTDAG-computed blue_score for version selection
+        // This correctly accounts for multi-parent mergeset contributions
+        let candidate_blue_score = ghostdag_data.blue_score;
+
+        // Get the version at the candidate blue_score (used as height for version calculation)
+        let (has_hard_fork, version) =
+            has_hard_fork_at_height(self.get_network(), candidate_blue_score);
+
         // if simulator is enabled or we are too low in blue_score, don't calculate difficulty
-        if blue_score <= 1 || self.is_simulator_enabled() {
+        if candidate_blue_score <= 1 || self.is_simulator_enabled() {
             let difficulty = difficulty::get_minimum_difficulty(self.get_network(), version);
             return Ok((difficulty, difficulty::get_covariance_p(version)));
         }
@@ -1871,21 +1884,8 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        // Search the highest difficulty available (using GHOSTDAG blue_work - TIP-2 Phase 1)
-        let best_tip = {
-            let tips_vec: Vec<_> = tips.clone().into_iter().collect();
-            let mut best_hash = tips_vec[0];
-            let mut best_blue_work = provider.get_ghostdag_blue_work(best_hash).await?;
-
-            for &tip in tips_vec.iter().skip(1) {
-                let blue_work = provider.get_ghostdag_blue_work(tip).await?;
-                if blue_work > best_blue_work {
-                    best_blue_work = blue_work;
-                    best_hash = tip;
-                }
-            }
-            best_hash
-        };
+        // Use selected parent from GHOSTDAG (best tip by blue_work)
+        let best_tip = &ghostdag_data.selected_parent;
         let biggest_difficulty = provider.get_difficulty_for_block_hash(best_tip).await?;
 
         // Search the newest tip available to determine the real solve time
@@ -1937,7 +1937,11 @@ impl<S: Storage> Blockchain<S> {
         tips: I,
     ) -> Result<(Difficulty, VarUint), BlockchainError>
     where
-        P: DifficultyProvider + DagOrderProvider + PrunedTopoheightProvider + GhostdagDataProvider,
+        P: DifficultyProvider
+            + DagOrderProvider
+            + PrunedTopoheightProvider
+            + GhostdagDataProvider
+            + GhostdagStorageProvider,
         I: IntoIterator<Item = &'a Hash> + ExactSizeIterator + Clone,
         I::IntoIter: ExactSizeIterator,
     {
@@ -2510,6 +2514,16 @@ impl<S: Storage> Blockchain<S> {
                 }
             }
         }
+        // SECURITY FIX: Get the difficulty and calculate bits for this block
+        // This ensures the bits field is properly set and can be validated
+        let (difficulty, _) = self
+            .get_difficulty_at_tips(storage, sorted_tips_vec.iter())
+            .await?;
+
+        // Convert difficulty to bits (compact representation)
+        // bits = leading zeros count (simplified - actual implementation may vary)
+        let bits = difficulty::difficulty_to_bits(&difficulty);
+
         let mut block = BlockHeader::new_simple(
             get_version_at_height(self.get_network(), blue_score),
             sorted_tips_vec,
@@ -2519,13 +2533,22 @@ impl<S: Storage> Blockchain<S> {
             Hash::zero(),
         );
 
-        // Set the calculated blue_score in the block header
+        // SECURITY FIX: Set all GHOSTDAG consensus fields in the block template
+        // This ensures consistency between template and validation, and prevents
+        // miners from submitting blocks with arbitrary consensus field values.
         block.blue_score = blue_score;
+        block.blue_work = ghostdag_data.blue_work.clone();
+        block.daa_score = ghostdag_data.daa_score;
+        block.bits = bits;
+
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Block template created with {} parents, blue_score: {}",
+                "Block template created with {} parents, blue_score: {}, blue_work: {}, daa_score: {}, bits: {}",
                 block.get_parents().len(),
-                blue_score
+                blue_score,
+                ghostdag_data.blue_work,
+                ghostdag_data.daa_score,
+                bits
             );
         }
 
@@ -2980,6 +3003,26 @@ impl<S: Storage> Blockchain<S> {
             ));
         }
 
+        // SECURITY FIX: Reject blocks with multiple parent levels
+        // TOS only uses level 0 parents for consensus (GHOSTDAG, mergeset, validation).
+        // Blocks with additional parent levels would have their extra parents ignored,
+        // causing DAG structure inconsistency with the header's parents_hash commitment.
+        // Per audit recommendation: reject blocks with > 1 parent level to ensure consistency.
+        let parents_by_level = block.get_header().get_parents_by_level();
+        if parents_by_level.len() > 1 {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has {} parent levels, only 1 level allowed",
+                    block_hash,
+                    parents_by_level.len()
+                );
+            }
+            return Err(BlockchainError::InvalidParentsLevelCount(
+                block_hash.into_owned(),
+                parents_by_level.len(),
+            ));
+        }
+
         let tips_count = block.get_parents().len();
         if log::log_enabled!(log::Level::Debug) {
             debug!("Tips count for this new {}: {}", block, tips_count);
@@ -3161,6 +3204,72 @@ impl<S: Storage> Blockchain<S> {
                 expected_blue_score,
                 block.get_blue_score(),
             ));
+        }
+
+        // SECURITY FIX: Validate blue_work, daa_score, and bits fields
+        // Genesis blocks (tips_count == 0) are exempt as they use default values (all zeros)
+        // and are trusted by design - their hash is hardcoded per network.
+        let is_genesis = tips_count == 0;
+
+        if !is_genesis {
+            // Validate blue_work field matches GHOSTDAG computation
+            // This prevents attackers from forging blue_work values
+            let expected_blue_work = &ghostdag_data.blue_work;
+            if expected_blue_work != block.get_blue_work() {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Invalid block blue_work: actual={}, ghostdag_expected={} for block {}",
+                        block.get_blue_work(),
+                        expected_blue_work,
+                        block_hash
+                    );
+                }
+                return Err(BlockchainError::InvalidBlueWork(
+                    block_hash.into_owned(),
+                    expected_blue_work.clone(),
+                    block.get_blue_work().clone(),
+                ));
+            }
+
+            // Validate daa_score field matches GHOSTDAG computation
+            // This prevents attackers from manipulating DAA calculations
+            let expected_daa_score = ghostdag_data.daa_score;
+            if expected_daa_score != block.get_daa_score() {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Invalid block daa_score: actual={}, ghostdag_expected={} for block {}",
+                        block.get_daa_score(),
+                        expected_daa_score,
+                        block_hash
+                    );
+                }
+                return Err(BlockchainError::InvalidDaaScore(
+                    block_hash.into_owned(),
+                    expected_daa_score,
+                    block.get_daa_score(),
+                ));
+            }
+
+            // Validate bits field matches expected difficulty
+            // This prevents miners from forging difficulty claims in the header
+            let (expected_difficulty, _) = self
+                .get_difficulty_at_tips(&*storage, block.get_parents().iter())
+                .await?;
+            let expected_bits = difficulty::difficulty_to_bits(&expected_difficulty);
+            let actual_bits = block.get_bits();
+            if expected_bits != actual_bits {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Invalid block bits: actual={}, expected={} for block {}",
+                        actual_bits, expected_bits, block_hash
+                    );
+                }
+                return Err(BlockchainError::InvalidBitsField(
+                    block_hash.into_owned(),
+                    expected_bits,
+                    actual_bits,
+                ));
+            }
         }
 
         let block_blue_score_by_tips = expected_blue_score;
