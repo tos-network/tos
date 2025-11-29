@@ -3,6 +3,8 @@
 //! This test suite validates nonce management in parallel transaction execution,
 //! ensuring nonces are properly tracked, incremented, and rolled back on failures.
 //!
+
+#![allow(clippy::disallowed_methods)]
 //! Test Coverage:
 //! 1. Nonce Increments Correctly - Verifies nonces increment after successful transactions
 //! 2. Staged Nonces (No Commit Until Success) - Ensures failed transactions don't modify nonces

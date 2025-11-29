@@ -119,6 +119,7 @@ pub fn calculate_block_work_from_difficulty(difficulty: u64) -> BlueWorkType {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

@@ -3,6 +3,8 @@
 //! These tests are migrated from parallel_execution_parity_tests.rs to use RocksDB
 //! instead of SledStorage, eliminating deadlock issues.
 //!
+
+#![allow(clippy::disallowed_methods)]
 //! Tests verify that parallel execution produces identical results to sequential
 //! execution for common transfer scenarios.
 //!

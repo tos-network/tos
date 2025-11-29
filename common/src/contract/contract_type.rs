@@ -88,6 +88,7 @@ pub fn is_elf_bytecode(bytecode: &[u8]) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

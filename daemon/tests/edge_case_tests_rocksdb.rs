@@ -3,6 +3,8 @@
 //! This test suite validates ParallelChainState behavior under edge conditions:
 //! - Empty accounts (zero balance, zero nonce)
 //! - Boundary values (u64::MAX, u64::MIN)
+
+#![allow(clippy::disallowed_methods)]
 //! - Account creation and destruction
 //! - Zero-value transfers
 //! - Maximum nonce values

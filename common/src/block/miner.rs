@@ -399,6 +399,7 @@ impl<'a> Serializer for MinerWork<'a> {
 impl Hashable for MinerWork<'_> {}
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use crate::crypto::KeyPair;
     use primitive_types::U256;

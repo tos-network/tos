@@ -269,6 +269,7 @@ impl Serializer for MissingTransactionsResponse {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

@@ -413,6 +413,7 @@ pub fn calculate_final_reward(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use crate::crypto::elgamal::CompressedPublicKey;

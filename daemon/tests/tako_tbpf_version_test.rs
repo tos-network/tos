@@ -3,6 +3,8 @@
 //! Tests the SVMFeatureSet and dynamic TBPF version range configuration,
 //! aligning with Solana's approach to SBPF version control.
 //!
+
+#![allow(clippy::disallowed_methods)]
 //! # TBPF Version Support Matrix
 //!
 //! | Version | e_flags | Features |
@@ -354,22 +356,24 @@ fn test_v3_contract_loads_with_production_features() {
     // V3 contract ELF loading should succeed (version check passes)
     // Execution may fail due to obsolete RETURN (0x9d) instruction in test fixture
     // This will be fixed when test contracts are recompiled with updated toolchain
-    if result.is_err() {
-        let err = result.unwrap_err();
-        let err_str = err.to_string();
-        // Should NOT be UnsupportedTBPFVersion - that would mean version check failed
-        assert!(
-            !err_str.contains("UnsupportedTBPFVersion"),
-            "V3 contract should pass version check with production features: {}",
-            err_str
-        );
-        // Expected: UnsupportedInstruction due to RETURN (0x9d) in old test fixture
-        println!(
-            "V3 contract passed version check, execution error (expected due to obsolete RETURN opcode): {}",
-            err_str
-        );
-    } else {
-        println!("V3 contract executed successfully");
+    match result {
+        Err(err) => {
+            let err_str = err.to_string();
+            // Should NOT be UnsupportedTBPFVersion - that would mean version check failed
+            assert!(
+                !err_str.contains("UnsupportedTBPFVersion"),
+                "V3 contract should pass version check with production features: {}",
+                err_str
+            );
+            // Expected: UnsupportedInstruction due to RETURN (0x9d) in old test fixture
+            println!(
+                "V3 contract passed version check, execution error (expected due to obsolete RETURN opcode): {}",
+                err_str
+            );
+        }
+        Ok(_) => {
+            println!("V3 contract executed successfully");
+        }
     }
 }
 
@@ -397,20 +401,22 @@ fn test_v3_contract_loads_with_v3_only_features() {
     );
 
     // Version check should pass, execution may fail due to obsolete opcode
-    if result.is_err() {
-        let err = result.unwrap_err();
-        let err_str = err.to_string();
-        assert!(
-            !err_str.contains("UnsupportedTBPFVersion"),
-            "V3 contract should pass version check with V3-only features: {}",
-            err_str
-        );
-        println!(
-            "V3 contract passed version check with V3-only features, execution error (expected): {}",
-            err_str
-        );
-    } else {
-        println!("V3 contract executed successfully with V3-only features");
+    match result {
+        Err(err) => {
+            let err_str = err.to_string();
+            assert!(
+                !err_str.contains("UnsupportedTBPFVersion"),
+                "V3 contract should pass version check with V3-only features: {}",
+                err_str
+            );
+            println!(
+                "V3 contract passed version check with V3-only features, execution error (expected): {}",
+                err_str
+            );
+        }
+        Ok(_) => {
+            println!("V3 contract executed successfully with V3-only features");
+        }
     }
 }
 

@@ -1,7 +1,10 @@
-/// Integration test for TOS Kernel(TAKO) log collection
-///
-/// This test verifies that log messages emitted by contracts are properly
-/// collected and included in the ExecutionResult.
+//! Integration test for TOS Kernel(TAKO) log collection
+//!
+//! This test verifies that log messages emitted by contracts are properly
+//! collected and included in the ExecutionResult.
+
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::Result;
 use tos_common::{
     asset::AssetData,

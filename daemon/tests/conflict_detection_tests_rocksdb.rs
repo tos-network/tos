@@ -3,6 +3,8 @@
 //! This test suite validates concurrent conflict detection in the parallel transaction
 //! execution system. Tests focus on identifying conflicts between transactions that
 //! access the same resources (accounts, balances, nonces).
+
+#![allow(clippy::disallowed_methods)]
 //!
 //! # Test Coverage
 //!

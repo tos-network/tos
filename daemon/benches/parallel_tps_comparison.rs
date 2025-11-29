@@ -14,6 +14,8 @@
 // - NO f64 in consensus-critical paths (use u64 for TPS, u128 for ratios)
 // - Follow CLAUDE.md code quality standards
 
+#![allow(clippy::disallowed_methods)]
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

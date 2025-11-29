@@ -3,6 +3,8 @@
 //! P0 Priority: These tests verify that parallel execution produces identical
 //! storage-level results to sequential execution.
 //!
+
+#![allow(clippy::disallowed_methods)]
 //! DESIGN DECISION (2025-11-01):
 //! After investigation, full transaction execution in tests causes deadlocks
 //! with RocksDB storage due to async runtime + storage initialization issues.

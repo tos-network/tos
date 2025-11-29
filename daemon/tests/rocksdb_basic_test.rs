@@ -3,6 +3,8 @@
 //! This test verifies that the RocksDB storage backend works correctly
 //! without deadlocks when setting up accounts and creating ParallelChainState.
 
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::Arc;
 use tempdir::TempDir;
 use tos_common::tokio::sync::RwLock;

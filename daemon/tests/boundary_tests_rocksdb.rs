@@ -3,6 +3,8 @@
 //! This test suite validates ParallelChainState behavior at system boundaries:
 //! - Account balance transitions (0 → positive, positive → 0)
 //! - Nonce overflow conditions
+
+#![allow(clippy::disallowed_methods)]
 //! - Asset key variations
 //! - State transitions between blocks
 //! - Cache invalidation scenarios

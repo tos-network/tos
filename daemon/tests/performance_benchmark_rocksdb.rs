@@ -3,6 +3,8 @@
 //! This test suite measures and benchmarks RocksDB performance across various
 //! dimensions including storage operations, concurrent access, and parallel
 //! chain state operations.
+
+#![allow(clippy::disallowed_methods)]
 //!
 //! # Running the Benchmarks
 //!

@@ -3,6 +3,8 @@
 //! This test suite migrates the security tests from parallel_execution_security_tests.rs
 //! to use RocksDB instead of Sled, eliminating deadlocks while maintaining security coverage.
 //!
+
+#![allow(clippy::disallowed_methods)]
 //! APPROACH: Simplified tests focusing on core objectives per user guidance:
 //! - "采用简化测试：只测试RocksDB基本操作+ParallelChainState创建（核心目标）"
 //! - Translation: "Use simplified tests: Only test RocksDB basic operations + ParallelChainState creation"

@@ -2,6 +2,7 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::panic)]
 #![allow(clippy::disallowed_methods)]
+#![allow(clippy::large_enum_variant)]
 
 // TOS Miner is a standalone mining tool, not core blockchain code
 // Some unwrap/expect usage is acceptable for simplicity in this context
@@ -222,6 +223,7 @@ pub struct Config {
 }
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 enum ThreadNotification<'a> {
     NewJob(MinerWork<'a>, Difficulty, u64), // block work, difficulty, height (V2 algorithm only)
     WebSocketClosed,                        // WebSocket connection has been closed

@@ -12,6 +12,10 @@
 //! 6. Nonce verification
 //! 7. Balance verification
 
+#![allow(clippy::disallowed_methods)]
+#![allow(deprecated)]
+#![allow(dead_code)]
+
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::time::Duration;
 

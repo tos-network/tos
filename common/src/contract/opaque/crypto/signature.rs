@@ -77,6 +77,7 @@ pub fn signature_verify_fn(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use curve25519_dalek::Scalar;

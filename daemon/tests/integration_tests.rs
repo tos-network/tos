@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::HashMap;
 use tos_common::{
     config::{COIN_VALUE, TOS_ASSET},

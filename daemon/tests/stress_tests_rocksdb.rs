@@ -3,6 +3,8 @@
 //! This test suite validates ParallelChainState performance under high load:
 //! - Large account sets (100, 500, 1000+ accounts)
 //! - Concurrent operations stress testing
+
+#![allow(clippy::disallowed_methods)]
 //! - Memory usage validation
 //! - State commit performance
 //!

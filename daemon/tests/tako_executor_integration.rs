@@ -1,6 +1,9 @@
-/// TOS Kernel(TAKO) Executor Integration Tests
-///
-/// Tests the complete TOS Kernel(TAKO) execution pipeline with real ELF contracts.
+//! TOS Kernel(TAKO) Executor Integration Tests
+//!
+//! Tests the complete TOS Kernel(TAKO) execution pipeline with real ELF contracts.
+
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::HashMap;
 use tos_common::{
     asset::AssetData,

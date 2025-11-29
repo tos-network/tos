@@ -197,6 +197,7 @@ pub fn compute_deterministic_contract_address(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

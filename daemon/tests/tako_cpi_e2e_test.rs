@@ -3,6 +3,8 @@
 //! This test suite validates the complete CPI (Cross-Program Invocation) flow
 //! with real contracts, real storage (RocksDB), and production-like conditions.
 //!
+
+#![allow(clippy::disallowed_methods)]
 //! Test Coverage:
 //! - Contract deployment and loading
 //! - CPI invocation with parameter passing

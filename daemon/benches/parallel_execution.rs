@@ -8,6 +8,8 @@
 // - Conflict detection performance
 // - Transaction account extraction
 //
+
+#![allow(clippy::disallowed_methods)]
 // NOTE: These are infrastructure benchmarks measuring overhead and scalability.
 // They do NOT require real signed transactions or full blockchain state.
 

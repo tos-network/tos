@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use crate::{
     account::Nonce,
     api::{DataElement, DataValue},

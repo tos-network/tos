@@ -615,6 +615,7 @@ pub struct ValidationSummary {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use curve25519_dalek::ristretto::CompressedRistretto;

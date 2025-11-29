@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::Result;
 use std::{path::PathBuf, time::Duration};
 use tos_ai_miner::{

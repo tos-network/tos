@@ -196,6 +196,7 @@ impl Serializer for Cipher {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use crate::{crypto::KeyPair, transaction::extra_data::Role};
 

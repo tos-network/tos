@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::Result;
 use std::cell::RefCell;
 use std::collections::HashMap;

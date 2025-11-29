@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

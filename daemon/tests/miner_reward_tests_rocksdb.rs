@@ -3,6 +3,8 @@
 //! This test suite validates miner reward handling in parallel execution,
 //! ensuring rewards are immediately available and correctly merged with existing balances.
 //!
+
+#![allow(clippy::disallowed_methods)]
 //! Test Coverage:
 //! 1. Reward Immediate Availability - Miner can spend rewards in same block
 //! 2. Reward Merge Detection - Rewards correctly add to existing balance
