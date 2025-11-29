@@ -3229,11 +3229,7 @@ impl<S: Storage> Blockchain<S> {
         // and timestamp > any parent timestamp.
         if let Err(e) = validate_block_timestamp(block.get_timestamp(), &parent_timestamps) {
             if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Invalid block timestamp {}: {:?}",
-                    block.get_timestamp(),
-                    e
-                );
+                debug!("Invalid block timestamp {}: {:?}", block.get_timestamp(), e);
             }
             return Err(e);
         }

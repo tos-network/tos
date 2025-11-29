@@ -1112,7 +1112,10 @@ mod ghostdag_execution_tests {
         );
         match result {
             Err(BlockchainError::TimestampIsLessThanParent(ts)) => {
-                assert_eq!(ts, 1500, "Error should contain the parent timestamp that was violated");
+                assert_eq!(
+                    ts, 1500,
+                    "Error should contain the parent timestamp that was violated"
+                );
             }
             _ => panic!("Expected TimestampIsLessThanParent error"),
         }
@@ -1134,9 +1137,7 @@ mod ghostdag_execution_tests {
             result.err()
         );
 
-        println!(
-            "TEST PASSED: validate_block_timestamp() correctly enforces > ALL parents"
-        );
+        println!("TEST PASSED: validate_block_timestamp() correctly enforces > ALL parents");
     }
 
     #[test]
@@ -1194,13 +1195,22 @@ mod ghostdag_execution_tests {
         // Edge case 1: Single parent - no median check needed
         let single_parent = vec![1000u64];
         let result = validate_block_timestamp(1001, &single_parent);
-        assert!(result.is_ok(), "Single parent: timestamp > parent should pass");
+        assert!(
+            result.is_ok(),
+            "Single parent: timestamp > parent should pass"
+        );
 
         let result = validate_block_timestamp(1000, &single_parent);
-        assert!(result.is_err(), "Single parent: timestamp == parent should fail");
+        assert!(
+            result.is_err(),
+            "Single parent: timestamp == parent should fail"
+        );
 
         let result = validate_block_timestamp(999, &single_parent);
-        assert!(result.is_err(), "Single parent: timestamp < parent should fail");
+        assert!(
+            result.is_err(),
+            "Single parent: timestamp < parent should fail"
+        );
 
         // Edge case 2: Empty parents (genesis-like) - should pass
         let no_parents: Vec<u64> = vec![];
@@ -1285,7 +1295,8 @@ mod ghostdag_execution_tests {
 
         // Verify timestamps match what we stored
         assert_eq!(
-            retrieved_timestamps, parent_timestamps_array.to_vec(),
+            retrieved_timestamps,
+            parent_timestamps_array.to_vec(),
             "Retrieved timestamps should match stored values"
         );
 
@@ -1306,9 +1317,7 @@ mod ghostdag_execution_tests {
             "Timestamp > max retrieved parent should pass"
         );
 
-        println!(
-            "TEST PASSED: Integration test with MockStorage + validate_block_timestamp()"
-        );
+        println!("TEST PASSED: Integration test with MockStorage + validate_block_timestamp()");
     }
 
     // =========================================================================
@@ -1404,7 +1413,10 @@ mod ghostdag_execution_tests {
                 );
             }
             Err(e) => {
-                println!("Test returned error (expected for some configurations): {:?}", e);
+                println!(
+                    "Test returned error (expected for some configurations): {:?}",
+                    e
+                );
             }
         }
     }
