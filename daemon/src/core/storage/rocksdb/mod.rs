@@ -647,7 +647,7 @@ impl Storage for RocksStorage {
         let mut txs = Vec::with_capacity(tx_hashes.len());
         for tx_hash in &tx_hashes {
             let tx = self.get_transaction(tx_hash).await?;
-            txs.push((*tx_hash, tx));
+            txs.push((tx_hash.clone(), tx));
         }
 
         // PRUNING FIX: Actually delete transaction data from Column::Transactions
