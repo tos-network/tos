@@ -36,10 +36,12 @@
 //! |----------|----------------|-------|--------|
 //! | GHOSTDAG Consensus | V-01 to V-07 | 17 | Active |
 //! | Cryptography | V-08 to V-12 | 19 | Active |
-//! | State Management | V-13 to V-19 | 14 | Partial |
-//! | Storage & Concurrency | V-20 to V-27 | 12 | Partial |
-//! | Integration | All | 9 | Partial |
-//! | **TOTAL** | **27 vulnerabilities** | **71 tests** | **Mixed** |
+//! | State Management | V-13 to V-19 | 14 | Active |
+//! | Storage & Concurrency | V-20 to V-27 | 13 | Active |
+//! | Block Submission | All | 18 | Active |
+//! | WebSocket Pentest | All | 12 | Active |
+//! | Integration | All | 7 | Active |
+//! | **TOTAL** | **27 vulnerabilities** | **100 tests** | **Active** |
 //!
 //! ## Test Status:
 //!
@@ -54,11 +56,10 @@
 
 pub mod block_submission_tests;
 pub mod ghostdag_security_tests;
-pub mod state_security_tests;
-// TODO: Temporarily disabled - requires API updates for testing framework
-// pub mod storage_security_tests;
 pub mod integration_security_tests;
+pub mod state_security_tests;
 pub mod state_transaction_integration_tests;
+pub mod storage_security_tests;
 pub mod test_utilities;
 pub mod websocket_pentest;
 
@@ -72,7 +73,7 @@ mod meta_tests {
         // This is a documentation test to ensure we have coverage
 
         const TOTAL_VULNERABILITIES: usize = 27;
-        const TOTAL_TESTS: usize = 71;
+        const TOTAL_TESTS: usize = 100;
 
         // Verify we have substantial test coverage
         assert!(
