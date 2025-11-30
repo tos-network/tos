@@ -165,8 +165,8 @@ fn test_blue_work_from_difficulty() {
     let base_difficulty = Difficulty::from(1000u64);
     let high_difficulty = Difficulty::from(2000u64);
 
-    let work_from_base = calc_work_from_difficulty(&base_difficulty);
-    let work_from_high = calc_work_from_difficulty(&high_difficulty);
+    let work_from_base = calc_work_from_difficulty(&base_difficulty).unwrap();
+    let work_from_high = calc_work_from_difficulty(&high_difficulty).unwrap();
 
     // Higher difficulty should produce higher work
     assert!(
@@ -190,7 +190,7 @@ fn test_blue_work_from_difficulty() {
 #[test]
 fn test_blue_work_accumulation() {
     let base_difficulty = Difficulty::from(1000u64);
-    let base_work = calc_work_from_difficulty(&base_difficulty);
+    let base_work = calc_work_from_difficulty(&base_difficulty).unwrap();
 
     // Genesis: blue_work = base_work
     let genesis_blue_work = base_work;
@@ -238,7 +238,7 @@ fn test_blue_work_accumulation() {
 #[test]
 fn test_blue_work_multi_parent() {
     let base_difficulty = Difficulty::from(1000u64);
-    let base_work = calc_work_from_difficulty(&base_difficulty);
+    let base_work = calc_work_from_difficulty(&base_difficulty).unwrap();
 
     // G.blue_work
     let g_blue_work = base_work;
@@ -367,7 +367,7 @@ async fn test_find_best_tip_selects_highest_blue_work() {
     let mut provider = SimpleBlueWorkProvider::new();
 
     let base_difficulty = Difficulty::from(1000u64);
-    let base_work = calc_work_from_difficulty(&base_difficulty);
+    let base_work = calc_work_from_difficulty(&base_difficulty).unwrap();
     let high_work = base_work + base_work;
 
     let a_bytes = [b'A'; 32];
@@ -413,7 +413,7 @@ fn test_kaspa_formula_match() {
     // blue_work = selected_parent.blue_work + work(selected_parent) + sum(work(other_blues))
 
     let base_difficulty = Difficulty::from(1000u64);
-    let base_work = calc_work_from_difficulty(&base_difficulty);
+    let base_work = calc_work_from_difficulty(&base_difficulty).unwrap();
 
     // Simulate selected_parent with blue_work = 2*base_work
     let selected_parent_blue_work = base_work + base_work;

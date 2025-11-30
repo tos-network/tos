@@ -11,6 +11,11 @@ use crate::core::ghostdag::GhostdagStorageProvider;
 /// DAA window size - number of blocks to consider for difficulty adjustment
 pub const DAA_WINDOW_SIZE: u64 = 2016;
 
+/// Maximum number of blocks that can be collected in a DAA window traversal
+/// SECURITY FIX (Codex Audit): Prevents DoS via wide DAG mergesets inflating memory/IO
+/// Set to 4x DAA_WINDOW_SIZE to allow for reasonable DAG width while preventing abuse
+pub const MAX_DAA_WINDOW_BLOCKS: usize = (DAA_WINDOW_SIZE as usize) * 4; // 8064 blocks max
+
 /// Target time per block in seconds
 /// TOS uses 1 second per block (TIP-1's 3s proposal was deprecated)
 /// This value is used by DAA for difficulty adjustment calculations
@@ -126,6 +131,16 @@ async fn find_daa_window_blocks<S: GhostdagStorageProvider>(
     visited.insert(start_block.clone());
 
     while let Some(current) = queue.pop_front() {
+        // SECURITY FIX (Codex Audit): Limit maximum blocks to prevent DoS via wide DAG mergesets
+        // Without this check, an attacker could craft a DAG structure that causes unbounded
+        // memory allocation during DAA window traversal
+        if window_blocks.len() >= MAX_DAA_WINDOW_BLOCKS {
+            return Err(BlockchainError::DaaWindowTooLarge(
+                window_blocks.len(),
+                MAX_DAA_WINDOW_BLOCKS,
+            ));
+        }
+
         // Get current block's GHOSTDAG data
         let current_data = storage.get_ghostdag_data(&current).await?;
 

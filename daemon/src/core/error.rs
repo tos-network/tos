@@ -352,6 +352,10 @@ pub enum BlockchainError {
     InvalidTipsCount(Hash, usize),
     #[error("Block {0} has an invalid tip {1} which is not present in chain")]
     InvalidTipsNotFound(Hash, Hash),
+    #[error(
+        "DAA window traversal exceeded maximum block limit: collected {0} blocks, max allowed {1}"
+    )]
+    DaaWindowTooLarge(usize, usize),
     #[error("Block {0} has invalid tips difficulty: {1}")]
     InvalidTipsDifficulty(Hash, Hash),
     #[error("Invalid block version")]
@@ -390,6 +394,8 @@ pub enum BlockchainError {
     BlueScoreOverflow,
     #[error("Blue work overflow detected - would exceed U256::MAX")]
     BlueWorkOverflow,
+    #[error("Zero difficulty is not allowed - blocks must have non-zero difficulty")]
+    ZeroDifficulty,
     #[error("Burned supply would exceed maximum allowed (total supply limit)")]
     BurnedSupplyLimitExceeded,
     #[error("K-cluster violation: block {block} has anticone size {anticone_size} (k={k})")]

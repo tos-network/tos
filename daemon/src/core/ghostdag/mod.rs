@@ -13,7 +13,8 @@ mod tests_comprehensive;
 // which has a working MockGhostdagStorage implementation
 
 pub use daa::{
-    calculate_daa_score, calculate_target_difficulty, DAA_WINDOW_SIZE, TARGET_TIME_PER_BLOCK,
+    calculate_daa_score, calculate_target_difficulty, DAA_WINDOW_SIZE, MAX_DAA_WINDOW_BLOCKS,
+    TARGET_TIME_PER_BLOCK,
 };
 pub use types::{BlueWorkType, CompactGhostdagData, KType, TosGhostdagData};
 
@@ -76,18 +77,18 @@ impl<T: Storage> GhostdagStorageProvider for T {
 /// as it's too large. However, as 2**256 is at least as large
 /// as target+1, it is equal to ((2**256 - target - 1) / (target+1)) + 1,
 /// or ~target / (target+1) + 1.
-/// SECURITY FIX V-06: Added zero difficulty check to prevent division by zero
-pub fn calc_work_from_difficulty(difficulty: &Difficulty) -> BlueWorkType {
+///
+/// SECURITY FIX (Codex Audit): Returns error for zero difficulty instead of max_value()
+/// This prevents blocks with invalid zero difficulty from gaining infinite work.
+pub fn calc_work_from_difficulty(difficulty: &Difficulty) -> Result<BlueWorkType, BlockchainError> {
     // Convert difficulty (VarUint wrapping common's U256 v0.13.1) to daemon's U256 v0.12
     // We do this by serializing to bytes and deserializing with the correct version
     let diff_u256_common = difficulty.as_ref();
 
-    // SECURITY FIX V-06: Check for zero difficulty to prevent division by zero
+    // SECURITY FIX (Codex Audit): Reject zero difficulty with error
+    // Zero difficulty blocks are invalid and should be rejected, not given max work
     if diff_u256_common.is_zero() {
-        // Return maximum work for zero difficulty (or could reject the block)
-        // Using max work means zero difficulty blocks have infinite work
-        // In practice, blocks with zero difficulty should be rejected during validation
-        return BlueWorkType::max_value();
+        return Err(BlockchainError::ZeroDifficulty);
     }
 
     // Serialize common's U256 (v0.13.1) to bytes
@@ -97,19 +98,19 @@ pub fn calc_work_from_difficulty(difficulty: &Difficulty) -> BlueWorkType {
     // Deserialize into daemon's U256 v0.12 (BlueWorkType)
     let diff_u256_daemon = BlueWorkType::from_big_endian(&diff_bytes);
 
-    // SECURITY FIX V-06: Double-check to prevent division by zero at daemon U256 level
+    // SECURITY FIX: Double-check to prevent division by zero at daemon U256 level
     if diff_u256_daemon.is_zero() {
-        return BlueWorkType::max_value();
+        return Err(BlockchainError::ZeroDifficulty);
     }
 
     // Calculate target = MAX / difficulty (TOS's difficulty semantics)
     let target = BlueWorkType::max_value() / diff_u256_daemon;
 
-    // SECURITY FIX V-06 (extended): Handle edge case where target = MAX
+    // Handle edge case where target = MAX
     // When difficulty = 1, target = MAX, and target + 1 would overflow
     // In this case, work = 2^256 / (MAX + 1) = 2^256 / 0 = infinity (return 1)
     if target == BlueWorkType::max_value() {
-        return BlueWorkType::one();
+        return Ok(BlueWorkType::one());
     }
 
     // Calculate work: (~target / (target + 1)) + 1
@@ -117,7 +118,7 @@ pub fn calc_work_from_difficulty(difficulty: &Difficulty) -> BlueWorkType {
     // Source: https://github.com/bitcoin/bitcoin/blob/2e34374bf3e12b37b0c66824a6c998073cdfab01/src/chain.cpp#L131
     let res = (!target / (target + BlueWorkType::one())) + BlueWorkType::one();
 
-    res
+    Ok(res)
 }
 
 /// SortableBlock for topological ordering by blue work
@@ -356,8 +357,8 @@ impl TosGhostdag {
         for blue_hash in new_block_data.mergeset_blues.iter() {
             // Get the difficulty for this blue block
             let difficulty = storage.get_difficulty_for_block_hash(blue_hash).await?;
-            // Calculate work from difficulty
-            let block_work = calc_work_from_difficulty(&difficulty);
+            // Calculate work from difficulty (returns error for zero difficulty)
+            let block_work = calc_work_from_difficulty(&difficulty)?;
             // Use checked addition for blue work accumulation
             added_blue_work = added_blue_work
                 .checked_add(block_work)
@@ -754,8 +755,8 @@ mod tests {
         let parent_work = BlueWorkType::from(1000u64);
         let block_difficulty = Difficulty::from(100u64);
 
-        // Calculate work from difficulty
-        let block_work = calc_work_from_difficulty(&block_difficulty);
+        // Calculate work from difficulty (now returns Result)
+        let block_work = calc_work_from_difficulty(&block_difficulty).unwrap();
 
         // Total work should accumulate
         let total_work = parent_work + block_work;
@@ -884,8 +885,8 @@ mod tests {
         let diff_low = Difficulty::from(100u64);
         let diff_high = Difficulty::from(1000u64);
 
-        let work_low = calc_work_from_difficulty(&diff_low);
-        let work_high = calc_work_from_difficulty(&diff_high);
+        let work_low = calc_work_from_difficulty(&diff_low).unwrap();
+        let work_high = calc_work_from_difficulty(&diff_high).unwrap();
 
         // Higher difficulty should produce higher work
         assert!(
@@ -894,18 +895,23 @@ mod tests {
         );
     }
 
-    /// Test 12: Zero difficulty edge case (V-06 Security Fix)
+    /// Test 12: Zero difficulty edge case (Codex Audit Security Fix)
     #[test]
     fn test_ghostdag_zero_difficulty() {
+        use crate::core::error::BlockchainError;
         use tos_common::difficulty::Difficulty;
 
         // Test work calculation with zero difficulty
         let zero_diff = Difficulty::from(0u64);
-        let zero_work = calc_work_from_difficulty(&zero_diff);
+        let result = calc_work_from_difficulty(&zero_diff);
 
-        // V-06 Security Fix: Zero difficulty produces max work to prevent division by zero
-        // This prevents attacks using zero difficulty blocks
-        assert_eq!(zero_work, BlueWorkType::max_value());
+        // Codex Audit Security Fix: Zero difficulty returns error instead of max work
+        // This prevents attacks using zero difficulty blocks from gaining infinite work
+        assert!(result.is_err(), "Zero difficulty should return error");
+        assert!(
+            matches!(result.unwrap_err(), BlockchainError::ZeroDifficulty),
+            "Should return ZeroDifficulty error"
+        );
     }
 
     /// Test 13: Large DAG performance simulation
@@ -1045,25 +1051,26 @@ mod tests {
         );
     }
 
-    /// Test V-06: Zero difficulty protection
+    /// Test V-06: Zero difficulty protection (updated for Codex Audit)
     #[test]
     fn test_v06_zero_difficulty_protection() {
+        use crate::core::error::BlockchainError;
         use tos_common::difficulty::Difficulty;
 
-        // Test zero difficulty handling
+        // Test zero difficulty handling - should return error per Codex Audit fix
         let zero_diff = Difficulty::from(0u64);
-        let work = calc_work_from_difficulty(&zero_diff);
+        let result = calc_work_from_difficulty(&zero_diff);
 
-        // Should return max work for zero difficulty
-        assert_eq!(
-            work,
-            BlueWorkType::max_value(),
-            "Zero difficulty should return max work"
+        // SECURITY FIX (Codex Audit): Zero difficulty returns error instead of max work
+        assert!(result.is_err(), "Zero difficulty should return error");
+        assert!(
+            matches!(result.unwrap_err(), BlockchainError::ZeroDifficulty),
+            "Should return ZeroDifficulty error"
         );
 
-        // Test non-zero difficulty
+        // Test non-zero difficulty - should succeed
         let normal_diff = Difficulty::from(1000u64);
-        let normal_work = calc_work_from_difficulty(&normal_diff);
+        let normal_work = calc_work_from_difficulty(&normal_diff).unwrap();
         assert!(
             normal_work < BlueWorkType::max_value(),
             "Normal difficulty should return finite work"
@@ -1131,8 +1138,8 @@ mod tests {
 
         // Test that work calculation is consistent
         let diff = Difficulty::from(1000u64);
-        let work1 = calc_work_from_difficulty(&diff);
-        let work2 = calc_work_from_difficulty(&diff);
+        let work1 = calc_work_from_difficulty(&diff).unwrap();
+        let work2 = calc_work_from_difficulty(&diff).unwrap();
 
         assert_eq!(work1, work2, "Work calculation should be deterministic");
     }

@@ -44,7 +44,10 @@ async fn test_end_to_end_double_spend_prevention() {
 
             // Check if nonce matches expected value
             if tx_nonce != current_nonce {
-                return Err(format!("Invalid nonce: expected {}, got {}", current_nonce, tx_nonce));
+                return Err(format!(
+                    "Invalid nonce: expected {}, got {}",
+                    current_nonce, tx_nonce
+                ));
             }
 
             // Check if nonce already in mempool (double-spend prevention)
@@ -77,22 +80,20 @@ async fn test_end_to_end_double_spend_prevention() {
 
     // Submit both concurrently
     let bc1 = blockchain.clone();
-    let handle1 = spawn(async move {
-        bc1.add_tx_to_mempool(tx1_nonce).await
-    });
+    let handle1 = spawn(async move { bc1.add_tx_to_mempool(tx1_nonce).await });
 
     let bc2 = blockchain.clone();
-    let handle2 = spawn(async move {
-        bc2.add_tx_to_mempool(tx2_nonce).await
-    });
+    let handle2 = spawn(async move { bc2.add_tx_to_mempool(tx2_nonce).await });
 
     let (result1, result2) = tokio::join!(handle1, handle2);
     let result1 = result1.unwrap();
     let result2 = result2.unwrap();
 
     // Exactly ONE should succeed (XOR)
-    assert!(result1.is_ok() ^ result2.is_ok(),
-        "Only one transaction with same nonce should be accepted");
+    assert!(
+        result1.is_ok() ^ result2.is_ok(),
+        "Only one transaction with same nonce should be accepted"
+    );
 
     // Execute block
     blockchain.execute_block().await.unwrap();
@@ -102,8 +103,10 @@ async fn test_end_to_end_double_spend_prevention() {
     assert_eq!(final_nonce, 1, "Nonce should be incremented exactly once");
 
     // Verify mempool is empty
-    assert!(blockchain.mempool.lock().await.is_empty(),
-        "Mempool should be empty after block execution");
+    assert!(
+        blockchain.mempool.lock().await.is_empty(),
+        "Mempool should be empty after block execution"
+    );
 }
 
 /// Integration test: Concurrent block processing safety
@@ -113,8 +116,8 @@ async fn test_end_to_end_double_spend_prevention() {
 async fn test_concurrent_block_processing_safety() {
     use std::collections::HashMap;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
     use tokio::spawn;
+    use tokio::sync::RwLock;
 
     // VALIDATES: V-04 (GHOSTDAG races), V-15 (state atomicity), V-20 (balance atomicity)
 
@@ -156,11 +159,18 @@ async fn test_concurrent_block_processing_safety() {
             }
 
             // Update balance atomically (V-15, V-20)
-            *total_balance = total_balance.checked_add(balance_delta)
+            *total_balance = total_balance
+                .checked_add(balance_delta)
                 .ok_or_else(|| "Balance overflow".to_string())?;
 
             // Store block
-            blocks.insert(block_id, BlockInfo { id: block_id, balance_delta });
+            blocks.insert(
+                block_id,
+                BlockInfo {
+                    id: block_id,
+                    balance_delta,
+                },
+            );
             Ok(())
         }
 
@@ -180,9 +190,7 @@ async fn test_concurrent_block_processing_safety() {
     let mut handles = vec![];
     for i in 0..NUM_BLOCKS {
         let bc = blockchain.clone();
-        handles.push(spawn(async move {
-            bc.process_block(i as u64, 10).await
-        }));
+        handles.push(spawn(async move { bc.process_block(i as u64, 10).await }));
     }
 
     // Wait for all blocks to be processed
@@ -194,16 +202,24 @@ async fn test_concurrent_block_processing_safety() {
 
     // All should succeed
     let success_count = results.iter().filter(|r| r.is_ok()).count();
-    assert_eq!(success_count, NUM_BLOCKS,
-        "All concurrent block processing should succeed");
+    assert_eq!(
+        success_count, NUM_BLOCKS,
+        "All concurrent block processing should succeed"
+    );
 
     // Verify state consistency
-    assert_eq!(blockchain.get_block_count().await, NUM_BLOCKS,
-        "All blocks should be processed");
+    assert_eq!(
+        blockchain.get_block_count().await,
+        NUM_BLOCKS,
+        "All blocks should be processed"
+    );
 
     let expected_balance = 1000 + (NUM_BLOCKS as u64 * 10);
-    assert_eq!(blockchain.get_total_balance().await, expected_balance,
-        "Total balance should be consistent");
+    assert_eq!(
+        blockchain.get_total_balance().await,
+        expected_balance,
+        "Total balance should be consistent"
+    );
 }
 
 /// Integration test: Complete transaction lifecycle
@@ -284,8 +300,12 @@ async fn test_complete_transaction_lifecycle() {
         }
 
         fn is_complete(&self) -> bool {
-            self.validated && self.in_mempool && self.balance_checked &&
-            self.executed && self.nonce_updated && self.persisted
+            self.validated
+                && self.in_mempool
+                && self.balance_checked
+                && self.executed
+                && self.nonce_updated
+                && self.persisted
         }
     }
 
@@ -299,7 +319,10 @@ async fn test_complete_transaction_lifecycle() {
     tx.update_nonce().await.unwrap();
     tx.persist().await.unwrap();
 
-    assert!(tx.is_complete(), "Complete transaction lifecycle should execute all steps");
+    assert!(
+        tx.is_complete(),
+        "Complete transaction lifecycle should execute all steps"
+    );
 }
 
 /// Integration test: Chain reorganization handling
@@ -362,7 +385,7 @@ async fn test_chain_reorganization_handling() {
 
     // Verify initial states
     assert_eq!(main_chain.height(), 11); // Genesis + 10
-    assert_eq!(alt_chain.height(), 16);  // Genesis + 15
+    assert_eq!(alt_chain.height(), 16); // Genesis + 15
 
     // Simulate reorganization
     // 1. Rollback main chain
@@ -375,13 +398,21 @@ async fn test_chain_reorganization_handling() {
     }
 
     // Verify reorganization
-    assert_eq!(main_chain.height(), alt_chain.height(),
-        "After reorg, chain heights should match");
-    assert_eq!(*main_chain.state.get("balance").unwrap(),
-               *alt_chain.state.get("balance").unwrap(),
-        "After reorg, balances should match alternative chain");
-    assert_ne!(old_balance, *main_chain.state.get("balance").unwrap(),
-        "Balance should be different after reorg");
+    assert_eq!(
+        main_chain.height(),
+        alt_chain.height(),
+        "After reorg, chain heights should match"
+    );
+    assert_eq!(
+        *main_chain.state.get("balance").unwrap(),
+        *alt_chain.state.get("balance").unwrap(),
+        "After reorg, balances should match alternative chain"
+    );
+    assert_ne!(
+        old_balance,
+        *main_chain.state.get("balance").unwrap(),
+        "Balance should be different after reorg"
+    );
 }
 
 /// Integration test: High-load concurrent operations
@@ -389,10 +420,10 @@ async fn test_chain_reorganization_handling() {
 /// Tests system behavior under high concurrent load.
 #[tokio::test]
 async fn test_high_load_concurrent_operations() {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use tokio::spawn;
+    use std::sync::Arc;
     use std::time::Instant;
+    use tokio::spawn;
 
     // VALIDATES: All concurrency-related fixes (V-04, V-11, V-13, V-18, V-20, V-25)
 
@@ -440,9 +471,9 @@ async fn test_high_load_concurrent_operations() {
     let mut handles = vec![];
     for _ in 0..NUM_OPERATIONS {
         let sys = system.clone();
-        handles.push(spawn(async move {
-            sys.process_operation(AMOUNT_PER_OP).await
-        }));
+        handles.push(spawn(
+            async move { sys.process_operation(AMOUNT_PER_OP).await },
+        ));
     }
 
     // Wait for all operations
@@ -456,23 +487,37 @@ async fn test_high_load_concurrent_operations() {
 
     // All should succeed
     let success_count = results.iter().filter(|r| r.is_ok()).count();
-    assert_eq!(success_count, NUM_OPERATIONS,
-        "All concurrent operations should succeed");
+    assert_eq!(
+        success_count, NUM_OPERATIONS,
+        "All concurrent operations should succeed"
+    );
 
     // Verify state consistency
-    assert_eq!(system.get_operation_count(), NUM_OPERATIONS as u64,
-        "Operation count should match");
+    assert_eq!(
+        system.get_operation_count(),
+        NUM_OPERATIONS as u64,
+        "Operation count should match"
+    );
 
     let expected_balance = 10000 + (NUM_OPERATIONS as u64 * AMOUNT_PER_OP);
-    assert_eq!(system.get_total_balance(), expected_balance,
-        "Total balance should be consistent");
+    assert_eq!(
+        system.get_total_balance(),
+        expected_balance,
+        "Total balance should be consistent"
+    );
 
     // Verify performance (should be fast)
-    assert!(elapsed.as_secs() < 5,
-        "High-load test should complete quickly");
+    assert!(
+        elapsed.as_secs() < 5,
+        "High-load test should complete quickly"
+    );
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("High-load test: {} operations in {:?}", NUM_OPERATIONS, elapsed);
+        log::info!(
+            "High-load test: {} operations in {:?}",
+            NUM_OPERATIONS,
+            elapsed
+        );
     }
 }
 
@@ -519,7 +564,8 @@ async fn test_ghostdag_complete_pipeline() {
             // V-01: Overflow protection
             let blue_score = if id > 0 {
                 let parent_max_score = if !parents.is_empty() { id - 1 } else { 0 };
-                parent_max_score.checked_add(1)
+                parent_max_score
+                    .checked_add(1)
                     .ok_or_else(|| "Blue score overflow".to_string())?
             } else {
                 0
@@ -621,19 +667,27 @@ async fn test_mempool_to_blockchain_flow() {
             let balances = self.balance_tracker.read().await;
 
             // Check nonce (V-13)
-            let expected_nonce = *nonces.get(&tx.from)
+            let expected_nonce = *nonces
+                .get(&tx.from)
                 .ok_or_else(|| format!("Account {} not found", tx.from))?;
 
             if tx.nonce != expected_nonce {
-                return Err(format!("Invalid nonce: expected {}, got {}", expected_nonce, tx.nonce));
+                return Err(format!(
+                    "Invalid nonce: expected {}, got {}",
+                    expected_nonce, tx.nonce
+                ));
             }
 
             // V-14: Balance validation
-            let sender_balance = *balances.get(&tx.from)
+            let sender_balance = *balances
+                .get(&tx.from)
                 .ok_or_else(|| format!("Sender {} not found", tx.from))?;
 
             if sender_balance < tx.amount {
-                return Err(format!("Insufficient balance: have {}, need {}", sender_balance, tx.amount));
+                return Err(format!(
+                    "Insufficient balance: have {}, need {}",
+                    sender_balance, tx.amount
+                ));
             }
 
             // Check for overflow on receiver side
@@ -662,7 +716,8 @@ async fn test_mempool_to_blockchain_flow() {
         // V-17: Update nonce tracker after execution
         async fn update_nonce(&self, account: &str) -> Result<(), String> {
             let mut nonces = self.nonce_tracker.write().await;
-            let current_nonce = nonces.get_mut(account)
+            let current_nonce = nonces
+                .get_mut(account)
                 .ok_or_else(|| format!("Account {} not found", account))?;
             *current_nonce += 1;
             Ok(())
@@ -674,19 +729,22 @@ async fn test_mempool_to_blockchain_flow() {
 
             for tx in transactions {
                 // Atomic balance update
-                let sender_balance = balances.get_mut(&tx.from)
+                let sender_balance = balances
+                    .get_mut(&tx.from)
                     .ok_or_else(|| format!("Sender {} not found", tx.from))?;
 
                 if *sender_balance < tx.amount {
                     return Err(format!("Insufficient balance during execution"));
                 }
 
-                let new_sender_balance = sender_balance.checked_sub(tx.amount)
+                let new_sender_balance = sender_balance
+                    .checked_sub(tx.amount)
                     .ok_or_else(|| "Balance underflow".to_string())?;
                 *sender_balance = new_sender_balance;
 
                 let receiver_balance = balances.entry(tx.to.clone()).or_insert(0);
-                let new_receiver_balance = receiver_balance.checked_add(tx.amount)
+                let new_receiver_balance = receiver_balance
+                    .checked_add(tx.amount)
                     .ok_or_else(|| "Balance overflow".to_string())?;
                 *receiver_balance = new_receiver_balance;
             }
@@ -695,11 +753,21 @@ async fn test_mempool_to_blockchain_flow() {
         }
 
         async fn get_balance(&self, account: &str) -> u64 {
-            self.balance_tracker.read().await.get(account).copied().unwrap_or(0)
+            self.balance_tracker
+                .read()
+                .await
+                .get(account)
+                .copied()
+                .unwrap_or(0)
         }
 
         async fn get_nonce(&self, account: &str) -> u64 {
-            self.nonce_tracker.read().await.get(account).copied().unwrap_or(0)
+            self.nonce_tracker
+                .read()
+                .await
+                .get(account)
+                .copied()
+                .unwrap_or(0)
         }
     }
 
@@ -720,7 +788,10 @@ async fn test_mempool_to_blockchain_flow() {
     };
 
     let result1 = mempool.add_transaction(tx1.clone()).await;
-    assert!(result1.is_ok(), "Valid transaction should be accepted to mempool");
+    assert!(
+        result1.is_ok(),
+        "Valid transaction should be accepted to mempool"
+    );
 
     // Try adding transaction with invalid nonce
     let tx_invalid_nonce = Transaction {
@@ -732,9 +803,14 @@ async fn test_mempool_to_blockchain_flow() {
     };
 
     let result_invalid = mempool.add_transaction(tx_invalid_nonce).await;
-    assert!(result_invalid.is_err(), "Transaction with invalid nonce should be rejected");
-    assert!(result_invalid.unwrap_err().contains("Invalid nonce"),
-        "Error should mention invalid nonce");
+    assert!(
+        result_invalid.is_err(),
+        "Transaction with invalid nonce should be rejected"
+    );
+    assert!(
+        result_invalid.unwrap_err().contains("Invalid nonce"),
+        "Error should mention invalid nonce"
+    );
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Step 2: Validating balances (overflow/underflow checks)");
@@ -750,9 +826,16 @@ async fn test_mempool_to_blockchain_flow() {
     };
 
     let result_insufficient = mempool.add_transaction(tx_insufficient).await;
-    assert!(result_insufficient.is_err(), "Transaction with insufficient balance should be rejected");
-    assert!(result_insufficient.unwrap_err().contains("Insufficient balance"),
-        "Error should mention insufficient balance");
+    assert!(
+        result_insufficient.is_err(),
+        "Transaction with insufficient balance should be rejected"
+    );
+    assert!(
+        result_insufficient
+            .unwrap_err()
+            .contains("Insufficient balance"),
+        "Error should mention insufficient balance"
+    );
 
     // Add more valid transactions
     let tx2 = Transaction {
@@ -763,7 +846,10 @@ async fn test_mempool_to_blockchain_flow() {
         nonce: 0,
     };
 
-    mempool.add_transaction(tx2.clone()).await.expect("Valid transaction should be accepted");
+    mempool
+        .add_transaction(tx2.clone())
+        .await
+        .expect("Valid transaction should be accepted");
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Step 3: Creating block template from mempool");
@@ -771,7 +857,11 @@ async fn test_mempool_to_blockchain_flow() {
 
     // Step 3: Create block template
     let pending_txs = mempool.get_pending_transactions().await;
-    assert_eq!(pending_txs.len(), 2, "Should have 2 transactions in mempool");
+    assert_eq!(
+        pending_txs.len(),
+        2,
+        "Should have 2 transactions in mempool"
+    );
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Step 4: Executing block with atomic state updates");
@@ -790,12 +880,21 @@ async fn test_mempool_to_blockchain_flow() {
     let final_bob_balance = mempool.get_balance("bob").await;
     let final_charlie_balance = mempool.get_balance("charlie").await;
 
-    assert_eq!(final_alice_balance, initial_alice_balance - 100,
-        "Alice should have sent 100");
-    assert_eq!(final_bob_balance, initial_bob_balance + 100 - 50,
-        "Bob should have received 100 and sent 50");
-    assert_eq!(final_charlie_balance, initial_charlie_balance + 50,
-        "Charlie should have received 50");
+    assert_eq!(
+        final_alice_balance,
+        initial_alice_balance - 100,
+        "Alice should have sent 100"
+    );
+    assert_eq!(
+        final_bob_balance,
+        initial_bob_balance + 100 - 50,
+        "Bob should have received 100 and sent 50"
+    );
+    assert_eq!(
+        final_charlie_balance,
+        initial_charlie_balance + 50,
+        "Charlie should have received 50"
+    );
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Step 5: Updating nonce tracker after execution");
@@ -803,7 +902,10 @@ async fn test_mempool_to_blockchain_flow() {
 
     // Step 5: Update nonce checker (V-17: sync)
     for tx in &pending_txs {
-        mempool.update_nonce(&tx.from).await.expect("Nonce update should succeed");
+        mempool
+            .update_nonce(&tx.from)
+            .await
+            .expect("Nonce update should succeed");
     }
 
     // Verify nonces updated
@@ -823,7 +925,11 @@ async fn test_mempool_to_blockchain_flow() {
     }
 
     let remaining_txs = mempool.get_pending_transactions().await;
-    assert_eq!(remaining_txs.len(), 0, "Mempool should be empty after cleanup");
+    assert_eq!(
+        remaining_txs.len(),
+        0,
+        "Mempool should be empty after cleanup"
+    );
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Mempool flow test completed successfully");
@@ -874,7 +980,7 @@ async fn test_crypto_operations_in_pipeline() {
     // Generate keypair with security fixes (V-08)
     let keypair = KeyPair::new();
     // Verify keypair is valid (non-identity point check is internal to KeyPair::new)
-    assert!(keypair.get_public_key().as_bytes().len() == 32);
+    assert!(keypair.get_public_key().compress().as_bytes().len() == 32);
 
     // Create transaction
     let tx = Transaction {
@@ -929,15 +1035,22 @@ async fn test_storage_consistency_integration() {
             self.nonces.write().await.insert(account, 0);
         }
 
-        async fn process_transaction(&self, from: &str, to: &str, amount: u64) -> Result<(), String> {
+        async fn process_transaction(
+            &self,
+            from: &str,
+            to: &str,
+            amount: u64,
+        ) -> Result<(), String> {
             // Atomic transaction (V-15, V-20)
             let mut balances = self.balances.write().await;
             let mut nonces = self.nonces.write().await;
 
             // Get current balances
-            let from_balance = *balances.get(from)
+            let from_balance = *balances
+                .get(from)
                 .ok_or_else(|| "Sender not found".to_string())?;
-            let to_balance = *balances.get(to)
+            let to_balance = *balances
+                .get(to)
                 .ok_or_else(|| "Receiver not found".to_string())?;
 
             // Check sufficient balance (V-14: underflow check)
@@ -946,9 +1059,11 @@ async fn test_storage_consistency_integration() {
             }
 
             // Update balances with overflow checks (V-14)
-            let new_from_balance = from_balance.checked_sub(amount)
+            let new_from_balance = from_balance
+                .checked_sub(amount)
                 .ok_or_else(|| "Balance underflow".to_string())?;
-            let new_to_balance = to_balance.checked_add(amount)
+            let new_to_balance = to_balance
+                .checked_add(amount)
                 .ok_or_else(|| "Balance overflow".to_string())?;
 
             // Apply updates
@@ -956,7 +1071,8 @@ async fn test_storage_consistency_integration() {
             balances.insert(to.to_string(), new_to_balance);
 
             // Increment nonce (V-17)
-            let nonce = nonces.get_mut(from)
+            let nonce = nonces
+                .get_mut(from)
                 .ok_or_else(|| "Nonce not found".to_string())?;
             *nonce += 1;
 
@@ -999,8 +1115,8 @@ async fn test_storage_consistency_integration() {
     let alice_nonce = state.get_nonce("alice").await.unwrap();
 
     assert_eq!(alice_balance, 950); // 1000 - (5 * 10)
-    assert_eq!(bob_balance, 550);   // 500 + (5 * 10)
-    assert_eq!(alice_nonce, 5);     // 5 transactions
+    assert_eq!(bob_balance, 550); // 500 + (5 * 10)
+    assert_eq!(alice_nonce, 5); // 5 transactions
 }
 
 /// Performance test: Transaction throughput with security checks
@@ -1011,8 +1127,8 @@ async fn test_storage_consistency_integration() {
 async fn test_transaction_throughput_with_security() {
     use std::collections::HashMap;
     use std::time::Instant;
-    use tos_common::crypto::elgamal::KeyPair;
     use tokio::sync::Mutex;
+    use tos_common::crypto::elgamal::KeyPair;
 
     // Measure throughput of transaction validation with:
     // - Signature verification (V-10, V-12)
@@ -1052,13 +1168,19 @@ async fn test_transaction_throughput_with_security() {
             }
         }
 
-        async fn process_transaction(&self, amount: u64, expected_nonce: u64) -> Result<(), String> {
+        async fn process_transaction(
+            &self,
+            amount: u64,
+            expected_nonce: u64,
+        ) -> Result<(), String> {
             // V-10, V-12: Signature verification (simulated)
-            let keypair = self.keypairs.get("sender")
+            let keypair = self
+                .keypairs
+                .get("sender")
                 .ok_or_else(|| "Invalid keypair".to_string())?;
             let pubkey = keypair.get_public_key();
             // Verify keypair is valid (simplified check)
-            if pubkey.as_bytes().len() != 32 {
+            if pubkey.compress().as_bytes().len() != 32 {
                 return Err("Invalid signature".to_string());
             }
 
@@ -1066,21 +1188,30 @@ async fn test_transaction_throughput_with_security() {
             let mut nonces = self.nonces.lock().await;
             let current_nonce = *nonces.get("sender").unwrap_or(&0);
             if current_nonce != expected_nonce {
-                return Err(format!("Invalid nonce: expected {}, got {}", expected_nonce, current_nonce));
+                return Err(format!(
+                    "Invalid nonce: expected {}, got {}",
+                    expected_nonce, current_nonce
+                ));
             }
 
             // V-14: Balance validation
             let mut balances = self.balances.lock().await;
-            let sender_balance = *balances.get("sender").ok_or_else(|| "Sender not found".to_string())?;
+            let sender_balance = *balances
+                .get("sender")
+                .ok_or_else(|| "Sender not found".to_string())?;
             if sender_balance < amount {
                 return Err("Insufficient balance".to_string());
             }
 
             // V-15, V-20: Atomic state updates
-            let new_sender_balance = sender_balance.checked_sub(amount)
+            let new_sender_balance = sender_balance
+                .checked_sub(amount)
                 .ok_or_else(|| "Balance underflow".to_string())?;
-            let receiver_balance = *balances.get("receiver").ok_or_else(|| "Receiver not found".to_string())?;
-            let new_receiver_balance = receiver_balance.checked_add(amount)
+            let receiver_balance = *balances
+                .get("receiver")
+                .ok_or_else(|| "Receiver not found".to_string())?;
+            let new_receiver_balance = receiver_balance
+                .checked_add(amount)
                 .ok_or_else(|| "Balance overflow".to_string())?;
 
             // Apply updates atomically
@@ -1105,15 +1236,20 @@ async fn test_transaction_throughput_with_security() {
     let blockchain = Arc::new(SecureBlockchain::new());
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Starting throughput benchmark with {} transactions across {} blocks",
-            NUM_TRANSACTIONS, NUM_BLOCKS);
+        log::info!(
+            "Starting throughput benchmark with {} transactions across {} blocks",
+            NUM_TRANSACTIONS,
+            NUM_BLOCKS
+        );
     }
 
     // Benchmark 1: Transaction validation throughput
     let start = Instant::now();
     let mut nonce = 0u64;
     for _ in 0..NUM_TRANSACTIONS {
-        blockchain.process_transaction(TRANSFER_AMOUNT, nonce).await
+        blockchain
+            .process_transaction(TRANSFER_AMOUNT, nonce)
+            .await
             .expect("Transaction should succeed");
         nonce += 1;
     }
@@ -1146,7 +1282,9 @@ async fn test_transaction_throughput_with_security() {
     let block_start = Instant::now();
     for block in &blocks {
         for &tx_nonce in &block.transactions {
-            blockchain2.process_transaction(TRANSFER_AMOUNT, tx_nonce).await
+            blockchain2
+                .process_transaction(TRANSFER_AMOUNT, tx_nonce)
+                .await
                 .expect("Block transaction should succeed");
         }
     }
@@ -1156,34 +1294,345 @@ async fn test_transaction_throughput_with_security() {
     let avg_block_latency_ms = block_duration.as_millis() as f64 / NUM_BLOCKS as f64;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Block Processing Throughput: {:.2} blocks/sec", blocks_per_sec);
-        log::info!("Average Block Processing Latency: {:.3} ms", avg_block_latency_ms);
+        log::info!(
+            "Block Processing Throughput: {:.2} blocks/sec",
+            blocks_per_sec
+        );
+        log::info!(
+            "Average Block Processing Latency: {:.3} ms",
+            avg_block_latency_ms
+        );
         log::info!("Transactions per Block: {}", TXS_PER_BLOCK);
     }
 
     // Verify final state
     let final_tx_count = *blockchain2.transaction_count.lock().await;
-    assert_eq!(final_tx_count, NUM_TRANSACTIONS as u64,
-        "All transactions should be processed");
+    assert_eq!(
+        final_tx_count, NUM_TRANSACTIONS as u64,
+        "All transactions should be processed"
+    );
 
     // Performance assertions
-    assert!(tx_per_sec > 100.0,
-        "Transaction throughput {:.2} TPS should exceed 100 TPS", tx_per_sec);
-    assert!(blocks_per_sec > 1.0,
-        "Block throughput {:.2} blocks/sec should exceed 1 block/sec", blocks_per_sec);
-    assert!(avg_tx_latency_ms < 100.0,
-        "Average transaction latency {:.3} ms should be under 100ms", avg_tx_latency_ms);
+    assert!(
+        tx_per_sec > 100.0,
+        "Transaction throughput {:.2} TPS should exceed 100 TPS",
+        tx_per_sec
+    );
+    assert!(
+        blocks_per_sec > 1.0,
+        "Block throughput {:.2} blocks/sec should exceed 1 block/sec",
+        blocks_per_sec
+    );
+    assert!(
+        avg_tx_latency_ms < 100.0,
+        "Average transaction latency {:.3} ms should be under 100ms",
+        avg_tx_latency_ms
+    );
 
     // Print performance summary
     println!("\n=== Performance Benchmark Results ===");
     println!("Transaction Throughput: {:.2} TPS", tx_per_sec);
     println!("Average Transaction Latency: {:.3} ms", avg_tx_latency_ms);
-    println!("Block Processing Throughput: {:.2} blocks/sec", blocks_per_sec);
+    println!(
+        "Block Processing Throughput: {:.2} blocks/sec",
+        blocks_per_sec
+    );
     println!("Average Block Latency: {:.3} ms", avg_block_latency_ms);
     println!("Total Transactions Processed: {}", NUM_TRANSACTIONS);
     println!("Total Blocks Processed: {}", NUM_BLOCKS);
     println!("Test Duration: {:.2}s", tx_duration.as_secs_f64());
     println!("=====================================\n");
+}
+
+/// Network partition double-spend attack simulation
+///
+/// VALIDATES: V-11, V-13, V-19, V-23, V-25
+///
+/// This test simulates a network partition scenario where an attacker attempts
+/// to double-spend by creating conflicting transactions on different network
+/// partitions. When partitions merge, GHOSTDAG consensus should resolve
+/// conflicts and prevent double-spending.
+///
+/// Scenario:
+/// 1. Network splits into 2 partitions (A and B)
+/// 2. Attacker submits TX1 (spend 100 to Alice) on partition A
+/// 3. Attacker submits TX2 (spend 100 to Bob) on partition B using same nonce
+/// 4. Both partitions mine blocks containing their respective transactions
+/// 5. Network heals - partitions reconnect
+/// 6. GHOSTDAG consensus selects winning chain
+/// 7. Only ONE transaction should be valid; the other is rejected
+/// 8. Final balance should reflect only ONE spend, not both
+#[tokio::test]
+async fn test_network_partition_double_spend_attack() {
+    use std::collections::HashMap;
+    use tokio::sync::RwLock;
+
+    /// Simulates a network node with its own view of the blockchain
+    struct PartitionNode {
+        /// Node identifier
+        id: String,
+        /// Balances visible to this node
+        balances: Arc<RwLock<HashMap<String, u64>>>,
+        /// Nonces visible to this node
+        nonces: Arc<RwLock<HashMap<String, u64>>>,
+        /// Blocks mined on this partition (block_id, tx_data)
+        blocks: Arc<RwLock<Vec<(u64, TransactionData)>>>,
+        /// Block height / blue score for GHOSTDAG ordering
+        blue_score: Arc<RwLock<u64>>,
+    }
+
+    #[derive(Clone, Debug)]
+    struct TransactionData {
+        sender: String,
+        receiver: String,
+        amount: u64,
+        nonce: u64,
+    }
+
+    impl PartitionNode {
+        fn new(id: &str, initial_balances: HashMap<String, u64>) -> Self {
+            Self {
+                id: id.to_string(),
+                balances: Arc::new(RwLock::new(initial_balances)),
+                nonces: Arc::new(RwLock::new(HashMap::new())),
+                blocks: Arc::new(RwLock::new(Vec::new())),
+                blue_score: Arc::new(RwLock::new(0)),
+            }
+        }
+
+        /// Submit and process a transaction on this partition
+        async fn submit_transaction(&self, tx: TransactionData) -> Result<(), String> {
+            let mut balances = self.balances.write().await;
+            let mut nonces = self.nonces.write().await;
+
+            // V-11, V-13: Nonce validation
+            let current_nonce = *nonces.get(&tx.sender).unwrap_or(&0);
+            if tx.nonce != current_nonce {
+                return Err(format!(
+                    "Invalid nonce on {}: expected {}, got {}",
+                    self.id, current_nonce, tx.nonce
+                ));
+            }
+
+            // V-14: Balance validation
+            let sender_balance = *balances.get(&tx.sender).ok_or("Sender not found")?;
+            if sender_balance < tx.amount {
+                return Err("Insufficient balance".to_string());
+            }
+
+            // Apply transaction
+            balances.insert(tx.sender.clone(), sender_balance - tx.amount);
+            let receiver_balance = *balances.get(&tx.receiver).unwrap_or(&0);
+            balances.insert(tx.receiver.clone(), receiver_balance + tx.amount);
+            nonces.insert(tx.sender.clone(), current_nonce + 1);
+
+            // Mine block containing this transaction
+            let mut blocks = self.blocks.write().await;
+            let mut blue_score = self.blue_score.write().await;
+            *blue_score += 1;
+            blocks.push((*blue_score, tx));
+
+            Ok(())
+        }
+
+        /// Get current blue score (for GHOSTDAG chain selection)
+        async fn get_blue_score(&self) -> u64 {
+            *self.blue_score.read().await
+        }
+
+        /// Get all blocks from this partition
+        async fn get_blocks(&self) -> Vec<(u64, TransactionData)> {
+            self.blocks.read().await.clone()
+        }
+    }
+
+    /// Simulates GHOSTDAG consensus when partitions merge
+    /// Returns the winning partition ID based on blue_work
+    async fn resolve_partition_conflict(
+        partition_a: &PartitionNode,
+        partition_b: &PartitionNode,
+    ) -> String {
+        let score_a = partition_a.get_blue_score().await;
+        let score_b = partition_b.get_blue_score().await;
+
+        // GHOSTDAG selects chain with higher blue_work
+        // In case of tie, use deterministic tiebreaker (lower hash wins)
+        if score_a > score_b {
+            partition_a.id.clone()
+        } else if score_b > score_a {
+            partition_b.id.clone()
+        } else {
+            // Deterministic tiebreaker: lexicographically smaller ID wins
+            if partition_a.id < partition_b.id {
+                partition_a.id.clone()
+            } else {
+                partition_b.id.clone()
+            }
+        }
+    }
+
+    /// Apply winning partition's transactions to a fresh state
+    fn apply_winning_blocks(
+        initial_balances: &HashMap<String, u64>,
+        blocks: &[(u64, TransactionData)],
+        processed_nonces: &mut HashMap<String, u64>,
+    ) -> Result<HashMap<String, u64>, String> {
+        let mut balances = initial_balances.clone();
+
+        for (_, tx) in blocks {
+            // V-19: Nonce checking prevents double-spend
+            let current_nonce = *processed_nonces.get(&tx.sender).unwrap_or(&0);
+            if tx.nonce != current_nonce {
+                // This transaction conflicts with already processed nonce
+                // Skip it (it's the double-spend attempt that lost)
+                continue;
+            }
+
+            // V-14: Balance validation
+            let sender_balance = *balances.get(&tx.sender).ok_or("Sender not found")?;
+            if sender_balance < tx.amount {
+                return Err("Insufficient balance during replay".to_string());
+            }
+
+            // Apply transaction
+            balances.insert(tx.sender.clone(), sender_balance - tx.amount);
+            let receiver_balance = *balances.get(&tx.receiver).unwrap_or(&0);
+            balances.insert(tx.receiver.clone(), receiver_balance + tx.amount);
+            processed_nonces.insert(tx.sender.clone(), current_nonce + 1);
+        }
+
+        Ok(balances)
+    }
+
+    // ========== TEST EXECUTION ==========
+
+    // Initial state: Attacker has 100 coins
+    let mut initial_balances = HashMap::new();
+    initial_balances.insert("attacker".to_string(), 100u64);
+    initial_balances.insert("alice".to_string(), 0u64);
+    initial_balances.insert("bob".to_string(), 0u64);
+
+    // Create two partitions with identical initial state
+    let partition_a = PartitionNode::new("partition_a", initial_balances.clone());
+    let partition_b = PartitionNode::new("partition_b", initial_balances.clone());
+
+    // Attacker's double-spend attempt
+    let tx_to_alice = TransactionData {
+        sender: "attacker".to_string(),
+        receiver: "alice".to_string(),
+        amount: 100,
+        nonce: 0, // Same nonce!
+    };
+
+    let tx_to_bob = TransactionData {
+        sender: "attacker".to_string(),
+        receiver: "bob".to_string(),
+        amount: 100,
+        nonce: 0, // Same nonce - double spend!
+    };
+
+    // Submit conflicting transactions to different partitions
+    // Both should succeed on their respective partitions (they don't know about each other)
+    let result_a = partition_a.submit_transaction(tx_to_alice.clone()).await;
+    let result_b = partition_b.submit_transaction(tx_to_bob.clone()).await;
+
+    assert!(
+        result_a.is_ok(),
+        "TX to Alice should succeed on partition A"
+    );
+    assert!(result_b.is_ok(), "TX to Bob should succeed on partition B");
+
+    // Mine additional blocks on partition A to give it higher blue_work
+    // This ensures partition A wins (deterministic test outcome)
+    for i in 1..=3 {
+        let dummy_tx = TransactionData {
+            sender: "alice".to_string(),
+            receiver: "attacker".to_string(),
+            amount: 0, // No-op transaction to increase blue_score
+            nonce: i - 1,
+        };
+        // Ignore result - alice may not have balance, but blue_score still increases
+        let _ = partition_a.submit_transaction(dummy_tx).await;
+    }
+
+    // Verify partition A has higher blue_score
+    let score_a = partition_a.get_blue_score().await;
+    let score_b = partition_b.get_blue_score().await;
+    assert!(
+        score_a > score_b,
+        "Partition A should have higher blue_score: {} > {}",
+        score_a,
+        score_b
+    );
+
+    // ========== NETWORK HEALS - PARTITIONS MERGE ==========
+
+    // GHOSTDAG resolves conflict by selecting higher blue_work chain
+    let winner = resolve_partition_conflict(&partition_a, &partition_b).await;
+    assert_eq!(
+        winner, "partition_a",
+        "Partition A should win with higher blue_work"
+    );
+
+    // Apply winning partition's transactions to fresh state
+    let winning_blocks = partition_a.get_blocks().await;
+    let mut processed_nonces = HashMap::new();
+    let final_balances =
+        apply_winning_blocks(&initial_balances, &winning_blocks, &mut processed_nonces)
+            .expect("Applying winning blocks should succeed");
+
+    // ========== VERIFY DOUBLE-SPEND PREVENTION ==========
+
+    // Attacker should have spent 100 (to Alice), not 200 (to both)
+    let attacker_balance = *final_balances.get("attacker").unwrap_or(&0);
+    let alice_balance = *final_balances.get("alice").unwrap_or(&0);
+    let bob_balance = *final_balances.get("bob").unwrap_or(&0);
+
+    // Conservation of value: total should equal initial 100
+    let total = attacker_balance + alice_balance + bob_balance;
+    assert_eq!(
+        total, 100,
+        "Total coins should be conserved: {} (attacker) + {} (alice) + {} (bob) = {}",
+        attacker_balance, alice_balance, bob_balance, total
+    );
+
+    // Alice should have 100 (winning transaction)
+    assert_eq!(
+        alice_balance, 100,
+        "Alice should receive 100 from winning partition"
+    );
+
+    // Bob should have 0 (losing transaction)
+    assert_eq!(
+        bob_balance, 0,
+        "Bob should NOT receive coins (double-spend rejected)"
+    );
+
+    // Attacker should have 0 (spent all to Alice)
+    assert_eq!(
+        attacker_balance, 0,
+        "Attacker should have 0 after successful spend to Alice"
+    );
+
+    // Verify nonce was only incremented once
+    let final_nonce = *processed_nonces.get("attacker").unwrap_or(&0);
+    assert_eq!(
+        final_nonce, 1,
+        "Attacker's nonce should be 1 (only one transaction accepted)"
+    );
+
+    if log::log_enabled!(log::Level::Info) {
+        log::info!("Network partition double-spend attack test PASSED");
+        log::info!("  Partition A blue_score: {}", score_a);
+        log::info!("  Partition B blue_score: {}", score_b);
+        log::info!("  Winner: {}", winner);
+        log::info!(
+            "  Final balances: attacker={}, alice={}, bob={}",
+            attacker_balance,
+            alice_balance,
+            bob_balance
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1207,9 +1656,10 @@ mod documentation {
     //! 7. **Mempool flow**: V-13, V-14, V-15, V-17, V-19
     //! 8. **Crypto operations**: V-08-V-12
     //! 9. **Storage consistency**: V-20-V-27
+    //! 10. **Network partition double-spend**: V-11, V-13, V-19, V-23, V-25
     //!
-    //! ## Total Integration Tests: 9
-    //! - 3 active tests
+    //! ## Total Integration Tests: 10
+    //! - 4 active tests
     //! - 6 ignored (require full implementation)
     //!
     //! ## Coverage Summary:

@@ -46,6 +46,21 @@ impl Block {
     pub fn split(self) -> (Immutable<BlockHeader>, Vec<Arc<Transaction>>) {
         (self.header, self.transactions)
     }
+
+    /// Fallible serialization to bytes
+    ///
+    /// SECURITY FIX (Codex Audit): This method validates the block header before
+    /// serialization, returning an error if the header is malformed. Use this in
+    /// release builds where silent corruption must be prevented.
+    pub fn try_to_bytes(&self) -> Result<Vec<u8>, ReaderError> {
+        // Validate header before serialization (works in both debug and release)
+        self.header
+            .validate_parent_levels()
+            .map_err(|e| ReaderError::SerializationError(e.to_string()))?;
+
+        // If validation passes, proceed with normal serialization
+        Ok(self.to_bytes())
+    }
 }
 
 impl Serializer for Block {

@@ -26,7 +26,7 @@ mod concurrency_tests {
         for i in 1..=50 {
             let handle = tokio::spawn(async move {
                 let difficulty = Difficulty::from((i * 100) as u64);
-                let work = calc_work_from_difficulty(&difficulty);
+                let work = calc_work_from_difficulty(&difficulty).unwrap();
                 (i, work)
             });
 
@@ -181,7 +181,7 @@ mod concurrency_tests {
             let handle = tokio::spawn(async move {
                 // Simulate some work
                 let difficulty = Difficulty::from(1000u64);
-                let _work = calc_work_from_difficulty(&difficulty);
+                let _work = calc_work_from_difficulty(&difficulty).unwrap();
 
                 // Atomic increment
                 counter.fetch_add(1, Ordering::SeqCst);
@@ -218,9 +218,9 @@ mod concurrency_tests {
 
                 match operation {
                     0 => {
-                        // Work calculation
-                        let difficulty = Difficulty::from((i * 10) as u64);
-                        let _work = calc_work_from_difficulty(&difficulty);
+                        // Work calculation (add 1 to avoid zero difficulty)
+                        let difficulty = Difficulty::from((i * 10 + 1) as u64);
+                        let _work = calc_work_from_difficulty(&difficulty).unwrap();
                     }
                     1 => {
                         // Interval operation
@@ -360,7 +360,7 @@ mod concurrency_tests {
             let handle = tokio::spawn(async move {
                 // Create difficulty and calculate work
                 let difficulty = Difficulty::from(diff_val);
-                let work = calc_work_from_difficulty(&difficulty);
+                let work = calc_work_from_difficulty(&difficulty).unwrap();
 
                 // Verify work is non-zero (unless difficulty is max)
                 if diff_val > 0 {

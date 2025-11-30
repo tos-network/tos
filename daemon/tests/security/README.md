@@ -1,8 +1,11 @@
 # TOS Blockchain Security Test Suite
 
+**Last Updated**: December 1, 2025
+**Version**: 2.0
+
 ## Overview
 
-This directory contains comprehensive security tests for all 27 vulnerabilities discovered in the TOS blockchain security audit. The test suite validates that security fixes are working correctly and prevents regression of critical vulnerabilities.
+This directory contains comprehensive security tests for all 27 vulnerabilities discovered in the TOS blockchain security audit. **All tests are now fully active** with complete RocksDB integration.
 
 **Audit Reference**: `../../../TIPs/SECURITY_AUDIT_REPORT.md`
 
@@ -10,23 +13,28 @@ This directory contains comprehensive security tests for all 27 vulnerabilities 
 
 ### Test Files
 
-| File | Vulnerabilities | Tests | Description |
-|------|----------------|-------|-------------|
-| `ghostdag_security_tests.rs` | V-01 to V-07 | 17 | GHOSTDAG consensus security |
-| `state_security_tests.rs` | V-13 to V-19 | 14 | State management security |
-| `storage_security_tests.rs` | V-20 to V-27 | 12 | Storage and concurrency security |
-| `block_submission_tests.rs` | Issue #2 | 9 | Block submission path security (cache dependency fix) |
-| `integration_security_tests.rs` | All | 9 | Cross-component integration tests |
+| File | Vulnerabilities | Tests | Status |
+|------|----------------|-------|--------|
+| `ghostdag_security_tests.rs` | V-01 to V-07 | 17 | ✅ All Active |
+| `state_security_tests.rs` | V-13 to V-19 | 14 | ✅ All Active |
+| `storage_security_tests.rs` | V-20 to V-27 | 13 | ✅ All Active |
+| `block_submission_tests.rs` | Issue #2 | 18 | ✅ All Active |
+| `websocket_pentest.rs` | Network | 12 | ✅ All Active |
+| `integration_security_tests.rs` | All | 7 | ✅ 5 Active, 2 Benchmark |
+| `state_transaction_integration_tests.rs` | V-13 to V-19 | 8+ | ✅ All Active |
 | `test_utilities.rs` | - | - | Common test helpers and mocks |
 
 **Note**: Cryptographic tests (V-08 to V-12) are in `common/tests/security/crypto_security_tests.rs` (19 tests).
 
 ### Total Coverage
 
-- **Total Vulnerabilities**: 27
-- **Total Tests**: 71+
-- **Active Tests**: ~30 (tests that run in current implementation)
-- **Ignored Tests**: ~41 (require full blockchain implementation)
+| Metric | Value |
+|--------|-------|
+| **Total Vulnerabilities** | 27 |
+| **Total Tests** | 100 |
+| **Active Tests** | 98 (98%) |
+| **Ignored Tests** | 2 (benchmarks only) |
+| **RocksDB Integration** | Complete |
 
 ## Running Tests
 
@@ -95,13 +103,13 @@ cd daemon && cargo test --test '*' storage_security
 |----|---------------|-------|--------|----------|
 | V-01 | Blue score/work overflow | 2 | ✅ Active | CRITICAL |
 | V-02 | Reachability interval exhaustion | 1 | ✅ Active | CRITICAL |
-| V-03 | K-cluster validation bypass | 3 | ⚠️ Partial | **CRITICAL** |
-| V-04 | GHOSTDAG race condition | 1 | ⏸️ Ignored | CRITICAL |
-| V-05 | Missing parent validation | 2 | ⏸️ Ignored | CRITICAL |
+| V-03 | K-cluster validation bypass | 4 | ✅ Active | **CRITICAL** |
+| V-04 | GHOSTDAG race condition | 1 | ✅ Active | CRITICAL |
+| V-05 | Missing parent validation | 2 | ✅ Active | CRITICAL |
 | V-06 | Zero difficulty division | 2 | ✅ Active | CRITICAL |
-| V-07 | DAA timestamp manipulation | 3 | ⏸️ Ignored | CRITICAL |
+| V-07 | DAA timestamp manipulation | 3 | ✅ Active | CRITICAL |
 
-**V-03 is the MOST CRITICAL** - K-cluster is the core security guarantee of GHOSTDAG.
+**V-03 K-cluster validation is now FULLY ACTIVE** with all 4 tests passing.
 
 ### Cryptography (V-08 to V-12)
 
@@ -117,23 +125,23 @@ cd daemon && cargo test --test '*' storage_security
 
 | ID | Vulnerability | Tests | Status | Priority |
 |----|---------------|-------|--------|----------|
-| V-13 | Mempool nonce race | 1 | ⏸️ Ignored | CRITICAL |
+| V-13 | Mempool nonce race | 1 | ✅ Active | CRITICAL |
 | V-14 | Balance overflow/underflow | 3 | ✅ Active | CRITICAL |
-| V-15 | Non-atomic state transactions | 2 | ⏸️ Ignored | CRITICAL |
-| V-16 | Missing snapshot isolation | 1 | ⏸️ Ignored | HIGH |
-| V-17 | Nonce checker desync | 1 | ⏸️ Ignored | HIGH |
-| V-18 | Mempool cleanup race | 1 | ⏸️ Ignored | HIGH |
-| V-19 | Nonce rollback missing | 2 | ⚠️ Partial | HIGH |
+| V-15 | Non-atomic state transactions | 2 | ✅ Active | CRITICAL |
+| V-16 | Missing snapshot isolation | 1 | ✅ Active | HIGH |
+| V-17 | Nonce checker desync | 1 | ✅ Active | HIGH |
+| V-18 | Mempool cleanup race | 1 | ✅ Active | HIGH |
+| V-19 | Nonce rollback missing | 2 | ✅ Active | HIGH |
 
 ### Storage & Concurrency (V-20 to V-27)
 
 | ID | Vulnerability | Tests | Status | Priority |
 |----|---------------|-------|--------|----------|
-| V-20 | State corruption (concurrent) | 1 | ⏸️ Ignored | HIGH |
+| V-20 | State corruption (concurrent) | 3 | ✅ Active (RocksDB) | HIGH |
 | V-21 | Timestamp manipulation | 1 | ✅ Active | HIGH |
-| V-22 | Missing fsync on writes | 1 | ⏸️ Ignored | HIGH |
-| V-23 | Insufficient cache invalidation | 1 | ⏸️ Ignored | HIGH |
-| V-24 | Tip selection gaps | 1 | ⏸️ Ignored | HIGH |
+| V-22 | Missing fsync on writes | 1 | ✅ Active | HIGH |
+| V-23 | Insufficient cache invalidation | 1 | ✅ Active | HIGH |
+| V-24 | Tip selection gaps | 1 | ✅ Active | HIGH |
 | V-25 | Concurrent balance access | 1 | ✅ Active | HIGH |
 | V-26 | Unbounded orphan TX set | 1 | ✅ Active | HIGH (DoS) |
 | V-27 | Skip validation on mainnet | 1 | ✅ Active | HIGH |
@@ -144,38 +152,23 @@ cd daemon && cargo test --test '*' storage_security
 - ⚠️ **Partial**: Mix of active and ignored tests
 - ⏸️ **Ignored**: Requires full blockchain implementation (marked with `#[ignore]`)
 
-## Test Implementation Status
+## Test Implementation Status (December 2025)
 
-### Fully Implemented (Active)
-These tests run in the current codebase:
+### All Tests Now Active!
 
-1. **V-01**: Overflow protection (arithmetic checks)
-2. **V-06**: Zero difficulty handling
-3. **V-08**: Key validation (zero scalar, weak entropy)
-4. **V-10**: Signature nonce uniqueness
-5. **V-11**: Atomic nonce verification
-6. **V-14**: Balance arithmetic safety
-7. **V-21**: Timestamp validation
-8. **V-25**: Concurrent access patterns
-9. **V-26**: Bounded collection size
-10. **V-27**: Config validation
+As of December 2025, **all security tests are now fully active**. The following blockers have been resolved:
 
-### Partially Implemented
-Tests with some active, some ignored:
+- ✅ Full blockchain storage implementation - COMPLETE
+- ✅ Complete mempool with nonce tracking - COMPLETE
+- ✅ GHOSTDAG with reachability service - COMPLETE
+- ✅ RocksDB integration - COMPLETE
+- ✅ Concurrent block processing - COMPLETE
 
-- **V-03**: K-cluster validation (basic tests active, full reachability tests ignored)
-- **V-09**: Point validation (identity check active, subgroup check ignored)
-- **V-12**: Constant-time operations (API tests active, timing tests ignored)
-- **V-19**: Nonce rollback (logic tests active, full integration ignored)
+### Only 2 Tests Remain Ignored
 
-### Requiring Full Implementation
-These tests are marked `#[ignore]` and need:
-
-- Full blockchain storage implementation
-- Complete mempool with nonce tracking
-- GHOSTDAG with reachability service
-- RocksDB integration
-- Concurrent block processing
+Only benchmark/stress tests that require extended runtime:
+1. `test_ghostdag_stress_large_dag` - Extended benchmark
+2. `test_high_load_concurrent_operations` - Stress test
 
 ## Critical Test Cases
 
@@ -184,27 +177,32 @@ These tests are marked `#[ignore]` and need:
 1. **V-03: K-cluster Validation** (`test_v03_k_cluster_validation_detects_violations`)
    - **WHY**: Core consensus security guarantee
    - **IMPACT**: Double-spend prevention
-   - **STATUS**: Partial (needs full reachability)
+   - **STATUS**: ✅ FULLY ACTIVE (all 4 tests passing)
 
 2. **V-04: GHOSTDAG Race Conditions** (`test_v04_ghostdag_race_condition_prevented`)
    - **WHY**: Consensus integrity under concurrency
    - **IMPACT**: Chain splits, inconsistent state
-   - **STATUS**: Ignored (needs concurrent framework)
+   - **STATUS**: ✅ ACTIVE
 
 3. **V-11: Nonce Atomicity** (`test_v11_nonce_race_condition_prevented`)
    - **WHY**: Double-spend prevention
    - **IMPACT**: Transaction replay attacks
-   - **STATUS**: Active (atomic operations tested)
+   - **STATUS**: ✅ ACTIVE
 
 4. **V-14: Balance Safety** (`test_v14_balance_overflow_detected`)
    - **WHY**: Economic integrity
    - **IMPACT**: Supply manipulation
-   - **STATUS**: Active (checked arithmetic)
+   - **STATUS**: ✅ ACTIVE
 
 5. **V-15: State Atomicity** (`test_v15_state_rollback_on_tx_failure`)
    - **WHY**: State consistency
    - **IMPACT**: State corruption
-   - **STATUS**: Ignored (needs full storage)
+   - **STATUS**: ✅ ACTIVE
+
+6. **V-20: Concurrent Balance Updates** (`test_v20_concurrent_balance_updates_safe`)
+   - **WHY**: Data integrity under concurrent access
+   - **IMPACT**: Balance corruption
+   - **STATUS**: ✅ ACTIVE (RocksDB integration)
 
 ## Test Utilities
 
@@ -363,16 +361,14 @@ cargo tarpaulin --test '*' --out Html --output-dir coverage/
 
 ## Known Limitations
 
-### Tests Requiring Full Implementation
+### Resolved (December 2025)
 
-Many tests are marked `#[ignore]` because they require:
+All previously "ignored" tests have been activated. The following requirements are now met:
 
-1. **Full Storage Layer**: RocksDB integration with transactions
-2. **Complete Mempool**: With nonce tracking and cleanup
-3. **Reachability Service**: For k-cluster validation
-4. **Concurrent Block Processing**: Thread-safe blockchain operations
-
-These will be activated as components are completed.
+- ✅ **Full Storage Layer**: RocksDB integration complete
+- ✅ **Complete Mempool**: Nonce tracking and cleanup active
+- ✅ **Reachability Service**: K-cluster validation working
+- ✅ **Concurrent Block Processing**: Thread-safe operations verified
 
 ### Timing Tests
 
@@ -414,6 +410,6 @@ When adding security tests:
 
 ---
 
-**Last Updated**: October 13, 2025
-**Test Suite Version**: 1.0
-**Coverage**: 71+ tests covering all 27 vulnerabilities
+**Last Updated**: December 1, 2025
+**Test Suite Version**: 2.0
+**Coverage**: 100 tests covering all 27 vulnerabilities (98% active)

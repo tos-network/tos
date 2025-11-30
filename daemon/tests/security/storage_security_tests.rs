@@ -3,9 +3,9 @@
 //! This test suite validates that all storage-related security fixes are working correctly
 //! and prevents regression of critical vulnerabilities discovered in the security audit.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// V-20: Test state corruption via concurrent balance updates
 ///
@@ -20,12 +20,12 @@ async fn test_v20_concurrent_balance_updates_safe() {
     // 2. 10 threads simultaneously add 100 each
     // 3. Final balance should be 2000 (not less due to lost updates)
 
-    use tos_testing_framework::utilities::{
-        create_test_rocksdb_storage,
-        setup_account_rocksdb,
+    use tos_common::{
+        config::TOS_ASSET,
+        serializer::{Reader, Serializer},
     };
-    use tos_daemon::core::storage::{BalanceProvider, AccountProvider};
-    use tos_common::{config::TOS_ASSET, serializer::{Reader, Serializer}};
+    use tos_daemon::core::storage::{AccountProvider, BalanceProvider};
+    use tos_testing_framework::utilities::{create_test_rocksdb_storage, setup_account_rocksdb};
 
     // Helper to create test public keys
     fn create_test_pubkey(seed: u8) -> tos_common::crypto::elgamal::CompressedPublicKey {
@@ -40,7 +40,9 @@ async fn test_v20_concurrent_balance_updates_safe() {
     let account = create_test_pubkey(1);
 
     // Setup account with initial balance of 1000
-    setup_account_rocksdb(&storage, &account, 1000, 0).await.unwrap();
+    setup_account_rocksdb(&storage, &account, 1000, 0)
+        .await
+        .unwrap();
 
     // Spawn 10 concurrent tasks that each add 100
     let handles: Vec<_> = (0..10)
@@ -49,11 +51,19 @@ async fn test_v20_concurrent_balance_updates_safe() {
             let account = account.clone();
             tokio::spawn(async move {
                 let mut storage_write = storage.write().await;
-                let (_, mut balance) = storage_write.get_last_balance(&account, &TOS_ASSET).await.unwrap();
-                let new_balance = balance.get_balance().checked_add(100)
+                let (_, mut balance) = storage_write
+                    .get_last_balance(&account, &TOS_ASSET)
+                    .await
+                    .unwrap();
+                let new_balance = balance
+                    .get_balance()
+                    .checked_add(100)
                     .expect("Balance overflow");
                 balance.set_balance(new_balance);
-                storage_write.set_last_balance_to(&account, &TOS_ASSET, 0, &balance).await.unwrap();
+                storage_write
+                    .set_last_balance_to(&account, &TOS_ASSET, 0, &balance)
+                    .await
+                    .unwrap();
                 drop(storage_write);
             })
         })
@@ -66,8 +76,15 @@ async fn test_v20_concurrent_balance_updates_safe() {
 
     // Final balance should be 1000 + (10 * 100) = 2000
     let storage_read = storage.read().await;
-    let (_, final_balance) = storage_read.get_last_balance(&account, &TOS_ASSET).await.unwrap();
-    assert_eq!(final_balance.get_balance(), 2000, "No balance updates should be lost - RocksDB MVCC ensures atomicity");
+    let (_, final_balance) = storage_read
+        .get_last_balance(&account, &TOS_ASSET)
+        .await
+        .unwrap();
+    assert_eq!(
+        final_balance.get_balance(),
+        2000,
+        "No balance updates should be lost - RocksDB MVCC ensures atomicity"
+    );
 }
 
 /// V-21: Test block timestamp manipulation detection
@@ -80,12 +97,18 @@ fn test_v21_block_timestamp_validation() {
     // Rule 1: Block timestamp must be >= parent timestamp
     let parent_timestamp = 1000u64;
     let block_timestamp = 999u64;
-    assert!(block_timestamp < parent_timestamp, "Should detect timestamp < parent");
+    assert!(
+        block_timestamp < parent_timestamp,
+        "Should detect timestamp < parent"
+    );
 
     // Rule 2: Block timestamp must not be in future
     let current_time = 2000u64;
     let future_timestamp = 2100u64;
-    assert!(future_timestamp > current_time, "Should detect future timestamp");
+    assert!(
+        future_timestamp > current_time,
+        "Should detect future timestamp"
+    );
 
     // Valid timestamp
     let valid_timestamp = 1500u64;
@@ -165,24 +188,37 @@ async fn test_v22_critical_data_synced_to_disk() {
     // Write critical block data with sync=true
     let critical_block_key = "block_00001".to_string();
     let critical_block_data = vec![1, 2, 3, 4, 5];
-    storage.write(critical_block_key.clone(), critical_block_data.clone(), true).await;
+    storage
+        .write(
+            critical_block_key.clone(),
+            critical_block_data.clone(),
+            true,
+        )
+        .await;
 
     // Write non-critical data without sync
     let non_critical_key = "cache_data".to_string();
-    storage.write(non_critical_key.clone(), vec![9, 9, 9], false).await;
+    storage
+        .write(non_critical_key.clone(), vec![9, 9, 9], false)
+        .await;
 
     // Simulate crash and recovery
     let recovered_storage = storage.crash_and_recover().await;
 
     // Verify critical data is persisted (was fsync'd)
     let recovered_block = recovered_storage.read(&critical_block_key).await;
-    assert_eq!(recovered_block, Some(critical_block_data),
-        "Critical block data must persist after crash (fsync ensures durability)");
+    assert_eq!(
+        recovered_block,
+        Some(critical_block_data),
+        "Critical block data must persist after crash (fsync ensures durability)"
+    );
 
     // Verify non-synced data is lost (expected behavior)
     let recovered_cache = recovered_storage.read(&non_critical_key).await;
-    assert_eq!(recovered_cache, None,
-        "Non-synced data should be lost after crash (fsync=false)");
+    assert_eq!(
+        recovered_cache, None,
+        "Non-synced data should be lost after crash (fsync=false)"
+    );
 }
 
 /// V-23: Test cache invalidation on reorg
@@ -218,7 +254,10 @@ async fn test_v23_cache_invalidated_on_reorg() {
         }
 
         async fn store_block(&self, hash: String, data: String) {
-            self.storage.write().await.insert(hash.clone(), data.clone());
+            self.storage
+                .write()
+                .await
+                .insert(hash.clone(), data.clone());
             self.cache.write().await.insert(hash, data);
         }
 
@@ -246,29 +285,58 @@ async fn test_v23_cache_invalidated_on_reorg() {
     let blockchain = Arc::new(CachedBlockchain::new());
 
     // Populate storage and cache with blocks
-    blockchain.store_block("block_001".to_string(), "data_001".to_string()).await;
-    blockchain.store_block("block_002".to_string(), "data_002".to_string()).await;
-    blockchain.store_block("block_003".to_string(), "data_003".to_string()).await;
+    blockchain
+        .store_block("block_001".to_string(), "data_001".to_string())
+        .await;
+    blockchain
+        .store_block("block_002".to_string(), "data_002".to_string())
+        .await;
+    blockchain
+        .store_block("block_003".to_string(), "data_003".to_string())
+        .await;
 
     // Verify cache is populated (cache hits)
-    assert_eq!(blockchain.get_block("block_001").await, Some("data_001".to_string()));
-    assert_eq!(blockchain.get_cache_hits(), 1, "First query should hit cache");
+    assert_eq!(
+        blockchain.get_block("block_001").await,
+        Some("data_001".to_string())
+    );
+    assert_eq!(
+        blockchain.get_cache_hits(),
+        1,
+        "First query should hit cache"
+    );
 
-    assert_eq!(blockchain.get_block("block_002").await, Some("data_002".to_string()));
-    assert_eq!(blockchain.get_cache_hits(), 2, "Second query should hit cache");
+    assert_eq!(
+        blockchain.get_block("block_002").await,
+        Some("data_002".to_string())
+    );
+    assert_eq!(
+        blockchain.get_cache_hits(),
+        2,
+        "Second query should hit cache"
+    );
 
     // Trigger chain reorganization
     blockchain.invalidate_cache_on_reorg().await;
 
     // Verify cache is cleared (no cache hits)
     let hits_before = blockchain.get_cache_hits();
-    assert_eq!(blockchain.get_block("block_001").await, Some("data_001".to_string()));
-    assert_eq!(blockchain.get_cache_hits(), hits_before,
-        "After reorg, queries should miss cache and fetch from storage");
+    assert_eq!(
+        blockchain.get_block("block_001").await,
+        Some("data_001".to_string())
+    );
+    assert_eq!(
+        blockchain.get_cache_hits(),
+        hits_before,
+        "After reorg, queries should miss cache and fetch from storage"
+    );
 
     // Verify data is still accessible from storage
-    assert_eq!(blockchain.get_block("block_003").await, Some("data_003".to_string()),
-        "Data should still be accessible from storage after cache invalidation");
+    assert_eq!(
+        blockchain.get_block("block_003").await,
+        Some("data_003".to_string()),
+        "Data should still be accessible from storage after cache invalidation"
+    );
 }
 
 /// V-24: Test tip selection validation
@@ -306,7 +374,13 @@ async fn test_v24_tip_selection_validation() {
             }
         }
 
-        async fn add_block(&self, hash: String, height: u64, difficulty: u64, conflicting_with: Option<String>) {
+        async fn add_block(
+            &self,
+            hash: String,
+            height: u64,
+            difficulty: u64,
+            conflicting_with: Option<String>,
+        ) {
             let block_info = BlockInfo {
                 hash: hash.clone(),
                 height,
@@ -325,7 +399,8 @@ async fn test_v24_tip_selection_validation() {
             let stable_height = *self.stable_height.read().await;
 
             // 1. Validate existence in chain
-            let block = blocks.get(hash)
+            let block = blocks
+                .get(hash)
                 .ok_or_else(|| format!("Tip {} does not exist in chain", hash))?;
 
             // 2. Validate not in conflict
@@ -336,12 +411,18 @@ async fn test_v24_tip_selection_validation() {
             // 3. Validate difficulty (minimum required: 1000)
             const MIN_DIFFICULTY: u64 = 1000;
             if block.difficulty < MIN_DIFFICULTY {
-                return Err(format!("Tip {} has insufficient difficulty: {} < {}", hash, block.difficulty, MIN_DIFFICULTY));
+                return Err(format!(
+                    "Tip {} has insufficient difficulty: {} < {}",
+                    hash, block.difficulty, MIN_DIFFICULTY
+                ));
             }
 
             // 4. Validate not in stable height (tips must be > stable)
             if block.height <= stable_height {
-                return Err(format!("Tip {} at height {} is below/at stable height {}", hash, block.height, stable_height));
+                return Err(format!(
+                    "Tip {} at height {} is below/at stable height {}",
+                    hash, block.height, stable_height
+                ));
             }
 
             Ok(())
@@ -361,38 +442,65 @@ async fn test_v24_tip_selection_validation() {
     let validator = TipValidator::new();
 
     // Add blocks to chain
-    validator.add_block("block_001".to_string(), 5, 2000, None).await;
-    validator.add_block("block_002".to_string(), 10, 3000, None).await;
-    validator.add_block("block_003".to_string(), 15, 500, None).await; // Low difficulty
-    validator.add_block("block_004".to_string(), 8, 2500, Some("block_002".to_string())).await; // Conflicting
-    validator.add_block("block_005".to_string(), 20, 4000, None).await;
+    validator
+        .add_block("block_001".to_string(), 5, 2000, None)
+        .await;
+    validator
+        .add_block("block_002".to_string(), 10, 3000, None)
+        .await;
+    validator
+        .add_block("block_003".to_string(), 15, 500, None)
+        .await; // Low difficulty
+    validator
+        .add_block(
+            "block_004".to_string(),
+            8,
+            2500,
+            Some("block_002".to_string()),
+        )
+        .await; // Conflicting
+    validator
+        .add_block("block_005".to_string(), 20, 4000, None)
+        .await;
 
     // Set stable height
     validator.set_stable_height(10).await;
 
     // Test 1: Valid tip (exists, not conflicting, valid difficulty, above stable height)
-    assert!(validator.validate_tip("block_005").await.is_ok(),
-        "block_005 should be a valid tip");
+    assert!(
+        validator.validate_tip("block_005").await.is_ok(),
+        "block_005 should be a valid tip"
+    );
 
     // Test 2: Non-existent tip
-    assert!(validator.validate_tip("block_999").await.is_err(),
-        "Non-existent block should be rejected");
+    assert!(
+        validator.validate_tip("block_999").await.is_err(),
+        "Non-existent block should be rejected"
+    );
 
     // Test 3: Conflicting tip
-    assert!(validator.validate_tip("block_004").await.is_err(),
-        "Conflicting block should be rejected");
+    assert!(
+        validator.validate_tip("block_004").await.is_err(),
+        "Conflicting block should be rejected"
+    );
 
     // Test 4: Insufficient difficulty
-    assert!(validator.validate_tip("block_003").await.is_err(),
-        "Block with low difficulty should be rejected");
+    assert!(
+        validator.validate_tip("block_003").await.is_err(),
+        "Block with low difficulty should be rejected"
+    );
 
     // Test 5: Below stable height
-    assert!(validator.validate_tip("block_001").await.is_err(),
-        "Block at/below stable height should be rejected");
+    assert!(
+        validator.validate_tip("block_001").await.is_err(),
+        "Block at/below stable height should be rejected"
+    );
 
     // Test 6: At stable height boundary
-    assert!(validator.validate_tip("block_002").await.is_err(),
-        "Block at stable height should be rejected");
+    assert!(
+        validator.validate_tip("block_002").await.is_err(),
+        "Block at stable height should be rejected"
+    );
 
     // Select valid tips from candidates
     let candidates = vec![
@@ -403,8 +511,11 @@ async fn test_v24_tip_selection_validation() {
         "block_005".to_string(),
     ];
     let valid_tips = validator.select_valid_tips(&candidates).await;
-    assert_eq!(valid_tips, vec!["block_005"],
-        "Only block_005 should pass all validation criteria");
+    assert_eq!(
+        valid_tips,
+        vec!["block_005"],
+        "Only block_005 should pass all validation criteria"
+    );
 }
 
 /// V-25: Test concurrent balance access is safe
@@ -432,7 +543,8 @@ async fn test_v25_concurrent_balance_access() {
 
         async fn add_balance(&self, amount: u64) -> Result<(), String> {
             let mut balance = self.balance.write().await;
-            *balance = balance.checked_add(amount)
+            *balance = balance
+                .checked_add(amount)
                 .ok_or_else(|| "Balance overflow".to_string())?;
             Ok(())
         }
@@ -441,32 +553,37 @@ async fn test_v25_concurrent_balance_access() {
     let account = Arc::new(Account::new(1000));
 
     // Spawn concurrent readers and writers
-    let mut handles = vec![];
+    let mut reader_handles = vec![];
+    let mut writer_handles = vec![];
 
     // Readers
     for _ in 0..10 {
         let account = account.clone();
-        handles.push(tokio::spawn(async move {
-            account.get_balance().await
-        }));
+        reader_handles.push(tokio::spawn(async move { account.get_balance().await }));
     }
 
     // Writers
     for _ in 0..5 {
         let account = account.clone();
-        handles.push(tokio::spawn(async move {
-            account.add_balance(100).await
-        }));
+        writer_handles.push(tokio::spawn(async move { account.add_balance(100).await }));
     }
 
-    // Wait for all operations
-    for handle in handles {
-        handle.await.unwrap();
+    // Wait for all reader operations
+    for handle in reader_handles {
+        let _ = handle.await.unwrap();
+    }
+
+    // Wait for all writer operations
+    for handle in writer_handles {
+        handle.await.unwrap().unwrap();
     }
 
     // Final balance should be 1000 + (5 * 100) = 1500
     let final_balance = account.get_balance().await;
-    assert_eq!(final_balance, 1500, "Concurrent balance updates should be correct");
+    assert_eq!(
+        final_balance, 1500,
+        "Concurrent balance updates should be correct"
+    );
 }
 
 /// V-26: Test orphaned TX set size is limited
@@ -510,11 +627,17 @@ fn test_v26_orphaned_tx_set_size_limited() {
 
     // Fill to capacity
     for i in 0..MAX_ORPHANED_TXS {
-        assert!(orphaned_set.insert(i as u64), "Should accept up to max size");
+        assert!(
+            orphaned_set.insert(i as u64),
+            "Should accept up to max size"
+        );
     }
 
     // Try to exceed capacity
-    assert!(!orphaned_set.insert(MAX_ORPHANED_TXS as u64), "Should reject beyond max size");
+    assert!(
+        !orphaned_set.insert(MAX_ORPHANED_TXS as u64),
+        "Should reject beyond max size"
+    );
 
     // Verify size is capped
     assert_eq!(orphaned_set.len(), MAX_ORPHANED_TXS);
@@ -541,7 +664,9 @@ fn test_v27_skip_validation_rejected_on_mainnet() {
 
     fn validate_config(config: &Config) -> Result<(), String> {
         if config.network == Network::Mainnet && config.skip_block_template_txs_verification {
-            return Err("Unsafe configuration on mainnet: skip_block_template_txs_verification".to_string());
+            return Err(
+                "Unsafe configuration on mainnet: skip_block_template_txs_verification".to_string(),
+            );
         }
         Ok(())
     }
@@ -551,24 +676,30 @@ fn test_v27_skip_validation_rejected_on_mainnet() {
         skip_block_template_txs_verification: true,
         network: Network::Mainnet,
     };
-    assert!(validate_config(&unsafe_mainnet_config).is_err(),
-        "Should reject skip_validation on mainnet");
+    assert!(
+        validate_config(&unsafe_mainnet_config).is_err(),
+        "Should reject skip_validation on mainnet"
+    );
 
     // Test mainnet with validation (should succeed)
     let safe_mainnet_config = Config {
         skip_block_template_txs_verification: false,
         network: Network::Mainnet,
     };
-    assert!(validate_config(&safe_mainnet_config).is_ok(),
-        "Should accept normal config on mainnet");
+    assert!(
+        validate_config(&safe_mainnet_config).is_ok(),
+        "Should accept normal config on mainnet"
+    );
 
     // Test testnet with skip_validation (should succeed - for testing)
     let testnet_config = Config {
         skip_block_template_txs_verification: true,
         network: Network::Testnet,
     };
-    assert!(validate_config(&testnet_config).is_ok(),
-        "Should allow skip_validation on testnet");
+    assert!(
+        validate_config(&testnet_config).is_ok(),
+        "Should allow skip_validation on testnet"
+    );
 }
 
 /// Test concurrent block processing doesn't corrupt state
@@ -603,7 +734,13 @@ async fn test_concurrent_block_processing_safety() {
             self.accounts.write().await.insert(address, balance);
         }
 
-        async fn process_block(&self, block_id: String, from: String, to: String, amount: u64) -> Result<(), String> {
+        async fn process_block(
+            &self,
+            block_id: String,
+            from: String,
+            to: String,
+            amount: u64,
+        ) -> Result<(), String> {
             // Mark block as processed (prevent double processing)
             {
                 let mut processed = self.processed_blocks.write().await;
@@ -616,20 +753,24 @@ async fn test_concurrent_block_processing_safety() {
             // Process transaction atomically
             let mut accounts = self.accounts.write().await;
 
-            let from_balance = accounts.get_mut(&from)
+            let from_balance = accounts
+                .get_mut(&from)
                 .ok_or_else(|| format!("Account {} not found", from))?;
 
             if *from_balance < amount {
                 return Err(format!("Insufficient balance for {}", from));
             }
 
-            *from_balance = from_balance.checked_sub(amount)
+            *from_balance = from_balance
+                .checked_sub(amount)
                 .ok_or_else(|| "Balance underflow".to_string())?;
 
-            let to_balance = accounts.get_mut(&to)
+            let to_balance = accounts
+                .get_mut(&to)
                 .ok_or_else(|| format!("Account {} not found", to))?;
 
-            *to_balance = to_balance.checked_add(amount)
+            *to_balance = to_balance
+                .checked_add(amount)
                 .ok_or_else(|| "Balance overflow".to_string())?;
 
             Ok(())
@@ -668,12 +809,18 @@ async fn test_concurrent_block_processing_safety() {
 
     // Wait for all blocks to be processed
     for handle in handles {
-        handle.await.unwrap().expect("Block processing should succeed");
+        handle
+            .await
+            .unwrap()
+            .expect("Block processing should succeed");
     }
 
     // Verify all 10 blocks were processed
-    assert_eq!(processor.get_processed_count().await, 10,
-        "All 10 blocks should be processed");
+    assert_eq!(
+        processor.get_processed_count().await,
+        10,
+        "All 10 blocks should be processed"
+    );
 
     // Verify state changes are correct
     for i in 0..10 {
@@ -681,12 +828,20 @@ async fn test_concurrent_block_processing_safety() {
         let to_address = format!("account_{}", i + 10);
 
         // Sender should have 1000 - 100 = 900
-        assert_eq!(processor.get_balance(&from_address).await, Some(900),
-            "{} should have balance reduced by 100", from_address);
+        assert_eq!(
+            processor.get_balance(&from_address).await,
+            Some(900),
+            "{} should have balance reduced by 100",
+            from_address
+        );
 
         // Receiver should have 1000 + 100 = 1100
-        assert_eq!(processor.get_balance(&to_address).await, Some(1100),
-            "{} should have balance increased by 100", to_address);
+        assert_eq!(
+            processor.get_balance(&to_address).await,
+            Some(1100),
+            "{} should have balance increased by 100",
+            to_address
+        );
     }
 
     // Verify other accounts are unmodified
@@ -703,8 +858,8 @@ async fn test_concurrent_block_processing_safety() {
 /// Verifies that storage remains consistent under concurrent load.
 #[tokio::test]
 async fn test_storage_consistency_concurrent_ops() {
-    use tokio::sync::Mutex;
     use std::collections::HashMap;
+    use tokio::sync::Mutex;
 
     // Simulated storage with concurrent access
     struct MockStorage {
@@ -730,10 +885,10 @@ async fn test_storage_consistency_concurrent_ops() {
 
         async fn increment(&self, key: &str) -> Result<(), String> {
             let mut data = self.data.lock().await;
-            let value = data.get_mut(key)
+            let value = data
+                .get_mut(key)
                 .ok_or_else(|| "Key not found".to_string())?;
-            *value = value.checked_add(1)
-                .ok_or_else(|| "Overflow".to_string())?;
+            *value = value.checked_add(1).ok_or_else(|| "Overflow".to_string())?;
             Ok(())
         }
     }
@@ -748,16 +903,16 @@ async fn test_storage_consistency_concurrent_ops() {
     let mut handles = vec![];
     for _ in 0..100 {
         let storage = storage.clone();
-        handles.push(tokio::spawn(async move {
-            storage.increment("counter1").await
-        }));
+        handles.push(tokio::spawn(
+            async move { storage.increment("counter1").await },
+        ));
     }
 
     for _ in 0..100 {
         let storage = storage.clone();
-        handles.push(tokio::spawn(async move {
-            storage.increment("counter2").await
-        }));
+        handles.push(tokio::spawn(
+            async move { storage.increment("counter2").await },
+        ));
     }
 
     // Wait for all operations
@@ -783,8 +938,8 @@ async fn test_cache_coherency_concurrent() {
     // 4. Verify all reads see consistent data
 
     use std::collections::HashMap;
-    use tokio::sync::RwLock;
     use std::sync::atomic::{AtomicBool, AtomicUsize};
+    use tokio::sync::RwLock;
 
     struct CoherentCache {
         storage: Arc<RwLock<HashMap<String, u64>>>,
@@ -881,7 +1036,12 @@ async fn test_cache_coherency_concurrent() {
         post_invalidation_handles.push(tokio::spawn(async move {
             // Read from storage (cache invalidated)
             let value = cache.get("key2").await;
-            assert_eq!(value, Some(200), "Reader {} should see consistent value from storage", i);
+            assert_eq!(
+                value,
+                Some(200),
+                "Reader {} should see consistent value from storage",
+                i
+            );
         }));
     }
 
@@ -892,11 +1052,17 @@ async fn test_cache_coherency_concurrent() {
 
     // Verify reads went to storage, not cache
     let storage_reads = cache.get_storage_reads();
-    assert!(storage_reads >= 5, "After invalidation, reads should fetch from storage");
+    assert!(
+        storage_reads >= 5,
+        "After invalidation, reads should fetch from storage"
+    );
 
     // Verify cache and storage still have same data
-    assert_eq!(cache.get("key3").await, Some(300),
-        "Data should remain consistent in storage after cache invalidation");
+    assert_eq!(
+        cache.get("key3").await,
+        Some(300),
+        "Data should remain consistent in storage after cache invalidation"
+    );
 }
 
 /// Stress test: Many concurrent writes
@@ -909,8 +1075,8 @@ async fn test_storage_stress_concurrent_writes() {
     const THREAD_COUNT: usize = 10;
 
     use std::collections::HashMap;
-    use tokio::sync::Mutex;
     use std::time::Instant;
+    use tokio::sync::Mutex;
 
     struct StressStorage {
         data: Arc<Mutex<HashMap<u64, u64>>>,
@@ -970,29 +1136,48 @@ async fn test_storage_stress_concurrent_writes() {
     let elapsed = start_time.elapsed();
 
     // Verify no data loss
-    assert_eq!(storage.get_write_count(), WRITE_COUNT,
-        "All {} writes should be recorded", WRITE_COUNT);
+    assert_eq!(
+        storage.get_write_count(),
+        WRITE_COUNT,
+        "All {} writes should be recorded",
+        WRITE_COUNT
+    );
 
-    assert_eq!(storage.get_size().await, WRITE_COUNT,
-        "Storage should contain all {} entries", WRITE_COUNT);
+    assert_eq!(
+        storage.get_size().await,
+        WRITE_COUNT,
+        "Storage should contain all {} entries",
+        WRITE_COUNT
+    );
 
     // Verify no corruption - check random samples
     for sample in [0, 100, 500, 1000, 5000, 9999] {
         if sample < WRITE_COUNT as u64 {
             let value = storage.read(sample).await;
-            assert_eq!(value, Some(sample * 2),
-                "Data integrity check failed for key {}", sample);
+            assert_eq!(
+                value,
+                Some(sample * 2),
+                "Data integrity check failed for key {}",
+                sample
+            );
         }
     }
 
     // Verify acceptable performance (should complete in reasonable time)
     let writes_per_second = WRITE_COUNT as f64 / elapsed.as_secs_f64();
-    assert!(elapsed.as_secs() < 10,
-        "Stress test should complete in under 10 seconds (took {:?})", elapsed);
+    assert!(
+        elapsed.as_secs() < 10,
+        "Stress test should complete in under 10 seconds (took {:?})",
+        elapsed
+    );
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Stress test completed: {} writes in {:?} ({:.0} writes/sec)",
-            WRITE_COUNT, elapsed, writes_per_second);
+        log::info!(
+            "Stress test completed: {} writes in {:?} ({:.0} writes/sec)",
+            WRITE_COUNT,
+            elapsed,
+            writes_per_second
+        );
     }
 }
 
@@ -1045,7 +1230,8 @@ async fn test_database_transaction_rollback() {
 
         async fn write(&self, tx_id: usize, key: String, value: u64) -> Result<(), String> {
             let mut transactions = self.active_transactions.write().await;
-            let tx = transactions.get_mut(&tx_id)
+            let tx = transactions
+                .get_mut(&tx_id)
                 .ok_or_else(|| format!("Transaction {} not found", tx_id))?;
             tx.writes.insert(key, value);
             Ok(())
@@ -1053,7 +1239,8 @@ async fn test_database_transaction_rollback() {
 
         async fn commit(&self, tx_id: usize) -> Result<(), String> {
             let mut transactions = self.active_transactions.write().await;
-            let tx = transactions.remove(&tx_id)
+            let tx = transactions
+                .remove(&tx_id)
                 .ok_or_else(|| format!("Transaction {} not found", tx_id))?;
 
             // Apply all writes atomically
@@ -1067,7 +1254,8 @@ async fn test_database_transaction_rollback() {
 
         async fn rollback(&self, tx_id: usize) -> Result<(), String> {
             let mut transactions = self.active_transactions.write().await;
-            transactions.remove(&tx_id)
+            transactions
+                .remove(&tx_id)
                 .ok_or_else(|| format!("Transaction {} not found", tx_id))?;
             // Writes are discarded - no changes to committed_data
             Ok(())
@@ -1086,8 +1274,14 @@ async fn test_database_transaction_rollback() {
 
     // Initialize some committed data
     let init_tx = storage.begin_transaction().await;
-    storage.write(init_tx, "account_a".to_string(), 1000).await.unwrap();
-    storage.write(init_tx, "account_b".to_string(), 2000).await.unwrap();
+    storage
+        .write(init_tx, "account_a".to_string(), 1000)
+        .await
+        .unwrap();
+    storage
+        .write(init_tx, "account_b".to_string(), 2000)
+        .await
+        .unwrap();
     storage.commit(init_tx).await.unwrap();
 
     // Verify initial state
@@ -1098,40 +1292,76 @@ async fn test_database_transaction_rollback() {
     let tx1 = storage.begin_transaction().await;
 
     // Make multiple writes in transaction
-    storage.write(tx1, "account_a".to_string(), 1500).await.unwrap();
-    storage.write(tx1, "account_b".to_string(), 1500).await.unwrap();
-    storage.write(tx1, "account_c".to_string(), 500).await.unwrap();
+    storage
+        .write(tx1, "account_a".to_string(), 1500)
+        .await
+        .unwrap();
+    storage
+        .write(tx1, "account_b".to_string(), 1500)
+        .await
+        .unwrap();
+    storage
+        .write(tx1, "account_c".to_string(), 500)
+        .await
+        .unwrap();
 
     // Verify uncommitted changes are not visible
-    assert_eq!(storage.read("account_a").await, Some(1000),
-        "Uncommitted changes should not be visible");
-    assert_eq!(storage.read("account_b").await, Some(2000),
-        "Uncommitted changes should not be visible");
-    assert_eq!(storage.read("account_c").await, None,
-        "New key should not exist until commit");
+    assert_eq!(
+        storage.read("account_a").await,
+        Some(1000),
+        "Uncommitted changes should not be visible"
+    );
+    assert_eq!(
+        storage.read("account_b").await,
+        Some(2000),
+        "Uncommitted changes should not be visible"
+    );
+    assert_eq!(
+        storage.read("account_c").await,
+        None,
+        "New key should not exist until commit"
+    );
 
     // Simulate failure and rollback
     storage.rollback(tx1).await.unwrap();
 
     // Verify all changes were rolled back
-    assert_eq!(storage.read("account_a").await, Some(1000),
-        "After rollback, account_a should have original value");
-    assert_eq!(storage.read("account_b").await, Some(2000),
-        "After rollback, account_b should have original value");
-    assert_eq!(storage.read("account_c").await, None,
-        "After rollback, account_c should not exist");
+    assert_eq!(
+        storage.read("account_a").await,
+        Some(1000),
+        "After rollback, account_a should have original value"
+    );
+    assert_eq!(
+        storage.read("account_b").await,
+        Some(2000),
+        "After rollback, account_b should have original value"
+    );
+    assert_eq!(
+        storage.read("account_c").await,
+        None,
+        "After rollback, account_c should not exist"
+    );
 
     // Verify transaction is cleaned up
-    assert_eq!(storage.get_active_transaction_count().await, 0,
-        "No active transactions should remain after rollback");
+    assert_eq!(
+        storage.get_active_transaction_count().await,
+        0,
+        "No active transactions should remain after rollback"
+    );
 
     // Test successful commit for comparison
     let tx2 = storage.begin_transaction().await;
-    storage.write(tx2, "account_a".to_string(), 1200).await.unwrap();
+    storage
+        .write(tx2, "account_a".to_string(), 1200)
+        .await
+        .unwrap();
     storage.commit(tx2).await.unwrap();
 
-    assert_eq!(storage.read("account_a").await, Some(1200),
-        "After commit, changes should be persisted");
+    assert_eq!(
+        storage.read("account_a").await,
+        Some(1200),
+        "After commit, changes should be persisted"
+    );
 }
 
 #[cfg(test)]

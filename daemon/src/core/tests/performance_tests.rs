@@ -121,7 +121,7 @@ mod performance_tests {
 
         let micros = measure("Calculate work (single)", || {
             for _ in 0..1000 {
-                let _work = calc_work_from_difficulty(&difficulty);
+                let _work = calc_work_from_difficulty(&difficulty).unwrap();
             }
         });
 
@@ -143,7 +143,7 @@ mod performance_tests {
 
         let micros = measure("Calculate work (varying difficulty)", || {
             for diff in &difficulties {
-                let _work = calc_work_from_difficulty(diff);
+                let _work = calc_work_from_difficulty(diff).unwrap();
             }
         });
 
@@ -372,8 +372,8 @@ mod performance_tests {
 
         let micros = measure("Difficulty operations (100,000 iterations)", || {
             for _ in 0..100_000 {
-                let _work1 = calc_work_from_difficulty(&diff1);
-                let _work2 = calc_work_from_difficulty(&diff2);
+                let _work1 = calc_work_from_difficulty(&diff1).unwrap();
+                let _work2 = calc_work_from_difficulty(&diff2).unwrap();
             }
         });
 
@@ -421,7 +421,7 @@ mod performance_tests {
                     .iter()
                     .zip(&difficulties)
                     .map(|(hash, diff)| {
-                        let work = calc_work_from_difficulty(diff);
+                        let work = calc_work_from_difficulty(diff).unwrap();
                         SortableBlock::new(hash.clone(), work)
                     })
                     .collect();
@@ -535,7 +535,7 @@ mod performance_tests {
         // Core operations
         let diff = Difficulty::from(1000u64);
         let work_calc_time = measure("Work calculation (single)", || {
-            let _work = calc_work_from_difficulty(&diff);
+            let _work = calc_work_from_difficulty(&diff).unwrap();
         });
 
         let hash1 = Hash::new([1u8; 32]);

@@ -420,7 +420,7 @@ mod ghostdag_execution_tests {
         let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
         let block1_ghostdag = TosGhostdagData::new(
             1,
-            calc_work_from_difficulty(&Difficulty::from(1000u64)),
+            calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap(),
             1,
             genesis_hash.clone(),
             vec![genesis_hash.clone()],
@@ -477,7 +477,7 @@ mod ghostdag_execution_tests {
         let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
         let block1_ghostdag = TosGhostdagData::new(
             1,
-            calc_work_from_difficulty(&Difficulty::from(1000u64)),
+            calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap(),
             1,
             genesis_hash.clone(),
             vec![genesis_hash.clone()],
@@ -723,7 +723,7 @@ mod ghostdag_execution_tests {
             let block_hash = create_test_hash(i);
             let block_header = create_test_header(i as u64 * 1000, vec![genesis_hash.clone()]);
 
-            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
             let block_ghostdag = TosGhostdagData::new(
                 1,
                 work,
@@ -828,7 +828,7 @@ mod ghostdag_execution_tests {
             let timestamp = timestamp_fn(i);
             let block_header = create_test_header(timestamp, vec![parent_hash.clone()]);
 
-            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
             let block_ghostdag = TosGhostdagData::new(
                 i, // blue_score
                 work,
@@ -1251,7 +1251,7 @@ mod ghostdag_execution_tests {
             let parent_hash = create_test_hash((i + 1) as u8);
             let parent_header = create_test_header(ts, vec![genesis_hash.clone()]);
 
-            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
             let parent_ghostdag = TosGhostdagData::new(
                 1,
                 work,
@@ -1349,7 +1349,7 @@ mod ghostdag_execution_tests {
             let block_hash = create_test_hash(i);
             let block_header = create_test_header(i as u64 * 1000, vec![genesis_hash.clone()]);
 
-            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
             let block_ghostdag = TosGhostdagData::new(
                 1,
                 work,
@@ -1442,7 +1442,7 @@ mod ghostdag_execution_tests {
             let block_hash = create_test_hash(i);
             let block_header = create_test_header(i as u64 * 1000, vec![genesis_hash.clone()]);
 
-            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
             let block_ghostdag = TosGhostdagData::new(
                 1,
                 work,
@@ -1523,7 +1523,7 @@ mod ghostdag_execution_tests {
             let block_hash = create_test_hash(i);
             let block_header = create_test_header(i as u64 * 1000, vec![genesis_hash.clone()]);
 
-            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
             let block_ghostdag = TosGhostdagData::new(
                 1,
                 work,
@@ -1615,7 +1615,7 @@ mod ghostdag_execution_tests {
         // Create block 1 with genesis as only parent
         let block1_hash = create_test_hash(1);
         let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
-        let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+        let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
         let block1_ghostdag = TosGhostdagData::new(
             1, // blue_score = 0 + 1 (genesis + 1)
             work,
@@ -1702,7 +1702,7 @@ mod ghostdag_execution_tests {
         // Create Block1 (child of genesis)
         let block1_hash = create_test_hash(1);
         let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
-        let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+        let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
         let block1_ghostdag = TosGhostdagData::new(
             1,
             work,
@@ -1736,7 +1736,7 @@ mod ghostdag_execution_tests {
         // Create Block2 (child of genesis, sibling of Block1)
         let block2_hash = create_test_hash(2);
         let block2_header = create_test_header(2000, vec![genesis_hash.clone()]);
-        let work2 = calc_work_from_difficulty(&Difficulty::from(1000u64));
+        let work2 = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
         let block2_ghostdag = TosGhostdagData::new(
             1,
             work2,
@@ -1838,7 +1838,7 @@ mod ghostdag_execution_tests {
         for i in 1..=3u8 {
             let block_hash = create_test_hash(i);
             let block_header = create_test_header(i as u64 * 1000, vec![genesis_hash.clone()]);
-            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
             let block_ghostdag = TosGhostdagData::new(
                 1,
                 work,
@@ -1948,7 +1948,7 @@ mod ghostdag_execution_tests {
         for i in 1..=10u64 {
             let block_hash = create_test_hash_u64(i);
             let block_header = create_test_header(i * 1000, vec![parent_hash.clone()]);
-            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
 
             current_blue_score = i;
             let block_ghostdag = TosGhostdagData::new(
@@ -2028,7 +2028,7 @@ mod ghostdag_execution_tests {
         // Create a block chain: genesis -> block1
         let block1_hash = create_test_hash(1);
         let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
-        let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+        let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
         let block1_ghostdag = TosGhostdagData::new(
             1,
             work,
@@ -2111,7 +2111,7 @@ mod ghostdag_execution_tests {
         // Create two parallel blocks (diamond pattern)
         let block1_hash = create_test_hash(1);
         let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
-        let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+        let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
         let block1_ghostdag = TosGhostdagData::new(
             1,
             work,
@@ -2251,7 +2251,7 @@ mod ghostdag_execution_tests {
             let block_header = create_test_header(i as u64 * 1000, vec![genesis_hash.clone()]);
             // Different difficulty for each block -> different blue_work
             let difficulty = Difficulty::from(1000u64 * i as u64);
-            let work = calc_work_from_difficulty(&difficulty);
+            let work = calc_work_from_difficulty(&difficulty).unwrap();
             let block_ghostdag = TosGhostdagData::new(
                 1,
                 work,
@@ -2446,7 +2446,7 @@ mod ghostdag_execution_tests {
         let block1_hash = create_test_hash(1);
         let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
         let difficulty = Difficulty::from(5000u64);
-        let work = calc_work_from_difficulty(&difficulty);
+        let work = calc_work_from_difficulty(&difficulty).unwrap();
         let block1_ghostdag = TosGhostdagData::new(
             1,
             work,
@@ -2523,7 +2523,7 @@ mod ghostdag_execution_tests {
         let block1_hash = create_test_hash(1);
         let block1_header = create_test_header(1000, vec![genesis_hash.clone()]);
         let difficulty1 = Difficulty::from(3000u64);
-        let work1 = calc_work_from_difficulty(&difficulty1);
+        let work1 = calc_work_from_difficulty(&difficulty1).unwrap();
 
         let block1_ghostdag = TosGhostdagData::new(
             1,
@@ -2557,7 +2557,7 @@ mod ghostdag_execution_tests {
         let block2_hash = create_test_hash(2);
         let block2_header = create_test_header(1100, vec![genesis_hash.clone()]);
         let difficulty2 = Difficulty::from(5000u64);
-        let work2 = calc_work_from_difficulty(&difficulty2);
+        let work2 = calc_work_from_difficulty(&difficulty2).unwrap();
 
         let block2_ghostdag = TosGhostdagData::new(
             1,
@@ -2656,7 +2656,7 @@ mod ghostdag_execution_tests {
 
         // Difficulty/work for this block
         let difficulty = Difficulty::from(5000u64);
-        let work = calc_work_from_difficulty(&difficulty);
+        let work = calc_work_from_difficulty(&difficulty).unwrap();
 
         // GHOSTDAG data for block (height 1)
         let ghostdag_data = TosGhostdagData::new(

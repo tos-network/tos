@@ -49,7 +49,7 @@ mod integration_tests {
 
         // Block 1: extends genesis
         let difficulty = Difficulty::from(1000u64);
-        let work = calc_work_from_difficulty(&difficulty);
+        let work = calc_work_from_difficulty(&difficulty).unwrap();
 
         let block1_data = TosGhostdagData::new(
             1,                          // blue_score = genesis.blue_score + 1
@@ -322,7 +322,7 @@ mod integration_tests {
         let mut accumulated_work = BlueWorkType::zero();
 
         for diff in &difficulties {
-            let work = calc_work_from_difficulty(diff);
+            let work = calc_work_from_difficulty(diff).unwrap();
             works.push(work);
             accumulated_work = accumulated_work.checked_add(work).unwrap();
         }
@@ -402,7 +402,7 @@ mod integration_tests {
             let parent_hash = chain_hashes[i - 1].clone();
             let parent_data = &chain_data[i - 1];
 
-            let work = calc_work_from_difficulty(&Difficulty::from(1000u64));
+            let work = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
             let blue_score = parent_data.blue_score + 1;
             let blue_work = parent_data.blue_work.checked_add(work).unwrap();
 
@@ -507,7 +507,7 @@ mod integration_tests {
 
         // Build first block
         let block1_hash = Hash::new([1u8; 32]);
-        let work1 = calc_work_from_difficulty(&Difficulty::from(1000u64));
+        let work1 = calc_work_from_difficulty(&Difficulty::from(1000u64)).unwrap();
 
         let block1_ghostdag = TosGhostdagData::new(
             1,

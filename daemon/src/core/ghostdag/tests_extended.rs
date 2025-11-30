@@ -14,6 +14,7 @@
 #[allow(unused)]
 mod extended_tests {
     use super::super::*;
+    use crate::core::error::BlockchainError;
     use tos_common::crypto::Hash;
     use tos_common::difficulty::Difficulty;
 
@@ -198,7 +199,7 @@ mod extended_tests {
     fn test_work_calculation_minimum_difficulty() {
         // Minimum non-zero difficulty
         let min_diff = Difficulty::from(1u64);
-        let work = calc_work_from_difficulty(&min_diff);
+        let work = calc_work_from_difficulty(&min_diff).unwrap();
 
         // work = (~target / (target + 1)) + 1
         // With difficulty=1, target=MAX, work should be very small
@@ -210,7 +211,7 @@ mod extended_tests {
     fn test_work_calculation_maximum_difficulty() {
         // Very high difficulty
         let max_diff = Difficulty::from(u64::MAX);
-        let work = calc_work_from_difficulty(&max_diff);
+        let work = calc_work_from_difficulty(&max_diff).unwrap();
 
         // Higher difficulty should produce higher work
         assert!(work > BlueWorkType::zero());
@@ -223,9 +224,9 @@ mod extended_tests {
         let diff_4 = Difficulty::from(4u64);
         let diff_8 = Difficulty::from(8u64);
 
-        let work_2 = calc_work_from_difficulty(&diff_2);
-        let work_4 = calc_work_from_difficulty(&diff_4);
-        let work_8 = calc_work_from_difficulty(&diff_8);
+        let work_2 = calc_work_from_difficulty(&diff_2).unwrap();
+        let work_4 = calc_work_from_difficulty(&diff_4).unwrap();
+        let work_8 = calc_work_from_difficulty(&diff_8).unwrap();
 
         // Higher difficulty = higher work
         assert!(work_4 > work_2);
@@ -480,10 +481,14 @@ mod extended_tests {
     fn test_v06_security_zero_difficulty() {
         // V-06: Zero difficulty protection
         let zero_diff = Difficulty::from(0u64);
-        let work = calc_work_from_difficulty(&zero_diff);
+        let result = calc_work_from_difficulty(&zero_diff);
 
-        // Should return max_value to prevent division by zero
-        assert_eq!(work, BlueWorkType::max_value());
+        // Should return ZeroDifficulty error
+        assert!(result.is_err(), "Zero difficulty should return an error");
+        assert!(
+            matches!(result, Err(BlockchainError::ZeroDifficulty)),
+            "Zero difficulty should return BlockchainError::ZeroDifficulty"
+        );
     }
 
     // ============================================================================
