@@ -174,10 +174,22 @@ pub const PRUNE_SAFETY_LIMIT: u64 = STABLE_LIMIT * 10;
 // Balance stability limit - blocks required for transaction finality
 // Used in deviation checks to prevent accepting blocks too far from consensus
 //
-// TOS: 60 blocks @ 1 BPS = 60 seconds (1 minute)
-// This value provides fast finality while maintaining excellent network stability
-// Tested: 128+ blocks with 100% acceptance rate, aligned with industry standards
-pub const STABLE_LIMIT: u64 = 60;
+// TOS: 20 blocks @ 1 BPS = 20 seconds
+//
+// Security Analysis:
+// - GHOSTDAG reorg probability decays exponentially: P(reorg) = O(e^{-cd})
+// - With GHOSTDAG_K=10 and 1 BPS, 20 blocks provides good security margin
+// - Comparable to Solana's ~12.8s finality (32 slots @ 400ms)
+//
+// Comparison with other blockchains:
+// - Solana:  32 blocks @ 400ms  = 12.8 seconds (PoS with Tower BFT)
+// - Bitcoin:  6 blocks @ 10min  = 60 minutes
+// - TOS:     20 blocks @ 1s     = 20 seconds (current setting)
+//
+// Future optimization:
+// - Can be reduced to 12 blocks (~12s) once network hashrate matures
+// - For high-value transactions, applications can wait for additional confirmations
+pub const STABLE_LIMIT: u64 = 20;
 
 // Pruning depth: number of blocks to keep before pruning point
 // TOS @ 1 BPS: 200 blocks (~200 seconds / ~3.3 minutes)
