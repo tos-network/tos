@@ -273,9 +273,24 @@ pub struct P2pConfig {
     /// It will not store any blocks / TXs and will not verify the history locally.
     ///
     /// Use it with extreme cautions and trusted nodes to have a valid bootstrapped chain.
+    ///
+    /// SECURITY WARNING: On mainnet/testnet, you MUST also set --i-understand-fast-sync-risks
+    /// to acknowledge that fast sync bypasses full history verification.
     #[clap(long)]
     #[serde(default)]
     pub allow_fast_sync: bool,
+    /// Acknowledge fast sync risks on mainnet/testnet.
+    ///
+    /// This flag is REQUIRED when using --allow-fast-sync on mainnet or testnet.
+    /// Fast sync does NOT verify historical blocks - you are trusting the remote node's state.
+    ///
+    /// ONLY use this if:
+    /// 1. You are connecting to a node you fully trust
+    /// 2. You understand that accepting unverified state could lead to accepting invalid history
+    /// 3. For high-value operations, you should run a fully-synced node instead
+    #[clap(long)]
+    #[serde(default)]
+    pub i_understand_fast_sync_risks: bool,
     /// Allow boost chain sync mode.
     ///
     /// This will request in parallel all blocks instead of sequentially.

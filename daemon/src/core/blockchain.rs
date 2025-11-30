@@ -270,6 +270,27 @@ impl<S: Storage> Blockchain<S> {
                 return Err(BlockchainError::ConfigSyncMode.into());
             }
 
+            // SECURITY FIX F-01: Require explicit risk acknowledgment for fast sync on mainnet/testnet
+            // Fast sync bypasses full history verification - users must explicitly acknowledge this risk
+            if config.p2p.allow_fast_sync && network != Network::Devnet {
+                if !config.p2p.i_understand_fast_sync_risks {
+                    error!("SECURITY WARNING: --allow-fast-sync on mainnet/testnet requires --i-understand-fast-sync-risks flag!");
+                    error!("Fast sync does NOT verify historical blocks - you are trusting the remote node's state.");
+                    error!("This could allow accepting invalid blockchain history from malicious nodes.");
+                    error!("");
+                    error!("If you understand these risks and want to proceed, add: --i-understand-fast-sync-risks");
+                    error!("For production use, consider running a fully-synced node instead.");
+                    return Err(BlockchainError::UnsafeConfigurationOnMainnet.into());
+                }
+                warn!("╔════════════════════════════════════════════════════════════════════╗");
+                warn!("║  FAST SYNC MODE ENABLED - SECURITY RISK ACKNOWLEDGED               ║");
+                warn!("║                                                                    ║");
+                warn!("║  You are trusting remote nodes to provide valid blockchain state.  ║");
+                warn!("║  Historical blocks are NOT being verified locally.                 ║");
+                warn!("║  Only use with trusted nodes for non-critical operations.          ║");
+                warn!("╚════════════════════════════════════════════════════════════════════╝");
+            }
+
             // SECURITY FIX: Reject skip_pow_verification on mainnet/testnet
             // This prevents accidental misconfiguration that would accept any block regardless of difficulty
             if config.skip_pow_verification {
