@@ -3,10 +3,10 @@
 //! This module provides common utilities, helpers, and mock implementations
 //! used across security tests.
 
-use tos_common::crypto::Hash;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
+use tos_common::crypto::Hash;
 
 /// Create a test hash from a single byte value
 pub fn test_hash(value: u8) -> Hash {
@@ -37,23 +37,33 @@ pub struct MockAccount {
 
 impl MockAccount {
     pub fn new(address: String, balance: u64, nonce: u64) -> Self {
-        Self { address, balance, nonce }
+        Self {
+            address,
+            balance,
+            nonce,
+        }
     }
 
     pub fn increment_nonce(&mut self) -> Result<(), String> {
-        self.nonce = self.nonce.checked_add(1)
+        self.nonce = self
+            .nonce
+            .checked_add(1)
             .ok_or_else(|| "Nonce overflow".to_string())?;
         Ok(())
     }
 
     pub fn add_balance(&mut self, amount: u64) -> Result<(), String> {
-        self.balance = self.balance.checked_add(amount)
+        self.balance = self
+            .balance
+            .checked_add(amount)
             .ok_or_else(|| "Balance overflow".to_string())?;
         Ok(())
     }
 
     pub fn sub_balance(&mut self, amount: u64) -> Result<(), String> {
-        self.balance = self.balance.checked_sub(amount)
+        self.balance = self
+            .balance
+            .checked_sub(amount)
             .ok_or_else(|| "Balance underflow".to_string())?;
         Ok(())
     }
@@ -102,7 +112,10 @@ impl MockStorage {
     }
 
     pub async fn set_balance(&self, address: &str, balance: u64) {
-        self.balances.write().await.insert(address.to_string(), balance);
+        self.balances
+            .write()
+            .await
+            .insert(address.to_string(), balance);
     }
 
     pub async fn get_balance(&self, address: &str) -> Option<u64> {
@@ -189,7 +202,8 @@ impl MockMempool {
         txs.insert(tx.hash.clone(), tx.clone());
 
         // Update nonce cache
-        nonces.entry(tx.sender.clone())
+        nonces
+            .entry(tx.sender.clone())
             .or_insert_with(HashSet::new)
             .insert(tx.nonce);
 
@@ -274,13 +288,22 @@ impl AtomicNonceChecker {
         self.nonces.write().await.insert(address, nonce);
     }
 
-    pub async fn compare_and_swap(&self, address: &str, expected: u64, new: u64) -> Result<(), String> {
+    pub async fn compare_and_swap(
+        &self,
+        address: &str,
+        expected: u64,
+        new: u64,
+    ) -> Result<(), String> {
         let mut nonces = self.nonces.write().await;
-        let current = nonces.get(address)
+        let current = nonces
+            .get(address)
             .ok_or_else(|| format!("Account {} not found", address))?;
 
         if *current != expected {
-            return Err(format!("Nonce mismatch: expected {}, got {}", expected, current));
+            return Err(format!(
+                "Nonce mismatch: expected {}, got {}",
+                expected, current
+            ));
         }
 
         nonces.insert(address.to_string(), new);
@@ -293,10 +316,12 @@ impl AtomicNonceChecker {
 
     pub async fn rollback_nonce(&self, address: &str) -> Result<(), String> {
         let mut nonces = self.nonces.write().await;
-        let current = nonces.get_mut(address)
+        let current = nonces
+            .get_mut(address)
             .ok_or_else(|| format!("Account {} not found", address))?;
 
-        *current = current.checked_sub(1)
+        *current = current
+            .checked_sub(1)
             .ok_or_else(|| "Cannot rollback nonce below 0".to_string())?;
         Ok(())
     }
@@ -378,12 +403,7 @@ mod tests {
     async fn test_mock_mempool() {
         let mempool = MockMempool::new();
 
-        let tx1 = MockTransaction::new(
-            "alice".to_string(),
-            "bob".to_string(),
-            100,
-            1
-        );
+        let tx1 = MockTransaction::new("alice".to_string(), "bob".to_string(), 100, 1);
 
         // Add first transaction
         assert!(mempool.add_transaction(tx1.clone()).await.is_ok());
@@ -394,7 +414,7 @@ mod tests {
             "alice".to_string(),
             "charlie".to_string(),
             200,
-            1 // Same nonce!
+            1, // Same nonce!
         );
         assert!(mempool.add_transaction(tx2).await.is_err());
 
