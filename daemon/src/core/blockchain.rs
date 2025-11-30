@@ -1087,6 +1087,20 @@ impl<S: Storage> Blockchain<S> {
                 trace!("Pruning block at topoheight {}", topo);
             }
 
+            // CRASH RECOVERY: Check if block was already deleted (idempotent pruning)
+            // This handles the case where a crash occurred between checkpoint updates.
+            // If the block at this topoheight no longer exists, it was already pruned
+            // in a previous run before the crash - skip it safely.
+            if !storage.has_hash_at_topoheight(topo).await? {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Block at topoheight {} already pruned (crash recovery), skipping",
+                        topo
+                    );
+                }
+                continue;
+            }
+
             // Delete block data and get the block hash for GHOSTDAG cleanup
             let (block_hash, _, _) = storage.delete_block_at_topoheight(topo).await?;
 
