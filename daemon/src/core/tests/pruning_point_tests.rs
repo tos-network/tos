@@ -8,6 +8,7 @@
 // 4. Validation correctly compares calculated vs header pruning_point
 
 #[cfg(test)]
+#[allow(clippy::unimplemented)]
 mod pruning_point_tests {
     use crate::config::PRUNING_DEPTH;
     use crate::core::{
