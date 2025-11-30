@@ -505,4 +505,304 @@ mod tests {
         let resume_range = checkpoint.current_position..checkpoint.target_topoheight;
         assert_eq!(resume_range, 100..150);
     }
+
+    // ============================================================================
+    // Strict Mock Storage Tests (ChatGPT Review Checklist 2.2)
+    // ============================================================================
+
+    /// A strict mock storage that panics on double delete.
+    ///
+    /// This is used to verify that the pruning logic with checkpoint recovery
+    /// never attempts to delete the same topoheight twice.
+    struct StrictMockStorage {
+        /// Set of existing topoheights (not yet deleted)
+        existing_topos: std::collections::HashSet<u64>,
+        /// Set of deleted topoheights (for tracking)
+        deleted_topos: std::collections::HashSet<u64>,
+        /// Checkpoint storage
+        checkpoint: Option<PruningCheckpoint>,
+    }
+
+    impl StrictMockStorage {
+        /// Create a new mock storage with blocks at topoheights [start, end)
+        fn new(start: u64, end: u64) -> Self {
+            Self {
+                existing_topos: (start..end).collect(),
+                deleted_topos: std::collections::HashSet::new(),
+                checkpoint: None,
+            }
+        }
+
+        /// Check if a topoheight exists (not yet deleted)
+        fn has_hash_at_topoheight(&self, topo: u64) -> bool {
+            self.existing_topos.contains(&topo)
+        }
+
+        /// Delete a block at topoheight - panics on double delete
+        fn delete_block_at_topoheight(&mut self, topo: u64) {
+            if self.deleted_topos.contains(&topo) {
+                panic!(
+                    "DOUBLE DELETE DETECTED: topoheight {} was already deleted!",
+                    topo
+                );
+            }
+            if !self.existing_topos.remove(&topo) {
+                panic!("DELETE NON-EXISTENT: topoheight {} does not exist!", topo);
+            }
+            self.deleted_topos.insert(topo);
+        }
+
+        /// Save checkpoint
+        fn set_checkpoint(&mut self, checkpoint: &PruningCheckpoint) {
+            self.checkpoint = Some(checkpoint.clone());
+        }
+
+        /// Get checkpoint
+        fn get_checkpoint(&self) -> Option<&PruningCheckpoint> {
+            self.checkpoint.as_ref()
+        }
+
+        /// Verify all topoheights in range were deleted exactly once
+        fn verify_all_deleted(&self, start: u64, end: u64) {
+            for topo in start..end {
+                assert!(
+                    self.deleted_topos.contains(&topo),
+                    "Topoheight {} was not deleted",
+                    topo
+                );
+            }
+            assert_eq!(
+                self.deleted_topos.len(),
+                (end - start) as usize,
+                "Number of deleted blocks doesn't match expected"
+            );
+        }
+    }
+
+    /// Simulate pruning loop with checkpoint updates.
+    ///
+    /// This mirrors the logic in `prune_blocks_with_checkpoint` to test
+    /// the checkpoint semantics with a strict mock storage.
+    fn simulate_pruning_loop(
+        storage: &mut StrictMockStorage,
+        checkpoint: &mut PruningCheckpoint,
+        start_topo: u64,
+        end_topo: u64,
+        checkpoint_interval: u64,
+    ) {
+        for topo in start_topo..end_topo {
+            // Idempotent check (mirrors the fix in blockchain.rs)
+            if !storage.has_hash_at_topoheight(topo) {
+                // Already deleted (crash recovery scenario) - skip
+                continue;
+            }
+
+            // Delete block
+            storage.delete_block_at_topoheight(topo);
+
+            // Update checkpoint periodically (store topo + 1 = next to process)
+            if (topo - start_topo) % checkpoint_interval == 0 && topo > start_topo {
+                checkpoint.update_position(topo + 1);
+                storage.set_checkpoint(checkpoint);
+            }
+        }
+
+        // Final checkpoint update
+        checkpoint.update_position(end_topo);
+        storage.set_checkpoint(checkpoint);
+    }
+
+    /// Test that strict mock storage correctly detects double delete.
+    #[test]
+    #[should_panic(expected = "DOUBLE DELETE DETECTED")]
+    fn test_strict_storage_detects_double_delete() {
+        let mut storage = StrictMockStorage::new(0, 10);
+
+        // First delete should succeed
+        storage.delete_block_at_topoheight(5);
+
+        // Second delete should panic
+        storage.delete_block_at_topoheight(5);
+    }
+
+    /// Test that strict mock storage correctly detects delete of non-existent block.
+    #[test]
+    #[should_panic(expected = "DELETE NON-EXISTENT")]
+    fn test_strict_storage_detects_non_existent_delete() {
+        let mut storage = StrictMockStorage::new(0, 10);
+
+        // Delete block that doesn't exist (outside range)
+        storage.delete_block_at_topoheight(100);
+    }
+
+    /// Test normal pruning without crash - should not double delete.
+    #[test]
+    fn test_pruning_no_crash_no_double_delete() {
+        let start = 0u64;
+        let end = 100u64;
+        let mut storage = StrictMockStorage::new(start, end);
+        let mut checkpoint = PruningCheckpoint::new(start, end);
+
+        // Run full pruning loop
+        simulate_pruning_loop(&mut storage, &mut checkpoint, start, end, 10);
+
+        // Verify all blocks were deleted exactly once
+        storage.verify_all_deleted(start, end);
+    }
+
+    /// Test crash recovery at each checkpoint interval.
+    ///
+    /// Simulates a crash at each checkpoint position, then resumes.
+    /// The strict mock storage will panic if any double delete occurs.
+    #[test]
+    fn test_crash_recovery_no_double_delete_strict() {
+        let start = 0u64;
+        let end = 50u64;
+        let checkpoint_interval = 10u64;
+
+        // Test crash at each checkpoint position
+        for crash_at in (start..end).step_by(checkpoint_interval as usize) {
+            if crash_at == start {
+                continue; // Skip start, no work done yet
+            }
+
+            // Phase 1: Initial pruning run until crash point
+            let mut storage = StrictMockStorage::new(start, end);
+            let mut checkpoint = PruningCheckpoint::new(start, end);
+
+            // Prune until crash point
+            simulate_pruning_loop(
+                &mut storage,
+                &mut checkpoint,
+                start,
+                crash_at,
+                checkpoint_interval,
+            );
+
+            // Save checkpoint at crash point (next to process = crash_at)
+            checkpoint.update_position(crash_at);
+            storage.set_checkpoint(&checkpoint);
+
+            // Phase 2: Crash recovery - resume from checkpoint
+            let resume_start = storage.get_checkpoint().unwrap().current_position;
+
+            // This should NOT cause double delete because:
+            // 1. resume_start = crash_at (next to process)
+            // 2. Blocks [start, crash_at) are already deleted
+            // 3. Idempotent check will skip any already-deleted blocks
+            simulate_pruning_loop(
+                &mut storage,
+                &mut checkpoint,
+                resume_start,
+                end,
+                checkpoint_interval,
+            );
+
+            // Verify all blocks were deleted exactly once
+            storage.verify_all_deleted(start, end);
+        }
+    }
+
+    /// Test crash at arbitrary positions (not just checkpoint boundaries).
+    ///
+    /// This tests the scenario where a crash occurs BETWEEN checkpoint updates,
+    /// which is the critical case that requires idempotent deletion.
+    #[test]
+    fn test_crash_between_checkpoints_no_double_delete() {
+        let start = 0u64;
+        let end = 50u64;
+        let checkpoint_interval = 10u64;
+
+        // Test crash at positions that are NOT checkpoint boundaries
+        // e.g., crash at 15, 25, 35 (between checkpoints at 10, 20, 30, 40)
+        for crash_at in [15u64, 25, 35, 45] {
+            // Phase 1: Initial pruning run
+            let mut storage = StrictMockStorage::new(start, end);
+            let mut checkpoint = PruningCheckpoint::new(start, end);
+
+            // Delete blocks [start, crash_at)
+            for topo in start..crash_at {
+                storage.delete_block_at_topoheight(topo);
+
+                // Update checkpoint at intervals
+                if (topo - start) % checkpoint_interval == 0 && topo > start {
+                    checkpoint.update_position(topo + 1);
+                    storage.set_checkpoint(&checkpoint);
+                }
+            }
+
+            // At crash_at = 15:
+            // - Blocks [0, 15) are deleted
+            // - Last checkpoint was at topo=10, saved position=11
+            // - Checkpoint.current_position = 11
+
+            // Phase 2: Crash recovery
+            // Resume from last checkpoint position (e.g., 11)
+            let resume_start = storage
+                .get_checkpoint()
+                .map(|c| c.current_position)
+                .unwrap_or(start);
+
+            // Resume should process [11, 50), but blocks [11, 15) are already deleted
+            // The idempotent check should skip them
+            simulate_pruning_loop(
+                &mut storage,
+                &mut checkpoint,
+                resume_start,
+                end,
+                checkpoint_interval,
+            );
+
+            // Verify all blocks were deleted exactly once
+            storage.verify_all_deleted(start, end);
+        }
+    }
+
+    /// Test multiple sequential crash-recovery cycles.
+    #[test]
+    fn test_multiple_crash_recovery_cycles() {
+        let start = 0u64;
+        let end = 100u64;
+        let checkpoint_interval = 10u64;
+
+        let mut storage = StrictMockStorage::new(start, end);
+        let mut checkpoint = PruningCheckpoint::new(start, end);
+
+        // Simulate: crash at 25, resume, crash at 55, resume, finish
+        let crash_points = [25u64, 55];
+        let mut current_start = start;
+
+        for crash_at in crash_points {
+            // Prune until crash
+            for topo in current_start..crash_at {
+                if !storage.has_hash_at_topoheight(topo) {
+                    continue;
+                }
+                storage.delete_block_at_topoheight(topo);
+
+                if (topo - start) % checkpoint_interval == 0 && topo > start {
+                    checkpoint.update_position(topo + 1);
+                    storage.set_checkpoint(&checkpoint);
+                }
+            }
+
+            // Resume from checkpoint
+            current_start = storage
+                .get_checkpoint()
+                .map(|c| c.current_position)
+                .unwrap_or(current_start);
+        }
+
+        // Final run to completion
+        simulate_pruning_loop(
+            &mut storage,
+            &mut checkpoint,
+            current_start,
+            end,
+            checkpoint_interval,
+        );
+
+        // Verify no double deletes occurred
+        storage.verify_all_deleted(start, end);
+    }
 }
