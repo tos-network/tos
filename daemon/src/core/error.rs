@@ -298,6 +298,16 @@ pub enum BlockchainError {
     InvalidBitsField(Hash, u32, u32),
     #[error("Block {} has invalid daa_score: expected {}, got {}", _0, _1, _2)]
     InvalidDaaScore(Hash, u64, u64),
+    #[error("Block {} has invalid pruning_point: expected {}, got {}", _0, _1, _2)]
+    InvalidPruningPoint(Hash, Hash, Hash),
+    #[error("Block {} has invalid accepted_id_merkle_root: expected zero while feature is inactive, got {}", _0, _1)]
+    InvalidAcceptedIdMerkleRoot(Hash, Hash),
+    #[error(
+        "Block {} has invalid utxo_commitment: expected zero while feature is inactive, got {}",
+        _0,
+        _1
+    )]
+    InvalidUtxoCommitment(Hash, Hash),
     #[error(transparent)]
     ErrorStd(#[from] std::io::Error),
     #[error(transparent)]

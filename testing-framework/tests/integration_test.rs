@@ -35,7 +35,7 @@ fn test_framework_version() {
     // Verify version constants are accessible
     use tos_testing_framework::{FRAMEWORK_VERSION, VERSION};
 
-    assert_eq!(VERSION, "0.1.0");
+    assert_eq!(VERSION, "0.1.2");
     assert_eq!(FRAMEWORK_VERSION, "TOS Testing Framework V3.0");
 }
 
@@ -75,6 +75,5 @@ fn test_chaos_feature_enabled() {
 #[test]
 fn test_chaos_feature_disabled() {
     // This test only compiles if chaos feature is disabled
-    // Verify the default feature set is reasonable
-    assert!(true, "Default features should be minimal");
+    // The fact that this test runs verifies default features are minimal
 }

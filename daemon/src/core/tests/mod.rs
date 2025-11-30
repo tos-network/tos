@@ -36,3 +36,6 @@ mod ghostdag_blue_calculations_tests;
 
 #[cfg(test)]
 mod ghostdag_execution_tests;
+
+#[cfg(test)]
+mod pruning_point_tests;

@@ -275,6 +275,16 @@ impl BlockHeader {
         &self.pruning_point
     }
 
+    /// Get accepted ID merkle root
+    pub fn get_accepted_id_merkle_root(&self) -> &Hash {
+        &self.accepted_id_merkle_root
+    }
+
+    /// Get UTXO commitment
+    pub fn get_utxo_commitment(&self) -> &Hash {
+        &self.utxo_commitment
+    }
+
     /// Build the header work (immutable part in mining process)
     pub fn get_work(&self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::with_capacity(HEADER_WORK_SIZE);

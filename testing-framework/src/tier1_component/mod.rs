@@ -31,6 +31,6 @@ mod blockchain;
 mod builder;
 
 pub use blockchain::{
-    AccountState, BlockchainCounters, TestBlock, TestBlockchain, TestTransaction,
+    AccountState, BlockchainCounters, TestBlock, TestBlockchain, TestTransaction, PRUNING_DEPTH,
 };
 pub use builder::TestBlockchainBuilder;

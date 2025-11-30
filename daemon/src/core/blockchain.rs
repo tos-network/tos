@@ -18,6 +18,7 @@ use crate::{
         MAX_ORPHANED_TRANSACTIONS_NONZERO,
         MILLIS_PER_SECOND,
         PRUNE_SAFETY_LIMIT,
+        PRUNING_DEPTH,
         SIDE_BLOCK_REWARD_MAX_BLOCKS,
         SIDE_BLOCK_REWARD_MIN_PERCENT,
         SIDE_BLOCK_REWARD_PERCENT,
@@ -2126,6 +2127,65 @@ impl<S: Storage> Blockchain<S> {
 
     // Get difficulty at tips
     // If tips is empty, returns genesis difficulty
+    /// Calculate the pruning point for a new block
+    ///
+    /// The pruning point is a block that is PRUNING_DEPTH (200 blocks @ 1 BPS) behind
+    /// the current block. This allows nodes to safely delete historical data before
+    /// the pruning point.
+    ///
+    /// # Algorithm
+    ///
+    /// Starting from the selected_parent, walk back along the selected_parent chain
+    /// PRUNING_DEPTH steps. If we reach genesis before that, return genesis.
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - Storage provider for reading block data
+    /// * `selected_parent` - The selected parent of the new block
+    /// * `blue_score` - The blue_score of the new block
+    ///
+    /// # Returns
+    ///
+    /// The hash of the pruning point block
+    pub async fn calc_pruning_point<P>(
+        &self,
+        storage: &P,
+        selected_parent: &Hash,
+        blue_score: u64,
+    ) -> Result<Hash, BlockchainError>
+    where
+        P: DifficultyProvider + GhostdagDataProvider,
+    {
+        // Get genesis hash for this network
+        let genesis_hash = get_genesis_block_hash(&self.network)
+            .cloned()
+            .unwrap_or_else(|| Hash::new([0u8; 32]));
+
+        // If blue_score is less than PRUNING_DEPTH, pruning point is genesis
+        if blue_score < PRUNING_DEPTH {
+            return Ok(genesis_hash);
+        }
+
+        // Walk back PRUNING_DEPTH steps along the selected_parent chain
+        let mut current = selected_parent.clone();
+        let mut steps = 0u64;
+
+        while steps < PRUNING_DEPTH {
+            // Get the selected parent of current block
+            let parent = storage.get_ghostdag_selected_parent(&current).await?;
+
+            // If we reached genesis, return it
+            if parent == genesis_hash {
+                return Ok(genesis_hash);
+            }
+
+            current = parent;
+            steps += 1;
+        }
+
+        Ok(current)
+    }
+
     // Find the best tip (highest blue_work via GHOSTDAG), then its difficulty, timestamp and its own tips
     // Same for its parent, then calculate the difficulty between the two timestamps
     // For Block C, take the timestamp and difficulty from parent block B, and then from parent of B, take the timestamp
@@ -2846,14 +2906,22 @@ impl<S: Storage> Blockchain<S> {
         block.daa_score = ghostdag_data.daa_score;
         block.bits = bits;
 
+        // Calculate and set the pruning point
+        // The pruning point is PRUNING_DEPTH blocks behind the current block
+        let pruning_point = self
+            .calc_pruning_point(storage, &ghostdag_data.selected_parent, blue_score)
+            .await?;
+        block.pruning_point = pruning_point.clone();
+
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Block template created with {} parents, blue_score: {}, blue_work: {}, daa_score: {}, bits: {}",
+                "Block template created with {} parents, blue_score: {}, blue_work: {}, daa_score: {}, bits: {}, pruning_point: {}",
                 block.get_parents().len(),
                 blue_score,
                 ghostdag_data.blue_work,
                 ghostdag_data.daa_score,
-                bits
+                bits,
+                pruning_point
             );
         }
 
@@ -3576,6 +3644,66 @@ impl<S: Storage> Blockchain<S> {
                     actual_bits,
                 ));
             }
+        }
+
+        // SECURITY FIX: Validate commitment fields
+        // - pruning_point: Validated against calculated value
+        // - accepted_id_merkle_root: Reserved for future use (must be zero)
+        // - utxo_commitment: Reserved for future use (must be zero)
+        let header = block.get_header();
+
+        // Validate pruning_point by recalculating it
+        let expected_pruning_point = self
+            .calc_pruning_point(
+                &*storage,
+                &ghostdag_data.selected_parent,
+                block.get_blue_score(),
+            )
+            .await?;
+
+        if *header.get_pruning_point() != expected_pruning_point {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has invalid pruning_point: expected {}, got {}",
+                    block_hash,
+                    expected_pruning_point,
+                    header.get_pruning_point()
+                );
+            }
+            return Err(BlockchainError::InvalidPruningPoint(
+                block_hash.into_owned(),
+                expected_pruning_point,
+                header.get_pruning_point().clone(),
+            ));
+        }
+
+        // accepted_id_merkle_root: Reserved for future use (must be zero)
+        if *header.get_accepted_id_merkle_root() != Hash::zero() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has non-zero accepted_id_merkle_root {} while feature is inactive",
+                    block_hash,
+                    header.get_accepted_id_merkle_root()
+                );
+            }
+            return Err(BlockchainError::InvalidAcceptedIdMerkleRoot(
+                block_hash.into_owned(),
+                header.get_accepted_id_merkle_root().clone(),
+            ));
+        }
+
+        if *header.get_utxo_commitment() != Hash::zero() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has non-zero utxo_commitment {} while feature is inactive",
+                    block_hash,
+                    header.get_utxo_commitment()
+                );
+            }
+            return Err(BlockchainError::InvalidUtxoCommitment(
+                block_hash.into_owned(),
+                header.get_utxo_commitment().clone(),
+            ));
         }
 
         let block_blue_score_by_tips = expected_blue_score;

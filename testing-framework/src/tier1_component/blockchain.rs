@@ -67,11 +67,20 @@ pub struct TestBlock {
     pub hash: Hash,
     /// Block height
     pub height: u64,
+    /// Blue score (DAG depth position, equals height in linear chain)
+    pub blue_score: u64,
     /// Transactions in this block
     pub transactions: Vec<TestTransaction>,
     /// Miner reward
     pub reward: u64,
+    /// Pruning point hash (GHOSTDAG commitment field)
+    pub pruning_point: Hash,
+    /// Selected parent hash (for pruning point calculation)
+    pub selected_parent: Hash,
 }
+
+/// Pruning depth constant (matches daemon/src/config.rs PRUNING_DEPTH)
+pub const PRUNING_DEPTH: u64 = 200;
 
 /// In-process test blockchain instance
 ///
@@ -114,6 +123,9 @@ pub struct TestBlockchain {
     /// Current tip height
     tip_height: AtomicU64,
 
+    /// Current blue score (same as height in linear chain)
+    blue_score: AtomicU64,
+
     /// DAG tips (hashes of current chain tips)
     tips: Arc<RwLock<Vec<Hash>>>,
 
@@ -125,6 +137,9 @@ pub struct TestBlockchain {
 
     /// Block history (for queries)
     blocks: Arc<RwLock<Vec<TestBlock>>>,
+
+    /// Genesis block hash (for pruning point calculation)
+    genesis_hash: Hash,
 }
 
 impl TestBlockchain {
@@ -158,12 +173,18 @@ impl TestBlockchain {
         // Compute initial state root
         let state_root = Self::compute_state_root(&accounts);
 
-        // Create genesis block
+        // Genesis hash (zero hash for test blockchain)
+        let genesis_hash = Hash::zero();
+
+        // Create genesis block with pruning point = genesis (itself)
         let genesis_block = TestBlock {
-            hash: Hash::zero(),
+            hash: genesis_hash.clone(),
             height: 0,
+            blue_score: 0,
             transactions: vec![],
             reward: 0,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash.clone(), // Genesis has no parent
         };
 
         Ok(Self {
@@ -172,10 +193,12 @@ impl TestBlockchain {
             accounts: Arc::new(RwLock::new(accounts)),
             counters: Arc::new(RwLock::new(counters)),
             tip_height: AtomicU64::new(0),
-            tips: Arc::new(RwLock::new(vec![Hash::zero()])),
+            blue_score: AtomicU64::new(0),
+            tips: Arc::new(RwLock::new(vec![genesis_hash.clone()])),
             state_root: Arc::new(RwLock::new(state_root)),
             mempool: Arc::new(RwLock::new(Vec::new())),
             blocks: Arc::new(RwLock::new(vec![genesis_block])),
+            genesis_hash,
         })
     }
 
@@ -332,18 +355,33 @@ impl TestBlockchain {
 
         // Create new block
         let new_height = self.tip_height.load(Ordering::SeqCst) + 1;
+        let new_blue_score = self.blue_score.load(Ordering::SeqCst) + 1;
         let block_hash = Self::compute_block_hash(new_height, &transactions);
+
+        // Get selected parent (previous tip)
+        let selected_parent = if let Some(last_block) = blocks.last() {
+            last_block.hash.clone()
+        } else {
+            self.genesis_hash.clone()
+        };
+
+        // Calculate pruning point using GHOSTDAG algorithm
+        let pruning_point = self.calc_pruning_point(&blocks, &selected_parent, new_blue_score);
 
         let block = TestBlock {
             hash: block_hash.clone(),
             height: new_height,
+            blue_score: new_blue_score,
             transactions: transactions.clone(),
             reward: BLOCK_REWARD,
+            pruning_point,
+            selected_parent,
         };
 
         // Update blockchain state
         blocks.push(block.clone());
         self.tip_height.store(new_height, Ordering::SeqCst);
+        self.blue_score.store(new_blue_score, Ordering::SeqCst);
         *self.tips.write() = vec![block_hash.clone()];
 
         // Recompute state root
@@ -351,14 +389,54 @@ impl TestBlockchain {
 
         if log::log_enabled!(log::Level::Info) {
             log::info!(
-                "Mined block {} at height {} with {} transactions",
+                "Mined block {} at height {} (blue_score={}) with {} transactions, pruning_point={}",
                 block_hash,
                 new_height,
-                transactions.len()
+                new_blue_score,
+                transactions.len(),
+                block.pruning_point
             );
         }
 
         Ok(block)
+    }
+
+    /// Calculate pruning point for a new block
+    ///
+    /// This implements the GHOSTDAG pruning point calculation:
+    /// - If blue_score < PRUNING_DEPTH, return genesis
+    /// - Otherwise, walk back PRUNING_DEPTH steps along selected_parent chain
+    fn calc_pruning_point(
+        &self,
+        blocks: &[TestBlock],
+        selected_parent: &Hash,
+        blue_score: u64,
+    ) -> Hash {
+        // If blue_score < PRUNING_DEPTH, pruning point is genesis
+        if blue_score < PRUNING_DEPTH {
+            return self.genesis_hash.clone();
+        }
+
+        // Walk back PRUNING_DEPTH steps along the selected_parent chain
+        let mut current = selected_parent.clone();
+        let mut steps = 0u64;
+
+        while steps < PRUNING_DEPTH {
+            // Find current block
+            if let Some(block) = blocks.iter().find(|b| b.hash == current) {
+                // If we reached genesis, return it
+                if block.selected_parent == self.genesis_hash {
+                    return self.genesis_hash.clone();
+                }
+                current = block.selected_parent.clone();
+                steps += 1;
+            } else {
+                // Block not found, return genesis
+                return self.genesis_hash.clone();
+            }
+        }
+
+        current
     }
 
     /// Receive a block from a peer and apply it to the blockchain
@@ -379,6 +457,7 @@ impl TestBlockchain {
     /// Returns an error if:
     /// - Block height is not sequential (must be current_height + 1)
     /// - Block is duplicate (already exists)
+    /// - Pruning point is invalid
     pub async fn receive_block(&self, block: TestBlock) -> Result<()> {
         let mut accounts = self.accounts.write();
         let mut counters = self.counters.write();
@@ -397,6 +476,17 @@ impl TestBlockchain {
         // Check for duplicate block
         if blocks.iter().any(|b| b.hash == block.hash) {
             anyhow::bail!("Duplicate block: {}", block.hash);
+        }
+
+        // Validate pruning point
+        let expected_pruning_point =
+            self.calc_pruning_point(&blocks, &block.selected_parent, block.blue_score);
+        if block.pruning_point != expected_pruning_point {
+            anyhow::bail!(
+                "Invalid pruning_point: expected {}, got {}",
+                expected_pruning_point,
+                block.pruning_point
+            );
         }
 
         // Process each transaction in the block
@@ -434,6 +524,7 @@ impl TestBlockchain {
         // Update blockchain state
         blocks.push(block.clone());
         self.tip_height.store(block.height, Ordering::SeqCst);
+        self.blue_score.store(block.blue_score, Ordering::SeqCst);
         *self.tips.write() = vec![block.hash.clone()];
 
         // Recompute state root
@@ -543,6 +634,38 @@ impl TestBlockchain {
     /// Get reference to injected clock
     pub fn clock(&self) -> Arc<dyn Clock> {
         self.clock.clone()
+    }
+
+    /// Get current blue score
+    pub async fn get_blue_score(&self) -> Result<u64> {
+        Ok(self.blue_score.load(Ordering::SeqCst))
+    }
+
+    /// Get genesis hash
+    pub fn get_genesis_hash(&self) -> &Hash {
+        &self.genesis_hash
+    }
+
+    /// Get block by hash
+    pub async fn get_block_by_hash(&self, hash: &Hash) -> Result<Option<TestBlock>> {
+        let blocks = self.blocks.read();
+        Ok(blocks.iter().find(|b| &b.hash == hash).cloned())
+    }
+
+    /// Get all blocks (for debugging/testing)
+    pub async fn get_all_blocks(&self) -> Result<Vec<TestBlock>> {
+        Ok(self.blocks.read().clone())
+    }
+
+    /// Validate a block's pruning point without applying it
+    ///
+    /// # Returns
+    ///
+    /// Ok(true) if pruning point is valid, Ok(false) if invalid
+    pub async fn validate_pruning_point(&self, block: &TestBlock) -> Result<bool> {
+        let blocks = self.blocks.read();
+        let expected = self.calc_pruning_point(&blocks, &block.selected_parent, block.blue_score);
+        Ok(block.pruning_point == expected)
     }
 
     /// Get current topoheight (same as tip_height in linear chain)
@@ -1063,11 +1186,15 @@ mod tests {
             nonce: 1,
         };
 
+        let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
+            blue_score: 1,
             transactions: vec![tx],
             reward: 50_000,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash,
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -1080,11 +1207,15 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
 
+        let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 5, // Invalid - should be 1
+            blue_score: 5,
             transactions: vec![],
             reward: 50_000,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash,
         };
 
         let result = blockchain.receive_block(block).await;
@@ -1098,11 +1229,15 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
 
+        let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
+            blue_score: 1,
             transactions: vec![],
             reward: 50_000,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash,
         };
 
         blockchain.receive_block(block.clone()).await.unwrap();
@@ -2239,11 +2374,15 @@ mod tests {
             nonce: 1,
         };
 
+        let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
+            blue_score: 1,
             transactions: vec![tx],
             reward: 50_000_000_000,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash,
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -2277,11 +2416,15 @@ mod tests {
         blockchain.submit_transaction(tx.clone()).await.unwrap();
 
         // Receive block with same transaction
+        let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
+            blue_score: 1,
             transactions: vec![tx],
             reward: 50_000_000_000,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash,
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -2481,11 +2624,15 @@ mod tests {
         let mined_block = blockchain1.mine_block().await.unwrap();
 
         // Blockchain2: receive block
+        let genesis_hash = blockchain2.get_genesis_hash().clone();
         let received_block = TestBlock {
             hash: mined_block.hash.clone(),
             height: 1,
+            blue_score: 1,
             transactions: vec![tx],
             reward: mined_block.reward,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash,
         };
         blockchain2.receive_block(received_block).await.unwrap();
 
@@ -2659,11 +2806,15 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
 
+        let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 10, // Should be 1
+            blue_score: 10,
             transactions: vec![],
             reward: 50_000_000_000,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash,
         };
 
         let result = blockchain.receive_block(block).await;
@@ -2678,11 +2829,15 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
 
+        let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
+            blue_score: 1,
             transactions: vec![],
             reward: 50_000_000_000,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash,
         };
 
         blockchain.receive_block(block.clone()).await.unwrap();
@@ -2867,11 +3022,15 @@ mod tests {
         blockchain.mine_block().await.unwrap();
 
         // Try to receive block 3 (skipping 2)
+        let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 3,
+            blue_score: 3,
             transactions: vec![],
             reward: 50_000_000_000,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash,
         };
 
         let result = blockchain.receive_block(block).await;
@@ -2934,11 +3093,15 @@ mod tests {
             nonce: 1,
         };
 
+        let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
+            blue_score: 1,
             transactions: vec![tx],
             reward: 50_000_000_000,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash,
         };
 
         // Note: Current implementation doesn't validate transactions in receive_block

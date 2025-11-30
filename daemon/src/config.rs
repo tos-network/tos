@@ -179,6 +179,12 @@ pub const PRUNE_SAFETY_LIMIT: u64 = STABLE_LIMIT * 10;
 // Tested: 128+ blocks with 100% acceptance rate, aligned with industry standards
 pub const STABLE_LIMIT: u64 = 60;
 
+// Pruning depth: number of blocks to keep before pruning point
+// TOS @ 1 BPS: 200 blocks (~200 seconds / ~3.3 minutes)
+// Formula: finality_depth (100) * 2 = 200
+// This ensures all finalized blocks are kept with a safe margin
+pub const PRUNING_DEPTH: u64 = 200;
+
 // Emission rules
 // 15% (6 months), 10% (6 months), 5% per block going to dev address
 // NOTE: The explained emission above was the expected one
