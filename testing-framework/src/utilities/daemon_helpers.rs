@@ -11,13 +11,13 @@
 
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tos_common::{
     account::{VersionedBalance, VersionedNonce},
     asset::{AssetData, VersionedAssetData},
     config::{COIN_DECIMALS, TOS_ASSET},
     crypto::{elgamal::CompressedPublicKey, KeyPair},
     network::Network,
+    tokio::sync::RwLock,
     versioned_type::Versioned,
 };
 use tos_daemon::core::{

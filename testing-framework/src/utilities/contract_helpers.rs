@@ -12,11 +12,11 @@
 
 use anyhow::{Context, Result};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tos_common::{
     block::TopoHeight,
     contract::ContractStorage,
     crypto::{Hash, KeyPair},
+    tokio::sync::RwLock,
 };
 use tos_daemon::{
     core::{error::BlockchainError, storage::rocksdb::RocksStorage},
