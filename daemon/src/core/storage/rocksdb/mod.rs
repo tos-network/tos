@@ -643,11 +643,25 @@ impl Storage for RocksStorage {
             .load_optional_from_disk(Column::BlockTransactions, hash.as_bytes())?
             .unwrap_or_default();
 
-        // Load each transaction to return
+        // Load each transaction to return, then delete it from storage
         let mut txs = Vec::with_capacity(tx_hashes.len());
-        for tx_hash in tx_hashes {
-            let tx = self.get_transaction(&tx_hash).await?;
-            txs.push((tx_hash, tx));
+        for tx_hash in &tx_hashes {
+            let tx = self.get_transaction(tx_hash).await?;
+            txs.push((tx_hash.clone(), tx));
+        }
+
+        // PRUNING FIX: Actually delete transaction data from Column::Transactions
+        // Previously, we only deleted the BlockTransactions mapping but left
+        // the transactions themselves in storage, causing disk bloat.
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "deleting {} transactions for block {}",
+                tx_hashes.len(),
+                hash
+            );
+        }
+        for tx_hash in &tx_hashes {
+            self.remove_from_disk(Column::Transactions, tx_hash)?;
         }
 
         // Delete the block → transactions mapping

@@ -273,7 +273,7 @@ impl BlockchainTestHarness {
         // Run GHOSTDAG algorithm
         let ghostdag_data = self
             .ghostdag
-            .ghostdag(&self.storage, &[self.current_tip.clone()])
+            .ghostdag(&self.storage, std::slice::from_ref(&self.current_tip))
             .await?;
 
         // Calculate difficulty

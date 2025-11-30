@@ -14,6 +14,9 @@
 // Usage:
 //   cargo run --bin tx_generator -- --count 50 --daemon http://127.0.0.1:8080
 
+// Allow disallowed methods in this test tool binary
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use log::{debug, error, info, warn};

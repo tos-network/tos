@@ -46,6 +46,8 @@ pub(super) const BLOCKS_EXECUTION_ORDER_COUNT: &[u8; 4] = b"EBLK";
 // AI Mining state keys
 pub(super) const AI_MINING_STATE_TOPOHEIGHT: &[u8; 4] = b"AIMT";
 pub(super) const CONTRACTS_COUNT: &[u8; 4] = b"CCON";
+// Pruning checkpoint for crash recovery
+pub(super) const PRUNING_CHECKPOINT: &[u8; 4] = b"PRCK";
 // Reserved for future database versioning/migration functionality
 #[allow(dead_code)]
 pub(super) const DB_VERSION: &[u8; 4] = b"VRSN";
@@ -921,9 +923,27 @@ impl Storage for SledStorage {
 
         // Load each transaction to return
         let mut txs = Vec::with_capacity(tx_hashes.len());
-        for tx_hash in tx_hashes {
-            let tx = self.get_transaction(&tx_hash).await?;
-            txs.push((tx_hash, tx));
+        for tx_hash in &tx_hashes {
+            let tx = self.get_transaction(tx_hash).await?;
+            txs.push((tx_hash.clone(), tx));
+        }
+
+        // PRUNING FIX: Actually delete transaction data from transactions tree
+        // Previously, we only deleted the BlockTransactions mapping but left
+        // the transactions themselves in storage, causing disk bloat.
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "deleting {} transactions for block {}",
+                tx_hashes.len(),
+                hash
+            );
+        }
+        for tx_hash in &tx_hashes {
+            Self::remove_from_disk_without_reading(
+                self.snapshot.as_mut(),
+                &self.transactions,
+                tx_hash.as_bytes(),
+            )?;
         }
 
         // Delete the block → transactions mapping

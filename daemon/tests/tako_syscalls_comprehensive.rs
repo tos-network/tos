@@ -133,8 +133,7 @@ impl ContractStorage for TestProvider {
         let value = self
             .storage
             .get(&(contract.clone(), key_bytes))
-            .map(|v| bincode::deserialize(v).ok())
-            .flatten();
+            .and_then(|v| bincode::deserialize(v).ok());
         Ok(value.map(|v| (self.block_height, Some(v))))
     }
 
