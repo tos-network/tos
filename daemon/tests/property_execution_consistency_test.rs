@@ -5,6 +5,9 @@
 //!
 //! Security Audit Reference: F-04 - Parallel execution path consistency
 
+#![allow(dead_code)]
+#![allow(clippy::disallowed_methods)]
+
 use proptest::prelude::*;
 use std::collections::HashMap;
 
@@ -40,10 +43,9 @@ impl TestExecutor {
     fn with_accounts(accounts: Vec<(u64, u64, u64)>) -> Self {
         let mut executor = Self::new();
         for (id, balance, nonce) in accounts {
-            executor.accounts.insert(
-                id,
-                AccountState { balance, nonce },
-            );
+            executor
+                .accounts
+                .insert(id, AccountState { balance, nonce });
         }
         executor
     }
