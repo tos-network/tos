@@ -496,7 +496,7 @@ mod comprehensive_tests {
 
         for diff in difficulties {
             let d = Difficulty::from(diff);
-            let work = calc_work_from_difficulty(&d);
+            let work = calc_work_from_difficulty(&d).unwrap();
             assert!(work > BlueWorkType::zero());
         }
     }
@@ -507,8 +507,8 @@ mod comprehensive_tests {
         let low_diff = Difficulty::from(100u64);
         let high_diff = Difficulty::from(1000u64);
 
-        let low_work = calc_work_from_difficulty(&low_diff);
-        let high_work = calc_work_from_difficulty(&high_diff);
+        let low_work = calc_work_from_difficulty(&low_diff).unwrap();
+        let high_work = calc_work_from_difficulty(&high_diff).unwrap();
 
         assert!(high_work > low_work);
     }

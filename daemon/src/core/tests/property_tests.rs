@@ -179,7 +179,7 @@ mod property_tests {
         let mut works = vec![];
         for &diff_val in &difficulties {
             let difficulty = Difficulty::from(diff_val);
-            let work = calc_work_from_difficulty(&difficulty);
+            let work = calc_work_from_difficulty(&difficulty).unwrap();
             works.push((diff_val, work));
         }
 
@@ -198,7 +198,7 @@ mod property_tests {
 
         for diff_val in test_cases {
             let difficulty = Difficulty::from(diff_val);
-            let work = calc_work_from_difficulty(&difficulty);
+            let work = calc_work_from_difficulty(&difficulty).unwrap();
 
             assert!(
                 work > BlueWorkType::zero(),
@@ -531,8 +531,8 @@ mod property_tests {
         // Property: Same difficulty always produces same work
         let difficulty = Difficulty::from(1000u64);
 
-        let work1 = calc_work_from_difficulty(&difficulty);
-        let work2 = calc_work_from_difficulty(&difficulty);
+        let work1 = calc_work_from_difficulty(&difficulty).unwrap();
+        let work2 = calc_work_from_difficulty(&difficulty).unwrap();
 
         assert_eq!(work1, work2, "Equal difficulties should produce equal work");
     }
@@ -546,9 +546,9 @@ mod property_tests {
             let difficulty = Difficulty::from(diff_val);
 
             // Calculate multiple times
-            let work1 = calc_work_from_difficulty(&difficulty);
-            let work2 = calc_work_from_difficulty(&difficulty);
-            let work3 = calc_work_from_difficulty(&difficulty);
+            let work1 = calc_work_from_difficulty(&difficulty).unwrap();
+            let work2 = calc_work_from_difficulty(&difficulty).unwrap();
+            let work3 = calc_work_from_difficulty(&difficulty).unwrap();
 
             assert_eq!(work1, work2, "Work calculation should be deterministic");
             assert_eq!(work2, work3, "Work calculation should be deterministic");

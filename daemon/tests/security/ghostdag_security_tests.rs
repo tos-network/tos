@@ -254,19 +254,22 @@ async fn test_v05_parent_validation_handles_empty_parents() {
 
 /// V-06: Test blue work calculation handles zero difficulty
 ///
-/// Verifies that zero difficulty doesn't cause division by zero panic.
+/// Verifies that zero difficulty returns an error instead of panicking.
 #[test]
 fn test_v06_blue_work_zero_difficulty_protected() {
     // SECURITY FIX LOCATION: daemon/src/core/ghostdag/mod.rs:30-56
-    // calc_work_from_difficulty checks for zero and returns zero work
+    // calc_work_from_difficulty checks for zero and returns ZeroDifficulty error
 
     use tos_daemon::core::ghostdag::calc_work_from_difficulty;
+    use tos_daemon::core::error::BlockchainError;
 
     let zero_diff = Difficulty::from(0u64);
-    let zero_work = calc_work_from_difficulty(&zero_diff);
+    let result = calc_work_from_difficulty(&zero_diff);
 
-    // Should return zero work, not panic
-    assert_eq!(zero_work, U256::zero(), "Zero difficulty should produce zero work");
+    // Should return ZeroDifficulty error, not panic
+    assert!(result.is_err(), "Zero difficulty should return an error");
+    assert!(matches!(result, Err(BlockchainError::ZeroDifficulty)),
+        "Zero difficulty should return BlockchainError::ZeroDifficulty");
 }
 
 /// V-06: Test blue work calculation with valid difficulties
@@ -280,8 +283,8 @@ fn test_v06_blue_work_calculation_valid() {
     let diff_low = Difficulty::from(100u64);
     let diff_high = Difficulty::from(1000u64);
 
-    let work_low = calc_work_from_difficulty(&diff_low);
-    let work_high = calc_work_from_difficulty(&diff_high);
+    let work_low = calc_work_from_difficulty(&diff_low).unwrap();
+    let work_high = calc_work_from_difficulty(&diff_high).unwrap();
 
     // Higher difficulty should produce higher work
     assert!(work_high > work_low, "Higher difficulty should produce higher work");

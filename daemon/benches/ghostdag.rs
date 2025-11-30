@@ -121,7 +121,7 @@ fn hash_from_index(index: u64) -> Hash {
 fn create_linear_chain(length: usize, k: KType) -> MockStorage {
     let mut storage = MockStorage::new();
     let base_difficulty = Difficulty::from(1000u64);
-    let base_work = calc_work_from_difficulty(&base_difficulty);
+    let base_work = calc_work_from_difficulty(&base_difficulty).unwrap();
 
     // Genesis block
     let genesis_hash = hash_from_index(0);
@@ -182,7 +182,7 @@ fn create_linear_chain(length: usize, k: KType) -> MockStorage {
 fn create_complex_dag(blocks: usize, avg_parents: usize, k: KType) -> MockStorage {
     let mut storage = MockStorage::new();
     let base_difficulty = Difficulty::from(1000u64);
-    let base_work = calc_work_from_difficulty(&base_difficulty);
+    let base_work = calc_work_from_difficulty(&base_difficulty).unwrap();
 
     // Genesis
     let genesis_hash = hash_from_index(0);
@@ -409,7 +409,7 @@ fn bench_blue_work_calculation(c: &mut Criterion) {
             &diff,
             |b, difficulty| {
                 b.iter(|| {
-                    let work = calc_work_from_difficulty(black_box(difficulty));
+                    let work = calc_work_from_difficulty(black_box(difficulty)).unwrap();
                     black_box(work)
                 });
             },

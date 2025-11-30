@@ -26,6 +26,10 @@ pub enum ReaderError {
     TryFromSliceError(#[from] TryFromSliceError),
     #[error(transparent)]
     Any(#[from] anyhow::Error),
+    // SECURITY FIX (Codex Audit): Error variant for serialization validation failures
+    // This allows serialization to be fallible in release builds
+    #[error("Serialization validation failed: {0}")]
+    SerializationError(String),
 }
 
 // Reader help us to read safely from bytes

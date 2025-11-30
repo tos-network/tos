@@ -118,7 +118,7 @@ fn create_mock_block(index: u64, parents: Vec<Hash>, tx_count: usize) -> Block {
 fn create_chain_with_blocks(length: usize, tx_per_block: usize) -> BlockProcessingStorage {
     let mut storage = BlockProcessingStorage::new();
     let base_difficulty = Difficulty::from(1000u64);
-    let base_work = calc_work_from_difficulty(&base_difficulty);
+    let base_work = calc_work_from_difficulty(&base_difficulty).unwrap();
 
     // Genesis
     let genesis_hash = hash_from_index(0);
@@ -197,7 +197,7 @@ fn bench_block_addition(c: &mut Criterion) {
                     let block = create_mock_block(1, vec![parent.clone()], tx_count);
                     let data = TosGhostdagData::new(
                         1,
-                        calc_work_from_difficulty(&base_difficulty),
+                        calc_work_from_difficulty(&base_difficulty).unwrap(),
                         parent.clone(),
                         vec![parent],
                         Vec::new(),

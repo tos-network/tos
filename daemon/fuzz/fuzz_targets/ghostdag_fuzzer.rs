@@ -71,8 +71,13 @@ fuzz_target!(|data: &[u8]| {
         // Test 1: Work calculation should never panic
         for &diff in &input.difficulties {
             let difficulty = Difficulty::from(diff);
-            let _ = calc_work_from_difficulty(&difficulty);
-            // Should complete without panic
+            // Should complete without panic - returns Result now
+            if diff > 0 {
+                let _ = calc_work_from_difficulty(&difficulty).unwrap();
+            } else {
+                // Zero difficulty should return error
+                assert!(calc_work_from_difficulty(&difficulty).is_err());
+            }
         }
 
         // Test 2: Blue score addition should use checked arithmetic
@@ -101,18 +106,18 @@ fuzz_target!(|data: &[u8]| {
             // If overflow, checked_add returns None (no panic)
         }
 
-        // Test 4: Zero difficulty should not cause division by zero
+        // Test 4: Zero difficulty should return error
         let zero_difficulty = Difficulty::from(0u64);
-        let zero_work = calc_work_from_difficulty(&zero_difficulty);
-        // Should return max work, not panic
-        assert_eq!(zero_work, BlueWorkType::max_value());
+        let zero_result = calc_work_from_difficulty(&zero_difficulty);
+        // Should return error, not panic
+        assert!(zero_result.is_err(), "Zero difficulty should return an error");
 
         // Test 5: Work calculation consistency
         for &diff in &input.difficulties {
             if diff > 0 {
                 let difficulty = Difficulty::from(diff);
-                let work1 = calc_work_from_difficulty(&difficulty);
-                let work2 = calc_work_from_difficulty(&difficulty);
+                let work1 = calc_work_from_difficulty(&difficulty).unwrap();
+                let work2 = calc_work_from_difficulty(&difficulty).unwrap();
                 // Deterministic calculation
                 assert_eq!(work1, work2);
             }

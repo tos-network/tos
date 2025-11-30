@@ -285,6 +285,44 @@ impl BlockHeader {
         &self.utxo_commitment
     }
 
+    /// Validate parent levels for serialization safety
+    ///
+    /// SECURITY FIX (Codex Audit): This method validates that parent levels don't
+    /// exceed serialization limits. Call this before serialization to prevent panics.
+    ///
+    /// Returns Ok(()) if valid, or an error describing the validation failure.
+    pub fn validate_parent_levels(&self) -> Result<(), &'static str> {
+        if self.parents_by_level.len() > MAX_PARENT_LEVELS {
+            return Err("Block header has too many parent levels (exceeds MAX_PARENT_LEVELS)");
+        }
+        if self.parents_by_level.len() > 255 {
+            return Err("Parent levels count exceeds u8 maximum (255)");
+        }
+        for level in &self.parents_by_level {
+            if level.len() > 255 {
+                return Err("Parent level size exceeds u8 maximum (255)");
+            }
+        }
+        Ok(())
+    }
+
+    /// Fallible serialization to bytes
+    ///
+    /// SECURITY FIX (Codex Audit): This method validates the header before serialization,
+    /// returning an error if the header is malformed. Use this in release builds where
+    /// silent corruption must be prevented.
+    ///
+    /// This is the safe alternative to `to_bytes()` which uses debug_assert! and
+    /// may silently corrupt data in release builds.
+    pub fn try_to_bytes(&self) -> Result<Vec<u8>, ReaderError> {
+        // Validate before serialization (works in both debug and release)
+        self.validate_parent_levels()
+            .map_err(|e| ReaderError::SerializationError(e.to_string()))?;
+
+        // If validation passes, proceed with normal serialization
+        Ok(self.to_bytes())
+    }
+
     /// Build the header work (immutable part in mining process)
     pub fn get_work(&self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::with_capacity(HEADER_WORK_SIZE);
@@ -386,15 +424,16 @@ impl Serializer for BlockHeader {
         self.version.write(writer);
 
         // Write parents_by_level
-        // SECURITY FIX: Validate parent levels count to prevent overflow
-        // Without this check, truncation can cause consensus splits across nodes
-        assert!(
+        // SECURITY FIX (Codex Audit): Use debug_assert! instead of assert! to prevent
+        // production panics. Validation should happen at ingress points via
+        // validate_parent_levels() method. The read() method already validates on input.
+        debug_assert!(
             self.parents_by_level.len() <= MAX_PARENT_LEVELS,
             "Block header has too many parent levels: {} > {}. This would cause byte overflow in serialization.",
             self.parents_by_level.len(),
             MAX_PARENT_LEVELS
         );
-        assert!(
+        debug_assert!(
             self.parents_by_level.len() <= 255,
             "Parent levels count {} exceeds u8 maximum (255)",
             self.parents_by_level.len()
@@ -403,7 +442,7 @@ impl Serializer for BlockHeader {
         writer.write_u8(self.parents_by_level.len() as u8);
         for level in &self.parents_by_level {
             // Also validate each level size doesn't overflow
-            assert!(
+            debug_assert!(
                 level.len() <= 255,
                 "Parent level size {} exceeds u8 maximum (255)",
                 level.len()
@@ -752,6 +791,81 @@ mod tests {
             header_utxo.hash(),
             base_hash,
             "Changing utxo_commitment must change the block hash"
+        );
+    }
+
+    /// Test validate_parent_levels() method
+    /// SECURITY FIX (Codex Audit): Ensure validation catches invalid parent levels
+    #[test]
+    fn test_validate_parent_levels() {
+        use primitive_types::U256;
+        let miner = KeyPair::new().get_public_key().compress();
+
+        // Valid header should pass validation
+        let valid_header = BlockHeader::new(
+            BlockVersion::Baseline,
+            vec![vec![Hash::zero()]],
+            100,
+            100,
+            U256::from(1000),
+            Hash::zero(),
+            1234567890,
+            0x1d00ffff,
+            [0u8; 32],
+            miner.clone(),
+            Hash::zero(),
+            Hash::zero(),
+            Hash::zero(),
+        );
+        assert!(
+            valid_header.validate_parent_levels().is_ok(),
+            "Valid header should pass validation"
+        );
+
+        // Header with too many parent levels (exceeds MAX_PARENT_LEVELS)
+        let too_many_levels: Vec<Vec<Hash>> = (0..=MAX_PARENT_LEVELS)
+            .map(|_| vec![Hash::zero()])
+            .collect();
+        let invalid_header_levels = BlockHeader::new(
+            BlockVersion::Baseline,
+            too_many_levels,
+            100,
+            100,
+            U256::from(1000),
+            Hash::zero(),
+            1234567890,
+            0x1d00ffff,
+            [0u8; 32],
+            miner.clone(),
+            Hash::zero(),
+            Hash::zero(),
+            Hash::zero(),
+        );
+        assert!(
+            invalid_header_levels.validate_parent_levels().is_err(),
+            "Header with too many levels should fail validation"
+        );
+
+        // Header with too many parents in one level (exceeds 255)
+        let too_many_parents: Vec<Hash> = (0..256).map(|_| Hash::zero()).collect();
+        let invalid_header_parents = BlockHeader::new(
+            BlockVersion::Baseline,
+            vec![too_many_parents],
+            100,
+            100,
+            U256::from(1000),
+            Hash::zero(),
+            1234567890,
+            0x1d00ffff,
+            [0u8; 32],
+            miner,
+            Hash::zero(),
+            Hash::zero(),
+            Hash::zero(),
+        );
+        assert!(
+            invalid_header_parents.validate_parent_levels().is_err(),
+            "Header with too many parents in a level should fail validation"
         );
     }
 }

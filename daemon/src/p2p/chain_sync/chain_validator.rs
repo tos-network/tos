@@ -286,6 +286,157 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             ));
         }
 
+        // SECURITY FIX (Codex Audit): Verify daa_score matches GHOSTDAG computation
+        // Without this check, an attacker could forge daa_score to manipulate difficulty
+        let expected_daa_score = ghostdag_data.daa_score;
+        if expected_daa_score != header.get_daa_score() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has daa_score {} while expected daa_score is {} (GHOSTDAG)",
+                    hash,
+                    header.get_daa_score(),
+                    expected_daa_score
+                );
+            }
+            return Err(BlockchainError::InvalidDaaScore(
+                hash,
+                expected_daa_score,
+                header.get_daa_score(),
+            ));
+        }
+
+        // SECURITY FIX (Codex Audit): Verify timestamp is valid
+        // Without this check, forged timestamps could be cached, wasting resources
+        // Timestamp must be greater than all parent timestamps
+        for parent in tips.iter() {
+            let parent_timestamp = provider.get_timestamp_for_block_hash(parent).await?;
+            if header.get_timestamp() <= parent_timestamp {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Block {} has timestamp {} <= parent {} timestamp {}",
+                        hash,
+                        header.get_timestamp(),
+                        parent,
+                        parent_timestamp
+                    );
+                }
+                return Err(BlockchainError::TimestampIsLessThanParent(
+                    header.get_timestamp(),
+                ));
+            }
+        }
+
+        // SECURITY FIX (Codex Audit): Verify bits field matches computed difficulty
+        // The difficulty returned by verify_proof_of_work is converted to bits for comparison
+        // Without this check, an attacker could forge the bits field
+        let expected_bits = tos_common::difficulty::difficulty_to_bits(&difficulty);
+        if expected_bits != header.get_bits() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has bits {} while expected bits is {}",
+                    hash,
+                    header.get_bits(),
+                    expected_bits
+                );
+            }
+            return Err(BlockchainError::InvalidBitsField(
+                hash,
+                expected_bits,
+                header.get_bits(),
+            ));
+        }
+
+        // SECURITY FIX (Codex Audit): Verify blue_work matches GHOSTDAG computation
+        // Without this check, an attacker could manipulate chain selection by forging blue_work
+        let computed_blue_work = ghostdag_data.blue_work;
+        if computed_blue_work != *header.get_blue_work() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has blue_work {} while expected blue_work is {} (GHOSTDAG)",
+                    hash,
+                    *header.get_blue_work(),
+                    computed_blue_work
+                );
+            }
+            return Err(BlockchainError::InvalidBlueWork(
+                hash,
+                computed_blue_work,
+                *header.get_blue_work(),
+            ));
+        }
+
+        // SECURITY FIX (Codex Audit): Verify pruning_point is valid
+        // If pruning_point is non-zero, it must exist in chain
+        // (full pruning point validation can be added when pruning is fully implemented)
+        if *header.get_pruning_point() != Hash::zero() {
+            // Pruning point must exist in chain
+            if !provider
+                .has_block_with_hash(header.get_pruning_point())
+                .await?
+            {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Block {} has invalid pruning_point {} (not found in chain)",
+                        hash,
+                        header.get_pruning_point()
+                    );
+                }
+                return Err(BlockchainError::InvalidPruningPoint(
+                    hash,
+                    Hash::zero(), // expected to be in chain
+                    header.get_pruning_point().clone(),
+                ));
+            }
+        }
+
+        // SECURITY FIX (Codex Audit): Verify reserved fields are zero
+        // These fields are reserved for future features (UTXO commitments, accepted ID merkle)
+        // They should be zero until those features are activated
+        if *header.get_accepted_id_merkle_root() != Hash::zero() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has non-zero accepted_id_merkle_root {} while feature is inactive",
+                    hash,
+                    header.get_accepted_id_merkle_root()
+                );
+            }
+            return Err(BlockchainError::InvalidAcceptedIdMerkleRoot(
+                hash,
+                header.get_accepted_id_merkle_root().clone(),
+            ));
+        }
+
+        if *header.get_utxo_commitment() != Hash::zero() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has non-zero utxo_commitment {} while feature is inactive",
+                    hash,
+                    header.get_utxo_commitment()
+                );
+            }
+            return Err(BlockchainError::InvalidUtxoCommitment(
+                hash,
+                header.get_utxo_commitment().clone(),
+            ));
+        }
+
+        // SECURITY FIX (Codex Audit): Verify parent-level structure
+        // TOS currently uses single-level parents (level 0 only)
+        // Multi-level parents are reserved for future features
+        if header.get_parents_by_level().len() > 1 {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has {} parent levels (multi-level not yet supported)",
+                    hash,
+                    header.get_parents_by_level().len()
+                );
+            }
+            return Err(BlockchainError::InvalidParentsLevelCount(
+                hash,
+                header.get_parents_by_level().len(),
+            ));
+        }
+
         // Use GHOSTDAG-computed blue_work for chain comparison
         let blue_work = ghostdag_data.blue_work;
 
