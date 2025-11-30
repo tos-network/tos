@@ -1110,9 +1110,18 @@ impl<S: Storage> Blockchain<S> {
                 storage.delete_ghostdag_data(&block_hash).await?;
             }
 
-            // Update checkpoint periodically for crash recovery
+            // Update checkpoint for crash recovery
             // IMPORTANT: Store topo + 1 (next to process) to avoid re-deleting on crash recovery
-            if (topo - start_topo) % CHECKPOINT_INTERVAL == 0 && topo > start_topo {
+            //
+            // CRASH RECOVERY FIX: Always update checkpoint after the FIRST deletion,
+            // then periodically every CHECKPOINT_INTERVAL blocks.
+            // This ensures that if a crash occurs during the first 99 blocks,
+            // resume_pruning_if_needed will start from the correct position.
+            let is_first_deletion = topo == start_topo;
+            let is_checkpoint_interval =
+                topo > start_topo && (topo - start_topo) % CHECKPOINT_INTERVAL == 0;
+
+            if is_first_deletion || is_checkpoint_interval {
                 checkpoint.current_position = topo + 1;
                 storage.set_pruning_checkpoint(checkpoint).await?;
 
