@@ -266,7 +266,7 @@ pub struct P2pConfig {
     #[clap(name = "disable-p2p-server", long)]
     #[serde(default)]
     pub disable: bool,
-    /// Allow fast sync mode.
+    /// [UNSAFE] Allow fast sync mode.
     ///
     /// Sync a bootstrapped chain if your local copy is outdated.
     ///
@@ -291,20 +291,22 @@ pub struct P2pConfig {
     #[clap(long)]
     #[serde(default)]
     pub i_understand_fast_sync_risks: bool,
-    /// Allow boost chain sync mode.
+    /// [EXPERIMENTAL] Allow boost chain sync mode.
     ///
     /// This will request in parallel all blocks instead of sequentially.
     ///
-    /// It is not enabled by default because it will requests several blocks before validating each previous.
+    /// It is not enabled by default because it will request several blocks before validating each previous.
+    /// This increases sync speed but also increases resource usage and may stress the network.
     #[clap(long)]
     #[serde(default)]
     pub allow_boost_sync: bool,
-    /// Allow blocks coming from priority nodes to be fast forwarded to our peers.
+    /// [ADVANCED] Allow blocks coming from priority nodes to be fast forwarded to our peers.
     ///
     /// Propagate a new block to our peers as soon as we receive it from a priority node before verifying it ourself.
     /// This reduces the time to propagate a new block to our peers.
-    /// Useful for pools operating having several nodes across the world to propagate their blocks faster.
+    /// Useful for pools operating several nodes across the world to propagate their blocks faster.
     ///
+    /// WARNING: This forwards unverified blocks. Only use with fully trusted priority nodes.
     /// By default, this is disabled.
     #[clap(long)]
     #[serde(default)]
@@ -517,13 +519,18 @@ pub struct Config {
     /// It must ends with a slash.
     #[clap(long)]
     pub dir_path: Option<String>,
-    /// Enable the simulator (skip PoW verification, generate a new block for every BLOCK_TIME).
+    /// [DEVNET ONLY] Enable the simulator (skip PoW verification, generate a new block for every BLOCK_TIME).
+    ///
+    /// WARNING: This bypasses consensus rules and is ONLY for development/testing.
     #[clap(long)]
     pub simulator: Option<Simulator>,
-    /// Skip PoW verification.
+    /// [UNSAFE - DEVNET ONLY] Skip PoW verification.
+    ///
     /// SECURITY WARNING: This is ONLY allowed on devnet. Attempting to use this
     /// on mainnet or testnet will cause the daemon to refuse to start.
     /// This prevents accidental misconfiguration that would accept invalid PoW blocks.
+    ///
+    /// Enabling this allows ANY block to be accepted regardless of proof-of-work difficulty.
     #[clap(long)]
     #[serde(default)]
     pub skip_pow_verification: bool,
@@ -532,12 +539,17 @@ pub struct Config {
     /// before the top.
     #[clap(long)]
     pub auto_prune_keep_n_blocks: Option<u64>,
-    /// Skip the TXs verification when building a block template.
+    /// [UNSAFE - DEVNET ONLY] Skip the TXs verification when building a block template.
+    ///
+    /// SECURITY WARNING: This is ONLY allowed on devnet. On mainnet/testnet, invalid
+    /// transactions could be included in block templates, causing block rejections.
     #[clap(long)]
     #[serde(default)]
     pub skip_block_template_txs_verification: bool,
-    /// Use the hexadecimal representation of the genesis block for the dev mode.
-    /// This is useful for testing and development.
+    /// [DEVNET ONLY] Use the hexadecimal representation of the genesis block for the dev mode.
+    ///
+    /// This is useful for testing and development with custom genesis blocks.
+    /// WARNING: Using a custom genesis creates an incompatible chain.
     #[clap(long)]
     pub genesis_block_hex: Option<String>,
     /// Blocks hashes checkpoints
@@ -558,9 +570,10 @@ pub struct Config {
     #[clap(long)]
     #[serde(default)]
     pub check_db_integrity: bool,
-    /// Enable the recovery mode of the daemon.
-    /// No DB integrity check or pre-computations will occurs
-    /// such as difficulty for tips, stable height, etc.
+    /// [EXPERIMENTAL] Enable the recovery mode of the daemon.
+    ///
+    /// No DB integrity check or pre-computations will occur (difficulty for tips, stable height, etc.).
+    /// Use this only when recovering from database corruption or other critical issues.
     #[clap(long)]
     #[serde(default)]
     pub recovery_mode: bool,
