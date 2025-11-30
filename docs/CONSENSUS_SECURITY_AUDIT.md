@@ -18,69 +18,55 @@ Scope: Parallel, line-by-line review of all Rust code under `tos/`, covering con
 - daemon/src/p2p/chain_sync/chain_validator.rs
 - daemon/src/p2p/chain_sync/mod.rs
 
-## Consensus file findings
+## Consensus file findings (updated)
 
 ### common/src/block/header.rs  
-- Status: ⚠️ Low  
-- Issue: `Serializer::write` uses `assert!` for parent-level and size validation. If unvalidated external input reaches serialization, the node could panic.  
-- Fix: Return an error instead of panicking, or validate parent levels/sizes at all ingress points before serialization.
+- Status: ✅ OK (mitigated)  
+- Note: Panics removed from production path. Parent-level validation is enforced at ingress; serialization uses `debug_assert!` only, and safe `validate_parent_levels`/`try_to_bytes` are available. Residual risk is low; optionally switch serialization call sites to `try_to_bytes` for maximal safety.
 
 ### common/src/block/miner.rs  
 - Status: ✅ OK  
-- Note: Miner work serialization includes all GHOSTDAG fields matching `BlockHeader::get_serialized_header`; no consensus risk observed.
+- Note: Miner work serialization matches header commitment fields.
 
 ### common/src/block/mod.rs  
-- Status: ✅ OK  
-- Note: Consensus field hashing protection matches design.
+- Status: ✅ OK
 
 ### common/src/difficulty.rs  
-- Status: ✅ OK  
-- Note: Zero difficulty is rejected in `compute_difficulty_target`; aligns with PoW checks. Should coordinate with ghostdag zero-difficulty fix.
+- Status: ✅ OK
 
 ### daemon/src/core/blockchain.rs  
 - Status: ✅ OK  
-- Note: `add_new_block` validates blue_score/blue_work/daa_score/bits/pruning_point consistently with template generation; timestamp check is admission-only.
+- Note: Full header field validation (blue_score/blue_work/daa_score/bits/pruning_point) aligns with templates.
 
 ### daemon/src/core/blockdag.rs  
-- Status: ✅ OK  
-- Note: Tip selection/sorting uses blue_work; deprecated fallback paths are annotated.
+- Status: ✅ OK
 
 ### daemon/src/core/difficulty/mod.rs & v2.rs  
-- Status: ✅ OK  
-- Note: Integer-only Kalman adjustment; no floating point; version gating consistent.
+- Status: ✅ OK
 
 ### daemon/src/core/ghostdag/mod.rs  
-- Status: ❗ High  
-- Issue: `calc_work_from_difficulty` returns `BlueWorkType::max_value()` for zero difficulty, granting “infinite” work. Any validation gap that lets bits=0 or VarUint underflow through could hijack chain selection.  
-- Fix: Reject zero difficulty outright; add a pre-check before work calculation and return an error in this case.
+- Status: ✅ OK  
+- Fix applied: Zero difficulty now returns `BlockchainError::ZeroDifficulty`; no infinite-work escalation.
 
 ### daemon/src/core/ghostdag/daa.rs  
-- Status: ⚠️ Medium  
-- Issue: `find_daa_window_blocks` BFS has no upper bound; a wide DAG mergeset can inflate memory/IO during validation.  
-- Fix: Impose a hard cap (e.g., DAA_WINDOW_SIZE or k-bound) on collected blocks and fail on overflow; consider reachability-based pruning.
+- Status: ✅ OK  
+- Fix applied: DAA window traversal bounded by `MAX_DAA_WINDOW_BLOCKS` with explicit error.
 
 ### daemon/src/core/ghostdag/types.rs  
-- Status: ✅ OK  
-- Note: Data structures and serialization use Arc/COW; no overflow/panic path noted.
+- Status: ✅ OK
 
 ### daemon/src/core/mining/template.rs  
-- Status: ✅ OK  
-- Note: Templates fill blue_score/blue_work/daa_score/bits/pruning_point; tips filtered by blue_work; prevents miner-crafted consensus fields.
+- Status: ✅ OK
 
 ### daemon/src/p2p/chain_sync/chain_validator.rs  
-- Status: ⚠️ Medium  
-- Issue: Chain sync validates PoW and blue_score only. Forged bits/blue_work/daa_score/pruning_point/timestamps/parent-levels could be cached as “heavier” headers, causing wasted CPU/bandwidth until full validation rejects them.  
-- Fix: Reuse the same header-field checks as `add_new_block` during sync (bits, blue_work, daa_score, pruning_point, parent level count, timestamp).
+- Status: ✅ OK  
+- Fix applied: Chain sync now checks bits vs difficulty, blue_work vs ghostdag, daa_score, parent timestamp ordering, pruning_point presence, reserved roots zero, and parent-level count.
 
 ### daemon/src/p2p/chain_sync/mod.rs  
-- Status: ✅ OK  
-- Note: Sync selection uses blue_work; no additional consensus risk observed.
+- Status: ✅ OK
 
 ## Conclusions and prioritized fixes
-1) High: Reject zero difficulty in `ghostdag::calc_work_from_difficulty` and pre-check `difficulty > 0` before PoW work calculation.  
-2) Medium: Add full header-field validation in chain-sync (`chain_validator`) to pre-reject forged heavy headers.  
-3) Medium: Cap DAA window traversal to avoid wide-DAG DoS in `find_daa_window_blocks`.  
-4) Low: Replace `assert!` in `BlockHeader::Serializer::write` with fallible validation to avoid panic surfaces.
+No critical open items remain from the previous round. Optional hardening: replace remaining production `to_bytes()` call sites with `try_to_bytes()` or ensure `validate_parent_levels()` is always called before serialization to eliminate residual low-risk surfaces.
 
 ## Non-consensus / peripheral components (wallet, RPC, contract tooling)
 - Wallet (`wallet/src/**/*`, `wallet/tests/**/*`, `wallet/precomputed_tables/**/*`): Reviewed line-by-line; no additional security findings beyond standard client-side hardening.  
