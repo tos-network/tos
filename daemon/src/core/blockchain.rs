@@ -441,6 +441,31 @@ impl<S: Storage> Blockchain<S> {
                     .delete_versioned_data_above_topoheight(topoheight)
                     .await?;
             }
+
+            // Check and rebuild reachability data if needed
+            // This recovers from database inconsistencies, out-of-order sync, or version upgrades
+            let genesis_hash = get_genesis_block_hash(&network)
+                .cloned()
+                .unwrap_or_else(|| Hash::new([0u8; 32]));
+
+            if crate::core::reachability::needs_rebuild(&*storage, &genesis_hash).await? {
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Reachability data incomplete - starting rebuild...");
+                }
+                let stats = crate::core::reachability::rebuild_missing_reachability(
+                    &mut *storage,
+                    &genesis_hash,
+                )
+                .await?;
+                if log::log_enabled!(log::Level::Info) {
+                    info!(
+                        "Reachability rebuild complete: {} blocks checked, {} rebuilt, {} skipped",
+                        stats.blocks_checked, stats.blocks_rebuilt, stats.blocks_skipped
+                    );
+                }
+            } else if log::log_enabled!(log::Level::Debug) {
+                debug!("Reachability data is complete, no rebuild needed");
+            }
         } else {
             warn!("Recovery mode enabled, required pre-computed data have been skipped.");
         }

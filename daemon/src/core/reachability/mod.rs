@@ -5,6 +5,7 @@
 // interval concentration, etc.) will be added in later milestones.
 
 mod interval;
+mod rebuild;
 mod reindex;
 mod store;
 mod tree;
@@ -16,6 +17,7 @@ mod tests_boundary;
 mod tests_comprehensive;
 
 pub use interval::Interval;
+pub use rebuild::{needs_rebuild, rebuild_missing_reachability, RebuildStats};
 pub use store::ReachabilityData;
 
 use crate::core::error::BlockchainError;
