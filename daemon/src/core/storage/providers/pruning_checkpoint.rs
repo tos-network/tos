@@ -332,4 +332,177 @@ mod tests {
             assert_eq!(decoded, phase);
         }
     }
+
+    // ============================================================================
+    // Checkpoint Semantic Invariant Tests
+    // ============================================================================
+
+    /// Test that current_position represents the NEXT topoheight to process.
+    ///
+    /// Invariant: After processing topoheight T, current_position should be T+1.
+    /// This ensures crash recovery never re-deletes already pruned blocks.
+    #[test]
+    fn test_checkpoint_position_invariant_initial() {
+        let checkpoint = PruningCheckpoint::new(100, 500);
+
+        // Invariant: current_position starts at start_topoheight (the first to process)
+        assert_eq!(
+            checkpoint.current_position, checkpoint.start_topoheight,
+            "current_position should equal start_topoheight on creation"
+        );
+    }
+
+    /// Test that after updating position to simulate processing,
+    /// the checkpoint stores the next-to-process value.
+    #[test]
+    fn test_checkpoint_position_after_processing() {
+        let mut checkpoint = PruningCheckpoint::new(0, 100);
+
+        // Simulate processing topoheights 0..50
+        // After processing topo 49, the next to process is 50
+        checkpoint.update_position(50);
+
+        assert_eq!(
+            checkpoint.current_position, 50,
+            "After processing 0..50, current_position should be 50 (next to process)"
+        );
+    }
+
+    /// Test that checkpoint semantics are correct at boundaries.
+    #[test]
+    fn test_checkpoint_boundary_semantics() {
+        let start = 100;
+        let end = 200;
+        let mut checkpoint = PruningCheckpoint::new(start, end);
+
+        // At start: next to process is start
+        assert_eq!(checkpoint.current_position, start);
+
+        // After processing everything: next to process is end
+        checkpoint.update_position(end);
+        assert_eq!(checkpoint.current_position, end);
+
+        // When current_position == target_topoheight, all blocks in [start, end) are processed
+        // So starting from current_position would give empty range [end, end)
+        let resume_range = checkpoint.current_position..checkpoint.target_topoheight;
+        assert!(
+            resume_range.is_empty(),
+            "Resume range should be empty when current_position == target_topoheight"
+        );
+    }
+
+    // ============================================================================
+    // Crash Recovery Simulation Tests
+    // ============================================================================
+
+    /// Simulates crash recovery scenarios to verify checkpoint semantics.
+    ///
+    /// The test verifies that after a "crash" at any checkpoint position,
+    /// resuming from the saved checkpoint would not cause double processing.
+    #[test]
+    fn test_crash_recovery_no_double_processing() {
+        let start = 0u64;
+        let end = 100u64;
+        const CHECKPOINT_INTERVAL: u64 = 10;
+
+        // Simulate processing with checkpoint updates at each interval
+        // Track which topoheights would be processed after a crash at each point
+        for crash_point in (start..end).step_by(CHECKPOINT_INTERVAL as usize) {
+            if crash_point == start {
+                continue; // Skip the first point (no processing done yet)
+            }
+
+            // Simulate: we've processed [start, crash_point) and saved checkpoint
+            // The checkpoint should store crash_point as current_position
+            // (meaning next to process is crash_point, NOT crash_point-1)
+            let mut checkpoint = PruningCheckpoint::new(start, end);
+            checkpoint.update_position(crash_point);
+
+            // After crash, resuming should process [crash_point, end)
+            let resume_start = checkpoint.current_position;
+            let resume_end = checkpoint.target_topoheight;
+
+            // Verify: resume_start should be crash_point
+            assert_eq!(
+                resume_start, crash_point,
+                "Resume should start from crash_point, not re-process already done work"
+            );
+
+            // Verify: we're not re-processing any block in [start, crash_point)
+            for already_processed in start..crash_point {
+                assert!(
+                    already_processed < resume_start,
+                    "Topoheight {} was already processed but would be re-processed after crash",
+                    already_processed
+                );
+            }
+
+            // Verify: all remaining blocks in [crash_point, end) will be processed
+            for remaining in crash_point..end {
+                assert!(
+                    remaining >= resume_start && remaining < resume_end,
+                    "Topoheight {} should be in the resume range",
+                    remaining
+                );
+            }
+        }
+    }
+
+    /// Test that resuming with current_position == target_topoheight
+    /// results in no processing (idempotent resume).
+    #[test]
+    fn test_resume_is_idempotent_when_complete() {
+        let mut checkpoint = PruningCheckpoint::new(0, 100);
+
+        // Simulate: all blocks processed
+        checkpoint.update_position(100);
+
+        // The resume range should be empty
+        let resume_range = checkpoint.current_position..checkpoint.target_topoheight;
+        assert!(
+            resume_range.is_empty(),
+            "No blocks should be processed when phase is complete"
+        );
+
+        // Multiple "resumes" should still be empty
+        for _ in 0..5 {
+            let range = checkpoint.current_position..checkpoint.target_topoheight;
+            assert!(range.is_empty(), "Resume should be idempotent");
+        }
+    }
+
+    /// Test cross-phase checkpoint semantics.
+    ///
+    /// When transitioning from one phase to another, the checkpoint
+    /// should correctly track position for each phase.
+    #[test]
+    fn test_cross_phase_checkpoint_semantics() {
+        let start = 50u64;
+        let end = 150u64;
+        let mut checkpoint = PruningCheckpoint::new(start, end);
+
+        // Phase 1: BlockDeletion
+        assert_eq!(checkpoint.phase, PruningPhase::BlockDeletion);
+        assert_eq!(checkpoint.current_position, start);
+
+        // Simulate completing Phase 1
+        checkpoint.update_position(end);
+        checkpoint.advance_phase();
+
+        // Phase 2: GhostdagCleanup
+        assert_eq!(checkpoint.phase, PruningPhase::GhostdagCleanup);
+        // Reset position for new phase (as done in resume_pruning_if_needed)
+        checkpoint.update_position(start);
+
+        // Simulate crash during Phase 2 at position 100
+        checkpoint.update_position(100);
+
+        // Verify resume semantics for Phase 2
+        assert_eq!(checkpoint.current_position, 100);
+        assert_eq!(checkpoint.phase, PruningPhase::GhostdagCleanup);
+
+        // Resume would process [100, 150)
+        let resume_range = checkpoint.current_position..checkpoint.target_topoheight;
+        assert_eq!(resume_range, 100..150);
+    }
 }
