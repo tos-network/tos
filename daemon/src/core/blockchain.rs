@@ -5079,21 +5079,15 @@ impl<S: Storage> Blockchain<S> {
                     }
                 } else {
                     // ===== SEQUENTIAL EXECUTION PATH (ORIGINAL) =====
-                    // Log the reason for using sequential execution
-                    if log::log_enabled!(log::Level::Info) {
-                        if has_unsupported_types {
-                            info!("Sequential execution ENABLED: block {} has unsupported transaction types (InvokeContract/Energy/AIMining/MultiSig) - parallel execution disabled", hash);
-                        } else if tx_count < min_txs_threshold {
-                            info!("Sequential execution ENABLED: block {} has {} transactions (threshold: {}) - below parallel threshold", hash, tx_count, min_txs_threshold);
-                        } else {
-                            info!("Sequential execution ENABLED: block {} has {} transactions - parallel execution disabled by configuration", hash, tx_count);
-                        }
-                    }
+                    // Log the reason for using sequential execution (DEBUG level to reduce log noise)
                     if log::log_enabled!(log::Level::Debug) {
-                        debug!(
-                            "Using sequential execution for {} transactions",
-                            block.get_transactions().len()
-                        );
+                        if has_unsupported_types {
+                            debug!("Sequential execution ENABLED: block {} has unsupported transaction types (InvokeContract/Energy/AIMining/MultiSig) - parallel execution disabled", hash);
+                        } else if tx_count < min_txs_threshold {
+                            debug!("Sequential execution ENABLED: block {} has {} transactions (threshold: {}) - below parallel threshold", hash, tx_count, min_txs_threshold);
+                        } else {
+                            debug!("Sequential execution ENABLED: block {} has {} transactions - parallel execution disabled by configuration", hash, tx_count);
+                        }
                     }
                     for (tx, tx_hash) in block.get_transactions().iter().zip(txs_hashes.iter()) {
                         // execute all txs
