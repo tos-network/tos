@@ -3693,34 +3693,39 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // SECURITY FIX: Validate commitment fields
-        // - pruning_point: Validated against calculated value
+        // - pruning_point: Validated against calculated value (skipped for genesis)
         // - accepted_id_merkle_root: Reserved for future use (must be zero)
         // - utxo_commitment: Reserved for future use (must be zero)
         let header = block.get_header();
 
         // Validate pruning_point by recalculating it
-        let expected_pruning_point = self
-            .calc_pruning_point(
-                &*storage,
-                &ghostdag_data.selected_parent,
-                block.get_blue_score(),
-            )
-            .await?;
+        // Genesis blocks are exempt: their pruning_point is Hash::zero() by design,
+        // as they have no prior chain to reference. Genesis blocks are trusted
+        // because their hash is hardcoded per network.
+        if !is_genesis {
+            let expected_pruning_point = self
+                .calc_pruning_point(
+                    &*storage,
+                    &ghostdag_data.selected_parent,
+                    block.get_blue_score(),
+                )
+                .await?;
 
-        if *header.get_pruning_point() != expected_pruning_point {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Block {} has invalid pruning_point: expected {}, got {}",
-                    block_hash,
+            if *header.get_pruning_point() != expected_pruning_point {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Block {} has invalid pruning_point: expected {}, got {}",
+                        block_hash,
+                        expected_pruning_point,
+                        header.get_pruning_point()
+                    );
+                }
+                return Err(BlockchainError::InvalidPruningPoint(
+                    block_hash.into_owned(),
                     expected_pruning_point,
-                    header.get_pruning_point()
-                );
+                    header.get_pruning_point().clone(),
+                ));
             }
-            return Err(BlockchainError::InvalidPruningPoint(
-                block_hash.into_owned(),
-                expected_pruning_point,
-                header.get_pruning_point().clone(),
-            ));
         }
 
         // accepted_id_merkle_root: Reserved for future use (must be zero)
