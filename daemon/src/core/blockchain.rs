@@ -2761,52 +2761,27 @@ impl<S: Storage> Blockchain<S> {
         // SECURITY: Use OsRng for cryptographically secure random nonce
         let extra_nonce: [u8; EXTRA_NONCE_SIZE] = secure_random_bytes::<EXTRA_NONCE_SIZE>();
         let tips_set = storage.get_tips().await?;
-        let current_height = self.get_blue_score();
 
-        // V-25: Filter tips early to ensure they are on or near the main chain
-        // This prevents generating block templates with off-chain parents
-        let mut tips = Vec::with_capacity(tips_set.len());
-        let mut filtered_count = 0;
-        for hash in tips_set {
-            if log::log_enabled!(log::Level::Trace) {
-                trace!("Evaluating tip from storage: {}", hash);
-            }
+        // BUG6 FIX: Remove STABLE_LIMIT filtering for local tips
+        // The tips from storage.get_tips() are already accepted by this node,
+        // so there's no need to filter them based on STABLE_LIMIT.
+        // This filtering was causing forked nodes to have no valid tips for mining.
+        //
+        // Previous V-25 filter removed because:
+        // 1. Tips in storage are already validated when they were accepted
+        // 2. is_near_enough_from_main_chain can incorrectly filter local tips when
+        //    the node is on a fork (the "mainchain" reference is ambiguous in fork scenarios)
+        // 3. Forked nodes should be able to mine on their local chain
+        let mut tips: Vec<Hash> = tips_set.into_iter().collect();
 
-            // Pre-filter: Check if tip is near enough to main chain before selecting
-            if !self
-                .is_near_enough_from_main_chain(storage, &hash, current_height)
-                .await?
-            {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Tip {} filtered (too far from main chain, current height: {})",
-                        hash, current_height
-                    );
-                }
-                filtered_count += 1;
-                continue;
-            }
-
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Tip {} accepted (near main chain, current height: {})",
-                    hash, current_height
-                );
-            }
-            tips.push(hash);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Block template using {} tips from storage (BUG6 fix: no STABLE_LIMIT filtering)",
+                tips.len()
+            );
         }
 
-        if filtered_count > 0 {
-            if log::log_enabled!(log::Level::Info) {
-                info!(
-                    "Filtered {} off-chain tips, {} valid tips remain for template",
-                    filtered_count,
-                    tips.len()
-                );
-            }
-        }
-
-        // V-25: Ensure we have at least one tip - if all were filtered, this is a critical error
+        // Ensure we have at least one tip
         if tips.is_empty() {
             return Err(BlockchainError::ExpectedTips);
         }
@@ -3796,12 +3771,31 @@ impl<S: Storage> Blockchain<S> {
         // For multi-parent blocks, use median-time-past to prevent manipulation
         // Collect parent timestamps first, then validate using the extracted function
         let mut parent_timestamps = Vec::with_capacity(tips_count);
+
+        // BUG6 FIX: Get current tips to check if parents are local tips
+        // If all parents are current tips, skip STABLE_LIMIT check (self-mined blocks)
+        // This prevents forked nodes from being stuck when they try to mine on their local chain
+        let current_tips = storage.get_tips().await?;
+
         for hash in block.get_parents() {
             let previous_timestamp = storage.get_timestamp_for_block_hash(&hash).await?;
             parent_timestamps.push(previous_timestamp);
 
             if log::log_enabled!(log::Level::Trace) {
                 trace!("calculate distance from mainchain for tips: {}", hash);
+            }
+
+            // BUG6 FIX: Skip STABLE_LIMIT check for parents that are current tips
+            // Current tips have already been accepted by this node, so building on them is safe
+            // This allows forked nodes to continue mining on their local chain
+            if current_tips.contains(hash) {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Parent {} is a current tip, skipping deviation check",
+                        hash
+                    );
+                }
+                continue;
             }
 
             // We're processing the block tips, so we can't use the block blue_score as it may not be in the chain yet
