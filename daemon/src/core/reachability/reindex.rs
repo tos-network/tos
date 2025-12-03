@@ -276,7 +276,12 @@ impl ReindexContext {
 
                 // All children of `current` have calculated their subtree size.
                 // Sum them all together and add 1 to get the subtree size of `current`.
-                let subtree_sum: u64 = parent_children.iter().map(|c| self.subtree_sizes[c]).sum();
+                // Use get() with unwrap_or(1) to handle edge cases where a child's
+                // subtree_size might not be calculated yet (defensive programming).
+                let subtree_sum: u64 = parent_children
+                    .iter()
+                    .map(|c| *self.subtree_sizes.get(c).unwrap_or(&1))
+                    .sum();
                 self.subtree_sizes.insert(current.clone(), subtree_sum + 1);
             }
         }
@@ -317,7 +322,11 @@ impl ReindexContext {
 
             if !children.is_empty() {
                 // Get children's subtree sizes
-                let sizes: Vec<u64> = children.iter().map(|c| self.subtree_sizes[c]).collect();
+                // Use get() with unwrap_or(1) for defensive programming
+                let sizes: Vec<u64> = children
+                    .iter()
+                    .map(|c| *self.subtree_sizes.get(c).unwrap_or(&1))
+                    .collect();
 
                 // ALIGNED WITH KASPA: Use entire parent capacity for children
                 // The interval of a block should *strictly* contain the intervals of its
@@ -772,7 +781,8 @@ impl ReindexContext {
         let mut sizes = Vec::new();
         for block in children_before {
             self.count_subtrees(storage, block.clone()).await?;
-            sizes.push(self.subtree_sizes[block]);
+            // Use get() with unwrap_or(1) for defensive programming
+            sizes.push(*self.subtree_sizes.get(block).unwrap_or(&1));
         }
         let sum: u64 = sizes.iter().sum();
 
@@ -810,7 +820,8 @@ impl ReindexContext {
         let mut sizes = Vec::new();
         for block in children_after {
             self.count_subtrees(storage, block.clone()).await?;
-            sizes.push(self.subtree_sizes[block]);
+            // Use get() with unwrap_or(1) for defensive programming
+            sizes.push(*self.subtree_sizes.get(block).unwrap_or(&1));
         }
         let sum: u64 = sizes.iter().sum();
 
