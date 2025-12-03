@@ -543,11 +543,11 @@ impl CommandManager {
             "freeze_tos" => {
                 self.require_param(args, "amount")?;
                 self.require_param(args, "duration")?;
-                self.require_param(args, "confirm")?;
+                // Note: confirm is optional in batch mode (auto-confirmed like transfer)
             }
             "unfreeze_tos" => {
                 self.require_param(args, "amount")?;
-                self.require_param(args, "confirm")?;
+                // Note: confirm is optional in batch mode (auto-confirmed like transfer)
             }
             "set_asset_name" => {
                 self.require_param(args, "asset")?;

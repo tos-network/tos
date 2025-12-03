@@ -1688,6 +1688,11 @@ impl EncryptedStorage {
             return Ok(topoheight);
         }
 
+        // For new wallets, TOPOHEIGHT_KEY may not exist yet - return 0 as default
+        if !self.contains_data(&self.extra, TOPOHEIGHT_KEY)? {
+            return Ok(0);
+        }
+
         let synced_topoheight = self.load_from_disk(&self.extra, TOPOHEIGHT_KEY)?;
         Ok(synced_topoheight)
     }

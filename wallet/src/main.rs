@@ -21,7 +21,8 @@ use tos_common::{
     tokio,
     transaction::{
         builder::{
-            EnergyBuilder, FeeBuilder, MultiSigBuilder, TransactionTypeBuilder, TransferBuilder,
+            DeployContractBuilder, EnergyBuilder, FeeBuilder, MultiSigBuilder,
+            TransactionTypeBuilder, TransferBuilder,
         },
         multisig::{MultiSig, SignatureId},
         BurnPayload, MultiSigPayload, Transaction, TxVersion,
@@ -896,7 +897,7 @@ async fn setup_wallet_command_manager(
             Arg::new("amount", ArgType::String, "Amount of TOS to freeze"),
             Arg::new(
                 "duration",
-                ArgType::Number,
+                ArgType::String,
                 "Freeze duration in days (3/7/14/30, longer = higher rewards)",
             ),
         ],
@@ -1249,6 +1250,18 @@ async fn setup_wallet_command_manager(
         "Register as an AI miner",
         vec![Arg::new("fee", ArgType::Number, "Registration fee amount")],
         CommandHandler::Async(async_handler!(register_miner)),
+    ))?;
+
+    // Smart contract deployment command
+    command_manager.add_command(Command::with_required_arguments(
+        "deploy_contract",
+        "Deploy a smart contract to the blockchain",
+        vec![Arg::new(
+            "file",
+            ArgType::String,
+            "Path to compiled contract (.so file)",
+        )],
+        CommandHandler::Async(async_handler!(deploy_contract)),
     ))?;
 
     // Help command for detailed command information
@@ -4515,6 +4528,20 @@ async fn freeze_tos(
         context.get::<Arc<Wallet>>()?.clone()
     };
 
+    // Wait for wallet to sync before creating transaction (same as transfer command)
+    #[cfg(feature = "network_handler")]
+    {
+        if wallet.is_online().await && !wallet.is_synced().await.unwrap_or(false) {
+            manager.message("Waiting for wallet to synchronize...");
+            if let Err(e) = wallet.wait_for_sync(30).await {
+                manager.error(format!("Sync timeout: {e:#}"));
+                manager.message("Tip: Check sync status with 'sync_status' command");
+                return Ok(());
+            }
+            manager.message("Wallet synchronized");
+        }
+    }
+
     // Get amount, duration, and confirm from arguments (with examples for better error messages)
     let amount_str = get_required_arg_with_example(
         &mut args,
@@ -4694,6 +4721,20 @@ async fn unfreeze_tos(
         let context = manager.get_context().lock()?;
         context.get::<Arc<Wallet>>()?.clone()
     };
+
+    // Wait for wallet to sync before creating transaction (same as transfer command)
+    #[cfg(feature = "network_handler")]
+    {
+        if wallet.is_online().await && !wallet.is_synced().await.unwrap_or(false) {
+            manager.message("Waiting for wallet to synchronize...");
+            if let Err(e) = wallet.wait_for_sync(30).await {
+                manager.error(format!("Sync timeout: {e:#}"));
+                manager.message("Tip: Check sync status with 'sync_status' command");
+                return Ok(());
+            }
+            manager.message("Wallet synchronized");
+        }
+    }
 
     // Get amount and confirm from arguments (with example for better error messages)
     let amount_str = get_required_arg_with_example(
@@ -4974,4 +5015,130 @@ async fn execute_json_batch(
             Err(e.into())
         }
     }
+}
+
+/// Deploy a smart contract to the blockchain
+async fn deploy_contract(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let prompt = manager.get_prompt();
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
+
+    // Wait for wallet to sync before creating transaction
+    #[cfg(feature = "network_handler")]
+    {
+        if wallet.is_online().await && !wallet.is_synced().await.unwrap_or(false) {
+            manager.message("Waiting for wallet to synchronize...");
+            if let Err(e) = wallet.wait_for_sync(30).await {
+                manager.error(format!("Sync timeout: {e:#}"));
+                manager.message("Tip: Check sync status with 'sync_status' command");
+                return Ok(());
+            }
+            manager.message("Wallet synchronized");
+        }
+    }
+
+    // Get contract file path
+    let file_path = get_required_arg_with_example(
+        &mut args,
+        "file",
+        manager,
+        "deploy_contract <file>",
+        "deploy_contract /path/to/counter.so",
+        || async {
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Contract file path (.so): "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await
+    .context("Error while reading file path")?;
+
+    // Read contract file
+    let contract_bytes = match std::fs::read(&file_path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            manager.error(format!(
+                "Failed to read contract file '{}': {}",
+                file_path, e
+            ));
+            return Ok(());
+        }
+    };
+
+    // Verify ELF magic bytes
+    if contract_bytes.len() < 4 || &contract_bytes[0..4] != b"\x7FELF" {
+        manager.error("Invalid contract file: not a valid ELF binary");
+        return Ok(());
+    }
+
+    let contract_size = contract_bytes.len();
+    manager.message(format!(
+        "Contract file: {} ({} bytes)",
+        file_path, contract_size
+    ));
+
+    // Create a TAKO module from the ELF bytecode and serialize it
+    // The serialization will use the TAKO format (magic + length + bytecode)
+    use tos_common::contract::Module;
+    let module = Module::from_bytecode(contract_bytes);
+    let module_bytes = module.to_bytes();
+    let module_hex = hex::encode(&module_bytes);
+
+    // Get confirmation in interactive mode
+    if !manager.is_batch_mode() {
+        let confirmed = prompt
+            .read_valid_str_value(
+                prompt.colorize_string(
+                    Color::Yellow,
+                    &format!(
+                        "Deploy contract ({} bytes) to blockchain? (Y/N): ",
+                        contract_size
+                    ),
+                ),
+                vec!["y", "n"],
+            )
+            .await
+            .context("Error while reading confirmation")?;
+
+        if confirmed != "y" {
+            manager.message("Contract deployment cancelled");
+            return Ok(());
+        }
+    }
+
+    manager.message("Building deployment transaction...");
+
+    // Create deploy contract transaction
+    let deploy_builder = DeployContractBuilder {
+        module: module_hex,
+        invoke: None, // No constructor invocation for now
+    };
+
+    let tx_type = TransactionTypeBuilder::DeployContract(deploy_builder);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {e}"));
+            return Ok(());
+        }
+    };
+
+    let hash = tx.hash();
+    manager.message(format!("Contract deployment transaction created: {hash}"));
+    manager.message(format!("Contract size: {} bytes", contract_size));
+
+    // Broadcast the transaction
+    broadcast_tx(&wallet, manager, tx).await;
+
+    Ok(())
 }

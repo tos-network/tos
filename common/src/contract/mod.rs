@@ -34,6 +34,9 @@ use tos_kernel::{
     Context, FnInstance, FnParams, FnReturnType, OpaqueWrapper, Primitive, Type, ValueCell,
 };
 
+// Re-export Module for contract deployment (used by wallet CLI)
+pub use tos_kernel::Module;
+
 pub use output::*;
 pub use random::DeterministicRandom;
 
