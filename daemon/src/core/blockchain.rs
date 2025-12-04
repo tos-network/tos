@@ -3845,10 +3845,7 @@ impl<S: Storage> Blockchain<S> {
             // This allows forked nodes to continue mining on their local chain
             if current_tips.contains(hash) {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Parent {} is a current tip, skipping deviation check",
-                        hash
-                    );
+                    debug!("Parent {} is a current tip, skipping deviation check", hash);
                 }
                 continue;
             }

@@ -14,14 +14,15 @@ build = "build.rs"
 [dependencies]
 tos-hash = { git = "https://github.com/tos-network/tos-hash", branch = "master" }
 # TOS Kernel - Simplified re-export crate in TAKO (all types + validation)
-# Updated to rev fb639c0 (update tos-tbpf dependency)
-tos-kernel = { git = "https://github.com/tos-network/tako", rev = "fb639c0" }
+tos-kernel = { git = "https://github.com/tos-network/tako", rev = "7b6633b" }
 # TOS Crypto - Extracted cryptographic primitives to avoid circular dependencies
 # Pinned to specific rev for reproducible builds
-tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "ac298fb" }
+tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "e487d8d" }
 # Balance simplification: bulletproofs removed (no longer needed with plaintext balances)
 # bulletproofs = { git = "https://github.com/tos-network/bulletproofs", tag = "v5.0.2" }
-curve25519-dalek = { features = ["digest", "group", "rand_core", "serde", "ecdlp"], git = "https://github.com/tos-network/curve25519-dalek", tag = "v4.2.0" }
+# Pinned to specific commit SHA for 100% reproducible builds (tag v4.2.0 = 0ca0e1a1...)
+# Must match tos-crypto's curve25519-dalek version to avoid type conflicts
+curve25519-dalek = { features = ["digest", "group", "rand_core", "serde", "ecdlp"], git = "https://github.com/tos-network/curve25519-dalek", rev = "0ca0e1a1cab7c08733e35cfedc33fc68db2058be" }
 blake3 = "1.5.1"
 # Balance simplification: merlin removed (Transcript no longer needed for proofs)
 # merlin = "3.0.0"
