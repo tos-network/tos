@@ -31,7 +31,7 @@ use crate::{
         difficulty,
         error::BlockchainError,
         executor::ParallelExecutor,
-        ghostdag::{GhostdagStorageProvider, TosGhostdag},
+        ghostdag::{BlueWorkType, GhostdagStorageProvider, TosGhostdag},
         hard_fork::*,
         mempool::Mempool,
         nonce_checker::NonceChecker,
@@ -3777,12 +3777,67 @@ impl<S: Storage> Blockchain<S> {
         // This prevents forked nodes from being stuck when they try to mine on their local chain
         let current_tips = storage.get_tips().await?;
 
+        // BUG7 FIX: Calculate the blue_work of the new block's best parent
+        // This is used to detect if the block comes from a heavier chain
+        // If so, we should accept it even if it deviates from our current chain
+        let new_block_best_parent_blue_work = {
+            let mut best_bw = BlueWorkType::zero();
+            for parent_hash in block.get_parents() {
+                if let Ok(parent_bw) = storage.get_ghostdag_blue_work(parent_hash).await {
+                    if parent_bw > best_bw {
+                        best_bw = parent_bw;
+                    }
+                }
+            }
+            best_bw
+        };
+
+        // BUG7 FIX: Get current chain's best tip blue_work for comparison
+        let current_best_tip_blue_work = if !current_tips.is_empty() {
+            let mut best_bw = BlueWorkType::zero();
+            for tip in current_tips.iter() {
+                if let Ok(tip_bw) = storage.get_ghostdag_blue_work(tip).await {
+                    if tip_bw > best_bw {
+                        best_bw = tip_bw;
+                    }
+                }
+            }
+            best_bw
+        } else {
+            BlueWorkType::zero()
+        };
+
+        // BUG7 FIX: Detect if the new block comes from a heavier chain
+        // If new block's parent has higher blue_work, this block is from a heavier chain
+        // and we should accept it to trigger chain reorganization
+        let is_from_heavier_chain = new_block_best_parent_blue_work > current_best_tip_blue_work;
+        if is_from_heavier_chain {
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "Block {} comes from heavier chain (parent blue_work: {} > current: {}), will accept for reorg",
+                    block_hash, new_block_best_parent_blue_work, current_best_tip_blue_work
+                );
+            }
+        }
+
         for hash in block.get_parents() {
             let previous_timestamp = storage.get_timestamp_for_block_hash(&hash).await?;
             parent_timestamps.push(previous_timestamp);
 
             if log::log_enabled!(log::Level::Trace) {
                 trace!("calculate distance from mainchain for tips: {}", hash);
+            }
+
+            // BUG7 FIX: If block comes from a heavier chain, skip deviation check
+            // This allows the node to accept blocks from a heavier chain and reorganize
+            if is_from_heavier_chain {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Parent {} is from heavier chain, skipping deviation check",
+                        hash
+                    );
+                }
+                continue;
             }
 
             // BUG6 FIX: Skip STABLE_LIMIT check for parents that are current tips
