@@ -4,6 +4,12 @@
 use std::process::Command;
 
 fn main() {
+    // Tell cargo to rerun this build script when git HEAD changes
+    // This ensures version is updated on every new commit
+    println!("cargo:rerun-if-changed=../.git/HEAD");
+    println!("cargo:rerun-if-changed=../.git/index");
+    println!("cargo:rerun-if-env-changed=TOS_COMMIT_HASH");
+
     let commit_hash = if let Some(hash) = option_env!("TOS_COMMIT_HASH") {
         hash[0..7].to_string()
     } else {
@@ -27,7 +33,5 @@ fn main() {
 
     // Set the result as an environment variable for the build
     let build_version = format!("{}-{}", env!("CARGO_PKG_VERSION"), commit_hash);
-    println!("cargo:rerun-if-env-changed=BUILD_VERSION");
-    println!("cargo:BUILD_VERSION={build_version}");
     println!("cargo:rustc-env=BUILD_VERSION={build_version}");
 }
