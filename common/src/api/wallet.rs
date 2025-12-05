@@ -401,8 +401,8 @@ pub enum EntryType {
         contract: Hash,
         // Deposits made
         deposits: IndexMap<Hash, u64>,
-        // Chunk id invoked
-        chunk_id: u16,
+        // Entry point id invoked
+        entry_id: u16,
         // Fee paid
         fee: u64,
         // Max gas allowed

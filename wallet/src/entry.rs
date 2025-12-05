@@ -224,8 +224,8 @@ pub enum EntryData {
         contract: Hash,
         // Deposits made
         deposits: IndexMap<Hash, u64>,
-        // Chunk id invoked
-        chunk_id: u16,
+        // Entry point id invoked
+        entry_id: u16,
         // Fee paid
         fee: u64,
         // max_gas gave
@@ -312,7 +312,7 @@ impl Serializer for EntryData {
             }
             5 => {
                 let contract = reader.read_hash()?;
-                let chunk_id = reader.read_u16()?;
+                let entry_id = reader.read_u16()?;
                 let deposits_size = reader.read_u8()? as usize;
                 let mut deposits = IndexMap::new();
                 for _ in 0..deposits_size {
@@ -327,7 +327,7 @@ impl Serializer for EntryData {
                 Self::InvokeContract {
                     contract,
                     deposits,
-                    chunk_id,
+                    entry_id,
                     fee,
                     max_gas,
                     nonce,
@@ -412,14 +412,14 @@ impl Serializer for EntryData {
             Self::InvokeContract {
                 contract,
                 deposits,
-                chunk_id,
+                entry_id,
                 fee,
                 max_gas,
                 nonce,
             } => {
                 writer.write_u8(5);
                 writer.write_hash(contract);
-                writer.write_u16(*chunk_id);
+                writer.write_u16(*entry_id);
                 writer.write_u8(deposits.len() as u8);
                 for (asset, amount) in deposits {
                     asset.write(writer);
@@ -480,7 +480,7 @@ impl Serializer for EntryData {
             Self::InvokeContract {
                 contract,
                 deposits,
-                chunk_id,
+                entry_id,
                 fee,
                 max_gas,
                 nonce,
@@ -491,7 +491,7 @@ impl Serializer for EntryData {
                         .iter()
                         .map(|(a, b)| a.size() + b.size())
                         .sum::<usize>()
-                    + chunk_id.size()
+                    + entry_id.size()
                     + fee.size()
                     + max_gas.size()
                     + nonce.size()
@@ -645,14 +645,14 @@ impl TransactionEntry {
                 EntryData::InvokeContract {
                     contract,
                     deposits,
-                    chunk_id,
+                    entry_id,
                     fee,
                     max_gas,
                     nonce,
                 } => RPCEntryType::InvokeContract {
                     contract,
                     deposits,
-                    chunk_id,
+                    entry_id,
                     fee,
                     max_gas,
                     nonce,
@@ -764,7 +764,7 @@ impl TransactionEntry {
             EntryData::InvokeContract {
                 contract,
                 deposits,
-                chunk_id,
+                entry_id,
                 fee,
                 max_gas,
                 nonce,
@@ -773,7 +773,7 @@ impl TransactionEntry {
                 str.push_str(&format!(
                     "Invoke contract {} with chunk id {} (max gas: {})",
                     contract,
-                    chunk_id,
+                    entry_id,
                     format_tos(*max_gas)
                 ));
                 for (asset, amount) in deposits {

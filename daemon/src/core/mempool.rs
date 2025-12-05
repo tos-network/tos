@@ -16,7 +16,6 @@ use tos_common::{
     config::{BYTES_PER_KB, FEE_PER_KB},
     crypto::{compute_deterministic_contract_address, Hash, PublicKey},
     network::Network,
-    serializer::Serializer,
     time::{get_current_time_in_seconds, TimestampSeconds},
     tokio::sync::Mutex as TokioMutex,
     transaction::{MultiSigPayload, Transaction, TransactionType},
@@ -94,14 +93,14 @@ impl Mempool {
     /// This helper ensures consistent cleanup across all removal paths (clear/drain/remove/clean_up)
     fn release_create2_reservation(&mut self, tx: &Transaction) {
         if let TransactionType::DeployContract(ref payload) = tx.get_data() {
-            let bytecode_or_module = payload
+            let bytecode = payload
                 .module
                 .get_bytecode()
                 .map(|b| b.to_vec())
-                .unwrap_or_else(|| payload.module.to_bytes());
+                .unwrap_or_default();
 
             let contract_address =
-                compute_deterministic_contract_address(tx.get_source(), &bytecode_or_module);
+                compute_deterministic_contract_address(tx.get_source(), &bytecode);
 
             if self.reserved_contracts.remove(&contract_address) {
                 if log::log_enabled!(log::Level::Debug) {
@@ -187,17 +186,15 @@ impl Mempool {
         // We only reserve AFTER we know the cache lookup won't fail.
         let contract_address_to_reserve =
             if let TransactionType::DeployContract(ref payload) = tx.get_data() {
-                // Calculate deterministic CREATE2 address using the same logic as verify/mod.rs
-                // For TOS Kernel(TAKO) contracts: use eBPF bytecode
-                // For legacy contracts: use serialized module bytes
-                let bytecode_or_module = payload
+                // Calculate deterministic CREATE2 address using eBPF bytecode
+                let bytecode = payload
                     .module
                     .get_bytecode()
                     .map(|b| b.to_vec())
-                    .unwrap_or_else(|| payload.module.to_bytes());
+                    .unwrap_or_default();
 
                 let contract_address =
-                    compute_deterministic_contract_address(tx.get_source(), &bytecode_or_module);
+                    compute_deterministic_contract_address(tx.get_source(), &bytecode);
 
                 // Check if address is already reserved by another pending deployment
                 if self.reserved_contracts.contains(&contract_address) {

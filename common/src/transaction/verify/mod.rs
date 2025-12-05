@@ -211,10 +211,8 @@ impl Transaction {
                     .await
                     .map_err(VerificationError::State)?;
 
-                if !module.is_entry_chunk(payload.chunk_id as usize) {
-                    return Err(VerificationError::InvalidInvokeContract);
-                }
-
+                // TAKO contracts: entry_id validation is handled by tos-tbpf at runtime
+                // Just verify the parameters are valid ValueCells
                 let validator = ModuleValidator::new(module, environment);
                 for constant in payload.parameters.iter() {
                     validator
@@ -576,10 +574,8 @@ impl Transaction {
                     .await
                     .map_err(VerificationError::State)?;
 
-                if !module.is_entry_chunk(payload.chunk_id as usize) {
-                    return Err(VerificationError::InvalidInvokeContract);
-                }
-
+                // TAKO contracts: entry_id validation is handled by tos-tbpf at runtime
+                // Just verify the parameters are valid ValueCells
                 let validator = ModuleValidator::new(module, environment);
                 for constant in payload.parameters.iter() {
                     validator
@@ -592,19 +588,15 @@ impl Transaction {
                     self.verify_invoke_contract(&invoke.deposits, invoke.max_gas)?;
                 }
 
-                // Compute deterministic contract address
-                // For TOS Kernel(TAKO) contracts: use eBPF bytecode
-                // For legacy contracts: use serialized module bytes
-                let bytecode_or_module = payload
+                // Compute deterministic contract address using eBPF bytecode
+                let bytecode = payload
                     .module
                     .get_bytecode()
                     .map(|b| b.to_vec())
-                    .unwrap_or_else(|| payload.module.to_bytes());
+                    .unwrap_or_default();
 
-                let contract_address = crate::crypto::compute_deterministic_contract_address(
-                    &self.source,
-                    &bytecode_or_module,
-                );
+                let contract_address =
+                    crate::crypto::compute_deterministic_contract_address(&self.source, &bytecode);
 
                 // Check if contract already exists at this deterministic address
                 if state
@@ -732,24 +724,18 @@ impl Transaction {
                 )?;
             }
             TransactionType::DeployContract(payload) => {
-                // Verify that if we have a constructor, we must have an invoke, and vice-versa
-                if payload.invoke.is_none() != payload.module.get_chunk_id_of_hook(0).is_none() {
-                    return Err(VerificationError::InvalidFormat);
-                }
+                // TAKO contracts: constructor invocation is optional
+                // Entry point validation is handled by tos-tbpf at runtime
 
-                // Compute deterministic contract address (CREATE2-style)
-                // For TOS Kernel(TAKO) contracts: use eBPF bytecode
-                // For legacy contracts: use serialized module bytes
-                let bytecode_or_module = payload
+                // Compute deterministic contract address using eBPF bytecode
+                let bytecode = payload
                     .module
                     .get_bytecode()
                     .map(|b| b.to_vec())
-                    .unwrap_or_else(|| payload.module.to_bytes());
+                    .unwrap_or_default();
 
-                let contract_address = crate::crypto::compute_deterministic_contract_address(
-                    &self.source,
-                    &bytecode_or_module,
-                );
+                let contract_address =
+                    crate::crypto::compute_deterministic_contract_address(&self.source, &bytecode);
 
                 if let Some(invoke) = payload.invoke.as_ref() {
                     // Use deterministic contract address for deposit verification
@@ -1204,7 +1190,7 @@ impl Transaction {
                         &payload.deposits,
                         payload.parameters.iter().cloned(),
                         payload.max_gas,
-                        InvokeContract::Entry(payload.chunk_id),
+                        InvokeContract::Entry(payload.entry_id),
                     )
                     .await?;
                 } else {
@@ -1221,19 +1207,15 @@ impl Transaction {
                 }
             }
             TransactionType::DeployContract(payload) => {
-                // Compute deterministic contract address
-                // For TOS Kernel(TAKO) contracts: use eBPF bytecode
-                // For legacy contracts: use serialized module bytes
-                let bytecode_or_module = payload
+                // Compute deterministic contract address using eBPF bytecode
+                let bytecode = payload
                     .module
                     .get_bytecode()
                     .map(|b| b.to_vec())
-                    .unwrap_or_else(|| payload.module.to_bytes());
+                    .unwrap_or_default();
 
-                let contract_address = crate::crypto::compute_deterministic_contract_address(
-                    &self.source,
-                    &bytecode_or_module,
-                );
+                let contract_address =
+                    crate::crypto::compute_deterministic_contract_address(&self.source, &bytecode);
 
                 // Deploy contract to deterministic address
                 state

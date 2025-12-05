@@ -27,7 +27,33 @@ use async_trait::async_trait;
 use indexmap::IndexSet;
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 use tos_kernel::Environment;
-use tos_kernel::{Chunk, Module};
+use tos_kernel::Module;
+
+/// Create a mock ELF bytecode for testing purposes
+/// This creates a minimal valid ELF header that passes Module validation
+fn create_mock_elf_bytecode() -> Vec<u8> {
+    vec![
+        0x7F, b'E', b'L', b'F', // ELF magic
+        0x02, // 64-bit
+        0x01, // Little endian
+        0x01, // ELF version
+        0x00, // OS/ABI
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Padding
+        0x03, 0x00, // Type: shared object
+        0xF7, 0x00, // Machine: BPF
+        0x01, 0x00, 0x00, 0x00, // Version
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Entry point
+        0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Program header offset
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Section header offset
+        0x00, 0x00, 0x00, 0x00, // Flags
+        0x40, 0x00, // ELF header size
+        0x38, 0x00, // Program header entry size
+        0x01, 0x00, // Program header count
+        0x40, 0x00, // Section header entry size
+        0x00, 0x00, // Section header count
+        0x00, 0x00, // Section name string table index
+    ]
+}
 
 // Create a newtype wrapper to avoid orphan rule violation
 #[derive(Debug, Clone)]
@@ -477,7 +503,7 @@ async fn test_tx_invoke_contract() {
 
         let data = TransactionTypeBuilder::InvokeContract(InvokeContractBuilder {
             contract: Hash::zero(),
-            chunk_id: 0,
+            entry_id: 0,
             max_gas: 1000,
             parameters: Vec::new(),
             deposits: [(
@@ -507,8 +533,7 @@ async fn test_tx_invoke_contract() {
     };
 
     let mut state = ChainState::new();
-    let mut module = Module::new();
-    module.add_entry_chunk(Chunk::new());
+    let module = Module::from_bytecode(create_mock_elf_bytecode());
     state.contracts.insert(Hash::zero(), module);
 
     // Create the chain state
@@ -564,7 +589,7 @@ async fn test_tx_invoke_contract_multiple_deposits() {
 
         let data = TransactionTypeBuilder::InvokeContract(InvokeContractBuilder {
             contract: Hash::zero(),
-            chunk_id: 0,
+            entry_id: 0,
             max_gas: 1000,
             parameters: Vec::new(),
             deposits: [(
@@ -599,8 +624,7 @@ async fn test_tx_invoke_contract_multiple_deposits() {
     };
 
     let mut state = ChainState::new();
-    let mut module = Module::new();
-    module.add_entry_chunk(Chunk::new());
+    let module = Module::from_bytecode(create_mock_elf_bytecode());
     state.contracts.insert(Hash::zero(), module);
 
     // Create the chain state
@@ -649,11 +673,8 @@ async fn test_tx_deploy_contract() {
             },
         };
 
-        // Create module with bytecode for CREATE2-style deterministic address computation
-        // For legacy modules, we need chunks; bytecode is for TOS Kernel(TAKO)
-        // Since bytecode doesn't survive hex serialization, use traditional approach
-        let mut module = Module::new();
-        module.add_chunk(Chunk::new());
+        // Create module with valid ELF bytecode for deterministic address computation
+        let module = Module::from_bytecode(create_mock_elf_bytecode());
         let data = TransactionTypeBuilder::DeployContract(DeployContractBuilder {
             module: module.to_hex(),
             invoke: None,

@@ -14,8 +14,8 @@ pub struct InvokeContractPayload {
     pub contract: Hash,
     // Assets deposited with this call
     pub deposits: IndexMap<Hash, ContractDeposit>,
-    // The chunk to invoke
-    pub chunk_id: u16,
+    // The entry point to invoke
+    pub entry_id: u16,
     // Additionnal fees to pay
     // This is the maximum of gas that can be used by the contract
     // If a contract uses more gas than this value, the transaction
@@ -35,7 +35,7 @@ impl Serializer for InvokeContractPayload {
             deposit.write(writer);
         }
 
-        writer.write_u16(self.chunk_id);
+        writer.write_u16(self.entry_id);
         self.max_gas.write(writer);
 
         writer.write_u8(self.parameters.len() as u8);
@@ -55,7 +55,7 @@ impl Serializer for InvokeContractPayload {
             deposits.insert(asset, deposit);
         }
 
-        let chunk_id = reader.read_u16()?;
+        let entry_id = reader.read_u16()?;
         let max_gas = reader.read_u64()?;
 
         let len = reader.read_u8()? as usize;
@@ -66,7 +66,7 @@ impl Serializer for InvokeContractPayload {
         Ok(InvokeContractPayload {
             contract,
             deposits,
-            chunk_id,
+            entry_id,
             max_gas,
             parameters,
         })
@@ -74,7 +74,7 @@ impl Serializer for InvokeContractPayload {
 
     fn size(&self) -> usize {
         let mut size = self.contract.size()
-            + self.chunk_id.size()
+            + self.entry_id.size()
             + self.max_gas.size()
         // 1 byte for the deposits length
             + 1;

@@ -1,6 +1,6 @@
 [package]
 name = "tos_daemon"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["TOS Network Team <info@tos.network>"]
 license = "BSD-3-Clause"
@@ -15,12 +15,12 @@ autobenches = false
 tos_common = { path = "../common", features = ["prompt", "clap", "rpc-server", "tokio"] }
 
 # TOS Kernel - TOS Kernel(TAKO) runtime
-tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "db8b521" }
-tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", rev = "db8b521" }
-tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "db8b521" }
-tako-sdk = { package = "tako-sdk", git = "https://github.com/tos-network/tako", rev = "db8b521" }
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "cc4612f" }
+tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", rev = "cc4612f" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "cc4612f" }
+tako-sdk = { package = "tako-sdk", git = "https://github.com/tos-network/tako", rev = "cc4612f" }
 tos-tbpf = { git = "https://github.com/tos-network/tbpf", rev = "73cee93", features = ["jit"] }
-tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", rev = "db8b521" }
+tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", rev = "cc4612f" }
 
 # Database backends
 sled = "0.34.7"

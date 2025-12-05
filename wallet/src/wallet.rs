@@ -1441,7 +1441,7 @@ impl Wallet {
                 EntryData::InvokeContract {
                     contract,
                     deposits,
-                    chunk_id,
+                    entry_id,
                     fee,
                     max_gas,
                     nonce,
@@ -1466,7 +1466,7 @@ impl Wallet {
                         "InvokeContract",
                         contract,
                         str_deposits.join("|"),
-                        chunk_id,
+                        entry_id,
                         format_tos(*fee),
                         nonce
                     )

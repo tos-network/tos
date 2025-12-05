@@ -499,7 +499,7 @@ pub enum AccountHistoryType {
     },
     InvokeContract {
         contract: Hash,
-        chunk_id: u16,
+        entry_id: u16,
     },
     // Contract hash is already stored
     // by the parent struct

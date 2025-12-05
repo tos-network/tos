@@ -34,7 +34,7 @@ pub struct ContractDepositBuilder {
 pub struct InvokeContractBuilder {
     pub contract: Hash,
     pub max_gas: u64,
-    pub chunk_id: u16,
+    pub entry_id: u16,
     pub parameters: Vec<ValueCell>,
     #[serde(default)]
     pub deposits: IndexMap<Hash, ContractDepositBuilder>,

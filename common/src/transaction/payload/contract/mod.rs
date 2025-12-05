@@ -3,9 +3,9 @@ mod invoke;
 
 use crate::serializer::*;
 use anyhow::Context;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use tos_kernel::{Chunk, Module};
+use tos_kernel::Module;
 use tos_kernel::{OpaqueWrapper, Primitive, ValueCell, U256};
 
 pub use deploy::*;
@@ -453,150 +453,31 @@ impl Serializer for ValueCell {
     }
 }
 
-// TAKO eBPF format magic marker: "TAKO" (0x54, 0x41, 0x4B, 0x4F)
-// This distinguishes TAKO bytecode from legacy TOS Kernel modules
-// Legacy format starts with u16 constants_len, which cannot spell "TAKO"
-const TAKO_MAGIC: [u8; 4] = [0x54, 0x41, 0x4B, 0x4F]; // "TAKO"
-
 impl Serializer for Module {
     fn write(&self, writer: &mut Writer) {
-        // Check if this is a TAKO eBPF contract (has bytecode)
-        if let Some(bytecode) = self.get_bytecode() {
-            // TAKO format: magic (4 bytes) + bytecode length (u32) + bytecode
-            writer.write_bytes(&TAKO_MAGIC);
-            writer.write_u32(&(bytecode.len() as u32));
-            writer.write_bytes(bytecode);
-            return;
-        }
-
-        // Legacy format: constants/chunks/entry_ids/hooks (no version byte)
-        let constants = self.constants();
-        writer.write_u16(constants.len() as u16);
-        for constant in constants {
-            constant.write(writer);
-        }
-
-        let chunks = self.chunks();
-        writer.write_u16(chunks.len() as u16);
-        for chunk in chunks {
-            let instructions = chunk.get_instructions();
-            let len = instructions.len() as u32;
-            writer.write_u32(&len);
-            writer.write_bytes(instructions);
-        }
-
-        // Write entry ids
-        let entry_ids = self.chunks_entry_ids();
-        // We can have only up to u16::MAX chunks, so same for entry ids
-        let len = entry_ids.len() as u16;
-        writer.write_u16(len);
-
-        for entry_id in entry_ids {
-            writer.write_u16(*entry_id as u16);
-        }
-
-        let hooks = self.hook_chunk_ids();
-        // We have only up to 255 hooks
-        writer.write_u8(hooks.len() as u8);
-
-        for (hook, chunk) in hooks {
-            writer.write_u8(*hook);
-            writer.write_u16(*chunk as u16);
-        }
+        // Simplified format: bytecode length (u32) + bytecode
+        let bytecode = self.get_bytecode().unwrap_or(&[]);
+        writer.write_u32(&(bytecode.len() as u32));
+        writer.write_bytes(bytecode);
     }
 
     fn read(reader: &mut Reader) -> Result<Module, ReaderError> {
-        // Check if we have at least 4 bytes for magic detection
-        if reader.size() < 4 {
+        let bytecode_len = reader.read_u32()? as usize;
+
+        // Sanity check: max 10MB for contract bytecode
+        if bytecode_len > 10 * 1024 * 1024 {
             return Err(ReaderError::InvalidSize);
         }
 
-        // Peek at the first 4 bytes without consuming
-        // We do this by accessing the underlying bytes directly
-        let peek_bytes = reader.bytes();
-        let total_read = reader.total_read();
-        let first_four = &peek_bytes[total_read..total_read + 4];
+        let bytecode: Vec<u8> = reader.read_bytes(bytecode_len)?;
 
-        if first_four == TAKO_MAGIC {
-            // Consume the magic bytes
-            reader.skip(4)?;
-
-            // TAKO eBPF format: bytecode length (u32) + bytecode
-            let bytecode_len = reader.read_u32()? as usize;
-            // Sanity check: max 10MB for contract bytecode
-            if bytecode_len > 10 * 1024 * 1024 {
-                return Err(ReaderError::InvalidSize);
-            }
-            let bytecode: Vec<u8> = reader.read_bytes(bytecode_len)?;
-
-            // Verify ELF magic bytes
-            if bytecode.len() < 4 || &bytecode[0..4] != b"\x7FELF" {
-                return Err(ReaderError::InvalidValue);
-            }
-
-            Ok(Module::from_bytecode(bytecode))
-        } else {
-            // Legacy format: don't consume magic, read normally
-            // First two bytes are constants_len (u16)
-            let constants_len = reader.read_u16()?;
-            read_legacy_module_format(reader, constants_len)
-        }
-    }
-}
-
-/// Read legacy module format when constants_len is already known
-fn read_legacy_module_format(
-    reader: &mut Reader,
-    constants_len: u16,
-) -> Result<Module, ReaderError> {
-    let mut constants = IndexSet::with_capacity(constants_len as usize);
-
-    for _ in 0..constants_len {
-        let c = ValueCell::read(reader)?;
-        if !constants.insert(c) {
-            return Err(ReaderError::InvalidValue);
-        }
-    }
-
-    let chunks_len = reader.read_u16()?;
-    let mut chunks = Vec::with_capacity(chunks_len as usize);
-
-    for _ in 0..chunks_len {
-        let instructions_len = reader.read_u32()? as usize;
-        let instructions: Vec<u8> = reader.read_bytes(instructions_len)?;
-        chunks.push(Chunk::from_instructions(instructions));
-    }
-
-    let entry_ids_len = reader.read_u16()?;
-    if entry_ids_len > chunks_len {
-        return Err(ReaderError::InvalidValue);
-    }
-
-    let mut entry_ids = IndexSet::with_capacity(entry_ids_len as usize);
-    for _ in 0..entry_ids_len {
-        let id = reader.read_u16()?;
-        if id > chunks_len {
+        // Verify ELF magic bytes
+        if bytecode.len() < 4 || &bytecode[0..4] != b"\x7FELF" {
             return Err(ReaderError::InvalidValue);
         }
 
-        if !entry_ids.insert(id as usize) {
-            return Err(ReaderError::InvalidValue);
-        }
+        Ok(Module::from_bytecode(bytecode))
     }
-
-    let hooks_len = reader.read_u8()?;
-    let mut hooks = IndexMap::with_capacity(hooks_len as usize);
-    for _ in 0..hooks_len {
-        let hook_id = reader.read_u8()?;
-        let chunk_id = reader.read_u16()?;
-
-        // Hook can be registered one time only
-        if hooks.insert(hook_id, chunk_id as usize).is_some() {
-            return Err(ReaderError::InvalidValue);
-        }
-    }
-
-    Ok(Module::with(constants, chunks, entry_ids, hooks))
 }
 
 #[cfg(test)]
@@ -607,16 +488,6 @@ mod tests {
 
     #[test]
     fn test_serde_module() {
-        let hex = "000302000000020008000b48656c6c6f20576f726c64020000000102000000060004000000000000000000040000000000000001000400000000000000020004000000000000000300040000000000000004000400000000000000050008000568656c6c6f000400000000000000000001000000211874000000020000000000020100010000000100010100187700010207000200140001000000";
-        let module = Module::from_hex(hex).unwrap();
-        assert_eq!(module.chunks_entry_ids().len(), 1);
-        assert_eq!(module.constants().len(), 3);
-
-        assert_eq!(hex.len() / 2, module.size());
-    }
-
-    #[test]
-    fn test_serde_tako_module() {
         // Create a mock ELF bytecode (starts with ELF magic)
         let mock_elf = vec![
             0x7F, b'E', b'L', b'F', // ELF magic
@@ -641,9 +512,9 @@ mod tests {
             0x00, 0x00, // Section name string table index
         ];
 
-        // Create a TAKO module from bytecode
+        // Create a module from bytecode
         let module = Module::from_bytecode(mock_elf.clone());
-        assert!(module.is_tako_contract());
+        assert!(module.has_bytecode());
         assert_eq!(module.get_bytecode(), Some(mock_elf.as_slice()));
 
         // Serialize and deserialize
@@ -651,13 +522,12 @@ mod tests {
         let deserialized = Module::from_bytes(&bytes).unwrap();
 
         // Verify deserialized module
-        assert!(deserialized.is_tako_contract());
+        assert!(deserialized.has_bytecode());
         assert_eq!(deserialized.get_bytecode(), Some(mock_elf.as_slice()));
 
         // Verify size calculation
-        // TAKO format: magic (4) + length (4) + bytecode
-        assert_eq!(bytes.len(), 4 + 4 + mock_elf.len());
-        assert_eq!(module.size(), bytes.len());
+        // Simplified format: length (4) + bytecode
+        assert_eq!(bytes.len(), 4 + mock_elf.len());
     }
 
     #[track_caller]

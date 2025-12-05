@@ -207,7 +207,7 @@ impl TransactionBuilder {
             TransactionTypeBuilder::InvokeContract(payload) => {
                 let payload_size = payload.contract.size()
                 + payload.max_gas.size()
-                + payload.chunk_id.size()
+                + payload.entry_id.size()
                 + 1 // byte for params len
                 // 4 is for the compressed constant len
                 + payload.parameters.iter().map(|param| 4 + param.size()).sum::<usize>();
@@ -649,7 +649,7 @@ impl TransactionBuilder {
                 TransactionType::InvokeContract(InvokeContractPayload {
                     contract: payload.contract.clone(),
                     max_gas: payload.max_gas,
-                    chunk_id: payload.chunk_id,
+                    entry_id: payload.entry_id,
                     parameters: payload.parameters.clone(),
                     deposits,
                 })
@@ -658,9 +658,8 @@ impl TransactionBuilder {
                 let module = Module::from_hex(&payload.module)
                     .map_err(|_| GenerationError::InvalidModule)?;
 
-                if payload.invoke.is_none() != module.get_chunk_id_of_hook(0).is_none() {
-                    return Err(GenerationError::InvalidConstructorInvoke);
-                }
+                // TAKO contracts: constructor invocation is optional
+                // Entry point validation is handled by tos-tbpf at runtime
 
                 TransactionType::DeployContract(DeployContractPayload {
                     module,
