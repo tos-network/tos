@@ -4288,6 +4288,34 @@ impl<S: Storage> Blockchain<S> {
                     ));
                 }
 
+                // P0-3: Validate mergeset size limit (fork prevention)
+                // Formula: max_mergeset = 4*k + 16
+                // This prevents "wide but light" DAG attacks where an attacker creates
+                // blocks with abnormally large mergesets to manipulate the DAG structure
+                let k = self.ghostdag.k();
+                let blues_count = ghostdag_data.mergeset_blues.len();
+                let reds_count = ghostdag_data.mergeset_reds.len();
+                let mergeset_size = blues_count + reds_count;
+                let max_mergeset = (4 * k as usize) + 16;
+
+                if mergeset_size > max_mergeset {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "FORK PREVENTION: Block {} rejected - mergeset too large ({} > {}). \
+                             blues={}, reds={}, k={}. This may indicate a 'wide but light' attack.",
+                            block_hash, mergeset_size, max_mergeset, blues_count, reds_count, k
+                        );
+                    }
+                    return Err(BlockchainError::MergesetTooLarge(
+                        (*block_hash).clone(),
+                        mergeset_size,
+                        blues_count,
+                        reds_count,
+                        max_mergeset,
+                        k,
+                    ));
+                }
+
                 // Store GHOSTDAG data with improved race condition handling
                 // We still insert even if there might be a race, as storage layer handles overwrites
                 // The semantic guarantee is that GHOSTDAG data is computed deterministically,
@@ -4580,6 +4608,69 @@ impl<S: Storage> Blockchain<S> {
 
                     // Block may be orphaned if its not in the new full order set
                     let is_orphaned = !full_order.contains(&hash_at_topo);
+
+                    // ========================================================================
+                    // FORK DETECTION LOGGING (P0-1)
+                    //
+                    // When a block is being displaced (is_orphaned or re-ordered), this indicates
+                    // a chain reorganization. Log fork detection with blue_work comparison to
+                    // help diagnose fork issues.
+                    //
+                    // This runs DURING the reorg process, providing real-time fork visibility.
+                    // ========================================================================
+                    if is_written {
+                        // Get blue_work of the displaced block
+                        let displaced_blue_work = storage
+                            .get_ghostdag_blue_work(&hash_at_topo)
+                            .await
+                            .unwrap_or_else(|_| BlueWorkType::zero());
+
+                        // Get blue_work of the new block at this position (if available)
+                        let new_block_blue_work = if let Some(new_hash) =
+                            full_order.get_index((topoheight - base_topo_height) as usize)
+                        {
+                            storage
+                                .get_ghostdag_blue_work(new_hash)
+                                .await
+                                .unwrap_or_else(|_| BlueWorkType::zero())
+                        } else {
+                            BlueWorkType::zero()
+                        };
+
+                        if log::log_enabled!(log::Level::Warn) {
+                            if is_orphaned {
+                                warn!(
+                                    "FORK DETECTED: Block {} displaced at topoheight {} (orphaned). \
+                                     Displaced blue_work={}, chain reorganizing",
+                                    hash_at_topo, topoheight, displaced_blue_work
+                                );
+                            } else {
+                                warn!(
+                                    "FORK DETECTED: Block {} displaced at topoheight {} (re-ordered). \
+                                     Old blue_work={}, new blue_work={}",
+                                    hash_at_topo, topoheight, displaced_blue_work, new_block_blue_work
+                                );
+                            }
+                        }
+
+                        // Log chain comparison for debugging
+                        if log::log_enabled!(log::Level::Info) {
+                            if new_block_blue_work > displaced_blue_work {
+                                info!(
+                                    "Reorg to heavier chain confirmed: new blue_work {} > old {}",
+                                    new_block_blue_work, displaced_blue_work
+                                );
+                            } else if new_block_blue_work < displaced_blue_work
+                                && new_block_blue_work != BlueWorkType::zero()
+                            {
+                                info!(
+                                    "WARNING: Reorg to lighter chain? new blue_work {} < old {}",
+                                    new_block_blue_work, displaced_blue_work
+                                );
+                            }
+                        }
+                    }
+
                     // Notify if necessary that we have a block orphaned
                     if is_orphaned && should_track_events.contains(&NotifyEvent::BlockOrphaned) {
                         let value = json!(BlockOrphanedEvent {

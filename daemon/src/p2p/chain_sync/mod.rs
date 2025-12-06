@@ -1,5 +1,6 @@
 mod bootstrap;
 mod chain_validator;
+mod sync_validator;
 
 use futures::{stream, StreamExt};
 use indexmap::IndexSet;
@@ -34,9 +35,31 @@ use super::{
 
 pub use chain_validator::*;
 
+// P0-3: SyncBlockValidator exports for chain synchronization security
+// NOTE: Core mergeset validation (4*k+16) is implemented in blockchain.rs:add_new_block
+// which protects ALL block additions. This module provides additional utilities:
+// - SyncBlockValidator: For tracking blue_work monotonicity during sync (optional)
+// - process_deferred_blocks: For handling blocks with missing parents (if needed)
+// These are available for integration if enhanced sync monitoring is desired.
+#[allow(unused_imports)]
+pub use sync_validator::{
+    process_deferred_blocks, SyncBlockValidator, SyncValidationResult, SyncValidatorConfig,
+};
+
 enum ResponseHelper {
     Requested(Block, Immutable<Hash>),
     NotRequested(Immutable<Hash>),
+}
+
+/// P0-3: Result of attempting to add a sync block
+/// Used to handle blocks that need to be deferred due to missing parents
+enum SyncBlockResult {
+    /// Block was added successfully
+    Added,
+    /// Block was already in chain
+    AlreadyInChain,
+    /// Block needs to be deferred (missing parents)
+    Deferred(Block, Immutable<Hash>),
 }
 
 impl<S: Storage> P2pServer<S> {
@@ -682,6 +705,10 @@ impl<S: Storage> P2pServer<S> {
             let mut futures = Scheduler::new(capacity);
             let group_id = self.object_tracker.next_group_id();
 
+            // P0-3: Deferred blocks waiting for parents (fork prevention)
+            // When a block fails with ParentNotFound, we defer it and retry later
+            let mut deferred_blocks: Vec<(Block, Immutable<Hash>)> = Vec::new();
+
             for hash in blocks {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("processing block request {}", hash);
@@ -728,9 +755,18 @@ impl<S: Storage> P2pServer<S> {
                         blocks_processed = 0;
                     },
                     Some(res) = blocks_executor.next() => {
-                        // If we actually requested the block
-                        if res? {
-                            total_requested += 1;
+                        // P0-3: Handle sync block result including deferred blocks
+                        match res? {
+                            SyncBlockResult::Added => {
+                                total_requested += 1;
+                            }
+                            SyncBlockResult::AlreadyInChain => {
+                                // Block was already in chain, no action needed
+                            }
+                            SyncBlockResult::Deferred(block, hash) => {
+                                // Block needs to wait for parents, add to deferred queue
+                                deferred_blocks.push((block, hash));
+                            }
                         }
 
                         futures.increment_n();
@@ -767,17 +803,29 @@ impl<S: Storage> P2pServer<S> {
                                         // This may happen if we try to chain sync with peer
                                         // while we got the block through propagation
                                         if !self.blockchain.has_block(&hash).await? {
-                                            if let Err(e) = self.blockchain.add_new_block(block, Some(hash), BroadcastOption::Miners, false).await {
-                                                self.object_tracker.mark_group_as_fail(group_id).await;
-                                                return Err(e)
+                                            match self.blockchain.add_new_block(block.clone(), Some(hash.clone()), BroadcastOption::Miners, false).await {
+                                                Ok(()) => Ok(SyncBlockResult::Added),
+                                                Err(BlockchainError::ParentNotFound(parent_hash)) => {
+                                                    // P0-3: Defer block if parent not found
+                                                    if log::log_enabled!(log::Level::Debug) {
+                                                        debug!(
+                                                            "Block {} deferred: parent {} not found, will retry later",
+                                                            hash, parent_hash
+                                                        );
+                                                    }
+                                                    Ok(SyncBlockResult::Deferred(block, hash))
+                                                }
+                                                Err(e) => {
+                                                    self.object_tracker.mark_group_as_fail(group_id).await;
+                                                    Err(e)
+                                                }
                                             }
                                         } else {
                                             if log::log_enabled!(log::Level::Debug) {
                                                 debug!("Block {} is already in chain despite requesting it, skipping it..", hash);
                                             }
+                                            Ok(SyncBlockResult::AlreadyInChain)
                                         }
-
-                                        Ok(true)
                                     },
                                     ResponseHelper::NotRequested(hash) => {
                                         if let Err(e) = self.try_re_execution_block(hash).await {
@@ -785,7 +833,7 @@ impl<S: Storage> P2pServer<S> {
                                             return Err(e)
                                         }
 
-                                        Ok(false)
+                                        Ok(SyncBlockResult::AlreadyInChain)
                                     }
                                 },
                                 Err(e) => {
@@ -808,6 +856,146 @@ impl<S: Storage> P2pServer<S> {
 
                 if blocks_executor.is_empty() && futures.is_empty() {
                     break;
+                }
+            }
+
+            // P0-3: Process deferred blocks with per-block timeout (CONCURRENT)
+            // Each block gets its own independent 30s timeout window running in parallel
+            if !deferred_blocks.is_empty() {
+                use futures::stream::FuturesUnordered;
+
+                if log::log_enabled!(log::Level::Info) {
+                    info!(
+                        "Processing {} deferred blocks concurrently (waiting for parents)...",
+                        deferred_blocks.len()
+                    );
+                }
+
+                let parent_timeout = Duration::from_secs(30); // Per-block timeout
+                let max_retries: u32 = 3;
+                let mut retry_count: u32 = 0;
+
+                while !deferred_blocks.is_empty() && retry_count < max_retries {
+                    // Create concurrent futures for all deferred blocks
+                    let mut deferred_futures = FuturesUnordered::new();
+
+                    for (block, hash) in deferred_blocks.drain(..) {
+                        let blockchain = &self.blockchain;
+                        let block_clone = block.clone();
+                        let hash_clone = hash.clone();
+
+                        // Each block gets its own concurrent task with independent timeout
+                        let fut = async move {
+                            let block_start = Instant::now();
+
+                            loop {
+                                // Check timeout for THIS block independently
+                                if block_start.elapsed() > parent_timeout {
+                                    if log::log_enabled!(log::Level::Debug) {
+                                        debug!(
+                                            "P0-3: Block {} timeout after {}s, will retry",
+                                            hash_clone,
+                                            parent_timeout.as_secs()
+                                        );
+                                    }
+                                    // Return block for retry
+                                    return Ok::<_, BlockchainError>(Some((
+                                        block_clone,
+                                        hash_clone,
+                                    )));
+                                }
+
+                                // Try to add the block
+                                match blockchain
+                                    .add_new_block(
+                                        block_clone.clone(),
+                                        Some(hash_clone.clone()),
+                                        BroadcastOption::Miners,
+                                        false,
+                                    )
+                                    .await
+                                {
+                                    Ok(()) => {
+                                        if log::log_enabled!(log::Level::Debug) {
+                                            debug!(
+                                                "Deferred block {} successfully added",
+                                                hash_clone
+                                            );
+                                        }
+                                        return Ok(None); // Success, no retry needed
+                                    }
+                                    Err(BlockchainError::ParentNotFound(_)) => {
+                                        // Still waiting for parent, sleep briefly then retry
+                                        tos_common::tokio::time::sleep(Duration::from_millis(100))
+                                            .await;
+                                    }
+                                    Err(BlockchainError::AlreadyInChain) => {
+                                        // Block was added by another peer while we were waiting
+                                        // This is success, not an error
+                                        if log::log_enabled!(log::Level::Debug) {
+                                            debug!("Deferred block {} already in chain (added via other path)", hash_clone);
+                                        }
+                                        return Ok(None); // Success, no retry needed
+                                    }
+                                    Err(e) => {
+                                        // Other error, propagate it
+                                        return Err(e);
+                                    }
+                                }
+                            }
+                        };
+
+                        deferred_futures.push(fut);
+                    }
+
+                    // Process all deferred blocks concurrently
+                    let mut still_deferred = Vec::new();
+                    let mut added_count = 0u64;
+
+                    while let Some(result) = deferred_futures.next().await {
+                        match result {
+                            Ok(None) => {
+                                // Block was successfully added
+                                added_count += 1;
+                            }
+                            Ok(Some((block, hash))) => {
+                                // Block needs retry (timeout or parent still missing)
+                                still_deferred.push((block, hash));
+                            }
+                            Err(e) => {
+                                // Fatal error, fail the sync
+                                if log::log_enabled!(log::Level::Warn) {
+                                    warn!("Deferred block processing failed: {}", e);
+                                }
+                                self.object_tracker.mark_group_as_fail(group_id).await;
+                                return Err(e.into());
+                            }
+                        }
+                    }
+
+                    total_requested += added_count;
+                    deferred_blocks = still_deferred;
+
+                    if !deferred_blocks.is_empty() {
+                        retry_count += 1;
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "{} blocks still waiting for parents after round {}/{} ({} added this round)",
+                                deferred_blocks.len(), retry_count, max_retries, added_count
+                            );
+                        }
+                    }
+                }
+
+                // If blocks still remain after max retries, emit P0-3 error
+                if !deferred_blocks.is_empty() {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "P0-3: {} blocks failed to sync after {} retries - max retries exceeded",
+                            deferred_blocks.len(), max_retries
+                        );
+                    }
+                    return Err(P2pError::SyncMaxRetriesExceeded(deferred_blocks.len()).into());
                 }
             }
 

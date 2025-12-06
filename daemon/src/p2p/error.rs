@@ -213,6 +213,27 @@ pub enum P2pError {
     EncryptionError(#[from] EncryptionError),
     #[error(transparent)]
     Any(#[from] Error),
+    // ========================================================================
+    // CHAIN SYNC VALIDATION ERRORS (P0-3)
+    // Reference: TOS_FORK_PREVENTION_IMPLEMENTATION_V2.md
+    // ========================================================================
+    #[error(
+        "Sync validation: mergeset too large for block {block_hash} ({size} > max {max_size})"
+    )]
+    SyncMergesetTooLarge {
+        block_hash: Hash,
+        size: usize,
+        max_size: usize,
+    },
+    #[error("Sync validation: parent not ready for block {block_hash}, missing {missing_count} parent(s)")]
+    SyncParentNotReady {
+        block_hash: Hash,
+        missing_count: usize,
+    },
+    #[error("Sync validation: parent fetch timeout for block {0}")]
+    SyncParentFetchTimeout(Hash),
+    #[error("Sync validation: max retries exceeded ({0} blocks still pending)")]
+    SyncMaxRetriesExceeded(usize),
 }
 
 impl From<BlockchainError> for P2pError {

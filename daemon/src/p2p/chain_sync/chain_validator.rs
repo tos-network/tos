@@ -13,7 +13,7 @@ use crate::core::{
 };
 use async_trait::async_trait;
 use indexmap::{IndexMap, IndexSet};
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use std::{collections::HashMap, sync::Arc};
 use tos_common::{
     block::{BlockHeader, BlockVersion, TopoHeight},
@@ -268,6 +268,70 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             .get_ghostdag()
             .ghostdag(&provider, header.get_parents())
             .await?;
+
+        // ========================================================================
+        // SYNC SAFETY VALIDATION (P0-3)
+        //
+        // Additional security checks during chain sync to prevent attacks:
+        // 1. Mergeset size limit - prevents "wide but light" attacks
+        // 2. Blue work monotonicity - detects malformed chains
+        //
+        // Reference: TOS_FORK_PREVENTION_IMPLEMENTATION_V2.md
+        // ========================================================================
+
+        // 1. Mergeset size validation
+        // Formula: max_mergeset = 4 * k + safety_margin (16)
+        // Rationale:
+        // - k bounds anticone size in well-connected conditions
+        // - 4x factor accounts for parallel chains, network partitions, high latency
+        // - Safety margin handles edge cases and bursts
+        let k = self.blockchain.get_ghostdag().k() as usize;
+        let max_mergeset_size = 4 * k + 16;
+        let mergeset_size = ghostdag_data.mergeset_blues.len() + ghostdag_data.mergeset_reds.len();
+
+        if mergeset_size > max_mergeset_size {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "SYNC SAFETY: Block {} rejected - mergeset too large ({} > max {}). \
+                     This may indicate a 'wide but light' attack. k={}, blues={}, reds={}",
+                    hash,
+                    mergeset_size,
+                    max_mergeset_size,
+                    k,
+                    ghostdag_data.mergeset_blues.len(),
+                    ghostdag_data.mergeset_reds.len()
+                );
+            }
+            return Err(BlockchainError::InvalidBlockHeight(
+                max_mergeset_size as u64,
+                mergeset_size as u64,
+            ));
+        }
+
+        // 2. Blue work monotonicity check
+        // In a properly ordered sync chain, blue_work should generally increase
+        // A decrease indicates sync ordering issues or potential attack
+        if let Some((_, last_hash)) = self.hash_at_topo.last() {
+            if let Some(last_data) = self.blocks.get(last_hash) {
+                let last_blue_work = last_data.blue_work;
+                let new_blue_work = ghostdag_data.blue_work;
+
+                // Log warning if blue_work decreases significantly
+                // Small decreases can happen in DAG reorganizations, but large decreases are suspicious
+                if new_blue_work < last_blue_work {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "SYNC SAFETY: Blue work decreased during sync. \
+                             Block {} blue_work={} < previous block {} blue_work={}. \
+                             This may indicate sync ordering issue or attack.",
+                            hash, new_blue_work, last_hash, last_blue_work
+                        );
+                    }
+                    // Note: We log but don't reject, as DAG can have legitimate reorderings
+                    // The chain selection by blue_work will handle this correctly
+                }
+            }
+        }
 
         // Verify blue_score matches header claim
         let expected_blue_score = ghostdag_data.blue_score;
