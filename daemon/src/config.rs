@@ -304,6 +304,56 @@ pub const PEER_TEMP_BAN_TIME_ON_CONNECT: u64 = 60;
 pub const PEER_TEMP_BAN_TIME: u64 = 15 * 60;
 // millis until we timeout
 pub const PEER_TIMEOUT_REQUEST_OBJECT: u64 = 15_000;
+// ========================================================================
+// UNSOLICITED BLOCK RATE LIMITING (P1-1)
+// Maximum unsolicited blocks per peer per second before triggering action
+// Value set to 10 per TOS_FORK_PREVENTION_IMPLEMENTATION_V2.md spec.
+// This limits flood attacks while allowing normal block propagation.
+// Reference: TOS_FORK_PREVENTION_IMPLEMENTATION_V2.md
+// ========================================================================
+pub const PEER_MAX_UNSOLICITED_BLOCKS_PER_SECOND: u32 = 10;
+// Minimum peer reputation to accept unsolicited blocks (future use)
+pub const PEER_MIN_REPUTATION_FOR_UNSOLICITED: u32 = 50;
+
+/// Policy for handling unsolicited (unrequested) blocks
+/// Reference: TOS_FORK_PREVENTION_IMPLEMENTATION_V2.md P1-1
+#[derive(Clone, Debug)]
+pub struct UnsolicitedBlockPolicy {
+    /// Maximum unsolicited blocks per peer per second
+    pub max_rate_per_second: u32,
+    /// Minimum peer reputation to accept unsolicited blocks
+    pub min_reputation: u32,
+    /// Whether to completely reject unsolicited blocks (strict mode)
+    pub reject_all: bool,
+}
+
+impl Default for UnsolicitedBlockPolicy {
+    fn default() -> Self {
+        Self {
+            max_rate_per_second: PEER_MAX_UNSOLICITED_BLOCKS_PER_SECOND,
+            min_reputation: PEER_MIN_REPUTATION_FOR_UNSOLICITED,
+            reject_all: false,
+        }
+    }
+}
+
+impl UnsolicitedBlockPolicy {
+    /// Create a new policy with custom rate limit
+    pub fn with_rate_limit(rate: u32) -> Self {
+        Self {
+            max_rate_per_second: rate,
+            ..Default::default()
+        }
+    }
+
+    /// Create a strict policy that rejects all unsolicited blocks
+    pub fn strict() -> Self {
+        Self {
+            reject_all: true,
+            ..Default::default()
+        }
+    }
+}
 // How many objects requests can be concurrently requested?
 pub const PEER_OBJECTS_CONCURRENCY: usize = 64;
 // millis until we timeout during a bootstrap request

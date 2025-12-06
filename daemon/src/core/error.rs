@@ -288,6 +288,18 @@ pub enum BlockchainError {
     InvalidBlueScore(Hash, u64, u64),
     #[error("Invalid blue_work for block {}: expected {}, got {}", _0, _1, _2)]
     InvalidBlueWork(Hash, BlueWorkType, BlueWorkType),
+    // P0-3: Mergeset size limit validation (fork prevention)
+    // max_mergeset = 4*k + 16 to prevent "wide but light" DAG attacks
+    #[error(
+        "Block {} has mergeset too large: {} (blues={}, reds={}) exceeds limit {} (k={})",
+        _0,
+        _1,
+        _2,
+        _3,
+        _4,
+        _5
+    )]
+    MergesetTooLarge(Hash, usize, usize, usize, usize, u16),
     #[error(
         "Block {} has multiple parent levels ({} levels), only single level (level 0) is allowed",
         _0,

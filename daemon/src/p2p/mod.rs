@@ -640,6 +640,36 @@ impl<S: Storage> P2pServer<S> {
             return Err(P2pError::InvalidP2pVersion(handshake.get_version().clone()));
         }
 
+        // ================================================================
+        // VERSION THRESHOLD CHECK (P1-2)
+        //
+        // Warn about peers running outdated versions that may have
+        // consensus bugs or missing security fixes. We accept the
+        // connection but log a warning for monitoring.
+        //
+        // Reference: TOS_FORK_PREVENTION_IMPLEMENTATION_V2.md
+        // ================================================================
+        let peer_version = handshake.get_version();
+        const PROBLEMATIC_VERSIONS: &[&str] = &["0.1.0", "0.1.1", "0.1.2", "0.1.2-alpha"];
+
+        if PROBLEMATIC_VERSIONS
+            .iter()
+            .any(|v| peer_version.starts_with(v))
+        {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "VERSION WARNING: Peer {} running outdated version '{}'. \
+                     This version may have consensus bugs. Consider upgrading. \
+                     Problematic versions: {:?}",
+                    connection.get_address(),
+                    peer_version,
+                    PROBLEMATIC_VERSIONS
+                );
+            }
+            // We still accept the connection but log the warning
+            // A future protocol upgrade could reject these versions
+        }
+
         Ok(())
     }
 
@@ -2373,6 +2403,31 @@ impl<S: Storage> P2pServer<S> {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!("Received a block propagation packet from {}", peer);
                 }
+
+                // ================================================================
+                // UNSOLICITED BLOCK RATE LIMITING (P1-1)
+                //
+                // Track unsolicited block rate from this peer. If they're sending
+                // blocks faster than the configured limit, log a warning and
+                // increment their fail count. This helps detect flood attacks.
+                //
+                // Reference: TOS_FORK_PREVENTION_IMPLEMENTATION_V2.md
+                // ================================================================
+                if peer.record_unsolicited_block_and_check(PEER_MAX_UNSOLICITED_BLOCKS_PER_SECOND) {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "RATE LIMIT: Peer {} exceeded unsolicited block rate ({}/sec). \
+                             Count={}, incrementing fail count. Possible flood attack.",
+                            peer,
+                            PEER_MAX_UNSOLICITED_BLOCKS_PER_SECOND,
+                            peer.get_unsolicited_block_count()
+                        );
+                    }
+                    peer.increment_fail_count();
+                    // Continue processing this block, but the peer's fail count
+                    // will eventually cause disconnection if abuse continues
+                }
+
                 let (header, ping) = packet_wrapper.consume();
                 ping.into_owned()
                     .update_peer(peer, &self.blockchain)
@@ -3011,6 +3066,28 @@ impl<S: Storage> P2pServer<S> {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!("{}: Compact Block Propagation packet", peer);
                 }
+
+                // ================================================================
+                // UNSOLICITED BLOCK RATE LIMITING (P1-1)
+                //
+                // Same rate limiting as regular BlockPropagation. Compact blocks
+                // count toward the same rate limit as regular blocks.
+                //
+                // Reference: TOS_FORK_PREVENTION_IMPLEMENTATION_V2.md
+                // ================================================================
+                if peer.record_unsolicited_block_and_check(PEER_MAX_UNSOLICITED_BLOCKS_PER_SECOND) {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "RATE LIMIT: Peer {} exceeded unsolicited block rate ({}/sec). \
+                             Count={}, incrementing fail count. Possible flood attack.",
+                            peer,
+                            PEER_MAX_UNSOLICITED_BLOCKS_PER_SECOND,
+                            peer.get_unsolicited_block_count()
+                        );
+                    }
+                    peer.increment_fail_count();
+                }
+
                 let (compact_block_msg, ping) = packet_wrapper.consume();
                 let compact_block = compact_block_msg.into_owned().into_owned();
 

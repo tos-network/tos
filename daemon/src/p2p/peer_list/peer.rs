@@ -24,7 +24,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering},
         Arc,
     },
     time::Duration,
@@ -110,6 +110,14 @@ pub struct Peer {
     last_fail_count: AtomicU64,
     // fail count: if greater than 20, we should close this connection
     fail_count: AtomicU8,
+    // ========================================================================
+    // UNSOLICITED BLOCK RATE LIMITING (P1-1)
+    // Tracks blocks received without explicit request to detect flood attacks
+    // ========================================================================
+    // Count of unsolicited blocks in current 1-second window
+    unsolicited_block_count: AtomicU32,
+    // Start of current rate window (seconds since epoch)
+    unsolicited_block_window_start: AtomicU64,
     // shared pointer to the peer list in case of disconnection
     peer_list: SharedPeerList,
     // map of requested objects from this peer
@@ -201,6 +209,9 @@ impl Peer {
                 priority,
                 last_fail_count: AtomicU64::new(0),
                 fail_count: AtomicU8::new(0),
+                // P1-1: Initialize unsolicited block rate tracking
+                unsolicited_block_count: AtomicU32::new(0),
+                unsolicited_block_window_start: AtomicU64::new(0),
                 last_chain_sync: AtomicU64::new(0),
                 peer_list,
                 objects_requested: Mutex::new(LruCache::new(
@@ -689,6 +700,81 @@ impl Peer {
     // Track the last time we sent a ping packet to this peer
     pub fn set_last_ping_sent(&self, value: TimestampSeconds) {
         self.last_ping.store(value, Ordering::SeqCst)
+    }
+
+    // ========================================================================
+    // UNSOLICITED BLOCK RATE LIMITING (P1-1)
+    //
+    // These methods track blocks received without explicit request to detect
+    // flood attacks. Uses a sliding window of 1 second.
+    //
+    // Reference: TOS_FORK_PREVENTION_IMPLEMENTATION_V2.md
+    // ========================================================================
+
+    /// Record an unsolicited block and check if rate limit is exceeded.
+    ///
+    /// # Arguments
+    /// * `max_rate` - Maximum allowed unsolicited blocks per second
+    ///
+    /// # Returns
+    /// * `true` if rate limit exceeded (caller should take action)
+    /// * `false` if within acceptable rate
+    ///
+    /// # Algorithm
+    /// Uses a 1-second sliding window. If the current second differs from
+    /// the stored window start, the counter resets. Otherwise, it increments.
+    /// Compare-exchange ensures thread-safety without locks.
+    pub fn record_unsolicited_block_and_check(&self, max_rate: u32) -> bool {
+        let current_time = get_current_time_in_seconds();
+        let window_start = self.unsolicited_block_window_start.load(Ordering::SeqCst);
+
+        // Check if we're in a new time window
+        if current_time != window_start {
+            // Try to reset the window atomically
+            // If another thread already reset it, that's fine - we'll just increment
+            match self.unsolicited_block_window_start.compare_exchange(
+                window_start,
+                current_time,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => {
+                    // Successfully reset window, start count at 1
+                    self.unsolicited_block_count.store(1, Ordering::SeqCst);
+                    return false; // First block in new window, always OK
+                }
+                Err(actual) => {
+                    // Another thread reset the window, check if it's current
+                    if actual == current_time {
+                        // Window is current, just increment
+                        let count = self.unsolicited_block_count.fetch_add(1, Ordering::SeqCst) + 1;
+                        return count > max_rate;
+                    } else {
+                        // Window is stale, try again (recursive would be cleaner but avoid for simplicity)
+                        self.unsolicited_block_window_start
+                            .store(current_time, Ordering::SeqCst);
+                        self.unsolicited_block_count.store(1, Ordering::SeqCst);
+                        return false;
+                    }
+                }
+            }
+        }
+
+        // Same window, increment and check
+        let count = self.unsolicited_block_count.fetch_add(1, Ordering::SeqCst) + 1;
+        count > max_rate
+    }
+
+    /// Get the current unsolicited block count for monitoring/debugging
+    pub fn get_unsolicited_block_count(&self) -> u32 {
+        self.unsolicited_block_count.load(Ordering::SeqCst)
+    }
+
+    /// Reset the unsolicited block counter (e.g., after successful sync)
+    pub fn reset_unsolicited_block_count(&self) {
+        self.unsolicited_block_count.store(0, Ordering::SeqCst);
+        self.unsolicited_block_window_start
+            .store(0, Ordering::SeqCst);
     }
 
     // Get the last time a inventory has been requested

@@ -1007,3 +1007,117 @@ fi
 | **Verify compilation** | `cargo check -p tos_daemon` |
 | **Run integration tests** | `cargo test --test tako_syscalls_comprehensive_test` |
 | **Verify consistency** | `./verify_tako_versions.sh` |
+
+## Local CI Check (Pre-Push Verification)
+
+Before pushing code to GitHub, run CI checks locally to catch issues early. This saves time by avoiding failed GitHub Actions runs.
+
+### Quick Start
+
+```bash
+# Quick check (fmt + clippy + build) - ~1 minute
+./scripts/ci-check.sh quick
+
+# Standard check (+ unit tests + doc tests) - ~5 minutes
+./scripts/ci-check.sh
+
+# Full check (+ integration tests + release build) - ~15 minutes
+./scripts/ci-check.sh full
+```
+
+### Docker Mode (Matches GitHub Actions Environment)
+
+Run checks in a Docker container that matches the GitHub Actions environment:
+
+```bash
+# Build Docker image (first time only)
+docker build -t tos-ci-check docker/ci-check/
+
+# Run checks in Docker
+./scripts/ci-check.sh docker quick
+./scripts/ci-check.sh docker
+./scripts/ci-check.sh docker full
+```
+
+### CI Checks Overview
+
+| Mode | Checks Performed | Time |
+|------|------------------|------|
+| `quick` | Format, Clippy (critical + security), Build with `-D warnings` | ~1 min |
+| default | quick + Unit tests + Doc tests | ~5 min |
+| `full` | default + Integration tests + Parallel tests + Security tests + Release build | ~15 min |
+
+### What Gets Checked
+
+**Formatting (lint job)**
+```bash
+cargo fmt --all -- --check
+```
+
+**Clippy - Critical Lints (lint job)**
+```bash
+cargo clippy --workspace --all-targets -- \
+    -D clippy::await_holding_lock \
+    -D clippy::todo \
+    -D clippy::unimplemented \
+    -W clippy::all
+```
+
+**Security Clippy - Production Code (security-checks job)**
+```bash
+cargo clippy \
+    --package tos_daemon \
+    --package tos_common \
+    --package tos_wallet \
+    --lib -- \
+    -D clippy::unwrap_used \
+    -D clippy::expect_used \
+    -D clippy::panic \
+    -D clippy::disallowed_methods \
+    -D warnings
+```
+
+**Build with Strict Warnings (build job)**
+```bash
+RUSTFLAGS="-D warnings" cargo build \
+    --package tos_daemon \
+    --package tos_common \
+    --package tos_wallet \
+    --lib
+```
+
+### File Structure
+
+```
+tos/
+├── docker/
+│   └── ci-check/
+│       ├── Dockerfile        # Docker image (rust:1.91-bookworm)
+│       └── ci-check.sh       # CI check script
+└── scripts/
+    └── ci-check.sh           # Entry point (local or Docker)
+```
+
+### Recommended Workflow
+
+1. **Before committing**: Run `./scripts/ci-check.sh quick` to catch format/lint issues
+2. **Before pushing**: Run `./scripts/ci-check.sh` to verify tests pass
+3. **Before PR merge**: Run `./scripts/ci-check.sh full` for complete verification
+
+### Troubleshooting
+
+**If local check passes but GitHub Actions fails:**
+
+1. Check Rust version matches (local vs Docker vs GitHub Actions)
+   ```bash
+   rustc --version  # Local
+   # Docker uses rust:1.91-bookworm
+   # GitHub Actions uses dtolnay/rust-toolchain@stable
+   ```
+
+2. Run in Docker to match GitHub Actions environment:
+   ```bash
+   ./scripts/ci-check.sh docker
+   ```
+
+3. Check for platform-specific issues (macOS vs Linux)
