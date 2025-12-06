@@ -137,12 +137,18 @@ else
     run_check "Doc Tests" \
         "cargo test --workspace --doc --no-fail-fast" || true
 
+    # ============================================
+    # 8. Integration Tests (Debug mode for default, Release for full)
+    # ============================================
     if [ "$MODE" = "full" ]; then
-        # ============================================
-        # 8. Integration Tests (Release mode)
-        # ============================================
         run_check "Integration Tests (Release Mode)" \
             "cargo test --workspace --tests --release --no-fail-fast" || true
+    else
+        run_check "Integration Tests (Debug Mode)" \
+            "cargo test --workspace --tests --no-fail-fast" || true
+    fi
+
+    if [ "$MODE" = "full" ]; then
 
         # ============================================
         # 9. Parallel Execution Tests
@@ -166,7 +172,6 @@ else
             "cargo build --workspace --release --lib && \
              cargo build --workspace --release --bins" || true
     else
-        print_skip "Integration Tests (use 'full' mode)"
         print_skip "Parallel Execution Tests (use 'full' mode)"
         print_skip "Security Tests (use 'full' mode)"
         print_skip "Release Build (use 'full' mode)"

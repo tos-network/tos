@@ -1044,8 +1044,8 @@ docker build -t tos-ci-check docker/ci-check/
 | Mode | Checks Performed | Time |
 |------|------------------|------|
 | `quick` | Format, Clippy (critical + security), Build with `-D warnings` | ~1 min |
-| default | quick + Unit tests + Doc tests | ~5 min |
-| `full` | default + Integration tests + Parallel tests + Security tests + Release build | ~15 min |
+| default | quick + Unit tests + Doc tests + Integration tests (debug) | ~8 min |
+| `full` | default + Integration tests (release) + Parallel tests + Security tests + Release build | ~20 min |
 
 ### What Gets Checked
 
