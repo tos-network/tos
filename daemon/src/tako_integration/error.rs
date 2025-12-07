@@ -206,11 +206,22 @@ impl TakoExecutionError {
             };
         }
 
-        // Check if it's a stack overflow
-        if reason.contains("CallDepthExceeded") || reason.contains("stack") {
+        // Check if it's a call depth exceeded (true stack overflow from nested calls)
+        // Only match CallDepthExceeded, NOT StackAccessViolation (which is a memory error)
+        if reason.contains("CallDepthExceeded") {
             return Self::StackOverflow {
                 depth: 0,      // Would need to extract from error
                 max_depth: 64, // Default max depth
+            };
+        }
+
+        // Check if it's a stack access violation (memory error in stack region)
+        // This is different from call depth exceeded - it's a memory access error
+        if reason.contains("StackAccessViolation") {
+            return Self::MemoryAccessViolation {
+                reason: reason.clone(),
+                address: None,
+                size: None,
             };
         }
 
