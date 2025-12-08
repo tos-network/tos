@@ -48,3 +48,7 @@ debug-assertions = false
 overflow-checks = false
 lto = true
 strip = true
+
+# Patch to use local tbpf for debugging entrypoint offset issue
+[patch."https://github.com/tos-network/tbpf"]
+tos-tbpf = { path = "../tbpf" }

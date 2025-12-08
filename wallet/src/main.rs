@@ -1264,6 +1264,59 @@ async fn setup_wallet_command_manager(
         CommandHandler::Async(async_handler!(deploy_contract)),
     ))?;
 
+    // Smart contract invocation command
+    command_manager.add_command(Command::with_required_arguments(
+        "invoke_contract",
+        "Invoke a smart contract function",
+        vec![
+            Arg::new(
+                "contract",
+                ArgType::String,
+                "Contract address (TX hash of deployment)",
+            ),
+            Arg::new("entry_id", ArgType::Number, "Entry point function ID"),
+        ],
+        CommandHandler::Async(async_handler!(invoke_contract)),
+    ))?;
+
+    // Contract info query command
+    command_manager.add_command(Command::with_required_arguments(
+        "get_contract_info",
+        "Get information about a deployed contract",
+        vec![Arg::new(
+            "contract",
+            ArgType::String,
+            "Contract address (TX hash of deployment)",
+        )],
+        CommandHandler::Async(async_handler!(get_contract_info)),
+    ))?;
+
+    // Contract balance query command
+    command_manager.add_command(Command::with_required_arguments(
+        "get_contract_balance",
+        "Get the balance of a contract for a specific asset",
+        vec![
+            Arg::new(
+                "contract",
+                ArgType::String,
+                "Contract address (TX hash of deployment)",
+            ),
+            Arg::new(
+                "asset",
+                ArgType::String,
+                "Asset hash (use 0 for native TOS)",
+            ),
+        ],
+        CommandHandler::Async(async_handler!(get_contract_balance)),
+    ))?;
+
+    // Count contracts command
+    command_manager.add_command(Command::new(
+        "count_contracts",
+        "Get the total number of deployed contracts",
+        CommandHandler::Async(async_handler!(count_contracts)),
+    ))?;
+
     // Help command for detailed command information
     command_manager.add_command(Command::with_optional_arguments(
         "help",
@@ -5139,6 +5192,343 @@ async fn deploy_contract(
 
     // Broadcast the transaction
     broadcast_tx(&wallet, manager, tx).await;
+
+    Ok(())
+}
+
+// Invoke a smart contract function
+async fn invoke_contract(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let prompt = manager.get_prompt();
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
+
+    // Wait for wallet to sync before creating transaction
+    #[cfg(feature = "network_handler")]
+    {
+        if wallet.is_online().await && !wallet.is_synced().await.unwrap_or(false) {
+            manager.message("Waiting for wallet to synchronize...");
+            if let Err(e) = wallet.wait_for_sync(30).await {
+                manager.error(format!("Sync timeout: {e:#}"));
+                manager.message("Tip: Check sync status with 'sync_status' command");
+                return Ok(());
+            }
+            manager.message("Wallet synchronized");
+        }
+    }
+
+    // Get contract address (deployment TX hash)
+    let contract_str = get_required_arg_with_example(
+        &mut args,
+        "contract",
+        manager,
+        "invoke_contract <contract> <entry_id> [max_gas]",
+        "invoke_contract abc123...def 0",
+        || async {
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Contract address (TX hash): "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await
+    .context("Error while reading contract address")?;
+
+    let contract = match Hash::from_hex(&contract_str) {
+        Ok(h) => h,
+        Err(e) => {
+            manager.error(format!("Invalid contract hash: {e}"));
+            return Ok(());
+        }
+    };
+
+    // Get entry point ID
+    let entry_id_str = get_required_arg_with_example(
+        &mut args,
+        "entry_id",
+        manager,
+        "invoke_contract <contract> <entry_id> [max_gas]",
+        "invoke_contract abc123...def 0",
+        || async {
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Entry point ID (0-65535): "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await
+    .context("Error while reading entry ID")?;
+
+    let entry_id: u16 = match entry_id_str.parse() {
+        Ok(id) => id,
+        Err(e) => {
+            manager.error(format!("Invalid entry ID: {e}"));
+            return Ok(());
+        }
+    };
+
+    // Optional max_gas parameter (default: 1_000_000)
+    let max_gas: u64 = if args.has_argument("max_gas") {
+        args.get_value("max_gas")?
+            .to_string_value()?
+            .parse()
+            .unwrap_or(1_000_000)
+    } else {
+        1_000_000
+    };
+
+    manager.message(format!(
+        "Invoking contract {} with entry_id={}, max_gas={}",
+        contract, entry_id, max_gas
+    ));
+
+    // Create invoke contract transaction
+    use indexmap::IndexMap;
+    use tos_common::transaction::builder::InvokeContractBuilder;
+
+    let invoke_builder = InvokeContractBuilder {
+        contract,
+        max_gas,
+        entry_id,
+        parameters: vec![],
+        deposits: IndexMap::new(),
+        contract_key: None,
+    };
+
+    let tx_type = TransactionTypeBuilder::InvokeContract(invoke_builder);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {e}"));
+            return Ok(());
+        }
+    };
+
+    let hash = tx.hash();
+    manager.message(format!("Contract invocation transaction created: {hash}"));
+
+    // Broadcast the transaction
+    broadcast_tx(&wallet, manager, tx).await;
+
+    Ok(())
+}
+
+// Get information about a deployed contract
+async fn get_contract_info(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let prompt = manager.get_prompt();
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
+
+    // Get contract address (deployment TX hash)
+    let contract_str = get_required_arg_with_example(
+        &mut args,
+        "contract",
+        manager,
+        "get_contract_info <contract>",
+        "get_contract_info abc123...def",
+        || async {
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Contract address (TX hash): "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await
+    .context("Error while reading contract address")?;
+
+    let contract = match Hash::from_hex(&contract_str) {
+        Ok(h) => h,
+        Err(e) => {
+            manager.error(format!("Invalid contract hash: {e}"));
+            return Ok(());
+        }
+    };
+
+    manager.message(format!("Querying contract {}...", contract));
+
+    // Get contract module from daemon
+    #[cfg(feature = "network_handler")]
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let api = handler.get_api();
+            match api.get_contract_module(&contract).await {
+                Ok(module) => {
+                    let bytecode_size = module.get_bytecode().map(|b| b.len()).unwrap_or(0);
+                    manager.message(format!("Contract: {}", contract));
+                    manager.message(format!("Bytecode size: {} bytes", bytecode_size));
+                    manager.message("Contract exists and is deployed.");
+                }
+                Err(e) => {
+                    manager.error(format!("Failed to get contract info: {e}"));
+                }
+            }
+        } else {
+            manager.error("Not connected to daemon. Use 'online_mode' to connect.");
+        }
+    }
+
+    #[cfg(not(feature = "network_handler"))]
+    {
+        manager.error("Network handler feature is not enabled.");
+    }
+
+    Ok(())
+}
+
+// Get the balance of a contract for a specific asset
+async fn get_contract_balance(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let prompt = manager.get_prompt();
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
+
+    // Get contract address (deployment TX hash)
+    let contract_str = get_required_arg_with_example(
+        &mut args,
+        "contract",
+        manager,
+        "get_contract_balance <contract> <asset>",
+        "get_contract_balance abc123...def 0",
+        || async {
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Contract address (TX hash): "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await
+    .context("Error while reading contract address")?;
+
+    let contract = match Hash::from_hex(&contract_str) {
+        Ok(h) => h,
+        Err(e) => {
+            manager.error(format!("Invalid contract hash: {e}"));
+            return Ok(());
+        }
+    };
+
+    // Get asset hash (use NATIVE_ASSET for native TOS)
+    let asset_str = get_required_arg_with_example(
+        &mut args,
+        "asset",
+        manager,
+        "get_contract_balance <contract> <asset>",
+        "get_contract_balance abc123...def 0",
+        || async {
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Asset hash (0 for native TOS): "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await
+    .context("Error while reading asset hash")?;
+
+    let asset = if asset_str == "0" {
+        TOS_ASSET
+    } else {
+        match Hash::from_hex(&asset_str) {
+            Ok(h) => h,
+            Err(e) => {
+                manager.error(format!("Invalid asset hash: {e}"));
+                return Ok(());
+            }
+        }
+    };
+
+    manager.message(format!("Querying balance for contract {}...", contract));
+
+    // Get contract balance from daemon
+    #[cfg(feature = "network_handler")]
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let api = handler.get_api();
+            match api.get_contract_balance(&contract, &asset).await {
+                Ok(balance) => {
+                    let formatted = format_coin(balance, tos_common::config::COIN_DECIMALS);
+                    manager.message(format!("Contract: {}", contract));
+                    manager.message(format!("Asset: {}", asset));
+                    manager.message(format!("Balance: {} ({} atomic units)", formatted, balance));
+                }
+                Err(e) => {
+                    manager.error(format!("Failed to get contract balance: {e}"));
+                }
+            }
+        } else {
+            manager.error("Not connected to daemon. Use 'online_mode' to connect.");
+        }
+    }
+
+    #[cfg(not(feature = "network_handler"))]
+    {
+        manager.error("Network handler feature is not enabled.");
+    }
+
+    Ok(())
+}
+
+// Get the total number of deployed contracts
+async fn count_contracts(
+    manager: &CommandManager,
+    _args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
+
+    manager.message("Querying contract count...");
+
+    // Get contract count from daemon
+    #[cfg(feature = "network_handler")]
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let api = handler.get_api();
+            match api.count_contracts().await {
+                Ok(count) => {
+                    manager.message(format!("Total deployed contracts: {}", count));
+                }
+                Err(e) => {
+                    manager.error(format!("Failed to get contract count: {e}"));
+                }
+            }
+        } else {
+            manager.error("Not connected to daemon. Use 'online_mode' to connect.");
+        }
+    }
+
+    #[cfg(not(feature = "network_handler"))]
+    {
+        manager.error("Network handler feature is not enabled.");
+    }
 
     Ok(())
 }
