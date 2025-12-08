@@ -14,7 +14,7 @@ build = "build.rs"
 [dependencies]
 tos-hash = { git = "https://github.com/tos-network/tos-hash", branch = "master" }
 # TOS Kernel - Simplified re-export crate in TAKO
-tos-kernel = { git = "https://github.com/tos-network/tako", rev = "892ff73" }
+tos-kernel = { git = "https://github.com/tos-network/tako", rev = "cdc7e14" }
 # TOS Crypto - Extracted cryptographic primitives to avoid circular dependencies
 # Pinned to specific rev for reproducible builds
 tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "e487d8d" }
