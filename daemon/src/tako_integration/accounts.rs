@@ -199,6 +199,12 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
         //
         // TODO [Phase 2]: Integrate with TOS's ContractOutput system for full transaction atomicity
 
+        // EVM-compatible behavior: zero-amount transfers are no-ops
+        // This matches Ethereum's CALL behavior where value=0 transfers always succeed
+        if amount == 0 {
+            return Ok(());
+        }
+
         let from_pubkey = Self::address_to_pubkey(from)?;
         let to_pubkey = Self::address_to_pubkey(to)?;
 
@@ -818,5 +824,48 @@ mod tests {
         let transfers = adapter.take_pending_transfers();
         assert_eq!(transfers.len(), 1);
         assert_eq!(transfers[0].amount, 400_000);
+    }
+
+    #[test]
+    fn test_zero_amount_transfer_to_nonexistent_account() {
+        // EVM-compatible: zero-amount transfers are no-ops, even to non-existent accounts
+        let mut provider = MockProvider::new();
+        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let to = PublicKey::from_bytes(&[0x33u8; 32]).unwrap();
+
+        // Sender has some balance
+        provider.set_balance(from.clone(), Hash::zero(), 1000);
+        // DON'T add 'to' account - it doesn't exist
+
+        let mut adapter = TosAccountAdapter::new(&provider, 100);
+
+        // Zero transfer should succeed (no-op)
+        let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 0);
+        assert!(result.is_ok(), "Zero-amount transfer should succeed");
+
+        // No transfer should be staged (it's a no-op)
+        let transfers = adapter.take_pending_transfers();
+        assert_eq!(transfers.len(), 0, "Zero transfer should not stage anything");
+    }
+
+    #[test]
+    fn test_zero_amount_transfer_to_existing_account() {
+        // Zero-amount transfers should succeed without any checks
+        let mut provider = MockProvider::new();
+        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+
+        provider.set_balance(from.clone(), Hash::zero(), 1000);
+        provider.set_balance(to.clone(), Hash::zero(), 0);
+
+        let mut adapter = TosAccountAdapter::new(&provider, 100);
+
+        // Zero transfer should succeed
+        let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 0);
+        assert!(result.is_ok(), "Zero-amount transfer should succeed");
+
+        // No transfer staged
+        let transfers = adapter.take_pending_transfers();
+        assert_eq!(transfers.len(), 0, "Zero transfer should not stage anything");
     }
 }
