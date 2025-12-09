@@ -8,7 +8,7 @@ use crate::{
     config::{TOS_ASSET, TX_GAS_BURN_PERCENT},
     contract::ContractProvider,
     crypto::Hash,
-    transaction::{encoding, ContractDeposit, Transaction},
+    transaction::{ContractDeposit, Transaction},
 };
 
 use super::{BlockchainApplyState, BlockchainVerificationState, VerificationError};
@@ -46,12 +46,32 @@ impl Transaction {
         state: &mut B,
         contract: &Hash,
         deposits: &'a IndexMap<Hash, ContractDeposit>,
-        _parameters: impl DoubleEndedIterator<Item = ValueCell>,
+        user_parameters: impl DoubleEndedIterator<Item = ValueCell>,
         max_gas: u64,
         invoke: InvokeContract,
     ) -> Result<bool, VerificationError<E>> {
         if log::log_enabled!(log::Level::Debug) {
             debug!("Invoking contract {contract} from TX {tx_hash}: {invoke:?}");
+        }
+
+        // Collect user parameters (bytes) from the transaction
+        // For TAKO contracts, the first parameter should contain the call data
+        let user_data: Vec<u8> = user_parameters
+            .filter_map(|cell| {
+                if let ValueCell::Bytes(bytes) = cell {
+                    Some(bytes)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect();
+
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "User data for contract invocation: {} bytes",
+                user_data.len()
+            );
         }
 
         // Get the contract module to extract bytecode
@@ -90,13 +110,19 @@ impl Transaction {
         // Convert timestamp from milliseconds to seconds for contract execution
         let block_timestamp = block.get_header().get_timestamp() / 1000;
 
-        // Convert invoke type to parameters
-        // For TOS Kernel(TAKO), we pass execution metadata as parameters
-        // Uses deterministic encoding that supports full u16 range for entry_id
-        // and proper u8 range for hook_id. See encoding module for format spec.
+        // Build input data for the contract
+        // The user_data contains [instruction_byte] + [args] for TAKO contracts
+        // The entry_id/hook_id is used for TOS-level routing but the contract
+        // handles its own dispatch via the instruction byte in user_data
         let parameters = match invoke {
-            InvokeContract::Entry(entry_id) => Some(encoding::encode_entry_point(entry_id)),
-            InvokeContract::Hook(hook_id) => Some(encoding::encode_hook(hook_id)),
+            InvokeContract::Entry(_entry_id) => {
+                // Pass user_data directly - it already contains instruction + args
+                Some(user_data)
+            }
+            InvokeContract::Hook(_hook_id) => {
+                // Pass user_data directly for hooks as well
+                Some(user_data)
+            }
         };
 
         // Execute the contract

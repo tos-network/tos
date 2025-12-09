@@ -30,12 +30,10 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
 };
 use tos_kernel::EnvironmentBuilder;
-use tos_kernel::{
-    Context, FnInstance, FnParams, FnReturnType, OpaqueWrapper, Primitive, Type, ValueCell,
-};
+use tos_kernel::{Context, FnInstance, FnParams, FnReturnType, OpaqueWrapper, Primitive, Type};
 
-// Re-export Module for contract deployment (used by wallet CLI)
-pub use tos_kernel::Module;
+// Re-export Module and ValueCell for contract deployment (used by wallet CLI)
+pub use tos_kernel::{Module, ValueCell};
 
 pub use output::*;
 pub use random::DeterministicRandom;

@@ -334,6 +334,18 @@ impl TakoExecutor {
         // Record bytecode size for loaded data accounting (done after InvokeContext creation)
         let bytecode_size = bytecode.len() as u64;
         let executable = Executable::load(bytecode, loader.clone()).map_err(|e| {
+            // Log detailed ELF parsing error for debugging
+            error!(
+                "ELF parsing failed for contract {}: bytecode_size={}, error={:?}",
+                contract_hash,
+                bytecode.len(),
+                e
+            );
+            // Also log first 64 bytes of bytecode for debugging
+            if log::log_enabled!(log::Level::Debug) {
+                let header_bytes: Vec<u8> = bytecode.iter().take(64).cloned().collect();
+                debug!("ELF header bytes: {:02x?}", header_bytes);
+            }
             TakoExecutionError::ExecutableLoadFailed {
                 reason: "ELF parsing failed".to_string(),
                 bytecode_size: bytecode.len(),

@@ -1265,7 +1265,7 @@ async fn setup_wallet_command_manager(
     ))?;
 
     // Smart contract invocation command
-    command_manager.add_command(Command::with_required_arguments(
+    command_manager.add_command(Command::with_arguments(
         "invoke_contract",
         "Invoke a smart contract function",
         vec![
@@ -1274,7 +1274,19 @@ async fn setup_wallet_command_manager(
                 ArgType::String,
                 "Contract address (TX hash of deployment)",
             ),
-            Arg::new("entry_id", ArgType::Number, "Entry point function ID"),
+            Arg::new("entry_id", ArgType::String, "Entry point function ID"),
+        ],
+        vec![
+            Arg::new(
+                "data",
+                ArgType::String,
+                "Optional hex-encoded call data (e.g., 00054555534443... for Initialize)",
+            ),
+            Arg::new(
+                "max_gas",
+                ArgType::Number,
+                "Maximum gas limit (default: 1000000)",
+            ),
         ],
         CommandHandler::Async(async_handler!(invoke_contract)),
     ))?;
@@ -5275,6 +5287,25 @@ async fn invoke_contract(
         }
     };
 
+    // Optional data parameter (hex-encoded bytes)
+    use tos_common::contract::ValueCell;
+    let parameters: Vec<ValueCell> = if args.has_argument("data") {
+        let data_hex = args.get_value("data")?.to_string_value()?;
+        // Decode hex string to bytes
+        match hex::decode(&data_hex) {
+            Ok(bytes) => {
+                manager.message(format!("Call data: {} bytes", bytes.len()));
+                vec![ValueCell::Bytes(bytes)]
+            }
+            Err(e) => {
+                manager.error(format!("Invalid hex data: {e}"));
+                return Ok(());
+            }
+        }
+    } else {
+        vec![]
+    };
+
     // Optional max_gas parameter (default: 1_000_000)
     let max_gas: u64 = if args.has_argument("max_gas") {
         args.get_value("max_gas")?
@@ -5286,8 +5317,11 @@ async fn invoke_contract(
     };
 
     manager.message(format!(
-        "Invoking contract {} with entry_id={}, max_gas={}",
-        contract, entry_id, max_gas
+        "Invoking contract {} with entry_id={}, max_gas={}, params={}",
+        contract,
+        entry_id,
+        max_gas,
+        parameters.len()
     ));
 
     // Create invoke contract transaction
@@ -5298,7 +5332,7 @@ async fn invoke_contract(
         contract,
         max_gas,
         entry_id,
-        parameters: vec![],
+        parameters,
         deposits: IndexMap::new(),
         contract_key: None,
     };
