@@ -729,6 +729,23 @@ pub struct GetContractOutputsParams<'a> {
     pub transaction: Cow<'a, Hash>,
 }
 
+/// Parameters for get_contract_address_from_tx RPC method
+/// Computes the deterministic contract address from a DeployContract transaction
+#[derive(Serialize, Deserialize)]
+pub struct GetContractAddressFromTxParams<'a> {
+    /// The transaction hash of a DeployContract transaction
+    pub transaction: Cow<'a, Hash>,
+}
+
+/// Response for get_contract_address_from_tx RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetContractAddressFromTxResult {
+    /// The computed contract address (deterministic from deployer + bytecode)
+    pub contract_address: Hash,
+    /// The deployer's address (for reference)
+    pub deployer: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct GetContractModuleParams<'a> {
     pub contract: Cow<'a, Hash>,

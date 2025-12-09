@@ -592,6 +592,10 @@ pub fn register_methods<S: Storage>(
         "get_contract_module",
         async_handler!(get_contract_module::<S>),
     );
+    handler.register_method(
+        "get_contract_address_from_tx",
+        async_handler!(get_contract_address_from_tx::<S>),
+    );
     handler.register_method("get_contract_data", async_handler!(get_contract_data::<S>));
     handler.register_method(
         "get_contract_data_at_topoheight",
@@ -2654,6 +2658,54 @@ async fn get_contract_module<S: Storage>(
         .context("Error while retrieving contract module")?;
 
     Ok(json!(module))
+}
+
+/// Compute the deterministic contract address from a DeployContract transaction.
+///
+/// The contract address is computed as:
+/// `blake3(0xff || deployer_pubkey || blake3(bytecode))`
+///
+/// This allows users to find the contract address by providing the deployment TX hash.
+async fn get_contract_address_from_tx<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetContractAddressFromTxParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let is_mainnet = blockchain.get_network().is_mainnet();
+    let storage = blockchain.get_storage().read().await;
+
+    // Load the transaction
+    let tx = storage
+        .get_transaction(&params.transaction)
+        .await
+        .context("Transaction not found")?;
+
+    // Check if it's a DeployContract transaction
+    let TransactionType::DeployContract(payload) = tx.get_data() else {
+        return Err(InternalRpcError::InvalidParams(
+            "Transaction is not a DeployContract transaction",
+        ));
+    };
+
+    // Get the bytecode from the module
+    let bytecode = payload
+        .module
+        .get_bytecode()
+        .map(|b| b.to_vec())
+        .unwrap_or_default();
+
+    // Compute the deterministic contract address
+    let contract_address =
+        tos_common::crypto::compute_deterministic_contract_address(tx.get_source(), &bytecode);
+
+    // Get deployer's address for reference
+    let deployer = tx.get_source().as_address(is_mainnet);
+
+    Ok(json!(GetContractAddressFromTxResult {
+        contract_address,
+        deployer: deployer.to_string(),
+    }))
 }
 
 async fn get_contract_data<S: Storage>(
