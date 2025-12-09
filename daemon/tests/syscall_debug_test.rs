@@ -1,16 +1,20 @@
 //! Debug test to verify syscall registration
+#![allow(clippy::disallowed_methods)] // Allow expect/unwrap in tests
+
 use std::sync::Arc;
+use tos_daemon::tako_integration::SVMFeatureSet;
 use tos_program_runtime::invoke_context::InvokeContext;
 use tos_tbpf::{ebpf, elf::Executable, program::BuiltinProgram, vm::Config};
 
 #[test]
 fn test_syscall_registration_debug() {
     // Create loader with production config (V0-V3)
-    use tos_daemon::tako_integration::SVMFeatureSet;
     let feature_set = SVMFeatureSet::production();
 
-    let mut config = Config::default();
-    config.enabled_tbpf_versions = feature_set.enabled_tbpf_versions();
+    let config = Config {
+        enabled_tbpf_versions: feature_set.enabled_tbpf_versions(),
+        ..Default::default()
+    };
 
     let mut loader = BuiltinProgram::<InvokeContext>::new_loader(config.clone());
 
@@ -81,19 +85,14 @@ fn test_actual_execution() {
     use tos_common::contract::ContractProvider;
     use tos_common::crypto::Hash;
     use tos_common::crypto::PublicKey;
-    use tos_daemon::tako_integration::SVMFeatureSet;
     use tos_kernel::ValueCell;
-    use tos_program_runtime::storage::InMemoryStorage;
 
     // Mock provider
-    struct MockProvider {
-        storage: InMemoryStorage,
-    }
+    #[allow(dead_code)]
+    struct MockProvider;
     impl MockProvider {
         fn new() -> Self {
-            Self {
-                storage: InMemoryStorage::new(),
-            }
+            Self
         }
     }
     impl ContractProvider for MockProvider {

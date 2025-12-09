@@ -845,7 +845,11 @@ mod tests {
 
         // No transfer should be staged (it's a no-op)
         let transfers = adapter.take_pending_transfers();
-        assert_eq!(transfers.len(), 0, "Zero transfer should not stage anything");
+        assert_eq!(
+            transfers.len(),
+            0,
+            "Zero transfer should not stage anything"
+        );
     }
 
     #[test]
@@ -866,6 +870,10 @@ mod tests {
 
         // No transfer staged
         let transfers = adapter.take_pending_transfers();
-        assert_eq!(transfers.len(), 0, "Zero transfer should not stage anything");
+        assert_eq!(
+            transfers.len(),
+            0,
+            "Zero transfer should not stage anything"
+        );
     }
 }
