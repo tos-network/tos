@@ -192,4 +192,13 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     /// that will be used to execute contract bytecode.
     /// Using Arc avoids borrow conflicts when executor is used alongside mutable state access.
     fn get_contract_executor(&self) -> std::sync::Arc<dyn crate::contract::ContractExecutor>;
+
+    /// Add contract events emitted during execution (LOG0-LOG4 syscalls)
+    /// These events will be indexed and stored for later querying
+    async fn add_contract_events(
+        &mut self,
+        events: Vec<crate::contract::ContractEvent>,
+        contract: &Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
 }

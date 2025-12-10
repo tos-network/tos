@@ -729,6 +729,50 @@ pub struct GetContractOutputsParams<'a> {
     pub transaction: Cow<'a, Hash>,
 }
 
+/// Parameters for get_contract_events RPC method
+/// Retrieves contract events (LOG0-LOG4 syscalls) with filtering options
+#[derive(Serialize, Deserialize)]
+pub struct GetContractEventsParams<'a> {
+    /// Filter by contract address (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract: Option<Cow<'a, Hash>>,
+    /// Filter by transaction hash (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tx_hash: Option<Cow<'a, Hash>>,
+    /// Filter by topic0 (event signature hash, optional)
+    /// This is the first topic in LOG1-LOG4 events, typically the event type identifier
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic0: Option<String>,
+    /// Minimum topoheight (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_topoheight: Option<TopoHeight>,
+    /// Maximum topoheight (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to_topoheight: Option<TopoHeight>,
+    /// Maximum number of events to return (default: 100)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
+/// Response event for get_contract_events RPC method
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RPCContractEvent {
+    /// Contract address that emitted the event
+    pub contract: Hash,
+    /// Transaction hash that triggered the event
+    pub tx_hash: Hash,
+    /// Block hash where the event was emitted
+    pub block_hash: Hash,
+    /// Topoheight when the event was emitted
+    pub topoheight: TopoHeight,
+    /// Log index within the transaction
+    pub log_index: u32,
+    /// Event topics (0-4 topics from LOG0-LOG4)
+    pub topics: Vec<String>,
+    /// Event data (hex-encoded)
+    pub data: String,
+}
+
 /// Parameters for get_contract_address_from_tx RPC method
 /// Computes the deterministic contract address from a DeployContract transaction
 #[derive(Serialize, Deserialize)]

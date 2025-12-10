@@ -354,6 +354,14 @@ pub async fn get_transaction_response<'a, S: Storage>(
 
     let data = RPCTransaction::from_tx(tx, hash, storage.is_mainnet());
     let executed_in_block = storage.get_block_executor_for_tx(hash).ok();
+
+    // Debug logging for executed_in_block to help diagnose null values
+    if executed_in_block.is_none() {
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!("get_transaction: executed_in_block is None for tx {}", hash);
+        }
+    }
+
     Ok(TransactionResponse {
         blocks,
         executed_in_block,
@@ -612,6 +620,10 @@ pub fn register_methods<S: Storage>(
     handler.register_method(
         "get_contract_assets",
         async_handler!(get_contract_assets::<S>),
+    );
+    handler.register_method(
+        "get_contract_events",
+        async_handler!(get_contract_events::<S>),
     );
 
     // P2p
@@ -2796,6 +2808,93 @@ async fn get_contract_assets<S: Storage>(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(json!(assets))
+}
+
+/// Get contract events with optional filtering
+///
+/// This endpoint retrieves events emitted by contracts via LOG0-LOG4 syscalls.
+/// Events can be filtered by contract address, transaction hash, topic0, and topoheight range.
+/// Note: When using topic0, contract address is also required.
+async fn get_contract_events<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetContractEventsParams = parse_params(body)?;
+
+    // Default limit is 100, max is 1000
+    let limit = params.limit.unwrap_or(100).min(1000);
+
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    // Determine which query to use based on provided filters
+    let events = if let Some(tx_hash) = params.tx_hash {
+        // Query by transaction hash takes priority
+        storage
+            .get_events_by_tx(&tx_hash)
+            .await
+            .context("Error while retrieving contract events by tx")?
+    } else if let Some(contract) = params.contract {
+        // Query by contract address with optional topic0 filter
+        if let Some(topic0) = params.topic0 {
+            // Both contract and topic0 provided - use topic filtering
+            let topic0_bytes = hex::decode(&topic0).map_err(|_| {
+                InternalRpcError::InvalidParams("topic0 must be a valid hex string")
+            })?;
+
+            // Convert Vec<u8> to [u8; 32]
+            let topic0_array: [u8; 32] = topic0_bytes.try_into().map_err(|_| {
+                InternalRpcError::InvalidParams("topic0 must be exactly 32 bytes (64 hex chars)")
+            })?;
+
+            storage
+                .get_events_by_topic(
+                    &contract,
+                    &topic0_array,
+                    params.from_topoheight,
+                    params.to_topoheight,
+                    Some(limit),
+                )
+                .await
+                .context("Error while retrieving contract events by topic0")?
+        } else {
+            // Only contract provided
+            storage
+                .get_events_by_contract(
+                    &contract,
+                    params.from_topoheight,
+                    params.to_topoheight,
+                    Some(limit),
+                )
+                .await
+                .context("Error while retrieving contract events by contract")?
+        }
+    } else if params.topic0.is_some() {
+        // topic0 provided without contract - this is not supported
+        return Err(InternalRpcError::InvalidJSONRequest)
+            .context("When using topic0 filter, contract address is also required")?;
+    } else {
+        // No filter specified - return error
+        return Err(InternalRpcError::InvalidJSONRequest)
+            .context("At least one filter parameter (contract or tx_hash) must be provided")?;
+    };
+
+    // Convert StoredContractEvent to RPCContractEvent
+    let rpc_events: Vec<RPCContractEvent> = events
+        .into_iter()
+        .take(limit)
+        .map(|event| RPCContractEvent {
+            contract: event.contract,
+            tx_hash: event.tx_hash,
+            block_hash: event.block_hash,
+            topoheight: event.topoheight,
+            log_index: event.log_index,
+            topics: event.topics.iter().map(hex::encode).collect(),
+            data: hex::encode(&event.data),
+        })
+        .collect();
+
+    Ok(json!(rpc_events))
 }
 
 async fn get_contract_balance_at_topoheight<S: Storage>(

@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use log::{debug, trace};
 use tos_common::{
     block::TopoHeight,
-    contract::{ContractExecutionResult, ContractExecutor, ContractProvider},
+    contract::{ContractEvent, ContractExecutionResult, ContractExecutor, ContractProvider},
     crypto::Hash,
 };
 
@@ -124,8 +124,29 @@ impl ContractExecutor for TakoContractExecutor {
             compute_units_used,
             return_data,
             transfers,
+            events,
             ..
         } = result;
+
+        // Convert TAKO events to ContractEvent format
+        let contract_events: Vec<ContractEvent> = events
+            .into_iter()
+            .map(|e| ContractEvent {
+                contract: e.contract,
+                topics: e.topics,
+                data: e.data,
+            })
+            .collect();
+
+        if log::log_enabled!(log::Level::Debug) {
+            if !contract_events.is_empty() {
+                debug!(
+                    "TAKO executor: {} events emitted by contract {}",
+                    contract_events.len(),
+                    contract_hash
+                );
+            }
+        }
 
         // Convert TAKO result to ContractExecutionResult
         Ok(ContractExecutionResult {
@@ -139,6 +160,9 @@ impl ContractExecutor for TakoContractExecutor {
             return_data,
 
             transfers,
+
+            // Events emitted by the contract
+            events: contract_events,
         })
     }
 

@@ -175,6 +175,15 @@ pub struct SledStorage {
     // Reachability data for DAG ancestry queries (TIP-2 Phase 2)
     // Key is the block hash, value is ReachabilityData
     pub(super) reachability_data: Tree,
+    // Contract events for TAKO VM
+    // Key is {topoheight}{contract_hash}{log_index}, value is StoredContractEvent
+    pub(super) contract_events: Tree,
+    // Contract events indexed by transaction hash
+    // Key is {tx_hash}, value is Vec<(topoheight, contract_hash, log_index)>
+    pub(super) contract_events_by_tx: Tree,
+    // Contract events indexed by topic0 (event signature)
+    // Key is {contract_hash}{topic0}{topoheight}{log_index}, value is empty (marker)
+    pub(super) contract_events_by_topic: Tree,
     // opened DB used for assets to create dynamic assets
     pub(super) db: sled::Db,
 
@@ -298,6 +307,9 @@ impl SledStorage {
             ghostdag_data: sled.open_tree("ghostdag_data")?,
             ghostdag_compact: sled.open_tree("ghostdag_compact")?,
             reachability_data: sled.open_tree("reachability_data")?,
+            contract_events: sled.open_tree("contract_events")?,
+            contract_events_by_tx: sled.open_tree("contract_events_by_tx")?,
+            contract_events_by_topic: sled.open_tree("contract_events_by_topic")?,
             db: sled,
             cache: StorageCache::new(cache_size),
 

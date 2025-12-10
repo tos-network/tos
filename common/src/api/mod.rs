@@ -3,6 +3,7 @@ mod data;
 pub mod query;
 pub mod wallet;
 
+use log::warn;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
@@ -232,6 +233,10 @@ pub enum RPCContractOutput<'a> {
     },
     ExitCode(Option<u64>),
     RefundDeposits,
+    ReturnData {
+        /// Hex-encoded return data from contract execution
+        data: String,
+    },
 }
 
 impl<'a> RPCContractOutput<'a> {
@@ -262,6 +267,9 @@ impl<'a> RPCContractOutput<'a> {
             },
             ContractOutput::ExitCode(code) => RPCContractOutput::ExitCode(*code),
             ContractOutput::RefundDeposits => RPCContractOutput::RefundDeposits,
+            ContractOutput::ReturnData { data } => RPCContractOutput::ReturnData {
+                data: hex::encode(data),
+            },
         }
     }
 }
@@ -292,6 +300,13 @@ impl<'a> From<RPCContractOutput<'a>> for ContractOutput {
             },
             RPCContractOutput::ExitCode(code) => ContractOutput::ExitCode(code),
             RPCContractOutput::RefundDeposits => ContractOutput::RefundDeposits,
+            RPCContractOutput::ReturnData { data } => ContractOutput::ReturnData {
+                // Hex-decode the string back to bytes; invalid hex is treated as empty
+                data: hex::decode(&data).unwrap_or_else(|e| {
+                    warn!("Invalid hex in RPCContractOutput::ReturnData: {e}");
+                    Vec::new()
+                }),
+            },
         }
     }
 }

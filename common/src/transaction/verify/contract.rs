@@ -151,15 +151,19 @@ impl Transaction {
 
         let used_gas = execution_result.gas_used;
         let exit_code = execution_result.exit_code;
+        let return_data = execution_result.return_data;
         let transfers = execution_result.transfers;
+        let events = execution_result.events;
 
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Contract {} execution result: gas_used={}, exit_code={:?}, transfers={}",
+                "Contract {} execution result: gas_used={}, exit_code={:?}, return_data={}, transfers={}, events={}",
                 contract,
                 used_gas,
                 exit_code,
-                transfers.len()
+                return_data.as_ref().map(|d| d.len()).unwrap_or(0),
+                transfers.len(),
+                events.len()
             );
         }
 
@@ -187,6 +191,16 @@ impl Transaction {
                 .merge_contract_changes(contract, cache, tracker, assets)
                 .await
                 .map_err(VerificationError::State)?;
+
+            // Store events from contract execution (LOG0-LOG4 syscalls)
+            // Events are only persisted if the contract execution was successful
+            // This must be done after chain_state is consumed to avoid borrow conflicts
+            if !events.is_empty() {
+                state
+                    .add_contract_events(events, contract, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
         } else {
             // Otherwise, something went wrong, delete the outputs made by the contract
             outputs.clear();
@@ -195,6 +209,16 @@ impl Transaction {
                 // It was not successful, we need to refund the deposits
                 self.refund_deposits(state, deposits).await?;
                 outputs.push(crate::contract::ContractOutput::RefundDeposits);
+            }
+        }
+
+        // Store return data from contract execution (if any)
+        // Return data is persisted regardless of success/failure since it may contain
+        // error messages on failure or result data on success
+        // This must be AFTER the success/failure branch to survive outputs.clear()
+        if let Some(data) = return_data {
+            if !data.is_empty() {
+                outputs.push(crate::contract::ContractOutput::ReturnData { data });
             }
         }
 

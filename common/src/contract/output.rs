@@ -41,6 +41,11 @@ pub enum ContractOutput {
     ExitCode(Option<u64>),
     // Inform that we refund the deposits
     RefundDeposits,
+    // Return data from contract execution (set via tos_set_return_data syscall)
+    ReturnData {
+        /// The return data bytes from the contract
+        data: Vec<u8>,
+    },
 }
 
 impl Serializer for ContractOutput {
@@ -81,6 +86,10 @@ impl Serializer for ContractOutput {
             ContractOutput::RefundDeposits => {
                 writer.write_u8(6);
             }
+            ContractOutput::ReturnData { data } => {
+                writer.write_u8(7);
+                data.write(writer);
+            }
         }
     }
 
@@ -116,6 +125,10 @@ impl Serializer for ContractOutput {
             }
             5 => Ok(ContractOutput::ExitCode(Option::read(reader)?)),
             6 => Ok(ContractOutput::RefundDeposits),
+            7 => {
+                let data = Vec::<u8>::read(reader)?;
+                Ok(ContractOutput::ReturnData { data })
+            }
             _ => Err(ReaderError::InvalidValue),
         }
     }
@@ -133,6 +146,7 @@ impl Serializer for ContractOutput {
             ContractOutput::NewAsset { asset } => 1 + asset.size(),
             ContractOutput::ExitCode(code) => 1 + code.size(),
             ContractOutput::RefundDeposits => 1,
+            ContractOutput::ReturnData { data } => 1 + data.size(),
         }
     }
 }

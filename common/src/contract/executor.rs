@@ -21,6 +21,22 @@ use async_trait::async_trait;
 
 use crate::{block::TopoHeight, contract::ContractProvider, crypto::Hash};
 
+/// Contract event emitted during execution
+///
+/// This is a VM-agnostic representation of contract events that bridges
+/// different VM implementations (TAKO, legacy) to a common format.
+/// Events are Ethereum-compatible with indexed topics and arbitrary data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractEvent {
+    /// Contract address that emitted the event (as 32-byte array)
+    pub contract: [u8; 32],
+    /// Indexed topics for efficient filtering (max 4, Ethereum-compatible)
+    /// topic[0] is typically the event signature hash
+    pub topics: Vec<[u8; 32]>,
+    /// Non-indexed event data (ABI-encoded parameters)
+    pub data: Vec<u8>,
+}
+
 /// Result of contract execution
 ///
 /// This is a simplified result type that bridges VM-specific execution results
@@ -42,6 +58,10 @@ pub struct ContractExecutionResult {
 
     /// Transfers requested by the contract during execution
     pub transfers: Vec<TransferOutput>,
+
+    /// Events emitted by the contract during execution (Ethereum-style)
+    /// Contains indexed topics and data for off-chain indexing and monitoring
+    pub events: Vec<ContractEvent>,
 }
 
 /// Contract executor trait
@@ -82,6 +102,7 @@ pub struct ContractExecutionResult {
 ///             exit_code: Some(0),
 ///             return_data: None,
 ///             transfers: vec![],
+///             events: vec![],
 ///         })
 ///     }
 ///

@@ -824,6 +824,18 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for ParallelAp
     fn get_contract_executor(&self) -> std::sync::Arc<dyn tos_common::contract::ContractExecutor> {
         self.executor.clone()
     }
+
+    async fn add_contract_events(
+        &mut self,
+        _events: Vec<tos_common::contract::ContractEvent>,
+        _contract: &Hash,
+        _tx_hash: &'a Hash,
+    ) -> Result<(), BlockchainError> {
+        // ParallelApplyAdapter doesn't support contract events (parallel execution limitation)
+        // Events are handled in ApplicableChainState for sequential execution
+        // This is a no-op for parallel execution
+        Ok(())
+    }
 }
 
 /// Automatic rollback on Drop for failed transactions

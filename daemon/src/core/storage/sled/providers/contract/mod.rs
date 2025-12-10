@@ -1,5 +1,6 @@
 mod balance;
 mod data;
+mod event;
 mod output;
 mod provider;
 mod supply;

@@ -5122,9 +5122,15 @@ impl<S: Storage> Blockchain<S> {
                             let start = Instant::now();
 
                             // Mark transaction as executed
+                            if log::log_enabled!(log::Level::Debug) {
+                                log::debug!("Marking tx {} as executed in block {}", tx_hash, hash);
+                            }
                             chain_state
                                 .get_mut_storage()?
                                 .mark_tx_as_executed_in_block(tx_hash, &hash)?;
+                            if log::log_enabled!(log::Level::Debug) {
+                                log::debug!("Successfully marked tx {} as executed", tx_hash);
+                            }
 
                             // Remove from orphaned transactions if present
                             if orphaned_transactions.pop(tx_hash).is_some() {

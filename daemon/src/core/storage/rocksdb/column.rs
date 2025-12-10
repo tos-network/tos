@@ -140,6 +140,16 @@ pub enum Column {
     // Pruning checkpoint for crash recovery
     // PRUNING_CHECKPOINT => {PruningCheckpoint}
     PruningCheckpoint,
+
+    // Contract events for TAKO VM
+    // {topoheight}{contract_hash}{log_index} => {StoredContractEvent}
+    ContractEvents,
+    // Contract events indexed by transaction hash
+    // {tx_hash} => {Vec<(topoheight, contract_hash, log_index)>}
+    ContractEventsByTx,
+    // Contract events indexed by topic0 (event signature)
+    // {contract_hash}{topic0}{topoheight}{log_index} => {}
+    ContractEventsByTopic,
 }
 
 impl Column {
@@ -157,7 +167,8 @@ impl Column {
             | VersionedContractsData
             | PrefixedRegistrations
             | VersionedEnergyResources
-            | VersionedAIMiningStates => Some(PREFIX_TOPOHEIGHT_LEN),
+            | VersionedAIMiningStates
+            | ContractEvents => Some(PREFIX_TOPOHEIGHT_LEN),
 
             ContractsBalances => Some(PREFIX_ID_LEN),
             Balances => Some(PREFIX_ID_LEN),

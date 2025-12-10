@@ -1,8 +1,8 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
-        Storage, VersionedContract, VersionedContractBalance, VersionedContractData,
-        VersionedMultiSig, VersionedSupply,
+        Storage, StoredContractEvent, VersionedContract, VersionedContractBalance,
+        VersionedContractData, VersionedMultiSig, VersionedSupply,
     },
 };
 use async_trait::async_trait;
@@ -39,6 +39,8 @@ struct ContractManager {
     // global assets cache
     assets: HashMap<Hash, Option<AssetChanges>>,
     tracker: ContractEventTracker,
+    // LOG events from contract executions (LOG0-LOG4 syscalls)
+    events: Vec<StoredContractEvent>,
 }
 
 // Chain State that can be applied to the mutable storage
@@ -368,6 +370,39 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
     fn get_contract_executor(&self) -> std::sync::Arc<dyn tos_common::contract::ContractExecutor> {
         self.executor.clone()
     }
+
+    async fn add_contract_events(
+        &mut self,
+        events: Vec<tos_common::contract::ContractEvent>,
+        contract: &Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<(), BlockchainError> {
+        // Convert ContractEvent to StoredContractEvent
+        // Each event gets a log_index within THIS TRANSACTION (starting at 0)
+        // This matches Ethereum's behavior where log_index is per-transaction
+        let event_count = events.len();
+        for (i, event) in events.into_iter().enumerate() {
+            let stored_event = StoredContractEvent {
+                contract: contract.clone(),
+                tx_hash: tx_hash.clone(),
+                block_hash: self.block_hash.clone(),
+                topoheight: self.inner.topoheight,
+                log_index: i as u32, // Per-transaction index, starts at 0
+                topics: event.topics,
+                data: event.data,
+            };
+            self.contract_manager.events.push(stored_event);
+        }
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Added {} events for contract {} in TX {}",
+                event_count, contract, tx_hash
+            );
+        }
+
+        Ok(())
+    }
 }
 
 impl<'a, S: Storage> Deref for ApplicableChainState<'a, S> {
@@ -422,6 +457,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 caches: HashMap::new(),
                 assets: HashMap::new(),
                 tracker: ContractEventTracker::default(),
+                events: Vec::new(),
             },
             block_hash,
             block,
@@ -789,11 +825,25 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
 
         // Apply all the contract outputs
         debug!("storing contract outputs");
-        for (key, outputs) in self.contract_manager.outputs {
+        for (key, outputs) in self.contract_manager.outputs.drain() {
             self.inner
                 .storage
                 .set_contract_outputs_for_tx(&key, &outputs)
                 .await?;
+        }
+
+        // Store contract events (LOG0-LOG4 syscalls)
+        if !self.contract_manager.events.is_empty() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Storing {} contract events at topoheight {}",
+                    self.contract_manager.events.len(),
+                    self.inner.topoheight
+                );
+            }
+            for event in self.contract_manager.events.drain(..) {
+                self.inner.storage.store_contract_event(event).await?;
+            }
         }
 
         // Apply all balances changes at topoheight
