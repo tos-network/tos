@@ -40,7 +40,7 @@ use futures::{stream, Stream, StreamExt};
 use indexmap::IndexSet;
 use log::{debug, error, info, log, trace, warn};
 use lru::LruCache;
-use metrics::counter;
+use metrics::{counter, gauge};
 use rand::seq::IteratorRandom;
 use std::{
     borrow::Cow,
@@ -1034,17 +1034,53 @@ impl<S: Storage> P2pServer<S> {
         trace!("select random best peer");
 
         // Search our blue_work (GHOSTDAG consensus metric)
+        // BUG-002 FIX: Must consider ALL tips when calculating our best blue_work
+        // In GHOSTDAG, blue_work is not strictly monotonic with topoheight during forks.
+        // Using only the block at our_topoheight may return a lower blue_work from a weaker
+        // fork tip, causing the node to incorrectly skip sync with peers that have higher work.
         let (our_height, our_topoheight, our_blue_work) = {
-            debug!("locking storage to search our blue_work");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("locking storage to search our blue_work");
+            }
             let storage = self.blockchain.get_storage().read().await;
 
             // We read those after having the storage locked to prevent issue
             let our_height = self.blockchain.get_blue_score();
             let our_topoheight = self.blockchain.get_topo_height();
 
-            debug!("storage locked for blue_work");
-            let hash = storage.get_hash_at_topo_height(our_topoheight).await?;
-            let our_blue_work = storage.get_ghostdag_blue_work(&hash).await?;
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("storage locked for blue_work");
+            }
+
+            // BUG-002 FIX: Get blue_work from ALL tips, not just the block at our_topoheight
+            // This matches the pattern used in blockchain.rs for best tip selection
+            let tips = storage.get_tips().await?;
+            let tips_count = tips.len();
+
+            let our_blue_work = if tips_count == 1 {
+                // Single tip: use it directly (most common case, no fork)
+                let tip = tips.iter().next().ok_or(BlockchainError::ExpectedTips)?;
+                storage.get_ghostdag_blue_work(tip).await?
+            } else {
+                // Multiple tips (fork state): find the highest blue_work among all tips
+                // This is critical for GHOSTDAG - different fork branches may have different blue_work
+                let mut best_blue_work = BlueWorkType::zero();
+                for tip in &tips {
+                    let tip_blue_work = storage.get_ghostdag_blue_work(tip).await?;
+                    if tip_blue_work > best_blue_work {
+                        best_blue_work = tip_blue_work;
+                    }
+                }
+
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "FORK STATE in peer selection: {} tips detected, best blue_work: {}, topoheight: {}",
+                        tips_count, best_blue_work, our_topoheight
+                    );
+                }
+
+                best_blue_work
+            };
 
             (our_height, our_topoheight, our_blue_work)
         };
@@ -1225,6 +1261,29 @@ impl<S: Storage> P2pServer<S> {
             if !self.is_running() {
                 debug!("Chain sync loop is stopped!");
                 break;
+            }
+
+            // BUG-002 FIX: Detect and log fork state before sync attempt
+            // This helps diagnose sync issues when node has multiple tips
+            {
+                let storage = self.blockchain.get_storage().read().await;
+                if let Ok(tips) = storage.get_tips().await {
+                    let tips_count = tips.len();
+                    // Emit metric for monitoring
+                    gauge!("tos_blockchain_tips_count").set(tips_count as f64);
+
+                    if tips_count > 1 {
+                        let our_topoheight = self.blockchain.get_topo_height();
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!(
+                                "FORK STATE DETECTED in sync loop: {} tips, topoheight={}, peer_count={}",
+                                tips_count,
+                                our_topoheight,
+                                self.peer_list.size().await
+                            );
+                        }
+                    }
+                }
             }
 
             // first we have to check if we allow fast sync mode
