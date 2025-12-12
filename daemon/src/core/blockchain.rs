@@ -3579,20 +3579,38 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        // Compute full GHOSTDAG data to get the correct blue_score
-        // This accounts for blue/red coloring and gives us the accurate mergeset_blues count
-        let ghostdag_data = self
-            .ghostdag
-            .ghostdag(&*storage, block.get_parents())
-            .await?;
+        // BUG-002 FIX: Check for pre-stored trusted GHOSTDAG data first
+        // During sync, peer-provided GHOSTDAG data may be pre-stored in storage.
+        // If available, use it for validation instead of computing locally.
+        // This is essential for syncing through fork regions where local computation
+        // may produce different results due to missing mergeset context.
+        let (ghostdag_data, is_trusted) = if storage.has_ghostdag_data(&block_hash).await? {
+            // Use pre-stored trusted GHOSTDAG data from peer
+            let trusted_data = storage.get_ghostdag_data(&block_hash).await?;
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "BUG-002 FIX: Using TRUSTED GHOSTDAG data for block {} validation (blue_score={}, blue_work={})",
+                    block_hash, trusted_data.blue_score, trusted_data.blue_work
+                );
+            }
+            (trusted_data, true)
+        } else {
+            // Compute full GHOSTDAG data to get the correct blue_score
+            // This accounts for blue/red coloring and gives us the accurate mergeset_blues count
+            let computed_data = self
+                .ghostdag
+                .ghostdag(&*storage, block.get_parents())
+                .await?;
+            (Arc::new(computed_data), false)
+        };
 
         let expected_blue_score = ghostdag_data.blue_score;
 
         if expected_blue_score != block.get_blue_score() {
             if log::log_enabled!(log::Level::Debug) {
                 debug!(
-                    "Invalid block blue_score: actual={}, ghostdag_expected={} for block {} (GHOSTDAG validation)",
-                    block.get_blue_score(), expected_blue_score, block_hash
+                    "Invalid block blue_score: actual={}, ghostdag_expected={} for block {} (GHOSTDAG validation, trusted={})",
+                    block.get_blue_score(), expected_blue_score, block_hash, is_trusted
                 );
             }
             return Err(BlockchainError::InvalidBlockHeight(
@@ -3607,16 +3625,17 @@ impl<S: Storage> Blockchain<S> {
         let is_genesis = tips_count == 0;
 
         if !is_genesis {
-            // Validate blue_work field matches GHOSTDAG computation
+            // Validate blue_work field matches GHOSTDAG computation (or trusted data)
             // This prevents attackers from forging blue_work values
             let expected_blue_work = &ghostdag_data.blue_work;
             if expected_blue_work != block.get_blue_work() {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "Invalid block blue_work: actual={}, ghostdag_expected={} for block {}",
+                        "Invalid block blue_work: actual={}, ghostdag_expected={} for block {} (trusted={})",
                         block.get_blue_work(),
                         expected_blue_work,
-                        block_hash
+                        block_hash,
+                        is_trusted
                     );
                 }
                 return Err(BlockchainError::InvalidBlueWork(
@@ -3626,16 +3645,17 @@ impl<S: Storage> Blockchain<S> {
                 ));
             }
 
-            // Validate daa_score field matches GHOSTDAG computation
+            // Validate daa_score field matches GHOSTDAG computation (or trusted data)
             // This prevents attackers from manipulating DAA calculations
             let expected_daa_score = ghostdag_data.daa_score;
             if expected_daa_score != block.get_daa_score() {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "Invalid block daa_score: actual={}, ghostdag_expected={} for block {}",
+                        "Invalid block daa_score: actual={}, ghostdag_expected={} for block {} (trusted={})",
                         block.get_daa_score(),
                         expected_daa_score,
-                        block_hash
+                        block_hash,
+                        is_trusted
                     );
                 }
                 return Err(BlockchainError::InvalidDaaScore(
