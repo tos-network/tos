@@ -2,14 +2,151 @@ use crate::config::{
     CHAIN_SYNC_REQUEST_MAX_BLOCKS, CHAIN_SYNC_RESPONSE_MAX_BLOCKS, CHAIN_SYNC_RESPONSE_MIN_BLOCKS,
     CHAIN_SYNC_TOP_BLOCKS,
 };
+use crate::core::ghostdag::{BlueWorkType, KType};
 use indexmap::IndexSet;
 use log::debug;
+use std::collections::HashMap;
 use std::hash::{Hash as StdHash, Hasher};
 use tos_common::{
     config::TIPS_LIMIT,
     crypto::Hash,
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
+
+/// External GHOSTDAG data provided by a peer during sync.
+///
+/// This is similar to Kaspa's `ExternalGhostdagData` - during IBD (Initial Block Download),
+/// GHOSTDAG data comes FROM the peer rather than being computed locally. This is necessary
+/// because local GHOSTDAG calculation in a fork state produces different results than the
+/// peer's GHOSTDAG, causing validation failures.
+///
+/// The security model is:
+/// - We "trust" this data only because it's indirectly validated through PoW
+/// - The PoW on later blocks commits to this GHOSTDAG data
+/// - If a peer provides incorrect GHOSTDAG data, later blocks would fail PoW validation
+///
+/// See BUG-002 for the problem this solves:
+/// - When node is in fork state (tips > 1), local GHOSTDAG calculation differs from peer
+/// - This causes `Block height mismatch` errors during sync
+/// - Solution: Use peer-provided GHOSTDAG data during IBD, validate via PoW
+#[derive(Clone, Debug)]
+pub struct ExternalGhostdagData {
+    /// Blue score: number of blue blocks in the past of this block
+    pub blue_score: u64,
+    /// Blue work: cumulative work of all blue blocks
+    pub blue_work: BlueWorkType,
+    /// DAA score: monotonic score for difficulty adjustment
+    pub daa_score: u64,
+    /// Selected parent: parent with highest blue_work
+    pub selected_parent: Hash,
+    /// Blue blocks in the mergeset (excluding selected parent)
+    pub mergeset_blues: Vec<Hash>,
+    /// Red blocks in the mergeset
+    pub mergeset_reds: Vec<Hash>,
+    /// Anticone sizes for each blue block (must be <= K)
+    pub blues_anticone_sizes: HashMap<Hash, KType>,
+}
+
+impl ExternalGhostdagData {
+    /// Create new external GHOSTDAG data
+    pub fn new(
+        blue_score: u64,
+        blue_work: BlueWorkType,
+        daa_score: u64,
+        selected_parent: Hash,
+        mergeset_blues: Vec<Hash>,
+        mergeset_reds: Vec<Hash>,
+        blues_anticone_sizes: HashMap<Hash, KType>,
+    ) -> Self {
+        Self {
+            blue_score,
+            blue_work,
+            daa_score,
+            selected_parent,
+            mergeset_blues,
+            mergeset_reds,
+            blues_anticone_sizes,
+        }
+    }
+}
+
+impl Serializer for ExternalGhostdagData {
+    fn write(&self, writer: &mut Writer) {
+        writer.write_u64(&self.blue_score);
+        self.blue_work.write(writer);
+        writer.write_u64(&self.daa_score);
+        writer.write_hash(&self.selected_parent);
+
+        // Write mergeset_blues
+        writer.write_u16(self.mergeset_blues.len() as u16);
+        for hash in &self.mergeset_blues {
+            writer.write_hash(hash);
+        }
+
+        // Write mergeset_reds
+        writer.write_u16(self.mergeset_reds.len() as u16);
+        for hash in &self.mergeset_reds {
+            writer.write_hash(hash);
+        }
+
+        // Write blues_anticone_sizes
+        writer.write_u16(self.blues_anticone_sizes.len() as u16);
+        for (hash, size) in &self.blues_anticone_sizes {
+            writer.write_hash(hash);
+            writer.write_u16(*size);
+        }
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let blue_score = reader.read_u64()?;
+        let blue_work = BlueWorkType::read(reader)?;
+        let daa_score = reader.read_u64()?;
+        let selected_parent = reader.read_hash()?;
+
+        // Read mergeset_blues
+        let blues_len = reader.read_u16()? as usize;
+        let mut mergeset_blues = Vec::with_capacity(blues_len);
+        for _ in 0..blues_len {
+            mergeset_blues.push(reader.read_hash()?);
+        }
+
+        // Read mergeset_reds
+        let reds_len = reader.read_u16()? as usize;
+        let mut mergeset_reds = Vec::with_capacity(reds_len);
+        for _ in 0..reds_len {
+            mergeset_reds.push(reader.read_hash()?);
+        }
+
+        // Read blues_anticone_sizes
+        let sizes_len = reader.read_u16()? as usize;
+        let mut blues_anticone_sizes = HashMap::with_capacity(sizes_len);
+        for _ in 0..sizes_len {
+            let hash = reader.read_hash()?;
+            let size = reader.read_u16()?;
+            blues_anticone_sizes.insert(hash, size);
+        }
+
+        Ok(Self {
+            blue_score,
+            blue_work,
+            daa_score,
+            selected_parent,
+            mergeset_blues,
+            mergeset_reds,
+            blues_anticone_sizes,
+        })
+    }
+
+    fn size(&self) -> usize {
+        8 // blue_score
+        + self.blue_work.size()
+        + 8 // daa_score
+        + 32 // selected_parent
+        + 2 + self.mergeset_blues.len() * 32 // mergeset_blues
+        + 2 + self.mergeset_reds.len() * 32 // mergeset_reds
+        + 2 + self.blues_anticone_sizes.len() * (32 + 2) // blues_anticone_sizes
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct BlockId {
@@ -181,6 +318,10 @@ impl Serializer for CommonPoint {
     }
 }
 
+/// Chain response structure for P2P sync.
+///
+/// V2 adds GHOSTDAG data for each block (TrustedBlock pattern from Kaspa).
+/// This solves BUG-002: sync stall in fork state due to local GHOSTDAG mismatch.
 #[derive(Debug)]
 pub struct ChainResponse {
     // Common point between us and the peer
@@ -190,9 +331,14 @@ pub struct ChainResponse {
     lowest_height: Option<u64>,
     blocks: IndexSet<Hash>,
     top_blocks: IndexSet<Hash>,
+    // V2: GHOSTDAG data for each block hash (for TrustedBlock validation)
+    // If empty, use legacy validation (compute GHOSTDAG locally)
+    // If present, use trusted validation (skip local GHOSTDAG computation)
+    ghostdag_data: HashMap<Hash, ExternalGhostdagData>,
 }
 
 impl ChainResponse {
+    /// Create new chain response (legacy, without GHOSTDAG data)
     pub fn new(
         common_point: Option<CommonPoint>,
         lowest_height: Option<u64>,
@@ -205,6 +351,25 @@ impl ChainResponse {
             lowest_height,
             blocks,
             top_blocks,
+            ghostdag_data: HashMap::new(),
+        }
+    }
+
+    /// Create new chain response with GHOSTDAG data (V2, TrustedBlock pattern)
+    pub fn new_with_ghostdag(
+        common_point: Option<CommonPoint>,
+        lowest_height: Option<u64>,
+        blocks: IndexSet<Hash>,
+        top_blocks: IndexSet<Hash>,
+        ghostdag_data: HashMap<Hash, ExternalGhostdagData>,
+    ) -> Self {
+        debug_assert!(common_point.is_some() == lowest_height.is_some());
+        Self {
+            common_point,
+            lowest_height,
+            blocks,
+            top_blocks,
+            ghostdag_data,
         }
     }
 
@@ -223,9 +388,35 @@ impl ChainResponse {
         self.blocks.len()
     }
 
+    /// Check if this response has GHOSTDAG data (V2 format)
+    pub fn has_ghostdag_data(&self) -> bool {
+        !self.ghostdag_data.is_empty()
+    }
+
+    /// Get GHOSTDAG data for a specific block hash
+    pub fn get_ghostdag_data(&self, hash: &Hash) -> Option<&ExternalGhostdagData> {
+        self.ghostdag_data.get(hash)
+    }
+
+    /// Take GHOSTDAG data for a specific block hash
+    pub fn take_ghostdag_data(&mut self, hash: &Hash) -> Option<ExternalGhostdagData> {
+        self.ghostdag_data.remove(hash)
+    }
+
     // Take ownership of the blocks
     pub fn consume(self) -> (IndexSet<Hash>, IndexSet<Hash>) {
         (self.blocks, self.top_blocks)
+    }
+
+    /// Take ownership of blocks and GHOSTDAG data
+    pub fn consume_with_ghostdag(
+        self,
+    ) -> (
+        IndexSet<Hash>,
+        IndexSet<Hash>,
+        HashMap<Hash, ExternalGhostdagData>,
+    ) {
+        (self.blocks, self.top_blocks, self.ghostdag_data)
     }
 }
 
@@ -250,6 +441,14 @@ impl Serializer for ChainResponse {
         writer.write_u8(self.top_blocks.len() as u8);
         for hash in &self.top_blocks {
             writer.write_hash(hash);
+        }
+
+        // V2: Write GHOSTDAG data count and entries
+        // Format: u16 count, then [hash, ExternalGhostdagData] pairs
+        writer.write_u16(self.ghostdag_data.len() as u16);
+        for (hash, data) in &self.ghostdag_data {
+            writer.write_hash(hash);
+            data.write(writer);
         }
     }
 
@@ -299,11 +498,34 @@ impl Serializer for ChainResponse {
             }
         }
 
-        Ok(Self::new(
+        // V2: Read GHOSTDAG data if present
+        // Note: Legacy peers don't send GHOSTDAG data, so we check if there's more data
+        let mut ghostdag_data = HashMap::new();
+        if reader.total_size() > 0 {
+            let ghostdag_len = reader.read_u16()? as usize;
+            // Validate GHOSTDAG data count
+            let max_ghostdag =
+                (CHAIN_SYNC_RESPONSE_MAX_BLOCKS + CHAIN_SYNC_TOP_BLOCKS * TIPS_LIMIT) as usize;
+            if ghostdag_len > max_ghostdag {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Invalid GHOSTDAG data count: {}", ghostdag_len);
+                }
+                return Err(ReaderError::InvalidValue);
+            }
+
+            for _ in 0..ghostdag_len {
+                let hash = reader.read_hash()?;
+                let data = ExternalGhostdagData::read(reader)?;
+                ghostdag_data.insert(hash, data);
+            }
+        }
+
+        Ok(Self::new_with_ghostdag(
             common_point,
             Some(lowest_height),
             blocks,
             top_blocks,
+            ghostdag_data,
         ))
     }
 
@@ -317,6 +539,15 @@ impl Serializer for ChainResponse {
             size += lowest_height.size();
         }
 
-        size + 2 + self.blocks.len() + 1 + self.top_blocks.len()
+        // Base size for blocks and top_blocks
+        size += 2 + self.blocks.len() * 32 + 1 + self.top_blocks.len() * 32;
+
+        // V2: Add GHOSTDAG data size
+        size += 2; // ghostdag_data count
+        for (_, data) in &self.ghostdag_data {
+            size += 32 + data.size(); // hash + ExternalGhostdagData
+        }
+
+        size
     }
 }

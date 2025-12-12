@@ -134,12 +134,15 @@ impl<S: Storage> P2pServer<S> {
 
     // search a common point between our blockchain and the peer's one
     // when the common point is found, start sending blocks from this point
+    // V2: Now includes GHOSTDAG data for each block (TrustedBlock pattern)
     pub async fn handle_chain_request(
         self: &Arc<Self>,
         peer: &Arc<Peer>,
         blocks: IndexSet<BlockId>,
         accepted_response_size: usize,
     ) -> Result<(), BlockchainError> {
+        use std::collections::HashMap;
+
         if log::log_enabled!(log::Level::Debug) {
             debug!(
                 "handle chain request for {} with {} blocks",
@@ -152,6 +155,9 @@ impl<S: Storage> P2pServer<S> {
         // blocks hashes sent for syncing (topoheight ordered)
         let mut response_blocks = IndexSet::new();
         let mut top_blocks = IndexSet::new();
+        // V2: GHOSTDAG data for each block hash
+        let mut ghostdag_data_map: HashMap<Hash, super::packet::ExternalGhostdagData> =
+            HashMap::new();
         // common point used to notify peer if he should rewind or not
         let common_point = self.find_common_point(&*storage, blocks).await?;
         // Lowest height of the blocks sent
@@ -188,6 +194,20 @@ impl<S: Storage> P2pServer<S> {
                     lowest_height = height;
                 }
 
+                // V2: Get GHOSTDAG data for this block
+                if let Ok(ghostdag) = storage.get_ghostdag_data(&hash).await {
+                    let external_ghostdag = super::packet::ExternalGhostdagData::new(
+                        ghostdag.blue_score,
+                        ghostdag.blue_work,
+                        ghostdag.daa_score,
+                        ghostdag.selected_parent.clone(),
+                        ghostdag.mergeset_blues.as_ref().clone(),
+                        ghostdag.mergeset_reds.as_ref().clone(),
+                        ghostdag.blues_anticone_sizes.as_ref().clone(),
+                    );
+                    ghostdag_data_map.insert(hash.clone(), external_ghostdag);
+                }
+
                 // VERSION UNIFICATION: V0 ordering issues no longer apply with Baseline
                 // All blocks use proper ordering from genesis, no swap logic needed
                 if log::log_enabled!(log::Level::Trace) {
@@ -217,6 +237,21 @@ impl<S: Storage> P2pServer<S> {
                             if log::log_enabled!(log::Level::Trace) {
                                 trace!("Adding top block at height {}: {}", height, hash);
                             }
+
+                            // V2: Get GHOSTDAG data for top block
+                            if let Ok(ghostdag) = storage.get_ghostdag_data(&hash).await {
+                                let external_ghostdag = super::packet::ExternalGhostdagData::new(
+                                    ghostdag.blue_score,
+                                    ghostdag.blue_work,
+                                    ghostdag.daa_score,
+                                    ghostdag.selected_parent.clone(),
+                                    ghostdag.mergeset_blues.as_ref().clone(),
+                                    ghostdag.mergeset_reds.as_ref().clone(),
+                                    ghostdag.blues_anticone_sizes.as_ref().clone(),
+                                );
+                                ghostdag_data_map.insert(hash.clone(), external_ghostdag);
+                            }
+
                             top_blocks.insert(hash);
                         } else {
                             if log::log_enabled!(log::Level::Trace) {
@@ -231,17 +266,20 @@ impl<S: Storage> P2pServer<S> {
 
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Sending {} blocks & {} top blocks as response to {}",
+                "Sending {} blocks & {} top blocks (with {} GHOSTDAG data entries) as response to {}",
                 response_blocks.len(),
                 top_blocks.len(),
+                ghostdag_data_map.len(),
                 peer
             );
         }
-        peer.send_packet(Packet::ChainResponse(ChainResponse::new(
+        // V2: Send ChainResponse with GHOSTDAG data
+        peer.send_packet(Packet::ChainResponse(ChainResponse::new_with_ghostdag(
             common_point,
             lowest_common_height,
             response_blocks,
             top_blocks,
+            ghostdag_data_map,
         )))
         .await?;
         Ok(())
@@ -484,14 +522,17 @@ impl<S: Storage> P2pServer<S> {
 
         // Packet verification ended, handle the chain response now
 
-        let (mut blocks, top_blocks) = response.consume();
+        // V2: Extract GHOSTDAG data along with blocks (TrustedBlock pattern)
+        let (mut blocks, top_blocks, ghostdag_data) = response.consume_with_ghostdag();
+        let has_ghostdag_data = !ghostdag_data.is_empty();
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "handling chain response from {}, {} blocks, {} top blocks, pop count {}",
+                "handling chain response from {}, {} blocks, {} top blocks, pop count {}, has_ghostdag: {}",
                 peer,
                 blocks.len(),
                 top_blocks.len(),
-                pop_count
+                pop_count,
+                has_ghostdag_data
             );
         }
 
@@ -602,7 +643,31 @@ impl<S: Storage> P2pServer<S> {
                             };
 
                             if let Some((block, hash)) = res? {
-                                chain_validator.insert_block(hash, block, expected_topoheight).await?;
+                                // V2: Use trusted validation when GHOSTDAG data is available
+                                // This fixes BUG-002: sync stall in fork state
+                                if let Some(external_ghostdag) = ghostdag_data.get(&hash) {
+                                    if log::log_enabled!(log::Level::Debug) {
+                                        debug!(
+                                            "Using TRUSTED validation for block {} (peer GHOSTDAG: blue_score={}, blue_work={})",
+                                            hash, external_ghostdag.blue_score, external_ghostdag.blue_work
+                                        );
+                                    }
+                                    chain_validator
+                                        .insert_trusted_block(hash, block, expected_topoheight, external_ghostdag)
+                                        .await?;
+                                } else {
+                                    // Fallback to legacy validation (compute GHOSTDAG locally)
+                                    // This happens when peer is old version without TrustedBlock support
+                                    if log::log_enabled!(log::Level::Debug) {
+                                        debug!(
+                                            "Using LOCAL validation for block {} (no peer GHOSTDAG data)",
+                                            hash
+                                        );
+                                    }
+                                    chain_validator
+                                        .insert_block(hash, block, expected_topoheight)
+                                        .await?;
+                                }
                                 expected_topoheight += 1;
                             }
                         }

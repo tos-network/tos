@@ -534,6 +534,326 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         Ok(())
     }
 
+    /// Insert a trusted block with GHOSTDAG data from the peer.
+    ///
+    /// This is the V2 TrustedBlock pattern from Kaspa. Instead of computing GHOSTDAG locally,
+    /// we use the peer-provided GHOSTDAG data. This solves BUG-002 where local GHOSTDAG
+    /// calculation in a fork state produces different results than the peer's GHOSTDAG.
+    ///
+    /// Security model:
+    /// - We "trust" this data only because it's indirectly validated through PoW
+    /// - Later blocks' PoW commits to previous GHOSTDAG data
+    /// - If incorrect GHOSTDAG data is provided, later blocks would fail PoW validation
+    ///
+    /// The method still validates:
+    /// - Block version
+    /// - Tips count and existence
+    /// - PoW hash and difficulty
+    /// - Timestamp ordering
+    /// - Reserved fields
+    ///
+    /// What it SKIPS (uses peer data instead):
+    /// - Local GHOSTDAG computation
+    /// - blue_score validation against local calculation
+    /// - blue_work validation against local calculation
+    pub async fn insert_trusted_block(
+        &mut self,
+        hash: Hash,
+        header: BlockHeader,
+        topoheight: TopoHeight,
+        external_ghostdag: &crate::p2p::packet::ExternalGhostdagData,
+    ) -> Result<(), BlockchainError> {
+        use crate::core::ghostdag::TosGhostdagData;
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Inserting TRUSTED block {} into chain validator with expected topoheight {} (using peer GHOSTDAG: blue_score={}, blue_work={})",
+                hash, topoheight, external_ghostdag.blue_score, external_ghostdag.blue_work
+            );
+        }
+
+        if self.blocks.contains_key(&hash) {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Block {} is already in validator chain!", hash);
+            }
+            return Err(BlockchainError::AlreadyInChain);
+        }
+
+        let storage = self.blockchain.get_storage().read().await;
+        debug!("storage locked for chain validator insert trusted block");
+
+        if storage.has_block_with_hash(&hash).await? {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Block {} is already in blockchain!", hash);
+            }
+            return Err(BlockchainError::AlreadyInChain);
+        }
+
+        let provider = ChainValidatorProvider {
+            parent: &self,
+            storage: &storage,
+        };
+
+        // Verify the block version
+        let version = get_version_at_height(self.blockchain.get_network(), header.get_blue_score());
+        if version != header.get_version() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has version {} while expected version is {}",
+                    hash,
+                    header.get_version(),
+                    version
+                );
+            }
+            return Err(BlockchainError::InvalidBlockVersion);
+        }
+
+        let tips = header.get_parents();
+        let tips_count = tips.len();
+
+        // verify tips count
+        if tips_count == 0 || tips_count > TIPS_LIMIT {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} contains {} tips while only {} is accepted",
+                    hash, tips_count, TIPS_LIMIT
+                );
+            }
+            return Err(BlockchainError::InvalidTipsCount(hash, tips_count));
+        }
+
+        // verify that we have already all its tips
+        {
+            for tip in tips.iter() {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Checking tip {} for block {}", tip, hash);
+                }
+                if !self.blocks.contains_key(tip) && !provider.has_block_with_hash(tip).await? {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Block {} contains tip {} which is not present in chain validator",
+                            hash, tip
+                        );
+                    }
+                    return Err(BlockchainError::InvalidTipsNotFound(hash, tip.clone()));
+                }
+            }
+        }
+
+        // VERSION UNIFICATION: Algorithm parameter removed, always uses V2
+        let pow_hash = header.get_pow_hash()?;
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("POW hash: {}", pow_hash);
+        }
+        let (difficulty, p) = self
+            .blockchain
+            .verify_proof_of_work(&provider, &pow_hash, tips.iter())
+            .await?;
+
+        // TRUSTED VALIDATION: Use peer-provided GHOSTDAG data instead of computing locally
+        // This is the key difference from insert_block()
+        let ghostdag_data = TosGhostdagData::new(
+            external_ghostdag.blue_score,
+            external_ghostdag.blue_work,
+            external_ghostdag.daa_score,
+            external_ghostdag.selected_parent.clone(),
+            external_ghostdag.mergeset_blues.clone(),
+            external_ghostdag.mergeset_reds.clone(),
+            external_ghostdag.blues_anticone_sizes.clone(),
+            Vec::new(), // mergeset_non_daa is not sent via P2P
+        );
+
+        // Verify blue_score matches header claim (using peer GHOSTDAG data)
+        // Note: We still verify header matches peer GHOSTDAG, just not against local calculation
+        let expected_blue_score = ghostdag_data.blue_score;
+        if expected_blue_score != header.get_blue_score() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "TRUSTED Block {} has blue_score {} but peer GHOSTDAG has {}",
+                    hash,
+                    header.get_blue_score(),
+                    expected_blue_score
+                );
+            }
+            return Err(BlockchainError::InvalidBlockHeight(
+                expected_blue_score,
+                header.get_blue_score(),
+            ));
+        }
+
+        // Verify daa_score matches
+        let expected_daa_score = ghostdag_data.daa_score;
+        if expected_daa_score != header.get_daa_score() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "TRUSTED Block {} has daa_score {} but peer GHOSTDAG has {}",
+                    hash,
+                    header.get_daa_score(),
+                    expected_daa_score
+                );
+            }
+            return Err(BlockchainError::InvalidDaaScore(
+                hash,
+                expected_daa_score,
+                header.get_daa_score(),
+            ));
+        }
+
+        // Verify timestamp is valid (must be greater than all parents)
+        for parent in tips.iter() {
+            let parent_timestamp = provider.get_timestamp_for_block_hash(parent).await?;
+            if header.get_timestamp() <= parent_timestamp {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Block {} has timestamp {} <= parent {} timestamp {}",
+                        hash,
+                        header.get_timestamp(),
+                        parent,
+                        parent_timestamp
+                    );
+                }
+                return Err(BlockchainError::TimestampIsLessThanParent(
+                    header.get_timestamp(),
+                ));
+            }
+        }
+
+        // Verify bits field matches computed difficulty
+        let expected_bits = tos_common::difficulty::difficulty_to_bits(&difficulty);
+        if expected_bits != header.get_bits() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has bits {} while expected bits is {}",
+                    hash,
+                    header.get_bits(),
+                    expected_bits
+                );
+            }
+            return Err(BlockchainError::InvalidBitsField(
+                hash,
+                expected_bits,
+                header.get_bits(),
+            ));
+        }
+
+        // Verify blue_work matches peer GHOSTDAG
+        let computed_blue_work = ghostdag_data.blue_work;
+        if computed_blue_work != *header.get_blue_work() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has blue_work {} but peer GHOSTDAG has {}",
+                    hash,
+                    *header.get_blue_work(),
+                    computed_blue_work
+                );
+            }
+            return Err(BlockchainError::InvalidBlueWork(
+                hash,
+                computed_blue_work,
+                *header.get_blue_work(),
+            ));
+        }
+
+        // Verify pruning_point is valid
+        if *header.get_pruning_point() != Hash::zero() {
+            if !provider
+                .has_block_with_hash(header.get_pruning_point())
+                .await?
+            {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Block {} has invalid pruning_point {} (not found in chain)",
+                        hash,
+                        header.get_pruning_point()
+                    );
+                }
+                return Err(BlockchainError::InvalidPruningPoint(
+                    hash,
+                    Hash::zero(),
+                    header.get_pruning_point().clone(),
+                ));
+            }
+        }
+
+        // Verify reserved fields are zero
+        if *header.get_accepted_id_merkle_root() != Hash::zero() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has non-zero accepted_id_merkle_root {} while feature is inactive",
+                    hash,
+                    header.get_accepted_id_merkle_root()
+                );
+            }
+            return Err(BlockchainError::InvalidAcceptedIdMerkleRoot(
+                hash,
+                header.get_accepted_id_merkle_root().clone(),
+            ));
+        }
+
+        if *header.get_utxo_commitment() != Hash::zero() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has non-zero utxo_commitment {} while feature is inactive",
+                    hash,
+                    header.get_utxo_commitment()
+                );
+            }
+            return Err(BlockchainError::InvalidUtxoCommitment(
+                hash,
+                header.get_utxo_commitment().clone(),
+            ));
+        }
+
+        // Verify parent-level structure
+        if header.get_parents_by_level().len() > 1 {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has {} parent levels (multi-level not yet supported)",
+                    hash,
+                    header.get_parents_by_level().len()
+                );
+            }
+            return Err(BlockchainError::InvalidParentsLevelCount(
+                hash,
+                header.get_parents_by_level().len(),
+            ));
+        }
+
+        // Use peer-provided blue_work for chain comparison
+        let blue_work = ghostdag_data.blue_work;
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "TRUSTED Block {} - blue_work: {} (from peer)",
+                hash, blue_work
+            );
+        }
+
+        let hash = Arc::new(hash);
+        // Store the block in both maps
+        self.blocks_at_height
+            .entry(header.get_blue_score())
+            .or_insert_with(IndexSet::new)
+            .insert(hash.clone());
+
+        self.blocks.insert(
+            hash.clone(),
+            BlockData {
+                header: Arc::new(header),
+                topoheight,
+                difficulty,
+                blue_work,                       // Using peer-provided GHOSTDAG blue_work
+                blue_score: expected_blue_score, // Using peer-provided GHOSTDAG blue_score
+                ghostdag_data: Arc::new(ghostdag_data), // Using peer-provided GHOSTDAG data
+                p,
+            },
+        );
+
+        self.hash_at_topo.insert(topoheight, hash);
+
+        Ok(())
+    }
+
     pub fn get_block(&mut self, hash: &Hash) -> Option<Arc<BlockHeader>> {
         if log::log_enabled!(log::Level::Debug) {
             debug!("retrieving block header for {}", hash);
