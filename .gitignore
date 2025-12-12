@@ -55,3 +55,6 @@ wallet2/
 test_export.csv
 transactions_2024.csv
 wallet_history.csv
+
+# ignore the testnet monitor plist file
+scripts/com.tos.testnet-monitor.plist
