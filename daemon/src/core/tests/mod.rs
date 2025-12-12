@@ -39,3 +39,6 @@ mod ghostdag_execution_tests;
 
 #[cfg(test)]
 mod pruning_point_tests;
+
+#[cfg(test)]
+mod trusted_ghostdag_tests;
