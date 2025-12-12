@@ -21,7 +21,10 @@ use tos_common::{
 
 use crate::{
     config::{CHAIN_SYNC_TOP_BLOCKS, PEER_OBJECTS_CONCURRENCY, STABLE_LIMIT},
-    core::{blockchain::BroadcastOption, error::BlockchainError, storage::Storage},
+    core::{
+        blockchain::BroadcastOption, error::BlockchainError, ghostdag::TosGhostdagData,
+        storage::Storage,
+    },
     p2p::{
         error::P2pError,
         packet::{ChainRequest, ObjectRequest, Packet, PacketWrapper},
@@ -770,6 +773,10 @@ impl<S: Storage> P2pServer<S> {
             let mut futures = Scheduler::new(capacity);
             let group_id = self.object_tracker.next_group_id();
 
+            // BUG-002 FIX: Wrap ghostdag_data in Arc for sharing across async blocks
+            // This allows TrustedBlock pattern to work in non-rewind path
+            let ghostdag_data = Arc::new(ghostdag_data);
+
             // P0-3: Deferred blocks waiting for parents (fork prevention)
             // When a block fails with ParentNotFound, we defer it and retry later
             let mut deferred_blocks: Vec<(Block, Immutable<Hash>)> = Vec::new();
@@ -840,7 +847,9 @@ impl<S: Storage> P2pServer<S> {
                     // Even with the biased select & the option future being above
                     // we must ensure we don't miss a block
                     Some(res) = futures.next() => {
-                        let future = async {
+                        // BUG-002 FIX: Clone Arc for use in async block
+                        let ghostdag_data_clone = Arc::clone(&ghostdag_data);
+                        let future = async move {
                             match res {
                                 Ok(response) => match response {
                                     ResponseHelper::Requested(block, hash) => {
@@ -868,6 +877,36 @@ impl<S: Storage> P2pServer<S> {
                                         // This may happen if we try to chain sync with peer
                                         // while we got the block through propagation
                                         if !self.blockchain.has_block(&hash).await? {
+                                            // BUG-002 FIX: Pre-store GHOSTDAG data from peer before calling add_new_block
+                                            // This enables TrustedBlock pattern in non-rewind path
+                                            if let Some(external_ghostdag) = ghostdag_data_clone.get(&*hash) {
+                                                // Convert ExternalGhostdagData to TosGhostdagData and store it
+                                                // Note: mergeset_non_daa is not transmitted over P2P, use empty Vec
+                                                let trusted_ghostdag = TosGhostdagData::new(
+                                                    external_ghostdag.blue_score,
+                                                    external_ghostdag.blue_work.clone(),
+                                                    external_ghostdag.daa_score,
+                                                    external_ghostdag.selected_parent.clone(),
+                                                    external_ghostdag.mergeset_blues.clone(),
+                                                    external_ghostdag.mergeset_reds.clone(),
+                                                    external_ghostdag.blues_anticone_sizes.clone(),
+                                                    Vec::new(), // mergeset_non_daa: not needed for sync validation
+                                                );
+                                                // Store GHOSTDAG data before add_new_block sees it
+                                                // add_new_block will find existing data and skip local calculation
+                                                let mut storage = self.blockchain.get_storage().write().await;
+                                                if !storage.has_ghostdag_data(&hash).await? {
+                                                    storage.insert_ghostdag_data(&hash, Arc::new(trusted_ghostdag)).await?;
+                                                    if log::log_enabled!(log::Level::Debug) {
+                                                        debug!(
+                                                            "BUG-002 FIX: Pre-stored TRUSTED GHOSTDAG data for block {} (blue_score={}, blue_work={})",
+                                                            hash, external_ghostdag.blue_score, external_ghostdag.blue_work
+                                                        );
+                                                    }
+                                                }
+                                                drop(storage);
+                                            }
+
                                             match self.blockchain.add_new_block(block.clone(), Some(hash.clone()), BroadcastOption::Miners, false).await {
                                                 Ok(()) => Ok(SyncBlockResult::Added),
                                                 Err(BlockchainError::ParentNotFound(parent_hash)) => {
