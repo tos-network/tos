@@ -3619,6 +3619,37 @@ impl<S: Storage> Blockchain<S> {
             ));
         }
 
+        // SECURITY FIX: Validate mergeset size limit (P0-3 fork prevention)
+        // This check MUST run for both trusted and computed GHOSTDAG data
+        // Formula: max_mergeset = 4*k + 16
+        // This prevents "wide but light" DAG attacks where an attacker creates
+        // blocks with abnormally large mergesets to manipulate the DAG structure
+        {
+            let k = self.ghostdag.k();
+            let blues_count = ghostdag_data.mergeset_blues.len();
+            let reds_count = ghostdag_data.mergeset_reds.len();
+            let mergeset_size = blues_count + reds_count;
+            let max_mergeset = (4 * k as usize) + 16;
+
+            if mergeset_size > max_mergeset {
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "FORK PREVENTION: Block {} rejected - mergeset too large ({} > {}). \
+                         blues={}, reds={}, k={}, trusted={}. This may indicate a 'wide but light' attack.",
+                        block_hash, mergeset_size, max_mergeset, blues_count, reds_count, k, is_trusted
+                    );
+                }
+                return Err(BlockchainError::MergesetTooLarge(
+                    block_hash.into_owned(),
+                    mergeset_size,
+                    blues_count,
+                    reds_count,
+                    max_mergeset,
+                    k,
+                ));
+            }
+        }
+
         // SECURITY FIX: Validate blue_work, daa_score, and bits fields
         // Genesis blocks (tips_count == 0) are exempt as they use default values (all zeros)
         // and are trusted by design - their hash is hardcoded per network.
