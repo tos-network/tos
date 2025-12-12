@@ -694,7 +694,7 @@ impl SledStorage {
         }
         self.get_optional_cacheable_data(tree, cache, key)
             .await?
-            .ok_or_else(|| BlockchainError::NotFoundOnDisk(DiskContext::LoadData))
+            .ok_or_else(|| BlockchainError::NotFoundOnDisk(context))
     }
 
     pub(super) async fn delete_cacheable_data<

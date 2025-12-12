@@ -20,7 +20,7 @@ use tos_common::{
     utils::format_tos,
 };
 
-#[derive(Error, Debug, Clone, Copy)]
+#[derive(Error, Debug, Clone)]
 pub enum DiskContext {
     #[error("data len")]
     DataLen,
@@ -160,6 +160,9 @@ pub enum DiskContext {
     // Reachability (TIP-2 Phase 2)
     #[error("reachability data")]
     ReachabilityData,
+    // RocksDB column-specific error (BUG-001 diagnostic improvement)
+    #[error("rocksdb column '{0}'")]
+    RocksDBColumn(String),
 }
 
 #[derive(Error, Debug, EnumDiscriminants)]

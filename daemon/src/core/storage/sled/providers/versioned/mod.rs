@@ -152,7 +152,7 @@ impl SledStorage {
                     tree_versioned,
                     &Self::get_versioned_key(&key, topo),
                 )?
-                .ok_or(BlockchainError::NotFoundOnDisk(context))?;
+                .ok_or_else(|| BlockchainError::NotFoundOnDisk(context.clone()))?;
 
                 // While we are above the threshold, we must delete versions to rewrite the correct topoheight
                 let mut new_topo_pointer = None;
@@ -171,7 +171,7 @@ impl SledStorage {
                         tree_versioned,
                         &key,
                     )?
-                    .ok_or(BlockchainError::NotFoundOnDisk(context))?;
+                    .ok_or_else(|| BlockchainError::NotFoundOnDisk(context.clone()))?;
                 }
 
                 // If we don't have any previous versioned data, delete the pointer
@@ -295,7 +295,7 @@ impl SledStorage {
                         snapshot.as_ref(),
                         tree_versioned,
                         &Self::get_versioned_key(&account_key, topo),
-                        context,
+                        context.clone(),
                     )?;
                     // If we are already below the threshold, we can directly erase without patching
                     let mut patched = topo < topoheight;
@@ -311,7 +311,7 @@ impl SledStorage {
                                 snapshot.as_ref(),
                                 tree_versioned,
                                 &key,
-                                context,
+                                context.clone(),
                             )?;
                             if prev_version.filter(|v| *v < topoheight).is_some() {
                                 if log::log_enabled!(log::Level::Trace) {
@@ -323,7 +323,7 @@ impl SledStorage {
                                         snapshot.as_ref(),
                                         tree_versioned,
                                         &key,
-                                        context,
+                                        context.clone(),
                                     )?;
                                 data.set_previous_topoheight(None);
                                 Self::insert_into_disk(
