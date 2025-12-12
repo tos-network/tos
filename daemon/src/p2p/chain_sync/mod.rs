@@ -905,6 +905,15 @@ impl<S: Storage> P2pServer<S> {
                                                     }
                                                 }
                                                 drop(storage);
+                                            } else {
+                                                // BUG-002 DIAGNOSTIC: Log when GHOSTDAG data is missing
+                                                // This helps identify why some blocks fail validation
+                                                if log::log_enabled!(log::Level::Warn) {
+                                                    warn!(
+                                                        "BUG-002 WARNING: No GHOSTDAG data from peer for block {} (blue_score={}). Will compute locally.",
+                                                        hash, block.get_blue_score()
+                                                    );
+                                                }
                                             }
 
                                             match self.blockchain.add_new_block(block.clone(), Some(hash.clone()), BroadcastOption::Miners, false).await {
