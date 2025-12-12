@@ -544,6 +544,13 @@ impl<S: Storage> P2pServer<S> {
         let top_len = top_blocks.len();
         let blocks_len = blocks.len();
 
+        // BUG-003: detect fork state (2+ tips). In fork state we must allow rewind even if
+        // the common point is above our local stable height; otherwise sync can deadlock.
+        let in_fork_state = {
+            let storage = self.blockchain.get_storage().read().await;
+            storage.get_tips().await?.len() > 1
+        };
+
         // merge both list together
         blocks.extend(top_blocks);
 
@@ -564,12 +571,14 @@ impl<S: Storage> P2pServer<S> {
         let peer_topoheight = peer.get_topoheight();
         let our_stable_topoheight = self.blockchain.get_stable_topoheight();
 
-        // SECURITY FIX: Removed skip_stable_height_check from the condition
-        // Only priority peers or when common_topoheight < our_stable_topoheight can trigger rewind
+        // SECURITY FIX (BUG-003): Allow rewind when we are in fork state even if the common point
+        // is above our local stable height. This matches the behavior of xelis' optional
+        // skip-stable flag and Kaspa's ability to resolve fork/finality conflicts during IBD,
+        // while still requiring the peer to be ahead and to pass blue_work validation.
         if pop_count > 0
             && peer_topoheight > our_previous_topoheight
             && peer.get_height() >= our_previous_height
-            && common_topoheight < our_stable_topoheight
+            && (common_topoheight < our_stable_topoheight || in_fork_state)
             // then, verify if it's a priority node, otherwise, check if we are connected to a priority node so only him can rewind us
             && (peer.is_priority() || !self.is_connected_to_a_synced_priority_node().await)
         {
