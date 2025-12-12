@@ -12,9 +12,12 @@ pub use self::{
     sled::SledStorage,
 };
 
-use crate::{config::PRUNE_SAFETY_LIMIT, core::error::BlockchainError};
+use crate::{
+    config::PRUNE_SAFETY_LIMIT,
+    core::error::{BlockchainError, DiskContext},
+};
 use async_trait::async_trait;
-use log::{debug, trace, warn};
+use log::{debug, error, trace, warn};
 use std::collections::HashSet;
 use tos_common::{
     block::{BlockHeader, TopoHeight},
@@ -87,6 +90,57 @@ pub trait Storage:
                     warn!("Pruned topoheight is {}, lowest topoheight is {}, rewind only until {}", pruned_topoheight, lowest_topo, safety_pruned_topoheight);
                 }
                 lowest_topo = safety_pruned_topoheight;
+            }
+        }
+
+        // BUG-001 FIX (Solution 1): Pre-validation before destructive operations
+        // Verify all blocks exist before starting the rewind loop
+        // This prevents partial deletion when a block is missing midway
+        // NOTE: Validation is done AFTER calculating final lowest_topo to cover
+        // the actual deletion range (which may extend beyond initial count)
+        {
+            // Calculate the actual lower bound for deletion
+            let validation_lower_bound = lowest_topo.max(until_topo_height);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Pre-validating blocks from topoheight {} to {} before rewind (actual deletion range)",
+                    validation_lower_bound + 1,
+                    topoheight
+                );
+            }
+            for check_topo in (validation_lower_bound + 1)..=topoheight {
+                // Verify hash_at_topo exists
+                if !self.has_hash_at_topoheight(check_topo).await? {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!(
+                            "BUG-001: Pre-validation failed - missing hash_at_topo for topoheight {}",
+                            check_topo
+                        );
+                    }
+                    return Err(BlockchainError::NotFoundOnDisk(
+                        DiskContext::GetBlockHashAtTopoHeight(check_topo),
+                    ));
+                }
+
+                // Verify block exists
+                let hash = self.get_hash_at_topo_height(check_topo).await?;
+                if !self.has_block_with_hash(&hash).await? {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!(
+                            "BUG-001: Pre-validation failed - missing block {} at topoheight {}",
+                            hash, check_topo
+                        );
+                    }
+                    return Err(BlockchainError::NotFoundOnDisk(
+                        DiskContext::GetBlockHeaderByHash,
+                    ));
+                }
+            }
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Pre-validation passed for {} blocks",
+                    topoheight.saturating_sub(validation_lower_bound)
+                );
             }
         }
 

@@ -585,10 +585,51 @@ impl<S: Storage> P2pServer<S> {
             // check that if we can trust him
             if peer.is_priority() {
                 if log::log_enabled!(log::Level::Warn) {
-                    warn!("Rewinding chain without checking because {} is a priority node (pop count: {})", peer, pop_count);
+                    warn!("Rewinding chain with commit point because {} is a priority node (pop count: {})", peer, pop_count);
                 }
-                // User trust him as a priority node, rewind chain without checking, allow to go below stable height also
-                self.blockchain.rewind_chain(pop_count, false).await?;
+                // BUG-001 FIX: Priority node rewind MUST use commit point for atomicity
+                // This prevents database corruption when rewind fails midway
+                // NOTE: We hold the storage write lock throughout the entire operation
+                // to prevent other write operations from being included in the same commit point
+                let mut storage = self.blockchain.get_storage().write().await;
+                storage.start_commit_point().await?;
+
+                let rewind_result = self
+                    .blockchain
+                    .rewind_chain_for_storage(&mut storage, pop_count, false)
+                    .await;
+
+                // End commit point based on rewind success
+                let apply = rewind_result.is_ok();
+                if let Err(e) = storage.end_commit_point(apply).await {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Failed to end commit point after priority rewind: {}", e);
+                    }
+                    // Release lock before reload
+                    drop(storage);
+                    self.blockchain.reload_from_disk().await?;
+                    return Err(e);
+                }
+
+                // Release storage lock before potential reload
+                drop(storage);
+
+                if !apply {
+                    // Rewind failed, reload from disk to restore consistent state
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Priority node rewind failed, rolling back via commit point");
+                    }
+                    self.blockchain.reload_from_disk().await?;
+
+                    // BUG-001 FIX (Solution 4): Graceful degradation - trigger full resync
+                    // Instead of leaving corrupted state, return error to trigger resync
+                    if let Err(e) = &rewind_result {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Priority rewind failed with error: {}. Database rolled back, triggering resync.", e);
+                        }
+                    }
+                    return rewind_result.map(|_| ()).map_err(|e| e.into());
+                }
             } else {
                 // Verify that someone isn't trying to trick us
                 if pop_count > blocks_len as u64 {
