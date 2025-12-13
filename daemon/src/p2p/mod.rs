@@ -851,6 +851,34 @@ impl<S: Storage> P2pServer<S> {
                 addr, priority
             );
         }
+
+        // BUG-006 FIX: If we're trying to connect to a priority node but already have
+        // an incoming connection from it, upgrade the existing connection's priority
+        // instead of creating a new connection. This handles the race condition where
+        // both nodes try to connect to each other simultaneously.
+        if priority {
+            if let Some(existing_peer) = self.peer_list.get_peer_by_addr(&addr).await {
+                if !existing_peer.is_priority() {
+                    if log::log_enabled!(log::Level::Info) {
+                        info!(
+                            "BUG-006 FIX: Upgrading existing connection to {} from non-priority to priority",
+                            addr
+                        );
+                    }
+                    existing_peer.set_priority(true);
+                    return Ok(()); // Successfully upgraded, no need to create new connection
+                } else {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Already connected to priority peer: {}, skipping",
+                            addr
+                        );
+                    }
+                    return Ok(()); // Already priority, nothing to do
+                }
+            }
+        }
+
         counter!("tos_p2p_outgoing_connections_total").increment(1u64);
         let connection = match self.connect_to_peer(addr).await {
             Ok(connection) => connection,

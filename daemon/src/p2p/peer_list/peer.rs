@@ -97,7 +97,9 @@ pub struct Peer {
     // daemon version
     version: String,
     // if this node can be trusted (seed node or added manually by user)
-    priority: bool,
+    // BUG-006 FIX: Changed from bool to AtomicBool to allow runtime upgrade
+    // when an incoming connection needs to be promoted to priority status
+    priority: AtomicBool,
     // current block top hash for this peer
     top_hash: Mutex<Hash>,
     // current highest topo height for this peer
@@ -206,7 +208,7 @@ impl Peer {
                 top_hash: Mutex::new(top_hash),
                 topoheight: AtomicU64::new(topoheight),
                 height: AtomicU64::new(height),
-                priority,
+                priority: AtomicBool::new(priority),
                 last_fail_count: AtomicU64::new(0),
                 fail_count: AtomicU8::new(0),
                 // P1-1: Initialize unsolicited block rate tracking
@@ -399,7 +401,27 @@ impl Peer {
     /// TODO: Consider adding metrics `deep_rewind_triggered_total{reason="priority_peer"}`
     /// to monitor when priority peers trigger deep rewinds.
     pub fn is_priority(&self) -> bool {
-        self.priority
+        self.priority.load(Ordering::SeqCst)
+    }
+
+    /// BUG-006 FIX: Upgrade an existing connection to priority status.
+    ///
+    /// This is used when we have an incoming connection from a peer that is
+    /// configured as a priority node, but the incoming connection was created
+    /// before we could establish an outgoing connection to it.
+    ///
+    /// By upgrading the priority status, we allow this peer to trigger
+    /// chain rewinds even when pop_count > blocks_len.
+    pub fn set_priority(&self, priority: bool) {
+        if log::log_enabled!(log::Level::Info) {
+            log::info!(
+                "BUG-006 FIX: Upgrading peer {} priority status from {} to {}",
+                self.get_outgoing_address(),
+                self.priority.load(Ordering::SeqCst),
+                priority
+            );
+        }
+        self.priority.store(priority, Ordering::SeqCst);
     }
 
     // Get the sharable flag of the peer
