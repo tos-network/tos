@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="TopoSpartan Logo" width="150"/>
+  <img src="logo.png" alt="TOS Network Logo" width="150"/>
 </p>
 
 # <p align="center">TOS Network</p>

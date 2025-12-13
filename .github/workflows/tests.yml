@@ -1,0 +1,430 @@
+name: Tests
+
+# Run tests on push to main branches and on all pull requests
+on:
+  push:
+    branches: [ master, main, develop ]
+  pull_request:
+    branches: [ master, main, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Fast unit tests in Debug mode
+  unit-tests:
+    name: Unit Tests (Debug Mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Free disk space
+        run: |
+          echo "=========================================="
+          echo "Freeing up disk space"
+          echo "=========================================="
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+          df -h
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-debug-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-debug-
+
+      - name: Run unit tests (lib)
+        run: |
+          echo "=========================================="
+          echo "Running Unit Tests in Debug Mode"
+          echo "=========================================="
+          cargo test --workspace --lib --no-fail-fast
+
+      - name: Run doc tests
+        run: |
+          echo "=========================================="
+          echo "Running Documentation Tests"
+          echo "=========================================="
+          cargo test --workspace --doc --no-fail-fast
+
+      - name: Clean up debug artifacts
+        run: |
+          echo "=========================================="
+          echo "Cleaning up debug build artifacts"
+          echo "=========================================="
+          cargo clean --release
+          df -h
+
+  # Integration tests in Release mode (following Kaspa best practice)
+  # Debug mode can be 10-100x slower than Release mode for integration tests
+  integration-tests:
+    name: Integration Tests (Release Mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkout tos-alloc
+        uses: actions/checkout@v4
+        with:
+          repository: tos-network/tos-alloc
+          path: tos-alloc
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo release build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Run integration tests in Release mode
+        run: |
+          echo "=========================================="
+          echo "Running Integration Tests in Release Mode"
+          echo "Following Kaspa best practice:"
+          echo "  - Debug mode: 10-100x slower"
+          echo "  - Release mode: Production-like performance"
+          echo "=========================================="
+          cargo test --workspace --tests --release --no-fail-fast
+
+      - name: Run testing-framework integration tests in Release mode
+        run: |
+          echo "=========================================="
+          echo "Running testing-framework Integration Tests"
+          echo "=========================================="
+          cargo test --package tos-testing-framework --tests --release --no-fail-fast
+
+  # Parallel execution tests (critical for blockchain performance)
+  parallel-execution-tests:
+    name: Parallel Execution Tests (Release Mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo release build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-release-parallel-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Run parallel execution tests (Release mode)
+        run: |
+          echo "=========================================="
+          echo "Parallel Execution Tests (Release Mode)"
+          echo "=========================================="
+          cargo test --package tos_daemon --test parallel_sequential_parity --release --no-fail-fast
+          cargo test --package tos_daemon --test parallel_execution_parity_tests_rocksdb --release --no-fail-fast
+          cargo test --package tos_daemon --test parallel_execution_security_tests_rocksdb --release --no-fail-fast
+
+  # Security tests (must run in Release mode for realistic attack scenarios)
+  security-tests:
+    name: Security Tests (Release Mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo release build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-release-security-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Run security tests (Release mode)
+        run: |
+          echo "=========================================="
+          echo "Security Tests (Release Mode)"
+          echo "=========================================="
+          cargo test --package tos_daemon security --release --no-fail-fast
+          cargo test --package tos_common crypto_security --release --no-fail-fast
+
+  # Code quality checks
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Check formatting
+        run: |
+          echo "=========================================="
+          echo "Checking Code Formatting"
+          echo "=========================================="
+          cargo fmt --all -- --check
+
+      - name: Run clippy (critical lints as errors, others as warnings)
+        run: |
+          echo "=========================================="
+          echo "Running Clippy - Critical Lints as Errors"
+          echo "=========================================="
+          echo "Checking for critical issues that must be fixed (will fail the build):"
+          echo "  - await_holding_lock: Prevents deadlocks and performance issues"
+          echo "  - todo/unimplemented: Prevents incomplete code in production"
+          echo ""
+          echo "Other Clippy findings will be shown as non-blocking warnings"
+          cargo clippy --workspace --all-targets -- \
+            -D clippy::await_holding_lock \
+            -D clippy::todo \
+            -D clippy::unimplemented \
+            -W clippy::all
+
+  # Security checks - strict lints for production code
+  security-checks:
+    name: Security Checks (Strict Clippy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Security Clippy - Production Code Only
+        run: |
+          echo "=========================================="
+          echo "Security Clippy Checks - Production Code"
+          echo "=========================================="
+          echo "Enforcing security best practices (will fail on violations):"
+          echo "  - unwrap_used: Prevent panic in production code"
+          echo "  - expect_used: Prevent panic in production code"
+          echo "  - panic: Prevent explicit panic calls"
+          echo "  - disallowed_methods: Prevent unsafe time operations"
+          echo ""
+          echo "Note: Test code and test tools are exempt from these checks"
+          echo ""
+          echo "Checking production code libraries..."
+          cargo clippy \
+            --package tos_daemon \
+            --package tos_common \
+            --package tos_wallet \
+            --lib -- \
+            -D clippy::unwrap_used \
+            -D clippy::expect_used \
+            -D clippy::panic \
+            -D clippy::disallowed_methods \
+            -D warnings
+          echo ""
+          echo "Checking production binaries (miner, ai_miner)..."
+          cargo clippy --package tos_miner --package tos_ai_miner -- \
+            -D clippy::unwrap_used \
+            -D clippy::expect_used \
+            -D clippy::panic \
+            -D clippy::disallowed_methods \
+            -D warnings
+
+  # Build verification
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Free disk space
+        run: |
+          echo "=========================================="
+          echo "Freeing up disk space"
+          echo "=========================================="
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+          df -h
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-
+
+      - name: Build workspace (libs and bins only)
+        run: |
+          echo "=========================================="
+          echo "Building Workspace (libs and bins)"
+          echo "=========================================="
+          echo "Building libraries and binaries..."
+          echo "(Tests are built separately to avoid linker memory issues)"
+          cargo build --workspace --lib
+          cargo build --workspace --bins
+
+      - name: Build release
+        run: |
+          echo "=========================================="
+          echo "Building Release"
+          echo "=========================================="
+          cargo build --workspace --release --lib
+          cargo build --workspace --release --bins
+
+      - name: Build with strict warnings (production crates only)
+        run: |
+          echo "=========================================="
+          echo "Building with -D warnings (Strict Mode)"
+          echo "=========================================="
+          echo "Checking production crates for warnings..."
+          echo ""
+          echo "Excluded from strict mode:"
+          echo "  - test crates (ai_miner, testing-integration)"
+          echo "  - benches, examples, tests"
+          echo ""
+          RUSTFLAGS="-D warnings" cargo build \
+            --package tos_daemon \
+            --package tos_common \
+            --package tos_wallet \
+            --lib
+          RUSTFLAGS="-D warnings" cargo build \
+            --package tos_miner

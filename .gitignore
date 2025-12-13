@@ -10,9 +10,22 @@ peerlist-*.json
 build/
 data/
 logs/
+librust_out.rlib
+demo_ai_wallet/
+parallel_test_sender/
 test_*/
+wallet_receiver/
+wallet_sender/
 miner_wallet.db/
 publisher_wallet.db/
+final_test_wallet/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 
 
 # ignore all profiling files
@@ -20,7 +33,7 @@ flamegraph.svg
 perf.data
 perf.data.old
 
-# ignore generated files by Terminos
+# ignore generated files by TOS
 difficulty_dataset.csv
 precomputed_tables_*.bin
 mainnet*
@@ -30,6 +43,18 @@ devnet*
 wallet.dat
 miner_wallet.dat
 test_wallet*/
+final_test_wallet/
+parallel_test_sender/
+demo_ai_wallet/
+wallet_receiver/
+wallet_sender/
+*_wallet/
+wallet_*/
+wallet1/
+wallet2/
 test_export.csv
 transactions_2024.csv
 wallet_history.csv
+
+# ignore the testnet monitor plist file
+scripts/com.tos.testnet-monitor.plist
