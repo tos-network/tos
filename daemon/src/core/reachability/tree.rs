@@ -98,9 +98,37 @@ pub async fn add_tree_block<S: Storage>(
         // Step 3: PERFORM REINDEXING
         let reindex_root = get_reindex_root(storage).await?;
 
-        let mut ctx = ReindexContext::new(DEFAULT_REINDEX_DEPTH, DEFAULT_REINDEX_SLACK);
-        ctx.reindex_intervals(storage, new_block.clone(), reindex_root)
-            .await?;
+        // BUG-005 FIX: Validate reindex root consistency before reindexing
+        // The reindex root height must be <= new_block height (it should be ~100 blocks behind)
+        let reindex_root_data = storage.get_reachability_data(&reindex_root).await?;
+        let new_block_height = new_block_data.height;
+
+        if reindex_root_data.height > new_block_height {
+            // CRITICAL: Data inconsistency detected!
+            // This can happen after partial data corruption or sync from different chain
+            log::error!(
+                "BUG-005: Reindex root height inconsistency detected! \
+                reindex_root {} (height {}) > new_block {} (height {}). \
+                Resetting reindex root to parent.",
+                reindex_root,
+                reindex_root_data.height,
+                new_block,
+                new_block_height
+            );
+
+            // Recovery: Reset reindex root to the parent block (which we know exists)
+            // This allows reindexing to proceed with a valid reference point
+            storage.set_reindex_root(parent.clone()).await?;
+
+            // Use parent as the new reindex root for this operation
+            let mut ctx = ReindexContext::new(DEFAULT_REINDEX_DEPTH, DEFAULT_REINDEX_SLACK);
+            ctx.reindex_intervals(storage, new_block.clone(), parent.clone())
+                .await?;
+        } else {
+            let mut ctx = ReindexContext::new(DEFAULT_REINDEX_DEPTH, DEFAULT_REINDEX_SLACK);
+            ctx.reindex_intervals(storage, new_block.clone(), reindex_root)
+                .await?;
+        }
 
         if log::log_enabled!(log::Level::Info) {
             log::info!("Reindexing completed successfully for block {}", new_block);
@@ -446,6 +474,29 @@ pub async fn try_advancing_reindex_root<S: Storage>(
         }
     };
 
+    // BUG-005 FIX: Validate reindex root consistency
+    // The reindex root height must be <= hint height
+    let current_data = storage.get_reachability_data(&current).await?;
+    let hint_data = storage.get_reachability_data(&hint).await?;
+
+    if current_data.height > hint_data.height {
+        // CRITICAL: Data inconsistency detected!
+        log::error!(
+            "BUG-005: Reindex root height inconsistency in try_advancing! \
+            current_root {} (height {}) > hint {} (height {}). \
+            Resetting reindex root to hint.",
+            current,
+            current_data.height,
+            hint,
+            hint_data.height
+        );
+
+        // Recovery: Reset reindex root to the hint (current tip)
+        // The reindex root will gradually move back as more blocks are added
+        storage.set_reindex_root(hint).await?;
+        return Ok(());
+    }
+
     // Find the possible new root using rusty-kaspa's algorithm
     let (mut ancestor, next) = find_next_reindex_root(
         storage,
@@ -459,7 +510,6 @@ pub async fn try_advancing_reindex_root<S: Storage>(
     // No update to root, return early
     if current == next {
         if log::log_enabled!(log::Level::Trace) {
-            let current_data = storage.get_reachability_data(&current).await?;
             log::trace!(
                 "Reindex root unchanged: current {} at height {}",
                 current,
@@ -470,7 +520,6 @@ pub async fn try_advancing_reindex_root<S: Storage>(
     }
 
     // Log the advancement at DEBUG level (called every block, so shouldn't be INFO)
-    let current_data = storage.get_reachability_data(&current).await?;
     let next_data = storage.get_reachability_data(&next).await?;
 
     if log::log_enabled!(log::Level::Debug) {
