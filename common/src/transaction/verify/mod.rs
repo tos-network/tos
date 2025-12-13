@@ -1190,7 +1190,7 @@ impl Transaction {
                         &payload.deposits,
                         payload.parameters.iter().cloned(),
                         payload.max_gas,
-                        InvokeContract::Entry(payload.chunk_id),
+                        InvokeContract::Entry(payload.entry_id),
                     )
                     .await?;
                 } else {

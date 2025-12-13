@@ -566,6 +566,12 @@ pub fn register_methods<S: Storage>(
         "get_contract_assets",
         async_handler!(get_contract_assets::<S>),
     );
+    handler.register_method(
+        "get_contract_address_from_tx",
+        async_handler!(get_contract_address_from_tx::<S>),
+    );
+    // Note: get_contract_events is not yet implemented because ContractEventProvider
+    // is not implemented for the storage backends. This will be added in a future phase.
 
     // P2p
     handler.register_method(
@@ -1915,7 +1921,7 @@ async fn get_account_history<S: Storage>(
                             hash: tx_hash.clone(),
                             history_type: AccountHistoryType::InvokeContract {
                                 contract: payload.contract.clone(),
-                                chunk_id: payload.chunk_id,
+                                entry_id: payload.entry_id,
                             },
                             block_timestamp: block_header.get_timestamp(),
                         });
@@ -2867,3 +2873,51 @@ async fn get_ai_mining_active_tasks<S: Storage>(
         )),
     }
 }
+
+// Get contract address from a DeployContract transaction
+async fn get_contract_address_from_tx<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetContractAddressFromTxParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let is_mainnet = blockchain.get_network().is_mainnet();
+    let storage = blockchain.get_storage().read().await;
+
+    // Load the transaction
+    let tx = storage
+        .get_transaction(&params.transaction)
+        .await
+        .context("Transaction not found")?;
+
+    // Check if it's a DeployContract transaction
+    let TransactionType::DeployContract(payload) = tx.get_data() else {
+        return Err(InternalRpcError::InvalidParams(
+            "Transaction is not a DeployContract transaction",
+        ));
+    };
+
+    // Get the bytecode from the module
+    let bytecode = payload
+        .module
+        .get_bytecode()
+        .map(|b| b.to_vec())
+        .unwrap_or_default();
+
+    // Compute the deterministic contract address
+    let contract_address =
+        tos_common::crypto::compute_deterministic_contract_address(tx.get_source(), &bytecode);
+
+    // Get deployer's address for reference
+    let deployer = tx.get_source().as_address(is_mainnet);
+
+    Ok(json!(GetContractAddressFromTxResult {
+        contract_address,
+        deployer: deployer.to_string(),
+    }))
+}
+
+// Note: get_contract_events function is not yet implemented because ContractEventProvider
+// is not implemented for the storage backends. The trait and types are defined in
+// daemon/src/core/storage/providers/contract/event.rs but the storage implementations
+// (RocksDB, Sled) don't implement the trait yet. This will be added in a future phase.

@@ -1,0 +1,25 @@
+// TOS Daemon Library
+// Exposes internal modules for benchmarking and testing
+
+// Allow some clippy lints for legacy code - to be fixed gradually
+#![allow(clippy::all)]
+#![warn(clippy::correctness)]
+#![allow(clippy::int_plus_one)]
+#![allow(clippy::needless_borrow)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::collapsible_else_if)]
+#![allow(clippy::uninlined_format_args)]
+
+extern crate log;
+
+pub mod config;
+pub mod core;
+pub mod p2p;
+pub mod rpc;
+
+// TOS Kernel(TAKO) integration module
+pub mod tako_integration;
+
+// Doc-test helpers (always available for doc-tests to work)
+// These are minimal mocks suitable for documentation examples
+pub mod doc_test_helpers;

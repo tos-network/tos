@@ -24,6 +24,7 @@ use crate::{
         rpc::{get_block_response, get_block_type_for_block},
         DaemonRpcServer, SharedDaemonRpcServer,
     },
+    tako_integration::TakoContractExecutor,
 };
 use anyhow::Error;
 use futures::{stream, TryStreamExt};
@@ -61,7 +62,7 @@ use tos_common::{
     config::{
         COIN_DECIMALS, MAXIMUM_SUPPLY, MAX_BLOCK_SIZE, MAX_TRANSACTION_SIZE, TIPS_LIMIT, TOS_ASSET,
     },
-    contract::build_environment,
+    contract::{build_environment, ContractExecutor},
     crypto::{Hash, Hashable, PublicKey, HASH_SIZE},
     difficulty::{check_difficulty, CumulativeDifficulty, Difficulty},
     immutable::Immutable,
@@ -162,6 +163,8 @@ pub struct Blockchain<S: Storage> {
     txs_verification_threads_count: usize,
     // Disable the ZKP Cache
     disable_zkp_cache: bool,
+    // Contract executor for running smart contracts (TOS Kernel - TAKO)
+    executor: Arc<dyn ContractExecutor>,
 }
 
 impl<S: Storage> Blockchain<S> {
@@ -277,6 +280,7 @@ impl<S: Storage> Blockchain<S> {
             txs_verification_threads_count: config.txs_verification_threads_count,
             flush_db_every_n_blocks: config.flush_db_every_n_blocks,
             disable_zkp_cache: config.disable_zkp_cache,
+            executor: Arc::new(TakoContractExecutor::new()),
         };
 
         // include genesis block
@@ -893,6 +897,11 @@ impl<S: Storage> Blockchain<S> {
     // Get the network on which this chain is running
     pub fn get_network(&self) -> &Network {
         &self.network
+    }
+
+    // Get the contract executor (TOS Kernel - TAKO)
+    pub fn get_executor(&self) -> Arc<dyn ContractExecutor> {
+        Arc::clone(&self.executor)
     }
 
     // Get the current emitted supply of TOS at current topoheight

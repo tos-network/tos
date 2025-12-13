@@ -207,7 +207,7 @@ impl TransactionBuilder {
             TransactionTypeBuilder::InvokeContract(payload) => {
                 let payload_size = payload.contract.size()
                 + payload.max_gas.size()
-                + payload.chunk_id.size()
+                + payload.entry_id.size()
                 + 1 // byte for params len
                 // 4 is for the compressed constant len
                 + payload.parameters.iter().map(|param| 4 + param.size()).sum::<usize>();
@@ -647,7 +647,7 @@ impl TransactionBuilder {
                 TransactionType::InvokeContract(InvokeContractPayload {
                     contract: payload.contract.clone(),
                     max_gas: payload.max_gas,
-                    chunk_id: payload.chunk_id,
+                    entry_id: payload.entry_id,
                     parameters: payload.parameters.clone(),
                     deposits,
                 })

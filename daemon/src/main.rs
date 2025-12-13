@@ -1,7 +1,14 @@
+//! TOS Daemon Main Binary
+
+// Allow clippy lints for legacy code in daemon binary
+#![allow(clippy::all)]
+#![warn(clippy::correctness)]
+
 pub mod config;
 pub mod core;
 pub mod p2p;
 pub mod rpc;
+pub mod tako_integration;
 
 use crate::config::MILLIS_PER_SECOND;
 use anyhow::{Context as AnyContext, Result};
@@ -11,9 +18,7 @@ use core::{
     blockchain::{get_block_reward, Blockchain, BroadcastOption},
     blockdag,
     config::{Config as InnerConfig, StorageBackend},
-    hard_fork::{
-        get_block_time_target_for_version, get_pow_algorithm_for_version, get_version_at_height,
-    },
+    hard_fork::{get_block_time_target_for_version, get_version_at_height},
     state::ChainState,
     storage::{RocksStorage, SledStorage, Storage},
 };
@@ -198,10 +203,12 @@ async fn main() -> Result<()> {
 
     if blockchain_config.simulator.is_some() && config.network != Network::Devnet {
         config.network = Network::Devnet;
-        warn!(
-            "Switching automatically to network {} because of simulator enabled",
-            config.network
-        );
+        if log::log_enabled!(log::Level::Warn) {
+            warn!(
+                "Switching automatically to network {} because of simulator enabled",
+                config.network
+            );
+        }
     }
 
     let log_config = &config.log;
@@ -220,19 +227,22 @@ async fn main() -> Result<()> {
         log_config.datetime_format.clone(),
     )?;
 
-    info!("Tos Blockchain running version: {}", VERSION);
+    if log::log_enabled!(log::Level::Info) {
+        info!("Tos Blockchain running version: {}", VERSION);
+    }
     info!("----------------------------------------------");
 
     let dir_path = blockchain_config.dir_path.as_deref().unwrap_or_default();
 
+    // Application-level LRU cache size (shared config for both storage backends)
+    let use_cache = if blockchain_config.sled.cache_size > 0 {
+        Some(blockchain_config.sled.cache_size)
+    } else {
+        None
+    };
+
     match blockchain_config.use_db_backend {
         StorageBackend::Sled => {
-            let use_cache = if blockchain_config.sled.cache_size > 0 {
-                Some(blockchain_config.sled.cache_size)
-            } else {
-                None
-            };
-
             let storage = SledStorage::new(
                 dir_path.to_owned(),
                 use_cache,
@@ -240,10 +250,12 @@ async fn main() -> Result<()> {
                 blockchain_config.sled.internal_cache_size,
                 blockchain_config.sled.internal_db_mode,
             )?;
+
             start_chain(prompt, storage, config).await
         }
         StorageBackend::RocksDB => {
             let storage = RocksStorage::new(&dir_path, config.network, &blockchain_config.rocksdb);
+
             start_chain(prompt, storage, config).await
         }
     }
@@ -256,7 +268,9 @@ async fn start_chain<S: Storage>(
 ) -> Result<()> {
     let blockchain = Blockchain::new(config.core.clone(), config.network, storage).await?;
     if let Err(e) = run_prompt(prompt, blockchain.clone(), config).await {
-        error!("Error while running prompt: {}", e);
+        if log::log_enabled!(log::Level::Error) {
+            error!("Error while running prompt: {}", e);
+        }
     }
 
     blockchain.stop().await;
@@ -533,6 +547,7 @@ async fn run_prompt<S: Storage>(
         trace!("Retrieving network hashrate");
         let version = get_version_at_height(blockchain.get_network(), blockchain.get_height());
         let block_time_target = get_block_time_target_for_version(version);
+        // SAFE: f64 for display/monitoring only, not consensus-critical
         let network_hashrate: f64 =
             (blockchain.get_difficulty().await / (block_time_target / MILLIS_PER_SECOND)).into();
 
@@ -654,8 +669,11 @@ async fn verify_chain<S: Storage>(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
 
     let storage = blockchain.get_storage().read().await;
     let mut pruned_topoheight = storage
@@ -685,10 +703,12 @@ async fn verify_chain<S: Storage>(
         blockchain.get_topo_height()
     };
 
-    info!(
-        "Verifying chain supply from {} until topoheight {}",
-        pruned_topoheight, topoheight
-    );
+    if log::log_enabled!(log::Level::Info) {
+        info!(
+            "Verifying chain supply from {} until topoheight {}",
+            pruned_topoheight, topoheight
+        );
+    }
     for topo in pruned_topoheight..=topoheight {
         let hash_at_topo = storage
             .get_hash_at_topo_height(topo)
@@ -736,18 +756,18 @@ async fn verify_chain<S: Storage>(
         }
 
         // Verify that we have a balance for each account updated
-        let header = storage
-            .get_block_header_by_hash(&hash_at_topo)
+        let block = storage
+            .get_block_by_hash(&hash_at_topo)
             .await
-            .context("Error while retrieving block header")?;
+            .context("Error while retrieving block")?;
         if !storage
-            .has_balance_at_exact_topoheight(header.get_miner(), &TOS_ASSET, topo)
+            .has_balance_at_exact_topoheight(block.get_miner(), &TOS_ASSET, topo)
             .await
             .context("Error while checking the miner balance version")?
         {
             manager.error(format!(
                 "No balance version found for miner {} at topoheight {} for block {}",
-                header
+                block
                     .get_miner()
                     .as_address(blockchain.get_network().is_mainnet()),
                 topo,
@@ -759,13 +779,14 @@ async fn verify_chain<S: Storage>(
         let mut burned_sum = 0;
         let mut txs = Vec::new();
         let mut outputs = 0;
-        for tx_hash in header.get_transactions() {
+        for tx in block.get_transactions() {
+            let tx_hash = tx.hash();
             if storage
-                .is_tx_executed_in_block(tx_hash, &hash_at_topo)
+                .is_tx_executed_in_block(&tx_hash, &hash_at_topo)
                 .context("Error while checking if tx is executed in block")?
             {
                 let transaction = storage
-                    .get_transaction(tx_hash)
+                    .get_transaction(&tx_hash)
                     .await
                     .context("Error while retrieving transaction")?;
 
@@ -812,25 +833,29 @@ async fn verify_chain<S: Storage>(
         }
 
         if !txs.is_empty() {
-            info!(
-                "Verifying {} txs ({} outputs) at {}",
-                txs.len(),
-                outputs,
-                topo
-            );
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "Verifying {} txs ({} outputs) at {}",
+                    txs.len(),
+                    outputs,
+                    topo
+                );
+            }
             let start = Instant::now();
             let mut state = ChainState::new(
                 &*storage,
                 blockchain.get_contract_environment(),
                 0,
                 topo - 1,
-                header.get_version(),
+                block.get_version(),
             );
             Transaction::verify_batch(txs.iter(), &mut state, &NoZKPCache::default())
                 .await
                 .context("Error while verifying txs")?;
 
-            info!("Verified in {}ms", start.elapsed().as_millis());
+            if log::log_enabled!(log::Level::Info) {
+                info!("Verified in {}ms", start.elapsed().as_millis());
+            }
         }
 
         // Verify the burned supply
@@ -864,8 +889,11 @@ async fn list_unexecuted_transactions<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let storage = blockchain.get_storage().read().await;
     let unexecuted = storage
         .get_unexecuted_transactions()
@@ -887,8 +915,11 @@ async fn swap_blocks_executions_positions<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let prompt = manager.get_prompt();
     let mut storage = blockchain.get_storage().write().await;
 
@@ -913,8 +944,11 @@ async fn print_balance<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let prompt = manager.get_prompt();
     let storage = blockchain.get_storage().read().await;
 
@@ -946,8 +980,11 @@ async fn estimate_db_size<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let storage = blockchain.get_storage().read().await;
     let size = storage
         .estimate_size()
@@ -962,8 +999,11 @@ async fn list_orphaned_blocks<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let storage = blockchain.get_storage().read().await;
     let orphaned_blocks = storage
         .get_orphaned_blocks()
@@ -986,9 +1026,11 @@ async fn show_json_config<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let config: &CliConfig = context.get()?;
-    let json = serde_json::to_string_pretty(config).context("Error while serializing config")?;
+    let json = {
+        let context = manager.get_context().lock()?;
+        let config: &CliConfig = context.get()?;
+        serde_json::to_string_pretty(config).context("Error while serializing config")?
+    };
 
     manager.message(json);
 
@@ -999,9 +1041,11 @@ async fn export_json_config<S: Storage>(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let config: &CliConfig = context.get()?;
-    let json = serde_json::to_string_pretty(config).context("Error while serializing config")?;
+    let json = {
+        let context = manager.get_context().lock()?;
+        let config: &CliConfig = context.get()?;
+        serde_json::to_string_pretty(config).context("Error while serializing config")?
+    };
 
     let path = if args.has_argument("filename") {
         args.get_value("filename")?.to_string_value()?
@@ -1028,8 +1072,11 @@ async fn broadcast_txs<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let p2p = blockchain.get_p2p().read().await;
     let p2p = match p2p.as_ref() {
         Some(p2p) => p2p,
@@ -1047,7 +1094,9 @@ async fn broadcast_txs<S: Storage>(
     };
 
     for hash in txs {
-        info!("Broadcasting TX {}", hash);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Broadcasting TX {}", hash);
+        }
         p2p.broadcast_tx_hash(hash.clone()).await;
     }
 
@@ -1058,8 +1107,11 @@ async fn kick_peer<S: Storage>(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain.get_p2p().read().await.as_ref() {
         Some(p2p) => {
             let addr: SocketAddr = args
@@ -1093,8 +1145,11 @@ async fn temp_ban_address<S: Storage>(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain.get_p2p().read().await.as_ref() {
         Some(p2p) => {
             let addr: IpAddr = args
@@ -1141,8 +1196,11 @@ async fn list_miners<S: Storage>(
         ));
     }
 
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain.get_rpc().read().await.as_ref() {
         Some(rpc) => match rpc.getwork_server() {
             Some(getwork) => {
@@ -1206,8 +1264,11 @@ async fn list_peers<S: Storage>(
         ));
     }
 
-    let context: std::sync::MutexGuard<Context> = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain.get_p2p().read().await.as_ref() {
         Some(p2p) => {
             let peer_list = p2p.get_peer_list();
@@ -1266,8 +1327,11 @@ async fn list_assets<S: Storage>(
         ));
     }
 
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let storage = blockchain.get_storage().read().await;
     let assets = storage
         .get_assets()
@@ -1325,8 +1389,11 @@ async fn show_stored_peerlist<S: Storage>(
         ));
     }
 
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain.get_p2p().read().await.as_ref() {
         Some(p2p) => {
             let peer_list = p2p.get_peer_list();
@@ -1406,8 +1473,11 @@ async fn show_balance<S: Storage>(
     };
 
     let key = address.to_public_key();
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let storage = blockchain.get_storage().read().await;
     if !storage
         .has_balance_for(&key, &asset)
@@ -1448,11 +1518,14 @@ async fn print_block<S: Storage>(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let storage = blockchain.get_storage().read().await;
     let hash = arguments.get_value("hash")?.to_hash()?;
-    let response = get_block_response_for_hash(blockchain, &storage, &hash, false)
+    let response = get_block_response_for_hash(&blockchain, &storage, &hash, false)
         .await
         .context("Error while building block response")?;
     let json = serde_json::to_string_pretty(&response).context("Error while serializing")?;
@@ -1466,8 +1539,11 @@ async fn dump_tx<S: Storage>(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let storage = blockchain.get_storage().read().await;
     let hash = arguments.get_value("hash")?.to_hash()?;
     let tx = storage
@@ -1484,8 +1560,11 @@ async fn dump_block<S: Storage>(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let storage = blockchain.get_storage().read().await;
     let hash = arguments.get_value("hash")?.to_hash()?;
     let block = storage
@@ -1502,14 +1581,17 @@ async fn top_block<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let storage = blockchain.get_storage().read().await;
     let hash = blockchain
         .get_top_block_hash_for_storage(&storage)
         .await
         .context("Error on top block hash")?;
-    let response = get_block_response_for_hash(blockchain, &storage, &hash, false)
+    let response = get_block_response_for_hash(&blockchain, &storage, &hash, false)
         .await
         .context("Error while building block response")?;
     let json = serde_json::to_string_pretty(&response).context("Error while serializing")?;
@@ -1524,22 +1606,29 @@ async fn pop_blocks<S: Storage>(
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
     let amount = arguments.get_value("amount")?.to_number()?;
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     if amount == 0 || amount >= blockchain.get_topo_height() {
         return Err(anyhow::anyhow!("Invalid amount of blocks to pop").into());
     }
 
-    info!("Trying to pop {} blocks from chain...", amount);
+    if log::log_enabled!(log::Level::Info) {
+        info!("Trying to pop {} blocks from chain...", amount);
+    }
     let (topoheight, txs) = blockchain
         .rewind_chain(amount, false)
         .await
         .context("Error while rewinding chain")?;
-    info!(
-        "Chain as been rewinded until topoheight {}, {} rewinded txs",
-        topoheight,
-        txs.len()
-    );
+    if log::log_enabled!(log::Level::Info) {
+        info!(
+            "Chain as been rewinded until topoheight {}, {} rewinded txs",
+            topoheight,
+            txs.len()
+        );
+    }
 
     Ok(())
 }
@@ -1548,8 +1637,11 @@ async fn clear_mempool<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     info!("Clearing mempool...");
     let mut mempool = blockchain.get_mempool().write().await;
     mempool.clear();
@@ -1562,8 +1654,11 @@ async fn snapshot_mode<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     manager.message("Starting snapshot mode...");
     let mut storage = blockchain.get_storage().write().await;
     storage
@@ -1592,8 +1687,11 @@ async fn add_tx<S: Storage>(
     let hash = tx.hash();
     manager.message(format!("Adding TX {} to mempool...", hash));
 
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     blockchain
         .add_tx_to_mempool(tx, broadcast)
         .await
@@ -1607,8 +1705,11 @@ async fn prune_chain<S: Storage>(
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
     let topoheight = arguments.get_value("topoheight")?.to_number()?;
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     manager.message(format!(
         "Pruning chain until maximum topoheight {}",
         topoheight
@@ -1631,8 +1732,11 @@ async fn status<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
 
     debug!("Retrieving blockchain status");
 
@@ -1733,10 +1837,8 @@ async fn status<S: Storage>(
         accounts_count, transactions_count, blocks_count, assets, contracts
     ));
     manager.message(format!("Block Version: {}", version));
-    manager.message(format!(
-        "POW Algorithm: {}",
-        get_pow_algorithm_for_version(version)
-    ));
+    // VERSION UNIFICATION: Algorithm is always V2
+    manager.message("POW Algorithm: V2".to_string());
     manager.message(format!("Snapshot: {}", snapshot));
 
     manager.message(format!("Tips ({}):", tips.len()));
@@ -1764,8 +1866,11 @@ async fn clear_rpc_connections<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain.get_rpc().read().await.as_ref() {
         Some(rpc) => match rpc.get_websocket().clear_connections().await {
             Ok(_) => {
@@ -1787,8 +1892,11 @@ async fn clear_miners_connections<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain
         .get_rpc()
         .read()
@@ -1816,8 +1924,11 @@ async fn clear_p2p_connections<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain.get_p2p().read().await.as_ref() {
         Some(p2p) => {
             p2p.clear_connections().await;
@@ -1835,8 +1946,11 @@ async fn clear_p2p_peerlist<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain.get_p2p().read().await.as_ref() {
         Some(p2p) => {
             let peerlist = p2p.get_peer_list();
@@ -1858,8 +1972,11 @@ async fn clear_caches<S: Storage>(
     manager: &CommandManager,
     _: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     let mut storage = blockchain.get_storage().write().await;
 
     storage
@@ -1874,8 +1991,11 @@ async fn blacklist<S: Storage>(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain.get_p2p().read().await.as_ref() {
         Some(p2p) => {
             if arguments.has_argument("ip") {
@@ -1925,8 +2045,11 @@ async fn whitelist<S: Storage>(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain.get_p2p().read().await.as_ref() {
         Some(p2p) => {
             if arguments.has_argument("ip") {
@@ -1988,8 +2111,11 @@ async fn difficulty_dataset<S: Storage>(
     file.write(b"topoheight,solve_time_ms,difficulty,hashrate,timestamp\n")
         .context("Error while writing header to file")?;
 
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
 
     manager.message("Creating difficulty dataset...");
     for topoheight in 0..=blockchain.get_topo_height() {
@@ -2062,8 +2188,11 @@ async fn mine_block<S: Storage>(
         1
     };
 
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
 
     // Prevent trying to mine a block on mainnet through this as it will keep busy the node for nothing
     if *blockchain.get_network() == Network::Mainnet {
@@ -2110,8 +2239,11 @@ async fn add_peer<S: Storage>(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
     match blockchain.get_p2p().read().await.as_ref() {
         Some(p2p) => {
             let addr: SocketAddr = args

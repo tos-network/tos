@@ -434,7 +434,7 @@ impl NetworkHandler {
                             }
 
                             if should_scan_history {
-                                Some(EntryData::InvokeContract { contract: payload.contract, deposits, entry_id: payload.chunk_id, fee: tx.fee, max_gas: payload.max_gas, nonce: tx.nonce })
+                                Some(EntryData::InvokeContract { contract: payload.contract, deposits, entry_id: payload.entry_id, fee: tx.fee, max_gas: payload.max_gas, nonce: tx.nonce })
                             } else {
                                 None
                             }

@@ -5,11 +5,11 @@ use std::process::Command;
 
 fn main() {
     let commit_hash = if let Some(hash) = option_env!("TOS_COMMIT_HASH") {
-        (&hash[0..7]).to_string()
+        hash[0..7].to_string()
     } else {
         // Run git command to get the commit hash
         let output = Command::new("git")
-            .args(&["rev-parse", "--short", "HEAD"])
+            .args(["rev-parse", "--short", "HEAD"])
             .output()
             .expect("Failed to execute git command");
 

@@ -1,5 +1,6 @@
 mod balance;
 mod data;
+mod event;
 mod output;
 mod supply;
 
@@ -12,6 +13,7 @@ use tos_kernel::Module;
 
 pub use balance::*;
 pub use data::*;
+pub use event::*;
 pub use output::*;
 pub use supply::*;
 
