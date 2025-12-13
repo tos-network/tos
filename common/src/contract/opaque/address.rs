@@ -1,15 +1,8 @@
-use tos_vm::{
-    traits::Serializable,
-    Context,
-    EnvironmentError,
-    FnInstance,
-    FnParams,
-    FnReturnType,
-    OpaqueWrapper,
-    Primitive,
-    ValueCell
-};
 use crate::crypto::Address;
+use tos_kernel::{
+    traits::Serializable, Context, EnvironmentError, FnInstance, FnParams, FnReturnType,
+    OpaqueWrapper, Primitive, ValueCell,
+};
 
 use super::{Serializer, Writer, ADDRESS_OPAQUE_ID};
 
@@ -42,19 +35,16 @@ pub fn address_is_normal(zelf: FnInstance, _: FnParams, _: &mut Context) -> FnRe
 
 pub fn address_public_key_bytes(zelf: FnInstance, _: FnParams, _: &mut Context) -> FnReturnType {
     let address: &Address = zelf?.as_opaque_type()?;
-    let bytes = address.get_public_key()
-        .as_bytes();
+    let bytes = address.get_public_key().as_bytes();
 
     Ok(Some(ValueCell::Bytes(bytes.into())))
 }
 
 pub fn address_from_string(_: FnInstance, mut params: FnParams, _: &mut Context) -> FnReturnType {
-    let param = params.remove(0)
-        .into_owned()?;
+    let param = params.remove(0).into_owned()?;
     let string = param.as_string()?;
 
-    let address = Address::from_string(string)
-        .map_err(|_| EnvironmentError::InvalidParameter)?;
+    let address = Address::from_string(string).map_err(|_| EnvironmentError::InvalidParameter)?;
 
     Ok(Some(Primitive::Opaque(OpaqueWrapper::new(address)).into()))
 }

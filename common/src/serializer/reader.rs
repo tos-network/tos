@@ -1,8 +1,8 @@
 use std::array::TryFromSliceError;
 use thiserror::Error;
 
-use crate::{context::Context, crypto::Hash};
 use super::{Serializer, Writer};
+use crate::{context::Context, crypto::Hash};
 
 #[derive(Error, Debug)]
 pub enum ReaderError {
@@ -14,21 +14,27 @@ pub enum ReaderError {
     InvalidHex,
     #[error("Error on try into")]
     ErrorTryInto,
+    #[error("Exceeds max depth: max={max}, actual={actual}")]
+    ExceedsMaxDepth { max: usize, actual: usize },
+    #[error("Exceeds max array size: max={max}, actual={actual}")]
+    ExceedsMaxArraySize { max: usize, actual: usize },
+    #[error("Exceeds max map size: max={max}, actual={actual}")]
+    ExceedsMaxMapSize { max: usize, actual: usize },
     #[error(transparent)]
     TryFromSliceError(#[from] TryFromSliceError),
     #[error(transparent)]
-    Any(#[from] anyhow::Error)
+    Any(#[from] anyhow::Error),
 }
 
 // Reader help us to read safely from bytes
-// Mostly used when de-serializing an object from Serializer trait 
+// Mostly used when de-serializing an object from Serializer trait
 pub struct Reader<'a> {
     // bytes to read
     bytes: &'a [u8],
     // total read bytes
     total: usize,
     // Context if needed
-    context: Context
+    context: Context,
 }
 
 impl<'a> Reader<'a> {
@@ -40,7 +46,7 @@ impl<'a> Reader<'a> {
         Self {
             bytes,
             total: 0,
-            context
+            context,
         }
     }
 
@@ -58,7 +64,7 @@ impl<'a> Reader<'a> {
 
     pub fn skip(&mut self, n: usize) -> Result<(), ReaderError> {
         if n > self.size() {
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         self.total += n;
@@ -74,21 +80,21 @@ impl<'a> Reader<'a> {
         match byte {
             0 => Ok(false),
             1 => Ok(true),
-            _ => Err(ReaderError::InvalidValue)
+            _ => Err(ReaderError::InvalidValue),
         }
     }
 
     pub fn read_bytes<T>(&mut self, n: usize) -> Result<T, ReaderError>
-    where T: for<'b> TryFrom<&'b [u8]> {
+    where
+        T: for<'b> TryFrom<&'b [u8]>,
+    {
         if n > self.size() {
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
-        let result = match self.bytes[self.total..self.total+n].try_into() {
-            Ok(v) => {
-                Ok(v)
-            },
-            Err(_) => Err(ReaderError::ErrorTryInto)
+        let result = match self.bytes[self.total..self.total + n].try_into() {
+            Ok(v) => Ok(v),
+            Err(_) => Err(ReaderError::ErrorTryInto),
         };
 
         self.total += n;
@@ -97,10 +103,10 @@ impl<'a> Reader<'a> {
 
     pub fn read_bytes_ref(&mut self, n: usize) -> Result<&[u8], ReaderError> {
         if n > self.size() {
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
-        let bytes = &self.bytes[self.total..self.total+n];
+        let bytes = &self.bytes[self.total..self.total + n];
         self.total += n;
         Ok(bytes)
     }
@@ -119,7 +125,7 @@ impl<'a> Reader<'a> {
 
     pub fn read_u8(&mut self) -> Result<u8, ReaderError> {
         if self.size() == 0 {
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
         let byte: u8 = self.bytes[self.total];
         self.total += 1;
@@ -146,7 +152,7 @@ impl<'a> Reader<'a> {
         let bytes: Vec<u8> = self.read_bytes(size)?;
         match String::from_utf8(bytes) {
             Ok(v) => Ok(v),
-            Err(_) => Err(ReaderError::InvalidValue)
+            Err(_) => Err(ReaderError::InvalidValue),
         }
     }
 
@@ -165,7 +171,7 @@ impl<'a> Reader<'a> {
     pub fn read_optional_non_zero_u8(&mut self) -> Result<Option<u8>, ReaderError> {
         let byte = self.read_u8()?;
         if byte == 0 {
-            return Ok(None)
+            return Ok(None);
         }
 
         Ok(Some(byte))
@@ -174,7 +180,7 @@ impl<'a> Reader<'a> {
     pub fn read_optional_non_zero_u16(&mut self) -> Result<Option<u16>, ReaderError> {
         let value = self.read_u16()?;
         if value == 0 {
-            return Ok(None)
+            return Ok(None);
         }
 
         Ok(Some(value))
@@ -183,7 +189,7 @@ impl<'a> Reader<'a> {
     pub fn read_optional_non_zero_u64(&mut self) -> Result<Option<u64>, ReaderError> {
         let value = self.read_u64()?;
         if value == 0 {
-            return Ok(None)
+            return Ok(None);
         }
 
         Ok(Some(value))

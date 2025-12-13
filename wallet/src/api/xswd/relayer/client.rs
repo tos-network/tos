@@ -1,24 +1,11 @@
 use futures::{SinkExt, StreamExt};
-use log::{error, debug};
-use tokio_tungstenite_wasm::{
-    WebSocketStream,
-    Message,
-    connect,
-};
-use tos_common::tokio::{
-    select,
-    spawn_task,
-    sync::mpsc
-};
+use log::{debug, error};
+use tokio_tungstenite_wasm::{connect, Message, WebSocketStream};
+use tos_common::tokio::{select, spawn_task, sync::mpsc};
 
 use crate::api::{
-    xswd::relayer::{
-        cipher::Cipher,
-        XSWDRelayerShared
-    },
-    AppStateShared,
-    EncryptionMode,
-    XSWDHandler
+    xswd::relayer::{cipher::Cipher, XSWDRelayerShared},
+    AppStateShared, EncryptionMode, XSWDHandler,
 };
 
 enum InternalMessage {
@@ -32,9 +19,14 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn new<W>(target: String, relayer: XSWDRelayerShared<W>, encryption_mode: EncryptionMode, state: AppStateShared) -> Result<Self, anyhow::Error>
+    pub async fn new<W>(
+        target: String,
+        relayer: XSWDRelayerShared<W>,
+        encryption_mode: EncryptionMode,
+        state: AppStateShared,
+    ) -> Result<Self, anyhow::Error>
     where
-        W: Clone + Send + Sync + XSWDHandler + 'static
+        W: Clone + Send + Sync + XSWDHandler + 'static,
     {
         // Create a cipher based on the provided encryption mode
         let cipher = Cipher::new(encryption_mode)?;
@@ -49,10 +41,7 @@ impl Client {
             relayer.on_close(state).await;
         });
 
-        Ok(Self {
-            target,
-            sender,
-        })
+        Ok(Self { target, sender })
     }
 
     pub fn target(&self) -> &str {
@@ -76,10 +65,10 @@ impl Client {
         state: &AppStateShared,
         relayer: &XSWDRelayerShared<W>,
         mut receiver: mpsc::Receiver<InternalMessage>,
-        mut cipher: Cipher
+        mut cipher: Cipher,
     ) -> Result<(), anyhow::Error>
     where
-        W: Clone + Send + Sync + XSWDHandler + 'static
+        W: Clone + Send + Sync + XSWDHandler + 'static,
     {
         loop {
             select! {

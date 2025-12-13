@@ -1,28 +1,24 @@
 use crate::p2p::error::P2pError;
+use human_bytes::human_bytes;
 use std::sync::PoisonError;
 use strum::{EnumDiscriminants, IntoDiscriminant};
 use thiserror::Error;
 use tos_common::{
-    crypto::{
-        bech32::Bech32Error,
-        elgamal::DecompressionError,
-        proofs::ProofVerificationError,
-        Address,
-        Hash,
-        TosHashError
-    },
-    tokio::sync::AcquireError,
     account::Nonce,
     block::TopoHeight,
+    crypto::{
+        bech32::Bech32Error, elgamal::DecompressionError, proofs::ProofVerificationError, Address,
+        Hash, TosHashError,
+    },
     difficulty::DifficultyError,
     prompt::PromptError,
     rpc::InternalRpcError,
     serializer::ReaderError,
     time::TimestampMillis,
+    tokio::sync::AcquireError,
     transaction::verify::VerificationError,
-    utils::format_tos
+    utils::format_tos,
 };
-use human_bytes::human_bytes;
 
 #[derive(Error, Debug, Clone, Copy)]
 pub enum DiskContext {
@@ -174,9 +170,19 @@ pub enum BlockchainError {
     VersionedNotFound,
     #[error("Block is not ordered")]
     BlockNotOrdered,
-    #[error("Invalid balances merkle hash for block {}, expected {}, got {}", _0, _1, _2)]
+    #[error(
+        "Invalid balances merkle hash for block {}, expected {}, got {}",
+        _0,
+        _1,
+        _2
+    )]
     InvalidBalancesMerkleHash(Hash, Hash, Hash),
-    #[error("Invalid tips merkle hash for block {}, expected {}, got {}", _0, _1, _2)]
+    #[error(
+        "Invalid tips merkle hash for block {}, expected {}, got {}",
+        _0,
+        _1,
+        _2
+    )]
     InvalidTipsMerkleHash(Hash, Hash, Hash),
     #[error("Transaction size is {} while limit is {}", human_bytes(*_0 as f64), human_bytes(*_1 as f64))]
     TxTooBig(usize, usize),
@@ -214,7 +220,9 @@ pub enum BlockchainError {
     TxEmpty(Hash),
     #[error("Transaction has an invalid reference: block hash not found")]
     InvalidReferenceHash,
-    #[error("Transaction has an invalid reference: topoheight {0} is higher than our topoheight {1}")]
+    #[error(
+        "Transaction has an invalid reference: topoheight {0} is higher than our topoheight {1}"
+    )]
     InvalidReferenceTopoheight(u64, u64),
     #[error("No previous balance found")]
     NoPreviousBalanceFound,
@@ -320,13 +328,21 @@ pub enum BlockchainError {
     NoNonce(Address),
     #[error("Overflow detected")]
     Overflow,
-    #[error("Error, block {} include a dead tx {} from stable height {} executed in block {}", _0, _1, _2, _3)]
+    #[error("Balance overflow detected - would exceed u64::MAX")]
+    BalanceOverflow,
+    #[error(
+        "Error, block {} include a dead tx {} from stable height {} executed in block {}",
+        _0,
+        _1,
+        _2,
+        _3
+    )]
     DeadTxFromStableHeight(Hash, Hash, u64, Hash),
     #[error("Error, block {} include a dead tx from tips {}", _0, _1)]
     DeadTxFromTips(Hash, Hash),
     #[error("TX {} is already in blockchain", _0)]
     TxAlreadyInBlockchain(Hash),
-    #[error("Cannot prune, not enough blocks")]  
+    #[error("Cannot prune, not enough blocks")]
     PruneHeightTooHigh,
     #[error("Cannot prune until topoheight 0, provide a positive number")]
     PruneZero,
@@ -404,14 +420,18 @@ impl<T> From<PoisonError<T>> for BlockchainError {
 impl From<VerificationError<BlockchainError>> for BlockchainError {
     fn from(value: VerificationError<BlockchainError>) -> Self {
         match value {
-            VerificationError::InvalidNonce(tx, expected, got) => BlockchainError::InvalidNonce(tx, expected, got),
+            VerificationError::InvalidNonce(tx, expected, got) => {
+                BlockchainError::InvalidNonce(tx, expected, got)
+            }
             VerificationError::SenderIsReceiver => BlockchainError::NoSenderOutput,
             VerificationError::InvalidSignature => BlockchainError::InvalidTransactionSignature,
             VerificationError::State(s) => s,
             VerificationError::Proof(proof) => BlockchainError::TransactionProof(proof),
             VerificationError::TransferCount => BlockchainError::TransferCount,
             VerificationError::Commitments => BlockchainError::Commitments,
-            VerificationError::TransactionExtraDataSize => BlockchainError::InvalidTransactionExtraData,
+            VerificationError::TransactionExtraDataSize => {
+                BlockchainError::InvalidTransactionExtraData
+            }
             VerificationError::TransferExtraDataSize => BlockchainError::InvalidTransferExtraData,
             VerificationError::MultiSigNotConfigured => BlockchainError::MultiSigNotConfigured,
             VerificationError::MultiSigParticipants => BlockchainError::MultiSigParticipants,
@@ -423,7 +443,7 @@ impl From<VerificationError<BlockchainError>> for BlockchainError {
             VerificationError::GasOverflow => BlockchainError::Overflow,
             VerificationError::InvalidInvokeContract => BlockchainError::InvalidInvokeContract,
             VerificationError::DepositNotFound => BlockchainError::DepositNotFound,
-            e => BlockchainError::Any(e.into())
+            e => BlockchainError::Any(e.into()),
         }
     }
 }

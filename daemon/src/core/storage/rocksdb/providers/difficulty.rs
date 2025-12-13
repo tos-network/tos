@@ -1,3 +1,10 @@
+use crate::core::{
+    error::BlockchainError,
+    storage::{
+        rocksdb::{BlockDifficulty, Column},
+        DifficultyProvider, RocksStorage,
+    },
+};
 use async_trait::async_trait;
 use indexmap::IndexSet;
 use log::trace;
@@ -7,18 +14,7 @@ use tos_common::{
     difficulty::{CumulativeDifficulty, Difficulty},
     immutable::Immutable,
     time::TimestampMillis,
-    varuint::VarUint
-};
-use crate::core::{
-    error::BlockchainError,
-    storage::{
-        rocksdb::{
-            BlockDifficulty,
-            Column,
-        },
-        DifficultyProvider,
-        RocksStorage
-    }
+    varuint::VarUint,
 };
 
 #[async_trait]
@@ -31,51 +27,72 @@ impl DifficultyProvider for RocksStorage {
     }
 
     // Get the block version using its hash
-    async fn get_version_for_block_hash(&self, hash: &Hash) -> Result<BlockVersion, BlockchainError> {
+    async fn get_version_for_block_hash(
+        &self,
+        hash: &Hash,
+    ) -> Result<BlockVersion, BlockchainError> {
         trace!("get version for block hash {}", hash);
         let block = self.get_block_header_by_hash(hash).await?;
         Ok(block.get_version())
     }
 
     // Get the timestamp from the block using its hash
-    async fn get_timestamp_for_block_hash(&self, hash: &Hash) -> Result<TimestampMillis, BlockchainError> {
+    async fn get_timestamp_for_block_hash(
+        &self,
+        hash: &Hash,
+    ) -> Result<TimestampMillis, BlockchainError> {
         trace!("get timestamp for block hash {}", hash);
         let header = self.get_block_header_by_hash(hash).await?;
         Ok(header.get_timestamp())
     }
 
     // Get the difficulty for a block hash
-    async fn get_difficulty_for_block_hash(&self, hash: &Hash) -> Result<Difficulty, BlockchainError> {
+    async fn get_difficulty_for_block_hash(
+        &self,
+        hash: &Hash,
+    ) -> Result<Difficulty, BlockchainError> {
         trace!("get difficulty for block hash {}", hash);
         self.load_block_difficulty(hash)
             .map(|block_difficulty| block_difficulty.difficulty)
     }
 
     // Get the cumulative difficulty for a block hash
-    async fn get_cumulative_difficulty_for_block_hash(&self, hash: &Hash) -> Result<CumulativeDifficulty, BlockchainError> {
+    async fn get_cumulative_difficulty_for_block_hash(
+        &self,
+        hash: &Hash,
+    ) -> Result<CumulativeDifficulty, BlockchainError> {
         trace!("get cumulative difficulty for block hash {}", hash);
         self.load_block_difficulty(hash)
             .map(|block_difficulty| block_difficulty.cumulative_difficulty)
     }
 
     // Get past blocks (block tips) for a specific block hash
-    async fn get_past_blocks_for_block_hash(&self, hash: &Hash) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
+    async fn get_past_blocks_for_block_hash(
+        &self,
+        hash: &Hash,
+    ) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
         trace!("get past blocks for block hash {}", hash);
         let header = self.get_block_header_by_hash(hash).await?;
         Ok(header.get_immutable_tips().clone())
     }
 
     // Get a block header using its hash
-    async fn get_block_header_by_hash(&self, hash: &Hash) -> Result<Immutable<BlockHeader>, BlockchainError> {
+    async fn get_block_header_by_hash(
+        &self,
+        hash: &Hash,
+    ) -> Result<Immutable<BlockHeader>, BlockchainError> {
         trace!("get block header by hash {}", hash);
         self.load_from_disk(Column::Blocks, hash)
     }
 
     // Retrieve the estimated covariance (P) for a block hash
-    async fn get_estimated_covariance_for_block_hash(&self, hash: &Hash) -> Result<VarUint, BlockchainError> {
+    async fn get_estimated_covariance_for_block_hash(
+        &self,
+        hash: &Hash,
+    ) -> Result<VarUint, BlockchainError> {
         trace!("get estimated covariance for block hash {}", hash);
         self.load_block_difficulty(hash)
-        .map(|block_difficulty| block_difficulty.covariance)
+            .map(|block_difficulty| block_difficulty.covariance)
     }
 }
 

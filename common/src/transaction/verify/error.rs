@@ -3,10 +3,7 @@ use thiserror::Error;
 
 use crate::{
     account::Nonce,
-    crypto::{
-        proofs::ProofVerificationError,    
-        Hash
-    }
+    crypto::{proofs::ProofVerificationError, Hash},
 };
 
 #[derive(Error, Debug)]
@@ -55,6 +52,12 @@ pub enum VerificationError<T> {
     MaxGasReached,
     #[error("Contract not found")]
     ContractNotFound,
+    #[error("Contract already exists at address {0}")]
+    ContractAlreadyExists(Hash),
     #[error("Insufficient energy: required {0}")]
     InsufficientEnergy(u64),
+    #[error("Insufficient funds: available {available}, required {required}")]
+    InsufficientFunds { available: u64, required: u64 },
+    #[error("Arithmetic overflow during balance calculation")]
+    Overflow,
 }

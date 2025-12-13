@@ -1,60 +1,45 @@
-use crate::{
-    config::{
-        PEER_FAIL_TIME_RESET, PEER_BLOCK_CACHE_SIZE,
-        PEER_TX_CACHE_SIZE, PEER_TIMEOUT_BOOTSTRAP_STEP,
-        PEER_TIMEOUT_REQUEST_OBJECT, CHAIN_SYNC_TIMEOUT_SECS,
-        PEER_PACKET_CHANNEL_SIZE, PEER_PEERS_CACHE_SIZE,
-        PEER_OBJECTS_CONCURRENCY
-    },
-    p2p::packet::PacketWrapper
-};
-use anyhow::Context;
-use metrics::counter;
-use tos_common::{
-    tokio::{
-        select,
-        sync::{broadcast, mpsc, oneshot, Mutex, Semaphore},
-        time::timeout,
-    },
-    api::daemon::{Direction, TimedDirection},
-    block::TopoHeight,
-    crypto::Hash,
-    difficulty::CumulativeDifficulty,
-    serializer::Serializer,
-    time::{
-        get_current_time_in_seconds,
-        TimestampSeconds
-    }
-};
 use super::{
-    super::{
-        Connection,
-        packet::*,
-        error::P2pError
-    },
+    super::{error::P2pError, packet::*, Connection},
     SharedPeerList,
 };
+use crate::{
+    config::{
+        CHAIN_SYNC_TIMEOUT_SECS, PEER_BLOCK_CACHE_SIZE, PEER_FAIL_TIME_RESET,
+        PEER_OBJECTS_CONCURRENCY, PEER_PACKET_CHANNEL_SIZE, PEER_PEERS_CACHE_SIZE,
+        PEER_TIMEOUT_BOOTSTRAP_STEP, PEER_TIMEOUT_REQUEST_OBJECT, PEER_TX_CACHE_SIZE,
+    },
+    p2p::packet::PacketWrapper,
+};
+use anyhow::Context;
+use bytes::Bytes;
+use log::{debug, log_enabled, trace, warn, Level};
+use lru::LruCache;
+use metrics::counter;
 use std::{
-    num::NonZeroUsize,
     borrow::Cow,
     collections::VecDeque,
     fmt::{Display, Error, Formatter},
     hash::{Hash as StdHash, Hasher},
     net::{IpAddr, SocketAddr},
+    num::NonZeroUsize,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
-        Arc
+        Arc,
     },
-    time::Duration
+    time::Duration,
 };
-use lru::LruCache;
-use bytes::Bytes;
-use log::{
-    Level,
-    log_enabled,
-    trace,
-    debug,
-    warn,
+use tos_common::{
+    api::daemon::{Direction, TimedDirection},
+    block::TopoHeight,
+    crypto::Hash,
+    difficulty::CumulativeDifficulty,
+    serializer::Serializer,
+    time::{get_current_time_in_seconds, TimestampSeconds},
+    tokio::{
+        select,
+        sync::{broadcast, mpsc, oneshot, Mutex, Semaphore},
+        time::timeout,
+    },
 };
 
 // A RequestedObjects is a map of all objects requested from a peer
@@ -175,7 +160,7 @@ impl Peer {
         cumulative_difficulty: CumulativeDifficulty,
         peer_list: SharedPeerList,
         sharable: bool,
-        propagate_txs: bool
+        propagate_txs: bool,
     ) -> (Self, Rx) {
         let mut outgoing_address = *connection.get_address();
         outgoing_address.set_port(local_port);
@@ -183,43 +168,58 @@ impl Peer {
         let (exit_channel, _) = broadcast::channel(1);
         let (tx, rx) = mpsc::channel(PEER_PACKET_CHANNEL_SIZE);
 
-        (Self {
-            connection,
-            id,
-            node_tag,
-            local_port,
-            version,
-            top_hash: Mutex::new(top_hash),
-            topoheight: AtomicU64::new(topoheight),
-            height: AtomicU64::new(height),
-            priority,
-            last_fail_count: AtomicU64::new(0),
-            fail_count: AtomicU8::new(0),
-            last_chain_sync: AtomicU64::new(0),
-            peer_list,
-            objects_requested: Mutex::new(LruCache::new(NonZeroUsize::new(PEER_OBJECTS_CONCURRENCY).expect("PEER_OBJECTS_CONCURRENCY must be non-zero"))),
-            peers: Mutex::new(LruCache::new(NonZeroUsize::new(PEER_PEERS_CACHE_SIZE).expect("PEER_PEERS_CACHE_SIZE must be non-zero"))),
-            last_peer_list: AtomicU64::new(0),
-            last_ping: AtomicU64::new(0),
-            last_ping_sent: AtomicU64::new(0),
-            cumulative_difficulty: Mutex::new(cumulative_difficulty),
-            txs_cache: Mutex::new(LruCache::new(NonZeroUsize::new(PEER_TX_CACHE_SIZE).expect("PEER_TX_CACHE_SIZE must be non-zero"))),
-            blocks_propagation: Mutex::new(LruCache::new(NonZeroUsize::new(PEER_BLOCK_CACHE_SIZE).expect("PEER_BLOCK_CACHE_SIZE must be non-zero"))),
-            last_inventory: AtomicU64::new(0),
-            requested_inventory: AtomicBool::new(false),
-            pruned_topoheight: AtomicU64::new(pruned_topoheight.unwrap_or(0)),
-            is_pruned: AtomicBool::new(pruned_topoheight.is_some()),
-            bootstrap_requests: Mutex::new(VecDeque::new()),
-            sync_chain: Mutex::new(None),
-            outgoing_address,
-            sharable,
-            exit_channel,
-            tx,
-            read_task: Mutex::new(TaskState::Inactive),
-            write_task: Mutex::new(TaskState::Inactive),
-            objects_semaphore: Semaphore::new(PEER_OBJECTS_CONCURRENCY),
-            propagate_txs: AtomicBool::new(propagate_txs),
-        }, rx)
+        (
+            Self {
+                connection,
+                id,
+                node_tag,
+                local_port,
+                version,
+                top_hash: Mutex::new(top_hash),
+                topoheight: AtomicU64::new(topoheight),
+                height: AtomicU64::new(height),
+                priority,
+                last_fail_count: AtomicU64::new(0),
+                fail_count: AtomicU8::new(0),
+                last_chain_sync: AtomicU64::new(0),
+                peer_list,
+                objects_requested: Mutex::new(LruCache::new(
+                    NonZeroUsize::new(PEER_OBJECTS_CONCURRENCY)
+                        .expect("PEER_OBJECTS_CONCURRENCY must be non-zero"),
+                )),
+                peers: Mutex::new(LruCache::new(
+                    NonZeroUsize::new(PEER_PEERS_CACHE_SIZE)
+                        .expect("PEER_PEERS_CACHE_SIZE must be non-zero"),
+                )),
+                last_peer_list: AtomicU64::new(0),
+                last_ping: AtomicU64::new(0),
+                last_ping_sent: AtomicU64::new(0),
+                cumulative_difficulty: Mutex::new(cumulative_difficulty),
+                txs_cache: Mutex::new(LruCache::new(
+                    NonZeroUsize::new(PEER_TX_CACHE_SIZE)
+                        .expect("PEER_TX_CACHE_SIZE must be non-zero"),
+                )),
+                blocks_propagation: Mutex::new(LruCache::new(
+                    NonZeroUsize::new(PEER_BLOCK_CACHE_SIZE)
+                        .expect("PEER_BLOCK_CACHE_SIZE must be non-zero"),
+                )),
+                last_inventory: AtomicU64::new(0),
+                requested_inventory: AtomicBool::new(false),
+                pruned_topoheight: AtomicU64::new(pruned_topoheight.unwrap_or(0)),
+                is_pruned: AtomicBool::new(pruned_topoheight.is_some()),
+                bootstrap_requests: Mutex::new(VecDeque::new()),
+                sync_chain: Mutex::new(None),
+                outgoing_address,
+                sharable,
+                exit_channel,
+                tx,
+                read_task: Mutex::new(TaskState::Inactive),
+                write_task: Mutex::new(TaskState::Inactive),
+                objects_semaphore: Semaphore::new(PEER_OBJECTS_CONCURRENCY),
+                propagate_txs: AtomicBool::new(propagate_txs),
+            },
+            rx,
+        )
     }
 
     // This is used to mark that peer is ready to get our propagated transactions
@@ -315,13 +315,14 @@ impl Peer {
     pub fn set_pruned_topoheight(&self, pruned_topoheight: Option<TopoHeight>) {
         if let Some(pruned_topoheight) = pruned_topoheight {
             self.is_pruned.store(true, Ordering::SeqCst);
-            self.pruned_topoheight.store(pruned_topoheight, Ordering::SeqCst);
+            self.pruned_topoheight
+                .store(pruned_topoheight, Ordering::SeqCst);
         } else {
             self.is_pruned.store(false, Ordering::SeqCst);
         }
     }
 
-    // Store the top block hash 
+    // Store the top block hash
     pub async fn set_top_block_hash(&self, hash: Hash) {
         *self.top_hash.lock().await = hash
     }
@@ -422,13 +423,19 @@ impl Peer {
     }
 
     // Remove a requested object from the requested list
-    pub async fn remove_object_request(&self, request: &ObjectRequest) -> Option<broadcast::Sender<OwnedObjectResponse>> {
+    pub async fn remove_object_request(
+        &self,
+        request: &ObjectRequest,
+    ) -> Option<broadcast::Sender<OwnedObjectResponse>> {
         let mut objects = self.objects_requested.lock().await;
         objects.pop(request)
     }
 
-    // Request a object from this peer and wait on it until we receive it or until timeout 
-    pub async fn request_blocking_object(&self, request: ObjectRequest) -> Result<OwnedObjectResponse, P2pError> {
+    // Request a object from this peer and wait on it until we receive it or until timeout
+    pub async fn request_blocking_object(
+        &self,
+        request: ObjectRequest,
+    ) -> Result<OwnedObjectResponse, P2pError> {
         trace!("waiting for permit {}", request);
         let _permit = self.objects_semaphore.acquire().await?;
         debug!("requesting {}", request);
@@ -437,10 +444,14 @@ impl Peer {
         let mut receiver = {
             let mut objects = self.objects_requested.lock().await;
             if let Some(sender) = objects.get(&request) {
-                debug!("{} was already sent to {}, subscribing to the same channel", request, self);
+                debug!(
+                    "{} was already sent to {}, subscribing to the same channel",
+                    request, self
+                );
                 sender.subscribe()
             } else {
-                self.send_packet(Packet::ObjectRequest(Cow::Borrowed(&request))).await?;
+                self.send_packet(Packet::ObjectRequest(Cow::Borrowed(&request)))
+                    .await?;
                 let (sender, receiver) = broadcast::channel(1);
                 // clone is necessary in case timeout has occured
                 if objects.put(request.clone(), sender).is_some() {
@@ -469,7 +480,7 @@ impl Peer {
         // Verify that the object is the one we requested
         let object_hash = object.get_hash();
         if *object_hash != *request.get_hash() {
-            return Err(P2pError::InvalidObjectResponse(object_hash.clone()))
+            return Err(P2pError::InvalidObjectResponse(object_hash.clone()));
         }
 
         // Returns error if the object is not found
@@ -481,9 +492,15 @@ impl Peer {
     }
 
     // Request a bootstrap chain from this peer and wait on it until we receive it or until timeout
-    pub async fn request_boostrap_chain(&self, step: StepRequest<'_>) -> Result<StepResponse, P2pError> {
+    pub async fn request_boostrap_chain(
+        &self,
+        step: StepRequest<'_>,
+    ) -> Result<StepResponse, P2pError> {
         let step_kind = step.kind();
-        debug!("waiting for permit for bootstrap chain step: {:?}", step_kind);
+        debug!(
+            "waiting for permit for bootstrap chain step: {:?}",
+            step_kind
+        );
 
         let _permit = self.objects_semaphore.acquire().await?;
         debug!("Requesting bootstrap chain step: {:?}", step_kind);
@@ -494,7 +511,10 @@ impl Peer {
             let mut senders = self.bootstrap_requests.lock().await;
 
             // send the packet while holding the lock so we ensure the correct order
-            self.send_packet(Packet::BootstrapChainRequest(BootstrapChainRequest::new(step))).await?;
+            self.send_packet(Packet::BootstrapChainRequest(BootstrapChainRequest::new(
+                step,
+            )))
+            .await?;
 
             senders.push_back(sender);
         }
@@ -520,14 +540,17 @@ impl Peer {
         // check that the response is what we asked for
         let response_kind = response.kind();
         if response_kind != step_kind {
-            return Err(P2pError::InvalidBootstrapStep(step_kind, response_kind))
+            return Err(P2pError::InvalidBootstrapStep(step_kind, response_kind));
         }
 
         Ok(response)
     }
 
     // Request a sync chain from this peer and wait on it until we receive it or until timeout
-    pub async fn request_sync_chain(&self, request: PacketWrapper<'_, ChainRequest>) -> Result<ChainResponse, P2pError> {
+    pub async fn request_sync_chain(
+        &self,
+        request: PacketWrapper<'_, ChainRequest>,
+    ) -> Result<ChainResponse, P2pError> {
         debug!("Requesting sync chain");
         let (sender, receiver) = tokio::sync::oneshot::channel();
         {
@@ -641,20 +664,23 @@ impl Peer {
     pub async fn close_and_temp_ban(&self, seconds: u64) -> Result<(), P2pError> {
         trace!("temp ban {}", self);
         if !self.is_priority() {
-            self.peer_list.temp_ban_address(&self.get_connection().get_address().ip(), seconds, false).await?;
+            self.peer_list
+                .temp_ban_address(&self.get_connection().get_address().ip(), seconds, false)
+                .await?;
         } else {
             debug!("{} is a priority peer, closing only", self);
         }
 
         self.peer_list.remove_peer(self.get_id(), true).await?;
-        
+
         Ok(())
     }
 
     // Signal the exit of the peer to the tasks
     // This is listened by write task to close the connection
     pub async fn signal_exit(&self) -> Result<(), P2pError> {
-        self.exit_channel.send(())
+        self.exit_channel
+            .send(())
             .map_err(|e| P2pError::SendError(e.to_string()))?;
 
         Ok(())
@@ -684,7 +710,9 @@ impl Peer {
     // Send packet bytes to the peer
     // This will send the bytes to the writer task through its channel
     pub async fn send_bytes(&self, bytes: Bytes) -> Result<(), P2pError> {
-        self.tx.send(bytes).await
+        self.tx
+            .send(bytes)
+            .await
             .map_err(|e| P2pError::SendError(e.to_string()))
     }
 
@@ -711,7 +739,14 @@ impl Display for Peer {
         self.update_fail_count_default();
         let peers = if let Ok(peers) = self.get_peers().try_lock() {
             if log_enabled!(Level::Trace) {
-                format!("{}", peers.iter().map(|(p, d)| format!("{} = {:?}", p, d)).collect::<Vec<_>>().join(", "))
+                format!(
+                    "{}",
+                    peers
+                        .iter()
+                        .map(|(p, d)| format!("{} = {:?}", p, d))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             } else {
                 format!("{}", peers.len())
             }
@@ -731,8 +766,16 @@ impl Display for Peer {
             "No".to_string()
         };
 
-        let read_task = self.read_task.try_lock().map(|v| *v).unwrap_or(TaskState::Unknown);
-        let write_task = self.write_task.try_lock().map(|v| *v).unwrap_or(TaskState::Unknown);
+        let read_task = self
+            .read_task
+            .try_lock()
+            .map(|v| *v)
+            .unwrap_or(TaskState::Unknown);
+        let write_task = self
+            .write_task
+            .try_lock()
+            .map(|v| *v)
+            .unwrap_or(TaskState::Unknown);
 
         write!(f, "Peer[connection: {}, id: {}, topoheight: {}, top hash: {}, height: {}, pruned: {}, priority: {}, tag: {}, version: {}, fail count: {}, out: {}, peers: {}, tasks: {:?}/{:?}, txs: {}]",
             self.get_connection(),

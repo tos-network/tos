@@ -4,14 +4,10 @@ use merlin::Transcript;
 use tos_common::crypto::{
     elgamal::{PedersenCommitment, PedersenOpening},
     proofs::{
-        BatchCollector,
-        CiphertextValidityProof,
-        CommitmentEqProof,
-        BP_GENS,
+        BatchCollector, CiphertextValidityProof, CommitmentEqProof, BP_GENS, BULLET_PROOF_SIZE,
         PC_GENS,
-        BULLET_PROOF_SIZE,
     },
-    KeyPair
+    KeyPair,
 };
 
 // CommitmentEqProof is a ZK Proof proving that the final balance (commitment) is equal to the initial balance minus the amount
@@ -32,44 +28,56 @@ fn bench_commitment_eq_proof(c: &mut Criterion) {
 
     // Compute the final balance
     let final_balance = source_balance - ciphertext;
-    
+
     let mut transcript = Transcript::new(b"test");
     // Generate the proof
-    let proof = CommitmentEqProof::new(&keypair, &final_balance, &opening, balance - amount, &mut transcript);
+    let proof = CommitmentEqProof::new(
+        &keypair,
+        &final_balance,
+        &opening,
+        balance - amount,
+        &mut transcript,
+    );
 
     group.bench_function("pre_verify", |b| {
         b.iter(|| {
-            proof.pre_verify(
-                keypair.get_public_key(),
-                &final_balance,
-                &commitment,
-                &mut Transcript::new(b"test"),
-                &mut BatchCollector::default()
-            ).expect("Failed to verify proof");
+            proof
+                .pre_verify(
+                    keypair.get_public_key(),
+                    &final_balance,
+                    &commitment,
+                    &mut Transcript::new(b"test"),
+                    &mut BatchCollector::default(),
+                )
+                .expect("Failed to verify proof");
         })
     });
 
     group.bench_function("verify", |b| {
         b.iter(|| {
-            proof.verify(
-                keypair.get_public_key(),
-                &final_balance,
-                &commitment,
-                &mut Transcript::new(b"test"),
-            ).expect("Failed to verify proof");
+            proof
+                .verify(
+                    keypair.get_public_key(),
+                    &final_balance,
+                    &commitment,
+                    &mut Transcript::new(b"test"),
+                )
+                .expect("Failed to verify proof");
         })
     });
 
     group.bench_function("pre_verify + batch", |b| {
         b.iter(|| {
             let mut batch_collector = BatchCollector::default();
-            proof.pre_verify(
-                keypair.get_public_key(),
-                &final_balance,
-                &commitment,
-                &mut Transcript::new(b"test"),
-                &mut batch_collector
-            ).expect("Failed to verify proof");
+            proof
+                .pre_verify(
+                    keypair.get_public_key(),
+                    &final_balance,
+                    &commitment,
+                    &mut Transcript::new(b"test"),
+                    &mut batch_collector,
+                )
+                .expect("Failed to verify proof");
             batch_collector.verify().expect("Failed to verify batch");
         })
     });
@@ -94,36 +102,46 @@ fn bench_ciphertext_validity_proof(c: &mut Criterion) {
 
     // Generate the proof
     let mut transcript = Transcript::new(b"test");
-    let proof = CiphertextValidityProof::new(destination.get_public_key(), Some(source.get_public_key()), amount, &opening, &mut transcript);
+    let proof = CiphertextValidityProof::new(
+        destination.get_public_key(),
+        Some(source.get_public_key()),
+        amount,
+        &opening,
+        &mut transcript,
+    );
 
     group.bench_function("pre_verify", |b| {
         b.iter(|| {
             // Verify the proof
-            proof.pre_verify(
-                &commitment,
-                destination.get_public_key(),
-                source.get_public_key(),
-                &receiver_handle,
-                &sender_handle,
-                true,
-                &mut Transcript::new(b"test"),
-                &mut BatchCollector::default(),
-            ).expect("Failed to verify proof");
+            proof
+                .pre_verify(
+                    &commitment,
+                    destination.get_public_key(),
+                    source.get_public_key(),
+                    &receiver_handle,
+                    &sender_handle,
+                    true,
+                    &mut Transcript::new(b"test"),
+                    &mut BatchCollector::default(),
+                )
+                .expect("Failed to verify proof");
         })
     });
 
     group.bench_function("verify", |b| {
         b.iter(|| {
             // Verify the proof
-            proof.verify(
-                &commitment,
-                destination.get_public_key(),
-                source.get_public_key(),
-                &receiver_handle,
-                &sender_handle,
-                true,
-                &mut Transcript::new(b"test"),
-            ).expect("Failed to verify proof");
+            proof
+                .verify(
+                    &commitment,
+                    destination.get_public_key(),
+                    source.get_public_key(),
+                    &receiver_handle,
+                    &sender_handle,
+                    true,
+                    &mut Transcript::new(b"test"),
+                )
+                .expect("Failed to verify proof");
         })
     });
 
@@ -131,16 +149,18 @@ fn bench_ciphertext_validity_proof(c: &mut Criterion) {
         b.iter(|| {
             // Verify the proof
             let mut batch_collector = BatchCollector::default();
-            proof.pre_verify(
-                &commitment,
-                destination.get_public_key(),
-                source.get_public_key(),
-                &receiver_handle,
-                &sender_handle,
-                true,
-                &mut Transcript::new(b"test"),
-                &mut batch_collector,
-            ).expect("Failed to verify proof");
+            proof
+                .pre_verify(
+                    &commitment,
+                    destination.get_public_key(),
+                    source.get_public_key(),
+                    &receiver_handle,
+                    &sender_handle,
+                    true,
+                    &mut Transcript::new(b"test"),
+                    &mut batch_collector,
+                )
+                .expect("Failed to verify proof");
             batch_collector.verify().expect("Failed to verify batch");
         })
     });
@@ -161,20 +181,25 @@ fn bench_range_proof(c: &mut Criterion) {
         &mut transcript,
         amount,
         &opening.as_scalar(),
-        BULLET_PROOF_SIZE
-    ).expect("Failed to generate proof");
+        BULLET_PROOF_SIZE,
+    )
+    .expect("Failed to generate proof");
 
-    let decompressed_commitment = commitment.decompress().expect("Failed to decompress commitment");
+    let decompressed_commitment = commitment
+        .decompress()
+        .expect("Failed to decompress commitment");
 
     group.bench_function("verify", |b| {
         b.iter(|| {
-            range_proof.verify_single(
-                &BP_GENS,
-                &PC_GENS,
-                &mut Transcript::new(b"test"),
-                &(decompressed_commitment.clone(), commitment.clone()),
-                BULLET_PROOF_SIZE
-            ).expect("Failed to verify proof");
+            range_proof
+                .verify_single(
+                    &BP_GENS,
+                    &PC_GENS,
+                    &mut Transcript::new(b"test"),
+                    &(decompressed_commitment.clone(), commitment.clone()),
+                    BULLET_PROOF_SIZE,
+                )
+                .expect("Failed to verify proof");
         })
     });
 }

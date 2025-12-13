@@ -1,13 +1,15 @@
-use async_trait::async_trait;
-use tos_common::{crypto::Hash, serializer::Serializer};
 use crate::core::{
     error::{BlockchainError, DiskContext},
-    storage::{sled::BLOCKS_EXECUTION_ORDER_COUNT, BlockExecutionOrderProvider, SledStorage}
+    storage::{sled::BLOCKS_EXECUTION_ORDER_COUNT, BlockExecutionOrderProvider, SledStorage},
 };
+use async_trait::async_trait;
+use tos_common::{crypto::Hash, serializer::Serializer};
 
 #[async_trait]
 impl BlockExecutionOrderProvider for SledStorage {
-    async fn get_blocks_execution_order<'a>(&'a self) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
+    async fn get_blocks_execution_order<'a>(
+        &'a self,
+    ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
         let order = Self::iter_keys(self.snapshot.as_ref(), &self.blocks_execution_order)
             .map(|x| Ok(Hash::from_bytes(&x?)?));
 
@@ -15,7 +17,11 @@ impl BlockExecutionOrderProvider for SledStorage {
     }
 
     async fn get_block_position_in_order(&self, hash: &Hash) -> Result<u64, BlockchainError> {
-        let position = self.load_from_disk(&self.blocks_execution_order, hash.as_bytes(), DiskContext::SearchBlockPositionInOrder)?;
+        let position = self.load_from_disk(
+            &self.blocks_execution_order,
+            hash.as_bytes(),
+            DiskContext::SearchBlockPositionInOrder,
+        )?;
         Ok(position)
     }
 
@@ -35,8 +41,18 @@ impl BlockExecutionOrderProvider for SledStorage {
             pos
         };
 
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.blocks_execution_order, hash.as_bytes(), &position.to_be_bytes())?;
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.extra, BLOCKS_EXECUTION_ORDER_COUNT, &position.to_be_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.blocks_execution_order,
+            hash.as_bytes(),
+            &position.to_be_bytes(),
+        )?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.extra,
+            BLOCKS_EXECUTION_ORDER_COUNT,
+            &position.to_be_bytes(),
+        )?;
 
         Ok(())
     }
@@ -49,12 +65,26 @@ impl BlockExecutionOrderProvider for SledStorage {
         }
     }
 
-    async fn swap_blocks_executions_positions(&mut self, left: &Hash, right: &Hash) -> Result<(), BlockchainError> {
+    async fn swap_blocks_executions_positions(
+        &mut self,
+        left: &Hash,
+        right: &Hash,
+    ) -> Result<(), BlockchainError> {
         let left_position = self.get_block_position_in_order(left).await?;
         let right_position = self.get_block_position_in_order(right).await?;
 
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.blocks_execution_order, left.as_bytes(), &right_position.to_be_bytes())?;
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.blocks_execution_order, right.as_bytes(), &left_position.to_be_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.blocks_execution_order,
+            left.as_bytes(),
+            &right_position.to_be_bytes(),
+        )?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.blocks_execution_order,
+            right.as_bytes(),
+            &left_position.to_be_bytes(),
+        )?;
 
         Ok(())
     }

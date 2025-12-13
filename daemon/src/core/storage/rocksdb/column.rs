@@ -1,4 +1,4 @@
-use strum::{Display, EnumIter, AsRefStr};
+use strum::{AsRefStr, Display, EnumIter};
 
 const PREFIX_TOPOHEIGHT_LEN: usize = 8;
 const PREFIX_ID_LEN: usize = 8;
@@ -54,7 +54,7 @@ pub enum Column {
 
     // {account_key} => {account}
     Account,
-    // Column used as a "versioned" as its 
+    // Column used as a "versioned" as its
     // prefixed with a topoheight to have
     // easier search per topoheight
     // {topoheight}{account_key} => {}
@@ -99,7 +99,7 @@ pub enum Column {
 
     // {topoheight}{asset_id} => {version}
     VersionedAssetsSupply,
-    
+
     // Energy resources for each account
     // {account_key} => {topoheight}
     EnergyResources,
@@ -112,7 +112,7 @@ pub enum Column {
     AIMiningState,
     // Versioned AI mining states
     // {topoheight} => {ai_mining_state}
-    VersionedAIMiningStates
+    VersionedAIMiningStates,
 }
 
 impl Column {

@@ -1,6 +1,13 @@
-use std::sync::Arc;
+use crate::core::{
+    error::BlockchainError,
+    storage::{
+        sled::BLOCKS_COUNT, BlockProvider, BlocksAtHeightProvider, DifficultyProvider, SledStorage,
+        TransactionProvider,
+    },
+};
 use async_trait::async_trait;
 use log::{debug, trace};
+use std::sync::Arc;
 use tos_common::{
     block::{Block, BlockHeader},
     crypto::Hash,
@@ -8,18 +15,7 @@ use tos_common::{
     immutable::Immutable,
     serializer::Serializer,
     transaction::Transaction,
-    varuint::VarUint
-};
-use crate::core::{
-    error::BlockchainError,
-    storage::{
-        sled::BLOCKS_COUNT,
-        BlockProvider,
-        BlocksAtHeightProvider,
-        DifficultyProvider,
-        TransactionProvider,
-        SledStorage,
-    }
+    varuint::VarUint,
 };
 
 impl SledStorage {
@@ -30,7 +26,12 @@ impl SledStorage {
         } else {
             self.cache.blocks_count = count;
         }
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.extra, BLOCKS_COUNT, &count.to_be_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.extra,
+            BLOCKS_COUNT,
+            &count.to_be_bytes(),
+        )?;
         Ok(())
     }
 }
@@ -65,15 +66,31 @@ impl BlockProvider for SledStorage {
 
     async fn has_block_with_hash(&self, hash: &Hash) -> Result<bool, BlockchainError> {
         trace!("has block {}", hash);
-        self.contains_data_cached(&self.blocks, &self.blocks_cache, hash).await
+        self.contains_data_cached(&self.blocks, &self.blocks_cache, hash)
+            .await
     }
 
-    async fn save_block(&mut self, block: Arc<BlockHeader>, txs: &[Arc<Transaction>], difficulty: Difficulty, cumulative_difficulty: CumulativeDifficulty, p: VarUint, hash: Immutable<Hash>) -> Result<(), BlockchainError> {
-        debug!("Storing new {} with hash: {}, difficulty: {}, snapshot mode: {}", block, hash, difficulty, self.snapshot.is_some());
+    async fn save_block(
+        &mut self,
+        block: Arc<BlockHeader>,
+        txs: &[Arc<Transaction>],
+        difficulty: Difficulty,
+        cumulative_difficulty: CumulativeDifficulty,
+        p: VarUint,
+        hash: Immutable<Hash>,
+    ) -> Result<(), BlockchainError> {
+        debug!(
+            "Storing new {} with hash: {}, difficulty: {}, snapshot mode: {}",
+            block,
+            hash,
+            difficulty,
+            self.snapshot.is_some()
+        );
 
         // Store transactions
         let mut txs_count = 0;
-        for (hash, tx) in block.get_transactions().iter().zip(txs) { // first save all txs, then save block
+        for (hash, tx) in block.get_transactions().iter().zip(txs) {
+            // first save all txs, then save block
             if !self.has_transaction(hash).await? {
                 self.add_transaction(hash, &tx).await?;
                 txs_count += 1;
@@ -86,21 +103,43 @@ impl BlockProvider for SledStorage {
         }
 
         // Store block header and increase blocks count if it's a new block
-        let no_prev = Self::insert_into_disk(self.snapshot.as_mut(), &self.blocks, hash.as_bytes(), block.to_bytes())?.is_none();
+        let no_prev = Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.blocks,
+            hash.as_bytes(),
+            block.to_bytes(),
+        )?
+        .is_none();
         if no_prev {
             self.store_blocks_count(self.count_blocks().await? + 1)?;
         }
 
         // Store difficulty
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.difficulty, hash.as_bytes(), difficulty.to_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.difficulty,
+            hash.as_bytes(),
+            difficulty.to_bytes(),
+        )?;
 
         // Store cumulative difficulty
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.cumulative_difficulty, hash.as_bytes(), cumulative_difficulty.to_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.cumulative_difficulty,
+            hash.as_bytes(),
+            cumulative_difficulty.to_bytes(),
+        )?;
 
         // Store P
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.difficulty_covariance, hash.as_bytes(), p.to_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.difficulty_covariance,
+            hash.as_bytes(),
+            p.to_bytes(),
+        )?;
 
-        self.add_block_hash_at_height(&hash, block.get_height()).await?;
+        self.add_block_hash_at_height(&hash, block.get_height())
+            .await?;
 
         if let Some(cache) = self.blocks_cache.as_mut() {
             // TODO: no clone
@@ -127,18 +166,33 @@ impl BlockProvider for SledStorage {
         debug!("Deleting block with hash: {}", hash);
 
         // Delete block header
-        let header = Self::delete_arc_cacheable_data(self.snapshot.as_mut(), &self.blocks, self.cache.blocks_cache.as_mut(), &hash).await?;
+        let header = Self::delete_arc_cacheable_data(
+            self.snapshot.as_mut(),
+            &self.blocks,
+            self.cache.blocks_cache.as_mut(),
+            &hash,
+        )
+        .await?;
 
         // Decrease blocks count
         self.store_blocks_count(self.count_blocks().await? - 1)?;
 
         // Delete difficulty
-        Self::remove_from_disk_without_reading(self.snapshot.as_mut(), &self.difficulty, hash.as_bytes())?;
+        Self::remove_from_disk_without_reading(
+            self.snapshot.as_mut(),
+            &self.difficulty,
+            hash.as_bytes(),
+        )?;
 
         // Delete P
-        Self::remove_from_disk_without_reading(self.snapshot.as_mut(), &self.difficulty_covariance, hash.as_bytes())?;
+        Self::remove_from_disk_without_reading(
+            self.snapshot.as_mut(),
+            &self.difficulty_covariance,
+            hash.as_bytes(),
+        )?;
 
-        self.remove_block_hash_at_height(&hash, header.get_height()).await?;
+        self.remove_block_hash_at_height(&hash, header.get_height())
+            .await?;
 
         let mut transactions = Vec::with_capacity(header.get_txs_count());
         for tx in header.get_transactions() {

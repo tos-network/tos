@@ -1,33 +1,19 @@
 use std::{borrow::Cow, collections::HashMap};
 
-use async_trait::async_trait;
-use indexmap::IndexMap;
-use tos_vm::{Environment, Module};
 use crate::{
     account::Nonce,
     block::{Block, BlockVersion},
     contract::{
-        AssetChanges,
-        ChainState,
-        ContractCache,
-        ContractEventTracker,
-        ContractOutput,
-        ContractProvider
+        AssetChanges, ChainState, ContractCache, ContractEventTracker, ContractOutput,
+        ContractProvider,
     },
-    crypto::{
-        elgamal::{
-            Ciphertext,
-            CompressedPublicKey
-        },
-        Hash
-    },
-    transaction::{
-        ContractDeposit,
-        MultiSigPayload,
-        Reference,
-        Transaction
-    }
+    crypto::{elgamal::CompressedPublicKey, Hash},
+    transaction::{ContractDeposit, MultiSigPayload, Reference, Transaction},
 };
+use async_trait::async_trait;
+use indexmap::IndexMap;
+use tos_kernel::Environment;
+use tos_kernel::Module;
 
 /// This trait is used by the batch verification function.
 /// It is intended to represent a virtual snapshot of the current blockchain
@@ -40,46 +26,50 @@ pub trait BlockchainVerificationState<'a, E> {
     // type Error;
 
     /// Pre-verify the TX
-    async fn pre_verify_tx<'b>(
-        &'b mut self,
-        tx: &Transaction,
-    ) -> Result<(), E>;
+    async fn pre_verify_tx<'b>(&'b mut self, tx: &Transaction) -> Result<(), E>;
 
-    /// Get the balance ciphertext for a receiver account
+    /// Get the balance for a receiver account (plaintext u64)
     async fn get_receiver_balance<'b>(
         &'b mut self,
         account: Cow<'a, CompressedPublicKey>,
         asset: Cow<'a, Hash>,
-    ) -> Result<&'b mut Ciphertext, E>;
+    ) -> Result<&'b mut u64, E>;
 
-    /// Get the balance ciphertext used for verification of funds for the sender account
+    /// Get the balance used for verification of funds for the sender account (plaintext u64)
     async fn get_sender_balance<'b>(
         &'b mut self,
         account: &'a CompressedPublicKey,
         asset: &'a Hash,
         reference: &Reference,
-    ) -> Result<&'b mut Ciphertext, E>;
+    ) -> Result<&'b mut u64, E>;
 
-    /// Apply new output to a sender account
+    /// Apply new output to a sender account (plaintext u64)
     async fn add_sender_output(
         &mut self,
         account: &'a CompressedPublicKey,
         asset: &'a Hash,
-        output: Ciphertext,
+        output: u64,
     ) -> Result<(), E>;
 
     /// Get the nonce of an account
-    async fn get_account_nonce(
-        &mut self,
-        account: &'a CompressedPublicKey
-    ) -> Result<Nonce, E>;
+    async fn get_account_nonce(&mut self, account: &'a CompressedPublicKey) -> Result<Nonce, E>;
 
     /// Apply a new nonce to an account
     async fn update_account_nonce(
         &mut self,
         account: &'a CompressedPublicKey,
-        new_nonce: Nonce
+        new_nonce: Nonce,
     ) -> Result<(), E>;
+
+    /// Atomically compare and swap nonce to prevent race conditions
+    /// Returns true if the nonce matched expected value and was updated
+    /// Returns false if the current nonce didn't match expected value
+    async fn compare_and_swap_nonce(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        expected: Nonce,
+        new_value: Nonce,
+    ) -> Result<bool, E>;
 
     /// Get the block version in which TX is executed
     fn get_block_version(&self) -> BlockVersion;
@@ -88,38 +78,31 @@ pub trait BlockchainVerificationState<'a, E> {
     async fn set_multisig_state(
         &mut self,
         account: &'a CompressedPublicKey,
-        config: &MultiSigPayload
+        config: &MultiSigPayload,
     ) -> Result<(), E>;
 
     /// Set the multisig state for an account
     async fn get_multisig_state(
         &mut self,
-        account: &'a CompressedPublicKey
+        account: &'a CompressedPublicKey,
     ) -> Result<Option<&MultiSigPayload>, E>;
 
     /// Get the environment
     async fn get_environment(&mut self) -> Result<&Environment, E>;
 
     /// Set the contract module
-    async fn set_contract_module(
-        &mut self,
-        hash: &'a Hash,
-        module: &'a Module
-    ) -> Result<(), E>;
+    async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;
 
     /// Load in the cache the contract module
     /// This is called before `get_contract_module_with_environment`
     /// Returns true if the module is available
-    async fn load_contract_module(
-        &mut self,
-        hash: &'a Hash
-    ) -> Result<bool, E>;
+    async fn load_contract_module(&mut self, hash: &Hash) -> Result<bool, E>;
 
     /// Get the contract module with the environment
     /// This is used to verify that all parameters are correct
     async fn get_contract_module_with_environment(
         &self,
-        hash: &'a Hash
+        hash: &Hash,
     ) -> Result<(&Module, &Environment), E>;
 }
 
@@ -133,7 +116,9 @@ pub struct ContractEnvironment<'a, P: ContractProvider> {
 }
 
 #[async_trait]
-pub trait BlockchainApplyState<'a, P: ContractProvider, E>: BlockchainVerificationState<'a, E> {
+pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
+    BlockchainVerificationState<'a, E>
+{
     /// Add burned Tos
     async fn add_burned_coins(&mut self, amount: u64) -> Result<(), E>;
 
@@ -153,7 +138,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>: BlockchainVerificati
     async fn set_contract_outputs(
         &mut self,
         tx_hash: &'a Hash,
-        outputs: Vec<ContractOutput>
+        outputs: Vec<ContractOutput>,
     ) -> Result<(), E>;
 
     /// Get the contract environment
@@ -163,37 +148,34 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>: BlockchainVerificati
         &'b mut self,
         contract: &'b Hash,
         deposits: &'b IndexMap<Hash, ContractDeposit>,
-        tx_hash: &'b Hash
+        tx_hash: &'b Hash,
     ) -> Result<(ContractEnvironment<'b, P>, ChainState<'b>), E>;
 
     /// Merge the contract cache with the stored one
     async fn merge_contract_changes(
         &mut self,
-        hash: &'a Hash,
+        hash: &Hash,
         cache: ContractCache,
         tracker: ContractEventTracker,
-        assets: HashMap<Hash, Option<AssetChanges>>
+        assets: HashMap<Hash, Option<AssetChanges>>,
     ) -> Result<(), E>;
 
     /// Remove the contract module
     /// This will mark the contract
     /// as a None version
-    async fn remove_contract_module(
-        &mut self,
-        hash: &'a Hash
-    ) -> Result<(), E>;
+    async fn remove_contract_module(&mut self, hash: &Hash) -> Result<(), E>;
 
     /// Get the energy resource for an account
     async fn get_energy_resource(
         &mut self,
-        account: &'a CompressedPublicKey
+        account: &'a CompressedPublicKey,
     ) -> Result<Option<crate::account::EnergyResource>, E>;
 
     /// Set the energy resource for an account
     async fn set_energy_resource(
         &mut self,
         account: &'a CompressedPublicKey,
-        energy_resource: crate::account::EnergyResource
+        energy_resource: crate::account::EnergyResource,
     ) -> Result<(), E>;
 
     /// Get the AI mining state
@@ -202,6 +184,21 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>: BlockchainVerificati
     /// Set the AI mining state
     async fn set_ai_mining_state(
         &mut self,
-        state: &crate::ai_mining::AIMiningState
+        state: &crate::ai_mining::AIMiningState,
+    ) -> Result<(), E>;
+
+    /// Get the contract executor for executing contracts
+    /// This returns an Arc to the executor implementation (TOS Kernel(TAKO), legacy VM, etc.)
+    /// that will be used to execute contract bytecode.
+    /// Using Arc avoids borrow conflicts when executor is used alongside mutable state access.
+    fn get_contract_executor(&self) -> std::sync::Arc<dyn crate::contract::ContractExecutor>;
+
+    /// Add contract events emitted during execution (LOG0-LOG4 syscalls)
+    /// These events will be indexed and stored for later querying
+    async fn add_contract_events(
+        &mut self,
+        events: Vec<crate::contract::ContractEvent>,
+        contract: &Hash,
+        tx_hash: &'a Hash,
     ) -> Result<(), E>;
 }

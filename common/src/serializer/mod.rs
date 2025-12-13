@@ -1,18 +1,18 @@
+mod count;
 mod defaults;
-mod reader;
-mod writer;
 mod hexable;
 mod raw;
-mod count;
+mod reader;
+mod writer;
 
 use std::marker::Sized;
 
-pub use reader::*;
-pub use writer::Writer;
+pub use count::*;
 pub use defaults::DEFAULT_MAX_ITEMS;
 pub use hexable::*;
 pub use raw::*;
-pub use count::*;
+pub use reader::*;
+pub use writer::Writer;
 
 pub trait Serializer {
     fn write(&self, writer: &mut Writer);
@@ -39,21 +39,26 @@ pub trait Serializer {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError>
-    where Self: Sized;
+    where
+        Self: Sized;
 
     fn from_hex(hex: &str) -> Result<Self, ReaderError>
-    where Self: Sized {
+    where
+        Self: Sized,
+    {
         match hex::decode(hex) {
             Ok(bytes) => {
                 let mut reader = Reader::new(&bytes);
                 Self::read(&mut reader)
-            },
-            Err(_) => Err(ReaderError::InvalidHex)
+            }
+            Err(_) => Err(ReaderError::InvalidHex),
         }
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self, ReaderError>
-    where Self: Sized {
+    where
+        Self: Sized,
+    {
         let mut reader = Reader::new(bytes);
         Self::read(&mut reader)
     }

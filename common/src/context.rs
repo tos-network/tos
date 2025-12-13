@@ -1,10 +1,10 @@
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    hash::{BuildHasher, BuildHasherDefault, Hasher}
+    hash::{BuildHasher, BuildHasherDefault, Hasher},
 };
 
-use anyhow::{Result, Context as AnyContext};
+use anyhow::{Context as AnyContext, Result};
 
 // A hasher for `TypeId`s that takes advantage of its known characteristics.
 #[derive(Debug, Default, Clone, Copy)]
@@ -42,7 +42,7 @@ pub struct Context {
 impl Context {
     pub fn new() -> Self {
         Self {
-            values: HashMap::default()
+            values: HashMap::default(),
         }
     }
 
@@ -59,7 +59,9 @@ impl Context {
     }
 
     pub fn get_optional<T: 'static>(&self) -> Option<&T> {
-        self.values.get(&TypeId::of::<T>()).and_then(|b| b.downcast_ref())
+        self.values
+            .get(&TypeId::of::<T>())
+            .and_then(|b| b.downcast_ref())
     }
 
     pub fn get<T: 'static>(&self) -> Result<&T> {

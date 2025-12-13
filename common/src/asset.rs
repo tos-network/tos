@@ -1,11 +1,11 @@
-use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 use crate::{
     block::TopoHeight,
     crypto::Hash,
     serializer::{Reader, ReaderError, Serializer, Writer},
-    versioned_type::Versioned
+    versioned_type::Versioned,
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -17,15 +17,12 @@ pub struct AssetOwner {
     // used by the smart contract
     // This may be invalid if the asset
     // is transfered
-    id: u64
+    id: u64,
 }
 
 impl AssetOwner {
     pub fn new(contract: Hash, id: u64) -> Self {
-        Self {
-            contract,
-            id
-        }
+        Self { contract, id }
     }
 
     pub fn get_contract(&self) -> &Hash {
@@ -73,17 +70,23 @@ pub struct AssetData {
     // The total supply of the asset
     max_supply: Option<u64>,
     // Contract owning this asset
-    owner: Option<AssetOwner>
+    owner: Option<AssetOwner>,
 }
 
 impl AssetData {
-    pub fn new(decimals: u8, name: String, ticker: String, max_supply: Option<u64>, owner: Option<AssetOwner>) -> Self {
+    pub fn new(
+        decimals: u8,
+        name: String,
+        ticker: String,
+        max_supply: Option<u64>,
+        owner: Option<AssetOwner>,
+    ) -> Self {
         Self {
             decimals,
             name,
             ticker,
             max_supply,
-            owner
+            owner,
         }
     }
 
@@ -152,5 +155,5 @@ pub struct RPCAssetData<'a> {
     pub topoheight: TopoHeight,
     // Inner data
     #[serde(flatten)]
-    pub inner: AssetData
+    pub inner: AssetData,
 }

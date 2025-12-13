@@ -1,10 +1,20 @@
-mod snapshot;
 mod migrations;
 mod providers;
+mod snapshot;
 
+use crate::core::error::{BlockchainError, DiskContext};
 use async_trait::async_trait;
 use itertools::Either;
-use crate::core::error::{BlockchainError, DiskContext};
+use log::{debug, error, info, trace};
+use lru::LruCache;
+use serde::{Deserialize, Serialize};
+use sled::{IVec, Tree};
+use std::{
+    hash::Hash as StdHash,
+    ops::{Deref, DerefMut},
+    str::FromStr,
+    sync::Arc,
+};
 use tos_common::{
     account::EnergyResource,
     ai_mining::AIMiningState,
@@ -14,28 +24,13 @@ use tos_common::{
     immutable::Immutable,
     network::Network,
     serializer::Serializer,
+    tokio::sync::Mutex,
     transaction::Transaction,
-    tokio::sync::Mutex
 };
-use std::{
-    hash::Hash as StdHash,
-    ops::{Deref, DerefMut},
-    str::FromStr,
-    sync::Arc
-};
-use serde::{Deserialize, Serialize};
-use lru::LruCache;
-use sled::{IVec, Tree};
-use log::{debug, trace, info, error};
 
 pub use snapshot::Snapshot;
 
-use super::{
-    cache::StorageCache,
-    providers::*,
-    Storage,
-    Tips
-};
+use super::{cache::StorageCache, providers::*, Storage, Tips};
 
 // Constant keys used for extra Tree
 pub(super) const TIPS: &[u8; 4] = b"TIPS";
@@ -103,7 +98,7 @@ pub struct SledStorage {
     pub(super) burned_supply: Tree,
     // difficulty for each block hash
     pub(super) difficulty: Tree,
-    // tree to store all blocks hashes where a tx was included in 
+    // tree to store all blocks hashes where a tx was included in
     pub(super) tx_blocks: Tree,
     // Tree that store all versioned nonces using hashed keys
     pub(super) versioned_nonces: Tree,
@@ -172,7 +167,7 @@ pub struct SledStorage {
 #[serde(rename_all = "snake_case")]
 pub enum StorageMode {
     HighThroughput,
-    LowSpace
+    LowSpace,
 }
 
 impl Default for StorageMode {
@@ -188,7 +183,7 @@ impl FromStr for StorageMode {
         Ok(match s {
             "high_throughput" => Self::HighThroughput,
             "low_space" => Self::LowSpace,
-            _ => return Err("Invalid storage mode".into())
+            _ => return Err("Invalid storage mode".into()),
         })
     }
 }
@@ -197,7 +192,7 @@ impl Into<sled::Mode> for StorageMode {
     fn into(self) -> sled::Mode {
         match self {
             Self::HighThroughput => sled::Mode::HighThroughput,
-            Self::LowSpace => sled::Mode::LowSpace
+            Self::LowSpace => sled::Mode::LowSpace,
         }
     }
 }
@@ -217,7 +212,13 @@ impl DerefMut for SledStorage {
 }
 
 impl SledStorage {
-    pub fn new(dir_path: String, cache_size: Option<usize>, network: Network, internal_cache_size: u64, mode: StorageMode) -> Result<Self, BlockchainError> {
+    pub fn new(
+        dir_path: String,
+        cache_size: Option<usize>,
+        network: Network,
+        internal_cache_size: u64,
+        mode: StorageMode,
+    ) -> Result<Self, BlockchainError> {
         let path = format!("{}{}", dir_path, network.to_string().to_lowercase());
         let config = sled::Config::new()
             .temporary(false)
@@ -277,7 +278,8 @@ impl SledStorage {
         // Verify that we are opening a DB on same network
         // This prevent any corruption made by user
         if storage.has_network()? {
-            let storage_network = storage.load_from_disk::<Network>(&storage.extra, NETWORK, DiskContext::Network)?;
+            let storage_network =
+                storage.load_from_disk::<Network>(&storage.extra, NETWORK, DiskContext::Network)?;
             if storage_network != network {
                 return Err(BlockchainError::InvalidNetwork);
             }
@@ -294,7 +296,7 @@ impl SledStorage {
         Ok(storage)
     }
 
-    // Load all the needed cache and counters in memory from disk 
+    // Load all the needed cache and counters in memory from disk
     pub fn load_cache_from_disk(&mut self) {
         // Load tips from disk if available
         if let Ok(tips) = self.load_from_disk::<Tips>(&self.extra, TIPS, DiskContext::Tips) {
@@ -303,49 +305,71 @@ impl SledStorage {
         }
 
         // Load the pruned topoheight from disk if available
-        if let Ok(pruned_topoheight) = self.load_from_disk::<u64>(&self.extra, PRUNED_TOPOHEIGHT, DiskContext::PrunedTopoHeight) {
+        if let Ok(pruned_topoheight) = self.load_from_disk::<u64>(
+            &self.extra,
+            PRUNED_TOPOHEIGHT,
+            DiskContext::PrunedTopoHeight,
+        ) {
             debug!("Found pruned topoheight: {}", pruned_topoheight);
             self.cache.pruned_topoheight = Some(pruned_topoheight);
         }
 
         // Load the assets count from disk if available
-        if let Ok(assets_count) = self.load_from_disk::<u64>(&self.extra, ASSETS_COUNT, DiskContext::AssetsCount) {
+        if let Ok(assets_count) =
+            self.load_from_disk::<u64>(&self.extra, ASSETS_COUNT, DiskContext::AssetsCount)
+        {
             debug!("Found assets count: {}", assets_count);
             self.cache.assets_count = assets_count;
         }
 
         // Load the txs count from disk if available
-        if let Ok(txs_count) = self.load_from_disk::<u64>(&self.extra, TXS_COUNT, DiskContext::TxsCount) {
+        if let Ok(txs_count) =
+            self.load_from_disk::<u64>(&self.extra, TXS_COUNT, DiskContext::TxsCount)
+        {
             debug!("Found txs count: {}", txs_count);
             self.cache.transactions_count = txs_count;
         }
 
         // Load the blocks count from disk if available
-        if let Ok(blocks_count) = self.load_from_disk::<u64>(&self.extra, BLOCKS_COUNT, DiskContext::BlocksCount) {
+        if let Ok(blocks_count) =
+            self.load_from_disk::<u64>(&self.extra, BLOCKS_COUNT, DiskContext::BlocksCount)
+        {
             debug!("Found blocks count: {}", blocks_count);
             self.cache.blocks_count = blocks_count;
         }
 
         // Load the accounts count from disk if available
-        if let Ok(accounts_count) = self.load_from_disk::<u64>(&self.extra, ACCOUNTS_COUNT, DiskContext::AccountsCount) {
+        if let Ok(accounts_count) =
+            self.load_from_disk::<u64>(&self.extra, ACCOUNTS_COUNT, DiskContext::AccountsCount)
+        {
             debug!("Found accounts count: {}", accounts_count);
             self.cache.accounts_count = accounts_count;
         }
 
         // Load the blocks execution count from disk if available
-        if let Ok(blocks_execution_count) = self.load_from_disk::<u64>(&self.extra, BLOCKS_EXECUTION_ORDER_COUNT, DiskContext::BlocksExecutionOrderCount) {
+        if let Ok(blocks_execution_count) = self.load_from_disk::<u64>(
+            &self.extra,
+            BLOCKS_EXECUTION_ORDER_COUNT,
+            DiskContext::BlocksExecutionOrderCount,
+        ) {
             debug!("Found blocks execution count: {}", blocks_execution_count);
             self.cache.blocks_execution_count = blocks_execution_count;
         }
 
         // Load the contracts count from disk if available
-        if let Ok(contracts_count) = self.load_from_disk::<u64>(&self.extra, CONTRACTS_COUNT, DiskContext::ContractsCount) {
+        if let Ok(contracts_count) =
+            self.load_from_disk::<u64>(&self.extra, CONTRACTS_COUNT, DiskContext::ContractsCount)
+        {
             debug!("Found contracts count: {}", contracts_count);
             self.cache.contracts_count = contracts_count;
         }
     }
 
-    pub fn load_optional_from_disk_internal<T: Serializer>(snapshot: Option<&Snapshot>, tree: &Tree, key: &[u8]) -> Result<Option<T>, BlockchainError> {
+    pub fn load_optional_from_disk_internal<T: Serializer>(
+        snapshot: Option<&Snapshot>,
+        tree: &Tree,
+        key: &[u8],
+    ) -> Result<Option<T>, BlockchainError> {
         trace!("load optional from disk internal");
         if let Some(snapshot) = snapshot {
             trace!("load from snapshot");
@@ -357,54 +381,82 @@ impl SledStorage {
 
         match tree.get(key)? {
             Some(bytes) => Ok(Some(T::from_bytes(&bytes)?)),
-            None => Ok(None)
+            None => Ok(None),
         }
     }
 
-    pub fn load_from_disk_internal<T: Serializer>(snapshot: Option<&Snapshot>, tree: &Tree, key: &[u8], context: DiskContext) -> Result<T, BlockchainError> {
+    pub fn load_from_disk_internal<T: Serializer>(
+        snapshot: Option<&Snapshot>,
+        tree: &Tree,
+        key: &[u8],
+        context: DiskContext,
+    ) -> Result<T, BlockchainError> {
         trace!("load from disk internal");
         Self::load_optional_from_disk_internal(snapshot, tree, key)?
             .ok_or(BlockchainError::NotFoundOnDisk(context))
     }
 
     // Load an optional value from the DB
-    pub(super) fn load_optional_from_disk<T: Serializer>(&self, tree: &Tree, key: &[u8]) -> Result<Option<T>, BlockchainError> {
+    pub(super) fn load_optional_from_disk<T: Serializer>(
+        &self,
+        tree: &Tree,
+        key: &[u8],
+    ) -> Result<Option<T>, BlockchainError> {
         trace!("load optional from disk");
         Self::load_optional_from_disk_internal(self.snapshot.as_ref(), tree, key)
     }
 
     // Load a value from the DB
-    pub(super) fn load_from_disk<T: Serializer>(&self, tree: &Tree, key: &[u8], context: DiskContext) -> Result<T, BlockchainError> {
+    pub(super) fn load_from_disk<T: Serializer>(
+        &self,
+        tree: &Tree,
+        key: &[u8],
+        context: DiskContext,
+    ) -> Result<T, BlockchainError> {
         trace!("load from disk");
         self.load_optional_from_disk(tree, key)?
             .ok_or(BlockchainError::NotFoundOnDisk(context))
     }
 
     // Scan prefix
-    pub(super) fn scan_prefix(snapshot: Option<&Snapshot>, tree: &Tree, prefix: &[u8]) -> impl Iterator<Item = sled::Result<IVec>> {
+    pub(super) fn scan_prefix(
+        snapshot: Option<&Snapshot>,
+        tree: &Tree,
+        prefix: &[u8],
+    ) -> impl Iterator<Item = sled::Result<IVec>> {
         match snapshot {
             Some(snapshot) => Either::Left(snapshot.scan_prefix(tree, prefix)),
-            None => Either::Right(tree.scan_prefix(prefix).into_iter().keys())
+            None => Either::Right(tree.scan_prefix(prefix).into_iter().keys()),
         }
     }
 
     // Iter over a tree entries
-    pub(super) fn iter(snapshot: Option<&Snapshot>, tree: &Tree) -> impl Iterator<Item = sled::Result<(IVec, IVec)>> {
+    pub(super) fn iter(
+        snapshot: Option<&Snapshot>,
+        tree: &Tree,
+    ) -> impl Iterator<Item = sled::Result<(IVec, IVec)>> {
         match snapshot {
             Some(snapshot) => Either::Left(snapshot.iter(tree)),
-            None => Either::Right(tree.iter())
+            None => Either::Right(tree.iter()),
         }
     }
 
     // Iter over a tree keys
-    pub(super) fn iter_keys(snapshot: Option<&Snapshot>, tree: &Tree) -> impl Iterator<Item = sled::Result<IVec>> {
+    pub(super) fn iter_keys(
+        snapshot: Option<&Snapshot>,
+        tree: &Tree,
+    ) -> impl Iterator<Item = sled::Result<IVec>> {
         match snapshot {
             Some(snapshot) => Either::Left(snapshot.iter_keys(tree)),
-            None => Either::Right(tree.iter().keys())
+            None => Either::Right(tree.iter().keys()),
         }
     }
 
-    pub(super) fn remove_from_disk_internal(snapshot: Option<&mut Snapshot>, tree: &Tree, key: &[u8]) -> Result<Option<IVec>, BlockchainError> {
+    pub(super) fn remove_from_disk_internal(
+        snapshot: Option<&mut Snapshot>,
+        tree: &Tree,
+        key: &[u8],
+    ) -> Result<Option<IVec>, BlockchainError> {
         trace!("remove from disk internal");
         if let Some(snapshot) = snapshot {
             let (value, load) = snapshot.remove(tree, key);
@@ -419,21 +471,33 @@ impl SledStorage {
     }
 
     // Delete a key from the DB
-    pub(super) fn remove_from_disk<T: Serializer>(snapshot: Option<&mut Snapshot>, tree: &Tree, key: &[u8]) -> Result<Option<T>, BlockchainError> {
+    pub(super) fn remove_from_disk<T: Serializer>(
+        snapshot: Option<&mut Snapshot>,
+        tree: &Tree,
+        key: &[u8],
+    ) -> Result<Option<T>, BlockchainError> {
         trace!("remove from disk");
         let v = Self::remove_from_disk_internal(snapshot, tree, key)?;
         Ok(v.map(|v| T::from_bytes(&v)).transpose()?)
     }
 
     // Delete a key from the DB without reading it
-    pub(super) fn remove_from_disk_without_reading(snapshot: Option<&mut Snapshot>, tree: &Tree, key: &[u8]) -> Result<bool, BlockchainError> {
+    pub(super) fn remove_from_disk_without_reading(
+        snapshot: Option<&mut Snapshot>,
+        tree: &Tree,
+        key: &[u8],
+    ) -> Result<bool, BlockchainError> {
         trace!("remove from disk without reading");
-        Self::remove_from_disk_internal(snapshot, tree, key)
-            .map(|v| v.is_some())
+        Self::remove_from_disk_internal(snapshot, tree, key).map(|v| v.is_some())
     }
 
     // Insert a key into the DB
-    pub(super) fn insert_into_disk<K: AsRef<[u8]>, V: Into<IVec>>(snapshot: Option<&mut Snapshot>, tree: &Tree, key: K, value: V) -> Result<Option<IVec>, BlockchainError> {
+    pub(super) fn insert_into_disk<K: AsRef<[u8]>, V: Into<IVec>>(
+        snapshot: Option<&mut Snapshot>,
+        tree: &Tree,
+        key: K,
+        value: V,
+    ) -> Result<Option<IVec>, BlockchainError> {
         let previous = if let Some(snapshot) = snapshot {
             let r = key.as_ref();
             snapshot.insert(tree, r, value)
@@ -445,16 +509,23 @@ impl SledStorage {
     }
 
     // Retrieve the exact size of a value from the DB
-    pub(super) fn get_size_from_disk(&self, tree: &Tree, key: &[u8]) -> Result<usize, BlockchainError> {
+    pub(super) fn get_size_from_disk(
+        &self,
+        tree: &Tree,
+        key: &[u8],
+    ) -> Result<usize, BlockchainError> {
         trace!("get size from disk");
 
         if let Some(snapshot) = self.snapshot.as_ref() {
             if snapshot.contains_key(tree, key) {
-                return snapshot.get_value_size(tree, key).ok_or(BlockchainError::NotFoundOnDisk(DiskContext::DataLen));
+                return snapshot
+                    .get_value_size(tree, key)
+                    .ok_or(BlockchainError::NotFoundOnDisk(DiskContext::DataLen));
             }
         }
 
-        let len = tree.get(key)?
+        let len = tree
+            .get(key)?
             .ok_or(BlockchainError::NotFoundOnDisk(DiskContext::DataLen))?
             .len();
         Ok(len)
@@ -464,15 +535,24 @@ impl SledStorage {
     // Or load it from cache if available
     // Note that the Snapshot has no cache and is priority over the cache
     // This mean, cache is never used if a snapshot is available
-    pub(super) async fn get_cacheable_arc_data<K: Eq + StdHash + Serializer + Clone, V: Serializer>(&self, tree: &Tree, cache: &Option<Mutex<LruCache<K, Arc<V>>>>, key: &K, context: DiskContext) -> Result<Immutable<V>, BlockchainError> {
+    pub(super) async fn get_cacheable_arc_data<
+        K: Eq + StdHash + Serializer + Clone,
+        V: Serializer,
+    >(
+        &self,
+        tree: &Tree,
+        cache: &Option<Mutex<LruCache<K, Arc<V>>>>,
+        key: &K,
+        context: DiskContext,
+    ) -> Result<Immutable<V>, BlockchainError> {
         trace!("get cacheable arc data {:?}", context);
         let key_bytes = key.to_bytes();
-        let value = if let Some(cache) = cache.as_ref()
-            .filter(|_| self.snapshot.as_ref()
+        let value = if let Some(cache) = cache.as_ref().filter(|_| {
+            self.snapshot
+                .as_ref()
                 .map(|s| !s.contains_key(tree, &key_bytes))
                 .unwrap_or(true)
-            )
-        {
+        }) {
             trace!("load arc from cache");
             let mut cache = cache.lock().await;
             if let Some(value) = cache.get(key) {
@@ -494,15 +574,23 @@ impl SledStorage {
         Ok(value)
     }
 
-    pub(super) async fn get_optional_cacheable_data<K: Eq + StdHash + Serializer + Clone, V: Serializer + Clone>(&self, tree: &Tree, cache: &Option<Mutex<LruCache<K, V>>>, key: &K) -> Result<Option<V>, BlockchainError> {
+    pub(super) async fn get_optional_cacheable_data<
+        K: Eq + StdHash + Serializer + Clone,
+        V: Serializer + Clone,
+    >(
+        &self,
+        tree: &Tree,
+        cache: &Option<Mutex<LruCache<K, V>>>,
+        key: &K,
+    ) -> Result<Option<V>, BlockchainError> {
         trace!("get optional cacheable data");
         let key_bytes = key.to_bytes();
-        let value = if let Some(cache) = cache.as_ref()
-            .filter(|_| self.snapshot.as_ref()
+        let value = if let Some(cache) = cache.as_ref().filter(|_| {
+            self.snapshot
+                .as_ref()
                 .map(|s| !s.contains_key(tree, &key_bytes))
                 .unwrap_or(true)
-            )
-        {
+        }) {
             trace!("load optional from cache");
             let mut cache = cache.lock().await;
             if let Some(value) = cache.get(key).cloned() {
@@ -528,13 +616,31 @@ impl SledStorage {
 
     // Load a value from the DB and cache it
     // This data is not cached behind an Arc, but is cloned at each access
-    pub(super) async fn get_cacheable_data<K: Eq + StdHash + Serializer + Clone, V: Serializer + Clone>(&self, tree: &Tree, cache: &Option<Mutex<LruCache<K, V>>>, key: &K, context: DiskContext) -> Result<V, BlockchainError> {
+    pub(super) async fn get_cacheable_data<
+        K: Eq + StdHash + Serializer + Clone,
+        V: Serializer + Clone,
+    >(
+        &self,
+        tree: &Tree,
+        cache: &Option<Mutex<LruCache<K, V>>>,
+        key: &K,
+        context: DiskContext,
+    ) -> Result<V, BlockchainError> {
         trace!("get cacheable data {:?}", context);
-        self.get_optional_cacheable_data(tree, cache, key).await?
+        self.get_optional_cacheable_data(tree, cache, key)
+            .await?
             .ok_or_else(|| BlockchainError::NotFoundOnDisk(DiskContext::LoadData))
     }
 
-    pub(super) async fn delete_cacheable_data<K: Eq + StdHash + Serializer + Clone, V: Serializer>(snapshot: Option<&mut Snapshot>, tree: &Tree, cache: Option<&mut Mutex<LruCache<K, V>>>, key: &K) -> Result<V, BlockchainError> {
+    pub(super) async fn delete_cacheable_data<
+        K: Eq + StdHash + Serializer + Clone,
+        V: Serializer,
+    >(
+        snapshot: Option<&mut Snapshot>,
+        tree: &Tree,
+        cache: Option<&mut Mutex<LruCache<K, V>>>,
+        key: &K,
+    ) -> Result<V, BlockchainError> {
         trace!("delete cacheable data");
         let value = Self::remove_from_disk_internal(snapshot, tree, &key.to_bytes())?
             .ok_or(BlockchainError::NotFoundOnDisk(DiskContext::DeleteData))?;
@@ -542,7 +648,7 @@ impl SledStorage {
         if let Some(cache) = cache {
             if let Some(v) = cache.get_mut().pop(key) {
                 trace!("data has been deleted from cache");
-                return Ok(v)
+                return Ok(v);
             }
         }
 
@@ -551,17 +657,25 @@ impl SledStorage {
     }
 
     // Delete a cacheable data from disk and cache behind a Arc
-    pub(super) async fn delete_arc_cacheable_data<K: Eq + StdHash + Serializer + Clone, V: Serializer>(snapshot: Option<&mut Snapshot>, tree: &Tree, cache: Option<&mut Mutex<LruCache<K, Arc<V>>>>, key: &K) -> Result<Immutable<V>, BlockchainError> {
+    pub(super) async fn delete_arc_cacheable_data<
+        K: Eq + StdHash + Serializer + Clone,
+        V: Serializer,
+    >(
+        snapshot: Option<&mut Snapshot>,
+        tree: &Tree,
+        cache: Option<&mut Mutex<LruCache<K, Arc<V>>>>,
+        key: &K,
+    ) -> Result<Immutable<V>, BlockchainError> {
         trace!("delete arc cacheable data");
         let value = match Self::remove_from_disk::<V>(snapshot, tree, &key.to_bytes())? {
             Some(data) => data,
-            None => return Err(BlockchainError::NotFoundOnDisk(DiskContext::DeleteData))
+            None => return Err(BlockchainError::NotFoundOnDisk(DiskContext::DeleteData)),
         };
 
         if let Some(cache) = cache {
             if let Some(v) = cache.get_mut().pop(key) {
                 trace!("data has been deleted from arc cache");
-                return Ok(Immutable::Arc(v))
+                return Ok(Immutable::Arc(v));
             }
         }
 
@@ -569,7 +683,12 @@ impl SledStorage {
     }
 
     // Check if our DB contains a data in cache or on disk
-    pub(super) async fn contains_data_cached<K: Eq + StdHash + Serializer + Clone, V>(&self, tree: &Tree, cache: &Option<Mutex<LruCache<K, V>>>, key: &K) -> Result<bool, BlockchainError> {
+    pub(super) async fn contains_data_cached<K: Eq + StdHash + Serializer + Clone, V>(
+        &self,
+        tree: &Tree,
+        cache: &Option<Mutex<LruCache<K, V>>>,
+        key: &K,
+    ) -> Result<bool, BlockchainError> {
         trace!("contains data cached");
 
         let key_bytes = key.to_bytes();
@@ -592,7 +711,11 @@ impl SledStorage {
     }
 
     // Check if our DB contains a data on disk
-    pub(super) fn contains_data<K: Serializer>(&self, tree: &Tree, key: &K) -> Result<bool, BlockchainError> {
+    pub(super) fn contains_data<K: Serializer>(
+        &self,
+        tree: &Tree,
+        key: &K,
+    ) -> Result<bool, BlockchainError> {
         trace!("contains data");
         let key_bytes = key.to_bytes();
         if let Some(snapshot) = self.snapshot.as_ref() {
@@ -614,7 +737,12 @@ impl SledStorage {
             self.cache.assets_count = count;
         }
 
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.extra, ASSETS_COUNT, &count.to_be_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.extra,
+            ASSETS_COUNT,
+            &count.to_be_bytes(),
+        )?;
         Ok(())
     }
 }
@@ -622,40 +750,90 @@ impl SledStorage {
 #[async_trait]
 impl Storage for SledStorage {
     // Delete the whole block using its topoheight
-    async fn delete_block_at_topoheight(&mut self, topoheight: u64) -> Result<(Hash, Immutable<BlockHeader>, Vec<(Hash, Immutable<Transaction>)>), BlockchainError> {
+    async fn delete_block_at_topoheight(
+        &mut self,
+        topoheight: u64,
+    ) -> Result<
+        (
+            Hash,
+            Immutable<BlockHeader>,
+            Vec<(Hash, Immutable<Transaction>)>,
+        ),
+        BlockchainError,
+    > {
         trace!("Delete block at topoheight {topoheight}");
 
         // delete topoheight<->hash pointers
-        let hash = Self::delete_cacheable_data(self.snapshot.as_mut(), &self.hash_at_topo, self.cache.hash_at_topo_cache.as_mut(), &topoheight).await?;
+        let hash = Self::delete_cacheable_data(
+            self.snapshot.as_mut(),
+            &self.hash_at_topo,
+            self.cache.hash_at_topo_cache.as_mut(),
+            &topoheight,
+        )
+        .await?;
 
         trace!("Deleting block execution order");
-        Self::remove_from_disk_without_reading(self.snapshot.as_mut(), &self.blocks_execution_order, hash.as_bytes())?;
+        Self::remove_from_disk_without_reading(
+            self.snapshot.as_mut(),
+            &self.blocks_execution_order,
+            hash.as_bytes(),
+        )?;
 
         trace!("Hash is {hash} at topo {topoheight}");
 
-        Self::delete_cacheable_data::<Hash, u64>(self.snapshot.as_mut(), &self.topo_by_hash, self.cache.topo_by_hash_cache.as_mut(), &hash).await?;
+        Self::delete_cacheable_data::<Hash, u64>(
+            self.snapshot.as_mut(),
+            &self.topo_by_hash,
+            self.cache.topo_by_hash_cache.as_mut(),
+            &hash,
+        )
+        .await?;
 
         trace!("deleting block header {}", hash);
-        let block = Self::delete_arc_cacheable_data(self.snapshot.as_mut(), &self.blocks, self.cache.blocks_cache.as_mut(), &hash).await?;
+        let block = Self::delete_arc_cacheable_data(
+            self.snapshot.as_mut(),
+            &self.blocks,
+            self.cache.blocks_cache.as_mut(),
+            &hash,
+        )
+        .await?;
         trace!("block header deleted successfully");
 
         trace!("Deleting supply");
-        let supply: u64 = Self::delete_cacheable_data(self.snapshot.as_mut(), &self.supply, None, &topoheight).await?;
+        let supply: u64 =
+            Self::delete_cacheable_data(self.snapshot.as_mut(), &self.supply, None, &topoheight)
+                .await?;
         trace!("Supply was {}", supply);
 
         trace!("Deleting burned supply");
-        let burned_supply: u64 = Self::delete_cacheable_data(self.snapshot.as_mut(), &self.burned_supply, None, &topoheight).await?;
+        let burned_supply: u64 = Self::delete_cacheable_data(
+            self.snapshot.as_mut(),
+            &self.burned_supply,
+            None,
+            &topoheight,
+        )
+        .await?;
         trace!("Burned supply was {}", burned_supply);
 
         trace!("Deleting rewards");
-        let reward: u64 = Self::delete_cacheable_data(self.snapshot.as_mut(), &self.rewards, None, &topoheight).await?;
+        let reward: u64 =
+            Self::delete_cacheable_data(self.snapshot.as_mut(), &self.rewards, None, &topoheight)
+                .await?;
         trace!("Reward for block {} was: {}", hash, reward);
 
         trace!("Deleting difficulty");
-        let _: Difficulty = Self::delete_cacheable_data(self.snapshot.as_mut(), &self.difficulty, None, &hash).await?;
+        let _: Difficulty =
+            Self::delete_cacheable_data(self.snapshot.as_mut(), &self.difficulty, None, &hash)
+                .await?;
 
         trace!("Deleting cumulative difficulty");
-        let cumulative_difficulty: CumulativeDifficulty = Self::delete_cacheable_data(self.snapshot.as_mut(), &self.cumulative_difficulty, self.cache.cumulative_difficulty_cache.as_mut(), &hash).await?;
+        let cumulative_difficulty: CumulativeDifficulty = Self::delete_cacheable_data(
+            self.snapshot.as_mut(),
+            &self.cumulative_difficulty,
+            self.cache.cumulative_difficulty_cache.as_mut(),
+            &hash,
+        )
+        .await?;
         trace!("Cumulative difficulty deleted: {}", cumulative_difficulty);
 
         let mut txs = Vec::new();
@@ -663,12 +841,26 @@ impl Storage for SledStorage {
             // Should we delete the tx too or only unlink it
             let mut should_delete = true;
             if self.has_tx_blocks(tx_hash)? {
-                let mut blocks: Tips = Self::delete_cacheable_data(self.snapshot.as_mut(), &self.tx_blocks, None, tx_hash).await?;
-                let blocks_len =  blocks.len();
+                let mut blocks: Tips = Self::delete_cacheable_data(
+                    self.snapshot.as_mut(),
+                    &self.tx_blocks,
+                    None,
+                    tx_hash,
+                )
+                .await?;
+                let blocks_len = blocks.len();
                 blocks.remove(&hash);
                 should_delete = blocks.is_empty();
                 self.set_blocks_for_tx(tx_hash, &blocks)?;
-                trace!("Tx was included in {}, blocks left: {}", blocks_len, blocks.into_iter().map(|b| b.to_string()).collect::<Vec<String>>().join(", "));
+                trace!(
+                    "Tx was included in {}, blocks left: {}",
+                    blocks_len,
+                    blocks
+                        .into_iter()
+                        .map(|b| b.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                );
             }
 
             if self.is_tx_executed_in_block(tx_hash, &hash)? {
@@ -680,14 +872,21 @@ impl Storage for SledStorage {
             // Because the TX is not linked to any other block, we can safely delete that block
             if should_delete {
                 trace!("Deleting TX {} in block {}", tx_hash, hash);
-                let tx: Immutable<Transaction> = Self::delete_arc_cacheable_data(self.snapshot.as_mut(), &self.transactions, self.cache.transactions_cache.as_mut(), tx_hash).await?;
+                let tx: Immutable<Transaction> = Self::delete_arc_cacheable_data(
+                    self.snapshot.as_mut(),
+                    &self.transactions,
+                    self.cache.transactions_cache.as_mut(),
+                    tx_hash,
+                )
+                .await?;
                 txs.push((tx_hash.clone(), tx));
             }
         }
 
         // remove the block hash from the set, and delete the set if empty
         if self.has_blocks_at_height(block.get_height()).await? {
-            self.remove_block_hash_at_height(&hash, block.get_height()).await?;
+            self.remove_block_hash_at_height(&hash, block.get_height())
+                .await?;
         }
 
         Ok((hash, block, txs))
@@ -712,7 +911,10 @@ impl Storage for SledStorage {
         let mut size = 0;
         for tree in self.db.tree_names() {
             let tree = self.db.open_tree(tree)?;
-            debug!("Estimating size for tree {}", String::from_utf8_lossy(&tree.name()));
+            debug!(
+                "Estimating size for tree {}",
+                String::from_utf8_lossy(&tree.name())
+            );
             for el in Self::iter(self.snapshot.as_ref(), &tree) {
                 let (key, value) = el?;
                 size += key.len() + value.len();
@@ -733,38 +935,82 @@ impl Storage for SledStorage {
 // EnergyProvider implementation for SledStorage
 #[async_trait]
 impl crate::core::storage::EnergyProvider for SledStorage {
-    async fn get_energy_resource(&self, account: &PublicKey) -> Result<Option<EnergyResource>, BlockchainError> {
-        trace!("get energy resource for account {}", account.as_address(self.network.is_mainnet()));
-        
+    async fn get_energy_resource(
+        &self,
+        account: &PublicKey,
+    ) -> Result<Option<EnergyResource>, BlockchainError> {
+        trace!(
+            "get energy resource for account {}",
+            account.as_address(self.network.is_mainnet())
+        );
+
         // Get the latest topoheight for this account's energy resource
-        let topoheight = self.load_optional_from_disk::<u64>(&self.energy_resources, &account.to_bytes())?;
-        
+        let topoheight =
+            self.load_optional_from_disk::<u64>(&self.energy_resources, &account.to_bytes())?;
+
         match topoheight {
             Some(topoheight) => {
                 // Get the versioned energy resource at that topoheight
-                let key = format!("{}_{}", topoheight, account.as_address(self.network.is_mainnet()));
-                let energy = self.load_optional_from_disk::<EnergyResource>(&self.versioned_energy_resources, key.as_bytes())?;
-                trace!("Found energy resource at topoheight {}: {:?}", topoheight, energy);
+                let key = format!(
+                    "{}_{}",
+                    topoheight,
+                    account.as_address(self.network.is_mainnet())
+                );
+                let energy = self.load_optional_from_disk::<EnergyResource>(
+                    &self.versioned_energy_resources,
+                    key.as_bytes(),
+                )?;
+                trace!(
+                    "Found energy resource at topoheight {}: {:?}",
+                    topoheight,
+                    energy
+                );
                 Ok(energy)
-            },
+            }
             None => {
-                trace!("No energy resource found for account {}", account.as_address(self.network.is_mainnet()));
+                trace!(
+                    "No energy resource found for account {}",
+                    account.as_address(self.network.is_mainnet())
+                );
                 Ok(None)
             }
         }
     }
 
-    async fn set_energy_resource(&mut self, account: &PublicKey, topoheight: TopoHeight, energy: &EnergyResource) -> Result<(), BlockchainError> {
-        trace!("set energy resource for account {} at topoheight {}: {:?}", 
-               account.as_address(self.network.is_mainnet()), topoheight, energy);
-        
+    async fn set_energy_resource(
+        &mut self,
+        account: &PublicKey,
+        topoheight: TopoHeight,
+        energy: &EnergyResource,
+    ) -> Result<(), BlockchainError> {
+        trace!(
+            "set energy resource for account {} at topoheight {}: {:?}",
+            account.as_address(self.network.is_mainnet()),
+            topoheight,
+            energy
+        );
+
         // Store the versioned energy resource
-        let key = format!("{}_{}", topoheight, account.as_address(self.network.is_mainnet()));
+        let key = format!(
+            "{}_{}",
+            topoheight,
+            account.as_address(self.network.is_mainnet())
+        );
         let bytes = energy.to_bytes();
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.versioned_energy_resources, key.as_bytes(), &bytes[..])?;
-        
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.versioned_energy_resources,
+            key.as_bytes(),
+            &bytes[..],
+        )?;
+
         // Update the latest topoheight pointer
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.energy_resources, &account.to_bytes(), &topoheight.to_be_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.energy_resources,
+            &account.to_bytes(),
+            &topoheight.to_be_bytes(),
+        )?;
 
         Ok(())
     }
@@ -776,15 +1022,23 @@ impl crate::core::storage::AIMiningProvider for SledStorage {
         trace!("get ai mining state");
 
         // Get the latest topoheight that has AI mining state
-        let topoheight = self.load_optional_from_disk::<u64>(&self.ai_mining_state, AI_MINING_STATE_TOPOHEIGHT)?;
+        let topoheight =
+            self.load_optional_from_disk::<u64>(&self.ai_mining_state, AI_MINING_STATE_TOPOHEIGHT)?;
 
         match topoheight {
             Some(topoheight) => {
                 // Get the AI mining state at that topoheight
-                let state = self.load_optional_from_disk::<AIMiningState>(&self.versioned_ai_mining_states, &topoheight.to_be_bytes())?;
-                trace!("Found AI mining state at topoheight {}: {:?}", topoheight, state.is_some());
+                let state = self.load_optional_from_disk::<AIMiningState>(
+                    &self.versioned_ai_mining_states,
+                    &topoheight.to_be_bytes(),
+                )?;
+                trace!(
+                    "Found AI mining state at topoheight {}: {:?}",
+                    topoheight,
+                    state.is_some()
+                );
                 Ok(state)
-            },
+            }
             None => {
                 trace!("No AI mining state found");
                 Ok(None)
@@ -792,30 +1046,58 @@ impl crate::core::storage::AIMiningProvider for SledStorage {
         }
     }
 
-    async fn set_ai_mining_state(&mut self, topoheight: TopoHeight, state: &AIMiningState) -> Result<(), BlockchainError> {
+    async fn set_ai_mining_state(
+        &mut self,
+        topoheight: TopoHeight,
+        state: &AIMiningState,
+    ) -> Result<(), BlockchainError> {
         trace!("set ai mining state at topoheight {}", topoheight);
 
         // Serialize the AI mining state
         let bytes = state.to_bytes();
 
         // Store the versioned state
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.versioned_ai_mining_states, &topoheight.to_be_bytes(), &bytes[..])?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.versioned_ai_mining_states,
+            &topoheight.to_be_bytes(),
+            &bytes[..],
+        )?;
 
         // Update the latest topoheight pointer
-        Self::insert_into_disk(self.snapshot.as_mut(), &self.ai_mining_state, AI_MINING_STATE_TOPOHEIGHT, &topoheight.to_be_bytes())?;
+        Self::insert_into_disk(
+            self.snapshot.as_mut(),
+            &self.ai_mining_state,
+            AI_MINING_STATE_TOPOHEIGHT,
+            &topoheight.to_be_bytes(),
+        )?;
 
         Ok(())
     }
 
-    async fn has_ai_mining_state_at_topoheight(&self, topoheight: TopoHeight) -> Result<bool, BlockchainError> {
-        trace!("check if AI mining state exists at topoheight {}", topoheight);
-        let exists = self.versioned_ai_mining_states.contains_key(topoheight.to_be_bytes())?;
+    async fn has_ai_mining_state_at_topoheight(
+        &self,
+        topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError> {
+        trace!(
+            "check if AI mining state exists at topoheight {}",
+            topoheight
+        );
+        let exists = self
+            .versioned_ai_mining_states
+            .contains_key(topoheight.to_be_bytes())?;
         Ok(exists)
     }
 
-    async fn get_ai_mining_state_at_topoheight(&self, topoheight: TopoHeight) -> Result<Option<AIMiningState>, BlockchainError> {
+    async fn get_ai_mining_state_at_topoheight(
+        &self,
+        topoheight: TopoHeight,
+    ) -> Result<Option<AIMiningState>, BlockchainError> {
         trace!("get AI mining state at topoheight {}", topoheight);
-        let state = self.load_optional_from_disk::<AIMiningState>(&self.versioned_ai_mining_states, &topoheight.to_be_bytes())?;
+        let state = self.load_optional_from_disk::<AIMiningState>(
+            &self.versioned_ai_mining_states,
+            &topoheight.to_be_bytes(),
+        )?;
         Ok(state)
     }
 }

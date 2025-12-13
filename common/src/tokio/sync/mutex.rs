@@ -1,16 +1,16 @@
+use log::{debug, error, log, Level};
 use std::{
     future::Future,
     ops::{Deref, DerefMut},
     panic::Location,
     sync::Mutex as StdMutex,
-    time::Duration
+    time::Duration,
 };
 use tokio::{
     pin,
     sync::{Mutex as InnerMutex, MutexGuard},
-    time::interval
+    time::interval,
 };
-use log::{debug, error, log, Level};
 
 pub struct Mutex<T: ?Sized> {
     init_location: &'static Location<'static>,
@@ -27,7 +27,7 @@ impl<T: ?Sized> Mutex<T> {
         Self {
             init_location: Location::caller(),
             last_location: StdMutex::new(None),
-            inner: InnerMutex::new(t)
+            inner: InnerMutex::new(t),
         }
     }
 
@@ -58,7 +58,7 @@ impl<T: ?Sized> Mutex<T> {
                                 }
                                 None => {}
                             };
- 
+
                             error!("{}", msg);
                         }
                     }
@@ -77,7 +77,6 @@ impl<T: ?Sized> Mutex<T> {
         }
     }
 }
-
 
 impl<T: ?Sized> AsRef<InnerMutex<T>> for Mutex<T> {
     fn as_ref(&self) -> &InnerMutex<T> {

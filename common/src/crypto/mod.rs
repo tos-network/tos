@@ -1,18 +1,17 @@
-mod hash;
 mod address;
-mod transcript;
-mod human_readable_proof;
+mod hash;
 
-pub mod elgamal;
-pub mod proofs;
 pub mod bech32;
+pub mod elgamal;
+pub mod error;
+pub mod proofs;
+pub mod random;
 
-pub use hash::*;
 pub use address::*;
-pub use transcript::*;
-pub use human_readable_proof::*;
+pub use error::CryptoError;
+pub use hash::*;
 
-pub use elgamal::{PrivateKey, KeyPair, Signature, SIGNATURE_SIZE};
+pub use elgamal::{KeyPair, PrivateKey, Signature, SIGNATURE_SIZE};
 
 /// Re-export the curve25519-dalek ecdlp module
 pub use curve25519_dalek::ecdlp;

@@ -1,37 +1,37 @@
+use super::{
+    bech32::{convert_bits, decode, encode, Bech32Error},
+    PublicKey,
+};
+use crate::{
+    api::{DataElement, DataValue, ValueType},
+    config::{PREFIX_ADDRESS, TESTNET_PREFIX_ADDRESS},
+    serializer::{Reader, ReaderError, Serializer, Writer},
+    transaction::EXTRA_DATA_LIMIT_SIZE,
+};
+use anyhow::Error;
+use core::fmt;
+use log::debug;
+use serde::de::Error as SerdeError;
 use std::{
     fmt::{Display, Formatter},
     hash::{Hash, Hasher},
     mem,
-    str::FromStr
+    str::FromStr,
 };
-use crate::{
-    api::{DataElement, ValueType, DataValue},
-    serializer::{Serializer, Writer, Reader, ReaderError},
-    config::{PREFIX_ADDRESS, TESTNET_PREFIX_ADDRESS},
-    transaction::EXTRA_DATA_LIMIT_SIZE
-};
-use super::{
-    bech32::{Bech32Error, encode, convert_bits, decode},
-    PublicKey
-};
-use core::fmt;
-use log::debug;
-use serde::de::Error as SerdeError;
-use anyhow::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AddressType {
     Normal,
     // Data variant allow to integrate data in address for easier communication / data transfered
     // those data are directly integrated in the data part and can be transfered in the transaction directly
-    Data(DataElement)
+    Data(DataElement),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Address {
     mainnet: bool,
     addr_type: AddressType,
-    key: PublicKey
+    key: PublicKey,
 }
 
 impl Hash for Address {
@@ -45,7 +45,7 @@ impl Address {
         Self {
             mainnet,
             addr_type,
-            key
+            key,
         }
     }
 
@@ -76,17 +76,18 @@ impl Address {
 
         match addr_type {
             AddressType::Data(data) => Some(data),
-            AddressType::Normal => None
+            AddressType::Normal => None,
         }
     }
 
     // Recreate a new address struct without the integrated data
     pub fn extract_data(self) -> (Option<DataElement>, Self) {
         match self.addr_type {
-            AddressType::Data(data) => {
-                (Some(data), Self::new(self.mainnet, AddressType::Normal, self.key))
-            },
-            AddressType::Normal => (None, self)
+            AddressType::Data(data) => (
+                Some(data),
+                Self::new(self.mainnet, AddressType::Normal, self.key),
+            ),
+            AddressType::Normal => (None, self),
         }
     }
 
@@ -94,7 +95,7 @@ impl Address {
     pub fn get_extra_data(&self) -> Option<&DataElement> {
         match &self.addr_type {
             AddressType::Data(data) => Some(data),
-            _ => None
+            _ => None,
         }
     }
 
@@ -102,7 +103,7 @@ impl Address {
     pub fn is_normal(&self) -> bool {
         match self.addr_type {
             AddressType::Normal => true,
-            _=> false
+            _ => false,
         }
     }
 
@@ -135,7 +136,7 @@ impl Address {
     pub fn get_data(&self, name: String, value_type: ValueType) -> Option<&DataValue> {
         match &self.addr_type {
             AddressType::Normal => None,
-            AddressType::Data(data) => data.get_value_by_string_key(name, value_type)
+            AddressType::Data(data) => data.get_value_by_string_key(name, value_type),
         }
     }
 
@@ -157,20 +158,26 @@ impl Address {
         let (hrp, decoded) = decode(address)?;
         // check that hrp is valid one
         if hrp != PREFIX_ADDRESS && hrp != TESTNET_PREFIX_ADDRESS {
-            return Err(Bech32Error::InvalidPrefix(hrp, format!("{} or {}", PREFIX_ADDRESS, TESTNET_PREFIX_ADDRESS)).into())
+            return Err(Bech32Error::InvalidPrefix(
+                hrp,
+                format!("{} or {}", PREFIX_ADDRESS, TESTNET_PREFIX_ADDRESS),
+            )
+            .into());
         }
 
         let bits = convert_bits(&decoded, 5, 8, false)?;
         let addr = Address::decompress(&bits, hrp.as_str())?;
 
         // now check that the hrp decoded is the one for the network state
-        if (addr.is_mainnet() && hrp != PREFIX_ADDRESS) || (!addr.is_mainnet() && hrp != TESTNET_PREFIX_ADDRESS) {
+        if (addr.is_mainnet() && hrp != PREFIX_ADDRESS)
+            || (!addr.is_mainnet() && hrp != TESTNET_PREFIX_ADDRESS)
+        {
             let expected = if addr.is_mainnet() {
                 PREFIX_ADDRESS
             } else {
                 TESTNET_PREFIX_ADDRESS
             };
-            return Err(Bech32Error::InvalidPrefix(hrp, expected.to_owned()).into())
+            return Err(Bech32Error::InvalidPrefix(hrp, expected.to_owned()).into());
         }
 
         Ok(addr)
@@ -221,7 +228,7 @@ impl Serializer for AddressType {
         match self {
             AddressType::Normal => {
                 writer.write_u8(0);
-            },
+            }
             AddressType::Data(data) => {
                 writer.write_u8(1);
                 data.write(writer);
@@ -237,12 +244,12 @@ impl Serializer for AddressType {
                 let addr_type = AddressType::Data(DataElement::read(reader)?);
                 if reader.total_read() - read > EXTRA_DATA_LIMIT_SIZE {
                     debug!("Invalid data in integrated address, maximum size reached");
-                    return Err(ReaderError::InvalidSize)
+                    return Err(ReaderError::InvalidSize);
                 }
 
                 addr_type
-            },
-            _ => return Err(ReaderError::InvalidValue)
+            }
+            _ => return Err(ReaderError::InvalidValue),
         };
         Ok(_type)
     }
@@ -250,7 +257,7 @@ impl Serializer for AddressType {
     fn size(&self) -> usize {
         match self {
             AddressType::Normal => 1,
-            AddressType::Data(data) => 1 + data.size()
+            AddressType::Data(data) => 1 + data.size(),
         }
     }
 }
@@ -266,7 +273,9 @@ impl serde::Serialize for Address {
 
 impl<'a> serde::Deserialize<'a> for Address {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where D: serde::Deserializer<'a> {
+    where
+        D: serde::Deserializer<'a>,
+    {
         let hex = String::deserialize(deserializer)?;
         Address::from_string(&hex).map_err(SerdeError::custom)
     }

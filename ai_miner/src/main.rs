@@ -1,20 +1,23 @@
-mod daemon_client;
-mod transaction_builder;
-mod storage;
 mod config;
+mod daemon_client;
+mod storage;
+mod transaction_builder;
 // mod integration_tests; // Temporarily disabled
 
+use anyhow::Result;
+use clap::Parser;
+use config::{ConfigValidator, ValidatedConfig};
+use daemon_client::DaemonClient;
+use log::{info, warn};
 use std::{
     path::{Path, PathBuf},
-    time::Duration,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
-use anyhow::Result;
-use clap::Parser;
-use log::{info, warn};
+use storage::StorageManager;
 use tos_common::{
     ai_mining::*,
     async_handler,
@@ -23,30 +26,36 @@ use tos_common::{
     prompt::{
         argument::{Arg, ArgType, ArgumentManager},
         command::{Command, CommandError, CommandHandler, CommandManager},
-        Color, LogLevel, Prompt, ShareablePrompt,
-        default_logs_datetime_format,
+        default_logs_datetime_format, Color, LogLevel, Prompt, ShareablePrompt,
     },
 };
-use daemon_client::DaemonClient;
 use transaction_builder::AIMiningTransactionBuilder;
-use storage::StorageManager;
-use config::{ValidatedConfig, ConfigValidator};
 
 /// Default daemon address for AI mining
 const DEFAULT_DAEMON_ADDRESS: &str = "http://127.0.0.1:18080";
 
 /// Get the next nonce for an address from the daemon
-async fn get_next_nonce(daemon_client: &DaemonClient, address: &Address) -> Result<u64, anyhow::Error> {
+async fn get_next_nonce(
+    daemon_client: &DaemonClient,
+    address: &Address,
+) -> Result<u64, anyhow::Error> {
     let address_str = address.to_string();
 
     // Try to get the current nonce from daemon
     match daemon_client.get_nonce(&address_str).await {
         Ok(nonce) => {
-            log::debug!("Retrieved nonce {} from daemon for address {}", nonce, address);
+            log::debug!(
+                "Retrieved nonce {} from daemon for address {}",
+                nonce,
+                address
+            );
             Ok(nonce + 1) // Next nonce is current + 1
         }
         Err(e) => {
-            log::warn!("Failed to get nonce from daemon: {}. Using fallback method.", e);
+            log::warn!(
+                "Failed to get nonce from daemon: {}. Using fallback method.",
+                e
+            );
 
             // Fallback to timestamp + random for development
             let timestamp = std::time::SystemTime::now()
@@ -186,7 +195,10 @@ async fn main() -> Result<()> {
 
             ValidatedConfig::generate_template(path)?;
             println!("📝 Configuration template generated at {}", path);
-            println!("💡 Edit the file and run the application with --config-file {}", path);
+            println!(
+                "💡 Edit the file and run the application with --config-file {}",
+                path
+            );
             return Ok(());
         }
     }
@@ -197,7 +209,7 @@ async fn main() -> Result<()> {
         ValidatedConfig::from_file(
             config_path,
             cli_config.strict_validation,
-            !cli_config.no_auto_fix
+            !cli_config.no_auto_fix,
         )?
     } else {
         // Use CLI configuration and validate it
@@ -206,7 +218,10 @@ async fn main() -> Result<()> {
         let messages = validator.validate(&mut config)?;
 
         if !messages.is_empty() {
-            println!("🔧 Configuration validation completed with {} message(s)", messages.len());
+            println!(
+                "🔧 Configuration validation completed with {} message(s)",
+                messages.len()
+            );
         }
 
         config
@@ -222,9 +237,9 @@ async fn main() -> Result<()> {
         config.disable_log_color,
         false, // auto_compress_logs
         !config.disable_interactive_mode,
-        vec![], // logs_modules
+        vec![],           // logs_modules
         config.log_level, // file_log_level
-        true, // show_ascii
+        true,             // show_ascii
         default_logs_datetime_format(),
     )?;
 
@@ -244,7 +259,10 @@ async fn main() -> Result<()> {
 
     // Create daemon client with validated configuration
     let daemon_config = config.to_daemon_client_config();
-    let daemon_client = Arc::new(DaemonClient::with_config(&config.daemon_address, daemon_config)?);
+    let daemon_client = Arc::new(DaemonClient::with_config(
+        &config.daemon_address,
+        daemon_config,
+    )?);
 
     // Create transaction builder
     let tx_builder = Arc::new(AIMiningTransactionBuilder::new(network));
@@ -257,7 +275,10 @@ async fn main() -> Result<()> {
     // Test connection to daemon
     info!("Testing connection to daemon...");
     if let Err(e) = daemon_client.test_connection().await {
-        warn!("Failed to connect to daemon: {}. AI mining commands may not work properly.", e);
+        warn!(
+            "Failed to connect to daemon: {}. AI mining commands may not work properly.",
+            e
+        );
     }
 
     if !config.disable_interactive_mode {
@@ -267,32 +288,57 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_prompt(prompt: ShareablePrompt, config: ValidatedConfig, daemon_client: Arc<DaemonClient>, tx_builder: Arc<AIMiningTransactionBuilder>, storage_manager: Arc<Mutex<StorageManager>>) -> Result<()> {
+async fn run_prompt(
+    prompt: ShareablePrompt,
+    config: ValidatedConfig,
+    daemon_client: Arc<DaemonClient>,
+    tx_builder: Arc<AIMiningTransactionBuilder>,
+    storage_manager: Arc<Mutex<StorageManager>>,
+) -> Result<()> {
     let command_manager = CommandManager::new(prompt.clone());
 
     // Register AI mining commands
-    register_ai_mining_commands(&command_manager, config, daemon_client, tx_builder, storage_manager).await?;
+    register_ai_mining_commands(
+        &command_manager,
+        config,
+        daemon_client,
+        tx_builder,
+        storage_manager,
+    )
+    .await?;
 
     let closure = |_: &_, _: _| async {
         let tasks_str = format!(
             "{}: {}",
             prompt.colorize_string(Color::Yellow, "Total Tasks"),
-            prompt.colorize_string(Color::Green, &format!("{}", TOTAL_TASKS.load(Ordering::SeqCst))),
+            prompt.colorize_string(
+                Color::Green,
+                &format!("{}", TOTAL_TASKS.load(Ordering::SeqCst))
+            ),
         );
         let active_str = format!(
             "{}: {}",
             prompt.colorize_string(Color::Yellow, "Active"),
-            prompt.colorize_string(Color::Green, &format!("{}", ACTIVE_TASKS.load(Ordering::SeqCst))),
+            prompt.colorize_string(
+                Color::Green,
+                &format!("{}", ACTIVE_TASKS.load(Ordering::SeqCst))
+            ),
         );
         let completed_str = format!(
             "{}: {}",
             prompt.colorize_string(Color::Yellow, "Completed"),
-            prompt.colorize_string(Color::Green, &format!("{}", COMPLETED_TASKS.load(Ordering::SeqCst))),
+            prompt.colorize_string(
+                Color::Green,
+                &format!("{}", COMPLETED_TASKS.load(Ordering::SeqCst))
+            ),
         );
         let miners_str = format!(
             "{}: {}",
             prompt.colorize_string(Color::Yellow, "Miners"),
-            prompt.colorize_string(Color::Green, &format!("{}", REGISTERED_MINERS.load(Ordering::SeqCst))),
+            prompt.colorize_string(
+                Color::Green,
+                &format!("{}", REGISTERED_MINERS.load(Ordering::SeqCst))
+            ),
         );
 
         Ok(format!(
@@ -306,12 +352,24 @@ async fn run_prompt(prompt: ShareablePrompt, config: ValidatedConfig, daemon_cli
         ))
     };
 
-    prompt.start(Duration::from_millis(1000), Box::new(async_handler!(closure)), Some(&command_manager)).await?;
+    prompt
+        .start(
+            Duration::from_millis(1000),
+            Box::new(async_handler!(closure)),
+            Some(&command_manager),
+        )
+        .await?;
     Ok(())
 }
 
 /// Register all AI mining commands
-async fn register_ai_mining_commands(manager: &CommandManager, config: ValidatedConfig, daemon_client: Arc<DaemonClient>, tx_builder: Arc<AIMiningTransactionBuilder>, storage_manager: Arc<Mutex<StorageManager>>) -> Result<(), CommandError> {
+async fn register_ai_mining_commands(
+    manager: &CommandManager,
+    config: ValidatedConfig,
+    daemon_client: Arc<DaemonClient>,
+    tx_builder: Arc<AIMiningTransactionBuilder>,
+    storage_manager: Arc<Mutex<StorageManager>>,
+) -> Result<(), CommandError> {
     // Set config, daemon client, transaction builder, and storage manager in context for commands to use
     {
         let mut context = manager.get_context().lock()?;
@@ -329,7 +387,7 @@ async fn register_ai_mining_commands(manager: &CommandManager, config: Validated
             Arg::new("address", ArgType::String),
             Arg::new("fee", ArgType::Number),
         ],
-        CommandHandler::Async(async_handler!(register_miner))
+        CommandHandler::Async(async_handler!(register_miner)),
     ))?;
 
     // Publish task command
@@ -342,7 +400,7 @@ async fn register_ai_mining_commands(manager: &CommandManager, config: Validated
             Arg::new("deadline", ArgType::Number),
             Arg::new("description", ArgType::String),
         ],
-        CommandHandler::Async(async_handler!(publish_task))
+        CommandHandler::Async(async_handler!(publish_task)),
     ))?;
 
     // Submit answer command
@@ -354,7 +412,7 @@ async fn register_ai_mining_commands(manager: &CommandManager, config: Validated
             Arg::new("answer", ArgType::String),
             Arg::new("stake", ArgType::Number),
         ],
-        CommandHandler::Async(async_handler!(submit_answer))
+        CommandHandler::Async(async_handler!(submit_answer)),
     ))?;
 
     // Validate answer command
@@ -366,107 +424,104 @@ async fn register_ai_mining_commands(manager: &CommandManager, config: Validated
             Arg::new("answer_id", ArgType::String),
             Arg::new("score", ArgType::Number),
         ],
-        CommandHandler::Async(async_handler!(validate_answer))
+        CommandHandler::Async(async_handler!(validate_answer)),
     ))?;
 
     // List tasks command
     manager.add_command(Command::new(
         "list_tasks",
         "List all active AI mining tasks",
-        CommandHandler::Async(async_handler!(list_tasks))
+        CommandHandler::Async(async_handler!(list_tasks)),
     ))?;
 
     // Show stats command
     manager.add_command(Command::new(
         "stats",
         "Show AI mining statistics",
-        CommandHandler::Async(async_handler!(show_stats))
+        CommandHandler::Async(async_handler!(show_stats)),
     ))?;
 
     // Show reputation command
     manager.add_command(Command::with_optional_arguments(
         "reputation",
         "Show miner reputation",
-        vec![
-            Arg::new("address", ArgType::String),
-        ],
-        CommandHandler::Async(async_handler!(show_reputation))
+        vec![Arg::new("address", ArgType::String)],
+        CommandHandler::Async(async_handler!(show_reputation)),
     ))?;
 
     // Daemon status command
     manager.add_command(Command::new(
         "daemon_status",
         "Check daemon connection status",
-        CommandHandler::Async(async_handler!(daemon_status))
+        CommandHandler::Async(async_handler!(daemon_status)),
     ))?;
 
     // Storage-related commands
     manager.add_command(Command::new(
         "storage_stats",
         "Show storage statistics",
-        CommandHandler::Async(async_handler!(storage_stats))
+        CommandHandler::Async(async_handler!(storage_stats)),
     ))?;
 
     manager.add_command(Command::new(
         "show_tasks",
         "Show all stored tasks",
-        CommandHandler::Async(async_handler!(show_stored_tasks))
+        CommandHandler::Async(async_handler!(show_stored_tasks)),
     ))?;
 
     manager.add_command(Command::new(
         "show_transactions",
         "Show transaction history",
-        CommandHandler::Async(async_handler!(show_transaction_history))
+        CommandHandler::Async(async_handler!(show_transaction_history)),
     ))?;
 
     manager.add_command(Command::with_optional_arguments(
         "clear_storage",
         "Clear all storage data (use with caution)",
-        vec![
-            Arg::new("confirm", ArgType::String),
-        ],
-        CommandHandler::Async(async_handler!(clear_storage))
+        vec![Arg::new("confirm", ArgType::String)],
+        CommandHandler::Async(async_handler!(clear_storage)),
     ))?;
 
     // Integration testing commands
     manager.add_command(Command::with_optional_arguments(
         "run_integration_tests",
         "Run comprehensive AI mining workflow tests",
-        vec![
-            Arg::new("mock_mode", ArgType::String),
-        ],
-        CommandHandler::Async(async_handler!(run_integration_tests))
+        vec![Arg::new("mock_mode", ArgType::String)],
+        CommandHandler::Async(async_handler!(run_integration_tests)),
     ))?;
 
     manager.add_command(Command::new(
         "test_task_publication",
         "Test AI task publication workflow",
-        CommandHandler::Async(async_handler!(test_task_publication_workflow))
+        CommandHandler::Async(async_handler!(test_task_publication_workflow)),
     ))?;
 
     manager.add_command(Command::new(
         "test_answer_submission",
         "Test AI answer submission workflow",
-        CommandHandler::Async(async_handler!(test_answer_submission_workflow))
+        CommandHandler::Async(async_handler!(test_answer_submission_workflow)),
     ))?;
 
     manager.add_command(Command::new(
         "test_validation",
         "Test AI answer validation workflow",
-        CommandHandler::Async(async_handler!(test_validation_workflow))
+        CommandHandler::Async(async_handler!(test_validation_workflow)),
     ))?;
 
     manager.add_command(Command::new(
         "test_reward_cycle",
         "Test complete reward distribution cycle",
-        CommandHandler::Async(async_handler!(test_reward_cycle))
+        CommandHandler::Async(async_handler!(test_reward_cycle)),
     ))?;
 
     Ok(())
 }
 
 /// Register as an AI miner
-async fn register_miner(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn register_miner(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let prompt = manager.get_prompt();
     let context = manager.get_context().lock()?;
     let config: &ValidatedConfig = context.get()?;
@@ -485,8 +540,12 @@ async fn register_miner(manager: &CommandManager, mut args: ArgumentManager) -> 
     let fee_amount = match args.get_value("fee") {
         Ok(fee) => fee.to_number()?,
         Err(_) => {
-            let fee_str = prompt.read_input("Enter registration fee (nanoTOS)", false).await?;
-            fee_str.parse().map_err(|_| CommandError::InvalidArgument("Invalid fee amount".to_string()))?
+            let fee_str = prompt
+                .read_input("Enter registration fee (nanoTOS)", false)
+                .await?;
+            fee_str
+                .parse()
+                .map_err(|_| CommandError::InvalidArgument("Invalid fee amount".to_string()))?
         }
     };
 
@@ -494,7 +553,10 @@ async fn register_miner(manager: &CommandManager, mut args: ArgumentManager) -> 
     let address = Address::from_string(&address_str)
         .map_err(|_| CommandError::InvalidArgument("Invalid address format".to_string()))?;
 
-    manager.message(format!("Registering miner {} with fee {} nanoTOS", address, fee_amount));
+    manager.message(format!(
+        "Registering miner {} with fee {} nanoTOS",
+        address, fee_amount
+    ));
 
     // Get storage and transaction builder
     let storage: &Arc<Mutex<StorageManager>> = context.get()?;
@@ -502,33 +564,54 @@ async fn register_miner(manager: &CommandManager, mut args: ArgumentManager) -> 
 
     // Get daemon client and generate nonce
     let daemon_client: &Arc<DaemonClient> = context.get()?;
-    let nonce = get_next_nonce(daemon_client, &address).await
+    let nonce = get_next_nonce(daemon_client, &address)
+        .await
         .map_err(|e| CommandError::BatchModeError(format!("Failed to generate nonce: {}", e)))?;
 
     // Create transaction metadata
-    let metadata = tx_builder.build_register_miner_transaction(
-        address.clone().to_public_key(),
-        fee_amount,
-        nonce,
-        0, // fee (auto-calculate)
-    ).map_err(|e| CommandError::BatchModeError(e.to_string()))?;
+    let metadata = tx_builder
+        .build_register_miner_transaction(
+            address.clone().to_public_key(),
+            fee_amount,
+            nonce,
+            0, // fee (auto-calculate)
+        )
+        .map_err(|e| CommandError::BatchModeError(e.to_string()))?;
 
     manager.message("Registration transaction created:");
     manager.message(format!("  - Address: {}", address));
-    manager.message(format!("  - Registration Fee: {} nanoTOS ({} TOS)", fee_amount, fee_amount as f64 / 1_000_000_000.0));
-    manager.message(format!("  - Estimated TX Fee: {} nanoTOS", metadata.estimated_fee));
-    manager.message(format!("  - Estimated Size: {} bytes", metadata.estimated_size));
+    manager.message(format!(
+        "  - Registration Fee: {} nanoTOS ({} TOS)",
+        fee_amount,
+        fee_amount as f64 / 1_000_000_000.0
+    ));
+    manager.message(format!(
+        "  - Estimated TX Fee: {} nanoTOS",
+        metadata.estimated_fee
+    ));
+    manager.message(format!(
+        "  - Estimated Size: {} bytes",
+        metadata.estimated_size
+    ));
     manager.message(format!("  - Nonce: {}", metadata.nonce));
 
     // Store miner registration in storage
     {
-        let mut storage_guard = storage.lock().map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
-        storage_guard.register_miner(&address.to_public_key(), fee_amount).await
+        let mut storage_guard = storage
+            .lock()
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
+        storage_guard
+            .register_miner(&address.to_public_key(), fee_amount)
+            .await
             .map_err(|e| CommandError::BatchModeError(format!("Storage error: {}", e)))?;
 
         // Add transaction record
-        storage_guard.add_transaction(&metadata, None).await
-            .map_err(|e| CommandError::BatchModeError(format!("Transaction storage error: {}", e)))?;
+        storage_guard
+            .add_transaction(&metadata, None)
+            .await
+            .map_err(|e| {
+                CommandError::BatchModeError(format!("Transaction storage error: {}", e))
+            })?;
     }
 
     manager.message("✅ Miner registration stored successfully");
@@ -539,21 +622,33 @@ async fn register_miner(manager: &CommandManager, mut args: ArgumentManager) -> 
 }
 
 /// Publish a new AI mining task
-async fn publish_task(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn publish_task(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let prompt = manager.get_prompt();
 
     let reward_amount = match args.get_value("reward") {
         Ok(reward) => reward.to_number()?,
         Err(_) => {
-            let reward_str = prompt.read_input("Enter reward amount (nanoTOS)", false).await?;
-            reward_str.parse().map_err(|_| CommandError::InvalidArgument("Invalid reward amount".to_string()))?
+            let reward_str = prompt
+                .read_input("Enter reward amount (nanoTOS)", false)
+                .await?;
+            reward_str
+                .parse()
+                .map_err(|_| CommandError::InvalidArgument("Invalid reward amount".to_string()))?
         }
     };
 
     let difficulty_str = match args.get_value("difficulty") {
         Ok(diff) => diff.to_string_value()?,
         Err(_) => {
-            prompt.read_input("Enter difficulty (Beginner/Intermediate/Advanced/Expert)", false).await?
+            prompt
+                .read_input(
+                    "Enter difficulty (Beginner/Intermediate/Advanced/Expert)",
+                    false,
+                )
+                .await?
         }
     };
 
@@ -562,22 +657,28 @@ async fn publish_task(manager: &CommandManager, mut args: ArgumentManager) -> Re
         "intermediate" => DifficultyLevel::Intermediate,
         "advanced" => DifficultyLevel::Advanced,
         "expert" => DifficultyLevel::Expert,
-        _ => return Err(CommandError::InvalidArgument("Invalid difficulty level".to_string())),
+        _ => {
+            return Err(CommandError::InvalidArgument(
+                "Invalid difficulty level".to_string(),
+            ))
+        }
     };
 
     let deadline = match args.get_value("deadline") {
         Ok(dl) => dl.to_number()?,
         Err(_) => {
-            let deadline_str = prompt.read_input("Enter deadline (timestamp)", false).await?;
-            deadline_str.parse().map_err(|_| CommandError::InvalidArgument("Invalid deadline".to_string()))?
+            let deadline_str = prompt
+                .read_input("Enter deadline (timestamp)", false)
+                .await?;
+            deadline_str
+                .parse()
+                .map_err(|_| CommandError::InvalidArgument("Invalid deadline".to_string()))?
         }
     };
 
     let description = match args.get_value("description") {
         Ok(desc) => desc.to_string_value()?,
-        Err(_) => {
-            prompt.read_input("Enter task description", false).await?
-        }
+        Err(_) => prompt.read_input("Enter task description", false).await?,
     };
 
     // Validate reward against difficulty
@@ -594,7 +695,11 @@ async fn publish_task(manager: &CommandManager, mut args: ArgumentManager) -> Re
 
     manager.message(format!("Publishing AI mining task:"));
     manager.message(format!("  - Task ID: {}", hex::encode(task_id.as_bytes())));
-    manager.message(format!("  - Reward: {} nanoTOS ({} TOS)", reward_amount, reward_amount as f64 / 1_000_000_000.0));
+    manager.message(format!(
+        "  - Reward: {} nanoTOS ({} TOS)",
+        reward_amount,
+        reward_amount as f64 / 1_000_000_000.0
+    ));
     manager.message(format!("  - Difficulty: {:?}", difficulty));
     manager.message(format!("  - Deadline: {}", deadline));
     manager.message(format!("  - Description: {}", description));
@@ -606,28 +711,31 @@ async fn publish_task(manager: &CommandManager, mut args: ArgumentManager) -> Re
 }
 
 /// Submit an answer to a task
-async fn submit_answer(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn submit_answer(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let prompt = manager.get_prompt();
 
     let task_id_str = match args.get_value("task_id") {
         Ok(id) => id.to_string_value()?,
-        Err(_) => {
-            prompt.read_input("Enter task ID", false).await?
-        }
+        Err(_) => prompt.read_input("Enter task ID", false).await?,
     };
 
     let answer_str = match args.get_value("answer") {
         Ok(ans) => ans.to_string_value()?,
-        Err(_) => {
-            prompt.read_input("Enter your answer", false).await?
-        }
+        Err(_) => prompt.read_input("Enter your answer", false).await?,
     };
 
     let stake_amount = match args.get_value("stake") {
         Ok(stake) => stake.to_number()?,
         Err(_) => {
-            let stake_str = prompt.read_input("Enter stake amount (nanoTOS)", false).await?;
-            stake_str.parse().map_err(|_| CommandError::InvalidArgument("Invalid stake amount".to_string()))?
+            let stake_str = prompt
+                .read_input("Enter stake amount (nanoTOS)", false)
+                .await?;
+            stake_str
+                .parse()
+                .map_err(|_| CommandError::InvalidArgument("Invalid stake amount".to_string()))?
         }
     };
 
@@ -635,7 +743,9 @@ async fn submit_answer(manager: &CommandManager, mut args: ArgumentManager) -> R
     let task_id_bytes = hex::decode(&task_id_str)
         .map_err(|_| CommandError::InvalidArgument("Invalid task ID format".to_string()))?;
     if task_id_bytes.len() != 32 {
-        return Err(CommandError::InvalidArgument("Task ID must be 32 bytes".to_string()));
+        return Err(CommandError::InvalidArgument(
+            "Task ID must be 32 bytes".to_string(),
+        ));
     }
     let mut task_id_array = [0u8; 32];
     task_id_array.copy_from_slice(&task_id_bytes);
@@ -649,40 +759,52 @@ async fn submit_answer(manager: &CommandManager, mut args: ArgumentManager) -> R
 
     manager.message(format!("Submitting answer to task:"));
     manager.message(format!("  - Task ID: {}", task_id_str));
-    manager.message(format!("  - Answer hash: {}", hex::encode(answer_hash.as_bytes())));
-    manager.message(format!("  - Stake: {} nanoTOS ({} TOS)", stake_amount, stake_amount as f64 / 1_000_000_000.0));
+    manager.message(format!(
+        "  - Answer hash: {}",
+        hex::encode(answer_hash.as_bytes())
+    ));
+    manager.message(format!(
+        "  - Stake: {} nanoTOS ({} TOS)",
+        stake_amount,
+        stake_amount as f64 / 1_000_000_000.0
+    ));
 
     Ok(())
 }
 
 /// Validate a submitted answer
-async fn validate_answer(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn validate_answer(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let prompt = manager.get_prompt();
 
     let task_id_str = match args.get_value("task_id") {
         Ok(id) => id.to_string_value()?,
-        Err(_) => {
-            prompt.read_input("Enter task ID", false).await?
-        }
+        Err(_) => prompt.read_input("Enter task ID", false).await?,
     };
 
     let answer_id_str = match args.get_value("answer_id") {
         Ok(id) => id.to_string_value()?,
-        Err(_) => {
-            prompt.read_input("Enter answer ID", false).await?
-        }
+        Err(_) => prompt.read_input("Enter answer ID", false).await?,
     };
 
     let score = match args.get_value("score") {
         Ok(s) => s.to_number()? as u8,
         Err(_) => {
-            let score_str = prompt.read_input("Enter validation score (0-100)", false).await?;
-            score_str.parse().map_err(|_| CommandError::InvalidArgument("Invalid score".to_string()))?
+            let score_str = prompt
+                .read_input("Enter validation score (0-100)", false)
+                .await?;
+            score_str
+                .parse()
+                .map_err(|_| CommandError::InvalidArgument("Invalid score".to_string()))?
         }
     };
 
     if score > 100 {
-        return Err(CommandError::InvalidArgument("Score must be between 0-100".to_string()));
+        return Err(CommandError::InvalidArgument(
+            "Score must be between 0-100".to_string(),
+        ));
     }
 
     manager.message(format!("Validating answer:"));
@@ -701,13 +823,34 @@ async fn list_tasks(manager: &CommandManager, _args: ArgumentManager) -> Result<
 
     // Show sample tasks for demonstration
     let sample_tasks = [
-        ("a1b2c3d4...", "Beginner", "10.0", "Image Classification", "2h 15m"),
-        ("e5f6g7h8...", "Advanced", "75.5", "Natural Language Processing", "5h 42m"),
-        ("i9j0k1l2...", "Expert", "200.0", "Code Generation", "12h 8m"),
+        (
+            "a1b2c3d4...",
+            "Beginner",
+            "10.0",
+            "Image Classification",
+            "2h 15m",
+        ),
+        (
+            "e5f6g7h8...",
+            "Advanced",
+            "75.5",
+            "Natural Language Processing",
+            "5h 42m",
+        ),
+        (
+            "i9j0k1l2...",
+            "Expert",
+            "200.0",
+            "Code Generation",
+            "12h 8m",
+        ),
     ];
 
     for (task_id, difficulty, reward, description, remaining) in sample_tasks {
-        manager.message(format!("  Task ID: {} | Difficulty: {} | Reward: {} TOS", task_id, difficulty, reward));
+        manager.message(format!(
+            "  Task ID: {} | Difficulty: {} | Reward: {} TOS",
+            task_id, difficulty, reward
+        ));
         manager.message(format!("    Description: {}", description));
         manager.message(format!("    Time remaining: {}", remaining));
         manager.message("");
@@ -719,10 +862,22 @@ async fn list_tasks(manager: &CommandManager, _args: ArgumentManager) -> Result<
 /// Show AI mining statistics
 async fn show_stats(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
     manager.message("AI Mining Statistics:");
-    manager.message(format!("  Total Tasks Published: {}", TOTAL_TASKS.load(Ordering::SeqCst)));
-    manager.message(format!("  Active Tasks: {}", ACTIVE_TASKS.load(Ordering::SeqCst)));
-    manager.message(format!("  Completed Tasks: {}", COMPLETED_TASKS.load(Ordering::SeqCst)));
-    manager.message(format!("  Registered Miners: {}", REGISTERED_MINERS.load(Ordering::SeqCst)));
+    manager.message(format!(
+        "  Total Tasks Published: {}",
+        TOTAL_TASKS.load(Ordering::SeqCst)
+    ));
+    manager.message(format!(
+        "  Active Tasks: {}",
+        ACTIVE_TASKS.load(Ordering::SeqCst)
+    ));
+    manager.message(format!(
+        "  Completed Tasks: {}",
+        COMPLETED_TASKS.load(Ordering::SeqCst)
+    ));
+    manager.message(format!(
+        "  Registered Miners: {}",
+        REGISTERED_MINERS.load(Ordering::SeqCst)
+    ));
     manager.message("");
     manager.message("Reward Distribution:");
     manager.message("  Beginner: 5.0 - 15.0 TOS");
@@ -734,7 +889,10 @@ async fn show_stats(manager: &CommandManager, _args: ArgumentManager) -> Result<
 }
 
 /// Show miner reputation
-async fn show_reputation(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn show_reputation(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let prompt = manager.get_prompt();
     let context = manager.get_context().lock()?;
     let config: &ValidatedConfig = context.get()?;
@@ -770,7 +928,10 @@ async fn show_reputation(manager: &CommandManager, mut args: ArgumentManager) ->
 }
 
 /// Show daemon connection status with comprehensive health check
-async fn daemon_status(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
+async fn daemon_status(
+    manager: &CommandManager,
+    _args: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let daemon_client: &Arc<DaemonClient> = context.get()?;
 
@@ -823,7 +984,10 @@ async fn daemon_status(manager: &CommandManager, _args: ArgumentManager) -> Resu
                 let config = daemon_client.config();
                 manager.message("⚙️  Client Configuration:");
                 manager.message(format!("  - Request Timeout: {:?}", config.request_timeout));
-                manager.message(format!("  - Connection Timeout: {:?}", config.connection_timeout));
+                manager.message(format!(
+                    "  - Connection Timeout: {:?}",
+                    config.connection_timeout
+                ));
                 manager.message(format!("  - Max Retries: {}", config.max_retries));
                 manager.message(format!("  - Retry Delay: {:?}", config.retry_delay));
 
@@ -861,43 +1025,78 @@ async fn daemon_status(manager: &CommandManager, _args: ArgumentManager) -> Resu
 }
 
 /// Show storage statistics
-async fn storage_stats(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
+async fn storage_stats(
+    manager: &CommandManager,
+    _args: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let storage: &Arc<Mutex<StorageManager>> = context.get()?;
 
     let (stats, miner_info) = {
-        let storage_guard = storage.lock().map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
-        (storage_guard.get_stats(), storage_guard.get_miner_info().cloned())
+        let storage_guard = storage
+            .lock()
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
+        (
+            storage_guard.get_stats(),
+            storage_guard.get_miner_info().cloned(),
+        )
     };
 
     manager.message("📊 Storage Statistics:");
     manager.message(format!("  Network: {:?}", stats.network));
     manager.message(format!("  Total Tasks: {}", stats.total_tasks));
-    manager.message(format!("  Total Transactions: {}", stats.total_transactions));
-    manager.message(format!("  Miner Registered: {}", if stats.miner_registered { "Yes" } else { "No" }));
+    manager.message(format!(
+        "  Total Transactions: {}",
+        stats.total_transactions
+    ));
+    manager.message(format!(
+        "  Miner Registered: {}",
+        if stats.miner_registered { "Yes" } else { "No" }
+    ));
 
     if let Some(miner) = miner_info {
         manager.message("  Miner Statistics:");
-        manager.message(format!("    - Tasks Published: {}", miner.total_tasks_published));
-        manager.message(format!("    - Answers Submitted: {}", miner.total_answers_submitted));
-        manager.message(format!("    - Validations Performed: {}", miner.total_validations_performed));
-        manager.message(format!("    - Registration Fee: {} nanoTOS", miner.registration_fee));
+        manager.message(format!(
+            "    - Tasks Published: {}",
+            miner.total_tasks_published
+        ));
+        manager.message(format!(
+            "    - Answers Submitted: {}",
+            miner.total_answers_submitted
+        ));
+        manager.message(format!(
+            "    - Validations Performed: {}",
+            miner.total_validations_performed
+        ));
+        manager.message(format!(
+            "    - Registration Fee: {} nanoTOS",
+            miner.registration_fee
+        ));
     }
 
-    let last_updated = chrono::DateTime::<chrono::Utc>::from_timestamp(stats.last_updated as i64, 0)
-        .unwrap_or_default();
-    manager.message(format!("  Last Updated: {}", last_updated.format("%Y-%m-%d %H:%M:%S UTC")));
+    let last_updated =
+        chrono::DateTime::<chrono::Utc>::from_timestamp(stats.last_updated as i64, 0)
+            .unwrap_or_default();
+    manager.message(format!(
+        "  Last Updated: {}",
+        last_updated.format("%Y-%m-%d %H:%M:%S UTC")
+    ));
 
     Ok(())
 }
 
 /// Show all stored tasks
-async fn show_stored_tasks(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
+async fn show_stored_tasks(
+    manager: &CommandManager,
+    _args: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let storage: &Arc<Mutex<StorageManager>> = context.get()?;
 
     let tasks = {
-        let storage_guard = storage.lock().map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
+        let storage_guard = storage
+            .lock()
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
         storage_guard.get_all_tasks().clone()
     };
 
@@ -909,8 +1108,9 @@ async fn show_stored_tasks(manager: &CommandManager, _args: ArgumentManager) -> 
     manager.message(format!("📝 Stored Tasks ({} total):", tasks.len()));
 
     for (task_id, task) in tasks {
-        let created_time = chrono::DateTime::<chrono::Utc>::from_timestamp(task.created_at as i64, 0)
-            .unwrap_or_default();
+        let created_time =
+            chrono::DateTime::<chrono::Utc>::from_timestamp(task.created_at as i64, 0)
+                .unwrap_or_default();
         let state_emoji = match task.state {
             storage::TaskState::Published => "🟡",
             storage::TaskState::AnswersReceived => "🔵",
@@ -922,7 +1122,10 @@ async fn show_stored_tasks(manager: &CommandManager, _args: ArgumentManager) -> 
         manager.message(format!("    Reward: {} nanoTOS", task.reward_amount));
         manager.message(format!("    Difficulty: {:?}", task.difficulty));
         manager.message(format!("    State: {:?}", task.state));
-        manager.message(format!("    Created: {}", created_time.format("%Y-%m-%d %H:%M:%S UTC")));
+        manager.message(format!(
+            "    Created: {}",
+            created_time.format("%Y-%m-%d %H:%M:%S UTC")
+        ));
         manager.message("");
     }
 
@@ -930,13 +1133,22 @@ async fn show_stored_tasks(manager: &CommandManager, _args: ArgumentManager) -> 
 }
 
 /// Show transaction history
-async fn show_transaction_history(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
+async fn show_transaction_history(
+    manager: &CommandManager,
+    _args: ArgumentManager,
+) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let storage: &Arc<Mutex<StorageManager>> = context.get()?;
 
     let transactions = {
-        let storage_guard = storage.lock().map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
-        storage_guard.get_recent_transactions(20).into_iter().cloned().collect::<Vec<_>>()
+        let storage_guard = storage
+            .lock()
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
+        storage_guard
+            .get_recent_transactions(20)
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>()
     }; // Show last 20 transactions
 
     if transactions.is_empty() {
@@ -944,7 +1156,10 @@ async fn show_transaction_history(manager: &CommandManager, _args: ArgumentManag
         return Ok(());
     }
 
-    manager.message(format!("💳 Recent Transactions ({} shown):", transactions.len()));
+    manager.message(format!(
+        "💳 Recent Transactions ({} shown):",
+        transactions.len()
+    ));
 
     for tx in &transactions {
         let created_time = chrono::DateTime::<chrono::Utc>::from_timestamp(tx.created_at as i64, 0)
@@ -956,17 +1171,27 @@ async fn show_transaction_history(manager: &CommandManager, _args: ArgumentManag
             storage::TransactionStatus::Failed => "❌",
         };
 
-        manager.message(format!("  {} {} - {} nanoTOS", status_emoji, tx.payload_type, tx.estimated_fee));
+        manager.message(format!(
+            "  {} {} - {} nanoTOS",
+            status_emoji, tx.payload_type, tx.estimated_fee
+        ));
         if let Some(ref hash) = tx.tx_hash {
             manager.message(format!("    Hash: {}...", &hash[..16]));
         }
         manager.message(format!("    Status: {:?}", tx.status));
-        manager.message(format!("    Created: {}", created_time.format("%Y-%m-%d %H:%M:%S UTC")));
+        manager.message(format!(
+            "    Created: {}",
+            created_time.format("%Y-%m-%d %H:%M:%S UTC")
+        ));
 
         if let Some(confirmed_at) = tx.confirmed_at {
-            let confirmed_time = chrono::DateTime::<chrono::Utc>::from_timestamp(confirmed_at as i64, 0)
-                .unwrap_or_default();
-            manager.message(format!("    Confirmed: {}", confirmed_time.format("%Y-%m-%d %H:%M:%S UTC")));
+            let confirmed_time =
+                chrono::DateTime::<chrono::Utc>::from_timestamp(confirmed_at as i64, 0)
+                    .unwrap_or_default();
+            manager.message(format!(
+                "    Confirmed: {}",
+                confirmed_time.format("%Y-%m-%d %H:%M:%S UTC")
+            ));
         }
         manager.message("");
     }
@@ -975,7 +1200,10 @@ async fn show_transaction_history(manager: &CommandManager, _args: ArgumentManag
 }
 
 /// Clear all storage data
-async fn clear_storage(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
+async fn clear_storage(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
     let confirm = match args.get_value("confirm") {
         Ok(val) => val.to_string_value()?.to_lowercase(),
         Err(_) => {
@@ -994,8 +1222,12 @@ async fn clear_storage(manager: &CommandManager, mut args: ArgumentManager) -> R
     let storage: &Arc<Mutex<StorageManager>> = context.get()?;
 
     {
-        let mut storage_guard = storage.lock().map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
-        storage_guard.clear_all().await
+        let mut storage_guard = storage
+            .lock()
+            .map_err(|e| CommandError::BatchModeError(format!("Storage lock error: {}", e)))?;
+        storage_guard
+            .clear_all()
+            .await
             .map_err(|e| CommandError::BatchModeError(format!("Clear storage error: {}", e)))?;
     }
 
@@ -1005,7 +1237,10 @@ async fn clear_storage(manager: &CommandManager, mut args: ArgumentManager) -> R
 }
 
 /// Run comprehensive integration tests (temporarily disabled)
-async fn run_integration_tests(manager: &CommandManager, mut _args: ArgumentManager) -> Result<(), CommandError> {
+async fn run_integration_tests(
+    manager: &CommandManager,
+    mut _args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.message("⚠️  Comprehensive integration tests temporarily disabled");
     manager.message("   Use individual workflow tests instead:");
     manager.message("   - test_task_publication");
@@ -1016,7 +1251,10 @@ async fn run_integration_tests(manager: &CommandManager, mut _args: ArgumentMana
 }
 
 /// Test AI task publication workflow
-async fn test_task_publication_workflow(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
+async fn test_task_publication_workflow(
+    manager: &CommandManager,
+    _args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.message("📤 Testing AI task publication workflow...");
 
     let context = manager.get_context().lock()?;
@@ -1031,10 +1269,13 @@ async fn test_task_publication_workflow(manager: &CommandManager, _args: Argumen
     let deadline = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_secs() + 7200; // 2 hours from now
+        .as_secs()
+        + 7200; // 2 hours from now
 
     // Use miner address as publisher for testing
-    let publisher_address = config.miner_address.as_ref()
+    let publisher_address = config
+        .miner_address
+        .as_ref()
         .ok_or_else(|| CommandError::BatchModeError("No miner address configured".to_string()))?;
 
     let nonce = get_next_nonce(daemon_client, publisher_address)
@@ -1042,28 +1283,42 @@ async fn test_task_publication_workflow(manager: &CommandManager, _args: Argumen
         .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {}", e)))?;
 
     // Create transaction metadata
-    let metadata = tx_builder.build_publish_task_transaction(
-        task_id.clone(),
-        reward_amount,
-        difficulty.clone(),
-        deadline,
-        "Test AI mining task".to_string(), // Task description
-        nonce,
-        0, // Auto-calculate fee
-    ).map_err(|e| CommandError::BatchModeError(e.to_string()))?;
+    let metadata = tx_builder
+        .build_publish_task_transaction(
+            task_id.clone(),
+            reward_amount,
+            difficulty.clone(),
+            deadline,
+            "Test AI mining task".to_string(), // Task description
+            nonce,
+            0, // Auto-calculate fee
+        )
+        .map_err(|e| CommandError::BatchModeError(e.to_string()))?;
 
     manager.message("✅ Task publication test completed:");
     manager.message(format!("  - Task ID: {}", hex::encode(task_id.as_bytes())));
-    manager.message(format!("  - Reward: {} TOS", reward_amount as f64 / 1_000_000_000.0));
+    manager.message(format!(
+        "  - Reward: {} TOS",
+        reward_amount as f64 / 1_000_000_000.0
+    ));
     manager.message(format!("  - Difficulty: {:?}", difficulty));
-    manager.message(format!("  - Estimated Fee: {} nanoTOS", metadata.estimated_fee));
-    manager.message(format!("  - Estimated Size: {} bytes", metadata.estimated_size));
+    manager.message(format!(
+        "  - Estimated Fee: {} nanoTOS",
+        metadata.estimated_fee
+    ));
+    manager.message(format!(
+        "  - Estimated Size: {} bytes",
+        metadata.estimated_size
+    ));
 
     Ok(())
 }
 
 /// Test AI answer submission workflow
-async fn test_answer_submission_workflow(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
+async fn test_answer_submission_workflow(
+    manager: &CommandManager,
+    _args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.message("💡 Testing AI answer submission workflow...");
 
     let context = manager.get_context().lock()?;
@@ -1078,7 +1333,9 @@ async fn test_answer_submission_workflow(manager: &CommandManager, _args: Argume
     let stake_amount = 2_000_000_000; // 2 TOS stake
 
     // Use miner address
-    let miner_address = config.miner_address.as_ref()
+    let miner_address = config
+        .miner_address
+        .as_ref()
         .ok_or_else(|| CommandError::BatchModeError("No miner address configured".to_string()))?;
 
     let nonce = get_next_nonce(daemon_client, miner_address)
@@ -1086,27 +1343,44 @@ async fn test_answer_submission_workflow(manager: &CommandManager, _args: Argume
         .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {}", e)))?;
 
     // Create transaction metadata
-    let metadata = tx_builder.build_submit_answer_transaction(
-        task_id.clone(),
-        answer_text.to_string(),
-        answer_hash.clone(),
-        stake_amount,
-        nonce,
-        0, // Auto-calculate fee
-    ).map_err(|e| CommandError::BatchModeError(e.to_string()))?;
+    let metadata = tx_builder
+        .build_submit_answer_transaction(
+            task_id.clone(),
+            answer_text.to_string(),
+            answer_hash.clone(),
+            stake_amount,
+            nonce,
+            0, // Auto-calculate fee
+        )
+        .map_err(|e| CommandError::BatchModeError(e.to_string()))?;
 
     manager.message("✅ Answer submission test completed:");
     manager.message(format!("  - Task ID: {}", hex::encode(task_id.as_bytes())));
-    manager.message(format!("  - Answer Hash: {}", hex::encode(answer_hash.as_bytes())));
-    manager.message(format!("  - Stake: {} TOS", stake_amount as f64 / 1_000_000_000.0));
-    manager.message(format!("  - Estimated Fee: {} nanoTOS", metadata.estimated_fee));
-    manager.message(format!("  - Estimated Size: {} bytes", metadata.estimated_size));
+    manager.message(format!(
+        "  - Answer Hash: {}",
+        hex::encode(answer_hash.as_bytes())
+    ));
+    manager.message(format!(
+        "  - Stake: {} TOS",
+        stake_amount as f64 / 1_000_000_000.0
+    ));
+    manager.message(format!(
+        "  - Estimated Fee: {} nanoTOS",
+        metadata.estimated_fee
+    ));
+    manager.message(format!(
+        "  - Estimated Size: {} bytes",
+        metadata.estimated_size
+    ));
 
     Ok(())
 }
 
 /// Test AI answer validation workflow
-async fn test_validation_workflow(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
+async fn test_validation_workflow(
+    manager: &CommandManager,
+    _args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.message("🔍 Testing AI answer validation workflow...");
 
     let context = manager.get_context().lock()?;
@@ -1120,7 +1394,9 @@ async fn test_validation_workflow(manager: &CommandManager, _args: ArgumentManag
     let validation_score = 88; // Good score
 
     // Use miner address as validator for testing
-    let validator_address = config.miner_address.as_ref()
+    let validator_address = config
+        .miner_address
+        .as_ref()
         .ok_or_else(|| CommandError::BatchModeError("No miner address configured".to_string()))?;
 
     let nonce = get_next_nonce(daemon_client, validator_address)
@@ -1128,26 +1404,40 @@ async fn test_validation_workflow(manager: &CommandManager, _args: ArgumentManag
         .map_err(|e| CommandError::BatchModeError(format!("Nonce generation failed: {}", e)))?;
 
     // Create transaction metadata
-    let metadata = tx_builder.build_validate_answer_transaction(
-        task_id.clone(),
-        answer_id.clone(),
-        validation_score,
-        nonce,
-        0, // Auto-calculate fee
-    ).map_err(|e| CommandError::BatchModeError(e.to_string()))?;
+    let metadata = tx_builder
+        .build_validate_answer_transaction(
+            task_id.clone(),
+            answer_id.clone(),
+            validation_score,
+            nonce,
+            0, // Auto-calculate fee
+        )
+        .map_err(|e| CommandError::BatchModeError(e.to_string()))?;
 
     manager.message("✅ Answer validation test completed:");
     manager.message(format!("  - Task ID: {}", hex::encode(task_id.as_bytes())));
-    manager.message(format!("  - Answer ID: {}", hex::encode(answer_id.as_bytes())));
+    manager.message(format!(
+        "  - Answer ID: {}",
+        hex::encode(answer_id.as_bytes())
+    ));
     manager.message(format!("  - Validation Score: {}/100", validation_score));
-    manager.message(format!("  - Estimated Fee: {} nanoTOS", metadata.estimated_fee));
-    manager.message(format!("  - Estimated Size: {} bytes", metadata.estimated_size));
+    manager.message(format!(
+        "  - Estimated Fee: {} nanoTOS",
+        metadata.estimated_fee
+    ));
+    manager.message(format!(
+        "  - Estimated Size: {} bytes",
+        metadata.estimated_size
+    ));
 
     Ok(())
 }
 
 /// Test complete reward distribution cycle
-async fn test_reward_cycle(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
+async fn test_reward_cycle(
+    manager: &CommandManager,
+    _args: ArgumentManager,
+) -> Result<(), CommandError> {
     manager.message("🔄 Testing complete AI mining reward cycle...");
 
     let context = manager.get_context().lock()?;
@@ -1158,8 +1448,10 @@ async fn test_reward_cycle(manager: &CommandManager, _args: ArgumentManager) -> 
     match daemon_client.health_check().await {
         Ok(health) => {
             if health.is_healthy {
-                manager.message(format!("✅ Daemon connection healthy - Version: {}",
-                    health.version.as_deref().unwrap_or("unknown")));
+                manager.message(format!(
+                    "✅ Daemon connection healthy - Version: {}",
+                    health.version.as_deref().unwrap_or("unknown")
+                ));
                 manager.message(format!("   Response time: {:?}", health.response_time));
 
                 if let Some(peer_count) = health.peer_count {
@@ -1190,25 +1482,48 @@ async fn test_reward_cycle(manager: &CommandManager, _args: ArgumentManager) -> 
     manager.message(format!("  Total Tasks: {}", total_tasks));
     manager.message(format!("  Active Tasks: {}", active_tasks));
     manager.message(format!("  Completed Tasks: {}", completed_tasks));
-    manager.message(format!("  Success Rate: {:.1}%", (completed_tasks as f64 / total_tasks as f64) * 100.0));
-    manager.message(format!("  Total Rewards Distributed: {:.2} TOS", total_rewards_distributed as f64 / 1_000_000_000.0));
-    manager.message(format!("  Average Reward per Task: {:.2} TOS", (total_rewards_distributed as f64 / completed_tasks as f64) / 1_000_000_000.0));
+    manager.message(format!(
+        "  Success Rate: {:.1}%",
+        (completed_tasks as f64 / total_tasks as f64) * 100.0
+    ));
+    manager.message(format!(
+        "  Total Rewards Distributed: {:.2} TOS",
+        total_rewards_distributed as f64 / 1_000_000_000.0
+    ));
+    manager.message(format!(
+        "  Average Reward per Task: {:.2} TOS",
+        (total_rewards_distributed as f64 / completed_tasks as f64) / 1_000_000_000.0
+    ));
 
     // Test network-specific fee calculations
     manager.message("");
     manager.message("💰 Network Fee Analysis:");
     let sample_payload = AIMiningPayload::RegisterMiner {
-        miner_address: config.miner_address.as_ref().unwrap().clone().to_public_key(),
+        miner_address: config
+            .miner_address
+            .as_ref()
+            .unwrap()
+            .clone()
+            .to_public_key(),
         registration_fee: 1_000_000_000,
     };
 
-    for network in &[Network::Devnet, Network::Testnet, Network::Stagenet, Network::Mainnet] {
+    for network in &[
+        Network::Devnet,
+        Network::Testnet,
+        Network::Stagenet,
+        Network::Mainnet,
+    ] {
         let builder = AIMiningTransactionBuilder::new(*network);
         // Use a fixed size estimate for demonstration
         let estimated_size = 120; // bytes, typical for register miner transaction
         let fee = builder.estimate_fee_with_payload_type(estimated_size, Some(&sample_payload));
-        manager.message(format!("  {:?}: {} nanoTOS ({:.6} TOS)",
-            network, fee, fee as f64 / 1_000_000_000.0));
+        manager.message(format!(
+            "  {:?}: {} nanoTOS ({:.6} TOS)",
+            network,
+            fee,
+            fee as f64 / 1_000_000_000.0
+        ));
     }
 
     manager.message("");
@@ -1216,4 +1531,3 @@ async fn test_reward_cycle(manager: &CommandManager, _args: ArgumentManager) -> 
 
     Ok(())
 }
-

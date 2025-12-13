@@ -3,20 +3,18 @@ use tos_common::{
     api::daemon::{DevFeeThreshold, HardFork},
     block::BlockVersion,
     config::BYTES_PER_KB,
-    crypto::{
-        Address,
-        Hash,
-        PublicKey
-    },
+    crypto::{Address, Hash, PublicKey},
     difficulty::Difficulty,
     network::Network,
-    time::TimestampSeconds,
     static_assert,
+    time::TimestampSeconds,
 };
 
 // In case of potential forks, have a unique network id to not connect to others compatible chains
 pub const NETWORK_ID_SIZE: usize = 16;
-pub const NETWORK_ID: [u8; NETWORK_ID_SIZE] = [0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x6f, 0x73, 0x73, 0x6f, 0x6e, 0x69, 0x6d, 0x72, 0x65, 0x74];
+pub const NETWORK_ID: [u8; NETWORK_ID_SIZE] = [
+    0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x6f, 0x73, 0x73, 0x6f, 0x6e, 0x69, 0x6d, 0x72, 0x65, 0x74,
+];
 
 // bind addresses
 pub const DEFAULT_P2P_BIND_ADDRESS: &str = "0.0.0.0:2125";
@@ -74,7 +72,7 @@ pub const DEV_FEES: [DevFeeThreshold; 2] = [
     // Activated for 3M blocks
     DevFeeThreshold {
         height: 0,
-        fee_percentage: 10
+        fee_percentage: 10,
     },
     // Activated for the rest
     DevFeeThreshold {
@@ -83,8 +81,8 @@ pub const DEV_FEES: [DevFeeThreshold; 2] = [
         // Note: Old comment referenced 12s blocks (3_942_000 blocks)
         // New calculation: 3_942_000 * (12/3) = 15_768_000 blocks for same duration
         height: 15_768_000,
-        fee_percentage: 5
-    }
+        fee_percentage: 5,
+    },
 ];
 // only 30% of reward for side block
 // This is to prevent spamming side blocks
@@ -202,20 +200,20 @@ const HARD_FORKS: [HardFork; 3] = [
         height: 0,
         version: BlockVersion::V0,
         changelog: "Initial version",
-        version_requirement: None
+        version_requirement: None,
     },
     HardFork {
         height: 0,
         version: BlockVersion::V1,
         changelog: "tos-hash v2",
-        version_requirement: None
+        version_requirement: None,
     },
     HardFork {
         height: 0,
         version: BlockVersion::V2,
         changelog: "MultiSig, P2P",
-        version_requirement: None
-    }
+        version_requirement: None,
+    },
 ];
 
 // Testnet / Stagenet / Devnet hard forks
@@ -224,26 +222,26 @@ const OTHERS_NETWORK_HARD_FORKS: [HardFork; 4] = [
         height: 0,
         version: BlockVersion::V0,
         changelog: "Initial version",
-        version_requirement: None
+        version_requirement: None,
     },
     HardFork {
         height: 5,
         version: BlockVersion::V1,
         changelog: "tos-hash v2",
-        version_requirement: Some(">=1.13.0")
+        version_requirement: Some(">=1.13.0"),
     },
     HardFork {
         height: 10,
         version: BlockVersion::V2,
         changelog: "MultiSig, P2P",
-        version_requirement: Some(">=1.16.0")
+        version_requirement: Some(">=1.16.0"),
     },
     HardFork {
         height: 15,
         version: BlockVersion::V3,
         changelog: "Smart Contracts",
-        version_requirement: Some(">=1.16.0")
-    }
+        version_requirement: Some(">=1.16.0"),
+    },
 ];
 
 // Mainnet seed nodes
@@ -261,7 +259,7 @@ const MAINNET_SEED_NODES: [&str; 7] = [
     // Great Britain
     "51.195.220.137:2125",
     // Canada
-    "66.70.179.137:2125"
+    "66.70.179.137:2125",
 ];
 
 // Testnet seed nodes
@@ -277,8 +275,14 @@ const TESTNET_GENESIS_BLOCK: &str = "0000000000000000000000018ae9622918000000000
 
 // Genesis block hash for both networks
 // It must be the same as the hash of the genesis block
-const MAINNET_GENESIS_BLOCK_HASH: Hash = Hash::new([123, 111, 199, 253, 98, 37, 114, 152, 179, 226, 64, 94, 57, 131, 108, 241, 153, 243, 177, 108, 175, 198, 106, 4, 165, 113, 220, 59, 249, 217, 57, 252]);
-const TESTNET_GENESIS_BLOCK_HASH: Hash = Hash::new([155, 28, 4, 144, 29, 33, 28, 237, 10, 64, 156, 95, 52, 15, 165, 108, 5, 228, 138, 52, 42, 222, 1, 103, 24, 202, 208, 248, 217, 62, 124, 237]);
+const MAINNET_GENESIS_BLOCK_HASH: Hash = Hash::new([
+    123, 111, 199, 253, 98, 37, 114, 152, 179, 226, 64, 94, 57, 131, 108, 241, 153, 243, 177, 108,
+    175, 198, 106, 4, 165, 113, 220, 59, 249, 217, 57, 252,
+]);
+const TESTNET_GENESIS_BLOCK_HASH: Hash = Hash::new([
+    155, 28, 4, 144, 29, 33, 28, 237, 10, 64, 156, 95, 52, 15, 165, 108, 5, 228, 138, 52, 42, 222,
+    1, 103, 24, 202, 208, 248, 217, 62, 124, 237,
+]);
 
 // Genesis block getter
 // This is necessary to prevent having the same Genesis Block for differents network
@@ -287,7 +291,7 @@ pub fn get_hex_genesis_block(network: &Network) -> Option<&str> {
     match network {
         Network::Mainnet => Some(MAINNET_GENESIS_BLOCK),
         Network::Testnet | Network::Stagenet => Some(TESTNET_GENESIS_BLOCK),
-        Network::Devnet => None
+        Network::Devnet => None,
     }
 }
 
@@ -303,7 +307,7 @@ pub fn get_genesis_block_hash(network: &Network) -> Option<&'static Hash> {
     match network {
         Network::Mainnet => Some(&MAINNET_GENESIS_BLOCK_HASH),
         Network::Testnet | Network::Stagenet => Some(&TESTNET_GENESIS_BLOCK_HASH),
-        Network::Devnet => None
+        Network::Devnet => None,
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::{
     serializer::{Reader, ReaderError, Serializer, Writer},
-    transaction::TxVersion
+    transaction::TxVersion,
 };
 use core::fmt;
 
@@ -63,7 +63,9 @@ impl Serializer for BlockVersion {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError>
-        where Self: Sized {
+    where
+        Self: Sized,
+    {
         let id = reader.read_u8()?;
         Self::try_from(id).map_err(|_| ReaderError::InvalidValue)
     }
@@ -86,16 +88,21 @@ impl fmt::Display for BlockVersion {
 
 impl serde::Serialize for BlockVersion {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where S: serde::Serializer {
+    where
+        S: serde::Serializer,
+    {
         serializer.serialize_u8(*self as u8)
     }
 }
 
 impl<'de> serde::Deserialize<'de> for BlockVersion {
     fn deserialize<D>(deserializer: D) -> Result<BlockVersion, D::Error>
-        where D: serde::Deserializer<'de> {
+    where
+        D: serde::Deserializer<'de>,
+    {
         let value = u8::deserialize(deserializer)?;
-        BlockVersion::try_from(value).map_err(|_| serde::de::Error::custom("Invalid value for BlockVersion"))
+        BlockVersion::try_from(value)
+            .map_err(|_| serde::de::Error::custom("Invalid value for BlockVersion"))
     }
 }
 

@@ -1,7 +1,7 @@
+use super::{DataElement, DataValue, ElementType, ValueType};
 use indexmap::IndexMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use super::{DataElement, DataValue, ElementType, ValueType};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -25,7 +25,7 @@ impl QueryNumber {
                 DataValue::U32(v) => *v as usize > *value,
                 DataValue::U16(v) => *v as usize > *value,
                 DataValue::U8(v) => *v as usize > *value,
-                _ => false
+                _ => false,
             },
             Self::GreaterOrEqual(value) => match v {
                 DataValue::U128(v) => *v >= *value as u128,
@@ -33,7 +33,7 @@ impl QueryNumber {
                 DataValue::U32(v) => *v as usize >= *value,
                 DataValue::U16(v) => *v as usize >= *value,
                 DataValue::U8(v) => *v as usize >= *value,
-                _ => false
+                _ => false,
             },
             Self::Lesser(value) => match v {
                 DataValue::U128(v) => *v < *value as u128,
@@ -41,7 +41,7 @@ impl QueryNumber {
                 DataValue::U32(v) => (*v as usize) < *value,
                 DataValue::U16(v) => (*v as usize) < *value,
                 DataValue::U8(v) => (*v as usize) < *value,
-                _ => false
+                _ => false,
             },
             Self::LesserOrEqual(value) => match v {
                 DataValue::U128(v) => *v <= *value as u128,
@@ -49,8 +49,8 @@ impl QueryNumber {
                 DataValue::U32(v) => *v as usize <= *value,
                 DataValue::U16(v) => *v as usize <= *value,
                 DataValue::U8(v) => *v as usize <= *value,
-                _ => false
-            }
+                _ => false,
+            },
         }
     }
 }
@@ -70,7 +70,7 @@ pub enum QueryValue {
     #[serde(with = "serde_regex")]
     Matches(Regex),
     #[serde(untagged)]
-    NumberOp(QueryNumber)
+    NumberOp(QueryNumber),
 }
 
 impl QueryValue {
@@ -82,7 +82,7 @@ impl QueryValue {
             Self::ContainsValue(value) => v.to_string().contains(&value.to_string()),
             Self::IsOfType(expected) => v.kind() == *expected,
             Self::Matches(pattern) => pattern.is_match(&v.to_string()),
-            Self::NumberOp(query) => query.verify(v)
+            Self::NumberOp(query) => query.verify(v),
         }
     }
 }
@@ -99,7 +99,7 @@ pub enum Query {
     #[serde(untagged)]
     Element(QueryElement),
     #[serde(untagged)]
-    Value(QueryValue)
+    Value(QueryValue),
 }
 
 impl Query {
@@ -111,18 +111,18 @@ impl Query {
                 DataElement::Array(array) => {
                     for element in array {
                         if self.verify_element(element) {
-                            return true
+                            return true;
                         }
                     }
                     false
-                },
-                _ => false
-            }
+                }
+                _ => false,
+            },
             Self::Not(op) => !op.verify_element(element),
             Self::Or(operations) => {
                 for op in operations {
                     if op.verify_element(element) {
-                        return true
+                        return true;
                     }
                 }
                 false
@@ -130,7 +130,7 @@ impl Query {
             Self::And(operations) => {
                 for op in operations {
                     if !op.verify_element(element) {
-                        return false
+                        return false;
                     }
                 }
                 true
@@ -146,7 +146,7 @@ impl Query {
             Self::Or(operations) => {
                 for op in operations {
                     if op.verify_value(value) {
-                        return true
+                        return true;
                     }
                 }
                 false
@@ -154,7 +154,7 @@ impl Query {
             Self::And(operations) => {
                 for op in operations {
                     if !op.verify_value(value) {
-                        return false
+                        return false;
                     }
                 }
                 true
@@ -165,26 +165,35 @@ impl Query {
     pub fn is_for_element(&self) -> bool {
         match self {
             Self::Element(_) => true,
-            _ => false
+            _ => false,
         }
     }
 }
 
 // This is used to do query in daemon (in future for Smart Contracts) and wallet
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")] 
+#[serde(rename_all = "snake_case")]
 pub enum QueryElement {
     // Check if DataElement::Fields has key and optional check on value
-    HasKey { key: DataValue, query: Option<Box<Query>> },
+    HasKey {
+        key: DataValue,
+        query: Option<Box<Query>>,
+    },
     // Check query on the value of the key
-    AtKey { key: DataValue, query: Box<Query>},
+    AtKey {
+        key: DataValue,
+        query: Box<Query>,
+    },
     // check the array or map length
     Len(QueryNumber),
     // Only array supported
     ContainsElement(DataElement),
     // Verify with query the element at position
     // This is only for array
-    AtPosition { position: usize, query: Box<Query> },
+    AtPosition {
+        position: usize,
+        query: Box<Query>,
+    },
     // Check value type
     Type(ElementType),
 }
@@ -192,41 +201,53 @@ pub enum QueryElement {
 impl QueryElement {
     pub fn verify(&self, data: &DataElement) -> bool {
         match self {
-            Self::HasKey { key, query } => if let DataElement::Fields(fields) = data {
-                fields.get(key).map(|v|
-                    if let Some(query) = query {
-                        query.verify_element(v)
-                    } else {
-                        false
-                    }
-                ).unwrap_or(false)
-            } else {
-                false
-            },
-            Self::AtKey { key, query } => if let DataElement::Fields(fields) = data {
-                fields.get(key).map(|v| query.verify_element(v)).unwrap_or(false)
-            } else {
-                false
-            },
-            Self::Len(query) => match data {
-                DataElement::Fields(fields) => query.verify(&DataValue::U8(fields.len() as u8)),
-                DataElement::Array(array) => query.verify(&DataValue::U8(array.len() as u8)),
-                _ => false
-            },
-            Self::ContainsElement(query) => match data {
-                DataElement::Array(array) => array.contains(query),
-                _ => false
-            },
-            Self::AtPosition { position, query } => if let DataElement::Array(array) = data {
-                if let Some(element) = array.get(*position) {
-                    query.verify_element(element)
+            Self::HasKey { key, query } => {
+                if let DataElement::Fields(fields) = data {
+                    fields
+                        .get(key)
+                        .map(|v| {
+                            if let Some(query) = query {
+                                query.verify_element(v)
+                            } else {
+                                false
+                            }
+                        })
+                        .unwrap_or(false)
                 } else {
                     false
                 }
-            } else {
-                false
+            }
+            Self::AtKey { key, query } => {
+                if let DataElement::Fields(fields) = data {
+                    fields
+                        .get(key)
+                        .map(|v| query.verify_element(v))
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            }
+            Self::Len(query) => match data {
+                DataElement::Fields(fields) => query.verify(&DataValue::U8(fields.len() as u8)),
+                DataElement::Array(array) => query.verify(&DataValue::U8(array.len() as u8)),
+                _ => false,
             },
-            Self::Type(expected) => data.kind() == *expected
+            Self::ContainsElement(query) => match data {
+                DataElement::Array(array) => array.contains(query),
+                _ => false,
+            },
+            Self::AtPosition { position, query } => {
+                if let DataElement::Array(array) = data {
+                    if let Some(element) = array.get(*position) {
+                        query.verify_element(element)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            Self::Type(expected) => data.kind() == *expected,
         }
     }
 }
@@ -234,7 +255,7 @@ impl QueryElement {
 #[derive(Serialize, Deserialize)]
 pub struct QueryResult {
     pub entries: IndexMap<DataValue, DataElement>,
-    pub next: Option<usize>
+    pub next: Option<usize>,
 }
 
 #[cfg(test)]
@@ -295,34 +316,49 @@ mod tests {
     #[test]
     fn test_query_element() {
         let mut fields = HashMap::new();
-        fields.insert(DataValue::String("owner".to_string()), DataElement::Value(DataValue::String("Tos".to_string())));
-        fields.insert(DataValue::String("balance".to_string()), DataElement::Value(DataValue::U8(25)));
+        fields.insert(
+            DataValue::String("owner".to_string()),
+            DataElement::Value(DataValue::String("Tos".to_string())),
+        );
+        fields.insert(
+            DataValue::String("balance".to_string()),
+            DataElement::Value(DataValue::U8(25)),
+        );
 
         let element = DataElement::Fields(fields.clone());
 
         let query = QueryElement::HasKey {
             key: DataValue::String("owner".to_string()),
-            query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Tos".to_string())))))
+            query: Some(Box::new(Query::Value(QueryValue::Equal(
+                DataValue::String("Tos".to_string()),
+            )))),
         };
         assert!(query.verify(&element));
 
         let query = QueryElement::AtKey {
             key: DataValue::String("balance".to_string()),
-            query: Box::new(Query::Value(QueryValue::NumberOp(QueryNumber::Greater(20))))
+            query: Box::new(Query::Value(QueryValue::NumberOp(QueryNumber::Greater(20)))),
         };
         assert!(query.verify(&element));
 
         let query = QueryElement::Len(QueryNumber::GreaterOrEqual(2));
         assert!(query.verify(&DataElement::Fields(fields.clone())));
 
-        let query = QueryElement::ContainsElement(DataElement::Value(DataValue::String("Tos".to_string())));
-        assert!(query.verify(&DataElement::Array(vec![DataElement::Value(DataValue::String("Tos".to_string()))])));
+        let query =
+            QueryElement::ContainsElement(DataElement::Value(DataValue::String("Tos".to_string())));
+        assert!(query.verify(&DataElement::Array(vec![DataElement::Value(
+            DataValue::String("Tos".to_string())
+        )])));
 
         let query = QueryElement::AtPosition {
             position: 0,
-            query: Box::new(Query::Value(QueryValue::Equal(DataValue::String("Tos".to_string()))))
+            query: Box::new(Query::Value(QueryValue::Equal(DataValue::String(
+                "Tos".to_string(),
+            )))),
         };
-        assert!(query.verify(&DataElement::Array(vec![DataElement::Value(DataValue::String("Tos".to_string()))])));
+        assert!(query.verify(&DataElement::Array(vec![DataElement::Value(
+            DataValue::String("Tos".to_string())
+        )])));
 
         let query = QueryElement::Type(ElementType::Fields);
         assert!(query.verify(&DataElement::Fields(fields)));
@@ -337,44 +373,56 @@ mod tests {
             Query::Value(QueryValue::ContainsValue("Tomie".into())),
             Query::Value(QueryValue::ContainsValue("TOS".into())),
             Query::Value(QueryValue::ContainsValue("!".into())),
-        ]).verify_element(&data));
+        ])
+        .verify_element(&data));
 
         assert!(!Query::And(vec![
             Query::Value(QueryValue::ContainsValue("Tomie".into())),
             Query::Value(QueryValue::ContainsValue("TOS".into())),
             Query::Value(QueryValue::ContainsValue("!".into())),
-        ]).verify_element(&data));
+        ])
+        .verify_element(&data));
     }
 
     #[test]
     fn test_query_and() {
         let mut fields = HashMap::new();
-        fields.insert(DataValue::String("owner".to_string()), DataElement::Value(DataValue::String("Tos".to_string())));
-        fields.insert(DataValue::String("balance".to_string()), DataElement::Value(DataValue::U8(25)));
+        fields.insert(
+            DataValue::String("owner".to_string()),
+            DataElement::Value(DataValue::String("Tos".to_string())),
+        );
+        fields.insert(
+            DataValue::String("balance".to_string()),
+            DataElement::Value(DataValue::U8(25)),
+        );
 
         let element = DataElement::Fields(fields.clone());
 
         let query = Query::And(vec![
             Query::Element(QueryElement::HasKey {
                 key: DataValue::String("owner".to_string()),
-                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Tos".to_string())))))
+                query: Some(Box::new(Query::Value(QueryValue::Equal(
+                    DataValue::String("Tos".to_string()),
+                )))),
             }),
             Query::Element(QueryElement::AtKey {
                 key: DataValue::String("balance".to_string()),
-                query: Box::new(Query::Value(QueryValue::NumberOp(QueryNumber::Greater(20))))
-            })
+                query: Box::new(Query::Value(QueryValue::NumberOp(QueryNumber::Greater(20)))),
+            }),
         ]);
         assert!(query.verify_element(&element));
 
         let query = Query::And(vec![
             Query::Element(QueryElement::HasKey {
                 key: DataValue::String("owner".to_string()),
-                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Tos".to_string())))))
+                query: Some(Box::new(Query::Value(QueryValue::Equal(
+                    DataValue::String("Tos".to_string()),
+                )))),
             }),
             Query::Element(QueryElement::AtKey {
                 key: DataValue::String("balance".to_string()),
-                query: Box::new(Query::Value(QueryValue::NumberOp(QueryNumber::Greater(30))))
-            })
+                query: Box::new(Query::Value(QueryValue::NumberOp(QueryNumber::Greater(30)))),
+            }),
         ]);
         assert!(!query.verify_element(&element));
     }
@@ -382,32 +430,42 @@ mod tests {
     #[test]
     fn test_query_or() {
         let mut fields = HashMap::new();
-        fields.insert(DataValue::String("owner".to_string()), DataElement::Value(DataValue::String("Tos".to_string())));
-        fields.insert(DataValue::String("balance".to_string()), DataElement::Value(DataValue::U8(25)));
+        fields.insert(
+            DataValue::String("owner".to_string()),
+            DataElement::Value(DataValue::String("Tos".to_string())),
+        );
+        fields.insert(
+            DataValue::String("balance".to_string()),
+            DataElement::Value(DataValue::U8(25)),
+        );
 
         let element = DataElement::Fields(fields);
 
         let query = Query::Or(vec![
             Query::Element(QueryElement::AtKey {
                 key: DataValue::String("balance".to_string()),
-                query: Box::new(Query::Value(QueryValue::NumberOp(QueryNumber::Greater(30))))
+                query: Box::new(Query::Value(QueryValue::NumberOp(QueryNumber::Greater(30)))),
             }),
             Query::Element(QueryElement::HasKey {
                 key: DataValue::String("owner".to_string()),
-                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Tos".to_string())))))
-            })
+                query: Some(Box::new(Query::Value(QueryValue::Equal(
+                    DataValue::String("Tos".to_string()),
+                )))),
+            }),
         ]);
         assert!(query.verify_element(&element));
 
         let query = Query::Or(vec![
             Query::Element(QueryElement::AtKey {
                 key: DataValue::String("balance".to_string()),
-                query: Box::new(Query::Value(QueryValue::NumberOp(QueryNumber::Greater(30))))
+                query: Box::new(Query::Value(QueryValue::NumberOp(QueryNumber::Greater(30)))),
             }),
             Query::Not(Box::new(Query::Element(QueryElement::HasKey {
                 key: DataValue::String("owner".to_string()),
-                query: Some(Box::new(Query::Value(QueryValue::Equal(DataValue::String("Tos".to_string())))))
-            })))
+                query: Some(Box::new(Query::Value(QueryValue::Equal(
+                    DataValue::String("Tos".to_string()),
+                )))),
+            }))),
         ]);
         assert!(!query.verify_element(&element));
     }

@@ -1,4 +1,4 @@
-use crate::{varuint::VarUint, crypto::Hash};
+use crate::{crypto::Hash, varuint::VarUint};
 use primitive_types::U256;
 use thiserror::Error;
 
@@ -16,7 +16,7 @@ pub enum DifficultyError {
     #[error("Difficulty cannot be a value zero")]
     DifficultyCannotBeZero,
     #[error("Error while converting value to BigUint")]
-    ErrorOnConversionBigUint
+    ErrorOnConversionBigUint,
 }
 
 // Verify the validity of a block difficulty against the current network difficulty
@@ -31,7 +31,7 @@ pub fn check_difficulty(hash: &Hash, difficulty: &Difficulty) -> Result<bool, Di
 pub fn compute_difficulty_target(difficulty: &Difficulty) -> Result<U256, DifficultyError> {
     let diff = difficulty.as_ref();
     if diff.is_zero() {
-        return Err(DifficultyError::DifficultyCannotBeZero)
+        return Err(DifficultyError::DifficultyCannotBeZero);
     }
 
     Ok(U256::max_value() / diff)

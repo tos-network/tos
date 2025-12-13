@@ -1,24 +1,24 @@
+pub mod account;
+pub mod api;
+pub mod block;
+pub mod contract;
 pub mod crypto;
 pub mod serializer;
 pub mod transaction;
-pub mod block;
-pub mod account;
-pub mod api;
-pub mod contract;
 
 // AI Mining module
 pub mod ai_mining;
 
-pub mod utils;
-pub mod config;
-pub mod immutable;
-pub mod difficulty;
-pub mod network;
 pub mod asset;
+pub mod config;
 pub mod context;
+pub mod difficulty;
+pub mod immutable;
+pub mod network;
 pub mod queue;
-pub mod varuint;
 pub mod time;
+pub mod utils;
+pub mod varuint;
 pub mod versioned_type;
 
 pub mod tokio;
@@ -45,9 +45,7 @@ pub fn get_cli_styles() -> clap::builder::Styles {
                 .bold()
                 .fg_color(Some(Color::Ansi(AnsiColor::Yellow))),
         )
-        .literal(
-            Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))),
-        )
+        .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))))
         .invalid(
             Style::new()
                 .bold()
@@ -63,7 +61,5 @@ pub fn get_cli_styles() -> clap::builder::Styles {
                 .bold()
                 .fg_color(Some(Color::Ansi(AnsiColor::Green))),
         )
-        .placeholder(
-            Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))),
-        )
+        .placeholder(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))))
 }

@@ -1,54 +1,49 @@
 mod request;
 
+use super::{
+    error::P2pError,
+    packet::{ObjectRequest, OwnedObjectResponse, Packet},
+    peer_list::Peer,
+};
+use crate::config::PEER_TIMEOUT_REQUEST_OBJECT;
+use bytes::Bytes;
+use log::{debug, trace, warn};
+use request::*;
 use std::{
     borrow::Cow,
     collections::HashMap,
-    sync::{atomic::{AtomicU64, Ordering}, Arc},
-    time::{Duration, Instant}
-};
-use bytes::Bytes;
-use log::{
-    trace,
-    debug,
-    warn,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
 };
 use tos_common::{
-    tokio::{
-        sync::{
-            mpsc::{Sender, Receiver, self},
-            Mutex,
-            broadcast
-        },
-        select,
-        time::interval
-    },
     crypto::Hash,
     queue::Queue,
     serializer::Serializer,
-    tokio::spawn_task
-};
-use super::{
-    packet::{
-        ObjectRequest,
-        OwnedObjectResponse,
-        Packet
+    tokio::spawn_task,
+    tokio::{
+        select,
+        sync::{
+            broadcast,
+            mpsc::{self, Receiver, Sender},
+            Mutex,
+        },
+        time::interval,
     },
-    error::P2pError,
-    peer_list::Peer
 };
-use crate::config::PEER_TIMEOUT_REQUEST_OBJECT;
-use request::*;
 
 pub type SharedObjectTracker = Arc<ObjectTracker>;
 
 struct ExpirableCache {
-    cache: Mutex<HashMap<Hash, Instant>>
+    cache: Mutex<HashMap<Hash, Instant>>,
 }
 
 impl ExpirableCache {
     pub fn new() -> Self {
         Self {
-            cache: Mutex::new(HashMap::new())
+            cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -64,9 +59,7 @@ impl ExpirableCache {
 
     pub async fn clean(&self, timeout: Duration) {
         let mut cache = self.cache.lock().await;
-        cache.retain(|_, v| {
-            v.elapsed() < timeout
-        });
+        cache.retain(|_, v| v.elapsed() < timeout);
     }
 }
 
@@ -82,7 +75,7 @@ pub struct ObjectTracker {
     group_id: AtomicU64,
     // Requests that should be ignored
     // They got canceled but already requested
-    cache: ExpirableCache
+    cache: ExpirableCache,
 }
 
 // How many requests can be queued in the channel
@@ -99,7 +92,7 @@ impl ObjectTracker {
             request_sender,
             queue: Mutex::new(Queue::new()),
             group_id: AtomicU64::new(0),
-            cache: ExpirableCache::new()
+            cache: ExpirableCache::new(),
         });
 
         // start the requester task loop which send requests to peers
@@ -198,7 +191,11 @@ impl ObjectTracker {
     }
 
     // Task loop to request all objects in order
-    async fn requester_loop(&self, mut request_receiver: Receiver<Hash>, mut server_exit: broadcast::Receiver<()>) {
+    async fn requester_loop(
+        &self,
+        mut request_receiver: Receiver<Hash>,
+        mut server_exit: broadcast::Receiver<()>,
+    ) {
         debug!("Starting requester loop...");
         loop {
             select! {
@@ -228,30 +225,38 @@ impl ObjectTracker {
 
     // This function is called from P2p Server when a peer sends an object response that we requested
     // It will pass the response to the handler task loop
-    pub async fn handle_object_response(&self, response: OwnedObjectResponse) -> Result<bool, P2pError> {
+    pub async fn handle_object_response(
+        &self,
+        response: OwnedObjectResponse,
+    ) -> Result<bool, P2pError> {
         trace!("handle object response {}", response.get_hash());
         {
             let mut queue = self.queue.lock().await;
             if let Some(request) = queue.remove(response.get_hash()) {
                 request.notify(response);
-                return Ok(true)
+                return Ok(true);
             }
         }
 
         if self.cache.remove(response.get_hash()).await {
-            return Ok(true)
+            return Ok(true);
         }
 
         Ok(false)
     }
 
     // Request the object from the peer and returns the response blocker
-    pub async fn request_object_from_peer_with_or_get_notified(&self, peer: Arc<Peer>, request: ObjectRequest, group_id: Option<u64>) -> Result<RequestResponse, P2pError> {
+    pub async fn request_object_from_peer_with_or_get_notified(
+        &self,
+        peer: Arc<Peer>,
+        request: ObjectRequest,
+        group_id: Option<u64>,
+    ) -> Result<RequestResponse, P2pError> {
         trace!("Requesting object {} from {}", request.get_hash(), peer);
         let (listener, hash) = {
             let mut queue = self.queue.lock().await;
             if let Some(request) = queue.get(request.get_hash()) {
-                return Ok(request.listen())
+                return Ok(request.listen());
             }
 
             let hash = request.get_hash().clone();
@@ -268,10 +273,17 @@ impl ObjectTracker {
     }
 
     // Clean the queue from all requests from the given peer or from the group if it is specified
-    async fn clean_queue(&self, queue: &mut Queue<Hash, Request>, peer_id: Option<u64>, group: Option<u64>) {
+    async fn clean_queue(
+        &self,
+        queue: &mut Queue<Hash, Request>,
+        peer_id: Option<u64>,
+        group: Option<u64>,
+    ) {
         trace!("clean queue");
         let iter = queue.extract_if(|_, request| {
-            if let (Some(failed_group), Some(request_group)) = (group.as_ref(), request.get_group_id()) {
+            if let (Some(failed_group), Some(request_group)) =
+                (group.as_ref(), request.get_group_id())
+            {
                 if *failed_group == request_group {
                     return true;
                 }
@@ -292,7 +304,10 @@ impl ObjectTracker {
         });
 
         for (hash, _) in iter {
-            debug!("Adding requested object with hash {} in expirable cache", hash);
+            debug!(
+                "Adding requested object with hash {} in expirable cache",
+                hash
+            );
             self.cache.insert(hash).await;
         }
     }
@@ -307,7 +322,8 @@ impl ObjectTracker {
         let mut request = None;
         if let Some(req) = queue.get_mut(&request_hash) {
             req.set_requested();
-            let packet = Bytes::from(Packet::ObjectRequest(Cow::Borrowed(req.get_object())).to_bytes());
+            let packet =
+                Bytes::from(Packet::ObjectRequest(Cow::Borrowed(req.get_object())).to_bytes());
             request = Some((req.get_peer().clone(), packet, req.get_group_id()));
         } else {
             debug!("Object {} not requested anymore", request_hash);
@@ -319,7 +335,10 @@ impl ObjectTracker {
 
             // Make sure its not closed
             if peer.get_connection().is_closed() {
-                warn!("Peer {} is disconnected but still has a pending request object {}", peer, request_hash);
+                warn!(
+                    "Peer {} is disconnected but still has a pending request object {}",
+                    peer, request_hash
+                );
                 fail = Some((peer.get_id(), group_id));
             } else {
                 let mut peer_exit = peer.get_exit_receiver();

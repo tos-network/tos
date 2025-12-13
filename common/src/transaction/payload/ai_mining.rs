@@ -1,14 +1,20 @@
 use crate::{
-    crypto::{Hash, elgamal::CompressedPublicKey},
-    serializer::{Serializer, Reader, ReaderError, Writer},
-    ai_mining::{AIMiningPayload, DifficultyLevel}
+    ai_mining::{AIMiningPayload, DifficultyLevel},
+    crypto::{elgamal::CompressedPublicKey, Hash},
+    serializer::{Reader, ReaderError, Serializer, Writer},
 };
 
 // Implement Serializer for AIMiningPayload
 impl Serializer for AIMiningPayload {
     fn write(&self, writer: &mut Writer) {
         match self {
-            AIMiningPayload::PublishTask { task_id, reward_amount, difficulty, deadline, description } => {
+            AIMiningPayload::PublishTask {
+                task_id,
+                reward_amount,
+                difficulty,
+                deadline,
+                description,
+            } => {
                 0u8.write(writer);
                 task_id.write(writer);
                 reward_amount.write(writer);
@@ -16,20 +22,32 @@ impl Serializer for AIMiningPayload {
                 deadline.write(writer);
                 description.write(writer);
             }
-            AIMiningPayload::SubmitAnswer { task_id, answer_content, answer_hash, stake_amount } => {
+            AIMiningPayload::SubmitAnswer {
+                task_id,
+                answer_content,
+                answer_hash,
+                stake_amount,
+            } => {
                 1u8.write(writer);
                 task_id.write(writer);
                 answer_content.write(writer);
                 answer_hash.write(writer);
                 stake_amount.write(writer);
             }
-            AIMiningPayload::ValidateAnswer { task_id, answer_id, validation_score } => {
+            AIMiningPayload::ValidateAnswer {
+                task_id,
+                answer_id,
+                validation_score,
+            } => {
                 2u8.write(writer);
                 task_id.write(writer);
                 answer_id.write(writer);
                 validation_score.write(writer);
             }
-            AIMiningPayload::RegisterMiner { miner_address, registration_fee } => {
+            AIMiningPayload::RegisterMiner {
+                miner_address,
+                registration_fee,
+            } => {
                 3u8.write(writer);
                 miner_address.write(writer);
                 registration_fee.write(writer);
@@ -62,20 +80,40 @@ impl Serializer for AIMiningPayload {
                 miner_address: CompressedPublicKey::read(reader)?,
                 registration_fee: u64::read(reader)?,
             }),
-            _ => Err(ReaderError::InvalidValue)
+            _ => Err(ReaderError::InvalidValue),
         }
     }
 
     fn size(&self) -> usize {
         1 + match self {
-            AIMiningPayload::PublishTask { task_id, reward_amount, difficulty, deadline, description } =>
-                task_id.size() + reward_amount.size() + difficulty.size() + deadline.size() + description.size(),
-            AIMiningPayload::SubmitAnswer { task_id, answer_content, answer_hash, stake_amount } =>
-                task_id.size() + answer_content.size() + answer_hash.size() + stake_amount.size(),
-            AIMiningPayload::ValidateAnswer { task_id, answer_id, validation_score } =>
-                task_id.size() + answer_id.size() + validation_score.size(),
-            AIMiningPayload::RegisterMiner { miner_address, registration_fee } =>
-                miner_address.size() + registration_fee.size(),
+            AIMiningPayload::PublishTask {
+                task_id,
+                reward_amount,
+                difficulty,
+                deadline,
+                description,
+            } => {
+                task_id.size()
+                    + reward_amount.size()
+                    + difficulty.size()
+                    + deadline.size()
+                    + description.size()
+            }
+            AIMiningPayload::SubmitAnswer {
+                task_id,
+                answer_content,
+                answer_hash,
+                stake_amount,
+            } => task_id.size() + answer_content.size() + answer_hash.size() + stake_amount.size(),
+            AIMiningPayload::ValidateAnswer {
+                task_id,
+                answer_id,
+                validation_score,
+            } => task_id.size() + answer_id.size() + validation_score.size(),
+            AIMiningPayload::RegisterMiner {
+                miner_address,
+                registration_fee,
+            } => miner_address.size() + registration_fee.size(),
         }
     }
 }
@@ -96,7 +134,7 @@ impl Serializer for DifficultyLevel {
             1 => Ok(DifficultyLevel::Intermediate),
             2 => Ok(DifficultyLevel::Advanced),
             3 => Ok(DifficultyLevel::Expert),
-            _ => Err(ReaderError::InvalidValue)
+            _ => Err(ReaderError::InvalidValue),
         }
     }
 

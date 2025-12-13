@@ -1,13 +1,7 @@
 use anyhow::Context as AnyhowContext;
-use tos_vm::{
+use tos_kernel::{
     traits::{JSONHelper, Serializable},
-    Context,
-    FnInstance,
-    FnParams,
-    FnReturnType,
-    OpaqueWrapper,
-    Primitive,
-    ValueCell
+    Context, FnInstance, FnParams, FnReturnType, OpaqueWrapper, Primitive, ValueCell,
 };
 
 use crate::{block::Block, contract::ChainState};
@@ -22,7 +16,9 @@ impl JSONHelper for OpaqueBlock {}
 impl Serializable for OpaqueBlock {}
 
 pub fn block_current(_: FnInstance, _: FnParams, _: &mut Context) -> FnReturnType {
-    Ok(Some(Primitive::Opaque(OpaqueWrapper::new(OpaqueBlock)).into()))
+    Ok(Some(
+        Primitive::Opaque(OpaqueWrapper::new(OpaqueBlock)).into(),
+    ))
 }
 
 pub fn block_nonce(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
@@ -40,13 +36,17 @@ pub fn block_miner(_: FnInstance, _: FnParams, context: &mut Context) -> FnRetur
     let state: &ChainState = context.get().context("chain state not found")?;
 
     let miner_address = block.get_miner().as_address(state.mainnet);
-    Ok(Some(Primitive::Opaque(OpaqueWrapper::new(miner_address)).into()))
+    Ok(Some(
+        Primitive::Opaque(OpaqueWrapper::new(miner_address)).into(),
+    ))
 }
 
 pub fn block_hash(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
     let state: &ChainState = context.get().context("chain state not found")?;
 
-    Ok(Some(Primitive::Opaque(OpaqueWrapper::new(state.block_hash.clone())).into()))
+    Ok(Some(
+        Primitive::Opaque(OpaqueWrapper::new(state.block_hash.clone())).into(),
+    ))
 }
 
 pub fn block_version(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
@@ -58,7 +58,8 @@ pub fn block_version(_: FnInstance, _: FnParams, context: &mut Context) -> FnRet
 pub fn block_tips(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
     let block: &Block = context.get().context("current block not found")?;
 
-    let tips = block.get_tips()
+    let tips = block
+        .get_tips()
         .iter()
         .map(|tip| Primitive::Opaque(OpaqueWrapper::new(tip.clone())).into())
         .collect();
@@ -66,10 +67,15 @@ pub fn block_tips(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturn
     Ok(Some(ValueCell::Object(tips)))
 }
 
-pub fn block_transactions_hashes(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
+pub fn block_transactions_hashes(
+    _: FnInstance,
+    _: FnParams,
+    context: &mut Context,
+) -> FnReturnType {
     let block: &Block = context.get().context("current block not found")?;
 
-    let hashes = block.get_txs_hashes()
+    let hashes = block
+        .get_txs_hashes()
         .iter()
         .map(|hash| Primitive::Opaque(OpaqueWrapper::new(hash.clone())).into())
         .collect();
@@ -80,13 +86,17 @@ pub fn block_transactions_hashes(_: FnInstance, _: FnParams, context: &mut Conte
 pub fn block_transactions(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
     let block: &Block = context.get().context("current block not found")?;
 
-    let txs = block.get_txs_hashes()
+    let txs = block
+        .get_txs_hashes()
         .iter()
         .zip(block.get_transactions())
-        .map(|(hash, tx)| Primitive::Opaque(OpaqueWrapper::new(OpaqueTransaction {
-            inner: tx.clone(),
-            hash: hash.clone()
-        })).into())
+        .map(|(hash, tx)| {
+            Primitive::Opaque(OpaqueWrapper::new(OpaqueTransaction {
+                inner: tx.clone(),
+                hash: hash.clone(),
+            }))
+            .into()
+        })
         .collect();
 
     Ok(Some(ValueCell::Object(txs)))
@@ -104,7 +114,8 @@ pub fn block_height(_: FnInstance, _: FnParams, context: &mut Context) -> FnRetu
 
 pub fn block_extra_nonce(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnType {
     let block: &Block = context.get().context("current block not found")?;
-    let extra_nonce = block.get_extra_nonce()
+    let extra_nonce = block
+        .get_extra_nonce()
         .iter()
         .map(|v| Primitive::U8(*v).into())
         .collect();

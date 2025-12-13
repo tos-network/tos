@@ -1,17 +1,13 @@
 use std::borrow::Cow;
 
+use crate::core::{
+    error::BlockchainError,
+    storage::{rocksdb::Column, BlocksAtHeightProvider, RocksStorage},
+};
 use async_trait::async_trait;
 use indexmap::IndexSet;
 use log::trace;
 use tos_common::crypto::Hash;
-use crate::core::{
-    error::BlockchainError,
-    storage::{
-        rocksdb::Column,
-        BlocksAtHeightProvider,
-        RocksStorage
-    }
-};
 
 #[async_trait]
 impl BlocksAtHeightProvider for RocksStorage {
@@ -29,15 +25,24 @@ impl BlocksAtHeightProvider for RocksStorage {
     }
 
     // This is used to store the blocks hashes at a specific height
-    async fn set_blocks_at_height(&mut self, tips: &IndexSet<Hash>, height: u64) -> Result<(), BlockchainError> {
+    async fn set_blocks_at_height(
+        &mut self,
+        tips: &IndexSet<Hash>,
+        height: u64,
+    ) -> Result<(), BlockchainError> {
         trace!("set blocks at height {}", height);
         self.insert_into_disk(Column::BlocksAtHeight, height.to_be_bytes(), tips)
     }
 
     // Append a block hash at a specific height
-    async fn add_block_hash_at_height(&mut self, hash: &Hash, height: u64) -> Result<(), BlockchainError> {
+    async fn add_block_hash_at_height(
+        &mut self,
+        hash: &Hash,
+        height: u64,
+    ) -> Result<(), BlockchainError> {
         trace!("add block hash at height {}", height);
-        let mut blocks: IndexSet<Cow<'_, Hash>> = self.load_optional_from_disk(Column::BlocksAtHeight, &height.to_be_bytes())?
+        let mut blocks: IndexSet<Cow<'_, Hash>> = self
+            .load_optional_from_disk(Column::BlocksAtHeight, &height.to_be_bytes())?
             .unwrap_or_default();
 
         if blocks.insert(Cow::Borrowed(hash)) {
@@ -49,10 +54,16 @@ impl BlocksAtHeightProvider for RocksStorage {
     }
 
     // Remove a block hash at a specific height
-    async fn remove_block_hash_at_height(&mut self, hash: &Hash, height: u64) -> Result<(), BlockchainError> {
+    async fn remove_block_hash_at_height(
+        &mut self,
+        hash: &Hash,
+        height: u64,
+    ) -> Result<(), BlockchainError> {
         trace!("remove block hash at height {}", height);
-        let Some(mut blocks): Option<IndexSet<Cow<'_, Hash>>> = self.load_optional_from_disk(Column::BlocksAtHeight, &height.to_be_bytes())? else {
-            return Ok(())
+        let Some(mut blocks): Option<IndexSet<Cow<'_, Hash>>> =
+            self.load_optional_from_disk(Column::BlocksAtHeight, &height.to_be_bytes())?
+        else {
+            return Ok(());
         };
 
         if blocks.shift_remove(&Cow::Borrowed(hash)) {

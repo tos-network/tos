@@ -6,7 +6,7 @@ use crate::{crypto::Hash, serializer::*};
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BurnPayload {
     pub asset: Hash,
-    pub amount: u64
+    pub amount: u64,
 }
 
 impl Serializer for BurnPayload {
@@ -18,10 +18,7 @@ impl Serializer for BurnPayload {
     fn read(reader: &mut Reader) -> Result<BurnPayload, ReaderError> {
         let asset = Hash::read(reader)?;
         let amount = reader.read_u64()?;
-        Ok(BurnPayload {
-            asset,
-            amount
-        })
+        Ok(BurnPayload { asset, amount })
     }
 
     fn size(&self) -> usize {

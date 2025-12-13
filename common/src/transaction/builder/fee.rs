@@ -2,15 +2,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::elgamal::CompressedPublicKey;
 
+/// Fee builder for transaction fee calculation
+/// SAFE: f64 in Multiplier is for client-side estimation only, not consensus-critical
 #[derive(Serialize, Deserialize, Clone, Debug, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum FeeBuilder {
     // calculate tx fees based on its size and multiply by this value
+    // SAFE: Client-side fee estimation, network only validates sufficiency
     Multiplier(f64),
     // set a direct value of how much fees you want to pay exactly
     Value(u64),
     // how much we want to pay above the calculated/needed fees.
-    Boost(u64)
+    Boost(u64),
 }
 
 impl Default for FeeBuilder {
@@ -23,6 +26,7 @@ pub trait FeeHelper {
     type Error;
 
     /// Get the fee multiplier from wallet if wanted
+    /// SAFE: f64 for client-side fee preference, not consensus-critical
     fn get_fee_multiplier(&self) -> f64 {
         1f64
     }

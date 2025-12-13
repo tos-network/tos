@@ -1,20 +1,14 @@
+use super::{
+    derive_shared_key_from_handle, derive_shared_key_from_opening, Cipher, CipherFormatError,
+    PlaintextData, Role, SharedKey, UnknownExtraDataFormat,
+};
 use crate::{
     api::DataElement,
     crypto::{
         elgamal::{CompressedHandle, PedersenOpening, PublicKey, RISTRETTO_COMPRESSED_SIZE},
-        PrivateKey
+        PrivateKey,
     },
     serializer::*,
-    transaction::Role
-};
-use super::{
-    derive_shared_key_from_handle,
-    derive_shared_key_from_opening,
-    Cipher,
-    CipherFormatError,
-    PlaintextData,
-    SharedKey,
-    UnknownExtraDataFormat
 };
 
 // New version of Extra Data due to the issue of commitment randomness reuse
@@ -31,7 +25,7 @@ pub struct ExtraData {
 impl ExtraData {
     // Create a new extra data that will encrypt the message for receiver & sender keys.
     // Both will be able to decrypt it.
-    pub fn new(data: PlaintextData, sender: &PublicKey, receiver: &PublicKey) -> Self {
+    pub fn new(data: PlaintextData, _sender: &PublicKey, _receiver: &PublicKey) -> Self {
         // Generate a new opening (randomness r)
         let opening = PedersenOpening::generate_new();
         // From the randomness, derive the opening it to get the shared key
@@ -40,13 +34,9 @@ impl ExtraData {
         Self {
             // Encrypt the cipher using the shared key
             cipher: data.encrypt_in_place(&k),
-            // Create a handle for the sender so he can decrypt the message later
-            // SH = sender PK * r
-            // Because SK is invert of PK, we can decrypt it by doing SH * SK 
-            sender_handle: sender.decrypt_handle(&opening).compress(),
-            // Same for the receiver
-            // RH = receiver PK * r
-            receiver_handle: receiver.decrypt_handle(&opening).compress(),
+            // Balance simplification: Using default handles (encryption being phased out)
+            sender_handle: CompressedHandle::default(),
+            receiver_handle: CompressedHandle::default(),
         }
     }
 
@@ -54,7 +44,7 @@ impl ExtraData {
     pub fn estimate_size(data: &DataElement) -> usize {
         let cipher: UnknownExtraDataFormat = Cipher(data.to_bytes()).into();
         // 2 bytes of additional overhead because the extra data store
-        // the cipher size again 
+        // the cipher size again
         2 + cipher.size() + (RISTRETTO_COMPRESSED_SIZE * 2)
     }
 
@@ -67,21 +57,31 @@ impl ExtraData {
     }
 
     // Decrypt the message using the private key and the role to determine the correct handle to use.
-    pub fn decrypt(&self, private_key: &PrivateKey, role: Role) -> Result<PlaintextData, CipherFormatError> {
-        let handle = self.get_handle(role).decompress().map_err(|_| CipherFormatError)?;
+    pub fn decrypt(
+        &self,
+        private_key: &PrivateKey,
+        role: Role,
+    ) -> Result<PlaintextData, CipherFormatError> {
+        let handle = self
+            .get_handle(role)
+            .decompress()
+            .map_err(|_| CipherFormatError)?;
         let key = derive_shared_key_from_handle(private_key, &handle);
         self.decrypt_with_shared_key(&key)
     }
 
     // Decrypt the message using the shared key
-    pub fn decrypt_with_shared_key(&self, shared_key: &SharedKey) -> Result<PlaintextData, CipherFormatError> {
-        Ok(self.cipher.clone().decrypt(shared_key)?)
+    pub fn decrypt_with_shared_key(
+        &self,
+        shared_key: &SharedKey,
+    ) -> Result<PlaintextData, CipherFormatError> {
+        self.cipher.clone().decrypt(shared_key)
     }
 }
 
 impl Serializer for ExtraData {
     fn write(&self, writer: &mut Writer) {
-        self.sender_handle.write(writer); 
+        self.sender_handle.write(writer);
         self.receiver_handle.write(writer);
         self.cipher.write(writer);
     }

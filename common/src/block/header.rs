@@ -1,32 +1,33 @@
-use std::{fmt::{Display, Formatter}, fmt::Error};
-use indexmap::IndexSet;
-use serde::Deserialize;
-use log::debug;
+use super::{Algorithm, MinerWork, EXTRA_NONCE_SIZE};
 use crate::{
-    block::{BLOCK_WORK_SIZE, HEADER_WORK_SIZE, BlockVersion},
+    block::{BlockVersion, BLOCK_WORK_SIZE, HEADER_WORK_SIZE},
     config::TIPS_LIMIT,
-    crypto::{
-        elgamal::CompressedPublicKey,
-        hash,
-        pow_hash,
-        Hash,
-        Hashable,
-        HASH_SIZE
-    },
+    crypto::{elgamal::CompressedPublicKey, hash, pow_hash, Hash, Hashable, HASH_SIZE},
+    immutable::Immutable,
     serializer::{Reader, ReaderError, Serializer, Writer},
     time::TimestampMillis,
-    immutable::Immutable
+};
+use indexmap::IndexSet;
+use log::debug;
+use serde::Deserialize;
+use std::{
+    fmt::Error,
+    fmt::{Display, Formatter},
 };
 use tos_hash::Error as TosHashError;
-use super::{Algorithm, MinerWork, EXTRA_NONCE_SIZE};
 
 // Serialize the extra nonce in a hexadecimal string
-pub fn serialize_extra_nonce<S: serde::Serializer>(extra_nonce: &[u8; EXTRA_NONCE_SIZE], s: S) -> Result<S::Ok, S::Error> {
+pub fn serialize_extra_nonce<S: serde::Serializer>(
+    extra_nonce: &[u8; EXTRA_NONCE_SIZE],
+    s: S,
+) -> Result<S::Ok, S::Error> {
     s.serialize_str(&hex::encode(extra_nonce))
 }
 
 // Deserialize the extra nonce from a hexadecimal string
-pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<[u8; EXTRA_NONCE_SIZE], D::Error> {
+pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<[u8; EXTRA_NONCE_SIZE], D::Error> {
     let mut extra_nonce = [0u8; EXTRA_NONCE_SIZE];
     let hex = String::deserialize(deserializer)?;
     let decoded = hex::decode(hex).map_err(serde::de::Error::custom)?;
@@ -56,11 +57,19 @@ pub struct BlockHeader {
     // Miner public key
     pub miner: CompressedPublicKey,
     // All transactions hashes of the block
-    pub txs_hashes: IndexSet<Hash>
+    pub txs_hashes: IndexSet<Hash>,
 }
 
 impl BlockHeader {
-    pub fn new(version: BlockVersion, height: u64, timestamp: TimestampMillis, tips: impl Into<Immutable<IndexSet<Hash>>>, extra_nonce: [u8; EXTRA_NONCE_SIZE], miner: CompressedPublicKey, txs_hashes: IndexSet<Hash>) -> Self {
+    pub fn new(
+        version: BlockVersion,
+        height: u64,
+        timestamp: TimestampMillis,
+        tips: impl Into<Immutable<IndexSet<Hash>>>,
+        extra_nonce: [u8; EXTRA_NONCE_SIZE],
+        miner: CompressedPublicKey,
+        txs_hashes: IndexSet<Hash>,
+    ) -> Self {
         BlockHeader {
             version,
             height,
@@ -69,7 +78,7 @@ impl BlockHeader {
             nonce: 0,
             extra_nonce,
             miner,
-            txs_hashes
+            txs_hashes,
         }
     }
 
@@ -105,7 +114,6 @@ impl BlockHeader {
     pub fn get_tips(&self) -> &IndexSet<Hash> {
         &self.tips
     }
-
 
     pub fn get_immutable_tips(&self) -> &Immutable<IndexSet<Hash>> {
         &self.tips
@@ -167,7 +175,12 @@ impl BlockHeader {
         bytes.extend(self.get_tips_hash().as_bytes()); // 9 + 32 = 41
         bytes.extend(self.get_txs_hash().as_bytes()); // 41 + 32 = 73
 
-        debug_assert!(bytes.len() == HEADER_WORK_SIZE, "Error, invalid header work size, got {} but expected {}", bytes.len(), HEADER_WORK_SIZE);
+        debug_assert!(
+            bytes.len() == HEADER_WORK_SIZE,
+            "Error, invalid header work size, got {} but expected {}",
+            bytes.len(),
+            HEADER_WORK_SIZE
+        );
 
         bytes
     }
@@ -186,7 +199,12 @@ impl BlockHeader {
         bytes.extend(self.extra_nonce);
         bytes.extend(self.miner.as_bytes());
 
-        debug_assert!(bytes.len() == BLOCK_WORK_SIZE, "invalid block work size, got {} but expected {}", bytes.len(), BLOCK_WORK_SIZE);
+        debug_assert!(
+            bytes.len() == BLOCK_WORK_SIZE,
+            "invalid block work size, got {} but expected {}",
+            bytes.len(),
+            BLOCK_WORK_SIZE
+        );
 
         bytes
     }
@@ -218,7 +236,7 @@ impl Serializer for BlockHeader {
             writer.write_hash(tx); // 32
         }
         self.miner.write(writer); // 60 + (N*32) + (T*32) + 32 = 92 + (N*32) + (T*32)
-        // Minimum size is 92 bytes
+                                  // Minimum size is 92 bytes
     }
 
     fn read(reader: &mut Reader) -> Result<BlockHeader, ReaderError> {
@@ -231,14 +249,14 @@ impl Serializer for BlockHeader {
         let tips_count = reader.read_u8()?;
         if tips_count as usize > TIPS_LIMIT {
             debug!("Error, too many tips in block header");
-            return Err(ReaderError::InvalidValue)
+            return Err(ReaderError::InvalidValue);
         }
-        
+
         let mut tips = IndexSet::with_capacity(tips_count as usize);
         for _ in 0..tips_count {
             if !tips.insert(reader.read_hash()?) {
                 debug!("Error, duplicate tip found in block header");
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         }
 
@@ -247,23 +265,21 @@ impl Serializer for BlockHeader {
         for _ in 0..txs_count {
             if !txs_hashes.insert(reader.read_hash()?) {
                 debug!("Error, duplicate tx hash found in block header");
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         }
 
         let miner = CompressedPublicKey::read(reader)?;
-        Ok(
-            BlockHeader {
-                version,
-                extra_nonce,
-                height,
-                timestamp,
-                tips: Immutable::Owned(tips),
-                miner,
-                nonce,
-                txs_hashes
-            }
-        )
+        Ok(BlockHeader {
+            version,
+            extra_nonce,
+            height,
+            timestamp,
+            tips: Immutable::Owned(tips),
+            miner,
+            nonce,
+            txs_hashes,
+        })
     }
 
     fn size(&self) -> usize {
@@ -274,11 +290,14 @@ impl Serializer for BlockHeader {
         // Version is u8
         let version_size = 1;
 
-        EXTRA_NONCE_SIZE + tips_size + txs_size + version_size
-        + self.miner.size()
-        + self.timestamp.size()
-        + self.height.size()
-        + self.nonce.size()
+        EXTRA_NONCE_SIZE
+            + tips_size
+            + txs_size
+            + version_size
+            + self.miner.size()
+            + self.timestamp.size()
+            + self.height.size()
+            + self.nonce.size()
     }
 }
 
@@ -302,9 +321,13 @@ impl Display for BlockHeader {
 
 #[cfg(test)]
 mod tests {
-    use indexmap::IndexSet;
-    use crate::{block::BlockVersion, crypto::{Hash, Hashable, KeyPair}, serializer::Serializer};
     use super::BlockHeader;
+    use crate::{
+        block::BlockVersion,
+        crypto::{Hash, Hashable, KeyPair},
+        serializer::Serializer,
+    };
+    use indexmap::IndexSet;
 
     #[test]
     fn test_block_template() {
@@ -312,7 +335,15 @@ mod tests {
         tips.insert(Hash::zero());
 
         let miner = KeyPair::new().get_public_key().compress();
-        let header = BlockHeader::new(BlockVersion::V0, 0, 0, tips, [0u8; 32], miner, IndexSet::new());
+        let header = BlockHeader::new(
+            BlockVersion::V0,
+            0,
+            0,
+            tips,
+            [0u8; 32],
+            miner,
+            IndexSet::new(),
+        );
 
         let serialized = header.to_bytes();
         assert!(serialized.len() == header.size());

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::Signature,
-    serializer::{Reader, ReaderError, Serializer, Writer}
+    serializer::{Reader, ReaderError, Serializer, Writer},
 };
 
 // SignatureId is a structure that holds the signature and the id of the signer
@@ -15,7 +15,7 @@ pub struct SignatureId {
     // This is the index of the signer in the transaction
     pub id: u8,
     // Signature
-    pub signature: Signature
+    pub signature: Signature,
 }
 
 // MultiSig is a structure that holds a set of signatures

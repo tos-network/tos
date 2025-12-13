@@ -1,36 +1,26 @@
-use std::{borrow::Cow, collections::HashMap};
-use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use super::{
+    daemon, default_false_value, default_true_value, query::Query, DataElement, DataHash, DataValue,
+};
 use crate::{
-    account::CiphertextCache,
     block::TopoHeight,
-    crypto::{elgamal::CompressedCiphertext, Address, Hash, PrivateKey},
+    crypto::{Address, Hash, PrivateKey},
     serializer::Hexable,
     transaction::{
         builder::{FeeBuilder, TransactionTypeBuilder, UnsignedTransaction},
-        extra_data::{PlaintextExtraData, UnknownExtraDataFormat},
+        extra_data::{PlaintextExtraData, Role, UnknownExtraDataFormat},
         multisig::SignatureId,
-        Reference,
-        Role,
-        Transaction,
-        TxVersion
-    }
+        Reference, Transaction, TxVersion,
+    },
 };
-use super::{
-    DataHash,
-    DataElement,
-    DataValue,
-    query::Query,
-    default_false_value,
-    default_true_value,
-    daemon
-};
+use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
+use std::{borrow::Cow, collections::HashMap};
 
 // Signer ID to use for signing the transaction
 #[derive(Serialize, Deserialize)]
 pub struct SignerId {
     pub id: u8,
-    pub private_key: PrivateKey
+    pub private_key: PrivateKey,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -71,9 +61,9 @@ pub struct BuildTransactionOfflineParams {
     // Returns the TX in HEX format also
     #[serde(default = "default_false_value")]
     pub tx_as_hex: bool,
-    // Encrypted balances to use
+    // Plain balances to use
     // Assets spent in the transaction must be present
-    pub balances: HashMap<Hash, CiphertextCache>,
+    pub balances: HashMap<Hash, u64>,
     // Reference to use for the transaction
     // This must point to the most up-to-date topoheight/block hash
     pub reference: Reference,
@@ -124,7 +114,7 @@ pub struct SignUnsignedTransactionParams {
     // Unsigned transaction hash
     pub hash: Hash,
     // Signer ID to use for signing the transaction
-    pub signer_id: u8
+    pub signer_id: u8,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -136,7 +126,7 @@ pub struct UnsignedTransactionResponse {
     // Multisig threshold, zero if not active
     pub threshold: Option<u8>,
     // Unsigned transaction in hex format
-    pub tx_as_hex: Option<String>
+    pub tx_as_hex: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -180,26 +170,26 @@ pub struct GetAssetsParams {
 pub struct TransactionResponse<'a> {
     #[serde(flatten)]
     pub inner: DataHash<'a, Transaction>,
-    pub tx_as_hex: Option<String>
+    pub tx_as_hex: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct GetAssetPrecisionParams<'a> {
-    pub asset: Cow<'a, Hash>
+    pub asset: Cow<'a, Hash>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct GetAddressParams {
     // Data to use for creating an integrated address
     // Returned address will contains all the data provided here
-    pub integrated_data: Option<DataElement>
+    pub integrated_data: Option<DataElement>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct RescanParams {
     pub until_topoheight: Option<TopoHeight>,
     #[serde(default = "default_false_value")]
-    pub auto_reconnect: bool
+    pub auto_reconnect: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -218,42 +208,42 @@ pub struct NetworkInfoResult {
 
 #[derive(Serialize, Deserialize)]
 pub struct GetBalanceParams {
-    pub asset: Option<Hash>
+    pub asset: Option<Hash>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct GetTransactionParams {
-    pub hash: Hash
+    pub hash: Hash,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct SearchTransactionParams<'a> {
-    pub hash: Cow<'a, Hash>
+    pub hash: Cow<'a, Hash>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct SearchTransactionResult {
     pub transaction: Option<TransactionEntry>,
     pub index: Option<u64>,
-    pub is_raw_search: bool
+    pub is_raw_search: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BalanceChanged {
     pub asset: Hash,
-    pub balance: u64
+    pub balance: u64,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct GetValueFromKeyParams {
     pub tree: String,
-    pub key: DataValue
+    pub key: DataValue,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct HasKeyParams {
     pub tree: String,
-    pub key: DataValue
+    pub key: DataValue,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -261,32 +251,32 @@ pub struct GetMatchingKeysParams {
     pub tree: String,
     pub query: Option<Query>,
     pub limit: Option<usize>,
-    pub skip: Option<usize>
+    pub skip: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct CountMatchingEntriesParams {
     pub tree: String,
     pub key: Option<Query>,
-    pub value: Option<Query>
+    pub value: Option<Query>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct StoreParams {
     pub tree: String,
     pub key: DataValue,
-    pub value: DataElement
+    pub value: DataElement,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct DeleteParams {
     pub tree: String,
-    pub key: DataValue
+    pub key: DataValue,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct DeleteTreeEntriesParams {
-    pub tree: String
+    pub tree: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -295,7 +285,7 @@ pub struct QueryDBParams {
     pub key: Option<Query>,
     pub value: Option<Query>,
     pub limit: Option<usize>,
-    pub skip: Option<usize>
+    pub skip: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -305,12 +295,6 @@ pub struct DecryptExtraDataParams<'a> {
     // The role we have in the transaction
     // This is needed to select the correct handle
     pub role: Role,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct DecryptCiphertextParams<'a> {
-    // Ciphertext with the correct handle to use
-    pub ciphertext: Cow<'a, CompressedCiphertext>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -354,7 +338,7 @@ pub struct TransferOut {
     // Plaintext amount
     pub amount: u64,
     // extra data
-    pub extra_data: Option<PlaintextExtraData>
+    pub extra_data: Option<PlaintextExtraData>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -364,7 +348,7 @@ pub struct TransferIn {
     // Plaintext amount
     pub amount: u64,
     // extra data
-    pub extra_data: Option<PlaintextExtraData>
+    pub extra_data: Option<PlaintextExtraData>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -383,24 +367,24 @@ pub struct DeployInvoke {
 pub enum EntryType {
     // Coinbase is only TOS_ASSET
     Coinbase {
-        reward: u64
+        reward: u64,
     },
     Burn {
         asset: Hash,
         amount: u64,
         fee: u64,
-        nonce: u64
+        nonce: u64,
     },
     Incoming {
         from: Address,
-        transfers: Vec<TransferIn>
+        transfers: Vec<TransferIn>,
     },
     Outgoing {
         transfers: Vec<TransferOut>,
         // Fee paid
         fee: u64,
         // Nonce used
-        nonce: u64
+        nonce: u64,
     },
     MultiSig {
         // List of participants
@@ -410,21 +394,21 @@ pub enum EntryType {
         // Fee paid
         fee: u64,
         // Nonce used
-        nonce: u64
+        nonce: u64,
     },
     InvokeContract {
         // Contract address
         contract: Hash,
         // Deposits made
         deposits: IndexMap<Hash, u64>,
-        // Chunk id invoked
-        chunk_id: u16,
+        // Entry point id invoked
+        entry_id: u16,
         // Fee paid
         fee: u64,
         // Max gas allowed
         max_gas: u64,
         // Nonce used
-        nonce: u64
+        nonce: u64,
     },
     DeployContract {
         // Fee paid
@@ -432,7 +416,7 @@ pub enum EntryType {
         // Nonce used
         nonce: u64,
         // constructor invoke
-        invoke: Option<DeployInvoke>
+        invoke: Option<DeployInvoke>,
     },
     AIMining {
         // Transaction hash for reference
@@ -441,7 +425,7 @@ pub enum EntryType {
         payload: crate::ai_mining::AIMiningPayload,
         // Whether this is an outgoing transaction
         outgoing: bool,
-    }
+    },
 }
 
 // This struct is used to represent a transaction entry like in wallet

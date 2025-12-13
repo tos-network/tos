@@ -1,12 +1,9 @@
 pub mod languages;
 
-use thiserror::Error;
-use log::debug;
-use tos_common::{
-    crypto::PrivateKey,
-    serializer::Serializer
-};
 use languages::*;
+use log::debug;
+use thiserror::Error;
+use tos_common::crypto::PrivateKey;
 
 const KEY_SIZE: usize = 32;
 const SEED_LENGTH: usize = 24;
@@ -24,7 +21,7 @@ pub const LANGUAGES: [Language<'static>; 11] = [
     russian::RUSSIAN,
     esperanto::ESPERANTO,
     dutch::DUTCH,
-    german::GERMAN
+    german::GERMAN,
 ];
 
 #[derive(Debug, Error)]
@@ -50,7 +47,7 @@ pub enum MnemonicsError {
     #[error("Word list sanity check error")]
     WordListSanityCheckError,
     #[error("Out of bounds")]
-    OutOfBounds
+    OutOfBounds,
 }
 
 pub struct Language<'a> {
@@ -59,7 +56,7 @@ pub struct Language<'a> {
     // number of utf-8 chars to use for checksum
     prefix_length: usize,
     // list of words in the language
-    words: [&'a str; WORDS_LIST]
+    words: [&'a str; WORDS_LIST],
 }
 
 impl<'a> Language<'a> {
@@ -84,9 +81,7 @@ fn calculate_checksum_index(words: &[&str], prefix_len: usize) -> Result<u32, Mn
 
     let mut chars: Vec<char> = Vec::new();
     for word in words {
-        let mut word_chars: Vec<char> = word.chars()
-            .map(|c| c.to_ascii_lowercase())
-            .collect();
+        let mut word_chars: Vec<char> = word.chars().map(|c| c.to_ascii_lowercase()).collect();
 
         if word_chars.len() > prefix_len {
             word_chars.truncate(prefix_len);
@@ -102,18 +97,25 @@ fn calculate_checksum_index(words: &[&str], prefix_len: usize) -> Result<u32, Mn
 // Verify the checksum of the seed based on the language prefix length and if the seed is composed of 25 words
 fn verify_checksum(words: &[&str], prefix_len: usize) -> Result<Option<bool>, MnemonicsError> {
     let checksum_index = calculate_checksum_index(&words[0..SEED_LENGTH], prefix_len)?;
-    let checksum_word = words.get(checksum_index as usize).ok_or(MnemonicsError::InvalidChecksumIndex)?;
-    Ok(words.get(SEED_LENGTH).map(|v| v.eq_ignore_ascii_case(checksum_word)))
+    let checksum_word = words
+        .get(checksum_index as usize)
+        .ok_or(MnemonicsError::InvalidChecksumIndex)?;
+    Ok(words
+        .get(SEED_LENGTH)
+        .map(|v| v.eq_ignore_ascii_case(checksum_word)))
 }
 
 // Find the indices of the words in the languages
 fn find_indices(words: &[&str]) -> Result<Option<(Vec<usize>, usize)>, MnemonicsError> {
     'main: for (i, language) in LANGUAGES.iter().enumerate() {
-
         // find the indices of the words
         let mut indices = Vec::new();
         for word in words.iter() {
-            if let Some(index) = language.get_words().iter().position(|v| v.eq_ignore_ascii_case(word)) {
+            if let Some(index) = language
+                .get_words()
+                .iter()
+                .position(|v| v.eq_ignore_ascii_case(word))
+            {
                 indices.push(index);
             } else {
                 // incorrect language for this word, try the next one
@@ -146,7 +148,9 @@ pub fn words_to_key(words: &[&str]) -> Result<PrivateKey, MnemonicsError> {
         let b = indices.get(i + 1).ok_or(MnemonicsError::OutOfBounds)?;
         let c = indices.get(i + 2).ok_or(MnemonicsError::OutOfBounds)?;
 
-        let val = a + WORDS_LIST * (((WORDS_LIST - a) + b) % WORDS_LIST) + WORDS_LIST * WORDS_LIST * (((WORDS_LIST - b) + c) % WORDS_LIST);
+        let val = a
+            + WORDS_LIST * (((WORDS_LIST - a) + b) % WORDS_LIST)
+            + WORDS_LIST * WORDS_LIST * (((WORDS_LIST - b) + c) % WORDS_LIST);
         if val % WORDS_LIST != *a {
             return Err(MnemonicsError::WordListSanityCheckError);
         }
@@ -155,17 +159,25 @@ pub fn words_to_key(words: &[&str]) -> Result<PrivateKey, MnemonicsError> {
         dest.extend_from_slice(&val.to_le_bytes());
     }
 
-    Ok(PrivateKey::from_bytes(&dest).map_err(|_| MnemonicsError::InvalidKeyFromBytes)?)
+    let bytes: [u8; 32] = dest
+        .try_into()
+        .map_err(|_| MnemonicsError::InvalidKeyFromBytes)?;
+    Ok(PrivateKey::from_bytes(&bytes).map_err(|_| MnemonicsError::InvalidKeyFromBytes)?)
 }
 
 // Transform a Private Key to a list of words based on the language index
 pub fn key_to_words(key: &PrivateKey, language_index: usize) -> Result<Vec<&str>, MnemonicsError> {
-    let language = LANGUAGES.get(language_index).ok_or(MnemonicsError::InvalidLanguageIndex)?;
+    let language = LANGUAGES
+        .get(language_index)
+        .ok_or(MnemonicsError::InvalidLanguageIndex)?;
     key_to_words_with_language(key, language)
 }
 
 // Transform a Private Key to a list of words with a specific language
-pub fn key_to_words_with_language<'a>(key: &PrivateKey, language: &'a Language) -> Result<Vec<&'a str>, MnemonicsError> {
+pub fn key_to_words_with_language<'a>(
+    key: &PrivateKey,
+    language: &'a Language,
+) -> Result<Vec<&'a str>, MnemonicsError> {
     if language.words.len() != WORDS_LIST {
         return Err(MnemonicsError::InvalidLanguage);
     }
@@ -181,14 +193,18 @@ pub fn key_to_words_with_language<'a>(key: &PrivateKey, language: &'a Language) 
         let a = val % WORDS_LIST_U32;
         let b = ((val / WORDS_LIST_U32) + a) % WORDS_LIST_U32;
         let c = ((val / WORDS_LIST_U32 / WORDS_LIST_U32) + b) % WORDS_LIST_U32;
-        
+
         words.push(language.words[a as usize]);
         words.push(language.words[b as usize]);
         words.push(language.words[c as usize]);
     }
 
     let checksum = calculate_checksum_index(&words, language.prefix_length)?;
-    words.push(words.get(checksum as usize).ok_or(MnemonicsError::InvalidChecksumCalculation)?);
+    words.push(
+        words
+            .get(checksum as usize)
+            .ok_or(MnemonicsError::InvalidChecksumCalculation)?,
+    );
 
     Ok(words)
 }
@@ -220,7 +236,33 @@ mod tests {
     #[test]
     fn test_ignore_case() {
         // Try a random seed with mixed case
-        let seed = ["KiNG", "gleeFuL", "fidgET", "furnished", "agreed", "rowboat", "factual", "echo", "scrub", "enforce", "bygones", "muzzle", "mews", "abbey", "swiftly", "issued", "tonic", "cinema", "lettuce", "zapped", "sighting", "kettle", "leopard", "logic", "enforce"];
+        let seed = [
+            "KiNG",
+            "gleeFuL",
+            "fidgET",
+            "furnished",
+            "agreed",
+            "rowboat",
+            "factual",
+            "echo",
+            "scrub",
+            "enforce",
+            "bygones",
+            "muzzle",
+            "mews",
+            "abbey",
+            "swiftly",
+            "issued",
+            "tonic",
+            "cinema",
+            "lettuce",
+            "zapped",
+            "sighting",
+            "kettle",
+            "leopard",
+            "logic",
+            "enforce",
+        ];
         assert!(super::words_to_key(&seed).is_ok());
     }
 }

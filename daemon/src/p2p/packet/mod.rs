@@ -1,25 +1,25 @@
-mod handshake;
-mod chain;
-mod ping;
-mod object;
-mod inventory;
 mod bootstrap;
+mod chain;
+mod handshake;
+mod inventory;
+mod object;
 mod peer_disconnected;
+mod ping;
 
-use std::borrow::Cow;
-use log::{debug, trace};
-use tos_common::{
-    serializer::{Serializer, Reader, ReaderError, Writer},
-    block::BlockHeader,
-    crypto::Hash
-};
 use super::EncryptionKey;
+use log::{debug, trace};
+use std::borrow::Cow;
+use tos_common::{
+    block::BlockHeader,
+    crypto::Hash,
+    serializer::{Reader, ReaderError, Serializer, Writer},
+};
 
 pub use bootstrap::*;
-pub use inventory::*;
-pub use object::*;
 pub use chain::*;
 pub use handshake::*;
+pub use inventory::*;
+pub use object::*;
 pub use peer_disconnected::*;
 pub use ping::Ping;
 
@@ -33,7 +33,7 @@ const CHAIN_RESPONSE_ID: u8 = 5;
 const PING_ID: u8 = 6;
 const OBJECT_REQUEST_ID: u8 = 7;
 const OBJECT_RESPONSE_ID: u8 = 8;
-const NOTIFY_INV_REQUEST_ID: u8 = 9; 
+const NOTIFY_INV_REQUEST_ID: u8 = 9;
 const NOTIFY_INV_RESPONSE_ID: u8 = 10;
 const BOOTSTRAP_CHAIN_REQUEST_ID: u8 = 11;
 const BOOTSTRAP_CHAIN_RESPONSE_ID: u8 = 12;
@@ -43,15 +43,12 @@ const PEER_DISCONNECTED_ID: u8 = 13;
 #[derive(Debug)]
 pub struct PacketWrapper<'a, T: Serializer + Clone> {
     packet: Cow<'a, T>,
-    ping: Cow<'a, Ping<'a>>
+    ping: Cow<'a, Ping<'a>>,
 }
 
 impl<'a, T: Serializer + Clone> PacketWrapper<'a, T> {
     pub fn new(packet: Cow<'a, T>, ping: Cow<'a, Ping<'a>>) -> Self {
-        Self {
-            packet,
-            ping
-        }
+        Self { packet, ping }
     }
 
     pub fn consume(self) -> (Cow<'a, T>, Cow<'a, Ping<'a>>) {
@@ -69,7 +66,7 @@ impl<'a, T: Serializer + Clone> Serializer for PacketWrapper<'a, T> {
     }
 
     fn write(&self, writer: &mut Writer) {
-        self.packet.write(writer);   
+        self.packet.write(writer);
         self.ping.write(writer);
     }
 
@@ -125,7 +122,7 @@ impl Packet<'_> {
         match self {
             Packet::ObjectRequest(_)
             | Packet::ObjectResponse(_)
-            | Packet::ChainRequest(_) 
+            | Packet::ChainRequest(_)
             | Packet::ChainResponse(_)
             | Packet::NotifyInventoryRequest(_)
             | Packet::PeerDisconnected(_)
@@ -155,14 +152,20 @@ impl<'a> Serializer for Packet<'a> {
             PING_ID => Packet::Ping(Cow::Owned(Ping::read(reader)?)),
             OBJECT_REQUEST_ID => Packet::ObjectRequest(Cow::Owned(ObjectRequest::read(reader)?)),
             OBJECT_RESPONSE_ID => Packet::ObjectResponse(ObjectResponse::read(reader)?),
-            NOTIFY_INV_REQUEST_ID => Packet::NotifyInventoryRequest(PacketWrapper::read(reader)?), 
-            NOTIFY_INV_RESPONSE_ID => Packet::NotifyInventoryResponse(NotifyInventoryResponse::read(reader)?),
-            BOOTSTRAP_CHAIN_REQUEST_ID => Packet::BootstrapChainRequest(BootstrapChainRequest::read(reader)?),
-            BOOTSTRAP_CHAIN_RESPONSE_ID => Packet::BootstrapChainResponse(BootstrapChainResponse::read(reader)?),
+            NOTIFY_INV_REQUEST_ID => Packet::NotifyInventoryRequest(PacketWrapper::read(reader)?),
+            NOTIFY_INV_RESPONSE_ID => {
+                Packet::NotifyInventoryResponse(NotifyInventoryResponse::read(reader)?)
+            }
+            BOOTSTRAP_CHAIN_REQUEST_ID => {
+                Packet::BootstrapChainRequest(BootstrapChainRequest::read(reader)?)
+            }
+            BOOTSTRAP_CHAIN_RESPONSE_ID => {
+                Packet::BootstrapChainResponse(BootstrapChainResponse::read(reader)?)
+            }
             PEER_DISCONNECTED_ID => Packet::PeerDisconnected(PacketPeerDisconnected::read(reader)?),
             id => {
                 debug!("invalid packet id received: {}", id);
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         };
 
@@ -176,19 +179,39 @@ impl<'a> Serializer for Packet<'a> {
     fn write(&self, writer: &mut Writer) {
         match self {
             Packet::KeyExchange(key) => Self::write_packet(writer, KEY_EXCHANGE_ID, key),
-            Packet::Handshake(handshake) => Self::write_packet(writer, HANDSHAKE_ID, handshake.as_ref()),
+            Packet::Handshake(handshake) => {
+                Self::write_packet(writer, HANDSHAKE_ID, handshake.as_ref())
+            }
             Packet::TransactionPropagation(tx) => Self::write_packet(writer, TX_PROPAGATION_ID, tx),
-            Packet::BlockPropagation(block) => Self::write_packet(writer, BLOCK_PROPAGATION_ID, block),
+            Packet::BlockPropagation(block) => {
+                Self::write_packet(writer, BLOCK_PROPAGATION_ID, block)
+            }
             Packet::ChainRequest(request) => Self::write_packet(writer, CHAIN_REQUEST_ID, request),
-            Packet::ChainResponse(response) => Self::write_packet(writer, CHAIN_RESPONSE_ID, response),
+            Packet::ChainResponse(response) => {
+                Self::write_packet(writer, CHAIN_RESPONSE_ID, response)
+            }
             Packet::Ping(ping) => Self::write_packet(writer, PING_ID, ping.as_ref()),
-            Packet::ObjectRequest(request) => Self::write_packet(writer, OBJECT_REQUEST_ID, request.as_ref()),
-            Packet::ObjectResponse(response) => Self::write_packet(writer, OBJECT_RESPONSE_ID, response),
-            Packet::NotifyInventoryRequest(request) => Self::write_packet(writer, NOTIFY_INV_REQUEST_ID, request),
-            Packet::NotifyInventoryResponse(inventory) => Self::write_packet(writer, NOTIFY_INV_RESPONSE_ID, inventory),
-            Packet::BootstrapChainRequest(request) => Self::write_packet(writer, BOOTSTRAP_CHAIN_REQUEST_ID, request),
-            Packet::BootstrapChainResponse(response) => Self::write_packet(writer, BOOTSTRAP_CHAIN_RESPONSE_ID, response),
-            Packet::PeerDisconnected(disconnected) => Self::write_packet(writer, PEER_DISCONNECTED_ID, disconnected),
+            Packet::ObjectRequest(request) => {
+                Self::write_packet(writer, OBJECT_REQUEST_ID, request.as_ref())
+            }
+            Packet::ObjectResponse(response) => {
+                Self::write_packet(writer, OBJECT_RESPONSE_ID, response)
+            }
+            Packet::NotifyInventoryRequest(request) => {
+                Self::write_packet(writer, NOTIFY_INV_REQUEST_ID, request)
+            }
+            Packet::NotifyInventoryResponse(inventory) => {
+                Self::write_packet(writer, NOTIFY_INV_RESPONSE_ID, inventory)
+            }
+            Packet::BootstrapChainRequest(request) => {
+                Self::write_packet(writer, BOOTSTRAP_CHAIN_REQUEST_ID, request)
+            }
+            Packet::BootstrapChainResponse(response) => {
+                Self::write_packet(writer, BOOTSTRAP_CHAIN_RESPONSE_ID, response)
+            }
+            Packet::PeerDisconnected(disconnected) => {
+                Self::write_packet(writer, PEER_DISCONNECTED_ID, disconnected)
+            }
         };
     }
 }

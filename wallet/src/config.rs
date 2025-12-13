@@ -1,26 +1,19 @@
 use std::ops::ControlFlow;
 
-use argon2::{Params, Argon2, Algorithm, Version};
+use argon2::{Algorithm, Argon2, Params, Version};
+#[cfg(feature = "cli")]
+use clap::Parser;
 use lazy_static::lazy_static;
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-#[cfg(feature = "cli")]
-use clap::Parser;
 use tos_common::{
-    config::VERSION,
-    crypto::ecdlp,
-    network::Network,
-    utils::detect_available_parallelism
+    config::VERSION, crypto::ecdlp, network::Network, utils::detect_available_parallelism,
 };
 
-#[cfg(feature = "cli")]
-use tos_common::prompt::{
-    default_logs_datetime_format,
-    LogLevel,
-    ModuleConfig
-};
 use crate::precomputed_tables;
+#[cfg(feature = "cli")]
+use tos_common::prompt::{default_logs_datetime_format, LogLevel, ModuleConfig};
 
 pub const DIR_PATH: &str = "wallets/";
 pub const XSWD_BIND_ADDRESS: &str = "0.0.0.0:44325";
@@ -41,7 +34,6 @@ lazy_static! {
     };
 }
 
-
 // This struct is used to configure the RPC Server
 // In case we want to enable it instead of starting
 // the XSWD Server
@@ -59,7 +51,7 @@ pub struct RPCConfig {
     pub rpc_password: Option<String>,
     /// Number of threads to use for the RPC Server
     #[clap(long)]
-    pub rpc_threads: Option<usize>
+    pub rpc_threads: Option<usize>,
 }
 
 // Functions Helpers
@@ -104,7 +96,7 @@ pub struct PrecomputedTablesConfig {
     #[serde(default = "default_precomputed_tables_l1")]
     pub precomputed_tables_l1: usize,
     /// Set the path to use for precomputed tables
-    /// 
+    ///
     /// By default, it will be from current directory.
     #[clap(long)]
     pub precomputed_tables_path: Option<String>,
@@ -146,7 +138,7 @@ pub struct LogConfig {
     #[serde(default)]
     pub disable_interactive_mode: bool,
     /// Log filename
-    /// 
+    ///
     /// By default filename is tos-wallet.log.
     /// File will be stored in logs directory, this is only the filename, not the full path.
     /// Log file is rotated every day and has the format YYYY-MM-DD.tos-wallet.log.
@@ -154,7 +146,7 @@ pub struct LogConfig {
     #[serde(default = "default_log_filename")]
     pub filename_log: String,
     /// Logs directory
-    /// 
+    ///
     /// By default it will be logs/ of the current directory.
     /// It must end with a / to be a valid folder.
     #[clap(long, default_value_t = default_logs_path())]
@@ -255,7 +247,7 @@ pub struct Config {
     #[clap(long)]
     #[serde(skip)]
     #[serde(default)]
-    pub json_file: Option<String>
+    pub json_file: Option<String>,
 }
 
 #[cfg(feature = "cli")]

@@ -1,49 +1,32 @@
 use serde::{Deserialize, Serialize};
 use tos_common::{
-    account::CiphertextCache,
     block::TopoHeight,
     crypto::Hash,
-    serializer::{
-        Reader,
-        ReaderError,
-        Serializer,
-        Writer
-    },
-    transaction::{MultiSigPayload, Reference}
+    serializer::{Reader, ReaderError, Serializer, Writer},
+    transaction::{MultiSigPayload, Reference},
 };
-
 
 #[derive(Debug, Clone)]
 pub struct Balance {
     pub amount: u64,
-    pub ciphertext: CiphertextCache
 }
 
 impl Balance {
-    pub fn new(amount: u64, ciphertext: CiphertextCache) -> Self {
-        Self {
-            amount,
-            ciphertext
-        }
+    pub fn new(amount: u64) -> Self {
+        Self { amount }
     }
 }
 
 impl Serializer for Balance {
     fn write(&self, writer: &mut Writer) {
         self.amount.write(writer);
-        self.ciphertext.write(writer);
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let amount = u64::read(reader)?;
-        let ciphertext = CiphertextCache::read(reader)?;
-        Ok(Self {
-            amount,
-            ciphertext
-        })
+        Ok(Self { amount })
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct TxCache {
@@ -74,7 +57,7 @@ impl Serializer for MultiSig {
         let topoheight = TopoHeight::read(reader)?;
         Ok(Self {
             payload,
-            topoheight
+            topoheight,
         })
     }
 }

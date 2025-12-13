@@ -1,39 +1,26 @@
-use std::{borrow::Cow, collections::{hash_map::Entry, HashMap}};
+use crate::core::{error::BlockchainError, mempool::Mempool, storage::Storage};
 use async_trait::async_trait;
+use std::{
+    borrow::Cow,
+    collections::{hash_map::Entry, HashMap},
+};
 use tos_common::{
     account::Nonce,
     block::{BlockVersion, TopoHeight},
-    crypto::{
-        elgamal::Ciphertext,
-        Hash,
-        PublicKey
-    },
-    transaction::{
-        verify::BlockchainVerificationState,
-        MultiSigPayload,
-        Reference,
-        Transaction
-    }
+    crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
+    transaction::{verify::BlockchainVerificationState, MultiSigPayload, Reference, Transaction},
 };
 use tos_environment::Environment;
-use tos_vm::Module;
-use crate::core::{
-    error::BlockchainError,
-    mempool::Mempool,
-    storage::Storage
-};
+use tos_kernel::Module;
 
 struct Account<'a> {
     // Account nonce used to verify valid transaction
     nonce: u64,
     // Assets ready as source for any transfer/transaction
-    // TODO: they must store also the ciphertext change
-    // It will be added by next change at each TX
-    // This is necessary to easily build the final user balance
-    assets: HashMap<&'a Hash, Ciphertext>,
+    assets: HashMap<&'a Hash, u64>,
     // Multisig configured
     // This is used to verify the validity of the multisig setup
-    multisig: Option<MultiSigPayload>
+    multisig: Option<MultiSigPayload>,
 }
 
 pub struct MempoolState<'a, S: Storage> {
@@ -46,12 +33,12 @@ pub struct MempoolState<'a, S: Storage> {
     // Contract environment
     environment: &'a Environment,
     // Receiver balances
-    receiver_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, Ciphertext>>,
+    receiver_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, u64>>,
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
     accounts: HashMap<&'a PublicKey, Account<'a>>,
     // Contract modules
-    contracts: HashMap<&'a Hash, Cow<'a, Module>>,
+    contracts: HashMap<Hash, Cow<'a, Module>>,
     // The current stable topoheight of the chain
     stable_topoheight: TopoHeight,
     // The current topoheight of the chain
@@ -61,7 +48,15 @@ pub struct MempoolState<'a, S: Storage> {
 }
 
 impl<'a, S: Storage> MempoolState<'a, S> {
-    pub fn new(mempool: &'a Mempool, storage: &'a S, environment: &'a Environment, stable_topoheight: TopoHeight, topoheight: TopoHeight, block_version: BlockVersion, mainnet: bool) -> Self {
+    pub fn new(
+        mempool: &'a Mempool,
+        storage: &'a S,
+        environment: &'a Environment,
+        stable_topoheight: TopoHeight,
+        topoheight: TopoHeight,
+        block_version: BlockVersion,
+        mainnet: bool,
+    ) -> Self {
         Self {
             mainnet,
             mempool,
@@ -77,7 +72,10 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     }
 
     // Retrieve the sender cache (inclunding balances and multisig)
-    pub fn get_sender_cache(&mut self, key: &PublicKey) -> Option<(HashMap<&Hash, Ciphertext>, Option<MultiSigPayload>)> {
+    pub fn get_sender_cache(
+        &mut self,
+        key: &PublicKey,
+    ) -> Option<(HashMap<&Hash, u64>, Option<MultiSigPayload>)> {
         let account = self.accounts.remove(key)?;
         Some((account.assets, account.multisig))
     }
@@ -85,42 +83,82 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     // Retrieve the receiver balance
     // We never store the receiver balance in mempool, only outgoing balances
     // So we just get it from our internal cache or from storage
-    async fn internal_get_receiver_balance<'b>(&'b mut self, account: Cow<'a, PublicKey>, asset: Cow<'a, Hash>) -> Result<&'b mut Ciphertext, BlockchainError> {
+    async fn internal_get_receiver_balance<'b>(
+        &'b mut self,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
+    ) -> Result<&'b mut u64, BlockchainError> {
         // If its borrowed, it cost nothing to clone the Cow as it's just the reference being cloned
-        match self.receiver_balances.entry(account.clone()).or_insert_with(HashMap::new).entry(asset.clone()) {
+        match self
+            .receiver_balances
+            .entry(account.clone())
+            .or_insert_with(HashMap::new)
+            .entry(asset.clone())
+        {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
             Entry::Vacant(entry) => {
-                let (version, _) = self.storage.get_new_versioned_balance(&account, &asset, self.topoheight).await?;
-                Ok(entry.insert(version.take_balance().take_ciphertext()?))
+                let (version, _) = self
+                    .storage
+                    .get_new_versioned_balance(&account, &asset, self.topoheight)
+                    .await?;
+                Ok(entry.insert(version.take_balance()))
             }
         }
     }
 
-    // Retrieve the versioned balance based on the TX reference 
-    async fn get_versioned_balance_for_reference(storage: &S, key: &PublicKey, asset: &Hash, current_topoheight: TopoHeight, reference: &Reference) -> Result<Ciphertext, BlockchainError> {
-        let (output, _, version) = super::search_versioned_balance_for_reference(storage, key, asset, current_topoheight, reference, false).await?;
+    // Retrieve the versioned balance based on the TX reference
+    async fn get_versioned_balance_for_reference(
+        storage: &S,
+        key: &PublicKey,
+        asset: &Hash,
+        current_topoheight: TopoHeight,
+        reference: &Reference,
+    ) -> Result<u64, BlockchainError> {
+        let (output, _, version) = super::search_versioned_balance_for_reference(
+            storage,
+            key,
+            asset,
+            current_topoheight,
+            reference,
+            false,
+        )
+        .await?;
 
-        Ok(version.take_balance_with(output).take_ciphertext()?)
+        Ok(version.take_balance_with(output))
     }
 
     // Retrieve the nonce & the multisig state for a sender account
-    async fn create_sender_account(mempool: &Mempool, storage: &S, key: &'a PublicKey, topoheight: TopoHeight) -> Result<Account<'a>, BlockchainError> {
+    async fn create_sender_account(
+        mempool: &Mempool,
+        storage: &S,
+        key: &'a PublicKey,
+        topoheight: TopoHeight,
+    ) -> Result<Account<'a>, BlockchainError> {
         let (nonce, multisig) = if let Some(cache) = mempool.get_cache_for(key) {
             let nonce = cache.get_next_nonce();
             let multisig = if let Some(multisig) = cache.get_multisig() {
                 Some(multisig.clone())
             } else {
-                storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
-                    .map(|(_, v)| v.take().map(|v| v.into_owned())).flatten()
+                storage
+                    .get_multisig_at_maximum_topoheight_for(key, topoheight)
+                    .await?
+                    .map(|(_, v)| v.take().map(|v| v.into_owned()))
+                    .flatten()
             };
 
             (nonce, multisig)
         } else {
-            let nonce = storage.get_nonce_at_maximum_topoheight(key, topoheight).await?
-                .map(|(_, v)| v.get_nonce()).unwrap_or(0);
+            let nonce = storage
+                .get_nonce_at_maximum_topoheight(key, topoheight)
+                .await?
+                .map(|(_, v)| v.get_nonce())
+                .unwrap_or(0);
 
-            let multisig = storage.get_multisig_at_maximum_topoheight_for(key, topoheight).await?
-                .map(|(_, v)| v.take().map(|v| v.into_owned())).flatten();
+            let multisig = storage
+                .get_multisig_at_maximum_topoheight_for(key, topoheight)
+                .await?
+                .map(|(_, v)| v.take().map(|v| v.into_owned()))
+                .flatten();
 
             (nonce, multisig)
         };
@@ -128,7 +166,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         Ok(Account {
             nonce,
             assets: HashMap::new(),
-            multisig
+            multisig,
         })
     }
 
@@ -137,7 +175,12 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     // If not found, we check in mempool cache,
     // If still not present, we check in storage and determine using reference
     // Which version to use
-    async fn internal_get_sender_balance<'b>(&'b mut self, key: &'a PublicKey, asset: &'a Hash, reference: &Reference) -> Result<&'b mut Ciphertext, BlockchainError> {
+    async fn internal_get_sender_balance<'b>(
+        &'b mut self,
+        key: &'a PublicKey,
+        asset: &'a Hash,
+        reference: &Reference,
+    ) -> Result<&'b mut u64, BlockchainError> {
         match self.accounts.entry(key) {
             Entry::Occupied(o) => {
                 let account = o.into_mut();
@@ -148,29 +191,49 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                             if let Some(version) = cache.get_balances().get(asset) {
                                 Ok(entry.insert(version.clone()))
                             } else {
-                                let ct = Self::get_versioned_balance_for_reference(&self.storage, key, asset, self.topoheight, reference).await?;
+                                let ct = Self::get_versioned_balance_for_reference(
+                                    &self.storage,
+                                    key,
+                                    asset,
+                                    self.topoheight,
+                                    reference,
+                                )
+                                .await?;
                                 Ok(entry.insert(ct))
                             }
-                        },
+                        }
                         None => {
-                            let ct = Self::get_versioned_balance_for_reference(&self.storage, key, asset, self.topoheight, reference).await?;
+                            let ct = Self::get_versioned_balance_for_reference(
+                                &self.storage,
+                                key,
+                                asset,
+                                self.topoheight,
+                                reference,
+                            )
+                            .await?;
                             Ok(entry.insert(ct))
                         }
-                    }
+                    },
                 }
-            },
+            }
             Entry::Vacant(e) => {
-                let account = e.insert(Self::create_sender_account(&self.mempool, &self.storage, key, self.topoheight).await?);
+                let account = e.insert(
+                    Self::create_sender_account(&self.mempool, &self.storage, key, self.topoheight)
+                        .await?,
+                );
 
                 match account.assets.entry(asset) {
                     Entry::Occupied(entry) => Ok(entry.into_mut()),
                     Entry::Vacant(entry) => {
-                        let (version, new) = self.storage.get_new_versioned_balance(key, asset, self.topoheight).await?;
+                        let (version, new) = self
+                            .storage
+                            .get_new_versioned_balance(key, asset, self.topoheight)
+                            .await?;
                         if new {
                             return Err(BlockchainError::NoPreviousBalanceFound);
                         }
 
-                        Ok(entry.insert(version.take_balance().take_ciphertext()?))
+                        Ok(entry.insert(version.take_balance()))
                     }
                 }
             }
@@ -179,11 +242,16 @@ impl<'a, S: Storage> MempoolState<'a, S> {
 
     // Retrieve the account nonce
     // Only sender accounts should be used here
-    async fn internal_get_account_nonce(&mut self, key: &'a PublicKey) -> Result<Nonce, BlockchainError> {
+    async fn internal_get_account_nonce(
+        &mut self,
+        key: &'a PublicKey,
+    ) -> Result<Nonce, BlockchainError> {
         match self.accounts.entry(key) {
             Entry::Occupied(o) => Ok(o.get().nonce),
             Entry::Vacant(e) => {
-                let account = Self::create_sender_account(&self.mempool, &self.storage, key, self.topoheight).await?;
+                let account =
+                    Self::create_sender_account(&self.mempool, &self.storage, key, self.topoheight)
+                        .await?;
                 Ok(e.insert(account).nonce)
             }
         }
@@ -192,8 +260,14 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     // Update the account nonce
     // Only sender accounts should be used here
     // For each TX, we must update the nonce by one
-    async fn internal_update_account_nonce(&mut self, account: &'a PublicKey, new_nonce: u64) -> Result<(), BlockchainError> {
-        let account = self.accounts.get_mut(account).ok_or_else(|| BlockchainError::AccountNotFound(account.as_address(self.storage.is_mainnet())))?;
+    async fn internal_update_account_nonce(
+        &mut self,
+        account: &'a PublicKey,
+        new_nonce: u64,
+    ) -> Result<(), BlockchainError> {
+        let account = self.accounts.get_mut(account).ok_or_else(|| {
+            BlockchainError::AccountNotFound(account.as_address(self.storage.is_mainnet()))
+        })?;
         account.nonce = new_nonce;
 
         Ok(())
@@ -203,30 +277,35 @@ impl<'a, S: Storage> MempoolState<'a, S> {
 #[async_trait]
 impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for MempoolState<'a, S> {
     /// Verify the TX version and reference
-    async fn pre_verify_tx<'b>(
-        &'b mut self,
-        tx: &Transaction,
-    ) -> Result<(), BlockchainError> {
-        super::pre_verify_tx(self.storage, tx, self.stable_topoheight, self.topoheight, self.get_block_version()).await
+    async fn pre_verify_tx<'b>(&'b mut self, tx: &Transaction) -> Result<(), BlockchainError> {
+        super::pre_verify_tx(
+            self.storage,
+            tx,
+            self.stable_topoheight,
+            self.topoheight,
+            self.get_block_version(),
+        )
+        .await
     }
 
-    /// Get the balance ciphertext for a receiver account
+    /// Get the balance for a receiver account
     async fn get_receiver_balance<'b>(
         &'b mut self,
         account: Cow<'a, PublicKey>,
         asset: Cow<'a, Hash>,
-    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+    ) -> Result<&'b mut u64, BlockchainError> {
         self.internal_get_receiver_balance(account, asset).await
     }
 
-    /// Get the balance ciphertext used for verification of funds for the sender account
+    /// Get the balance used for verification of funds for the sender account
     async fn get_sender_balance<'b>(
         &'b mut self,
         account: &'a PublicKey,
         asset: &'a Hash,
         reference: &Reference,
-    ) -> Result<&'b mut Ciphertext, BlockchainError> {
-        self.internal_get_sender_balance(account, asset, reference).await
+    ) -> Result<&'b mut u64, BlockchainError> {
+        self.internal_get_sender_balance(account, asset, reference)
+            .await
     }
 
     /// Apply new output to a sender account
@@ -235,7 +314,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         &mut self,
         _: &'a PublicKey,
         _: &'a Hash,
-        _: Ciphertext,
+        _: u64,
     ) -> Result<(), BlockchainError> {
         Ok(())
     }
@@ -243,7 +322,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     /// Get the nonce of an account
     async fn get_account_nonce(
         &mut self,
-        account: &'a PublicKey
+        account: &'a PublicKey,
     ) -> Result<Nonce, BlockchainError> {
         self.internal_get_account_nonce(account).await
     }
@@ -252,9 +331,30 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     async fn update_account_nonce(
         &mut self,
         account: &'a PublicKey,
-        new_nonce: Nonce
+        new_nonce: Nonce,
     ) -> Result<(), BlockchainError> {
         self.internal_update_account_nonce(account, new_nonce).await
+    }
+
+    /// SECURITY FIX V-11: Atomic compare-and-swap for nonce updates
+    /// Returns true if the nonce matched expected value and was updated
+    /// Returns false if the current nonce didn't match expected value
+    async fn compare_and_swap_nonce(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        expected: Nonce,
+        new_value: Nonce,
+    ) -> Result<bool, BlockchainError> {
+        // For mempool state, we don't have atomic operations
+        // This is acceptable because mempool only validates individual txs
+        // The actual ordering protection happens at blockchain level
+        let current = self.get_account_nonce(account).await?;
+        if current == expected {
+            self.update_account_nonce(account, new_value).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Get the block version
@@ -266,9 +366,12 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     async fn set_multisig_state(
         &mut self,
         account: &'a PublicKey,
-        payload: &MultiSigPayload
+        payload: &MultiSigPayload,
     ) -> Result<(), BlockchainError> {
-        let account = self.accounts.get_mut(account).ok_or_else(|| BlockchainError::AccountNotFound(account.as_address(self.mainnet)))?;
+        let account = self
+            .accounts
+            .get_mut(account)
+            .ok_or_else(|| BlockchainError::AccountNotFound(account.as_address(self.mainnet)))?;
         if payload.is_delete() {
             account.multisig = None;
         } else {
@@ -282,11 +385,14 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     /// If the account is not a multisig account, return None
     async fn get_multisig_state(
         &mut self,
-        account: &'a PublicKey
+        account: &'a PublicKey,
     ) -> Result<Option<&MultiSigPayload>, BlockchainError> {
-        self.accounts.get(account)
+        self.accounts
+            .get(account)
             .map(|a| a.multisig.as_ref())
-            .ok_or_else(|| BlockchainError::AccountNotFound(account.as_address(self.storage.is_mainnet())))
+            .ok_or_else(|| {
+                BlockchainError::AccountNotFound(account.as_address(self.storage.is_mainnet()))
+            })
     }
 
     /// Get the contract environment
@@ -297,40 +403,55 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     /// Set the contract module
     async fn set_contract_module(
         &mut self,
-        hash: &'a Hash,
-        module: &'a Module
+        hash: &Hash,
+        module: &'a Module,
     ) -> Result<(), BlockchainError> {
-        if self.contracts.insert(hash, Cow::Borrowed(module)).is_some() {
+        // Insert contract with owned hash (no memory leak!)
+        if self
+            .contracts
+            .insert(hash.clone(), Cow::Borrowed(module))
+            .is_some()
+        {
             return Err(BlockchainError::ContractAlreadyExists);
         }
 
         Ok(())
     }
 
-    async fn load_contract_module(
-        &mut self,
-        hash: &'a Hash
-    ) -> Result<bool, BlockchainError> {
-        match self.contracts.entry(hash) {
-            Entry::Occupied(_) => Ok(true),
-            Entry::Vacant(v) => {
-                let module = self.storage.get_contract_at_maximum_topoheight_for(hash, self.topoheight).await?
-                    .map(|(_, v)| v.take().map(|v| v.into_owned()))
-                    .flatten()
-                    .ok_or_else(|| BlockchainError::ContractNotFound(hash.clone()))?;
+    async fn load_contract_module(&mut self, hash: &Hash) -> Result<bool, BlockchainError> {
+        // Check if already loaded
+        if self.contracts.contains_key(hash) {
+            return Ok(true);
+        }
 
-                v.insert(Cow::Owned(module));
+        // Load from storage - return Ok(false) if not found
+        let module_opt = self
+            .storage
+            .get_contract_at_maximum_topoheight_for(hash, self.topoheight)
+            .await?
+            .map(|(_, v)| v.take().map(|v| v.into_owned()))
+            .flatten();
 
+        match module_opt {
+            Some(module) => {
+                // Insert contract with owned hash (no memory leak!)
+                self.contracts.insert(hash.clone(), Cow::Owned(module));
                 Ok(true)
+            }
+            None => {
+                // Contract doesn't exist - this is OK for existence checks
+                Ok(false)
             }
         }
     }
 
     async fn get_contract_module_with_environment(
         &self,
-        hash: &'a Hash
+        hash: &Hash,
     ) -> Result<(&Module, &Environment), BlockchainError> {
-        let module = self.contracts.get(hash)
+        let module = self
+            .contracts
+            .get(hash)
             .ok_or_else(|| BlockchainError::ContractNotFound(hash.clone()))?;
 
         Ok((module, self.environment))

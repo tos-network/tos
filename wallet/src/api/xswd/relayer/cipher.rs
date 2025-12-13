@@ -41,17 +41,24 @@ impl Cipher {
         Ok(Self {
             mode: match mode {
                 EncryptionMode::None => CipherState::None,
-                EncryptionMode::AES { key } => CipherState::AES { cipher: Self::new_internal(&key)? },
-                EncryptionMode::Chacha20Poly1305 { key } => CipherState::Chacha20Poly1305 { cipher: Self::new_internal(&key)? },
+                EncryptionMode::AES { key } => CipherState::AES {
+                    cipher: Self::new_internal(&key)?,
+                },
+                EncryptionMode::Chacha20Poly1305 { key } => CipherState::Chacha20Poly1305 {
+                    cipher: Self::new_internal(&key)?,
+                },
             },
         })
     }
 
-    fn encrypt_internal<'a, T: Aead>(data: &'a [u8], cipher: &T) -> Result<Cow<'a, [u8]>, CipherError> {
-        let nonce = T::generate_nonce()
-            .map_err(|_| CipherError::InvalidNonce)?;
+    fn encrypt_internal<'a, T: Aead>(
+        data: &'a [u8],
+        cipher: &T,
+    ) -> Result<Cow<'a, [u8]>, CipherError> {
+        let nonce = T::generate_nonce().map_err(|_| CipherError::InvalidNonce)?;
 
-        let encrypted_data = cipher.encrypt(&nonce, data)
+        let encrypted_data = cipher
+            .encrypt(&nonce, data)
             .map_err(|_| CipherError::EncryptionFailed)?;
 
         // Prepend nonce to the encrypted data
@@ -60,17 +67,22 @@ impl Cipher {
         Ok(Cow::Owned(combined))
     }
 
-    fn decrypt_internal<'a, T: Aead>(data: &'a [u8], cipher: &T) -> Result<Cow<'a, [u8]>, CipherError> {
+    fn decrypt_internal<'a, T: Aead>(
+        data: &'a [u8],
+        cipher: &T,
+    ) -> Result<Cow<'a, [u8]>, CipherError> {
         if data.len() < 12 {
             return Err(CipherError::InvalidNonce);
         }
 
         // The first 12 bytes are the nonce
         let nonce_bytes = &data[..12];
-        let nonce = nonce_bytes.try_into()
+        let nonce = nonce_bytes
+            .try_into()
             .map_err(|_| CipherError::InvalidNonce)?;
 
-        let decrypted_data = cipher.decrypt(&nonce, data)
+        let decrypted_data = cipher
+            .decrypt(&nonce, data)
             .map_err(|_| CipherError::DecryptionFailed)?;
 
         Ok(Cow::Owned(decrypted_data))

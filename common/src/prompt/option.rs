@@ -1,19 +1,17 @@
+use crate::tokio::sync::mpsc::UnboundedReceiver;
 use std::{
     future::Future,
     pin::Pin,
-    task::{Context, Poll}
+    task::{Context, Poll},
 };
-use crate::tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct OptionReader {
-    reader: Option<UnboundedReceiver<String>>
+    reader: Option<UnboundedReceiver<String>>,
 }
 
 impl OptionReader {
     pub fn new(reader: Option<UnboundedReceiver<String>>) -> Self {
-        Self {
-            reader
-        }
+        Self { reader }
     }
 }
 
@@ -22,14 +20,12 @@ impl Future for OptionReader {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.reader.as_mut() {
-            Some(reader) => {
-                match Pin::new(reader).poll_recv(cx) {
-                    Poll::Ready(Some(value)) => Poll::Ready(Some(value)),
-                    Poll::Ready(None) => Poll::Ready(None),
-                    Poll::Pending => Poll::Pending
-                }
+            Some(reader) => match Pin::new(reader).poll_recv(cx) {
+                Poll::Ready(Some(value)) => Poll::Ready(Some(value)),
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => Poll::Pending,
             },
-            None => Poll::Ready(None)
+            None => Poll::Ready(None),
         }
     }
 }

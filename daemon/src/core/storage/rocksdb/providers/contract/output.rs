@@ -1,13 +1,10 @@
-use async_trait::async_trait;
-use log::trace;
-use tos_common::{
-    contract::ContractOutput,
-    crypto::Hash
-};
 use crate::core::{
     error::BlockchainError,
-    storage::{rocksdb::Column, ContractOutputsProvider, RocksStorage}
+    storage::{rocksdb::Column, ContractOutputsProvider, RocksStorage},
 };
+use async_trait::async_trait;
+use log::trace;
+use tos_common::{contract::ContractOutput, crypto::Hash};
 
 #[async_trait]
 impl ContractOutputsProvider for RocksStorage {
@@ -18,19 +15,29 @@ impl ContractOutputsProvider for RocksStorage {
     }
 
     // Get the contract outputs for a transaction
-    async fn get_contract_outputs_for_tx(&self, tx_hash: &Hash) -> Result<Vec<ContractOutput>, BlockchainError> {
+    async fn get_contract_outputs_for_tx(
+        &self,
+        tx_hash: &Hash,
+    ) -> Result<Vec<ContractOutput>, BlockchainError> {
         trace!("get contract outputs for tx {}", tx_hash);
         self.load_from_disk(Column::TransactionsOutputs, tx_hash)
     }
 
     // Set the contract outputs for a transaction
-    async fn set_contract_outputs_for_tx(&mut self, tx_hash: &Hash, contract_output: &Vec<ContractOutput>) -> Result<(), BlockchainError> {
+    async fn set_contract_outputs_for_tx(
+        &mut self,
+        tx_hash: &Hash,
+        contract_output: &Vec<ContractOutput>,
+    ) -> Result<(), BlockchainError> {
         trace!("set contract outputs for tx {}", tx_hash);
         self.insert_into_disk(Column::TransactionsOutputs, tx_hash, contract_output)
     }
 
     // Delete the contract outputs for a transaction
-    async fn delete_contract_outputs_for_tx(&mut self, tx_hash: &Hash) -> Result<(), BlockchainError> {
+    async fn delete_contract_outputs_for_tx(
+        &mut self,
+        tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
         trace!("delete contract outputs for tx {}", tx_hash);
         self.remove_from_disk(Column::TransactionsOutputs, tx_hash)
     }

@@ -1,15 +1,15 @@
-use strum::{EnumDiscriminants, IntoDiscriminant};
-use thiserror::Error;
-use chacha20poly1305::Error as CryptoError;
 #[cfg(feature = "network_handler")]
 use super::network_handler::NetworkError;
+use chacha20poly1305::Error as CryptoError;
+use strum::{EnumDiscriminants, IntoDiscriminant};
+use thiserror::Error;
+#[cfg(feature = "xswd")]
+use tos_common::rpc::InternalRpcError;
 use tos_common::{
     crypto::Hash,
     transaction::extra_data::CipherFormatError,
-    utils::{format_coin, format_tos}
+    utils::{format_coin, format_tos},
 };
-#[cfg(feature = "xswd")]
-use tos_common::rpc::InternalRpcError;
 
 use anyhow::Error;
 
@@ -59,7 +59,11 @@ pub enum WalletError {
     NotEnoughFundsForFee(u64, u64),
     #[error("Invalid address params")]
     InvalidAddressParams,
-    #[error("Invalid extra data in this transaction, expected maximum {} bytes but got {} bytes", _0, _1)]
+    #[error(
+        "Invalid extra data in this transaction, expected maximum {} bytes but got {} bytes",
+        _0,
+        _1
+    )]
     ExtraDataTooBig(usize, usize),
     #[error("Wallet is not in online mode")]
     NotOnlineMode,
@@ -101,12 +105,12 @@ pub enum WalletError {
     #[error("unsupported operation")]
     Unsupported,
     #[error("Other error: {}", _0)]
-    Other(String)
+    Other(String),
 }
 
 impl WalletError {
     // Return the id for the variant
-    pub  fn id(&self) -> usize {
+    pub fn id(&self) -> usize {
         self.discriminant() as usize
     }
 }

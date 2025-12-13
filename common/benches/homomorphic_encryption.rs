@@ -1,10 +1,10 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::hint::black_box;
 use curve25519_dalek::Scalar;
+use std::hint::black_box;
 use tos_common::crypto::KeyPair;
 
 // Current Homomorphic Encryption operations used by tos network
-// Those are based on the Twisted elGamal encryption scheme. 
+// Those are based on the Twisted elGamal encryption scheme.
 fn bench_he_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("he_operations");
 
@@ -40,7 +40,6 @@ fn bench_he_operations(c: &mut Criterion) {
         })
     });
 
-
     group.bench_function("compress", |b| {
         b.iter(|| {
             let _ = black_box(ct1.compress());
@@ -57,9 +56,5 @@ fn bench_he_operations(c: &mut Criterion) {
     group.finish();
 }
 
-
-criterion_group!(
-    he_benches,
-    bench_he_operations
-);
+criterion_group!(he_benches, bench_he_operations);
 criterion_main!(he_benches);

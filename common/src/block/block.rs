@@ -1,32 +1,29 @@
-use std::{
-    fmt::{Display, Formatter},
-    fmt::Error,
-    ops::Deref,
-    sync::Arc
-};
-use crate::{
-    crypto::{
-        Hashable,
-        Hash,
-    },
-    immutable::Immutable,
-    transaction::Transaction,
-    serializer::{Serializer, Writer, Reader, ReaderError},
-};
 use super::BlockHeader;
+use crate::{
+    crypto::{Hash, Hashable},
+    immutable::Immutable,
+    serializer::{Reader, ReaderError, Serializer, Writer},
+    transaction::Transaction,
+};
+use std::{
+    fmt::Error,
+    fmt::{Display, Formatter},
+    ops::Deref,
+    sync::Arc,
+};
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Block {
     #[serde(flatten)]
     header: Immutable<BlockHeader>,
-    transactions: Vec<Arc<Transaction>>
+    transactions: Vec<Arc<Transaction>>,
 }
 
 impl Block {
     pub fn new(header: Immutable<BlockHeader>, transactions: Vec<Arc<Transaction>>) -> Self {
         Block {
             header,
-            transactions
+            transactions,
         }
     }
 
@@ -64,7 +61,7 @@ impl Serializer for Block {
         let mut txs = Vec::new();
         for _ in 0..block.get_txs_count() {
             let tx = Transaction::read(reader)?;
-            txs.push(Arc::new(tx));     
+            txs.push(Arc::new(tx));
         }
 
         Ok(Block::new(Immutable::Owned(block), txs))
@@ -85,7 +82,7 @@ impl Deref for Block {
     type Target = BlockHeader;
 
     fn deref(&self) -> &Self::Target {
-        &self.get_header()        
+        &self.get_header()
     }
 }
 
@@ -95,6 +92,15 @@ impl Display for Block {
         for hash in self.tips.iter() {
             tips.push(format!("{}", hash));
         }
-        write!(f, "Block[height: {}, tips: [{}], timestamp: {}, nonce: {}, extra_nonce: {}, txs: {}]", self.height, tips.join(", "), self.timestamp, self.nonce, hex::encode(self.extra_nonce), self.txs_hashes.len())
+        write!(
+            f,
+            "Block[height: {}, tips: [{}], timestamp: {}, nonce: {}, extra_nonce: {}, txs: {}]",
+            self.height,
+            tips.join(", "),
+            self.timestamp,
+            self.nonce,
+            hex::encode(self.extra_nonce),
+            self.txs_hashes.len()
+        )
     }
 }

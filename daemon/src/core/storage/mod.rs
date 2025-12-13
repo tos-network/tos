@@ -1,49 +1,84 @@
-mod providers;
 mod cache;
+mod providers;
 
-pub mod sled;
 pub mod rocksdb;
+pub mod sled;
 
-pub use self::{
-    providers::*,
-    sled::SledStorage,
-    rocksdb::RocksStorage,
-};
+pub use self::{providers::*, rocksdb::RocksStorage, sled::SledStorage};
 
-use std::collections::HashSet;
+use crate::{config::PRUNE_SAFETY_LIMIT, core::error::BlockchainError};
 use async_trait::async_trait;
 use log::{debug, trace, warn};
+use std::collections::HashSet;
 use tos_common::{
-    block::{
-        BlockHeader,
-        TopoHeight,
-    },
+    block::{BlockHeader, TopoHeight},
     contract::ContractProvider as ContractInfoProvider,
     crypto::Hash,
     immutable::Immutable,
-    transaction::Transaction
+    transaction::Transaction,
 };
-use crate::{config::PRUNE_SAFETY_LIMIT, core::error::BlockchainError};
 
 // Represents the tips of the chain or of a block
 pub type Tips = HashSet<Hash>;
 
 #[async_trait]
 pub trait Storage:
-    BlockExecutionOrderProvider + DagOrderProvider + PrunedTopoheightProvider
-    + NonceProvider + AccountProvider + ClientProtocolProvider + BlockDagProvider
-    + MerkleHashProvider + NetworkProvider + MultiSigProvider + TipsProvider
-    + CommitPointProvider + ContractProvider + ContractDataProvider + ContractOutputsProvider
-    + ContractInfoProvider + ContractBalanceProvider + VersionedProvider + SupplyProvider
-    + CacheProvider + StateProvider + EnergyProvider + AIMiningProvider
-    + Sync + Send + 'static {
+    BlockExecutionOrderProvider
+    + DagOrderProvider
+    + PrunedTopoheightProvider
+    + NonceProvider
+    + AccountProvider
+    + ClientProtocolProvider
+    + BlockDagProvider
+    + MerkleHashProvider
+    + NetworkProvider
+    + MultiSigProvider
+    + TipsProvider
+    + CommitPointProvider
+    + ContractProvider
+    + ContractDataProvider
+    + ContractOutputsProvider
+    + ContractInfoProvider
+    + ContractBalanceProvider
+    + VersionedProvider
+    + SupplyProvider
+    + CacheProvider
+    + StateProvider
+    + EnergyProvider
+    + AIMiningProvider
+    + Sync
+    + Send
+    + 'static
+{
     // delete block at topoheight, and all pointers (hash_at_topo, topo_by_hash, reward, supply, diff, cumulative diff...)
-    async fn delete_block_at_topoheight(&mut self, topoheight: TopoHeight) -> Result<(Hash, Immutable<BlockHeader>, Vec<(Hash, Immutable<Transaction>)>), BlockchainError>;
+    async fn delete_block_at_topoheight(
+        &mut self,
+        topoheight: TopoHeight,
+    ) -> Result<
+        (
+            Hash,
+            Immutable<BlockHeader>,
+            Vec<(Hash, Immutable<Transaction>)>,
+        ),
+        BlockchainError,
+    >;
 
     // Count is the number of blocks (topoheight) to rewind
-    async fn pop_blocks(&mut self, mut height: u64, mut topoheight: TopoHeight, count: u64, until_topo_height: TopoHeight) -> Result<(u64, TopoHeight, Vec<(Hash, Immutable<Transaction>)>), BlockchainError> {
-        trace!("pop blocks from height: {}, topoheight: {}, count: {}", height, topoheight, count);
-        if topoheight < count as u64 { // also prevent removing genesis block
+    async fn pop_blocks(
+        &mut self,
+        mut height: u64,
+        mut topoheight: TopoHeight,
+        count: u64,
+        until_topo_height: TopoHeight,
+    ) -> Result<(u64, TopoHeight, Vec<(Hash, Immutable<Transaction>)>), BlockchainError> {
+        trace!(
+            "pop blocks from height: {}, topoheight: {}, count: {}",
+            height,
+            topoheight,
+            count
+        );
+        if topoheight < count as u64 {
+            // also prevent removing genesis block
             return Err(BlockchainError::NotEnoughBlocks);
         }
 
@@ -65,7 +100,10 @@ pub trait Storage:
                 debug!("Sync block found at topoheight {}", lowest_topo);
                 break;
             } else {
-                warn!("No sync block found at topoheight {} we must go lower if possible", lowest_topo);
+                warn!(
+                    "No sync block found at topoheight {} we must go lower if possible",
+                    lowest_topo
+                );
                 lowest_topo -= 1;
             }
         }
@@ -73,7 +111,10 @@ pub trait Storage:
         if pruned_topoheight != 0 {
             let safety_pruned_topoheight = pruned_topoheight + PRUNE_SAFETY_LIMIT;
             if lowest_topo <= safety_pruned_topoheight && until_topo_height != 0 {
-                warn!("Pruned topoheight is {}, lowest topoheight is {}, rewind only until {}", pruned_topoheight, lowest_topo, safety_pruned_topoheight);
+                warn!(
+                    "Pruned topoheight is {}, lowest topoheight is {}, rewind only until {}",
+                    pruned_topoheight, lowest_topo, safety_pruned_topoheight
+                );
                 lowest_topo = safety_pruned_topoheight;
             }
         }
@@ -94,7 +135,8 @@ pub trait Storage:
         let mut done = 0;
         'main: loop {
             // stop rewinding if its genesis block or if we reached the lowest topo
-            if topoheight <= lowest_topo || topoheight <= until_topo_height || topoheight == 0 { // prevent removing genesis block
+            if topoheight <= lowest_topo || topoheight <= until_topo_height || topoheight == 0 {
+                // prevent removing genesis block
                 trace!("Done: {done}, count: {count}, height: {height}, topoheight: {topoheight}, lowest topo: {lowest_topo}, stable topo: {until_topo_height}");
                 break 'main;
             }
@@ -109,7 +151,7 @@ pub trait Storage:
             // generate new tips
             trace!("Removing {} from {} tips", hash, tips.len());
             tips.remove(&hash);
- 
+
             for hash in block.get_tips().iter() {
                 trace!("Adding {} to {} tips", hash, tips.len());
                 tips.insert(hash.clone());
@@ -142,7 +184,10 @@ pub trait Storage:
             done += 1;
         }
 
-        warn!("Blocks rewinded: {}, new topoheight: {}, new height: {}", done, topoheight, height);
+        warn!(
+            "Blocks rewinded: {}, new topoheight: {}, new height: {}",
+            done, topoheight, height
+        );
 
         trace!("Cleaning caches");
         // Clear all caches to not have old data after rewind

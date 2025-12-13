@@ -1630,5 +1630,5 @@ pub const PORTUGUESE: Language<'static> = Language {
         "zeloso",
         "zenite",
         "zumbi",
-    ]
+    ],
 };

@@ -26,7 +26,7 @@ impl Serializer for Account {
             id,
             registered_at,
             nonce_pointer,
-            multisig_pointer
+            multisig_pointer,
         })
     }
 
@@ -39,8 +39,8 @@ impl Serializer for Account {
 
     fn size(&self) -> usize {
         self.id.size()
-        + self.registered_at.size()
-        + self.nonce_pointer.size()
-        + self.multisig_pointer.size()
+            + self.registered_at.size()
+            + self.nonce_pointer.size()
+            + self.multisig_pointer.size()
     }
 }

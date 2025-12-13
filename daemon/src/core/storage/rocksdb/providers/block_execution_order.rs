@@ -1,22 +1,23 @@
-use async_trait::async_trait;
-use log::trace;
-use tos_common::crypto::Hash;
 use crate::core::{
     error::BlockchainError,
     storage::{
-        BlockExecutionOrderProvider,
-        RocksStorage,
         rocksdb::{Column, IteratorMode},
         sled::BLOCKS_EXECUTION_ORDER_COUNT,
-    }
+        BlockExecutionOrderProvider, RocksStorage,
+    },
 };
+use async_trait::async_trait;
+use log::trace;
+use tos_common::crypto::Hash;
 
 // This provider tracks the order in which blocks are added in the chain.
 // This is independant of the DAG order and is used for debug purposes.
 #[async_trait]
 impl BlockExecutionOrderProvider for RocksStorage {
     // Get the blocks execution order
-    async fn get_blocks_execution_order<'a>(&'a self) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
+    async fn get_blocks_execution_order<'a>(
+        &'a self,
+    ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
         trace!("get blocks execution order");
         self.iter_keys(Column::BlocksExecutionOrder, IteratorMode::Start)
     }
@@ -43,13 +44,18 @@ impl BlockExecutionOrderProvider for RocksStorage {
     // Get the number of blocks executed
     async fn get_blocks_execution_count(&self) -> u64 {
         trace!("get blocks execution count");
-        self.load_optional_from_disk(Column::Common, BLOCKS_EXECUTION_ORDER_COUNT).ok()
+        self.load_optional_from_disk(Column::Common, BLOCKS_EXECUTION_ORDER_COUNT)
+            .ok()
             .flatten()
             .unwrap_or(0)
     }
 
     // Swap the position of two blocks in the execution order
-    async fn swap_blocks_executions_positions(&mut self, left: &Hash, right: &Hash) -> Result<(), BlockchainError> {
+    async fn swap_blocks_executions_positions(
+        &mut self,
+        left: &Hash,
+        right: &Hash,
+    ) -> Result<(), BlockchainError> {
         trace!("swap blocks {} and {} execution positions", left, right);
         let left_position = self.get_block_position_in_order(left).await?;
         let right_position = self.get_block_position_in_order(right).await?;
@@ -64,11 +70,16 @@ impl BlockExecutionOrderProvider for RocksStorage {
 impl RocksStorage {
     fn get_next_block_position(&mut self) -> Result<u64, BlockchainError> {
         trace!("get next block position");
-        let position = self.load_optional_from_disk(Column::Common, BLOCKS_EXECUTION_ORDER_COUNT)?
+        let position = self
+            .load_optional_from_disk(Column::Common, BLOCKS_EXECUTION_ORDER_COUNT)?
             .unwrap_or(0);
 
         trace!("next block position is {}", position);
-        self.insert_into_disk(Column::Common, BLOCKS_EXECUTION_ORDER_COUNT, &(position + 1))?;
+        self.insert_into_disk(
+            Column::Common,
+            BLOCKS_EXECUTION_ORDER_COUNT,
+            &(position + 1),
+        )?;
         Ok(position)
     }
 }

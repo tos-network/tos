@@ -1,7 +1,5 @@
 use anyhow::Result;
-use tos_ai_miner::{
-    transaction_builder::AIMiningTransactionBuilder,
-};
+use tos_ai_miner::transaction_builder::AIMiningTransactionBuilder;
 use tos_common::{
     ai_mining::{
         calculate_base_reward, calculate_final_reward, calculate_secure_gas_cost, AIMiningPayload,

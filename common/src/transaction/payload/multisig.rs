@@ -2,9 +2,7 @@ use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::elgamal::CompressedPublicKey,
-    serializer::*,
-    transaction::MAX_MULTISIG_PARTICIPANTS
+    crypto::elgamal::CompressedPublicKey, serializer::*, transaction::MAX_MULTISIG_PARTICIPANTS,
 };
 
 // MultiSigPayload is a public payload allowing to setup a multi signature account
@@ -40,25 +38,25 @@ impl Serializer for MultiSigPayload {
         if threshold == 0 {
             return Ok(MultiSigPayload {
                 threshold,
-                participants: IndexSet::new()
-            })
+                participants: IndexSet::new(),
+            });
         }
 
         let participants_len = reader.read_u8()?;
         if participants_len == 0 || participants_len > MAX_MULTISIG_PARTICIPANTS as u8 {
-            return Err(ReaderError::InvalidSize)
+            return Err(ReaderError::InvalidSize);
         }
 
         let mut participants = IndexSet::new();
         for _ in 0..participants_len {
             if !participants.insert(CompressedPublicKey::read(reader)?) {
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         }
 
         Ok(MultiSigPayload {
             threshold,
-            participants
+            participants,
         })
     }
 

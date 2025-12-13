@@ -1,9 +1,9 @@
-use log::debug;
-use serde::{Deserialize, Serialize};
 use crate::{
     block::TopoHeight,
-    serializer::{Reader, ReaderError, Serializer, Writer}
+    serializer::{Reader, ReaderError, Serializer, Writer},
 };
+use log::debug;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VersionedState {
@@ -33,17 +33,17 @@ impl<T: Serializer> Serializer for State<T> {
         match self {
             Self::Clean => {
                 writer.write_u8(0);
-            },
+            }
             Self::Some(data) => {
                 writer.write_u8(1);
                 data.write(writer);
-            },
+            }
             Self::None => {
                 writer.write_u8(2);
-            },
+            }
             Self::Deleted => {
                 writer.write_u8(3);
-            },
+            }
         }
     }
 
@@ -95,11 +95,11 @@ impl VersionedState {
         match self {
             Self::FetchedAt(topoheight) => {
                 *self = Self::Updated(*topoheight);
-            },
-            Self::Updated(_) => {},
+            }
+            Self::Updated(_) => {}
             Self::New => {
                 debug!("Cannot mark as updated a new version");
-            },
+            }
         };
     }
 }
@@ -117,7 +117,10 @@ pub struct Versioned<T: Serializer> {
 
 impl<T: Serializer + Clone> Clone for Versioned<T> {
     fn clone(&self) -> Self {
-        Self { previous_topoheight: self.previous_topoheight, data: self.data.clone() }
+        Self {
+            previous_topoheight: self.previous_topoheight,
+            data: self.data.clone(),
+        }
     }
 }
 
@@ -138,7 +141,7 @@ impl<T: Serializer> Versioned<T> {
     }
 
     pub fn get_previous_topoheight(&self) -> Option<TopoHeight> {
-        self.previous_topoheight        
+        self.previous_topoheight
     }
 
     pub fn set_previous_topoheight(&mut self, previous_topoheight: Option<TopoHeight>) {

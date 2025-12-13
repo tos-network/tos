@@ -1,16 +1,10 @@
-use std::net::SocketAddr;
 use log::warn;
+use std::net::SocketAddr;
 
 use crate::{
-    config::{
-        COIN_DECIMALS,
-        FEE_PER_ACCOUNT_CREATION,
-        FEE_PER_KB,
-        FEE_PER_TRANSFER,
-        BYTES_PER_KB
-    },
+    config::{BYTES_PER_KB, COIN_DECIMALS, FEE_PER_ACCOUNT_CREATION, FEE_PER_KB, FEE_PER_TRANSFER},
     difficulty::Difficulty,
-    varuint::VarUint
+    varuint::VarUint,
 };
 
 pub mod energy_fee;
@@ -34,15 +28,17 @@ macro_rules! static_assert {
 #[macro_export]
 macro_rules! async_handler {
     ($func: expr) => {
-        move |a, b| {
-          Box::pin($func(a, b))
-        }
+        move |a, b| Box::pin($func(a, b))
     };
 }
 
 // Format any coin value using the requested decimals count
 pub fn format_coin(value: u64, decimals: u8) -> String {
-    format!("{:.1$}", value as f64 / 10usize.pow(decimals as u32) as f64, decimals as usize)
+    format!(
+        "{:.1$}",
+        value as f64 / 10usize.pow(decimals as u32) as f64,
+        decimals as usize
+    )
 }
 
 // Format value using tos decimals
@@ -111,13 +107,17 @@ pub fn detect_available_parallelism() -> usize {
     }
 }
 
-
 // return the fee for a transaction based on its size in bytes
 // the fee is calculated in atomic units for TOS
 // Sending to a newly created address will increase the fee
 // Each transfers output will also increase the fee
 // Each signature of a multisig add a small overhead due to the verfications
-pub fn calculate_tx_fee(tx_size: usize, output_count: usize, new_addresses: usize, multisig: usize) -> u64 {
+pub fn calculate_tx_fee(
+    tx_size: usize,
+    output_count: usize,
+    new_addresses: usize,
+    multisig: usize,
+) -> u64 {
     let mut size_in_kb = tx_size as u64 / BYTES_PER_KB as u64;
 
     // we consume a full kb for fee
@@ -126,21 +126,17 @@ pub fn calculate_tx_fee(tx_size: usize, output_count: usize, new_addresses: usiz
     }
 
     size_in_kb * FEE_PER_KB
-    + output_count as u64 * FEE_PER_TRANSFER
-    + new_addresses as u64 * FEE_PER_ACCOUNT_CREATION
-    + multisig as u64 * FEE_PER_TRANSFER
+        + output_count as u64 * FEE_PER_TRANSFER
+        + new_addresses as u64 * FEE_PER_ACCOUNT_CREATION
+        + multisig as u64 * FEE_PER_TRANSFER
 }
 
 // Calculate energy fee for a transaction (only transfer supported)
 pub fn calculate_energy_fee(tx_size: usize, output_count: usize, new_addresses: usize) -> u64 {
     use crate::utils::energy_fee::EnergyFeeCalculator;
-    
+
     // Only transfer operations consume energy, so we only need these 3 parameters
-    EnergyFeeCalculator::calculate_energy_cost(
-        tx_size,
-        output_count,
-        new_addresses
-    )
+    EnergyFeeCalculator::calculate_energy_cost(tx_size, output_count, new_addresses)
 }
 
 const HASHRATE_FORMATS: [&str; 7] = ["H/s", "KH/s", "MH/s", "GH/s", "TH/s", "PH/s", "EH/s"];
@@ -186,11 +182,9 @@ pub fn sanitize_ws_address(target: &str) -> String {
     let mut target = target.to_lowercase();
     if target.starts_with("https://") {
         target.replace_range(..8, "wss://");
-    }
-    else if target.starts_with("http://") {
+    } else if target.starts_with("http://") {
         target.replace_range(..7, "ws://");
-    }
-    else if !target.starts_with("ws://") && !target.starts_with("wss://") {
+    } else if !target.starts_with("ws://") && !target.starts_with("wss://") {
         // use ws:// if it's a IP address, otherwise it may be a domain, use wss://
         let prefix = if target.parse::<SocketAddr>().is_ok() {
             "ws://"
@@ -215,31 +209,13 @@ mod tests {
 
     #[test]
     fn test_format_coin() {
-        assert_eq!(
-            from_coin("10", 8),
-            Some(10 * COIN_VALUE)
-        );
-        assert_eq!(
-            from_coin("1", 8),
-            Some(COIN_VALUE)
-        );
-        assert_eq!(
-            from_coin("0.1", 8),
-            Some(COIN_VALUE / 10)
-        );
-        assert_eq!(
-            from_coin("0.01", 8),
-            Some(COIN_VALUE / 100)
-        );
+        assert_eq!(from_coin("10", 8), Some(10 * COIN_VALUE));
+        assert_eq!(from_coin("1", 8), Some(COIN_VALUE));
+        assert_eq!(from_coin("0.1", 8), Some(COIN_VALUE / 10));
+        assert_eq!(from_coin("0.01", 8), Some(COIN_VALUE / 100));
 
-        assert_eq!(
-            from_coin("0.1", 1),
-            Some(1)
-        );
-        assert_eq!(
-            from_coin("1", 0),
-            Some(1)
-        );
+        assert_eq!(from_coin("0.1", 1), Some(1));
+        assert_eq!(from_coin("1", 0), Some(1));
     }
 
     #[test]

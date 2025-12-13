@@ -1630,5 +1630,5 @@ pub const RUSSIAN: Language<'static> = Language {
         "яхта",
         "ячейка",
         "ящик",
-    ]
+    ],
 };

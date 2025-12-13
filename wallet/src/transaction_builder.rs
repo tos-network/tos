@@ -1,24 +1,29 @@
-use std::collections::{HashMap, HashSet};
-use log::{debug, trace};
-use tos_common::{
-    account::CiphertextCache,
-    crypto::{elgamal::Ciphertext, Hash, Hashable, PublicKey},
-    transaction::{builder::{AccountState, FeeHelper}, Reference, Transaction}
+use crate::{
+    error::WalletError,
+    storage::{Balance, EncryptedStorage, TxCache},
 };
-use crate::{error::WalletError, storage::{Balance, EncryptedStorage, TxCache}};
+use log::{debug, trace};
+use std::collections::{HashMap, HashSet};
+use tos_common::{
+    crypto::{Hash, Hashable, PublicKey},
+    transaction::{
+        builder::{AccountState, FeeHelper},
+        Reference, Transaction,
+    },
+};
 
 // State used to estimate fees for a transaction
 // Because fees can be higher if a destination account is not registered
 // We need to give this information during the estimation of fees
 pub struct EstimateFeesState {
     // this is containing the registered keys that we are aware of
-    registered_keys: HashSet<PublicKey>
+    registered_keys: HashSet<PublicKey>,
 }
 
 impl EstimateFeesState {
     pub fn new() -> Self {
         Self {
-            registered_keys: HashSet::new()
+            registered_keys: HashSet::new(),
         }
     }
 
@@ -90,17 +95,26 @@ impl TransactionBuilderState {
         self.balances.contains_key(asset)
     }
 
-    pub async fn from_tx(storage: &EncryptedStorage, transaction: &Transaction, mainnet: bool) -> Result<Self, WalletError> {
-        let mut state = Self::new(mainnet, transaction.get_reference().clone(), transaction.get_nonce());
-        let ciphertexts = transaction.get_expected_sender_outputs()
+    pub async fn from_tx(
+        storage: &EncryptedStorage,
+        transaction: &Transaction,
+        mainnet: bool,
+    ) -> Result<Self, WalletError> {
+        let mut state = Self::new(
+            mainnet,
+            transaction.get_reference().clone(),
+            transaction.get_nonce(),
+        );
+        let amounts = transaction
+            .get_expected_sender_outputs()
             .map_err(|e| WalletError::Any(e.into()))?;
 
-        for (asset, ct) in ciphertexts {
+        for (asset, amount) in amounts {
             let (mut balance, _) = storage.get_unconfirmed_balance_for(asset).await?;
-            let balance_ct = balance.ciphertext.computable()
-                .map_err(|e| WalletError::Any(e.into()))?;
-
-            *balance_ct -= ct;
+            balance.amount = balance
+                .amount
+                .checked_sub(amount)
+                .ok_or_else(|| WalletError::Any(anyhow::anyhow!("Balance underflow")))?;
             state.add_balance(asset.clone(), balance);
         }
 
@@ -136,23 +150,35 @@ impl TransactionBuilderState {
     }
 
     // Apply the changes to the storage
-    pub async fn apply_changes(&mut self, storage: &mut EncryptedStorage) -> Result<(), WalletError> {
+    pub async fn apply_changes(
+        &mut self,
+        storage: &mut EncryptedStorage,
+    ) -> Result<(), WalletError> {
         trace!("Applying changes to storage");
 
         for (asset, balance) in self.balances.drain() {
-            debug!("Setting balance for asset {} to {} ({})", asset, balance.amount, balance.ciphertext);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Setting balance for asset {} to {}", asset, balance.amount);
+            }
             storage.set_unconfirmed_balance_for(asset, balance).await?;
         }
 
         storage.set_tx_cache(TxCache {
             reference: self.reference.clone(),
+            // NONCE FIX: Keep current nonce instead of incrementing
+            // The nonce will only be incremented after transaction confirmation
+            // during blockchain sync in network_handler.rs (process_block -> line 640, 733)
+            // This prevents nonce desync when transactions fail
             nonce: self.nonce,
             last_tx_hash_created: self.tx_hash_built.take(),
         });
 
         // Lets verify if the last coinbase reward topoheight is still valid
         if let Some(stable_topoheight) = self.stable_topoheight {
-            if storage.get_last_coinbase_reward_topoheight().is_some_and(|h| h < stable_topoheight) {
+            if storage
+                .get_last_coinbase_reward_topoheight()
+                .is_some_and(|h| h < stable_topoheight)
+            {
                 storage.set_last_coinbase_reward_topoheight(None)?;
             }
         }
@@ -179,18 +205,23 @@ impl AccountState for TransactionBuilderState {
     }
 
     fn get_account_balance(&self, asset: &Hash) -> Result<u64, Self::Error> {
-        self.balances.get(asset).map(|b| b.amount).ok_or_else(|| WalletError::BalanceNotFound(asset.clone()))
+        self.balances
+            .get(asset)
+            .map(|b| b.amount)
+            .ok_or_else(|| WalletError::BalanceNotFound(asset.clone()))
     }
 
-    fn get_account_ciphertext(&self, asset: &Hash) -> Result<CiphertextCache, Self::Error> {
-        self.balances.get(asset).map(|b| b.ciphertext.clone()).ok_or_else(|| WalletError::BalanceNotFound(asset.clone()))
-    }
-
-    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64, ciphertext: Ciphertext) -> Result<(), Self::Error> {
-        self.balances.insert(asset.clone(), Balance {
-            amount: new_balance,
-            ciphertext: CiphertextCache::Decompressed(ciphertext)
-        });
+    fn update_account_balance(
+        &mut self,
+        asset: &Hash,
+        new_balance: u64,
+    ) -> Result<(), Self::Error> {
+        self.balances.insert(
+            asset.clone(),
+            Balance {
+                amount: new_balance,
+            },
+        );
         Ok(())
     }
 

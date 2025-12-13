@@ -1,3 +1,18 @@
+use crate::{
+    api::SubscribeParams,
+    tokio::{
+        select, spawn_task,
+        sync::{broadcast, mpsc, oneshot, Mutex},
+        task::JoinHandle,
+        time::{sleep, timeout},
+    },
+    utils::sanitize_ws_address,
+};
+use anyhow::Error;
+use futures_util::{SinkExt, StreamExt};
+use log::{debug, error, info, trace, warn};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -5,37 +20,13 @@ use std::{
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
-        OnceLock
+        Arc, OnceLock,
     },
-    time::Duration
+    time::Duration,
 };
-use anyhow::Error;
-use futures_util::{
-    StreamExt,
-    SinkExt
-};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::{Value, json};
-use tokio_tungstenite_wasm::{
-    WebSocketStream,
-    connect,
-    Message
-};
-use log::{debug, error, info, trace, warn};
-use crate::{
-    tokio::{
-        sync::{broadcast, oneshot, Mutex, mpsc},
-        task::JoinHandle,
-        time::{sleep, timeout},
-        spawn_task,
-        select
-    },
-    api::SubscribeParams,
-    utils::sanitize_ws_address
-};
+use tokio_tungstenite_wasm::{connect, Message, WebSocketStream};
 
-use super::{JSON_RPC_VERSION, JsonRPCError, JsonRPCResponse, JsonRPCResult};
+use super::{JsonRPCError, JsonRPCResponse, JsonRPCResult, JSON_RPC_VERSION};
 
 // Initialize rustls crypto provider once
 static RUSTLS_CRYPTO_INIT: OnceLock<()> = OnceLock::new();
@@ -68,14 +59,14 @@ fn init_rustls_crypto_provider() {
 // EventReceiver allows to get the event value parsed directly
 pub struct EventReceiver<T: DeserializeOwned> {
     inner: broadcast::Receiver<Value>,
-    _phantom: PhantomData<T>
+    _phantom: PhantomData<T>,
 }
 
 impl<T: DeserializeOwned> EventReceiver<T> {
     pub fn new(inner: broadcast::Receiver<Value>) -> Self {
         Self {
             inner,
-            _phantom: PhantomData
+            _phantom: PhantomData,
         }
     }
 
@@ -92,10 +83,10 @@ impl<T: DeserializeOwned> EventReceiver<T> {
                     error!("EventReceiver lagged {i} behind, catching up...");
                     res = self.inner.recv().await;
                 }
-                e => return Err(e.into())
+                e => return Err(e.into()),
             };
         }
- 
+
         let value = res?;
         Ok(serde_json::from_value(value)?)
     }
@@ -122,7 +113,7 @@ pub struct WebSocketJsonRPCClientImpl<E: Serialize + Hash + Eq + Send + Sync + C
     // This contains all pending requests
     requests: Mutex<HashMap<usize, oneshot::Sender<JsonRPCResponse>>>,
     // This contains all id sent to register to a event on daemon
-    // It stores the sender channel to propagate the event to apps 
+    // It stores the sender channel to propagate the event to apps
     handler_by_id: Mutex<HashMap<usize, broadcast::Sender<Value>>>,
     // This contains all events registered by the app with its usize
     // This allows us to subscribe to same channel if its already subscribed
@@ -147,15 +138,19 @@ pub struct WebSocketJsonRPCClientImpl<E: Serialize + Hash + Eq + Send + Sync + C
 
 pub const DEFAULT_AUTO_RECONNECT: Duration = Duration::from_secs(5);
 
-impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static> WebSocketJsonRPCClientImpl<E> {
-
+impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
+    WebSocketJsonRPCClientImpl<E>
+{
     // Create a new WebSocketJsonRPCClient with the target address
     pub async fn new(target: String) -> Result<WebSocketJsonRPCClient<E>, JsonRPCError> {
         Self::with(target, Duration::from_secs(15)).await
     }
 
     // Create a new WebSocketJsonRPCClient with the target address and timeout
-    pub async fn with(mut target: String, timeout_after: Duration) -> Result<WebSocketJsonRPCClient<E>, JsonRPCError> {
+    pub async fn with(
+        mut target: String,
+        timeout_after: Duration,
+    ) -> Result<WebSocketJsonRPCClient<E>, JsonRPCError> {
         // Initialize rustls crypto provider before any TLS connections
         #[cfg(feature = "rpc-client")]
         init_rustls_crypto_provider();
@@ -216,7 +211,10 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     }
 
     // Register to a channel
-    async fn register_to_connection_channel(&self, mutex: &Mutex<Option<broadcast::Sender<()>>>) -> broadcast::Receiver<()> {
+    async fn register_to_connection_channel(
+        &self,
+        mutex: &Mutex<Option<broadcast::Sender<()>>>,
+    ) -> broadcast::Receiver<()> {
         let mut channel = mutex.lock().await;
         match channel.as_ref() {
             Some(sender) => sender.subscribe(),
@@ -230,17 +228,20 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
     // Call this function to be notified by a channel when we lose the connection
     pub async fn on_connection_lost(&self) -> broadcast::Receiver<()> {
-        self.register_to_connection_channel(&self.offline_channel).await
+        self.register_to_connection_channel(&self.offline_channel)
+            .await
     }
 
     // Call this function to be notified by a channel when we are connected to the server
     pub async fn on_connection(&self) -> broadcast::Receiver<()> {
-        self.register_to_connection_channel(&self.online_channel).await
+        self.register_to_connection_channel(&self.online_channel)
+            .await
     }
 
     // Call this function to be notified by a channel when we are trying to reconnect to the server
     pub async fn on_reconnect(&self) -> broadcast::Receiver<()> {
-        self.register_to_connection_channel(&self.reconnect_channel).await
+        self.register_to_connection_channel(&self.reconnect_channel)
+            .await
     }
 
     // Should the client try to reconnect to the server if the connection is lost
@@ -273,9 +274,16 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                 debug!("Resubscribing to event {:?} with id {}", event, id);
 
                 // Send it to the server
-                let res = match self.send::<_, bool>("subscribe", Some(id), &SubscribeParams {
-                    notify: Cow::Borrowed(&event),
-                }).await {
+                let res = match self
+                    .send::<_, bool>(
+                        "subscribe",
+                        Some(id),
+                        &SubscribeParams {
+                            notify: Cow::Borrowed(&event),
+                        },
+                    )
+                    .await
+                {
                     Ok(res) => res,
                     Err(e) => {
                         error!("Error while resubscribing to event with id {}: {:?}", id, e);
@@ -304,7 +312,10 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         {
             let sender = self.sender.lock().await;
             if let Err(e) = sender.send(InternalMessage::Close).await {
-                error!("Error while sending close message to the background task: {:?}", e);
+                error!(
+                    "Error while sending close message to the background task: {:?}",
+                    e
+                );
             }
         }
 
@@ -313,7 +324,10 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             if let Some(task) = task {
                 if task.is_finished() {
                     if let Err(e) = task.await {
-                        error!("Error while waiting for the background task to finish: {:?}", e);
+                        error!(
+                            "Error while waiting for the background task to finish: {:?}",
+                            e
+                        );
                     }
                 } else {
                     task.abort();
@@ -346,7 +360,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         trace!("Reconnect requested: server '{}'", self.target);
         if self.is_online() {
             warn!("Already connected to the server");
-            return Ok(false)
+            return Ok(false);
         }
 
         trace!("Reconnecting to the server '{}'", self.target);
@@ -399,7 +413,11 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         }
     }
 
-    async fn start_background_task(self: Arc<Self>, mut receiver: mpsc::Receiver<InternalMessage>, ws: WebSocketStream) -> Result<(), JsonRPCError> {
+    async fn start_background_task(
+        self: Arc<Self>,
+        mut receiver: mpsc::Receiver<InternalMessage>,
+        ws: WebSocketStream,
+    ) -> Result<(), JsonRPCError> {
         debug!("Starting background task");
         self.set_online(true).await;
 
@@ -417,19 +435,19 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                         if zelf.delay_auto_reconnect.lock().await.is_none() {
                             debug!("Closing background task because no auto reconnect ");
                             zelf.set_online(false).await;
-    
+
                             {
                                 let mut lock = zelf.background_task.lock().await;
                                 *lock = None;
                             }
-    
+
                             // Do a clean up
                             zelf.clear_requests().await;
                             zelf.clear_events().await;
-    
+
                             return;
                         }
-                    },
+                    }
                     Err(e) => {
                         error!("Error in the WebSocket client background task: {:?}", e);
                     }
@@ -444,12 +462,18 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                 debug!("Requests cleared");
 
                 // retry to connect until we are online or that it got disabled
-                while let Some(auto_reconnect) = { zelf.delay_auto_reconnect.lock().await.as_ref().cloned() } {
-                    debug!("Reconnecting to the server in {} seconds...", auto_reconnect.as_secs());
+                while let Some(auto_reconnect) =
+                    { zelf.delay_auto_reconnect.lock().await.as_ref().cloned() }
+                {
+                    debug!(
+                        "Reconnecting to the server in {} seconds...",
+                        auto_reconnect.as_secs()
+                    );
                     sleep(auto_reconnect).await;
 
                     // Notify that we are trying to reconnect
-                    zelf.notify_connection_channel(&zelf.reconnect_channel).await;
+                    zelf.notify_connection_channel(&zelf.reconnect_channel)
+                        .await;
 
                     match connect(&zelf.target).await {
                         Ok(websocket) => {
@@ -459,7 +483,10 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
                             // Register all events again
                             if let Err(e) = Arc::clone(&zelf).resubscribe_events().await {
-                                error!("Error while resubscribing to events due to reconnect: {:?}", e);
+                                error!(
+                                    "Error while resubscribing to events due to reconnect: {:?}",
+                                    e
+                                );
                             } else {
                                 info!("Resubscribed to all events");
                             }
@@ -487,11 +514,15 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             *lock = Some(handle);
         }
 
-        Ok(())        
+        Ok(())
     }
 
     // Background task that keep alive WS connection
-    async fn background_task(self: &Arc<Self>, receiver: &mut mpsc::Receiver<InternalMessage>, ws: WebSocketStream) -> Result<(), JsonRPCError> {
+    async fn background_task(
+        self: &Arc<Self>,
+        receiver: &mut mpsc::Receiver<InternalMessage>,
+        ws: WebSocketStream,
+    ) -> Result<(), JsonRPCError> {
         let (mut write, mut read) = ws.split();
         loop {
             select! {
@@ -558,7 +589,11 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     }
 
     // Call a method with parameters
-    pub async fn call_with<P: Serialize, R: DeserializeOwned>(&self, method: &str, params: &P) -> JsonRPCResult<R> {
+    pub async fn call_with<P: Serialize, R: DeserializeOwned>(
+        &self,
+        method: &str,
+        params: &P,
+    ) -> JsonRPCResult<R> {
         trace!("Calling method '{}' with params: {}", method, json!(params));
         self.send(method, None, params).await
     }
@@ -571,7 +606,11 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
     // Subscribe to an event
     // Capacity represents the number of events that can be stored in the channel
-    pub async fn subscribe_event<T: DeserializeOwned>(&self, event: E, capacity: usize) -> JsonRPCResult<EventReceiver<T>> {
+    pub async fn subscribe_event<T: DeserializeOwned>(
+        &self,
+        event: E,
+        capacity: usize,
+    ) -> JsonRPCResult<EventReceiver<T>> {
         trace!("Subscribing to event {:?}", event);
         // Returns a Receiver for this event if already registered
         {
@@ -588,9 +627,14 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         let id = self.next_id();
 
         // Send it to the server
-        self.send::<_, bool>("subscribe", Some(id), &SubscribeParams {
-            notify: Cow::Borrowed(&event)
-        }).await?;
+        self.send::<_, bool>(
+            "subscribe",
+            Some(id),
+            &SubscribeParams {
+                notify: Cow::Borrowed(&event),
+            },
+        )
+        .await?;
 
         // Create a mapping from the event to the ID used for the request
         {
@@ -630,7 +674,12 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     }
 
     // Send a request to the sender channel that will be sent to the server
-    async fn send_message_internal<P: Serialize>(&self, id: Option<usize>, method: &str, params: &P) -> JsonRPCResult<()> {
+    async fn send_message_internal<P: Serialize>(
+        &self,
+        id: Option<usize>,
+        method: &str,
+        params: &P,
+    ) -> JsonRPCResult<()> {
         let sender = self.sender.lock().await;
         let value = json!({
             "jsonrpc": JSON_RPC_VERSION,
@@ -638,14 +687,21 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             "id": id,
             "params": params
         });
-        sender.send(InternalMessage::Send(serde_json::to_string(&value)?)).await
+        sender
+            .send(InternalMessage::Send(serde_json::to_string(&value)?))
+            .await
             .map_err(|e| JsonRPCError::SendError(value.to_string(), e.to_string()))?;
 
         Ok(())
     }
 
     // Send a request to the server and wait for the response
-    async fn send<P: Serialize, R: DeserializeOwned>(&self, method: &str, id: Option<usize>, params: &P) -> JsonRPCResult<R> {
+    async fn send<P: Serialize, R: DeserializeOwned>(
+        &self,
+        method: &str,
+        id: Option<usize>,
+        params: &P,
+    ) -> JsonRPCResult<R> {
         let id = id.unwrap_or_else(|| self.next_id());
         let (sender, receiver) = oneshot::channel();
         {
@@ -659,7 +715,10 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             Ok(res) => Ok(res),
             Err(e) => {
                 let mut requests = self.requests.lock().await;
-                debug!("Removing request with id {} from the pending requests due to its fail", id);
+                debug!(
+                    "Removing request with id {} from the pending requests due to its fail",
+                    id
+                );
                 requests.remove(&id);
                 Err(e)
             }
@@ -667,18 +726,34 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     }
 
     // Send a request to the server and wait for the response
-    async fn send_internal<P: Serialize, R: DeserializeOwned>(&self, method: &str, id: usize, params: &P, receiver: oneshot::Receiver<JsonRPCResponse>) -> JsonRPCResult<R> {
+    async fn send_internal<P: Serialize, R: DeserializeOwned>(
+        &self,
+        method: &str,
+        id: usize,
+        params: &P,
+        receiver: oneshot::Receiver<JsonRPCResponse>,
+    ) -> JsonRPCResult<R> {
         self.send_message_internal(Some(id), method, params).await?;
 
-        let response = timeout(self.timeout_after, receiver).await
-            .map_err(|_| JsonRPCError::TimedOut(json!({ "method": method, "params": params }).to_string()))?
-            .map_err(|e| JsonRPCError::NoResponse(json!({ "method": method, "params": params }).to_string(), e.to_string()))?;
+        let response = timeout(self.timeout_after, receiver)
+            .await
+            .map_err(|_| {
+                JsonRPCError::TimedOut(json!({ "method": method, "params": params }).to_string())
+            })?
+            .map_err(|e| {
+                JsonRPCError::NoResponse(
+                    json!({ "method": method, "params": params }).to_string(),
+                    e.to_string(),
+                )
+            })?;
 
         if let Some(error) = response.error {
             return Err(JsonRPCError::ServerError {
                 code: error.code,
                 message: error.message,
-                data: error.data.map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+                data: error
+                    .data
+                    .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default()),
             });
         }
 

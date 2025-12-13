@@ -1,6 +1,9 @@
-use std::collections::{btree_map::{Entry, IntoIter}, BTreeMap};
 use itertools::{Either, Itertools};
 use sled::{IVec, Tree};
+use std::collections::{
+    btree_map::{Entry, IntoIter},
+    BTreeMap,
+};
 use tos_common::serializer::Serializer;
 
 use crate::core::{error::BlockchainError, storage::cache::StorageCache};
@@ -11,7 +14,9 @@ pub struct Batch {
 
 impl Default for Batch {
     fn default() -> Self {
-        Self { writes: BTreeMap::new() }
+        Self {
+            writes: BTreeMap::new(),
+        }
     }
 }
 
@@ -34,11 +39,11 @@ impl Batch {
             Entry::Occupied(mut entry) => {
                 let value = entry.get_mut().take();
                 (value, false)
-            },
+            }
             Entry::Vacant(v) => {
                 v.insert(None);
                 (None, true)
-            },
+            }
         }
     }
 }
@@ -57,14 +62,14 @@ impl IntoIterator for Batch {
 // So we can apply them to the DB or rollback them
 pub struct Snapshot {
     pub trees: BTreeMap<IVec, Option<Batch>>,
-    pub cache: StorageCache
+    pub cache: StorageCache,
 }
 
 impl Default for Snapshot {
     fn default() -> Self {
         Self {
             trees: BTreeMap::new(),
-            cache: StorageCache::default()
+            cache: StorageCache::default(),
         }
     }
 }
@@ -74,16 +79,19 @@ impl Snapshot {
     pub fn new(cache: StorageCache) -> Self {
         Self {
             trees: BTreeMap::new(),
-            cache
+            cache,
         }
     }
 
     // Contains a key in the snapshot
     pub fn contains_key(&self, tree: &Tree, key: &[u8]) -> bool {
-        self.trees.get(&tree.name())
-            .map(|batch| batch.as_ref()
-                .map_or(false, |batch| batch.writes.contains_key(key))
-            )
+        self.trees
+            .get(&tree.name())
+            .map(|batch| {
+                batch
+                    .as_ref()
+                    .map_or(false, |batch| batch.writes.contains_key(key))
+            })
             .unwrap_or(false)
     }
 
@@ -91,23 +99,23 @@ impl Snapshot {
     // If its deleted, it should return false
     // If its not touched, return None
     pub fn contains_key_with_value(&self, tree: &Tree, key: &[u8]) -> Option<bool> {
-        self.trees.get(&tree.name())
-            .and_then(|batch| {
-                batch.as_ref()
-                    .and_then(|batch|
-                        batch.writes.get(key)
-                            .map(|v| v.is_some())
-                    )
-            })
+        self.trees.get(&tree.name()).and_then(|batch| {
+            batch
+                .as_ref()
+                .and_then(|batch| batch.writes.get(key).map(|v| v.is_some()))
+        })
     }
 
     // Read from our snapshot
-    pub fn load_optional_from_disk<T: Serializer>(&self, tree: &Tree, key: &[u8]) -> Result<Option<T>, BlockchainError> {
-        let data = self.trees.get(&tree.name())
-            .and_then(|batch| {
-                batch.as_ref()
-                    .and_then(|batch| batch.writes.get(key))
-            })
+    pub fn load_optional_from_disk<T: Serializer>(
+        &self,
+        tree: &Tree,
+        key: &[u8],
+    ) -> Result<Option<T>, BlockchainError> {
+        let data = self
+            .trees
+            .get(&tree.name())
+            .and_then(|batch| batch.as_ref().and_then(|batch| batch.writes.get(key)))
             .and_then(Option::as_ref);
 
         match data {
@@ -118,10 +126,17 @@ impl Snapshot {
 
     // Insert a key into the snapshot
     // Returns the previous value if it exists
-    pub fn insert<K: Into<IVec>, V: Into<IVec>>(&mut self, tree: &Tree, key: K, value: V) -> Option<IVec> {
-        let batch = self.trees.entry(tree.name())
+    pub fn insert<K: Into<IVec>, V: Into<IVec>>(
+        &mut self,
+        tree: &Tree,
+        key: K,
+        value: V,
+    ) -> Option<IVec> {
+        let batch = self
+            .trees
+            .entry(tree.name())
             .or_insert_with(|| Some(Batch::default()));
-        
+
         match batch {
             Some(batch) => batch.insert(key.into(), value.into()),
             None => {
@@ -137,7 +152,9 @@ impl Snapshot {
     // This will mark the entry as None
     // If the key is not found, it will return true to load from the disk
     pub fn remove<K: Into<IVec>>(&mut self, tree: &Tree, key: K) -> (Option<IVec>, bool) {
-        let batch = self.trees.entry(tree.name())
+        let batch = self
+            .trees
+            .entry(tree.name())
             .or_insert_with(|| Some(Batch::default()));
 
         match batch {
@@ -148,8 +165,7 @@ impl Snapshot {
 
     // Get the length of a value using its tree key in the snapshot
     pub fn get_value_size<K: AsRef<[u8]> + ?Sized>(&self, tree: &Tree, key: &K) -> Option<usize> {
-        let batch = self.trees.get(&tree.name())?
-            .as_ref()?;
+        let batch = self.trees.get(&tree.name())?.as_ref()?;
         let elem = batch.writes.get(key.as_ref())?.as_ref()?;
         Some(elem.len())
     }
@@ -159,20 +175,24 @@ impl Snapshot {
         self.trees.insert(tree_name.as_ref().into(), None).is_some()
     }
 
-    pub fn scan_prefix(&self, tree: &Tree, prefix: &[u8]) -> impl Iterator<Item = sled::Result<IVec>> {
+    pub fn scan_prefix(
+        &self,
+        tree: &Tree,
+        prefix: &[u8],
+    ) -> impl Iterator<Item = sled::Result<IVec>> {
         match self.trees.get(&tree.name()) {
             Some(Some(entries)) => {
-                let original =  tree.scan_prefix(prefix)
-                    .keys()
-                    .filter_map_ok(|v| {
-                        if !entries.writes.contains_key(&v) {
-                            Some(v)
-                        } else {
-                            None
-                        }
-                    });
+                let original = tree.scan_prefix(prefix).keys().filter_map_ok(|v| {
+                    if !entries.writes.contains_key(&v) {
+                        Some(v)
+                    } else {
+                        None
+                    }
+                });
 
-                let changes = entries.writes.iter()
+                let changes = entries
+                    .writes
+                    .iter()
                     .filter(|(k, v)| v.is_some() && k.starts_with(prefix))
                     .map(|(k, _)| Ok(k.clone()))
                     .chain(original)
@@ -180,57 +200,58 @@ impl Snapshot {
                     .into_iter();
 
                 Either::Left(changes)
-            },
-            _ => Either::Right(tree.scan_prefix(prefix).keys())
+            }
+            _ => Either::Right(tree.scan_prefix(prefix).keys()),
         }
     }
 
     pub fn iter(&self, tree: &Tree) -> impl Iterator<Item = sled::Result<(IVec, IVec)>> {
         match self.trees.get(&tree.name()) {
             Some(Some(entries)) => {
-                let original = tree.iter()
-                    .filter_map_ok(|(k, v)| {
-                        if !entries.writes.contains_key(&k) {
-                            Some((k, v))
-                        } else {
-                            None
-                        }
-                    });
+                let original = tree.iter().filter_map_ok(|(k, v)| {
+                    if !entries.writes.contains_key(&k) {
+                        Some((k, v))
+                    } else {
+                        None
+                    }
+                });
 
-                let changes = entries.writes.iter()
+                let changes = entries
+                    .writes
+                    .iter()
                     .filter_map(|(k, v)| v.clone().map(|v| Ok((k.clone(), v))))
                     .chain(original)
                     .collect::<Vec<_>>()
                     .into_iter();
 
                 Either::Left(changes)
-            },
-            _ => Either::Right(tree.iter())
+            }
+            _ => Either::Right(tree.iter()),
         }
     }
 
     pub fn iter_keys(&self, tree: &Tree) -> impl Iterator<Item = sled::Result<IVec>> {
         match self.trees.get(&tree.name()) {
             Some(Some(entries)) => {
-                let original = tree.iter()
-                    .keys()
-                    .filter_map_ok(|k| {
-                        if !entries.writes.contains_key(&k) {
-                            Some(k)
-                        } else {
-                            None
-                        }
-                    });
+                let original = tree.iter().keys().filter_map_ok(|k| {
+                    if !entries.writes.contains_key(&k) {
+                        Some(k)
+                    } else {
+                        None
+                    }
+                });
 
-                let changes = entries.writes.iter()
+                let changes = entries
+                    .writes
+                    .iter()
                     .filter_map(|(k, v)| v.as_ref().map(|_| Ok(k.clone())))
                     .chain(original)
                     .collect::<Vec<_>>()
                     .into_iter();
 
                 Either::Left(changes)
-            },
-            _ => Either::Right(tree.iter().keys())
+            }
+            _ => Either::Right(tree.iter().keys()),
         }
     }
 }

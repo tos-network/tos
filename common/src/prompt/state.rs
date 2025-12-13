@@ -1,33 +1,20 @@
+use crate::tokio::sync::{mpsc::UnboundedSender, oneshot};
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    terminal,
+};
+use log::{debug, error, info};
+use regex::Regex;
 use std::{
     collections::VecDeque,
     io::{stdout, Write},
     sync::{
-        atomic::{
-            AtomicBool,
-            AtomicU16,
-            AtomicUsize,
-            Ordering
-        },
-        Arc,
-        Mutex
-    }
-};
-use crossterm::{
-    event::{
-        self,
-        Event,
-        KeyCode,
-        KeyEventKind,
-        KeyModifiers
+        atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering},
+        Arc, Mutex,
     },
-    terminal
 };
-use regex::Regex;
-use log::{debug, error, info};
-use crate::tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use super::PromptError;
-
 
 // State used to be shared between stdin thread and Prompt instance
 pub struct State {
@@ -40,14 +27,18 @@ pub struct State {
     prompt_sender: Mutex<Option<oneshot::Sender<String>>>,
     exit: AtomicBool,
     ascii_escape_regex: Regex,
-    interactive: bool
+    interactive: bool,
 }
 
 impl State {
     pub fn new(allow_interactive: bool) -> Self {
         // enable the raw mode for terminal
         // so we can read each event/action
-        let interactive = if allow_interactive { !terminal::enable_raw_mode().is_err() } else { false };
+        let interactive = if allow_interactive {
+            !terminal::enable_raw_mode().is_err()
+        } else {
+            false
+        };
 
         Self {
             prompt: Mutex::new(None),
@@ -59,7 +50,7 @@ impl State {
             prompt_sender: Mutex::new(None),
             exit: AtomicBool::new(false),
             ascii_escape_regex: Regex::new("\x1B\\[[0-9;]*[A-Za-z]").unwrap(),
-            interactive
+            interactive,
         }
     }
 
@@ -90,7 +81,7 @@ impl State {
     pub fn set_exit_channel(&self, sender: oneshot::Sender<()>) -> Result<(), PromptError> {
         let mut exit = self.exit_channel.lock()?;
         if exit.is_some() {
-            return Err(PromptError::AlreadyRunning)
+            return Err(PromptError::AlreadyRunning);
         }
         *exit = Some(sender);
         Ok(())
@@ -159,7 +150,7 @@ impl State {
                                             }
                                         }
                                     }
-                                },
+                                }
                                 KeyCode::Down => {
                                     if is_in_history {
                                         let mut buffer = self.user_input.lock()?;
@@ -174,7 +165,7 @@ impl State {
                                         }
                                         self.show_input(&buffer)?;
                                     }
-                                },
+                                }
                                 KeyCode::Char(c) => {
                                     is_in_history = false;
                                     // handle CTRL+C
@@ -185,14 +176,14 @@ impl State {
                                     let mut buffer = self.user_input.lock()?;
                                     buffer.push(c);
                                     self.show_input(&buffer)?;
-                                },
+                                }
                                 KeyCode::Backspace => {
                                     is_in_history = false;
                                     let mut buffer = self.user_input.lock()?;
                                     buffer.pop();
 
                                     self.show_input(&buffer)?;
-                                },
+                                }
                                 KeyCode::Enter => {
                                     is_in_history = false;
                                     let mut buffer = self.user_input.lock()?;
@@ -218,13 +209,13 @@ impl State {
                                             }
                                         }
                                     }
-                                },
+                                }
                                 _ => {}
                             }
                         }
                         _ => {}
                     }
-                },
+                }
                 Err(e) => {
                     error!("Error while reading input: {}", e);
                     break;
@@ -283,11 +274,13 @@ impl State {
     pub fn show_with_prompt_and_input(&self, prompt: &str, input: &str) -> Result<(), PromptError> {
         // if not interactive, we don't need to show anything
         if !self.is_interactive() {
-            return Ok(())
+            return Ok(());
         }
 
         let current_count = self.count_lines(&format!("\r{}{}", prompt, input));
-        let previous_count = self.previous_prompt_line.swap(current_count, Ordering::SeqCst);
+        let previous_count = self
+            .previous_prompt_line
+            .swap(current_count, Ordering::SeqCst);
 
         // > 1 because prompt line is already counted below
         if previous_count > 1 {

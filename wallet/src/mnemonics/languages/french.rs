@@ -1630,5 +1630,5 @@ pub const FRENCH: Language<'static> = Language {
         "zinc",
         "zone",
         "zoom",
-    ]
+    ],
 };

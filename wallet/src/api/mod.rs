@@ -1,4 +1,3 @@
-
 #[cfg(any(feature = "xswd", feature = "api_server"))]
 mod rpc;
 
@@ -11,7 +10,4 @@ mod xswd;
 pub use server::*;
 
 #[cfg(feature = "xswd")]
-pub use self::{
-    xswd::*,
-    rpc::register_methods as register_rpc_methods
-};
+pub use self::{rpc::register_methods as register_rpc_methods, xswd::*};

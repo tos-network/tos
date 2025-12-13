@@ -1,10 +1,14 @@
-use tos_common::{difficulty::{CumulativeDifficulty, Difficulty}, serializer::*, varuint::VarUint};
+use tos_common::{
+    difficulty::{CumulativeDifficulty, Difficulty},
+    serializer::*,
+    varuint::VarUint,
+};
 
 // All needed difficulty for a block
 pub struct BlockDifficulty {
     pub difficulty: Difficulty,
     pub cumulative_difficulty: CumulativeDifficulty,
-    pub covariance: VarUint
+    pub covariance: VarUint,
 }
 
 impl Serializer for BlockDifficulty {
@@ -16,7 +20,7 @@ impl Serializer for BlockDifficulty {
         Ok(Self {
             difficulty,
             cumulative_difficulty,
-            covariance
+            covariance,
         })
     }
 
@@ -27,8 +31,6 @@ impl Serializer for BlockDifficulty {
     }
 
     fn size(&self) -> usize {
-        self.difficulty.size()
-        + self.cumulative_difficulty.size()
-        + self.covariance.size()
+        self.difficulty.size() + self.cumulative_difficulty.size() + self.covariance.size()
     }
 }

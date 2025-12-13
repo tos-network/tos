@@ -1,8 +1,8 @@
 use std::{fmt, str::FromStr};
 
-use serde::{Serialize, Deserialize};
-pub use x25519_dalek::{PublicKey, StaticSecret};
 use rand::rngs::OsRng;
+use serde::{Deserialize, Serialize};
+pub use x25519_dalek::{PublicKey, StaticSecret};
 
 /// A wrapped secret key
 /// For clap implementation
@@ -42,7 +42,7 @@ pub enum KeyVerificationAction {
     /// Reject the connection with the peer
     Reject,
     /// Ignore the key change for the peer
-    Ignore
+    Ignore,
 }
 
 impl Default for KeyVerificationAction {
@@ -54,7 +54,7 @@ impl Default for KeyVerificationAction {
 /// A Diffie-Hellman keypair
 pub struct DHKeyPair {
     pub_key: PublicKey,
-    priv_key: StaticSecret
+    priv_key: StaticSecret,
 }
 
 impl DHKeyPair {
@@ -62,19 +62,13 @@ impl DHKeyPair {
     pub fn new() -> Self {
         let priv_key = StaticSecret::random_from_rng(&mut OsRng);
         let pub_key = PublicKey::from(&priv_key);
-        Self {
-            pub_key,
-            priv_key
-        }
+        Self { pub_key, priv_key }
     }
 
     /// Create a keypair from a private key
     pub fn from(priv_key: StaticSecret) -> Self {
         let pub_key = PublicKey::from(&priv_key);
-        Self {
-            pub_key,
-            priv_key
-        }
+        Self { pub_key, priv_key }
     }
 
     /// Get the public key of this keypair
@@ -116,7 +110,7 @@ impl serde::Serialize for WrappedSecret {
 impl<'a> serde::Deserialize<'a> for WrappedSecret {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'a>
+        D: serde::Deserializer<'a>,
     {
         let s = String::deserialize(deserializer)?;
         WrappedSecret::from_str(&s).map_err(serde::de::Error::custom)

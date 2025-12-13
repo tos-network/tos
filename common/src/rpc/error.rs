@@ -1,15 +1,15 @@
 use std::fmt::{Display, Formatter};
 
 #[cfg(feature = "rpc-server")]
-use actix_web::{ResponseError, HttpResponse};
+use actix_web::{HttpResponse, ResponseError};
 
-use serde_json::{Value, Error as SerdeError, json};
-use thiserror::Error;
-use anyhow::Error as AnyError;
 use crate::{
+    rpc::{Id, JSON_RPC_VERSION},
     serializer::ReaderError,
-    rpc::{Id, JSON_RPC_VERSION}
 };
+use anyhow::Error as AnyError;
+use serde_json::{json, Error as SerdeError, Value};
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum InternalRpcError {
@@ -87,9 +87,7 @@ impl InternalRpcError {
             Self::EventNotSubscribed => -1,
             Self::EventAlreadySubscribed => -2,
             // Custom errors
-            Self::Custom(code, _)
-            | Self::CustomStr(code, _)
-            | Self::CustomAny(code, _) => *code,
+            Self::Custom(code, _) | Self::CustomStr(code, _) | Self::CustomAny(code, _) => *code,
         }
     }
 }
@@ -97,21 +95,21 @@ impl InternalRpcError {
 #[derive(Debug)]
 pub struct RpcResponseError {
     id: Option<Id>,
-    error: InternalRpcError
+    error: InternalRpcError,
 }
 
 impl RpcResponseError {
     pub fn new<T: Into<InternalRpcError>>(id: Option<Id>, error: T) -> Self {
         Self {
             id,
-            error: error.into()
+            error: error.into(),
         }
     }
 
     pub fn get_id(&self) -> Value {
         match &self.id {
             Some(id) => json!(id),
-            None => Value::Null
+            None => Value::Null,
         }
     }
 
@@ -129,7 +127,12 @@ impl RpcResponseError {
 
 impl Display for RpcResponseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "RpcError[id: {}, error: {:#}]", self.get_id(), self.error)
+        write!(
+            f,
+            "RpcError[id: {}, error: {:#}]",
+            self.get_id(),
+            self.error
+        )
     }
 }
 
@@ -139,4 +142,3 @@ impl ResponseError for RpcResponseError {
         HttpResponse::Ok().json(self.to_json())
     }
 }
-

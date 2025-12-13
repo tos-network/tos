@@ -1,16 +1,12 @@
-use anyhow::{Result, anyhow};
-use reqwest::Client;
-use serde_json::{Value, json};
-use url::Url;
+use anyhow::{anyhow, Result};
 use log::{debug, info, warn};
+use reqwest::Client;
+use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::time::sleep;
+use url::Url;
 
-use tos_common::{
-    crypto::Hash,
-    transaction::Transaction,
-    serializer::Serializer,
-};
+use tos_common::{crypto::Hash, serializer::Serializer, transaction::Transaction};
 
 /// Configuration for daemon client retries and timeouts
 #[derive(Debug, Clone)]
@@ -87,11 +83,12 @@ impl DaemonClient {
 
     /// Create a new daemon client with custom configuration
     pub fn with_config(daemon_address: &str, config: DaemonClientConfig) -> Result<Self> {
-        let base_url = if daemon_address.starts_with("http://") || daemon_address.starts_with("https://") {
-            Url::parse(daemon_address)?
-        } else {
-            Url::parse(&format!("http://{}", daemon_address))?
-        };
+        let base_url =
+            if daemon_address.starts_with("http://") || daemon_address.starts_with("https://") {
+                Url::parse(daemon_address)?
+            } else {
+                Url::parse(&format!("http://{}", daemon_address))?
+            };
 
         let client = Client::builder()
             .timeout(config.request_timeout)
@@ -121,7 +118,10 @@ impl DaemonClient {
 
         for attempt in 0..=self.config.max_retries {
             if attempt > 0 {
-                warn!("Retrying request to {} (attempt {}/{})", url, attempt, self.config.max_retries);
+                warn!(
+                    "Retrying request to {} (attempt {}/{})",
+                    url, attempt, self.config.max_retries
+                );
                 sleep(self.config.retry_delay).await;
             }
 
@@ -133,10 +133,11 @@ impl DaemonClient {
                     // Don't retry on certain types of errors
                     if let Some(ref err) = last_error {
                         let err_msg = err.to_string().to_lowercase();
-                        if err_msg.contains("invalid") ||
-                           err_msg.contains("malformed") ||
-                           err_msg.contains("unauthorized") ||
-                           err_msg.contains("forbidden") {
+                        if err_msg.contains("invalid")
+                            || err_msg.contains("malformed")
+                            || err_msg.contains("unauthorized")
+                            || err_msg.contains("forbidden")
+                        {
                             debug!("Not retrying due to non-retryable error: {}", err);
                             break;
                         }
@@ -150,7 +151,8 @@ impl DaemonClient {
 
     /// Make a single JSON-RPC request without retry logic
     async fn make_single_request(&self, url: &Url, request: &JsonRpcRequest) -> Result<Value> {
-        let response = self.client
+        let response = self
+            .client
             .post(url.clone())
             .json(request)
             .send()
@@ -166,9 +168,13 @@ impl DaemonClient {
             })?;
 
         if !response.status().is_success() {
-            return Err(anyhow!("HTTP error {}: {}",
+            return Err(anyhow!(
+                "HTTP error {}: {}",
                 response.status().as_u16(),
-                response.status().canonical_reason().unwrap_or("Unknown error")
+                response
+                    .status()
+                    .canonical_reason()
+                    .unwrap_or("Unknown error")
             ));
         }
 
@@ -181,7 +187,9 @@ impl DaemonClient {
             return Err(anyhow!("RPC error {}: {}", error.code, error.message));
         }
 
-        rpc_response.result.ok_or_else(|| anyhow!("No result in response"))
+        rpc_response
+            .result
+            .ok_or_else(|| anyhow!("No result in response"))
     }
 
     /// Get daemon version information
@@ -211,7 +219,8 @@ impl DaemonClient {
         let result = self.make_request("submit_transaction", params).await?;
 
         // The result should contain the transaction hash
-        let tx_hash_hex = result.as_str()
+        let tx_hash_hex = result
+            .as_str()
             .ok_or_else(|| anyhow!("Expected transaction hash string"))?;
 
         let tx_hash_bytes = hex::decode(tx_hash_hex)?;
@@ -252,14 +261,16 @@ impl DaemonClient {
         // Test basic connectivity
         let version = match self.get_version().await {
             Ok(v) => v,
-            Err(e) => return Ok(DaemonHealthStatus {
-                is_healthy: false,
-                version: None,
-                response_time: start_time.elapsed(),
-                error_message: Some(format!("Version check failed: {}", e)),
-                peer_count: None,
-                mempool_size: None,
-            }),
+            Err(e) => {
+                return Ok(DaemonHealthStatus {
+                    is_healthy: false,
+                    version: None,
+                    response_time: start_time.elapsed(),
+                    error_message: Some(format!("Version check failed: {}", e)),
+                    peer_count: None,
+                    mempool_size: None,
+                })
+            }
         };
 
         // Test additional endpoints
@@ -284,12 +295,18 @@ impl DaemonClient {
         let health = self.health_check().await?;
 
         if health.is_healthy {
-            info!("Successfully connected to daemon version: {}",
-                  health.version.as_deref().unwrap_or("unknown"));
+            info!(
+                "Successfully connected to daemon version: {}",
+                health.version.as_deref().unwrap_or("unknown")
+            );
             info!("Daemon response time: {:?}", health.response_time);
         } else {
-            return Err(anyhow!("Daemon health check failed: {}",
-                             health.error_message.unwrap_or_else(|| "Unknown error".to_string())));
+            return Err(anyhow!(
+                "Daemon health check failed: {}",
+                health
+                    .error_message
+                    .unwrap_or_else(|| "Unknown error".to_string())
+            ));
         }
 
         Ok(())

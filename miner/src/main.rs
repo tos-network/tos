@@ -1,100 +1,54 @@
 pub mod config;
 
+use crate::config::DEFAULT_DAEMON_ADDRESS;
+use anyhow::{Context, Error, Result};
+use clap::Parser;
+use futures_util::{SinkExt, StreamExt};
+use lazy_static::lazy_static;
+use log::{debug, error, info, trace, warn};
+use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::Write,
     path::Path,
     sync::{
-        atomic::{
-            AtomicBool,
-            AtomicU64,
-            AtomicUsize,
-            Ordering
-        },
-        RwLock
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        RwLock,
     },
     thread,
-    time::Duration
-};
-use crate::config::DEFAULT_DAEMON_ADDRESS;
-use futures_util::{StreamExt, SinkExt};
-use serde::{Serialize, Deserialize};
-use tokio::{
-    select,
-    sync::{
-        broadcast,
-        mpsc,
-        Mutex
-    },
-    task::JoinHandle,
-    time::Instant
+    time::Duration,
 };
 #[cfg(feature = "api_stats")]
+use tokio::{io::AsyncWriteExt, net::TcpListener};
 use tokio::{
-    io::AsyncWriteExt,
-    net::TcpListener
+    select,
+    sync::{broadcast, mpsc, Mutex},
+    task::JoinHandle,
+    time::Instant,
 };
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{
-        Message,
-        Error as TungsteniteError
-    }
+    tungstenite::{Error as TungsteniteError, Message},
 };
 use tos_common::{
-    api::daemon::{
-        GetMinerWorkResult,
-        SubmitMinerWorkParams,
-    },
+    api::daemon::{GetMinerWorkResult, SubmitMinerWorkParams},
     async_handler,
-    block::{
-        Algorithm,
-        MinerWork,
-        Worker
-    },
+    block::{Algorithm, MinerWork, Worker},
     config::VERSION,
-    crypto::{
-        Address,
-        Hash,
-    },
+    crypto::{Address, Hash},
     difficulty::{
-        check_difficulty_against_target,
-        compute_difficulty_target,
-        difficulty_from_hash,
-        Difficulty
+        check_difficulty_against_target, compute_difficulty_target, difficulty_from_hash,
+        Difficulty,
     },
     prompt::{
-        command::CommandManager,
-        Color,
-        LogLevel,
-        ModuleConfig,
-        Prompt,
-        ShareablePrompt,
-        default_logs_datetime_format
+        command::CommandManager, default_logs_datetime_format, Color, LogLevel, ModuleConfig,
+        Prompt, ShareablePrompt,
     },
     serializer::Serializer,
     time::get_current_time_in_millis,
     tokio::spawn_task,
-    utils::{
-        format_difficulty,
-        format_hashrate,
-        sanitize_ws_address
-    }
+    utils::{format_difficulty, format_hashrate, sanitize_ws_address},
 };
-use clap::Parser;
-use log::{
-    trace,
-    debug,
-    info,
-    warn,
-    error,
-};
-use anyhow::{
-    Result,
-    Error,
-    Context
-};
-use lazy_static::lazy_static;
 
 // Functions helpers
 fn default_daemon_address() -> String {
@@ -152,7 +106,7 @@ pub struct LogConfig {
     #[serde(default)]
     disable_interactive_mode: bool,
     /// Log filename
-    /// 
+    ///
     /// By default filename is tos-miner.log.
     /// File will be stored in logs directory, this is only the filename, not the full path.
     /// Log file is rotated every day and has the format YYYY-MM-DD.tos-miner.log.
@@ -160,7 +114,7 @@ pub struct LogConfig {
     #[serde(default = "default_log_filename")]
     filename_log: String,
     /// Logs directory
-    /// 
+    ///
     /// By default it will be logs/ of the current directory.
     /// It must end with a / to be a valid folder.
     #[clap(long, default_value_t = String::from("logs/"))]
@@ -177,7 +131,7 @@ pub struct LogConfig {
     /// Change the datetime format used by the logger
     #[clap(long, default_value_t = default_logs_datetime_format())]
     #[serde(default = "default_logs_datetime_format")]
-    datetime_format: String, 
+    datetime_format: String,
 }
 
 #[derive(Parser, Serialize, Deserialize)]
@@ -229,22 +183,22 @@ pub struct Config {
     #[clap(long)]
     #[serde(skip)]
     #[serde(default)]
-    generate_config_template: bool
+    generate_config_template: bool,
 }
 
 #[derive(Clone)]
 enum ThreadNotification<'a> {
     NewJob(Algorithm, MinerWork<'a>, Difficulty, u64), // POW algorithm, block work, difficulty, height
-    WebSocketClosed, // WebSocket connection has been closed
-    Exit // all threads must stop
+    WebSocketClosed,                                   // WebSocket connection has been closed
+    Exit,                                              // all threads must stop
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")] 
+#[serde(rename_all = "snake_case")]
 pub enum SocketMessage {
     NewJob(GetMinerWorkResult),
     BlockAccepted,
-    BlockRejected(String)
+    BlockRejected(String),
 }
 
 static WEBSOCKET_CONNECTED: AtomicBool = AtomicBool::new(false);
@@ -256,12 +210,11 @@ static HASHRATE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 static HASHRATE: AtomicU64 = AtomicU64::new(0);
 static JOB_ELAPSED: RwLock<Option<Instant>> = RwLock::new(None);
 
-
 lazy_static! {
     static ref HASHRATE_LAST_TIME: Mutex<Instant> = Mutex::new(Instant::now());
 }
 
-// After how many iterations we update the timestamp of the block to avoid too much CPU usage 
+// After how many iterations we update the timestamp of the block to avoid too much CPU usage
 const UPDATE_EVERY_NONCE: u64 = 10;
 
 #[tokio::main(flavor = "current_thread")]
@@ -275,8 +228,10 @@ async fn main() -> Result<()> {
             }
 
             let mut file = File::create(path).context("Error while creating config file")?;
-            let json = serde_json::to_string_pretty(&config).context("Error while serializing config file")?;
-            file.write_all(json.as_bytes()).context("Error while writing config file")?;
+            let json = serde_json::to_string_pretty(&config)
+                .context("Error while serializing config file")?;
+            file.write_all(json.as_bytes())
+                .context("Error while writing config file")?;
             println!("Config file template generated at {}", path);
             return Ok(());
         }
@@ -284,7 +239,9 @@ async fn main() -> Result<()> {
         let file = File::open(path).context("Error while opening config file")?;
         config = serde_json::from_reader(file).context("Error while reading config file")?;
     } else if config.generate_config_template {
-        eprintln!("Provided config file path is required to generate the template with --config-file");
+        eprintln!(
+            "Provided config file path is required to generate the template with --config-file"
+        );
         return Ok(());
     }
 
@@ -311,30 +268,43 @@ async fn main() -> Result<()> {
     let detected_threads = match thread::available_parallelism() {
         Ok(value) => value.get() as u16,
         Err(e) => {
-            warn!("Couldn't detect number of available threads: {}, fallback to 1 thread only", e);
+            warn!(
+                "Couldn't detect number of available threads: {}, fallback to 1 thread only",
+                e
+            );
             1
         }
     };
 
     let threads = match config.num_threads {
         Some(value) => value,
-        None => detected_threads
+        None => detected_threads,
     };
 
-
-    info!("Total threads to use: {} (detected: {})", threads, detected_threads);
+    info!(
+        "Total threads to use: {} (detected: {})",
+        threads, detected_threads
+    );
 
     if let Some(algorithm) = config.benchmark.benchmark {
-        info!("Benchmark mode enabled, miner will try up to {} threads", threads);
+        info!(
+            "Benchmark mode enabled, miner will try up to {} threads",
+            threads
+        );
         benchmark(threads as usize, config.benchmark.iterations, algorithm);
         info!("Benchmark finished");
-        return Ok(())
+        return Ok(());
     }
 
-    let address = config.miner_address.ok_or_else(|| Error::msg("No miner address specified"))?;
-    info!("Miner address: {}", address);    
+    let address = config
+        .miner_address
+        .ok_or_else(|| Error::msg("No miner address specified"))?;
+    info!("Miner address: {}", address);
     if threads != detected_threads {
-        warn!("Attention, the number of threads used may not be optimal, recommended is: {}", detected_threads);
+        warn!(
+            "Attention, the number of threads used may not be optimal, recommended is: {}",
+            detected_threads
+        );
     }
 
     // broadcast channel to send new jobs / exit command to all threads
@@ -349,8 +319,17 @@ async fn main() -> Result<()> {
     }
 
     // start communication task
-    let task = spawn_task("communication", communication_task(config.daemon_address, sender.clone(), block_receiver, address, config.worker));
-    
+    let task = spawn_task(
+        "communication",
+        communication_task(
+            config.daemon_address,
+            sender.clone(),
+            block_receiver,
+            address,
+            config.worker,
+        ),
+    );
+
     let stats_task: Option<JoinHandle<Result<()>>>;
     #[cfg(feature = "api_stats")]
     {
@@ -413,21 +392,23 @@ async fn broadcast_stats_task(broadcast_address: String) -> Result<()> {
             let content_type = "Content-Type: application/json\r\n";
             let contents = data.to_string();
             let length = contents.len();
-            let response = format!("{status_line}{content_type}Content-Length: {length}\r\n\r\n{contents}");
+            let response =
+                format!("{status_line}{content_type}Content-Length: {length}\r\n\r\n{contents}");
 
             // Send HTTP repsonse and close socket
-            AsyncWriteExt::write_all(&mut socket, response.as_bytes())
-                .await?;
+            AsyncWriteExt::write_all(&mut socket, response.as_bytes()).await?;
             socket.shutdown().await?;
         }
     }
 }
 
-
 // Benchmark the miner with the specified number of threads and iterations
 // It will output the total time, total iterations, time per PoW and hashrate for each number of threads
 fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
-    info!("{0: <10} | {1: <10} | {2: <16} | {3: <13} | {4: <13}", "Threads", "Total Time", "Total Iterations", "Time/PoW (ms)", "Hashrate");
+    info!(
+        "{0: <10} | {1: <10} | {2: <16} | {3: <13} | {4: <13}",
+        "Threads", "Total Time", "Total Iterations", "Time/PoW (ms)", "Hashrate"
+    );
 
     for bench in 1..=threads {
         let start = Instant::now();
@@ -446,12 +427,20 @@ fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
             handles.push(handle);
         }
 
-        for handle in handles { // wait on all threads
+        for handle in handles {
+            // wait on all threads
             handle.join().unwrap();
         }
         let duration = start.elapsed().as_millis();
-        let hashrate = format_hashrate(1000f64 / (duration as f64 / (bench*iterations) as f64));
-        info!("{0: <10} | {1: <10} | {2: <16} | {3: <13} | {4: <13}", bench, duration, bench*iterations, duration/(bench*iterations) as u128, hashrate);
+        let hashrate = format_hashrate(1000f64 / (duration as f64 / (bench * iterations) as f64));
+        info!(
+            "{0: <10} | {1: <10} | {2: <16} | {3: <13} | {4: <13}",
+            bench,
+            duration,
+            bench * iterations,
+            duration / (bench * iterations) as u128,
+            hashrate
+        );
     }
 }
 
@@ -459,25 +448,46 @@ fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
 // It maintains a WebSocket connection with the daemon and notify all threads when it receive a new job.
 // Its also the task who have the job to send directly the new block found by one of the threads.
 // This allow mining threads to only focus on mining and receiving jobs through memory channels.
-async fn communication_task(daemon_address: String, job_sender: broadcast::Sender<ThreadNotification<'_>>, mut block_receiver: mpsc::Receiver<MinerWork<'_>>, address: Address, worker: String) {
+async fn communication_task(
+    daemon_address: String,
+    job_sender: broadcast::Sender<ThreadNotification<'_>>,
+    mut block_receiver: mpsc::Receiver<MinerWork<'_>>,
+    address: Address,
+    worker: String,
+) {
     info!("Starting communication task");
     let daemon_address = sanitize_ws_address(&daemon_address);
     'main: loop {
         info!("Trying to connect to {}", daemon_address);
-        let client = match connect_async(format!("{}/getwork/{}/{}", daemon_address, address.to_string(), worker)).await {
+        let client = match connect_async(format!(
+            "{}/getwork/{}/{}",
+            daemon_address,
+            address.to_string(),
+            worker
+        ))
+        .await
+        {
             Ok((client, response)) => {
                 let status = response.status();
                 if status.is_server_error() || status.is_client_error() {
-                    error!("Error while connecting to {}, got an unexpected response: {}", daemon_address, status.as_str());
+                    error!(
+                        "Error while connecting to {}, got an unexpected response: {}",
+                        daemon_address,
+                        status.as_str()
+                    );
                     warn!("Trying to connect to WebSocket again in 10 seconds...");
                     tokio::time::sleep(Duration::from_secs(10)).await;
                     continue 'main;
                 }
                 client
-            },
+            }
             Err(e) => {
                 if let TungsteniteError::Http(e) = e {
-                    error!("Error while connecting to {}, got an unexpected response: {}", daemon_address, e.status());
+                    error!(
+                        "Error while connecting to {}, got an unexpected response: {}",
+                        daemon_address,
+                        e.status()
+                    );
                 } else {
                     error!("Error while connecting to {}: {}", daemon_address, e);
                 }
@@ -520,7 +530,10 @@ async fn communication_task(daemon_address: String, job_sender: broadcast::Sende
         }
 
         WEBSOCKET_CONNECTED.store(false, Ordering::SeqCst);
-        if job_sender.send(ThreadNotification::WebSocketClosed).is_err() {
+        if job_sender
+            .send(ThreadNotification::WebSocketClosed)
+            .is_err()
+        {
             error!("Error while sending WebSocketClosed message to threads");
         }
 
@@ -529,43 +542,59 @@ async fn communication_task(daemon_address: String, job_sender: broadcast::Sende
     }
 }
 
-async fn handle_websocket_message(message: Result<Message, TungsteniteError>, job_sender: &broadcast::Sender<ThreadNotification<'_>>) -> Result<bool, Error> {
+async fn handle_websocket_message(
+    message: Result<Message, TungsteniteError>,
+    job_sender: &broadcast::Sender<ThreadNotification<'_>>,
+) -> Result<bool, Error> {
     match message? {
         Message::Text(text) => {
             debug!("new message from daemon: {}", text);
             match serde_json::from_slice::<SocketMessage>(text.as_bytes())? {
                 SocketMessage::NewJob(job) => {
-                    info!("New job received: difficulty {} at height {}", format_difficulty(job.difficulty), job.height);
-                    let block = MinerWork::from_hex(&job.miner_work).context("Error while decoding new job received from daemon")?;
+                    info!(
+                        "New job received: difficulty {} at height {}",
+                        format_difficulty(job.difficulty),
+                        job.height
+                    );
+                    let block = MinerWork::from_hex(&job.miner_work)
+                        .context("Error while decoding new job received from daemon")?;
                     CURRENT_TOPO_HEIGHT.store(job.topoheight, Ordering::SeqCst);
                     JOB_ELAPSED.write().unwrap().replace(Instant::now());
 
-                    if let Err(e) = job_sender.send(ThreadNotification::NewJob(job.algorithm, block, job.difficulty, job.height)) {
+                    if let Err(e) = job_sender.send(ThreadNotification::NewJob(
+                        job.algorithm,
+                        block,
+                        job.difficulty,
+                        job.height,
+                    )) {
                         error!("Error while sending new job to threads: {}", e);
                     }
-                },
+                }
                 SocketMessage::BlockAccepted => {
                     BLOCKS_FOUND.fetch_add(1, Ordering::SeqCst);
                     info!("Block submitted has been accepted by network !");
-                },
+                }
                 SocketMessage::BlockRejected(err) => {
                     BLOCKS_REJECTED.fetch_add(1, Ordering::SeqCst);
                     error!("Block submitted has been rejected by network: {}", err);
                 }
             }
-        },
+        }
         Message::Close(reason) => {
             let reason: String = if let Some(reason) = reason {
                 reason.to_string()
             } else {
                 "No reason".into()
             };
-            warn!("Daemon has closed the WebSocket connection with us: {}", reason);
+            warn!(
+                "Daemon has closed the WebSocket connection with us: {}",
+                reason
+            );
             return Ok(true);
-        },
+        }
         Message::Ping(_) => {
             trace!("received ping");
-        },
+        }
         msg => {
             warn!("Unexpected message from WebSocket: {:?}", msg);
             return Ok(true);
@@ -575,7 +604,11 @@ async fn handle_websocket_message(message: Result<Message, TungsteniteError>, jo
     Ok(false)
 }
 
-fn start_thread(id: u16, mut job_receiver: broadcast::Receiver<ThreadNotification<'static>>, block_sender: mpsc::Sender<MinerWork<'static>>) -> Result<(), Error> {
+fn start_thread(
+    id: u16,
+    mut job_receiver: broadcast::Receiver<ThreadNotification<'static>>,
+    block_sender: mpsc::Sender<MinerWork<'static>>,
+) -> Result<(), Error> {
     let builder = thread::Builder::new().name(format!("Mining Thread #{}", id));
     builder.spawn(move || {
         let mut worker = Worker::new();
@@ -606,7 +639,7 @@ fn start_thread(id: u16, mut job_receiver: broadcast::Receiver<ThreadNotificatio
                 ThreadNotification::Exit => {
                     info!("Exiting Mining Thread #{}...", id);
                     break 'main;
-                },
+                }
                 ThreadNotification::NewJob(algorithm, mut new_job, expected_difficulty, height) => {
                     debug!("Mining Thread #{} received a new job", id);
                     // set thread id in extra nonce for more work spread between threads
@@ -618,7 +651,10 @@ fn start_thread(id: u16, mut job_receiver: broadcast::Receiver<ThreadNotificatio
                     let difficulty_target = match compute_difficulty_target(&expected_difficulty) {
                         Ok(value) => value,
                         Err(e) => {
-                            error!("Mining Thread #{}: error on difficulty target computation: {}", id, e);
+                            error!(
+                                "Mining Thread #{}: error on difficulty target computation: {}",
+                                id, e
+                            );
                             continue 'main;
                         }
                     };
@@ -636,10 +672,16 @@ fn start_thread(id: u16, mut job_receiver: broadcast::Receiver<ThreadNotificatio
                             }
                             if let Ok(instant) = JOB_ELAPSED.read() {
                                 if let Some(instant) = instant.as_ref() {
-                                    worker.set_timestamp(initial_timestamp + instant.elapsed().as_millis() as u64).unwrap();
+                                    worker
+                                        .set_timestamp(
+                                            initial_timestamp
+                                                + instant.elapsed().as_millis() as u64,
+                                        )
+                                        .unwrap();
                                 }
                             }
-                            HASHRATE_COUNTER.fetch_add(UPDATE_EVERY_NONCE as usize, Ordering::SeqCst);
+                            HASHRATE_COUNTER
+                                .fetch_add(UPDATE_EVERY_NONCE as usize, Ordering::SeqCst);
                         }
 
                         hash = worker.get_pow_hash().unwrap();
@@ -648,11 +690,20 @@ fn start_thread(id: u16, mut job_receiver: broadcast::Receiver<ThreadNotificatio
 
                     // compute the reference hash for easier finding of the block
                     let block_hash = worker.get_block_hash().unwrap();
-                    info!("Thread #{}: block {} found at height {} with difficulty {}", id, block_hash, height, format_difficulty(difficulty_from_hash(&hash)));
+                    info!(
+                        "Thread #{}: block {} found at height {} with difficulty {}",
+                        id,
+                        block_hash,
+                        height,
+                        format_difficulty(difficulty_from_hash(&hash))
+                    );
 
                     let job = worker.take_work().unwrap();
                     if let Err(_) = block_sender.blocking_send(job) {
-                        error!("Mining Thread #{}: error while sending block found with hash {}", id, block_hash);
+                        error!(
+                            "Mining Thread #{}: error while sending block found with hash {}",
+                            id, block_hash
+                        );
                         continue 'main;
                     }
                     debug!("Job sent to communication task");
@@ -672,17 +723,26 @@ async fn run_prompt(prompt: ShareablePrompt) -> Result<()> {
         let topoheight_str = format!(
             "{}: {}",
             prompt.colorize_string(Color::Yellow, "TopoHeight"),
-            prompt.colorize_string(Color::Green, &format!("{}", CURRENT_TOPO_HEIGHT.load(Ordering::SeqCst))),
+            prompt.colorize_string(
+                Color::Green,
+                &format!("{}", CURRENT_TOPO_HEIGHT.load(Ordering::SeqCst))
+            ),
         );
         let blocks_found = format!(
             "{}: {}",
             prompt.colorize_string(Color::Yellow, "Accepted"),
-            prompt.colorize_string(Color::Green, &format!("{}", BLOCKS_FOUND.load(Ordering::SeqCst))),
+            prompt.colorize_string(
+                Color::Green,
+                &format!("{}", BLOCKS_FOUND.load(Ordering::SeqCst))
+            ),
         );
         let blocks_rejected = format!(
             "{}: {}",
             prompt.colorize_string(Color::Yellow, "Rejected"),
-            prompt.colorize_string(Color::Green, &format!("{}", BLOCKS_REJECTED.load(Ordering::SeqCst))),
+            prompt.colorize_string(
+                Color::Green,
+                &format!("{}", BLOCKS_REJECTED.load(Ordering::SeqCst))
+            ),
         );
         let status = if WEBSOCKET_CONNECTED.load(Ordering::SeqCst) {
             prompt.colorize_string(Color::Green, "Online")
@@ -702,20 +762,24 @@ async fn run_prompt(prompt: ShareablePrompt) -> Result<()> {
             prompt.colorize_string(Color::Green, &format!("{}", format_hashrate(hashrate)))
         };
 
-        Ok(
-            format!(
-                "{} | {} | {} | {} | {} | {} {} ",
-                prompt.colorize_string(Color::Blue, "Tos Miner"),
-                topoheight_str,
-                blocks_found,
-                blocks_rejected,
-                hashrate,
-                status,
-                prompt.colorize_string(Color::BrightBlack, ">>")
-            )
-        )
+        Ok(format!(
+            "{} | {} | {} | {} | {} | {} {} ",
+            prompt.colorize_string(Color::Blue, "Tos Miner"),
+            topoheight_str,
+            blocks_found,
+            blocks_rejected,
+            hashrate,
+            status,
+            prompt.colorize_string(Color::BrightBlack, ">>")
+        ))
     };
 
-    prompt.start(Duration::from_millis(1000), Box::new(async_handler!(closure)), Some(&command_manager)).await?;
+    prompt
+        .start(
+            Duration::from_millis(1000),
+            Box::new(async_handler!(closure)),
+            Some(&command_manager),
+        )
+        .await?;
     Ok(())
 }

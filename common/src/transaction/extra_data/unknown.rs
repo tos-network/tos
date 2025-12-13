@@ -1,26 +1,16 @@
-use std::borrow::Cow;
 use anyhow::Error;
 use log::debug;
+use std::borrow::Cow;
 
+use super::{
+    derive_shared_key_from_handle, plaintext::PlaintextFlag, AEADCipher, AEADCipherInner, Cipher,
+    ExtraData, ExtraDataType, PlaintextExtraData, Role, SharedKey,
+};
 use crate::{
     api::DataElement,
-    crypto::{
-        elgamal::DecryptHandle,
-        PrivateKey
-    },
+    crypto::{elgamal::DecryptHandle, PrivateKey},
     serializer::*,
-    transaction::{Role, TxVersion}
-};
-use super::{
-    derive_shared_key_from_handle,
-    plaintext::PlaintextFlag,
-    AEADCipher,
-    AEADCipherInner,
-    Cipher,
-    ExtraData,
-    ExtraDataType,
-    PlaintextExtraData,
-    SharedKey
+    transaction::TxVersion,
 };
 
 // A wrapper around a Vec<u8>.
@@ -39,27 +29,39 @@ impl UnknownExtraDataFormat {
     }
 
     // Decrypt from the versioned extra data format
-    fn decrypt_typed(&self, private_key: &PrivateKey, role: Role) -> Result<PlaintextExtraData, Error> {
+    fn decrypt_typed(
+        &self,
+        private_key: &PrivateKey,
+        role: Role,
+    ) -> Result<PlaintextExtraData, Error> {
         let typed = ExtraDataType::from_bytes(&self.0)?;
         match typed {
             ExtraDataType::Private(payload) => self.decrypt_extra_data(&payload, private_key, role),
             ExtraDataType::Public(payload) => {
                 let decoded = DataElement::from_bytes(&payload.0)?;
-                Ok(PlaintextExtraData::new(None, Some(decoded), PlaintextFlag::Public))
+                Ok(PlaintextExtraData::new(
+                    None,
+                    Some(decoded),
+                    PlaintextFlag::Public,
+                ))
             }
             ExtraDataType::Proprietary(payload) => Ok(PlaintextExtraData::new(
                 None,
                 Some(DataElement::Value(payload.into())),
-                PlaintextFlag::Proprietary
+                PlaintextFlag::Proprietary,
             )),
         }
     }
 
-    // Decrypt the extra data by generating the shared key for decryption and decode its result into a data element 
-    fn decrypt_extra_data(&self, extra_data: &ExtraData, private_key: &PrivateKey, role: Role) -> Result<PlaintextExtraData, Error> {
+    // Decrypt the extra data by generating the shared key for decryption and decode its result into a data element
+    fn decrypt_extra_data(
+        &self,
+        extra_data: &ExtraData,
+        private_key: &PrivateKey,
+        role: Role,
+    ) -> Result<PlaintextExtraData, Error> {
         // Generate the shared key
-        let handle = extra_data.get_handle(role)
-            .decompress()?;
+        let handle = extra_data.get_handle(role).decompress()?;
 
         let shared_key = derive_shared_key_from_handle(private_key, &handle);
 
@@ -69,13 +71,17 @@ impl UnknownExtraDataFormat {
         Ok(PlaintextExtraData::new(
             Some(shared_key),
             Some(data),
-            PlaintextFlag::Private
+            PlaintextFlag::Private,
         ))
     }
 
     /// WARNING: This function is deprecated and should not be used.
     /// It is kept for compatibility reasons only.
-    fn decrypt_v1(&self, private_key: &PrivateKey, handle: &DecryptHandle) -> Result<DataElement, Error> {
+    fn decrypt_v1(
+        &self,
+        private_key: &PrivateKey,
+        handle: &DecryptHandle,
+    ) -> Result<DataElement, Error> {
         let key = derive_shared_key_from_handle(private_key, handle);
         let plaintext = AEADCipherInner(Cow::Borrowed(&self.0)).decrypt(&key)?;
         DataElement::from_bytes(&plaintext.0).map_err(|e| e.into())
@@ -83,7 +89,13 @@ impl UnknownExtraDataFormat {
 
     /// Decrypt the encrypted data by trying to determine which version to use.
     /// T0 should always be used.
-    pub fn decrypt(&self, private_key: &PrivateKey, handle: Option<&DecryptHandle>, role: Role, _version: TxVersion) -> Result<PlaintextExtraData, Error> {
+    pub fn decrypt(
+        &self,
+        private_key: &PrivateKey,
+        handle: Option<&DecryptHandle>,
+        role: Role,
+        _version: TxVersion,
+    ) -> Result<PlaintextExtraData, Error> {
         // Always use T0 version
         let res = self.decrypt_typed(private_key, role);
 
@@ -94,7 +106,7 @@ impl UnknownExtraDataFormat {
             return Ok(PlaintextExtraData::new(
                 None,
                 Some(data),
-                PlaintextFlag::Private
+                PlaintextFlag::Private,
             ));
         }
 

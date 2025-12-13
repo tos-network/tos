@@ -1,15 +1,11 @@
-use anyhow::{Result, anyhow};
-use log::{info, warn, debug};
+use anyhow::{anyhow, Result};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use url::Url;
 
-use tos_common::{
-    crypto::Address,
-    network::Network,
-    prompt::LogLevel,
-};
+use tos_common::{crypto::Address, network::Network, prompt::LogLevel};
 
 /// Network-specific address characteristics for validation
 #[derive(Debug, Clone)]
@@ -107,16 +103,36 @@ pub struct ValidatedConfig {
 }
 
 // Default functions for serde
-fn default_log_level() -> LogLevel { defaults::LOG_LEVEL }
-fn default_filename_log() -> String { defaults::FILENAME_LOG.to_string() }
-fn default_logs_path() -> String { defaults::LOGS_PATH.to_string() }
-fn default_storage_path() -> String { defaults::STORAGE_PATH.to_string() }
-fn default_daemon_address() -> String { defaults::DAEMON_ADDRESS.to_string() }
-fn default_network() -> String { defaults::NETWORK.to_string() }
-fn default_request_timeout_secs() -> u64 { defaults::REQUEST_TIMEOUT_SECS }
-fn default_connection_timeout_secs() -> u64 { defaults::CONNECTION_TIMEOUT_SECS }
-fn default_max_retries() -> u32 { defaults::MAX_RETRIES }
-fn default_retry_delay_ms() -> u64 { defaults::RETRY_DELAY_MS }
+fn default_log_level() -> LogLevel {
+    defaults::LOG_LEVEL
+}
+fn default_filename_log() -> String {
+    defaults::FILENAME_LOG.to_string()
+}
+fn default_logs_path() -> String {
+    defaults::LOGS_PATH.to_string()
+}
+fn default_storage_path() -> String {
+    defaults::STORAGE_PATH.to_string()
+}
+fn default_daemon_address() -> String {
+    defaults::DAEMON_ADDRESS.to_string()
+}
+fn default_network() -> String {
+    defaults::NETWORK.to_string()
+}
+fn default_request_timeout_secs() -> u64 {
+    defaults::REQUEST_TIMEOUT_SECS
+}
+fn default_connection_timeout_secs() -> u64 {
+    defaults::CONNECTION_TIMEOUT_SECS
+}
+fn default_max_retries() -> u32 {
+    defaults::MAX_RETRIES
+}
+fn default_retry_delay_ms() -> u64 {
+    defaults::RETRY_DELAY_MS
+}
 
 impl Default for ValidatedConfig {
     fn default() -> Self {
@@ -148,32 +164,83 @@ pub enum ConfigValidationError {
     InvalidDaemonAddress(String),
     InvalidNetworkType(String),
     InvalidMinerAddress(String),
-    InvalidTimeout { field: String, value: u64, min: u64, max: u64 },
-    InvalidRetrySettings { field: String, value: u32, max: u32 },
-    InvalidPath { field: String, path: String, reason: String },
-    DuplicateLogFile { logs_path: String, filename: String },
-    InsufficientPermissions { path: String, operation: String },
+    InvalidTimeout {
+        field: String,
+        value: u64,
+        min: u64,
+        max: u64,
+    },
+    InvalidRetrySettings {
+        field: String,
+        value: u32,
+        max: u32,
+    },
+    InvalidPath {
+        field: String,
+        path: String,
+        reason: String,
+    },
+    DuplicateLogFile {
+        logs_path: String,
+        filename: String,
+    },
+    InsufficientPermissions {
+        path: String,
+        operation: String,
+    },
 }
 
 impl std::fmt::Display for ConfigValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConfigValidationError::InvalidDaemonAddress(addr) =>
-                write!(f, "Invalid daemon address: '{}' - must be a valid HTTP/HTTPS URL", addr),
-            ConfigValidationError::InvalidNetworkType(network) =>
-                write!(f, "Invalid network type: '{}' - must be one of: mainnet, testnet, devnet, stagenet", network),
-            ConfigValidationError::InvalidMinerAddress(addr) =>
-                write!(f, "Invalid miner address: '{}' - must be a valid TOS address", addr),
-            ConfigValidationError::InvalidTimeout { field, value, min, max } =>
-                write!(f, "Invalid {}: {} seconds - must be between {} and {} seconds", field, value, min, max),
-            ConfigValidationError::InvalidRetrySettings { field, value, max } =>
-                write!(f, "Invalid {}: {} - must be between 0 and {}", field, value, max),
-            ConfigValidationError::InvalidPath { field, path, reason } =>
-                write!(f, "Invalid {}: '{}' - {}", field, path, reason),
-            ConfigValidationError::DuplicateLogFile { logs_path, filename } =>
-                write!(f, "Log file conflict: '{}' already exists in directory '{}'", filename, logs_path),
-            ConfigValidationError::InsufficientPermissions { path, operation } =>
-                write!(f, "Insufficient permissions for {}: '{}' - check directory permissions", operation, path),
+            ConfigValidationError::InvalidDaemonAddress(addr) => write!(
+                f,
+                "Invalid daemon address: '{}' - must be a valid HTTP/HTTPS URL",
+                addr
+            ),
+            ConfigValidationError::InvalidNetworkType(network) => write!(
+                f,
+                "Invalid network type: '{}' - must be one of: mainnet, testnet, devnet, stagenet",
+                network
+            ),
+            ConfigValidationError::InvalidMinerAddress(addr) => write!(
+                f,
+                "Invalid miner address: '{}' - must be a valid TOS address",
+                addr
+            ),
+            ConfigValidationError::InvalidTimeout {
+                field,
+                value,
+                min,
+                max,
+            } => write!(
+                f,
+                "Invalid {}: {} seconds - must be between {} and {} seconds",
+                field, value, min, max
+            ),
+            ConfigValidationError::InvalidRetrySettings { field, value, max } => write!(
+                f,
+                "Invalid {}: {} - must be between 0 and {}",
+                field, value, max
+            ),
+            ConfigValidationError::InvalidPath {
+                field,
+                path,
+                reason,
+            } => write!(f, "Invalid {}: '{}' - {}", field, path, reason),
+            ConfigValidationError::DuplicateLogFile {
+                logs_path,
+                filename,
+            } => write!(
+                f,
+                "Log file conflict: '{}' already exists in directory '{}'",
+                filename, logs_path
+            ),
+            ConfigValidationError::InsufficientPermissions { path, operation } => write!(
+                f,
+                "Insufficient permissions for {}: '{}' - check directory permissions",
+                operation, path
+            ),
         }
     }
 }
@@ -191,7 +258,10 @@ pub struct ConfigValidator {
 
 impl ConfigValidator {
     pub fn new(strict_mode: bool, auto_fix: bool) -> Self {
-        Self { strict_mode, auto_fix }
+        Self {
+            strict_mode,
+            auto_fix,
+        }
     }
 
     /// Validate the entire configuration
@@ -206,7 +276,10 @@ impl ConfigValidator {
             if self.auto_fix && !self.strict_mode {
                 warn!("Auto-fixing daemon address: {}", e);
                 config.daemon_address = defaults::DAEMON_ADDRESS.to_string();
-                fixed_issues.push(format!("Fixed daemon address to default: {}", config.daemon_address));
+                fixed_issues.push(format!(
+                    "Fixed daemon address to default: {}",
+                    config.daemon_address
+                ));
             } else {
                 return Err(anyhow!("Configuration validation failed: {}", e));
             }
@@ -239,17 +312,24 @@ impl ConfigValidator {
             if self.auto_fix && !self.strict_mode {
                 warn!("Auto-fixing request timeout: {}", e);
                 config.request_timeout_secs = defaults::REQUEST_TIMEOUT_SECS;
-                fixed_issues.push(format!("Fixed request timeout to {} seconds", config.request_timeout_secs));
+                fixed_issues.push(format!(
+                    "Fixed request timeout to {} seconds",
+                    config.request_timeout_secs
+                ));
             } else {
                 return Err(anyhow!("Configuration validation failed: {}", e));
             }
         }
 
-        if let Err(e) = self.validate_timeout("connection_timeout", config.connection_timeout_secs) {
+        if let Err(e) = self.validate_timeout("connection_timeout", config.connection_timeout_secs)
+        {
             if self.auto_fix && !self.strict_mode {
                 warn!("Auto-fixing connection timeout: {}", e);
                 config.connection_timeout_secs = defaults::CONNECTION_TIMEOUT_SECS;
-                fixed_issues.push(format!("Fixed connection timeout to {} seconds", config.connection_timeout_secs));
+                fixed_issues.push(format!(
+                    "Fixed connection timeout to {} seconds",
+                    config.connection_timeout_secs
+                ));
             } else {
                 return Err(anyhow!("Configuration validation failed: {}", e));
             }
@@ -281,7 +361,10 @@ impl ConfigValidator {
 
         // Report results
         if !fixed_issues.is_empty() {
-            info!("🔧 Auto-fixed {} configuration issue(s):", fixed_issues.len());
+            info!(
+                "🔧 Auto-fixed {} configuration issue(s):",
+                fixed_issues.len()
+            );
             for fix in &fixed_issues {
                 info!("  ✅ {}", fix);
             }
@@ -317,7 +400,9 @@ impl ConfigValidator {
     fn validate_network(&self, network: &str) -> ValidationResult<()> {
         match network.to_lowercase().as_str() {
             "mainnet" | "testnet" | "devnet" | "dev" | "stagenet" => Ok(()),
-            _ => Err(ConfigValidationError::InvalidNetworkType(network.to_string()))
+            _ => Err(ConfigValidationError::InvalidNetworkType(
+                network.to_string(),
+            )),
         }
     }
 
@@ -338,15 +423,19 @@ impl ConfigValidator {
 
         // Check address length (TOS addresses should be specific length)
         if address_str.len() < 20 || address_str.len() > 150 {
-            return Err(ConfigValidationError::InvalidMinerAddress(
-                format!("Address length {} is invalid (expected 20-150 characters)", address_str.len())
-            ));
+            return Err(ConfigValidationError::InvalidMinerAddress(format!(
+                "Address length {} is invalid (expected 20-150 characters)",
+                address_str.len()
+            )));
         }
 
         // Check address format (should contain valid characters)
-        if !address_str.chars().all(|c| c.is_alphanumeric() || "._-".contains(c)) {
+        if !address_str
+            .chars()
+            .all(|c| c.is_alphanumeric() || "._-".contains(c))
+        {
             return Err(ConfigValidationError::InvalidMinerAddress(
-                "Address contains invalid characters".to_string()
+                "Address contains invalid characters".to_string(),
             ));
         }
 
@@ -364,8 +453,10 @@ impl ConfigValidator {
         // Validate network-specific patterns
         if let Some(prefix) = expected_characteristics.prefix {
             if !address_str.starts_with(prefix) {
-                warn!("Address {} doesn't have expected network prefix '{}' for network type",
-                      address, prefix);
+                warn!(
+                    "Address {} doesn't have expected network prefix '{}' for network type",
+                    address, prefix
+                );
                 // Note: This is a warning, not an error, as address formats may vary
             }
         }
@@ -373,12 +464,17 @@ impl ConfigValidator {
         // Check address format compatibility
         if let Some(expected_format) = expected_characteristics.format_hint {
             if !self.matches_address_format(&address_str, expected_format) {
-                warn!("Address {} may not be compatible with {} network format",
-                      address, expected_format);
+                warn!(
+                    "Address {} may not be compatible with {} network format",
+                    address, expected_format
+                );
             }
         }
 
-        debug!("Address network compatibility validation passed for: {}", address);
+        debug!(
+            "Address network compatibility validation passed for: {}",
+            address
+        );
         Ok(())
     }
 
@@ -396,7 +492,10 @@ impl ConfigValidator {
         }
 
         // Additional validation can be added based on TOS address specifications
-        debug!("Address type compatibility validation passed for: {}", address);
+        debug!(
+            "Address type compatibility validation passed for: {}",
+            address
+        );
         Ok(())
     }
 
@@ -414,8 +513,11 @@ impl ConfigValidator {
         match format_hint {
             "standard" => {
                 // Standard TOS address format validation
-                address.len() >= 20 && address.len() <= 150 &&
-                address.chars().all(|c| c.is_alphanumeric() || "._-".contains(c))
+                address.len() >= 20
+                    && address.len() <= 150
+                    && address
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || "._-".contains(c))
             }
             "compressed" => {
                 // Compressed address format (if supported)
@@ -460,7 +562,12 @@ impl ConfigValidator {
         Ok(())
     }
 
-    fn validate_and_create_paths(&self, config: &ValidatedConfig, warnings: &mut Vec<String>, fixed_issues: &mut Vec<String>) -> Result<()> {
+    fn validate_and_create_paths(
+        &self,
+        config: &ValidatedConfig,
+        warnings: &mut Vec<String>,
+        fixed_issues: &mut Vec<String>,
+    ) -> Result<()> {
         // Validate and create logs directory
         self.ensure_directory_exists(&config.logs_path, "logs", fixed_issues)?;
 
@@ -479,13 +586,19 @@ impl ConfigValidator {
         Ok(())
     }
 
-    fn ensure_directory_exists(&self, path: &str, dir_type: &str, fixed_issues: &mut Vec<String>) -> Result<()> {
+    fn ensure_directory_exists(
+        &self,
+        path: &str,
+        dir_type: &str,
+        fixed_issues: &mut Vec<String>,
+    ) -> Result<()> {
         let path_buf = PathBuf::from(path);
 
         if !path_buf.exists() {
             info!("Creating {} directory: {}", dir_type, path);
-            std::fs::create_dir_all(&path_buf)
-                .map_err(|e| anyhow!("Failed to create {} directory '{}': {}", dir_type, path, e))?;
+            std::fs::create_dir_all(&path_buf).map_err(|e| {
+                anyhow!("Failed to create {} directory '{}': {}", dir_type, path, e)
+            })?;
             fixed_issues.push(format!("Created {} directory: {}", dir_type, path));
         } else if !path_buf.is_dir() {
             return Err(anyhow!("Path '{}' exists but is not a directory", path));
@@ -498,7 +611,12 @@ impl ConfigValidator {
                 let _ = std::fs::remove_file(test_file);
             }
             Err(e) => {
-                return Err(anyhow!("Insufficient write permissions for {} directory '{}': {}", dir_type, path, e));
+                return Err(anyhow!(
+                    "Insufficient write permissions for {} directory '{}': {}",
+                    dir_type,
+                    path,
+                    e
+                ));
             }
         }
 
@@ -533,18 +651,31 @@ impl ValidatedConfig {
 
     /// Validate and load configuration from file
     pub fn from_file<P: AsRef<Path>>(path: P, strict_mode: bool, auto_fix: bool) -> Result<Self> {
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| anyhow!("Failed to read config file '{}': {}", path.as_ref().display(), e))?;
+        let content = std::fs::read_to_string(&path).map_err(|e| {
+            anyhow!(
+                "Failed to read config file '{}': {}",
+                path.as_ref().display(),
+                e
+            )
+        })?;
 
-        let mut config: ValidatedConfig = serde_json::from_str(&content)
-            .map_err(|e| anyhow!("Failed to parse config file '{}': {}", path.as_ref().display(), e))?;
+        let mut config: ValidatedConfig = serde_json::from_str(&content).map_err(|e| {
+            anyhow!(
+                "Failed to parse config file '{}': {}",
+                path.as_ref().display(),
+                e
+            )
+        })?;
 
         // Validate the loaded configuration
         let validator = ConfigValidator::new(strict_mode, auto_fix);
         let messages = validator.validate(&mut config)?;
 
         if !messages.is_empty() {
-            info!("Configuration loaded with {} adjustments/warnings", messages.len());
+            info!(
+                "Configuration loaded with {} adjustments/warnings",
+                messages.len()
+            );
         }
 
         Ok(config)
@@ -555,8 +686,13 @@ impl ValidatedConfig {
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| anyhow!("Failed to serialize config: {}", e))?;
 
-        std::fs::write(&path, content)
-            .map_err(|e| anyhow!("Failed to write config file '{}': {}", path.as_ref().display(), e))?;
+        std::fs::write(&path, content).map_err(|e| {
+            anyhow!(
+                "Failed to write config file '{}': {}",
+                path.as_ref().display(),
+                e
+            )
+        })?;
 
         info!("Configuration saved to: {}", path.as_ref().display());
         Ok(())
@@ -568,7 +704,8 @@ impl ValidatedConfig {
         let _json_content = serde_json::to_string_pretty(&template_config)?;
 
         // Add descriptive header
-        let template = format!(r#"{{
+        let template = format!(
+            r#"{{
   "_info": {{
     "description": "TOS AI Mining Configuration",
     "version": "1.0",
@@ -595,12 +732,21 @@ impl ValidatedConfig {
   "retry_delay_ms": 1000,
   "auto_fix_config": true,
   "strict_validation": false
-}}"#);
+}}"#
+        );
 
-        std::fs::write(&path, template)
-            .map_err(|e| anyhow!("Failed to write template to '{}': {}", path.as_ref().display(), e))?;
+        std::fs::write(&path, template).map_err(|e| {
+            anyhow!(
+                "Failed to write template to '{}': {}",
+                path.as_ref().display(),
+                e
+            )
+        })?;
 
-        info!("Configuration template generated at: {}", path.as_ref().display());
+        info!(
+            "Configuration template generated at: {}",
+            path.as_ref().display()
+        );
         Ok(())
     }
 }

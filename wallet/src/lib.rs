@@ -1,11 +1,11 @@
-pub mod storage;
-pub mod wallet;
-pub mod config;
 pub mod cipher;
+pub mod config;
 pub mod entry;
-pub mod mnemonics;
-pub mod transaction_builder;
 pub mod error;
+pub mod mnemonics;
+pub mod storage;
+pub mod transaction_builder;
+pub mod wallet;
 
 pub mod precomputed_tables;
 

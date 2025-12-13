@@ -1,18 +1,17 @@
-use std::time::Duration;
-use humantime::Duration as HumanDuration;
-use serde::{Deserialize, Serialize};
-use tos_common::{
-    crypto::Hash,
-    prompt::LogLevel,
-    utils::detect_available_parallelism
-};
 use crate::{
     config::*,
     core::storage::sled::StorageMode,
-    p2p::diffie_hellman::{KeyVerificationAction, WrappedSecret}
+    p2p::diffie_hellman::{KeyVerificationAction, WrappedSecret},
 };
+use humantime::Duration as HumanDuration;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use tos_common::{crypto::Hash, prompt::LogLevel, utils::detect_available_parallelism};
 
-use super::{simulator::Simulator, storage::rocksdb::{CacheMode, CompressionMode}};
+use super::{
+    simulator::Simulator,
+    storage::rocksdb::{CacheMode, CompressionMode},
+};
 
 // Functions helpers for serde default values
 fn default_p2p_bind_address() -> String {
@@ -169,7 +168,7 @@ pub struct ProxyConfig {
     pub username: Option<String>,
     /// Proxy password for authentication
     #[clap(name = "p2p-proxy-password", long)]
-    pub password: Option<String>
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
@@ -190,7 +189,7 @@ pub struct P2pConfig {
     #[serde(default = "default_max_peers")]
     pub max_peers: usize,
     /// Set a maximum of P2P outgoing peers.
-    /// 
+    ///
     /// This is useful to limit to how many nodes you want to connect to.
     #[clap(name = "p2p-max-outgoing-peers", long, default_value_t = default_max_outgoing_peers())]
     #[serde(default = "default_max_outgoing_peers")]
@@ -218,45 +217,45 @@ pub struct P2pConfig {
     #[serde(default)]
     pub disable: bool,
     /// Allow fast sync mode.
-    /// 
+    ///
     /// Sync a bootstrapped chain if your local copy is outdated.
-    /// 
+    ///
     /// It will not store any blocks / TXs and will not verify the history locally.
-    /// 
+    ///
     /// Use it with extreme cautions and trusted nodes to have a valid bootstrapped chain.
     #[clap(long)]
     #[serde(default)]
     pub allow_fast_sync: bool,
     /// Allow boost chain sync mode.
-    /// 
+    ///
     /// This will request in parallel all blocks instead of sequentially.
-    /// 
+    ///
     /// It is not enabled by default because it will requests several blocks before validating each previous.
     #[clap(long)]
     #[serde(default)]
     pub allow_boost_sync: bool,
     /// Allow blocks coming from priority nodes to be fast forwarded to our peers.
-    /// 
+    ///
     /// Propagate a new block to our peers as soon as we receive it from a priority node before verifying it ourself.
     /// This reduces the time to propagate a new block to our peers.
     /// Useful for pools operating having several nodes across the world to propagate their blocks faster.
-    /// 
+    ///
     /// By default, this is disabled.
     #[clap(long)]
     #[serde(default)]
     pub allow_priority_blocks: bool,
     /// Configure the maximum chain response size.
-    /// 
+    ///
     /// This is useful for low devices who want to reduce resources usage
     /// and for high-end devices who want to (or help others to) sync faster.
     #[clap(long, default_value_t = default_chain_sync_response_blocks())]
     #[serde(default = "default_chain_sync_response_blocks")]
     pub max_chain_response_size: usize,
     /// Ask peers to not share our IP to others and/or through API.
-    /// 
+    ///
     /// This is useful for people that don't want that their IP is revealed in RPC API
     /// and/or shared to others nodes as a potential new peer to connect to.
-    /// 
+    ///
     /// Note that it may prevent to have new incoming peers.
     #[clap(long)]
     #[serde(default)]
@@ -292,10 +291,7 @@ pub struct P2pConfig {
     /// This is used to configure the time to wait before unbanning the peer.
     /// By default, it will be set to 15 minutes.
     #[clap(name = "p2p-temp-ban-duration", long, default_value_t = default_p2p_temp_ban_duration())]
-    #[serde(
-        with = "humantime_serde",
-        default = "default_p2p_temp_ban_duration"
-    )]
+    #[serde(with = "humantime_serde", default = "default_p2p_temp_ban_duration")]
     pub temp_ban_duration: HumanDuration,
     /// P2P Fail count limit to ban a peer temporarily.
     /// This is used to configure the number of failed requests
@@ -330,7 +326,7 @@ pub enum StorageBackend {
     Sled,
     #[serde(rename = "rocksdb")]
     #[clap(name = "rocksdb")]
-    RocksDB
+    RocksDB,
 }
 
 impl Default for StorageBackend {
@@ -476,7 +472,7 @@ pub struct Config {
     #[serde(default)]
     pub recovery_mode: bool,
     /// Flush the storage onto the disk every N blocks (topoheight based).
-    /// In case of RocksDB, this will also compact the changes. 
+    /// In case of RocksDB, this will also compact the changes.
     #[clap(long)]
     #[serde(default)]
     pub flush_db_every_n_blocks: Option<u64>,
@@ -491,7 +487,7 @@ pub struct Config {
     // prevent to re-verify the same ZK Proofs more than once.
     #[clap(long)]
     #[serde(default)]
-    pub disable_zkp_cache: bool
+    pub disable_zkp_cache: bool,
 }
 
 mod humantime_serde {

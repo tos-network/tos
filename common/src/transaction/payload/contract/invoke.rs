@@ -1,9 +1,9 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use tos_vm::ValueCell;
+use tos_kernel::ValueCell;
 
-use crate::{crypto::Hash, serializer::*};
 use super::ContractDeposit;
+use crate::{crypto::Hash, serializer::*};
 
 // InvokeContractPayload is a public payload allowing to call a smart contract
 // It contains all the assets deposited in the contract and the parameters to call the contract
@@ -22,7 +22,7 @@ pub struct InvokeContractPayload {
     // is still accepted by nodes but the contract execution is stopped
     pub max_gas: u64,
     // The parameters to call the contract
-    pub parameters: Vec<ValueCell>
+    pub parameters: Vec<ValueCell>,
 }
 
 impl Serializer for InvokeContractPayload {
@@ -63,7 +63,13 @@ impl Serializer for InvokeContractPayload {
         for _ in 0..len {
             parameters.push(ValueCell::read(reader)?);
         }
-        Ok(InvokeContractPayload { contract, deposits, chunk_id, max_gas, parameters })
+        Ok(InvokeContractPayload {
+            contract,
+            deposits,
+            chunk_id,
+            max_gas,
+            parameters,
+        })
     }
 
     fn size(&self) -> usize {

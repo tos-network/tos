@@ -1,12 +1,12 @@
 use indexmap::{IndexMap, IndexSet};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     hash::{Hash, Hasher},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc
-    }
+        Arc,
+    },
 };
 use tos_common::{rpc::RpcRequest, serializer::*, tokio::sync::Mutex};
 
@@ -28,7 +28,7 @@ pub struct AppState {
     // All permissions for each method based on user config
     permissions: Mutex<IndexMap<String, Permission>>,
     // Do we have a pending request?
-    is_requesting: AtomicBool
+    is_requesting: AtomicBool,
 }
 
 impl Hash for AppState {
@@ -54,19 +54,27 @@ impl AppState {
             name: data.name,
             description: data.description,
             url: data.url,
-            permissions: Mutex::new(data.permissions.into_iter().map(|k| (k, Permission::Ask)).collect()),
-            is_requesting: AtomicBool::new(false)
+            permissions: Mutex::new(
+                data.permissions
+                    .into_iter()
+                    .map(|k| (k, Permission::Ask))
+                    .collect(),
+            ),
+            is_requesting: AtomicBool::new(false),
         }
     }
 
-    pub fn with_permissions(data: ApplicationData, permissions: IndexMap<String, Permission>) -> Self {
+    pub fn with_permissions(
+        data: ApplicationData,
+        permissions: IndexMap<String, Permission>,
+    ) -> Self {
         Self {
             id: XSWDAppId(Arc::new(data.id)),
             name: data.name,
             description: data.description,
             url: data.url,
             permissions: Mutex::new(permissions),
-            is_requesting: AtomicBool::new(false)
+            is_requesting: AtomicBool::new(false),
         }
     }
 
@@ -116,7 +124,7 @@ pub struct ApplicationData {
     // Permissions per RPC method
     // This is useful to request in one time all permissions
     #[serde(default)]
-    permissions: IndexSet<String>
+    permissions: IndexSet<String>,
 }
 
 impl ApplicationData {
@@ -154,7 +162,7 @@ impl Serializer for ApplicationData {
             name,
             description,
             url,
-            permissions
+            permissions,
         })
     }
 
@@ -174,13 +182,9 @@ pub enum EncryptionMode {
     // No encryption, just transfer the data as is (discouraged)
     None,
     // Encrypt the data using AES-GCM
-    AES {
-        key: EncryptionKey
-    },
+    AES { key: EncryptionKey },
     // Encrypt the data using ChaCha20Poly1305 AEAD cipher
-    Chacha20Poly1305 {
-        key: EncryptionKey
-    }
+    Chacha20Poly1305 { key: EncryptionKey },
 }
 
 impl Serializer for EncryptionMode {
@@ -188,9 +192,13 @@ impl Serializer for EncryptionMode {
         let mode = reader.read_u8()?;
         match mode {
             0 => Ok(Self::None),
-            1 => Ok(Self::AES { key: reader.read_bytes(32)? }),
-            2 => Ok(Self::Chacha20Poly1305 { key: reader.read_bytes(32)? }),
-            _ => Err(ReaderError::InvalidValue)
+            1 => Ok(Self::AES {
+                key: reader.read_bytes(32)?,
+            }),
+            2 => Ok(Self::Chacha20Poly1305 {
+                key: reader.read_bytes(32)?,
+            }),
+            _ => Err(ReaderError::InvalidValue),
         }
     }
 
@@ -229,7 +237,7 @@ impl Serializer for ApplicationDataRelayer {
         Ok(Self {
             inner,
             relayer,
-            encryption_mode
+            encryption_mode,
         })
     }
 
@@ -249,7 +257,7 @@ impl Serializer for ApplicationDataRelayer {
 pub enum Permission {
     Allow,
     Reject,
-    Ask
+    Ask,
 }
 
 impl fmt::Display for Permission {
@@ -264,21 +272,21 @@ impl fmt::Display for Permission {
 
 pub enum PermissionRequest<'a> {
     Application,
-    Request(&'a RpcRequest)
+    Request(&'a RpcRequest),
 }
 
 pub enum PermissionResult {
     Accept,
     Reject,
     AlwaysAccept,
-    AlwaysReject
+    AlwaysReject,
 }
 
 impl PermissionResult {
     pub fn is_positive(&self) -> bool {
         match self {
             Self::Accept | Self::AlwaysAccept => true,
-            _ => false
+            _ => false,
         }
     }
 }

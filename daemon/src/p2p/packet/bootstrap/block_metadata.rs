@@ -1,13 +1,12 @@
-use std::hash::{Hasher, Hash as StdHash};
+use std::hash::{Hash as StdHash, Hasher};
 
 use indexmap::IndexSet;
 use tos_common::{
     crypto::Hash,
     difficulty::{CumulativeDifficulty, Difficulty},
+    serializer::*,
     varuint::VarUint,
-    serializer::*
 };
-
 
 #[derive(Debug)]
 pub struct BlockMetadata {
@@ -26,7 +25,7 @@ pub struct BlockMetadata {
     // Difficulty P variable
     pub p: VarUint,
     // All transactions marked as executed in this block
-    pub executed_transactions: IndexSet<Hash>
+    pub executed_transactions: IndexSet<Hash>,
 }
 
 impl StdHash for BlockMetadata {
@@ -61,7 +60,7 @@ impl Serializer for BlockMetadata {
         let mut executed_transactions = IndexSet::new();
         for _ in 0..len {
             if !executed_transactions.insert(Hash::read(reader)?) {
-                return Err(ReaderError::InvalidValue)
+                return Err(ReaderError::InvalidValue);
             }
         }
 
@@ -73,7 +72,7 @@ impl Serializer for BlockMetadata {
             difficulty,
             cumulative_difficulty,
             p,
-            executed_transactions
+            executed_transactions,
         })
     }
 
@@ -90,12 +89,12 @@ impl Serializer for BlockMetadata {
 
     fn size(&self) -> usize {
         self.hash.size()
-        + self.supply.size()
-        + self.burned_supply.size()
-        + self.reward.size()
-        + self.difficulty.size()
-        + self.cumulative_difficulty.size()
-        + self.p.size()
-        + self.executed_transactions.size()
+            + self.supply.size()
+            + self.burned_supply.size()
+            + self.reward.size()
+            + self.difficulty.size()
+            + self.cumulative_difficulty.size()
+            + self.p.size()
+            + self.executed_transactions.size()
     }
 }

@@ -17,9 +17,6 @@ impl Serializer for Contract {
         let id = ContractId::read(reader)?;
         let module_pointer = Option::read(reader)?;
 
-        Ok(Self {
-            id,
-            module_pointer
-        })
+        Ok(Self { id, module_pointer })
     }
 }
