@@ -40,6 +40,7 @@ pub trait Storage:
     + ContractOutputsProvider
     + ContractInfoProvider
     + ContractBalanceProvider
+    + ContractEventProvider
     + VersionedProvider
     + SupplyProvider
     + CacheProvider

@@ -153,6 +153,15 @@ pub struct SledStorage {
     // Versioned AI mining states
     // Key is topoheight, value is the AI mining state at that topoheight
     pub(super) versioned_ai_mining_states: Tree,
+    // Contract events storage for LOG0-LOG4 syscalls
+    // Key is contract_hash + topoheight + log_index, value is StoredContractEvent
+    pub(super) contract_events: Tree,
+    // Contract events indexed by transaction hash
+    // Key is tx_hash + log_index, value is StoredContractEvent
+    pub(super) contract_events_by_tx: Tree,
+    // Contract events indexed by topic0 (event signature)
+    // Key is contract_hash + topic0 + topoheight + log_index, value is StoredContractEvent
+    pub(super) contract_events_by_topic: Tree,
     // opened DB used for assets to create dynamic assets
     pub(super) db: sled::Db,
 
@@ -269,6 +278,9 @@ impl SledStorage {
             versioned_energy_resources: sled.open_tree("versioned_energy_resources")?,
             ai_mining_state: sled.open_tree("ai_mining_state")?,
             versioned_ai_mining_states: sled.open_tree("versioned_ai_mining_states")?,
+            contract_events: sled.open_tree("contract_events")?,
+            contract_events_by_tx: sled.open_tree("contract_events_by_tx")?,
+            contract_events_by_topic: sled.open_tree("contract_events_by_topic")?,
             db: sled,
             cache: StorageCache::new(cache_size),
 

@@ -113,6 +113,16 @@ pub enum Column {
     // Versioned AI mining states
     // {topoheight} => {ai_mining_state}
     VersionedAIMiningStates,
+
+    // Contract events storage for LOG0-LOG4 syscalls
+    // {contract_id}{topoheight}{log_index} => {StoredContractEvent}
+    ContractEvents,
+    // Contract events indexed by transaction hash
+    // {tx_hash}{log_index} => {StoredContractEvent}
+    ContractEventsByTx,
+    // Contract events indexed by topic0 (event signature)
+    // {contract_id}{topic0}{topoheight}{log_index} => {StoredContractEvent}
+    ContractEventsByTopic,
 }
 
 impl Column {
@@ -134,6 +144,13 @@ impl Column {
 
             ContractsBalances => Some(PREFIX_ID_LEN),
             Balances => Some(PREFIX_ID_LEN),
+
+            // Contract events: prefix by contract_id (8 bytes)
+            ContractEvents => Some(PREFIX_ID_LEN),
+            // Events by tx: prefix by tx_hash (32 bytes)
+            ContractEventsByTx => Some(32),
+            // Events by topic: prefix by contract_id (8 bytes)
+            ContractEventsByTopic => Some(PREFIX_ID_LEN),
 
             _ => None,
         }

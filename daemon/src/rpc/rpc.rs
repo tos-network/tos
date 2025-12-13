@@ -570,8 +570,10 @@ pub fn register_methods<S: Storage>(
         "get_contract_address_from_tx",
         async_handler!(get_contract_address_from_tx::<S>),
     );
-    // Note: get_contract_events is not yet implemented because ContractEventProvider
-    // is not implemented for the storage backends. This will be added in a future phase.
+    handler.register_method(
+        "get_contract_events",
+        async_handler!(get_contract_events::<S>),
+    );
 
     // P2p
     handler.register_method(
@@ -2917,7 +2919,86 @@ async fn get_contract_address_from_tx<S: Storage>(
     }))
 }
 
-// Note: get_contract_events function is not yet implemented because ContractEventProvider
-// is not implemented for the storage backends. The trait and types are defined in
-// daemon/src/core/storage/providers/contract/event.rs but the storage implementations
-// (RocksDB, Sled) don't implement the trait yet. This will be added in a future phase.
+/// Get contract events (LOG0-LOG4 syscalls) with filtering options
+///
+/// This endpoint allows querying contract events by:
+/// - Contract address (with optional topic0 filter)
+/// - Transaction hash
+/// - Topoheight range
+///
+/// Returns a list of events matching the filters.
+async fn get_contract_events<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetContractEventsParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let mut events = Vec::new();
+
+    // Query by transaction hash takes priority
+    if let Some(tx_hash) = &params.tx_hash {
+        let tx_events = storage.get_events_by_tx(tx_hash).await?;
+        for event in tx_events {
+            events.push(RPCContractEvent {
+                contract: event.contract,
+                tx_hash: event.tx_hash,
+                block_hash: event.block_hash,
+                topoheight: event.topoheight,
+                log_index: event.log_index,
+                topics: event.topics.iter().map(hex::encode).collect(),
+                data: hex::encode(&event.data),
+            });
+        }
+    } else if let Some(contract) = &params.contract {
+        // Query by contract (with optional topic0 filter)
+        let stored_events = if let Some(topic0_hex) = &params.topic0 {
+            // Parse topic0 from hex
+            let topic0_bytes = hex::decode(topic0_hex)
+                .map_err(|_| InternalRpcError::InvalidParams("Invalid topic0 hex string"))?;
+            if topic0_bytes.len() != 32 {
+                return Err(InternalRpcError::InvalidParams("topic0 must be 32 bytes"));
+            }
+            let mut topic0 = [0u8; 32];
+            topic0.copy_from_slice(&topic0_bytes);
+
+            storage
+                .get_events_by_topic(
+                    contract,
+                    &topic0,
+                    params.from_topoheight,
+                    params.to_topoheight,
+                    params.limit,
+                )
+                .await?
+        } else {
+            storage
+                .get_events_by_contract(
+                    contract,
+                    params.from_topoheight,
+                    params.to_topoheight,
+                    params.limit,
+                )
+                .await?
+        };
+
+        for event in stored_events {
+            events.push(RPCContractEvent {
+                contract: event.contract,
+                tx_hash: event.tx_hash,
+                block_hash: event.block_hash,
+                topoheight: event.topoheight,
+                log_index: event.log_index,
+                topics: event.topics.iter().map(hex::encode).collect(),
+                data: hex::encode(&event.data),
+            });
+        }
+    } else {
+        return Err(InternalRpcError::InvalidParams(
+            "Either 'contract' or 'tx_hash' parameter is required",
+        ));
+    }
+
+    Ok(json!(events))
+}

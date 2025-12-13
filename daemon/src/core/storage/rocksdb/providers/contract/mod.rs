@@ -1,5 +1,6 @@
 mod balance;
 mod data;
+mod event;
 mod r#impl;
 mod output;
 mod supply;
