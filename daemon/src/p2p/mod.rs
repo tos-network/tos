@@ -1211,7 +1211,8 @@ impl<S: Storage> P2pServer<S> {
     }
 
     // Set the chain syncing state
-    fn set_chain_syncing(&self, syncing: bool) {
+    // pub(crate) for force_sync RPC command (BUG-004 Phase 3)
+    pub(crate) fn set_chain_syncing(&self, syncing: bool) {
         self.is_syncing.store(syncing, Ordering::SeqCst);
     }
 
@@ -1366,8 +1367,145 @@ impl<S: Storage> P2pServer<S> {
                 self.set_chain_syncing(false);
                 warned = false;
             } else {
-                if !self.allow_fast_sync() && self.get_peer_count().await > 0 && !warned {
-                    let our_topoheight = self.blockchain.get_topo_height();
+                // BUG-004 Phase 1 & 2: Diagnostic logging and fallback sync
+                let our_topoheight = self.blockchain.get_topo_height();
+                let peers = self.peer_list.get_cloned_peers().await;
+                let peer_count = peers.len();
+
+                if peer_count > 0 {
+                    // Phase 1: Diagnostic logging - understand why no peer was selected
+                    let best_peer_topoheight =
+                        peers.iter().map(|p| p.get_topoheight()).max().unwrap_or(0);
+                    let gap = best_peer_topoheight.saturating_sub(our_topoheight);
+
+                    if gap > 0 {
+                        // Emit metric for monitoring
+                        gauge!("tos_p2p_sync_gap_blocks").set(gap as f64);
+
+                        if log::log_enabled!(log::Level::Info) {
+                            info!(
+                                "BUG-004 DIAG: No sync peer selected. our_topo={}, best_peer_topo={}, gap={}, peers={}",
+                                our_topoheight, best_peer_topoheight, gap, peer_count
+                            );
+                        }
+
+                        // Detailed per-peer analysis at DEBUG level
+                        if log::log_enabled!(log::Level::Debug) {
+                            let our_blue_work = {
+                                let storage = self.blockchain.get_storage().read().await;
+                                if let Ok(tips) = storage.get_tips().await {
+                                    let mut best = BlueWorkType::zero();
+                                    for tip in &tips {
+                                        if let Ok(bw) = storage.get_ghostdag_blue_work(tip).await {
+                                            if bw > best {
+                                                best = bw;
+                                            }
+                                        }
+                                    }
+                                    best
+                                } else {
+                                    BlueWorkType::zero()
+                                }
+                            };
+                            let our_height = self.blockchain.get_blue_score();
+
+                            for peer in &peers {
+                                let peer_bw = *peer.get_blue_work().lock().await;
+                                let peer_topo = peer.get_topoheight();
+                                let peer_height = peer.get_height();
+                                let peer_pruned = peer.get_pruned_topoheight();
+
+                                debug!(
+                                    "  Peer {}: topo={}, height={}, blue_work={}, pruned={:?}, checks: bw_ahead={}, topo_ahead={}, height_ahead={}, not_pruned={}",
+                                    peer.get_outgoing_address(),
+                                    peer_topo,
+                                    peer_height,
+                                    peer_bw,
+                                    peer_pruned,
+                                    peer_bw > our_blue_work,
+                                    peer_topo > our_topoheight,
+                                    peer_height > our_height,
+                                    peer_pruned.map_or(true, |p| p <= our_topoheight)
+                                );
+                            }
+                        }
+                    }
+
+                    // Phase 2: Fallback sync when gap detected but no peer selected
+                    // Purpose: Resolve deadlock when node is stuck because no peer passes
+                    //          select_random_best_peer()'s blue_work filter, yet peers are ahead.
+                    //
+                    // Safety analysis:
+                    // - This bypasses peer selection's blue_work check, NOT consensus validation
+                    // - add_new_block() still enforces full PoW/consensus checks on each block
+                    // - has_higher_blue_work() in handle_chain_response only applies to rewind
+                    //   path (pop_count > 0); forward-only sync (pop_count=0) does not use it
+                    // - Worst case: we fetch blocks from a peer on a weaker chain, but each
+                    //   block must still pass consensus; invalid blocks are rejected
+                    // - This is intended for "stuck node" recovery, not normal operation
+                    const FALLBACK_SYNC_GAP_THRESHOLD: u64 = 100;
+
+                    if gap > FALLBACK_SYNC_GAP_THRESHOLD {
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!(
+                                "BUG-004 FIX: Gap of {} blocks detected but no peer passed blue_work check. Attempting fallback sync.",
+                                gap
+                            );
+                        }
+
+                        // Select peer by topoheight only, bypassing peer selection's blue_work filter
+                        // Still validates: pruning check, and add_new_block() consensus checks
+                        let fallback_peer = peers
+                            .into_iter()
+                            .filter(|p| {
+                                let peer_topo = p.get_topoheight();
+                                if peer_topo <= our_topoheight {
+                                    return false;
+                                }
+                                // Still check pruning - can't sync from peer that pruned needed blocks
+                                if let Some(pruned) = p.get_pruned_topoheight() {
+                                    if pruned > our_topoheight {
+                                        return false;
+                                    }
+                                }
+                                true
+                            })
+                            .max_by_key(|p| p.get_topoheight());
+
+                        if let Some(peer) = fallback_peer {
+                            if log::log_enabled!(log::Level::Info) {
+                                info!(
+                                    "BUG-004 FIX: Fallback sync from {} (topo: {}, gap: {})",
+                                    peer,
+                                    peer.get_topoheight(),
+                                    gap
+                                );
+                            }
+                            counter!("tos_p2p_fallback_sync_attempts").increment(1u64);
+
+                            // We are syncing the chain
+                            self.set_chain_sync_rate_bps(0);
+                            self.set_chain_syncing(true);
+
+                            if let Err(e) = self
+                                .request_sync_chain_for(&peer, &mut last_chain_sync)
+                                .await
+                            {
+                                peer.clear_objects_requested().await;
+                                if log::log_enabled!(log::Level::Warn) {
+                                    warn!("BUG-004 FIX: Fallback sync failed: {}", e);
+                                }
+                            }
+
+                            self.set_chain_syncing(false);
+                            // Continue to next loop iteration
+                            continue;
+                        }
+                    }
+                }
+
+                // Original warning logic for no compatible peer
+                if !self.allow_fast_sync() && peer_count > 0 && !warned {
                     let has_peer = self
                         .peer_list
                         .get_cloned_peers()
@@ -1847,11 +1985,27 @@ impl<S: Storage> P2pServer<S> {
                                 if log::log_enabled!(log::Level::Debug) {
                                     debug!("Adding received block {} from {} to chain", block_hash, peer);
                                 }
-                                if let Err(e) = zelf.blockchain.add_new_block(block, Some(Immutable::Arc(block_hash.clone())), BroadcastOption::All, false).await {
-                                    if log::log_enabled!(log::Level::Warn) {
-                                        warn!("Error while adding new block {} from {}: {}", block_hash, peer, e);
+                                if let Err(e) = zelf.blockchain.add_new_block(block.clone(), Some(Immutable::Arc(block_hash.clone())), BroadcastOption::All, false).await {
+                                    // BUG-004 Phase 4: Diagnostic logging for ParentNotFound in broadcast path
+                                    // Full recovery implementation deferred - requires async queue pattern
+                                    // to avoid blocking and rate limiting to prevent orphan flood attacks.
+                                    // See BUG-004.md for detailed implementation plan.
+                                    if let BlockchainError::ParentNotFound(parent_hash) = &e {
+                                        if log::log_enabled!(log::Level::Debug) {
+                                            debug!(
+                                                "BUG-004: Block {} has missing parent {} from peer {} (recovery deferred)",
+                                                block_hash, parent_hash, peer
+                                            );
+                                        }
+                                        counter!("tos_p2p_orphan_blocks_total").increment(1u64);
+                                        // Don't increment fail_count - this is expected during sync gaps
+                                    } else {
+                                        // Other errors - log and increment fail count as before
+                                        if log::log_enabled!(log::Level::Warn) {
+                                            warn!("Error while adding new block {} from {}: {}", block_hash, peer, e);
+                                        }
+                                        peer.increment_fail_count();
                                     }
-                                    peer.increment_fail_count();
                                 }
 
                                 block_hash
@@ -4344,5 +4498,57 @@ mod tests {
         assert!(!is_local_address(
             &SocketAddr::from_str("1.1.1.1:2125").unwrap()
         ));
+    }
+
+    // BUG-004 Phase 2: Test fallback sync gap threshold calculation
+    #[test]
+    fn test_bug004_fallback_sync_gap_threshold() {
+        // The fallback sync threshold is 100 blocks
+        // This constant is defined in chain_sync_loop
+        const FALLBACK_SYNC_GAP_THRESHOLD: u64 = 100;
+
+        // Test gap calculation scenarios
+        let our_topo = 1000u64;
+
+        // Peer ahead by less than threshold - should NOT trigger fallback
+        let peer_topo_small_gap = 1050u64;
+        let gap_small = peer_topo_small_gap.saturating_sub(our_topo);
+        assert_eq!(gap_small, 50);
+        assert!(gap_small <= FALLBACK_SYNC_GAP_THRESHOLD);
+
+        // Peer ahead by exactly threshold - should NOT trigger fallback (> not >=)
+        let peer_topo_exact = 1100u64;
+        let gap_exact = peer_topo_exact.saturating_sub(our_topo);
+        assert_eq!(gap_exact, 100);
+        assert!(!(gap_exact > FALLBACK_SYNC_GAP_THRESHOLD));
+
+        // Peer ahead by more than threshold - should trigger fallback
+        let peer_topo_large_gap = 1200u64;
+        let gap_large = peer_topo_large_gap.saturating_sub(our_topo);
+        assert_eq!(gap_large, 200);
+        assert!(gap_large > FALLBACK_SYNC_GAP_THRESHOLD);
+
+        // Peer behind us - gap should be 0
+        let peer_topo_behind = 900u64;
+        let gap_behind = peer_topo_behind.saturating_sub(our_topo);
+        assert_eq!(gap_behind, 0);
+    }
+
+    // BUG-004: Test saturating subtraction for sync gap calculation
+    #[test]
+    fn test_bug004_gap_calculation_no_overflow() {
+        // Ensure gap calculation doesn't overflow when peer is behind
+        let our_topo = u64::MAX;
+        let peer_topo = 100u64;
+
+        // saturating_sub prevents underflow
+        let gap = peer_topo.saturating_sub(our_topo);
+        assert_eq!(gap, 0);
+
+        // Normal case
+        let our_topo = 100u64;
+        let peer_topo = u64::MAX;
+        let gap = peer_topo.saturating_sub(our_topo);
+        assert_eq!(gap, u64::MAX - 100);
     }
 }

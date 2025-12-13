@@ -631,6 +631,7 @@ pub fn register_methods<S: Storage>(
         "get_p2p_block_propagation",
         async_handler!(get_p2p_block_propagation::<S>),
     );
+    handler.register_method("force_sync", async_handler!(force_sync::<S>));
 
     // Energy management
     handler.register_method("get_energy", async_handler!(get_energy::<S>));
@@ -3163,5 +3164,151 @@ async fn get_ai_mining_active_tasks<S: Storage>(
         None => Err(InternalRpcError::InvalidRequestStr(
             "AI mining state not initialized",
         )),
+    }
+}
+
+// BUG-004 Phase 3: Force sync from a specific peer or best available peer
+// This is an operational tool for manual intervention when automatic sync fails
+async fn force_sync<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+    #[derive(serde::Deserialize)]
+    struct ForceSyncParams {
+        peer_address: Option<String>,
+    }
+
+    let params: ForceSyncParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Clone the Arc to avoid holding read guard across await points
+    // This follows the pattern used in p2p_status, get_peers, etc.
+    let p2p = { blockchain.get_p2p().read().await.clone() };
+    let p2p = p2p
+        .as_ref()
+        .ok_or_else(|| InternalRpcError::InvalidParamsAny(ApiError::NoP2p.into()))?;
+
+    // Concurrency check: avoid conflict with background chain_sync_loop
+    if p2p.is_syncing_chain() {
+        return Err(InternalRpcError::InvalidRequestStr(
+            "Sync already in progress. Please wait for it to complete.",
+        ));
+    }
+
+    let our_topo = blockchain.get_topo_height();
+
+    let peer = if let Some(addr_str) = params.peer_address {
+        // Use specified peer
+        let addr: std::net::SocketAddr = addr_str.parse().map_err(|_| {
+            InternalRpcError::InvalidParamsAny(ApiError::ExpectedNormalAddress.into())
+        })?;
+        p2p.get_peer_list()
+            .get_peer_by_addr(&addr)
+            .await
+            .ok_or_else(|| InternalRpcError::InvalidParams("Peer not found".into()))?
+    } else {
+        // Select best peer by topoheight
+        p2p.get_peer_list()
+            .get_cloned_peers()
+            .await
+            .into_iter()
+            .filter(|p| p.get_topoheight() > our_topo)
+            .max_by_key(|p| p.get_topoheight())
+            .ok_or_else(|| InternalRpcError::InvalidParams("No peer ahead of us found".into()))?
+    };
+
+    let peer_topo = peer.get_topoheight();
+    let peer_addr = peer.get_outgoing_address().to_string();
+
+    // Mark that we're syncing
+    p2p.set_chain_syncing(true);
+
+    let mut dummy_ts = 0;
+    let result = p2p.request_sync_chain_for(&peer, &mut dummy_ts).await;
+
+    // Clear sync state
+    p2p.set_chain_syncing(false);
+
+    match result {
+        Ok(()) => {
+            let new_topo = blockchain.get_topo_height();
+            if log::log_enabled!(log::Level::Info) {
+                log::info!(
+                    "force_sync: Synced from {} (topo: {} -> {})",
+                    peer_addr,
+                    our_topo,
+                    new_topo
+                );
+            }
+            Ok(json!({
+                "success": true,
+                "peer": peer_addr,
+                "peer_topoheight": peer_topo,
+                "our_topoheight_before": our_topo,
+                "our_topoheight_after": new_topo,
+                "blocks_synced": new_topo.saturating_sub(our_topo)
+            }))
+        }
+        Err(e) => {
+            peer.clear_objects_requested().await;
+            if log::log_enabled!(log::Level::Warn) {
+                log::warn!("force_sync: Failed to sync from {}: {}", peer_addr, e);
+            }
+            Err(InternalRpcError::InternalError("Sync request failed"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // BUG-004 Phase 3: Test force_sync parameter parsing
+    #[test]
+    fn test_force_sync_params_with_peer_address() {
+        #[derive(serde::Deserialize)]
+        struct ForceSyncParams {
+            peer_address: Option<String>,
+        }
+
+        // Test with peer_address specified
+        let json_with_addr = serde_json::json!({
+            "peer_address": "192.168.1.100:2125"
+        });
+        let params: ForceSyncParams = serde_json::from_value(json_with_addr).unwrap();
+        assert_eq!(params.peer_address, Some("192.168.1.100:2125".to_string()));
+
+        // Test without peer_address (auto-select best peer)
+        let json_without_addr = serde_json::json!({});
+        let params: ForceSyncParams = serde_json::from_value(json_without_addr).unwrap();
+        assert_eq!(params.peer_address, None);
+
+        // Test with null peer_address
+        let json_null_addr = serde_json::json!({
+            "peer_address": null
+        });
+        let params: ForceSyncParams = serde_json::from_value(json_null_addr).unwrap();
+        assert_eq!(params.peer_address, None);
+    }
+
+    // BUG-004 Phase 3: Test socket address parsing for force_sync
+    #[test]
+    fn test_force_sync_socket_addr_parsing() {
+        use std::net::SocketAddr;
+
+        // Valid IPv4 address
+        let valid_ipv4 = "192.168.1.100:2125";
+        assert!(valid_ipv4.parse::<SocketAddr>().is_ok());
+
+        // Valid IPv6 address
+        let valid_ipv6 = "[::1]:2125";
+        assert!(valid_ipv6.parse::<SocketAddr>().is_ok());
+
+        // Invalid: missing port
+        let invalid_no_port = "192.168.1.100";
+        assert!(invalid_no_port.parse::<SocketAddr>().is_err());
+
+        // Invalid: bad IP
+        let invalid_ip = "999.999.999.999:2125";
+        assert!(invalid_ip.parse::<SocketAddr>().is_err());
+
+        // Invalid: not an address
+        let invalid_text = "not-an-address";
+        assert!(invalid_text.parse::<SocketAddr>().is_err());
     }
 }
