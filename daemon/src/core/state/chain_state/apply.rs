@@ -49,6 +49,7 @@ pub struct ApplicableChainState<'a, S: Storage> {
     contract_manager: ContractManager,
     burned_supply: u64,
     gas_fee: u64,
+    executor: std::sync::Arc<dyn tos_common::contract::ContractExecutor>,
 }
 
 #[async_trait]
@@ -358,13 +359,8 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             .await
     }
 
-    #[allow(clippy::panic)]
     fn get_contract_executor(&self) -> std::sync::Arc<dyn tos_common::contract::ContractExecutor> {
-        // TODO: Add contract executor support
-        // INTENTIONAL PANIC: This is a placeholder for unimplemented functionality.
-        // Contract execution is not yet supported in ApplicableChainState.
-        // This will be replaced with a proper implementation when contract support is added.
-        panic!("Contract executor not yet implemented in ApplicableChainState")
+        self.executor.clone()
     }
 
     async fn add_contract_events(
@@ -424,6 +420,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         burned_supply: u64,
         block_hash: &'a Hash,
         block: &'a Block,
+        executor: std::sync::Arc<dyn tos_common::contract::ContractExecutor>,
     ) -> Self {
         Self {
             inner: ChainState::with(
@@ -443,6 +440,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             block_hash,
             block,
             gas_fee: 0,
+            executor,
         }
     }
 

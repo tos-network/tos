@@ -3294,6 +3294,7 @@ impl<S: Storage> Blockchain<S> {
                     past_burned_supply,
                     &hash,
                     &block,
+                    self.executor.clone(),
                 );
 
                 total_txs_executed += block.get_txs_count();
