@@ -1,25 +1,183 @@
-// Contract Event Provider implementation for RocksDB
+// RocksDB Contract Event Storage Provider Implementation
 //
-// Implements ContractEventProvider trait for storing and querying
-// contract events emitted via LOG0-LOG4 syscalls.
+// This module implements the ContractEventProvider trait for RocksDB storage.
+// Events are indexed by:
+// - Contract hash + topoheight for contract-based queries
+// - Transaction hash for transaction-based lookups
+// - (contract, topic0) for event signature filtering
 
-use crate::core::{
-    error::BlockchainError,
-    storage::{
-        rocksdb::{Column, IteratorMode, RocksStorage},
-        ContractEventProvider, StoredContractEvent,
-    },
+use crate::core::error::BlockchainError;
+use crate::core::storage::{
+    rocksdb::{Column, IteratorMode},
+    ContractEventProvider, RocksStorage, StoredContractEvent, MAX_EVENTS_PER_QUERY,
 };
 use async_trait::async_trait;
 use log::trace;
 use rocksdb::Direction;
-use tos_common::{block::TopoHeight, crypto::Hash};
+use tos_common::{
+    block::TopoHeight,
+    crypto::Hash,
+    serializer::{Reader, ReaderError, Serializer, Writer},
+};
 
-// Key size constants
-const CONTRACT_ID_SIZE: usize = 8;
-const TOPOHEIGHT_SIZE: usize = 8;
-const LOG_INDEX_SIZE: usize = 4;
-const TOPIC_SIZE: usize = 32;
+/// Key builder for ContractEvents column
+/// Format: {topoheight:8}{contract_hash:32}{log_index:4}
+fn build_event_key(topoheight: TopoHeight, contract: &Hash, log_index: u32) -> EventKey {
+    EventKey {
+        topoheight,
+        contract: contract.clone(),
+        log_index,
+    }
+}
+
+/// Key builder for ContractEventsByTopic column
+/// Format: {contract_hash:32}{topic0:32}{topoheight:8}{log_index:4}
+fn build_topic_index_key(
+    contract: &Hash,
+    topic0: &[u8; 32],
+    topoheight: TopoHeight,
+    log_index: u32,
+) -> TopicIndexKey {
+    TopicIndexKey {
+        contract: contract.clone(),
+        topic0: *topic0,
+        topoheight,
+        log_index,
+    }
+}
+
+/// Key builder for ContractEventsByTx column
+/// Format: {tx_hash:32}
+fn build_tx_index_key(tx_hash: &Hash) -> Hash {
+    tx_hash.clone()
+}
+
+/// Structured key for ContractEvents column
+#[derive(Clone)]
+struct EventKey {
+    topoheight: TopoHeight,
+    contract: Hash,
+    log_index: u32,
+}
+
+impl Serializer for EventKey {
+    fn write(&self, writer: &mut Writer) {
+        writer.write_bytes(&self.topoheight.to_be_bytes());
+        writer.write_bytes(self.contract.as_bytes());
+        writer.write_bytes(&self.log_index.to_be_bytes());
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let topoheight = reader.read_u64()?;
+        let contract = reader.read_hash()?;
+        let log_index = reader.read_u32()?;
+
+        Ok(Self {
+            topoheight,
+            contract,
+            log_index,
+        })
+    }
+
+    fn size(&self) -> usize {
+        8 + 32 + 4
+    }
+}
+
+/// Structured key for ContractEventsByTopic column
+#[derive(Clone)]
+struct TopicIndexKey {
+    contract: Hash,
+    topic0: [u8; 32],
+    topoheight: TopoHeight,
+    log_index: u32,
+}
+
+impl Serializer for TopicIndexKey {
+    fn write(&self, writer: &mut Writer) {
+        writer.write_bytes(self.contract.as_bytes());
+        writer.write_bytes(&self.topic0);
+        writer.write_bytes(&self.topoheight.to_be_bytes());
+        writer.write_bytes(&self.log_index.to_be_bytes());
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let contract = reader.read_hash()?;
+        let topic0 = reader.read_bytes_32()?;
+        let topoheight = reader.read_u64()?;
+        let log_index = reader.read_u32()?;
+
+        Ok(Self {
+            contract,
+            topic0,
+            topoheight,
+            log_index,
+        })
+    }
+
+    fn size(&self) -> usize {
+        32 + 32 + 8 + 4
+    }
+}
+
+/// Event references stored in tx index
+#[derive(Clone)]
+struct EventRefs(Vec<EventRef>);
+
+impl Serializer for EventRefs {
+    fn write(&self, writer: &mut Writer) {
+        for r in &self.0 {
+            writer.write_bytes(&r.topoheight.to_be_bytes());
+            writer.write_bytes(r.contract.as_bytes());
+            writer.write_bytes(&r.log_index.to_be_bytes());
+        }
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let mut refs = Vec::new();
+        while reader.total_size() - reader.total_read() >= 44 {
+            let topoheight = reader.read_u64()?;
+            let contract = reader.read_hash()?;
+            let log_index = reader.read_u32()?;
+
+            refs.push(EventRef {
+                topoheight,
+                contract,
+                log_index,
+            });
+        }
+        Ok(EventRefs(refs))
+    }
+
+    fn size(&self) -> usize {
+        self.0.len() * 44
+    }
+}
+
+/// Single event reference
+#[derive(Clone)]
+struct EventRef {
+    topoheight: TopoHeight,
+    contract: Hash,
+    log_index: u32,
+}
+
+/// Empty marker value for topic index (just need the key)
+struct EmptyMarker;
+
+impl Serializer for EmptyMarker {
+    fn write(&self, _writer: &mut Writer) {
+        // Write nothing
+    }
+
+    fn read(_reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(EmptyMarker)
+    }
+
+    fn size(&self) -> usize {
+        0
+    }
+}
 
 #[async_trait]
 impl ContractEventProvider for RocksStorage {
@@ -29,7 +187,7 @@ impl ContractEventProvider for RocksStorage {
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
-                "store contract event for contract {} tx {} at topoheight {} log_index {}",
+                "Storing contract event: contract={}, tx={}, topo={}, log_index={}",
                 event.contract,
                 event.tx_hash,
                 event.topoheight,
@@ -37,28 +195,42 @@ impl ContractEventProvider for RocksStorage {
             );
         }
 
-        // Get contract ID (or create one if needed)
-        let contract_id = self.get_or_create_contract_id(&event.contract)?;
+        // 1. Store the event in ContractEvents column
+        let event_key = build_event_key(event.topoheight, &event.contract, event.log_index);
+        self.insert_into_disk(Column::ContractEvents, &event_key.to_bytes(), &event)?;
 
-        // Store in ContractEvents: {contract_id}{topoheight}{log_index} => event
-        let primary_key =
-            Self::get_contract_event_key(contract_id, event.topoheight, event.log_index);
-        self.insert_into_disk(Column::ContractEvents, &primary_key, &event)?;
-
-        // Store in ContractEventsByTx: {tx_hash}{log_index} => event
-        let tx_key = Self::get_event_by_tx_key(&event.tx_hash, event.log_index);
-        self.insert_into_disk(Column::ContractEventsByTx, &tx_key, &event)?;
-
-        // Store in ContractEventsByTopic if topic0 exists
+        // 2. Store topic0 index if event has topics
         if let Some(topic0) = event.topic0() {
-            let topic_key = Self::get_event_by_topic_key(
-                contract_id,
-                topic0,
-                event.topoheight,
-                event.log_index,
-            );
-            self.insert_into_disk(Column::ContractEventsByTopic, &topic_key, &event)?;
+            let topic_key =
+                build_topic_index_key(&event.contract, topic0, event.topoheight, event.log_index);
+            // Value is empty marker - we just need the key for iteration
+            self.insert_into_disk(
+                Column::ContractEventsByTopic,
+                &topic_key.to_bytes(),
+                &EmptyMarker,
+            )?;
         }
+
+        // 3. Update tx index
+        let tx_key = build_tx_index_key(&event.tx_hash);
+        let event_ref = EventRef {
+            topoheight: event.topoheight,
+            contract: event.contract.clone(),
+            log_index: event.log_index,
+        };
+
+        // Read existing refs and append
+        let mut refs = if let Some(EventRefs(existing)) =
+            self.load_optional_from_disk::<_, EventRefs>(Column::ContractEventsByTx, &tx_key)?
+        {
+            existing
+        } else {
+            Vec::new()
+        };
+        refs.push(event_ref);
+
+        // Store updated refs
+        self.insert_into_disk(Column::ContractEventsByTx, &tx_key, &EventRefs(refs))?;
 
         Ok(())
     }
@@ -72,50 +244,39 @@ impl ContractEventProvider for RocksStorage {
     ) -> Result<Vec<StoredContractEvent>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
-                "get events by contract {} from {:?} to {:?} limit {:?}",
+                "Getting events by contract: {}, from={:?}, to={:?}",
                 contract,
                 from_topoheight,
-                to_topoheight,
-                limit
+                to_topoheight
             );
         }
 
-        let Some(contract_id) = self.get_optional_contract_id(contract)? else {
-            return Ok(Vec::new());
-        };
+        let mut events = Vec::new();
+        let effective_limit = limit
+            .unwrap_or(MAX_EVENTS_PER_QUERY)
+            .min(MAX_EVENTS_PER_QUERY);
+        let from_topo = from_topoheight.unwrap_or(0);
+        let to_topo = to_topoheight.unwrap_or(u64::MAX);
 
-        let effective_limit = limit.unwrap_or(1000).min(1000);
-        let mut events = Vec::with_capacity(effective_limit);
+        // Build start key
+        let start_key = build_event_key(from_topo, contract, 0);
 
-        // Build the prefix key for iteration
-        let prefix = contract_id.to_be_bytes();
-        let start_key = if let Some(from_topo) = from_topoheight {
-            let mut key = Vec::with_capacity(CONTRACT_ID_SIZE + TOPOHEIGHT_SIZE);
-            key.extend_from_slice(&prefix);
-            key.extend_from_slice(&from_topo.to_be_bytes());
-            key
-        } else {
-            prefix.to_vec()
-        };
-
-        let iter = self.iter::<Vec<u8>, StoredContractEvent>(
+        // Iterate through ContractEvents column
+        for result in self.iter::<EventKey, StoredContractEvent>(
             Column::ContractEvents,
-            IteratorMode::From(&start_key, Direction::Forward),
-        )?;
-
-        for result in iter {
+            IteratorMode::From(&start_key.to_bytes(), Direction::Forward),
+        )? {
             let (key, event) = result?;
 
-            // Check if we're still in the same contract's events
-            if key.len() < CONTRACT_ID_SIZE || &key[..CONTRACT_ID_SIZE] != prefix.as_slice() {
+            // Check if we've exceeded the topoheight range
+            if key.topoheight > to_topo {
                 break;
             }
 
-            // Check topoheight range
-            if let Some(to_topo) = to_topoheight {
-                if event.topoheight > to_topo {
-                    break;
-                }
+            // Check if this is for our contract
+            if &key.contract != contract {
+                // Skip events for other contracts at this topoheight
+                continue;
             }
 
             events.push(event);
@@ -138,60 +299,52 @@ impl ContractEventProvider for RocksStorage {
     ) -> Result<Vec<StoredContractEvent>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
-                "get events by topic for contract {} topic0 {} from {:?} to {:?} limit {:?}",
+                "Getting events by topic: contract={}, topic0={:?}, from={:?}, to={:?}",
                 contract,
-                hex::encode(topic0),
+                &topic0[..4],
                 from_topoheight,
-                to_topoheight,
-                limit
+                to_topoheight
             );
         }
 
-        let Some(contract_id) = self.get_optional_contract_id(contract)? else {
-            return Ok(Vec::new());
-        };
+        let mut events = Vec::new();
+        let effective_limit = limit
+            .unwrap_or(MAX_EVENTS_PER_QUERY)
+            .min(MAX_EVENTS_PER_QUERY);
+        let from_topo = from_topoheight.unwrap_or(0);
+        let to_topo = to_topoheight.unwrap_or(u64::MAX);
 
-        let effective_limit = limit.unwrap_or(1000).min(1000);
-        let mut events = Vec::with_capacity(effective_limit);
+        // Build prefix for contract+topic0
+        let start_key = build_topic_index_key(contract, topic0, from_topo, 0);
 
-        // Build prefix: contract_id + topic0
-        let mut prefix = Vec::with_capacity(CONTRACT_ID_SIZE + TOPIC_SIZE);
-        prefix.extend_from_slice(&contract_id.to_be_bytes());
-        prefix.extend_from_slice(topic0);
-
-        // Build start key with optional from_topoheight
-        let start_key = if let Some(from_topo) = from_topoheight {
-            let mut key = prefix.clone();
-            key.extend_from_slice(&from_topo.to_be_bytes());
-            key
-        } else {
-            prefix.clone()
-        };
-
-        let iter = self.iter::<Vec<u8>, StoredContractEvent>(
+        // Iterate through topic index
+        for result in self.iter::<TopicIndexKey, EmptyMarker>(
             Column::ContractEventsByTopic,
-            IteratorMode::From(&start_key, Direction::Forward),
-        )?;
+            IteratorMode::From(&start_key.to_bytes(), Direction::Forward),
+        )? {
+            let (key, _) = result?;
 
-        for result in iter {
-            let (key, event) = result?;
-
-            // Check if we're still in the same contract+topic prefix
-            if key.len() < prefix.len() || &key[..prefix.len()] != prefix.as_slice() {
+            // Check if this key still has our prefix (contract + topic0)
+            if &key.contract != contract || key.topic0 != *topic0 {
                 break;
             }
 
             // Check topoheight range
-            if let Some(to_topo) = to_topoheight {
-                if event.topoheight > to_topo {
-                    break;
-                }
+            if key.topoheight > to_topo {
+                break;
             }
 
-            events.push(event);
+            // Load the actual event
+            let event_key = build_event_key(key.topoheight, contract, key.log_index);
+            if let Some(event) = self.load_optional_from_disk::<_, StoredContractEvent>(
+                Column::ContractEvents,
+                &event_key.to_bytes(),
+            )? {
+                events.push(event);
 
-            if events.len() >= effective_limit {
-                break;
+                if events.len() >= effective_limit {
+                    break;
+                }
             }
         }
 
@@ -203,29 +356,30 @@ impl ContractEventProvider for RocksStorage {
         tx_hash: &Hash,
     ) -> Result<Vec<StoredContractEvent>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("get events by tx {}", tx_hash);
+            trace!("Getting events by tx: {}", tx_hash);
         }
+
+        let tx_key = build_tx_index_key(tx_hash);
+        let Some(EventRefs(refs)) =
+            self.load_optional_from_disk::<_, EventRefs>(Column::ContractEventsByTx, &tx_key)?
+        else {
+            return Ok(Vec::new());
+        };
 
         let mut events = Vec::new();
-
-        let iter = self.iter::<Vec<u8>, StoredContractEvent>(
-            Column::ContractEventsByTx,
-            IteratorMode::WithPrefix(tx_hash.as_bytes(), Direction::Forward),
-        )?;
-
-        for result in iter {
-            let (key, event) = result?;
-
-            // Check if we're still in the same tx's events
-            if key.len() < 32 || &key[..32] != tx_hash.as_bytes() {
-                break;
+        for event_ref in refs {
+            let event_key = build_event_key(
+                event_ref.topoheight,
+                &event_ref.contract,
+                event_ref.log_index,
+            );
+            if let Some(event) = self.load_optional_from_disk::<_, StoredContractEvent>(
+                Column::ContractEvents,
+                &event_key.to_bytes(),
+            )? {
+                events.push(event);
             }
-
-            events.push(event);
         }
-
-        // Sort by log_index to ensure correct ordering
-        events.sort_by_key(|e| e.log_index);
 
         Ok(events)
     }
@@ -235,153 +389,56 @@ impl ContractEventProvider for RocksStorage {
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("delete events at topoheight {}", topoheight);
+            trace!("Deleting events at topoheight: {}", topoheight);
         }
 
-        // Get all events at this topoheight by scanning ContractEvents
-        let events_to_delete: Vec<StoredContractEvent> = {
-            let mut events = Vec::new();
-            let iter = self.iter::<Vec<u8>, StoredContractEvent>(
-                Column::ContractEvents,
-                IteratorMode::Start,
-            )?;
+        // Build start key for this topoheight (with zero contract and log_index)
+        let start_key = build_event_key(topoheight, &Hash::zero(), 0);
 
-            for result in iter {
-                let (_, event) = result?;
-                if event.topoheight == topoheight {
-                    events.push(event);
-                }
+        // Collect keys to delete
+        let mut keys_to_delete = Vec::new();
+        let mut topic_keys_to_delete = Vec::new();
+
+        for result in self.iter::<EventKey, StoredContractEvent>(
+            Column::ContractEvents,
+            IteratorMode::From(&start_key.to_bytes(), Direction::Forward),
+        )? {
+            let (key, event) = result?;
+
+            // Check if this key is at our topoheight
+            if key.topoheight != topoheight {
+                break;
             }
-            events
-        };
 
-        // Delete each event from all indices
-        for event in events_to_delete {
-            if let Some(contract_id) = self.get_optional_contract_id(&event.contract)? {
-                // Delete from ContractEvents
-                let primary_key =
-                    Self::get_contract_event_key(contract_id, event.topoheight, event.log_index);
-                self.remove_from_disk(Column::ContractEvents, &primary_key)?;
+            keys_to_delete.push(key.to_bytes());
 
-                // Delete from ContractEventsByTx
-                let tx_key = Self::get_event_by_tx_key(&event.tx_hash, event.log_index);
-                self.remove_from_disk(Column::ContractEventsByTx, &tx_key)?;
-
-                // Delete from ContractEventsByTopic if topic0 exists
-                if let Some(topic0) = event.topic0() {
-                    let topic_key = Self::get_event_by_topic_key(
-                        contract_id,
-                        topic0,
-                        event.topoheight,
-                        event.log_index,
-                    );
-                    self.remove_from_disk(Column::ContractEventsByTopic, &topic_key)?;
-                }
+            // Also build topic index key for deletion
+            if let Some(topic0) = event.topic0() {
+                let topic_key = build_topic_index_key(
+                    &event.contract,
+                    topic0,
+                    event.topoheight,
+                    event.log_index,
+                );
+                topic_keys_to_delete.push(topic_key.to_bytes());
             }
         }
+
+        // Delete events and topic indices
+        for key in keys_to_delete {
+            self.remove_from_disk(Column::ContractEvents, &key)?;
+        }
+        for key in topic_keys_to_delete {
+            self.remove_from_disk(Column::ContractEventsByTopic, &key)?;
+        }
+
+        // Note: We don't delete from ContractEventsByTx as it would require
+        // parsing all tx indices. The event lookup will just return empty.
 
         Ok(())
     }
 
     async fn count_events(&self) -> Result<u64, BlockchainError> {
-        trace!("count contract events");
-        let count = self.count_entries(Column::ContractEvents)?;
-        Ok(count as u64)
-    }
-}
-
-impl RocksStorage {
-    // Key builders for contract events
-
-    /// Build key for ContractEvents: {contract_id (8)}{topoheight (8)}{log_index (4)}
-    fn get_contract_event_key(
-        contract_id: u64,
-        topoheight: TopoHeight,
-        log_index: u32,
-    ) -> [u8; 20] {
-        let mut key = [0u8; CONTRACT_ID_SIZE + TOPOHEIGHT_SIZE + LOG_INDEX_SIZE];
-        key[0..8].copy_from_slice(&contract_id.to_be_bytes());
-        key[8..16].copy_from_slice(&topoheight.to_be_bytes());
-        key[16..20].copy_from_slice(&log_index.to_be_bytes());
-        key
-    }
-
-    /// Build key for ContractEventsByTx: {tx_hash (32)}{log_index (4)}
-    fn get_event_by_tx_key(tx_hash: &Hash, log_index: u32) -> [u8; 36] {
-        let mut key = [0u8; 32 + LOG_INDEX_SIZE];
-        key[0..32].copy_from_slice(tx_hash.as_bytes());
-        key[32..36].copy_from_slice(&log_index.to_be_bytes());
-        key
-    }
-
-    /// Build key for ContractEventsByTopic: {contract_id (8)}{topic0 (32)}{topoheight (8)}{log_index (4)}
-    fn get_event_by_topic_key(
-        contract_id: u64,
-        topic0: &[u8; 32],
-        topoheight: TopoHeight,
-        log_index: u32,
-    ) -> [u8; 52] {
-        let mut key = [0u8; CONTRACT_ID_SIZE + TOPIC_SIZE + TOPOHEIGHT_SIZE + LOG_INDEX_SIZE];
-        key[0..8].copy_from_slice(&contract_id.to_be_bytes());
-        key[8..40].copy_from_slice(topic0);
-        key[40..48].copy_from_slice(&topoheight.to_be_bytes());
-        key[48..52].copy_from_slice(&log_index.to_be_bytes());
-        key
-    }
-
-    /// Get or create a contract ID for a contract hash
-    fn get_or_create_contract_id(&mut self, contract: &Hash) -> Result<u64, BlockchainError> {
-        // Try to get existing ID first
-        if let Some(id) = self.get_optional_contract_id(contract)? {
-            return Ok(id);
-        }
-
-        // Create a new ID - use hash as a deterministic ID source
-        // This is a fallback; normally contracts should be registered via deploy
-        let mut id_bytes = [0u8; 8];
-        id_bytes.copy_from_slice(&contract.as_bytes()[..8]);
-        let id = u64::from_be_bytes(id_bytes);
-
-        // Store the mapping
-        self.insert_into_disk(Column::Contracts, contract, contract)?;
-        self.insert_into_disk(Column::ContractById, &id.to_be_bytes(), contract)?;
-
-        Ok(id)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_event_key_construction() {
-        let contract_id = 12345u64;
-        let topoheight = 67890u64;
-        let log_index = 42u32;
-        let tx_hash = Hash::zero();
-        let topic0 = [1u8; 32];
-
-        // Test primary key
-        let primary_key = RocksStorage::get_contract_event_key(contract_id, topoheight, log_index);
-        assert_eq!(primary_key.len(), 20);
-        assert_eq!(&primary_key[0..8], &contract_id.to_be_bytes());
-        assert_eq!(&primary_key[8..16], &topoheight.to_be_bytes());
-        assert_eq!(&primary_key[16..20], &log_index.to_be_bytes());
-
-        // Test tx key
-        let tx_key = RocksStorage::get_event_by_tx_key(&tx_hash, log_index);
-        assert_eq!(tx_key.len(), 36);
-        assert_eq!(&tx_key[0..32], tx_hash.as_bytes());
-        assert_eq!(&tx_key[32..36], &log_index.to_be_bytes());
-
-        // Test topic key
-        let topic_key =
-            RocksStorage::get_event_by_topic_key(contract_id, &topic0, topoheight, log_index);
-        assert_eq!(topic_key.len(), 52);
-        assert_eq!(&topic_key[0..8], &contract_id.to_be_bytes());
-        assert_eq!(&topic_key[8..40], &topic0);
-        assert_eq!(&topic_key[40..48], &topoheight.to_be_bytes());
-        assert_eq!(&topic_key[48..52], &log_index.to_be_bytes());
+        Ok(self.count_entries(Column::ContractEvents)? as u64)
     }
 }
