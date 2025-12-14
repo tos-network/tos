@@ -284,9 +284,6 @@ pub enum PermissionResult {
 
 impl PermissionResult {
     pub fn is_positive(&self) -> bool {
-        match self {
-            Self::Accept | Self::AlwaysAccept => true,
-            _ => false,
-        }
+        matches!(self, Self::Accept | Self::AlwaysAccept)
     }
 }

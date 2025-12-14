@@ -199,8 +199,7 @@ impl Serializer for FreezeRecord {
 /// - Freezing 0.5 TOS will actually freeze 0 TOS (rounded down)
 /// - Unfreezing from multiple records follows FIFO order for unlocked records
 /// - Energy total decreases when unfreezing (proportional to amount unfrozen)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EnergyResource {
     /// Total energy available
     pub total_energy: u64,
@@ -213,7 +212,6 @@ pub struct EnergyResource {
     /// Individual freeze records for tracking duration-based rewards
     pub freeze_records: Vec<FreezeRecord>,
 }
-
 
 impl EnergyResource {
     pub fn new() -> Self {
@@ -380,10 +378,7 @@ impl EnergyResource {
             std::collections::HashMap::new();
 
         for record in &self.freeze_records {
-            grouped
-                .entry(record.duration)
-                .or_default()
-                .push(record);
+            grouped.entry(record.duration).or_default().push(record);
         }
 
         grouped

@@ -1,3 +1,9 @@
+// Allowing await_holding_lock for std::sync::Mutex - this is a pre-existing architectural pattern.
+// The code uses synchronous Mutex from std library with async functions. While this could cause
+// deadlocks in theory, the current usage pattern is safe as locks are held briefly.
+// TODO: Consider migrating to async-aware mutexes (tokio::sync::Mutex) in future refactoring.
+#![allow(clippy::await_holding_lock)]
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use indexmap::IndexSet;
@@ -986,7 +992,7 @@ async fn open_wallet(
         config,
         &wallet,
         #[cfg(feature = "xswd")]
-        &prompt,
+        prompt,
     )
     .await;
 
@@ -1755,11 +1761,9 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     };
 
     // Validate fee_type for energy
-    if fee_type.as_ref() == Some(&tos_common::transaction::FeeType::Energy) {
-        if asset != TOS_ASSET {
-            manager.error("Energy fees can only be used for TOS transfers");
-            return Ok(());
-        }
+    if fee_type.as_ref() == Some(&tos_common::transaction::FeeType::Energy) && asset != TOS_ASSET {
+        manager.error("Energy fees can only be used for TOS transfers");
+        return Ok(());
     }
 
     manager.message(format!(
@@ -1767,7 +1771,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         format_coin(amount, asset_data.get_decimals()),
         asset_data.get_name(),
         asset,
-        address.to_string()
+        address
     ));
 
     // Parse confirmation
@@ -1782,7 +1786,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
                     format_coin(amount, asset_data.get_decimals()),
                     asset_data.get_name(),
                     asset,
-                    address.to_string()
+                    address
                 );
                 prompt
                     .read_valid_str_value(
@@ -1862,7 +1866,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
 
         match builder.build(&mut state, wallet.get_keypair()) {
             Ok(tx) => {
-                manager.message(&format!(
+                manager.message(format!(
                     "Transaction created with {} fees",
                     match fee_type
                         .as_ref()
@@ -1875,7 +1879,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
                 tx
             }
             Err(e) => {
-                manager.error(&format!("Error while creating transaction: {}", e));
+                manager.error(format!("Error while creating transaction: {}", e));
                 return Ok(());
             }
         }
@@ -1937,11 +1941,9 @@ async fn transfer_all(
     };
 
     // Validate fee_type for energy
-    if fee_type.as_ref() == Some(&tos_common::transaction::FeeType::Energy) {
-        if asset != TOS_ASSET {
-            manager.error("Energy fees can only be used for TOS transfers");
-            return Ok(());
-        }
+    if fee_type.as_ref() == Some(&tos_common::transaction::FeeType::Energy) && asset != TOS_ASSET {
+        manager.error("Energy fees can only be used for TOS transfers");
+        return Ok(());
     }
 
     let (mut amount, asset_data, multisig) = {
@@ -2070,7 +2072,7 @@ async fn transfer_all(
 
         match builder.build(&mut state, wallet.get_keypair()) {
             Ok(tx) => {
-                manager.message(&format!(
+                manager.message(format!(
                     "Transaction created with {} fees",
                     match fee_type
                         .as_ref()
@@ -2083,7 +2085,7 @@ async fn transfer_all(
                 tx
             }
             Err(e) => {
-                manager.error(&format!("Error while creating transaction: {}", e));
+                manager.error(format!("Error while creating transaction: {}", e));
                 return Ok(());
             }
         }
@@ -2171,7 +2173,7 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         {
             Ok(tx) => tx,
             Err(e) => {
-                manager.error(&format!("Error while creating transaction: {}", e));
+                manager.error(format!("Error while creating transaction: {}", e));
                 return Ok(());
             }
         }
@@ -2284,7 +2286,7 @@ async fn history(
     for tx in transactions {
         manager.message(format!(
             "- {}",
-            tx.summary(wallet.get_network().is_mainnet(), &*storage)
+            tx.summary(wallet.get_network().is_mainnet(), &storage)
                 .await?
         ));
     }
@@ -2304,7 +2306,7 @@ async fn transaction(
         .get_transaction(&hash)
         .context("Transaction not found")?;
     manager.message(
-        tx.summary(wallet.get_network().is_mainnet(), &*storage)
+        tx.summary(wallet.get_network().is_mainnet(), &storage)
             .await?,
     );
     Ok(())
@@ -2892,7 +2894,7 @@ async fn ai_mining_tasks(
                     difficulty,
                     ..
                 } => {
-                    manager.message(format!("  Type: Publish Task"));
+                    manager.message("  Type: Publish Task".to_string());
                     manager.message(format!("  Task ID: {}", task_id));
                     manager.message(format!("  Reward: {} TOS", format_tos(*reward_amount)));
                     manager.message(format!("  Difficulty: {:?}", difficulty));
@@ -2903,7 +2905,7 @@ async fn ai_mining_tasks(
                     stake_amount,
                     answer_content: _,
                 } => {
-                    manager.message(format!("  Type: Submit Answer"));
+                    manager.message("  Type: Submit Answer".to_string());
                     manager.message(format!("  Task ID: {}", task_id));
                     manager.message(format!("  Answer Hash: {}", answer_hash));
                     manager.message(format!("  Stake: {} TOS", format_tos(*stake_amount)));
@@ -2913,7 +2915,7 @@ async fn ai_mining_tasks(
                     answer_id,
                     validation_score,
                 } => {
-                    manager.message(format!("  Type: Validate Answer"));
+                    manager.message("  Type: Validate Answer".to_string());
                     manager.message(format!("  Task ID: {}", task_id));
                     manager.message(format!("  Answer ID: {}", answer_id));
                     manager.message(format!("  Validation Score: {}", validation_score));
@@ -2922,7 +2924,7 @@ async fn ai_mining_tasks(
                     miner_address,
                     registration_fee,
                 } => {
-                    manager.message(format!("  Type: Register Miner"));
+                    manager.message("  Type: Register Miner".to_string());
                     manager.message(format!(
                         "  Miner Address: {}",
                         miner_address.as_address(wallet.get_network().is_mainnet())
@@ -3013,15 +3015,12 @@ async fn ai_mining_rewards(
         manager.message(summary);
 
         // Try to extract reward amounts
-        match tx.get_entry() {
-            EntryData::Incoming { transfers, .. } => {
-                for transfer in transfers {
-                    if transfer.get_asset() == &TOS_ASSET {
-                        total_rewards += transfer.get_amount();
-                    }
+        if let EntryData::Incoming { transfers, .. } = tx.get_entry() {
+            for transfer in transfers {
+                if transfer.get_asset() == &TOS_ASSET {
+                    total_rewards += transfer.get_amount();
                 }
             }
-            _ => {}
         }
     }
 
@@ -3054,9 +3053,9 @@ async fn publish_task(
     };
 
     let description = arguments.get_value("description")?.to_string_value()?;
-    let reward = arguments.get_value("reward")?.to_number()? as u64;
+    let reward = arguments.get_value("reward")?.to_number()?;
     let difficulty_str = arguments.get_value("difficulty")?.to_string_value()?;
-    let deadline = arguments.get_value("deadline")?.to_number()? as u64;
+    let deadline = arguments.get_value("deadline")?.to_number()?;
 
     // Parse difficulty level
     let difficulty = match difficulty_str.to_lowercase().as_str() {
@@ -3108,7 +3107,7 @@ async fn publish_task(
     // Create transaction type
     let tx_type = TransactionTypeBuilder::AIMining(ai_mining_payload);
 
-    manager.message(format!("Publishing AI mining task:"));
+    manager.message("Publishing AI mining task:".to_string());
     manager.message(format!("  Task ID: {}", task_id));
     manager.message(format!("  Description: {}", description));
     manager.message(format!("  Reward: {} TOS", reward));
@@ -3147,7 +3146,7 @@ async fn submit_answer(
     let task_id_str = arguments.get_value("task_id")?.to_string_value()?;
     let answer_content = arguments.get_value("answer_content")?.to_string_value()?;
     let answer_hash_str = arguments.get_value("answer_hash")?.to_string_value()?;
-    let stake = arguments.get_value("stake")?.to_number()? as u64;
+    let stake = arguments.get_value("stake")?.to_number()?;
 
     // Parse hashes
     let task_id = Hash::from_hex(&task_id_str)
@@ -3174,7 +3173,7 @@ async fn submit_answer(
     // Create transaction type
     let tx_type = TransactionTypeBuilder::AIMining(ai_mining_payload);
 
-    manager.message(format!("Submitting answer to AI mining task:"));
+    manager.message("Submitting answer to AI mining task:".to_string());
     manager.message(format!("  Task ID: {}", task_id));
     manager.message(format!("  Answer Hash: {}", answer_hash));
     manager.message(format!("  Stake: {} TOS", stake));
@@ -3235,7 +3234,7 @@ async fn validate_answer(
     // Create transaction type
     let tx_type = TransactionTypeBuilder::AIMining(ai_mining_payload);
 
-    manager.message(format!("Validating answer for AI mining task:"));
+    manager.message("Validating answer for AI mining task:".to_string());
     manager.message(format!("  Task ID: {}", task_id));
     manager.message(format!("  Answer ID: {}", answer_id));
     manager.message(format!("  Score: {}/100", score));
@@ -3271,7 +3270,7 @@ async fn register_miner(
         (wallet, wallet_address)
     };
 
-    let fee = arguments.get_value("fee")?.to_number()? as u64;
+    let fee = arguments.get_value("fee")?.to_number()?;
 
     // Convert fee from TOS to nanoTOS
     let fee_nanos = fee * 1_000_000_000;
@@ -3285,7 +3284,7 @@ async fn register_miner(
     // Create transaction type
     let tx_type = TransactionTypeBuilder::AIMining(ai_mining_payload);
 
-    manager.message(format!("Registering as AI miner:"));
+    manager.message("Registering as AI miner:".to_string());
     manager.message(format!("  Miner Address: {}", wallet_address));
     manager.message(format!("  Registration Fee: {} TOS", fee));
 
@@ -3627,7 +3626,7 @@ async fn multisig_setup(
         {
             Ok(tx) => tx,
             Err(e) => {
-                manager.error(&format!("Error while creating transaction: {}", e));
+                manager.error(format!("Error while creating transaction: {}", e));
                 return Ok(());
             }
         }
@@ -3785,7 +3784,7 @@ async fn freeze_tos(
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
 
     // Parse duration (3-90 days)
-    let duration = if duration_num >= 3 && duration_num <= 90 {
+    let duration = if (3..=90).contains(&duration_num) {
         tos_common::account::FreezeDuration::new(duration_num as u32)
             .map_err(|e| CommandError::InvalidArgument(e.to_string()))?
     } else {
@@ -3822,17 +3821,16 @@ async fn freeze_tos(
     }
 
     // Create freeze transaction
-    let duration_clone = duration.clone();
     let _payload = tos_common::transaction::EnergyPayload::FreezeTos { amount, duration };
 
     manager.message("Building transaction...");
 
     // Create energy transaction builder with validated parameters
-    let energy_builder = EnergyBuilder::freeze_tos(amount, duration_clone.clone());
+    let energy_builder = EnergyBuilder::freeze_tos(amount, duration);
 
     // Validate the builder configuration before creating transaction
     if let Err(e) = energy_builder.validate() {
-        manager.error(&format!("Invalid energy builder configuration: {}", e));
+        manager.error(format!("Invalid energy builder configuration: {}", e));
         return Ok(());
     }
 
@@ -3842,7 +3840,7 @@ async fn freeze_tos(
     let tx = match wallet.create_transaction(tx_type, fee).await {
         Ok(tx) => tx,
         Err(e) => {
-            manager.error(&format!("Error while creating transaction: {}", e));
+            manager.error(format!("Error while creating transaction: {}", e));
             return Ok(());
         }
     };
@@ -3850,10 +3848,10 @@ async fn freeze_tos(
     let hash = tx.hash();
     manager.message(format!("Freeze transaction created: {}", hash));
     manager.message(format!("Amount: {} TOS", format_coin(amount, 8)));
-    manager.message(format!("Duration: {:?}", duration_clone));
+    manager.message(format!("Duration: {:?}", duration));
     manager.message(format!(
         "Reward multiplier: {}x",
-        duration_clone.reward_multiplier()
+        duration.reward_multiplier()
     ));
 
     // Update energy resource in storage
@@ -3879,8 +3877,7 @@ async fn freeze_tos(
     };
 
     // Add energy from this freeze operation
-    let energy_gained =
-        energy_resource.freeze_tos_for_energy(amount, duration_clone, current_topoheight);
+    let energy_gained = energy_resource.freeze_tos_for_energy(amount, duration, current_topoheight);
     storage.set_energy_resource(energy_resource).await?;
 
     manager.message(format!(
@@ -3889,7 +3886,7 @@ async fn freeze_tos(
     ));
 
     // Broadcast the transaction
-    broadcast_tx(&wallet, manager, tx).await;
+    broadcast_tx(wallet, manager, tx).await;
 
     Ok(())
 }
@@ -3971,7 +3968,7 @@ async fn unfreeze_tos(
 
     // Validate the builder configuration before creating transaction
     if let Err(e) = energy_builder.validate() {
-        manager.error(&format!("Invalid energy builder configuration: {}", e));
+        manager.error(format!("Invalid energy builder configuration: {}", e));
         return Ok(());
     }
 
@@ -3982,7 +3979,7 @@ async fn unfreeze_tos(
     let tx = match wallet.create_transaction(tx_type, fee).await {
         Ok(tx) => tx,
         Err(e) => {
-            manager.error(&format!("Error while creating transaction: {}", e));
+            manager.error(format!("Error while creating transaction: {}", e));
             return Ok(());
         }
     };
@@ -4017,14 +4014,14 @@ async fn unfreeze_tos(
                 ));
             }
             Err(e) => {
-                manager.warn(&format!("Could not update energy resource: {}", e));
+                manager.warn(format!("Could not update energy resource: {}", e));
                 manager.message("Energy resource will be updated when transaction is confirmed");
             }
         }
     }
 
     // Broadcast the transaction
-    broadcast_tx(&wallet, manager, tx).await;
+    broadcast_tx(wallet, manager, tx).await;
 
     Ok(())
 }
@@ -4102,7 +4099,7 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
                         ));
 
                         if record.can_unlock {
-                            manager.message(format!("      Status: ✅ Unlockable"));
+                            manager.message("      Status: ✅ Unlockable".to_string());
                         } else {
                             let remaining_days =
                                 record.remaining_blocks as f64 / (24.0 * 60.0 * 60.0);

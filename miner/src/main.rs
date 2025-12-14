@@ -334,10 +334,9 @@ async fn main() -> Result<()> {
     #[cfg(feature = "api_stats")]
     {
         // start stats task
-        stats_task = match config.api_bind_address {
-            Some(addr) => Some(spawn_task("broadcast", broadcast_stats_task(addr))),
-            None => None,
-        };
+        stats_task = config
+            .api_bind_address
+            .map(|addr| spawn_task("broadcast", broadcast_stats_task(addr)));
     }
     #[cfg(not(feature = "api_stats"))]
     {
@@ -349,7 +348,7 @@ async fn main() -> Result<()> {
     }
 
     // send exit command to all threads to stop
-    if let Err(_) = sender.send(ThreadNotification::Exit) {
+    if sender.send(ThreadNotification::Exit).is_err() {
         debug!("Error while sending exit message to threads");
     }
 
@@ -369,36 +368,34 @@ async fn main() -> Result<()> {
 #[cfg(feature = "api_stats")]
 async fn broadcast_stats_task(broadcast_address: String) -> Result<()> {
     info!("Starting broadcast task");
+    // Start TCP listener
+    let listener = TcpListener::bind(broadcast_address).await?;
     loop {
-        // Start TCP listener
-        let listener = TcpListener::bind(broadcast_address).await?;
-        loop {
-            let (mut socket, _) = listener.accept().await?;
+        let (mut socket, _) = listener.accept().await?;
 
-            let blocks_found = BLOCKS_FOUND.load(Ordering::SeqCst);
-            let blocks_rejected = BLOCKS_REJECTED.load(Ordering::SeqCst);
-            let hashrate = HASHRATE.load(Ordering::SeqCst);
+        let blocks_found = BLOCKS_FOUND.load(Ordering::SeqCst);
+        let blocks_rejected = BLOCKS_REJECTED.load(Ordering::SeqCst);
+        let hashrate = HASHRATE.load(Ordering::SeqCst);
 
-            // Build JSON data
-            let data = serde_json::json!({
-                "accepted": blocks_found,
-                "rejected": blocks_rejected,
-                "hashrate": hashrate,
-                "hashrate_formatted": format_hashrate(hashrate as f64),
-            });
+        // Build JSON data
+        let data = serde_json::json!({
+            "accepted": blocks_found,
+            "rejected": blocks_rejected,
+            "hashrate": hashrate,
+            "hashrate_formatted": format_hashrate(hashrate as f64),
+        });
 
-            // Build HTTP response
-            let status_line = "HTTP/1.1 200 OK\r\n";
-            let content_type = "Content-Type: application/json\r\n";
-            let contents = data.to_string();
-            let length = contents.len();
-            let response =
-                format!("{status_line}{content_type}Content-Length: {length}\r\n\r\n{contents}");
+        // Build HTTP response
+        let status_line = "HTTP/1.1 200 OK\r\n";
+        let content_type = "Content-Type: application/json\r\n";
+        let contents = data.to_string();
+        let length = contents.len();
+        let response =
+            format!("{status_line}{content_type}Content-Length: {length}\r\n\r\n{contents}");
 
-            // Send HTTP repsonse and close socket
-            AsyncWriteExt::write_all(&mut socket, response.as_bytes()).await?;
-            socket.shutdown().await?;
-        }
+        // Send HTTP repsonse and close socket
+        AsyncWriteExt::write_all(&mut socket, response.as_bytes()).await?;
+        socket.shutdown().await?;
     }
 }
 
@@ -459,44 +456,39 @@ async fn communication_task(
     let daemon_address = sanitize_ws_address(&daemon_address);
     'main: loop {
         info!("Trying to connect to {}", daemon_address);
-        let client = match connect_async(format!(
-            "{}/getwork/{}/{}",
-            daemon_address,
-            address.to_string(),
-            worker
-        ))
-        .await
-        {
-            Ok((client, response)) => {
-                let status = response.status();
-                if status.is_server_error() || status.is_client_error() {
-                    error!(
-                        "Error while connecting to {}, got an unexpected response: {}",
-                        daemon_address,
-                        status.as_str()
-                    );
+        let client =
+            match connect_async(format!("{}/getwork/{}/{}", daemon_address, address, worker)).await
+            {
+                Ok((client, response)) => {
+                    let status = response.status();
+                    if status.is_server_error() || status.is_client_error() {
+                        error!(
+                            "Error while connecting to {}, got an unexpected response: {}",
+                            daemon_address,
+                            status.as_str()
+                        );
+                        warn!("Trying to connect to WebSocket again in 10 seconds...");
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        continue 'main;
+                    }
+                    client
+                }
+                Err(e) => {
+                    if let TungsteniteError::Http(e) = e {
+                        error!(
+                            "Error while connecting to {}, got an unexpected response: {}",
+                            daemon_address,
+                            e.status()
+                        );
+                    } else {
+                        error!("Error while connecting to {}: {}", daemon_address, e);
+                    }
+
                     warn!("Trying to connect to WebSocket again in 10 seconds...");
                     tokio::time::sleep(Duration::from_secs(10)).await;
                     continue 'main;
                 }
-                client
-            }
-            Err(e) => {
-                if let TungsteniteError::Http(e) = e {
-                    error!(
-                        "Error while connecting to {}, got an unexpected response: {}",
-                        daemon_address,
-                        e.status()
-                    );
-                } else {
-                    error!("Error while connecting to {}: {}", daemon_address, e);
-                }
-
-                warn!("Trying to connect to WebSocket again in 10 seconds...");
-                tokio::time::sleep(Duration::from_secs(10)).await;
-                continue 'main;
-            }
-        };
+            };
         WEBSOCKET_CONNECTED.store(true, Ordering::SeqCst);
         info!("Connected successfully to {}", daemon_address);
         let (mut write, mut read) = client.split();
@@ -699,7 +691,7 @@ fn start_thread(
                     );
 
                     let job = worker.take_work().unwrap();
-                    if let Err(_) = block_sender.blocking_send(job) {
+                    if block_sender.blocking_send(job).is_err() {
                         error!(
                             "Mining Thread #{}: error while sending block found with hash {}",
                             id, block_hash
@@ -759,7 +751,7 @@ async fn run_prompt(prompt: ShareablePrompt) -> Result<()> {
             #[cfg(feature = "api_stats")]
             HASHRATE.store(hashrate as u64, Ordering::SeqCst);
 
-            prompt.colorize_string(Color::Green, &format!("{}", format_hashrate(hashrate)))
+            prompt.colorize_string(Color::Green, &format_hashrate(hashrate))
         };
 
         Ok(format!(

@@ -211,7 +211,7 @@ impl DaemonClient {
 
     /// Submit a transaction to the mempool
     pub async fn submit_transaction(&self, tx: &Transaction) -> Result<Hash> {
-        let tx_hex = hex::encode(&tx.to_bytes());
+        let tx_hex = hex::encode(tx.to_bytes());
         let params = json!({
             "tx_hex": tx_hex
         });

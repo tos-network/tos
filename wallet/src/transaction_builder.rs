@@ -15,6 +15,7 @@ use tos_common::{
 // State used to estimate fees for a transaction
 // Because fees can be higher if a destination account is not registered
 // We need to give this information during the estimation of fees
+#[derive(Default)]
 pub struct EstimateFeesState {
     // this is containing the registered keys that we are aware of
     registered_keys: HashSet<PublicKey>,
@@ -22,9 +23,7 @@ pub struct EstimateFeesState {
 
 impl EstimateFeesState {
     pub fn new() -> Self {
-        Self {
-            registered_keys: HashSet::new(),
-        }
+        Self::default()
     }
 
     pub fn set_registered_keys(&mut self, registered_keys: HashSet<PublicKey>) {

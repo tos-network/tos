@@ -45,7 +45,7 @@ impl Cipher {
         let data = &self
             .cipher
             .encrypt(nonce.into(), plaintext.as_slice())
-            .map_err(|e| WalletError::CryptoError(e))?;
+            .map_err(WalletError::CryptoError)?;
 
         // append unique nonce to the encrypted data
         let mut encrypted = Vec::with_capacity(Self::NONCE_SIZE + data.len());
@@ -59,7 +59,7 @@ impl Cipher {
     pub fn decrypt_value(&self, encrypted: &[u8]) -> Result<Vec<u8>, WalletError> {
         // nonce is 24 bytes and is mandatory in encrypted slice
         if encrypted.len() < 25 {
-            return Err(WalletError::InvalidEncryptedValue.into());
+            return Err(WalletError::InvalidEncryptedValue);
         }
 
         // read the nonce for this data
@@ -70,7 +70,7 @@ impl Cipher {
         let mut decrypted = self
             .cipher
             .decrypt(&nonce, &encrypted[nonce.len()..])
-            .map_err(|e| WalletError::CryptoError(e))?;
+            .map_err(WalletError::CryptoError)?;
         // delete the salt from the decrypted slice
         if let Some(salt) = &self.salt {
             decrypted.drain(0..salt.len());

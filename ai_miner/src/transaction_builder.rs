@@ -69,6 +69,7 @@ impl AIMiningTransactionBuilder {
     }
 
     /// Build a publish task transaction metadata
+    #[allow(clippy::too_many_arguments)]
     pub fn build_publish_task_transaction(
         &self,
         task_id: Hash,

@@ -98,7 +98,7 @@ where
             return Err(XSWDError::InvalidApplicationId);
         }
 
-        hex::decode(&app_data.get_id()).map_err(|_| XSWDError::InvalidHexaApplicationId)?;
+        hex::decode(app_data.get_id()).map_err(|_| XSWDError::InvalidHexaApplicationId)?;
 
         if app_data.get_name().len() > 32 {
             return Err(XSWDError::ApplicationNameTooLong);
@@ -130,7 +130,7 @@ where
         }
 
         // Verify that this app ID is not already in use
-        if provider.has_app_with_id(&app_data.get_id()).await {
+        if provider.has_app_with_id(app_data.get_id()).await {
             return Err(XSWDError::ApplicationIdAlreadyUsed);
         }
 
@@ -148,7 +148,7 @@ where
         let wallet = self.handler.get_data();
         state.set_requesting(true);
         let permission = match wallet
-            .request_permission(&state, PermissionRequest::Application)
+            .request_permission(state, PermissionRequest::Application)
             .await
         {
             Ok(v) => v,
@@ -216,7 +216,7 @@ where
 
         // let's check the permission set by user for this method
         app.set_requesting(true);
-        self.verify_permission_for_request(provider, &app, &request)
+        self.verify_permission_for_request(provider, app, &request)
             .await?;
         app.set_requesting(false);
 

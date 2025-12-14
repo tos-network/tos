@@ -528,7 +528,7 @@ impl ConfigValidator {
     }
 
     fn validate_timeout(&self, field: &str, value: u64) -> ValidationResult<()> {
-        if value < defaults::MIN_TIMEOUT_SECS || value > defaults::MAX_TIMEOUT_SECS {
+        if !(defaults::MIN_TIMEOUT_SECS..=defaults::MAX_TIMEOUT_SECS).contains(&value) {
             return Err(ConfigValidationError::InvalidTimeout {
                 field: field.to_string(),
                 value,
@@ -551,7 +551,7 @@ impl ConfigValidator {
     }
 
     fn validate_retry_delay(&self, value: u64) -> ValidationResult<()> {
-        if value < defaults::MIN_RETRY_DELAY_MS || value > defaults::MAX_RETRY_DELAY_MS {
+        if !(defaults::MIN_RETRY_DELAY_MS..=defaults::MAX_RETRY_DELAY_MS).contains(&value) {
             return Err(ConfigValidationError::InvalidTimeout {
                 field: "retry_delay".to_string(),
                 value,
@@ -704,19 +704,18 @@ impl ValidatedConfig {
         let _json_content = serde_json::to_string_pretty(&template_config)?;
 
         // Add descriptive header
-        let template = format!(
-            r#"{{
-  "_info": {{
+        let template = r#"{
+  "_info": {
     "description": "TOS AI Mining Configuration",
     "version": "1.0",
-    "sections": {{
+    "sections": {
       "logging": "Controls log output and file generation",
       "storage": "Persistent storage for AI mining state",
       "daemon": "Connection settings for TOS daemon",
       "network": "Advanced network timeouts and retry settings",
       "validation": "Configuration validation behavior"
-    }}
-  }},
+    }
+  },
   "log_level": "info",
   "disable_file_logging": false,
   "disable_log_color": false,
@@ -732,8 +731,7 @@ impl ValidatedConfig {
   "retry_delay_ms": 1000,
   "auto_fix_config": true,
   "strict_validation": false
-}}"#
-        );
+}"#;
 
         std::fs::write(&path, template).map_err(|e| {
             anyhow!(

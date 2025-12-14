@@ -79,7 +79,7 @@ impl Client {
 
                     let bytes: &[u8] = match &msg {
                         Message::Text(bytes) => bytes.as_ref(),
-                        Message::Binary(bytes) => &bytes,
+                        Message::Binary(bytes) => bytes,
                         Message::Close(_) => {
                             break;
                         }

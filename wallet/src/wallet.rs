@@ -261,7 +261,7 @@ impl Wallet {
                     PrivateKey::from_hex(hex).context("Invalid private key provided")?
                 }
                 RecoverOption::Seed(seed) => {
-                    let words: Vec<&str> = seed.trim().split_whitespace().collect();
+                    let words: Vec<&str> = seed.split_whitespace().collect();
                     mnemonics::words_to_key(&words)?
                 }
             };
@@ -307,7 +307,7 @@ impl Wallet {
         let mut storage = EncryptedStorage::new(inner, &master_key, storage_salt, network)?;
 
         // Store the private key
-        storage.set_private_key(&keypair.get_private_key())?;
+        storage.set_private_key(keypair.get_private_key())?;
 
         // Flush the storage to be sure its written on disk
         storage.flush().await?;
@@ -783,7 +783,7 @@ impl Wallet {
     ) -> Result<(Transaction, TransactionBuilderState), WalletError> {
         trace!("create transaction with storage");
         let mut state = self
-            .create_transaction_state_with_storage(&storage, &transaction_type, &fee, None)
+            .create_transaction_state_with_storage(storage, &transaction_type, &fee, None)
             .await?;
         let threshold = storage
             .get_multisig_state()
@@ -899,7 +899,7 @@ impl Wallet {
                             }
                             match network_handler
                                 .get_api()
-                                .get_stable_balance(&address, &asset)
+                                .get_stable_balance(&address, asset)
                                 .await
                             {
                                 Ok(stable_point) => {
@@ -951,7 +951,7 @@ impl Wallet {
         // Get all balances used
         for asset in used_assets {
             trace!("Checking balance for asset {}", asset);
-            if state.has_balance_for(&asset) {
+            if state.has_balance_for(asset) {
                 trace!("Already have balance for asset {} in state", asset);
                 continue;
             }
@@ -960,11 +960,11 @@ impl Wallet {
                 return Err(WalletError::AssetNotTracked(asset.clone()));
             }
 
-            if !storage.has_balance_for(&asset).await? {
+            if !storage.has_balance_for(asset).await? {
                 return Err(WalletError::BalanceNotFound(asset.clone()));
             }
 
-            let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(&asset).await?;
+            let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(asset).await?;
             if log::log_enabled!(log::Level::Debug) {
                 debug!(
                     "Using balance (unconfirmed: {}) for asset {} with amount {}",
@@ -1143,7 +1143,7 @@ impl Wallet {
         trace!("export transactions in csv");
 
         // Sort transactions by topoheight
-        transactions.sort_by(|a, b| a.get_topoheight().cmp(&b.get_topoheight()));
+        transactions.sort_by_key(|a| a.get_topoheight());
 
         writeln!(
             w,
@@ -1158,14 +1158,13 @@ impl Wallet {
                     fee,
                     nonce,
                 } => {
-                    let data = storage.get_asset(&asset).await?;
+                    let data = storage.get_asset(asset).await?;
                     writeln!(
                         w,
-                        "{},{},{},{},{},-,{},{},{}",
+                        "{},{},{},Burn,{},-,{},{},{}",
                         datetime_from_timestamp(tx.get_timestamp())?,
                         tx.get_topoheight(),
                         tx.get_hash(),
-                        "Burn",
                         data.get_name(),
                         format_coin(*amount, data.get_decimals()),
                         format_tos(*fee),
@@ -1176,26 +1175,23 @@ impl Wallet {
                 EntryData::Coinbase { reward } => {
                     writeln!(
                         w,
-                        "{},{},{},{},{},-,{},-,-",
+                        "{},{},{},Coinbase,TOS,-,{},-,-",
                         datetime_from_timestamp(tx.get_timestamp())?,
                         tx.get_topoheight(),
                         tx.get_hash(),
-                        "Coinbase",
-                        "TOS",
                         format_tos(*reward)
                     )
                     .context("Error while writing csv line")?;
                 }
                 EntryData::Incoming { from, transfers } => {
                     for transfer in transfers {
-                        let data = storage.get_asset(&transfer.get_asset()).await?;
+                        let data = storage.get_asset(transfer.get_asset()).await?;
                         writeln!(
                             w,
-                            "{},{},{},{},{},{},{},-,-",
+                            "{},{},{},Incoming,{},{},{},-,-",
                             datetime_from_timestamp(tx.get_timestamp())?,
                             tx.get_topoheight(),
                             tx.get_hash(),
-                            "Incoming",
                             from.as_address(self.get_network().is_mainnet()),
                             data.get_name(),
                             format_coin(transfer.get_amount(), data.get_decimals())
@@ -1209,14 +1205,13 @@ impl Wallet {
                     nonce,
                 } => {
                     for transfer in transfers {
-                        let data = storage.get_asset(&transfer.get_asset()).await?;
+                        let data = storage.get_asset(transfer.get_asset()).await?;
                         writeln!(
                             w,
-                            "{},{},{},{},{},{},{},{},{}",
+                            "{},{},{},Outgoing,{},{},{},{},{}",
                             datetime_from_timestamp(tx.get_timestamp())?,
                             tx.get_topoheight(),
                             tx.get_hash(),
-                            "Outgoing",
                             transfer
                                 .get_destination()
                                 .as_address(self.get_network().is_mainnet()),
@@ -1240,11 +1235,10 @@ impl Wallet {
                         .collect();
                     writeln!(
                         w,
-                        "{},{},{},{},{},{},-,{},{}",
+                        "{},{},{},MultiSig,{},{},-,{},{}",
                         datetime_from_timestamp(tx.get_timestamp())?,
                         tx.get_topoheight(),
                         tx.get_hash(),
-                        "MultiSig",
                         str_participants.join("|"),
                         threshold,
                         format_tos(*fee),
@@ -1263,7 +1257,7 @@ impl Wallet {
                     let mut str_deposits = Vec::new();
                     str_deposits.push(format!("Gas:{}", format_tos(*max_gas)));
                     for (asset, amount) in deposits {
-                        let data = storage.get_asset(&asset).await?;
+                        let data = storage.get_asset(asset).await?;
                         str_deposits.push(format!(
                             "{}:{}",
                             data.get_name(),
@@ -1273,11 +1267,10 @@ impl Wallet {
 
                     writeln!(
                         w,
-                        "{},{},{},{},{},{},{},{},{}",
+                        "{},{},{},InvokeContract,{},{},{},{},{}",
                         datetime_from_timestamp(tx.get_timestamp())?,
                         tx.get_topoheight(),
                         tx.get_hash(),
-                        "InvokeContract",
                         contract,
                         str_deposits.join("|"),
                         entry_id,
@@ -1291,7 +1284,7 @@ impl Wallet {
                     if let Some(invoke) = invoke {
                         str_deposits.push(format!("Gas:{}", format_tos(invoke.max_gas)));
                         for (asset, amount) in invoke.deposits.iter() {
-                            let data = storage.get_asset(&asset).await?;
+                            let data = storage.get_asset(asset).await?;
                             str_deposits.push(format!(
                                 "{}:{}",
                                 data.get_name(),
@@ -1302,11 +1295,10 @@ impl Wallet {
 
                     writeln!(
                         w,
-                        "{},{},{},{},-,-,{},{},{}",
+                        "{},{},{},DeployContract,-,-,{},{},{}",
                         datetime_from_timestamp(tx.get_timestamp())?,
                         tx.get_topoheight(),
                         tx.get_hash(),
-                        "DeployContract",
                         str_deposits.join("|"),
                         format_tos(*fee),
                         nonce
@@ -1362,14 +1354,13 @@ impl Wallet {
                     let direction = if *outgoing { "Outgoing" } else { "Incoming" };
                     writeln!(
                         w,
-                        "{},{},{},{},{},{},{},-,-",
+                        "{},{},{},AIMining-{},{},{},TOS,-,-",
                         datetime_from_timestamp(tx.get_timestamp())?,
                         tx.get_topoheight(),
                         tx.get_hash(),
-                        format!("AIMining-{}", tx_type),
+                        tx_type,
                         direction,
-                        details,
-                        "TOS"
+                        details
                     )
                     .context("Error while writing csv line")?;
                 }
@@ -1399,7 +1390,7 @@ impl Wallet {
 
         // create the network handler
         let network_handler =
-            NetworkHandler::new(Arc::clone(&self), daemon_address, self.concurrency).await?;
+            NetworkHandler::new(Arc::clone(self), daemon_address, self.concurrency).await?;
         // start the task
         network_handler.start(auto_reconnect).await?;
         *self.network_handler.lock().await = Some(network_handler);
@@ -1425,7 +1416,7 @@ impl Wallet {
 
         // create the network handler
         let network_handler =
-            NetworkHandler::with_api(Arc::clone(&self), daemon_api, self.concurrency).await?;
+            NetworkHandler::with_api(Arc::clone(self), daemon_api, self.concurrency).await?;
         // start the task
         network_handler.start(auto_reconnect).await?;
         *self.network_handler.lock().await = Some(network_handler);

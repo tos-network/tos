@@ -600,7 +600,7 @@ mod tests {
         assert_eq!(tree.name(), b"test".into());
         assert_eq!(tree.len(), 2);
         assert_eq!(tree.get("test").unwrap().unwrap(), b"test".into());
-        assert_eq!(tree.contains_key("tos").unwrap(), true);
+        assert!(tree.contains_key("tos").unwrap());
         assert_eq!(tree.get("tos").unwrap().unwrap(), b"sonimret".into());
 
         assert_eq!(db.get("hello").unwrap().unwrap(), b"world".into());

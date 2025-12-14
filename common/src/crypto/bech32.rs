@@ -157,7 +157,10 @@ pub fn encode(mut hrp: String, data: &[u8]) -> Result<String, Bech32Error> {
         }
 
         result.push(
-            CHARSET.as_bytes().get(*value as usize).copied()
+            CHARSET
+                .as_bytes()
+                .get(*value as usize)
+                .copied()
                 .ok_or(Bech32Error::InvalidIndex(*value as usize))?,
         );
     }

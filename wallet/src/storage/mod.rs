@@ -123,15 +123,15 @@ impl EncryptedStorage {
     ) -> Result<Self> {
         let cipher = Cipher::new(key, Some(salt))?;
         let mut storage = Self {
-            transactions: inner.db.open_tree(&cipher.hash_key("transactions"))?,
+            transactions: inner.db.open_tree(cipher.hash_key("transactions"))?,
             transactions_indexes: inner
                 .db
-                .open_tree(&cipher.hash_key("transactions_indexes"))?,
-            balances: inner.db.open_tree(&cipher.hash_key("balances"))?,
-            extra: inner.db.open_tree(&cipher.hash_key("extra"))?,
-            assets: inner.db.open_tree(&cipher.hash_key("assets"))?,
-            tracked_assets: inner.db.open_tree(&cipher.hash_key("tracked_assets"))?,
-            changes_topoheight: inner.db.open_tree(&cipher.hash_key("changes_topoheight"))?,
+                .open_tree(cipher.hash_key("transactions_indexes"))?,
+            balances: inner.db.open_tree(cipher.hash_key("balances"))?,
+            extra: inner.db.open_tree(cipher.hash_key("extra"))?,
+            assets: inner.db.open_tree(cipher.hash_key("assets"))?,
+            tracked_assets: inner.db.open_tree(cipher.hash_key("tracked_assets"))?,
+            changes_topoheight: inner.db.open_tree(cipher.hash_key("changes_topoheight"))?,
             cipher,
             inner,
             balances_cache: Mutex::new(LruCache::new(
@@ -355,7 +355,7 @@ impl EncryptedStorage {
     fn get_custom_tree(&self, name: impl Into<String>) -> Result<Tree> {
         trace!("get custom tree");
         let hash = self.cipher.hash_key(format!("custom_{}", name.into()));
-        let tree = self.inner.db.open_tree(&hash)?;
+        let tree = self.inner.db.open_tree(hash)?;
         Ok(tree)
     }
 
@@ -974,7 +974,7 @@ impl EncryptedStorage {
         for el in self.transactions_indexes.iter() {
             let (key, value) = el?;
 
-            if value.as_ref() == &hashed_key {
+            if value.as_ref() == hashed_key {
                 return Ok(Some(u64::from_bytes(&key)?));
             }
         }
@@ -1098,7 +1098,7 @@ impl EncryptedStorage {
         while left <= right {
             let mid = left + (right - left) / 2;
 
-            let Some(tx_hash) = self.transactions_indexes.get(&mid.to_be_bytes())? else {
+            let Some(tx_hash) = self.transactions_indexes.get(mid.to_be_bytes())? else {
                 debug!("no transaction index found for {}", mid);
                 return Ok(None);
             };
@@ -1133,7 +1133,7 @@ impl EncryptedStorage {
         // If we didn’t find an exact match but nearest is true, return nearest higher topoheight
         if result.is_none() && nearest {
             // left should points to the insertion point where its the first topoheight above requested
-            let tx_hash_opt = self.transactions_indexes.get(&left.to_be_bytes())?;
+            let tx_hash_opt = self.transactions_indexes.get(left.to_be_bytes())?;
             if let Some(tx_hash) = tx_hash_opt {
                 let entry: Skip<HASH_SIZE, TopoHeight> =
                     self.load_from_disk_with_key(&self.transactions, &tx_hash)?;
@@ -1148,6 +1148,7 @@ impl EncryptedStorage {
 
     // Filter when the data is deserialized to not load all transactions in memory
     // Topoheight bounds are inclusive
+    #[allow(clippy::too_many_arguments)]
     pub fn get_filtered_transactions(
         &self,
         address: Option<&PublicKey>,
@@ -1181,12 +1182,10 @@ impl EncryptedStorage {
                     } else {
                         self.transactions_indexes.range(min.to_be_bytes()..)
                     }
+                } else if let Some(max) = max {
+                    self.transactions_indexes.range(..max.to_be_bytes())
                 } else {
-                    if let Some(max) = max {
-                        self.transactions_indexes.range(..max.to_be_bytes())
-                    } else {
-                        self.transactions_indexes.iter()
-                    }
+                    self.transactions_indexes.iter()
                 }
             }
             (Some(min), None) => {
@@ -1251,7 +1250,7 @@ impl EncryptedStorage {
                         t.retain(|transfer| *transfer.get_asset() == *asset);
                     }
 
-                    transfers = Some(t.iter_mut().map(|t| Transfer::In(t)).collect());
+                    transfers = Some(t.iter_mut().map(Transfer::In).collect());
                 }
                 EntryData::Outgoing { transfers: t, .. } if accept_outgoing => {
                     // Filter by address
@@ -1264,7 +1263,7 @@ impl EncryptedStorage {
                         t.retain(|transfer| *transfer.get_asset() == *asset);
                     }
 
-                    transfers = Some(t.iter_mut().map(|t| Transfer::Out(t)).collect());
+                    transfers = Some(t.iter_mut().map(Transfer::Out).collect());
                 }
                 EntryData::MultiSig { participants, .. } if accept_outgoing => {
                     // Filter by address
@@ -1423,7 +1422,7 @@ impl EncryptedStorage {
         let key = self.cipher.hash_key(hash.as_bytes());
         // We write in plaintext the id and the hashed key
         // Attacker may be able to see the ordering of the TXs but not the real TXs.
-        self.transactions_indexes.insert(&id.to_be_bytes(), &key)?;
+        self.transactions_indexes.insert(id.to_be_bytes(), &key)?;
         self.save_to_disk_with_key(&self.transactions, &key, &transaction.to_bytes())
     }
 
@@ -1443,11 +1442,11 @@ impl EncryptedStorage {
 
         while low_id < high_id {
             // Load TX hashes for swapping
-            let Some(low_tx_hash) = self.transactions_indexes.get(&low_id.to_be_bytes())? else {
+            let Some(low_tx_hash) = self.transactions_indexes.get(low_id.to_be_bytes())? else {
                 warn!("No transaction index found for low {}", low_id);
                 return Ok(());
             };
-            let Some(high_tx_hash) = self.transactions_indexes.get(&high_id.to_be_bytes())? else {
+            let Some(high_tx_hash) = self.transactions_indexes.get(high_id.to_be_bytes())? else {
                 warn!("No transaction index found for high {}", high_id);
                 return Ok(());
             };

@@ -10,7 +10,7 @@ const SEED_LENGTH: usize = 24;
 const WORDS_LIST: usize = 1626;
 const WORDS_LIST_U32: u32 = WORDS_LIST as u32;
 
-pub const LANGUAGES: [Language<'static>; 11] = [
+pub static LANGUAGES: [Language<'static>; 11] = [
     english::ENGLISH,
     french::FRENCH,
     italian::ITALIAN,
@@ -124,7 +124,7 @@ fn find_indices(words: &[&str]) -> Result<Option<(Vec<usize>, usize)>, Mnemonics
         }
 
         // we were able to build the indices, now verify checksum
-        if !verify_checksum(&words, language.prefix_length)?.unwrap_or(true) {
+        if !verify_checksum(words, language.prefix_length)?.unwrap_or(true) {
             return Err(MnemonicsError::InvalidChecksum);
         }
 
@@ -162,7 +162,7 @@ pub fn words_to_key(words: &[&str]) -> Result<PrivateKey, MnemonicsError> {
     let bytes: [u8; 32] = dest
         .try_into()
         .map_err(|_| MnemonicsError::InvalidKeyFromBytes)?;
-    Ok(PrivateKey::from_bytes(&bytes).map_err(|_| MnemonicsError::InvalidKeyFromBytes)?)
+    PrivateKey::from_bytes(&bytes).map_err(|_| MnemonicsError::InvalidKeyFromBytes)
 }
 
 // Transform a Private Key to a list of words based on the language index

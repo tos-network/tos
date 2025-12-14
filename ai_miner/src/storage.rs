@@ -134,16 +134,18 @@ impl StorageManager {
                         "Failed to parse existing state file: {}. Creating new state.",
                         e
                     );
-                    let mut new_state = AIMiningState::default();
-                    new_state.network = network;
-                    new_state
+                    AIMiningState {
+                        network,
+                        ..Default::default()
+                    }
                 }
             }
         } else {
             info!("Creating new AI mining state for network: {:?}", network);
-            let mut new_state = AIMiningState::default();
-            new_state.network = network;
-            new_state
+            AIMiningState {
+                network,
+                ..Default::default()
+            }
         };
 
         Ok(Self {
@@ -321,8 +323,11 @@ impl StorageManager {
 
     /// Clear all data (for testing or reset)
     pub async fn clear_all(&mut self) -> Result<()> {
-        self.state = AIMiningState::default();
-        self.state.network = self.state.network; // Preserve network
+        let network = self.state.network;
+        self.state = AIMiningState {
+            network,
+            ..Default::default()
+        };
         self.save().await?;
         info!("Cleared all AI mining storage data");
         Ok(())

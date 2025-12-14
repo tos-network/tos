@@ -114,7 +114,7 @@ impl NetworkHandler {
             }
         }
 
-        let zelf = Arc::clone(&self);
+        let zelf = Arc::clone(self);
         *self.task.lock().await = Some(spawn_task("network-handler", async move {
             loop {
                 // Notify that we are online
@@ -140,23 +140,21 @@ impl NetworkHandler {
                     }
 
                     break res;
-                } else {
-                    if !zelf.api.is_online() {
-                        debug!("API is offline, trying to reconnect #2");
-                        if !zelf.api.reconnect().await? {
-                            error!(
-                                "Couldn't reconnect to server, trying again in {} seconds",
-                                AUTO_RECONNECT_INTERVAL
-                            );
-                            sleep(Duration::from_secs(AUTO_RECONNECT_INTERVAL)).await;
-                        }
-                    } else {
-                        warn!(
-                            "Daemon is online but we couldn't sync, trying again in {} seconds",
+                } else if !zelf.api.is_online() {
+                    debug!("API is offline, trying to reconnect #2");
+                    if !zelf.api.reconnect().await? {
+                        error!(
+                            "Couldn't reconnect to server, trying again in {} seconds",
                             AUTO_RECONNECT_INTERVAL
                         );
                         sleep(Duration::from_secs(AUTO_RECONNECT_INTERVAL)).await;
                     }
+                } else {
+                    warn!(
+                        "Daemon is online but we couldn't sync, trying again in {} seconds",
+                        AUTO_RECONNECT_INTERVAL
+                    );
+                    sleep(Duration::from_secs(AUTO_RECONNECT_INTERVAL)).await;
                 }
             }
         }));
@@ -301,6 +299,7 @@ impl NetworkHandler {
         let mut our_highest_nonce = None;
 
         let block_hash = &block_hash;
+        #[allow(clippy::type_complexity)]
         let results: Vec<(Option<(TransactionEntry, u64, Option<u64>)>, HashSet<Hash>)> = stream::iter(block.transactions.into_iter())
             .map(|tx| async move {
                 let mut assets_changed = HashSet::new();
@@ -334,7 +333,7 @@ impl NetworkHandler {
 
                         // Used to check only once if we have processed this TX already
                         let mut checked = false;
-                        for (_i, transfer) in txs.into_iter().enumerate() {
+                        for transfer in txs.into_iter() {
                             let destination = transfer.destination.to_public_key();
                             if is_owner || destination == *address.get_public_key() {
                                 let asset = transfer.asset.into_owned();
@@ -511,7 +510,7 @@ impl NetworkHandler {
                     let mut tx_timestamp = block.timestamp;
 
                     // New transaction entry that may be linked to us, check if TX was executed
-                    if !self.api.is_tx_executed_in_block(&tx.hash, &block_hash).await? {
+                    if !self.api.is_tx_executed_in_block(&tx.hash, block_hash).await? {
                         debug!("Transaction {} was a good candidate but was not executed in block {}, searching its block executor", tx.hash, block_hash);
                         // Don't skip the TX, we may have missed it
                         match self.api.get_transaction_executor(&tx.hash).await {
@@ -575,7 +574,7 @@ impl NetworkHandler {
                     // Store the changes for history
                     if !changes_stored {
                         debug!("mark topoheight {} as changed", topoheight);
-                        storage.add_topoheight_to_changes(topoheight, &block_hash)?;
+                        storage.add_topoheight_to_changes(topoheight, block_hash)?;
                         changes_stored = true;
                     }
 
@@ -707,10 +706,11 @@ impl NetworkHandler {
                 // Balance simplification: Process single balance at current topoheight
                 // (History traversal will use GetAccountHistory API when needed)
                 let balance_value = balance;
-                let block = if {
+                let should_process = {
                     let mut lock = topoheight_processed.lock().await;
                     lock.insert(topoheight)
-                } {
+                };
+                let block = if should_process {
                     if log::log_enabled!(log::Level::Trace) {
                         trace!("fetching block with txs at {}", topoheight);
                     }
@@ -945,7 +945,7 @@ impl NetworkHandler {
         trace!("syncing head state");
         let new_nonce = if sync_nonce {
             debug!("no nonce provided, fetching it from daemon");
-            match self.api.get_nonce(&address).await.map(|v| v.version) {
+            match self.api.get_nonce(address).await.map(|v| v.version) {
                 Ok(v) => Some(v.get_nonce()),
                 Err(e) => {
                     debug!("Error while fetching last nonce: {}", e);
@@ -1121,7 +1121,7 @@ impl NetworkHandler {
                     trace!("requesting latest balance for {}", asset);
                 }
                 // get the balance for this asset
-                let result = match self.api.get_balance(&address, &asset).await {
+                let result = match self.api.get_balance(address, &asset).await {
                     Ok(res) => res,
                     Err(e) => {
                         if log::log_enabled!(log::Level::Warn) {
@@ -1252,7 +1252,7 @@ impl NetworkHandler {
                     }
                     // A change happened in this block, lets update balance and nonce
                     sync_new_blocks |= self
-                        .sync_head_state(&address, Some(assets), nonce, false, false)
+                        .sync_head_state(address, Some(assets), nonce, false, false)
                         .await?;
                 }
 
@@ -1277,7 +1277,7 @@ impl NetworkHandler {
             trace!("sync head state");
             // Now sync head state, this will helps us to determinate if we should sync blocks or not
             sync_new_blocks |= self
-                .sync_head_state(&address, None, None, true, true)
+                .sync_head_state(address, None, None, true, true)
                 .await?;
         }
 
@@ -1354,7 +1354,7 @@ impl NetworkHandler {
                     let topoheight = event.topoheight;
                     {
                         let mut storage = self.wallet.get_storage().write().await;
-                        if let Some(hash) = storage.get_block_hash_for_topoheight(topoheight).ok() {
+                        if let Ok(hash) = storage.get_block_hash_for_topoheight(topoheight) {
                             if hash != *event.block_hash {
                                 warn!("DAG reorg detected at topoheight {}, deleting changes at this topoheight", topoheight);
                                 storage.delete_changes_at_topoheight(topoheight)?;

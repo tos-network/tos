@@ -5,8 +5,10 @@ use thiserror::Error;
 
 use crate::api::EncryptionMode;
 
+#[allow(clippy::large_enum_variant)]
 enum CipherState {
     None,
+    #[allow(clippy::upper_case_acronyms)]
     AES {
         cipher: aes_gcm::Aes256Gcm,
     },

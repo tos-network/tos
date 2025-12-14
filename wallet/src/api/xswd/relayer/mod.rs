@@ -32,6 +32,7 @@ where
     W: Clone + Send + Sync + XSWDHandler + 'static,
 {
     xswd: XSWD<W>,
+    #[allow(clippy::type_complexity)]
     applications: RwLock<HashMap<AppStateShared, (Client, HashMap<NotifyEvent, Option<Id>>)>>,
     concurrency: usize,
 }
@@ -62,6 +63,7 @@ where
     }
 
     // All applications registered / connected
+    #[allow(clippy::type_complexity)]
     pub fn applications(
         &self,
     ) -> &RwLock<HashMap<AppStateShared, (Client, HashMap<NotifyEvent, Option<Id>>)>> {
@@ -80,7 +82,7 @@ where
             .for_each_concurrent(self.concurrency, |(client, subscriptions)| async {
                 if let Some(id) = subscriptions.get(event) {
                     let response =
-                        json!(RpcResponse::new(Cow::Borrowed(&id), Cow::Borrowed(&value)));
+                        json!(RpcResponse::new(Cow::Borrowed(id), Cow::Borrowed(&value)));
                     client.send_message(response.to_string()).await;
                 }
             })
@@ -179,6 +181,6 @@ where
     async fn has_app_with_id(&self, id: &str) -> bool {
         let applications = self.applications.read().await;
 
-        applications.keys().find(|v| v.get_id() == id).is_some()
+        applications.keys().any(|v| v.get_id() == id)
     }
 }

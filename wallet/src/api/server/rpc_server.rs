@@ -144,7 +144,7 @@ where
     W: Clone + Send + Sync + 'static,
 {
     fn get_rpc_handler(&self) -> &RPCHandler<W> {
-        &self.get_websocket().get_handler().get_rpc_handler()
+        self.get_websocket().get_handler().get_rpc_handler()
     }
 }
 

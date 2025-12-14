@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// AI Mining state stored in blockchain
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct AIMiningState {
     /// Map of task_id -> AIMiningTask
     pub tasks: HashMap<Hash, AIMiningTask>,
@@ -25,8 +24,7 @@ pub struct AIMiningState {
 }
 
 /// System-wide AI mining statistics
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct AIMiningStatistics {
     /// Total number of tasks published
     pub total_tasks: u64,
@@ -41,8 +39,6 @@ pub struct AIMiningStatistics {
     /// Total TOS staked in the system
     pub total_staked: u64,
 }
-
-
 
 impl AIMiningState {
     /// Create a new empty AI mining state
@@ -227,12 +223,9 @@ impl AIMiningState {
     pub fn cleanup_old_tasks(&mut self, cutoff_time: u64, max_age: u64) {
         let old_count = self.tasks.len();
 
-        self.tasks.retain(|_, task| {
-            
-            match task.status {
-                TaskStatus::Expired => cutoff_time - task.published_at < max_age,
-                _ => true,
-            }
+        self.tasks.retain(|_, task| match task.status {
+            TaskStatus::Expired => cutoff_time - task.published_at < max_age,
+            _ => true,
         });
 
         let removed_count = old_count - self.tasks.len();

@@ -85,6 +85,7 @@ where
     // All applications connected to the wallet
     applications: RwLock<HashMap<WebSocketSessionShared<Self>, AppStateShared>>,
     // Applications listening for events
+    #[allow(clippy::type_complexity)]
     listeners: Mutex<HashMap<WebSocketSessionShared<Self>, HashMap<NotifyEvent, Option<Id>>>>,
     xswd: XSWD<W>,
 }
@@ -112,16 +113,13 @@ where
     // get a HashSet of all events tracked
     pub async fn get_tracked_events(&self) -> HashSet<NotifyEvent> {
         let sessions = self.listeners.lock().await;
-        HashSet::from_iter(sessions.values().map(|e| e.keys().cloned()).flatten())
+        HashSet::from_iter(sessions.values().flat_map(|e| e.keys().cloned()))
     }
 
     // verify if a event is tracked by XSWD
     pub async fn is_event_tracked(&self, event: &NotifyEvent) -> bool {
         let sessions = self.listeners.lock().await;
-        sessions
-            .values()
-            .find(|e| e.keys().into_iter().find(|x| *x == event).is_some())
-            .is_some()
+        sessions.values().any(|e| e.keys().any(|x| x == event))
     }
 
     // notify a new event to all connected WebSocket
@@ -133,7 +131,7 @@ where
         let sessions = self.listeners.lock().await;
         for (session, subscriptions) in sessions.iter() {
             if let Some(id) = subscriptions.get(event) {
-                let response = json!(RpcResponse::new(Cow::Borrowed(&id), Cow::Borrowed(&value)));
+                let response = json!(RpcResponse::new(Cow::Borrowed(id), Cow::Borrowed(&value)));
                 let session = session.clone();
                 spawn_task("xswd-notify", async move {
                     if let Err(e) = session.send_text(response.to_string()).await {
@@ -252,7 +250,7 @@ where
                 .map(Some),
             }
         } else {
-            let app_data: ApplicationData = serde_json::from_slice(&message)
+            let app_data: ApplicationData = serde_json::from_slice(message)
                 .map_err(|_| RpcResponseError::new(None, XSWDError::InvalidApplicationData))?;
 
             // Application is not registered, register it
@@ -306,7 +304,7 @@ where
         session: &WebSocketSessionShared<Self>,
         message: &[u8],
     ) -> Result<(), anyhow::Error> {
-        let response: Value = match self.on_message_internal(&session, &message).await {
+        let response: Value = match self.on_message_internal(session, message).await {
             Ok(result) => match result {
                 Some(v) => v,
                 None => return Ok(()),
@@ -326,7 +324,7 @@ where
 {
     async fn has_app_with_id(&self, id: &str) -> bool {
         let applications = self.applications.read().await;
-        applications.values().find(|e| e.get_id() == id).is_some()
+        applications.values().any(|e| e.get_id() == id)
     }
 }
 

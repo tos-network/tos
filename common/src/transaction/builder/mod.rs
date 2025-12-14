@@ -762,10 +762,9 @@ impl TransactionTypeBuilder {
                     used_keys.insert(transfer.destination.get_public_key());
                 }
             }
-            TransactionTypeBuilder::AIMining(crate::ai_mining::AIMiningPayload::RegisterMiner {
-                miner_address,
-                ..
-            }) => {
+            TransactionTypeBuilder::AIMining(
+                crate::ai_mining::AIMiningPayload::RegisterMiner { miner_address, .. },
+            ) => {
                 // Add the miner address to used keys
                 used_keys.insert(miner_address);
             }

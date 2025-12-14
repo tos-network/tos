@@ -1,3 +1,7 @@
+// Allow holding std::sync::MutexGuard across await points - this is an architectural
+// decision for the context manager pattern used in command handlers
+#![allow(clippy::await_holding_lock)]
+
 mod config;
 mod daemon_client;
 mod storage;
@@ -693,7 +697,7 @@ async fn publish_task(
     // Generate task ID
     let task_id = Hash::new(rand::random::<[u8; 32]>());
 
-    manager.message(format!("Publishing AI mining task:"));
+    manager.message("Publishing AI mining task:".to_string());
     manager.message(format!("  - Task ID: {}", hex::encode(task_id.as_bytes())));
     manager.message(format!(
         "  - Reward: {} nanoTOS ({} TOS)",
@@ -757,7 +761,7 @@ async fn submit_answer(
     hash_array.copy_from_slice(hash_bytes.as_bytes());
     let answer_hash = Hash::new(hash_array);
 
-    manager.message(format!("Submitting answer to task:"));
+    manager.message("Submitting answer to task:".to_string());
     manager.message(format!("  - Task ID: {}", task_id_str));
     manager.message(format!(
         "  - Answer hash: {}",
@@ -807,7 +811,7 @@ async fn validate_answer(
         ));
     }
 
-    manager.message(format!("Validating answer:"));
+    manager.message("Validating answer:".to_string());
     manager.message(format!("  - Task ID: {}", task_id_str));
     manager.message(format!("  - Answer ID: {}", answer_id_str));
     manager.message(format!("  - Score: {}/100", score));

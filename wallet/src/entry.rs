@@ -563,12 +563,10 @@ impl TransactionEntry {
 
     // Is the transaction created by us
     pub fn is_outgoing(&self) -> bool {
-        match &self.entry {
-            EntryData::Burn { .. } => true,
-            EntryData::Outgoing { .. } => true,
-            EntryData::MultiSig { .. } => true,
-            _ => false,
-        }
+        matches!(
+            &self.entry,
+            EntryData::Burn { .. } | EntryData::Outgoing { .. } | EntryData::MultiSig { .. }
+        )
     }
 
     // Convert to RPC Transaction Entry
@@ -777,7 +775,7 @@ impl TransactionEntry {
                     format_tos(*max_gas)
                 ));
                 for (asset, amount) in deposits {
-                    let data = storage.get_asset(&asset).await?;
+                    let data = storage.get_asset(asset).await?;
                     str.push_str(&format!(
                         "Deposit {} {} ({}) to contract",
                         format_coin(*amount, data.get_decimals()),

@@ -17,7 +17,7 @@ mod tests {
     /// Helper function to run wallet command
     fn run_wallet_command(cmd: &str, wallet_name: &str) -> Result<std::process::Output> {
         let output = Command::new("../target/debug/tos_wallet")
-            .args(&[
+            .args([
                 "--precomputed-tables-l1",
                 "13",
                 "--exec",
@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn test_help_command() -> Result<()> {
         let output = Command::new("../target/debug/tos_wallet")
-            .args(&["--help"])
+            .args(["--help"])
             .output()?;
 
         assert!(output.status.success(), "help command failed");
@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn test_version_command() -> Result<()> {
         let output = Command::new("../target/debug/tos_wallet")
-            .args(&["--version"])
+            .args(["--version"])
             .output()?;
 
         assert!(output.status.success(), "version command failed");
@@ -114,7 +114,7 @@ mod tests {
 
         // Try to get help output to verify it's executable
         let output = Command::new("../target/debug/tos_wallet")
-            .args(&["--help"])
+            .args(["--help"])
             .output();
 
         assert!(output.is_ok(), "Wallet binary should be executable");

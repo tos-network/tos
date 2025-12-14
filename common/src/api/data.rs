@@ -48,7 +48,10 @@ pub enum ElementType {
 
 impl ValueType {
     pub fn is_number(&self) -> bool {
-        matches!(self, Self::U128 | Self::U64 | Self::U32 | Self::U16 | Self::U8)
+        matches!(
+            self,
+            Self::U128 | Self::U64 | Self::U32 | Self::U16 | Self::U8
+        )
     }
 }
 
@@ -755,7 +758,7 @@ mod tests {
         let dummy: Dummy = value.to_type().unwrap();
         assert_eq!(dummy.name, "John");
         assert_eq!(dummy.age, 25);
-        assert_eq!(dummy.is_active, true);
+        assert!(dummy.is_active);
         assert_eq!(dummy.friends, vec![0, 1, 2, 3, 4]);
     }
 }

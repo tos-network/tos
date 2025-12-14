@@ -17,7 +17,8 @@ use std::{
 };
 
 // Type alias for the events map
-type EventsMap<T, E> = RwLock<HashMap<WebSocketSessionShared<EventWebSocketHandler<T, E>>, HashMap<E, Option<Id>>>>;
+type EventsMap<T, E> =
+    RwLock<HashMap<WebSocketSessionShared<EventWebSocketHandler<T, E>>, HashMap<E, Option<Id>>>>;
 
 // generic websocket handler supporting event subscriptions
 pub struct EventWebSocketHandler<
@@ -61,9 +62,7 @@ where
         trace!("checking if event is tracked");
         let sessions = self.events.read().await;
         trace!("tracked events sessions locked");
-        sessions
-            .values()
-            .any(|e| e.keys().any(|x| x == event))
+        sessions.values().any(|e| e.keys().any(|x| x == event))
     }
 
     // Notify all sessions subscribed to the given event

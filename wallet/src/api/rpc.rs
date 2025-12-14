@@ -835,7 +835,7 @@ async fn get_matching_keys(context: &Context, body: Value) -> Result<Value, Inte
     }
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let tree = get_tree_name(&context, params.tree).await?;
+    let tree = get_tree_name(context, params.tree).await?;
     let storage = wallet.get_storage().read().await;
     let keys = storage.get_custom_tree_keys(&tree, &params.query, params.limit, params.skip)?;
 
@@ -846,7 +846,7 @@ async fn get_matching_keys(context: &Context, body: Value) -> Result<Value, Inte
 async fn count_matching_entries(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: CountMatchingEntriesParams = parse_params(body)?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let tree = get_tree_name(&context, params.tree).await?;
+    let tree = get_tree_name(context, params.tree).await?;
     let storage = wallet.get_storage().read().await;
     let count = storage.count_custom_tree_entries(&tree, &params.key, &params.value)?;
 
@@ -857,7 +857,7 @@ async fn count_matching_entries(context: &Context, body: Value) -> Result<Value,
 async fn get_value_from_key(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetValueFromKeyParams = parse_params(body)?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let tree = get_tree_name(&context, params.tree).await?;
+    let tree = get_tree_name(context, params.tree).await?;
 
     let storage = wallet.get_storage().read().await;
     let value = storage.get_custom_data(&tree, &params.key)?;
@@ -869,7 +869,7 @@ async fn get_value_from_key(context: &Context, body: Value) -> Result<Value, Int
 async fn store(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: StoreParams = parse_params(body)?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let tree = get_tree_name(&context, params.tree).await?;
+    let tree = get_tree_name(context, params.tree).await?;
     let mut storage = wallet.get_storage().write().await;
     storage.set_custom_data(&tree, &params.key, &params.value)?;
     Ok(json!(true))
@@ -879,7 +879,7 @@ async fn store(context: &Context, body: Value) -> Result<Value, InternalRpcError
 async fn delete(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: DeleteParams = parse_params(body)?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let tree = get_tree_name(&context, params.tree).await?;
+    let tree = get_tree_name(context, params.tree).await?;
     let mut storage = wallet.get_storage().write().await;
     storage.delete_custom_data(&tree, &params.key)?;
     Ok(json!(true))
@@ -889,7 +889,7 @@ async fn delete(context: &Context, body: Value) -> Result<Value, InternalRpcErro
 async fn delete_tree_entries(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: DeleteTreeEntriesParams = parse_params(body)?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let tree = get_tree_name(&context, params.tree).await?;
+    let tree = get_tree_name(context, params.tree).await?;
     let mut storage = wallet.get_storage().write().await;
     storage.clear_custom_tree(&tree)?;
     Ok(json!(true))
@@ -899,7 +899,7 @@ async fn delete_tree_entries(context: &Context, body: Value) -> Result<Value, In
 async fn has_key(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: HasKeyParams = parse_params(body)?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let tree = get_tree_name(&context, params.tree).await?;
+    let tree = get_tree_name(context, params.tree).await?;
 
     let storage = wallet.get_storage().read().await;
     Ok(json!(storage.has_custom_data(&tree, &params.key)?))
@@ -917,7 +917,7 @@ async fn query_db(context: &Context, body: Value) -> Result<Value, InternalRpcEr
     }
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let tree = get_tree_name(&context, params.tree).await?;
+    let tree = get_tree_name(context, params.tree).await?;
     let storage = wallet.get_storage().read().await;
     let result = storage.query_db(&tree, params.key, params.value, params.limit, params.skip)?;
     Ok(json!(result))
