@@ -1,0 +1,63 @@
+# Nonce Conflict
+# Tests that transactions with conflicting nonces are handled correctly
+
+name: "Nonce Conflict Detection"
+description: "Two transactions from same account with same nonce - one should fail"
+
+genesis:
+  network: "devnet"
+  accounts:
+    - name: "alice"
+      balance: "1000000000000"  # 1000 TOS
+    - name: "bob"
+      balance: "0"
+    - name: "charlie"
+      balance: "0"
+
+steps:
+  # First transaction: Alice → Bob (nonce 0)
+  - action: "transfer"
+    from: "alice"
+    to: "bob"
+    amount: "100000000000"  # 100 TOS
+    fee: "50"
+    expect:
+      status: "success"
+
+  # Second transaction: Alice → Charlie (also nonce 0, should conflict)
+  - action: "transfer"
+    from: "alice"
+    to: "charlie"
+    amount: "200000000000"  # 200 TOS
+    fee: "50"
+    expect:
+      status: "failure"  # Expected to fail due to nonce conflict
+
+  # Mine block
+  - action: "mine_block"
+
+  # Only first transaction should succeed
+  - action: "assert_balance"
+    account: "bob"
+    eq: "100000000000"
+
+  # Charlie should still have zero (second tx failed)
+  - action: "assert_balance"
+    account: "charlie"
+    eq: "0"
+
+  # Alice paid for only one transaction
+  - action: "assert_balance"
+    account: "alice"
+    within:
+      target: "899999999950"  # 1000 - 100 - fee
+      tolerance: "100"
+
+  # Alice nonce should be 1 (only one tx succeeded)
+  - action: "assert_nonce"
+    account: "alice"
+    eq: 1
+
+invariants:
+  - "balance_conservation"
+  - "nonce_monotonicity"

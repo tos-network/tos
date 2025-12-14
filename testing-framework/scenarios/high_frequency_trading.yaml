@@ -1,0 +1,114 @@
+name: "High-Frequency Trading"
+description: "Test rapid transaction submission and batched processing"
+
+genesis:
+  accounts:
+    - name: "trader"
+      balance: "10000000000000"  # 10,000 TOS
+    - name: "market_maker"
+      balance: "5000000000000"   # 5,000 TOS
+
+steps:
+  # Round 1: Trader executes 5 rapid trades (each mined separately for simplicity)
+  - action: "transfer"
+    from: "trader"
+    to: "buyer1"
+    amount: "100000000000"  # 100 TOS
+    fee: "50"
+
+  - action: "mine_block"
+
+  - action: "transfer"
+    from: "trader"
+    to: "buyer2"
+    amount: "150000000000"  # 150 TOS
+    fee: "50"
+
+  - action: "mine_block"
+
+  - action: "transfer"
+    from: "trader"
+    to: "buyer3"
+    amount: "200000000000"  # 200 TOS
+    fee: "50"
+
+  - action: "mine_block"
+
+  - action: "transfer"
+    from: "trader"
+    to: "buyer4"
+    amount: "250000000000"  # 250 TOS
+    fee: "50"
+
+  - action: "mine_block"
+
+  - action: "transfer"
+    from: "trader"
+    to: "buyer5"
+    amount: "300000000000"  # 300 TOS
+    fee: "50"
+
+  - action: "mine_block"
+
+  # Verify trader's balance (deducted 1000 TOS total + 250 nanoTOS fees)
+  - action: "assert_balance"
+    account: "trader"
+    within:
+      target: "9000000000000"  # 10,000 - 1,000
+      tolerance: "500"          # Allow small fee variance
+
+  # Verify buyers received funds
+  - action: "assert_balance"
+    account: "buyer1"
+    eq: "100000000000"
+
+  - action: "assert_balance"
+    account: "buyer5"
+    eq: "300000000000"
+
+  # Verify nonce advanced to 5
+  - action: "assert_nonce"
+    account: "trader"
+    eq: 5
+
+  # Round 2: Market maker provides liquidity with 3 transactions
+  - action: "transfer"
+    from: "market_maker"
+    to: "pool1"
+    amount: "1000000000000"  # 1,000 TOS
+    fee: "100"
+
+  - action: "mine_block"
+
+  - action: "transfer"
+    from: "market_maker"
+    to: "pool2"
+    amount: "1000000000000"  # 1,000 TOS
+    fee: "100"
+
+  - action: "mine_block"
+
+  - action: "transfer"
+    from: "market_maker"
+    to: "pool3"
+    amount: "1000000000000"  # 1,000 TOS
+    fee: "100"
+
+  - action: "mine_block"
+
+  # Verify market maker's remaining balance
+  - action: "assert_balance"
+    account: "market_maker"
+    within:
+      target: "2000000000000"  # 5,000 - 3,000
+      tolerance: "500"
+
+  - action: "assert_nonce"
+    account: "market_maker"
+    eq: 3
+
+  # Verify trader still has majority of funds (8 blocks mined total)
+  - action: "assert_balance"
+    account: "trader"
+    compare:
+      gte: "8000000000000"  # Still has majority of funds

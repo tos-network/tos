@@ -1,0 +1,254 @@
+/// TAKO Storage Persistence Integration Tests
+///
+/// Tests storage persistence through the TAKO VM using the counter contract.
+/// These tests validate that storage writes persist across multiple executions.
+use std::sync::Arc;
+use tos_program_runtime::{
+    invoke_context::InvokeContext,
+    storage::{InMemoryStorage, NoOpAccounts, NoOpContractLoader, StorageProvider},
+};
+use tos_tbpf::{
+    aligned_memory::AlignedMemory,
+    ebpf,
+    elf::Executable,
+    memory_region::{MemoryMapping, MemoryRegion},
+    program::BuiltinProgram,
+    vm::{Config, EbpfVm},
+};
+
+#[test]
+#[allow(clippy::disallowed_methods)] // Allow expect/unwrap in tests for clearer failures
+fn test_storage_persistence_basic() {
+    // Load the counter contract
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let contract_path = format!("{}/tests/fixtures/counter.so", manifest_dir);
+    let bytecode =
+        std::fs::read(&contract_path).expect("Failed to load counter contract from fixtures");
+
+    // Create persistent storage
+    let mut storage = InMemoryStorage::new();
+    let contract_hash = [1u8; 32];
+
+    // Setup execution environment
+    let config = Config::default();
+
+    println!("\n=== Test: Storage Persistence Basic ===");
+    println!("Contract hash: {:?}", contract_hash);
+
+    // Execute counter 5 times - each execution should increment
+    for i in 1..=5 {
+        println!("\nExecution {}: Calling counter increment", i);
+
+        // Create fresh loader for each iteration to avoid lifetime issues
+        let mut loader = BuiltinProgram::<InvokeContext>::new_loader(config.clone());
+        tos_syscalls::register_syscalls(&mut loader).expect("Failed to register syscalls");
+        let loader = Arc::new(loader);
+
+        let executable =
+            Executable::load(&bytecode, loader.clone()).expect("Failed to load executable");
+
+        // Create fresh instances for each iteration to avoid borrow checker issues
+        let mut accounts = NoOpAccounts;
+        let contract_loader = NoOpContractLoader;
+
+        let mut invoke_context = InvokeContext::new_with_state(
+            200_000,
+            contract_hash,
+            [1u8; 32],
+            12345,
+            0,
+            [2u8; 32],
+            [3u8; 32],
+            &mut storage,
+            &mut accounts,
+            &contract_loader,
+            loader.clone(),
+        );
+
+        let mut stack = AlignedMemory::<{ ebpf::HOST_ALIGN }>::zero_filled(config.stack_size());
+        let stack_len = stack.len();
+        let regions = vec![
+            executable.get_ro_region(),
+            MemoryRegion::new_writable(stack.as_slice_mut(), ebpf::MM_STACK_START),
+        ];
+        let memory_mapping = MemoryMapping::new(regions, &config, executable.get_tbpf_version())
+            .expect("Failed to create memory mapping");
+
+        let mut vm = EbpfVm::new(
+            executable.get_loader().clone(),
+            executable.get_tbpf_version(),
+            &mut invoke_context,
+            memory_mapping,
+            stack_len,
+        );
+
+        let (_, result) = vm.execute_program(&executable, true);
+        match result {
+            tos_tbpf::error::ProgramResult::Ok(return_value) => {
+                println!("  Return value: {}", return_value);
+                assert_eq!(return_value, 0, "Counter should return success");
+            }
+            tos_tbpf::error::ProgramResult::Err(e) => {
+                panic!("Execution {} failed: {:?}", i, e);
+            }
+        }
+    }
+
+    // Verify final storage state
+    let counter_key = b"count";
+    let stored_value = storage
+        .get(&contract_hash, counter_key)
+        .expect("Storage get should succeed")
+        .expect("Storage should contain counter key");
+
+    assert_eq!(stored_value.len(), 8, "Counter value should be 8 bytes");
+    let count = u64::from_le_bytes(stored_value[..8].try_into().unwrap());
+    println!("\nFinal counter value: {}", count);
+    assert_eq!(count, 5, "Counter should be incremented 5 times");
+
+    println!("\n✅ Storage persistence test passed!");
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)] // Allow expect/unwrap in tests for clearer failures
+fn test_storage_isolation() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let contract_path = format!("{}/tests/fixtures/counter.so", manifest_dir);
+    let bytecode = std::fs::read(&contract_path).expect("Failed to load counter contract");
+
+    let mut storage = InMemoryStorage::new();
+    let contract1 = [10u8; 32];
+    let contract2 = [20u8; 32];
+
+    let config = Config::default();
+
+    println!("\n=== Test: Storage Isolation Between Contracts ===");
+
+    // Execute contract1 three times
+    println!("\nExecuting contract1 3 times...");
+    for _ in 1..=3 {
+        // Create fresh loader for each iteration to avoid lifetime issues
+        let mut loader = BuiltinProgram::<InvokeContext>::new_loader(config.clone());
+        tos_syscalls::register_syscalls(&mut loader).expect("Failed to register syscalls");
+        let loader = Arc::new(loader);
+
+        let executable =
+            Executable::load(&bytecode, loader.clone()).expect("Failed to load executable");
+
+        let mut accounts = NoOpAccounts;
+        let contract_loader = NoOpContractLoader;
+
+        let mut invoke_context = InvokeContext::new_with_state(
+            200_000,
+            contract1,
+            [1u8; 32],
+            12345,
+            0,
+            [2u8; 32],
+            [3u8; 32],
+            &mut storage,
+            &mut accounts,
+            &contract_loader,
+            loader.clone(),
+        );
+
+        let mut stack = AlignedMemory::<{ ebpf::HOST_ALIGN }>::zero_filled(config.stack_size());
+        let stack_len = stack.len();
+        let regions = vec![
+            executable.get_ro_region(),
+            MemoryRegion::new_writable(stack.as_slice_mut(), ebpf::MM_STACK_START),
+        ];
+        let memory_mapping = MemoryMapping::new(regions, &config, executable.get_tbpf_version())
+            .expect("Failed to create memory mapping");
+
+        let mut vm = EbpfVm::new(
+            executable.get_loader().clone(),
+            executable.get_tbpf_version(),
+            &mut invoke_context,
+            memory_mapping,
+            stack_len,
+        );
+
+        let (_, result) = vm.execute_program(&executable, true);
+        match result {
+            tos_tbpf::error::ProgramResult::Ok(_) => {}
+            tos_tbpf::error::ProgramResult::Err(e) => {
+                panic!("Contract1 execution failed: {:?}", e);
+            }
+        }
+    }
+
+    // Execute contract2 twice
+    println!("Executing contract2 2 times...");
+    for _ in 1..=2 {
+        // Create fresh loader for each iteration to avoid lifetime issues
+        let mut loader = BuiltinProgram::<InvokeContext>::new_loader(config.clone());
+        tos_syscalls::register_syscalls(&mut loader).expect("Failed to register syscalls");
+        let loader = Arc::new(loader);
+
+        let executable =
+            Executable::load(&bytecode, loader.clone()).expect("Failed to load executable");
+
+        let mut accounts = NoOpAccounts;
+        let contract_loader = NoOpContractLoader;
+
+        let mut invoke_context = InvokeContext::new_with_state(
+            200_000,
+            contract2,
+            [1u8; 32],
+            12345,
+            0,
+            [2u8; 32],
+            [3u8; 32],
+            &mut storage,
+            &mut accounts,
+            &contract_loader,
+            loader.clone(),
+        );
+
+        let mut stack = AlignedMemory::<{ ebpf::HOST_ALIGN }>::zero_filled(config.stack_size());
+        let stack_len = stack.len();
+        let regions = vec![
+            executable.get_ro_region(),
+            MemoryRegion::new_writable(stack.as_slice_mut(), ebpf::MM_STACK_START),
+        ];
+        let memory_mapping = MemoryMapping::new(regions, &config, executable.get_tbpf_version())
+            .expect("Failed to create memory mapping");
+
+        let mut vm = EbpfVm::new(
+            executable.get_loader().clone(),
+            executable.get_tbpf_version(),
+            &mut invoke_context,
+            memory_mapping,
+            stack_len,
+        );
+
+        let (_, result) = vm.execute_program(&executable, true);
+        match result {
+            tos_tbpf::error::ProgramResult::Ok(_) => {}
+            tos_tbpf::error::ProgramResult::Err(e) => {
+                panic!("Contract2 execution failed: {:?}", e);
+            }
+        }
+    }
+
+    // Verify contract1 has count = 3
+    let value1 = storage
+        .get(&contract1, b"count")
+        .expect("Storage get should succeed")
+        .expect("Contract1 should have storage");
+    let count1 = u64::from_le_bytes(value1[..8].try_into().unwrap());
+    println!("Contract 1 counter: {}", count1);
+    assert_eq!(count1, 3, "Contract1 should have count=3");
+
+    // Verify contract2 has count = 2
+    let value2 = storage
+        .get(&contract2, b"count")
+        .expect("Storage get should succeed")
+        .expect("Contract2 should have storage");
+    let count2 = u64::from_le_bytes(value2[..8].try_into().unwrap());
+    println!("Contract 2 counter: {}", count2);
+    assert_eq!(count2, 2, "Contract2 should have count=2");
+
+    println!("\n✅ Storage isolation test passed!");
+}

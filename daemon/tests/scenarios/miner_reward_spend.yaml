@@ -1,0 +1,53 @@
+# Miner Reward Spend
+# Tests that miner can spend block rewards immediately
+
+name: "Miner Reward Spend"
+description: "Miner receives block reward and spends it in the same block"
+
+genesis:
+  network: "devnet"
+  accounts:
+    - name: "miner"
+      balance: "1000000000000"  # 1000 TOS
+    - name: "alice"
+      balance: "0"
+
+steps:
+  # Mine first block (miner gets reward)
+  - action: "mine_block"
+    expect:
+      block_count: 1
+
+  # Miner spends part of initial balance + reward
+  - action: "transfer"
+    from: "miner"
+    to: "alice"
+    amount: "1040000000000"  # 1040 TOS (more than initial, uses reward)
+    fee: "50"
+
+  # Mine second block
+  - action: "mine_block"
+
+  # Verify miner can spend reward (balance decreased)
+  - action: "assert_balance"
+    account: "miner"
+    compare:
+      lt: "1000000000000"  # Less than initial (spent reward)
+
+  # Alice received the transfer
+  - action: "assert_balance"
+    account: "alice"
+    eq: "1040000000000"
+
+  # Nonce checks
+  - action: "assert_nonce"
+    account: "miner"
+    eq: 1
+
+  - action: "assert_nonce"
+    account: "alice"
+    eq: 0
+
+invariants:
+  - "balance_conservation"
+  - "nonce_monotonicity"
