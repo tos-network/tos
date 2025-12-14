@@ -11,7 +11,7 @@ use actix_web::{
     App, HttpRequest, HttpResponse, HttpServer, Responder,
 };
 use async_trait::async_trait;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde_json::{json, Value};
 use tos_common::{
     api::{wallet::NotifyEvent, EventResult},
@@ -45,7 +45,34 @@ impl<W> XSWDServer<W>
 where
     W: Clone + Send + Sync + XSWDHandler + 'static,
 {
-    pub fn new(handler: RPCHandler<W>) -> Result<Self, anyhow::Error> {
+    pub fn new(
+        handler: RPCHandler<W>,
+        bind_address: Option<String>,
+    ) -> Result<Self, anyhow::Error> {
+        let bind_address = bind_address.as_deref().unwrap_or(XSWD_BIND_ADDRESS);
+
+        // SECURITY FIX: Warn when binding to non-localhost addresses
+        if !bind_address.starts_with("127.0.0.1") && !bind_address.starts_with("localhost") {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("╔════════════════════════════════════════════════════════════════════╗");
+                warn!("║ SECURITY WARNING: XSWD WebSocket Server Exposed to Network        ║");
+                warn!("╠════════════════════════════════════════════════════════════════════╣");
+                warn!("║ Bind Address: {:<55} ║", bind_address);
+                warn!("║                                                                    ║");
+                warn!("║ RISKS:                                                             ║");
+                warn!("║ • Any network client can attempt to connect to your wallet        ║");
+                warn!("║ • Applications can request permissions to sign transactions       ║");
+                warn!("║ • Malicious apps may impersonate legitimate applications          ║");
+                warn!("║                                                                    ║");
+                warn!("║ RECOMMENDATIONS:                                                   ║");
+                warn!("║ • Only expose XSWD on trusted networks                            ║");
+                warn!("║ • Use firewall rules to restrict access                           ║");
+                warn!("║ • Review all application permission requests carefully            ║");
+                warn!("║ • For local development, use 127.0.0.1 (default)                  ║");
+                warn!("╚════════════════════════════════════════════════════════════════════╝");
+            }
+        }
+
         let websocket = WebSocketServer::new(XSWDWebSocketHandler::new(handler));
         let this = websocket.clone();
         let http_server = HttpServer::new(move || {
@@ -56,13 +83,15 @@ where
                 .route("/xswd", web::get().to(endpoint::<W>))
         })
         .disable_signals()
-        .bind(&XSWD_BIND_ADDRESS)?
+        .bind(bind_address)?
         .run();
 
         let handle = http_server.handle();
         spawn_task("xswd-server", http_server);
 
-        info!("XSWD is listening on ws://{}", XSWD_BIND_ADDRESS);
+        if log::log_enabled!(log::Level::Info) {
+            info!("XSWD is listening on ws://{}", bind_address);
+        }
 
         Ok(Self { websocket, handle })
     }

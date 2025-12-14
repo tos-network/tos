@@ -17,7 +17,8 @@ use tos_common::{
         wallet::{BalanceChanged, NotifyEvent, TransactionEntry},
         DataElement,
     },
-    asset::RPCAssetData,
+    asset::{AssetData, RPCAssetData},
+    config::{COIN_DECIMALS, TOS_ASSET},
     crypto::{
         elgamal::DecryptHandle, Address, Hash, Hashable, KeyPair, PrivateKey, PublicKey, Signature,
     },
@@ -49,7 +50,6 @@ use {
         storage::Balance,
     },
     log::warn,
-    tos_common::config::TOS_ASSET,
 };
 
 #[cfg(feature = "xswd")]
@@ -154,6 +154,11 @@ pub struct Wallet {
     history_scan: AtomicBool,
     // flag to prioritize the usage of stable balance version when its online
     force_stable_balance: AtomicBool,
+    // Light wallet mode flag (no blockchain sync, query on-demand)
+    light_mode: AtomicBool,
+    // Light API for querying on-demand from daemon (light mode only)
+    #[cfg(feature = "network_handler")]
+    light_api: Mutex<Option<Arc<crate::light_api::LightAPI>>>,
     // Concurrency to use across the wallet
     concurrency: usize,
 }
@@ -217,6 +222,7 @@ impl Wallet {
         precomputed_tables: PrecomputedTablesShared,
         n_threads: usize,
         concurrency: usize,
+        light_mode: bool,
     ) -> Arc<Self> {
         let zelf = Self {
             storage: RwLock::new(storage),
@@ -232,6 +238,9 @@ impl Wallet {
             event_broadcaster: Mutex::new(None),
             history_scan: AtomicBool::new(true),
             force_stable_balance: AtomicBool::new(false),
+            light_mode: AtomicBool::new(light_mode),
+            #[cfg(feature = "network_handler")]
+            light_api: Mutex::new(None),
             account: Account::new(precomputed_tables, keypair, n_threads),
             concurrency,
         };
@@ -248,6 +257,7 @@ impl Wallet {
         precomputed_tables: PrecomputedTablesShared,
         n_threads: usize,
         concurrency: usize,
+        light_mode: bool,
     ) -> Result<Arc<Self>, Error> {
         if name.is_empty() {
             return Err(WalletError::EmptyName.into());
@@ -261,7 +271,7 @@ impl Wallet {
                     PrivateKey::from_hex(hex).context("Invalid private key provided")?
                 }
                 RecoverOption::Seed(seed) => {
-                    let words: Vec<&str> = seed.split_whitespace().collect();
+                    let words: Vec<&str> = seed.trim().split_whitespace().collect();
                     mnemonics::words_to_key(&words)?
                 }
             };
@@ -280,7 +290,9 @@ impl Wallet {
         debug!("hashing provided password");
         let hashed_password = hash_password(password, &salt)?;
 
-        debug!("Creating storage for {}", name);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Creating storage for {}", name);
+        }
         let mut inner = Storage::new(name)?;
 
         // generate the Cipher
@@ -307,7 +319,26 @@ impl Wallet {
         let mut storage = EncryptedStorage::new(inner, &master_key, storage_salt, network)?;
 
         // Store the private key
-        storage.set_private_key(keypair.get_private_key())?;
+        storage.set_private_key(&keypair.get_private_key())?;
+
+        // Auto-track TOS asset for convenience
+        // This allows users to immediately use "TOS" or the asset hash without manual tracking
+        debug!("Auto-tracking TOS asset");
+        storage
+            .add_asset(
+                &TOS_ASSET,
+                AssetData::new(
+                    COIN_DECIMALS,
+                    "TOS".to_string(),
+                    "TOS".to_string(),
+                    None, // No max supply
+                    None, // No owner
+                ),
+            )
+            .await?;
+        storage
+            .set_asset_name(&TOS_ASSET, "TOS".to_string())
+            .await?;
 
         // Flush the storage to be sure its written on disk
         storage.flush().await?;
@@ -319,6 +350,7 @@ impl Wallet {
             precomputed_tables,
             n_threads,
             concurrency,
+            light_mode,
         ))
     }
 
@@ -330,12 +362,15 @@ impl Wallet {
         precomputed_tables: PrecomputedTablesShared,
         n_threads: usize,
         concurrency: usize,
+        light_mode: bool,
     ) -> Result<Arc<Self>, Error> {
         if name.is_empty() {
             return Err(WalletError::EmptyName.into());
         }
 
-        debug!("Creating storage for {}", name);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Creating storage for {}", name);
+        }
         let storage = Storage::new(name)?;
 
         // get password salt for KDF
@@ -360,10 +395,12 @@ impl Wallet {
             .decrypt_value(&encrypted_storage_salt)
             .context("Invalid encrypted storage salt for this wallet")?;
         if storage_salt.len() != SALT_SIZE {
-            error!(
-                "Invalid size received after decrypting storage salt: {} bytes",
-                storage_salt.len()
-            );
+            if log::log_enabled!(log::Level::Error) {
+                error!(
+                    "Invalid size received after decrypting storage salt: {} bytes",
+                    storage_salt.len()
+                );
+            }
             return Err(WalletError::InvalidSaltSize.into());
         }
 
@@ -384,6 +421,7 @@ impl Wallet {
             precomputed_tables,
             n_threads,
             concurrency,
+            light_mode,
         ))
     }
 
@@ -422,7 +460,9 @@ impl Wallet {
             let mut lock = self.network_handler.lock().await;
             if let Some(handler) = lock.take() {
                 if let Err(e) = handler.stop(true).await {
-                    error!("Error while stopping network handler: {}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while stopping network handler: {}", e);
+                    }
                 }
             }
         }
@@ -464,10 +504,32 @@ impl Wallet {
         self.force_stable_balance.load(Ordering::SeqCst)
     }
 
+    // Check if wallet is in light mode (no blockchain sync, query on-demand)
+    pub fn is_light_mode(&self) -> bool {
+        self.light_mode.load(Ordering::SeqCst)
+    }
+
+    // Get the light API client for querying on-demand (light mode only)
+    #[cfg(feature = "network_handler")]
+    pub async fn get_light_api(&self) -> Result<Arc<crate::light_api::LightAPI>, WalletError> {
+        let lock = self.light_api.lock().await;
+        lock.clone().ok_or(WalletError::Any(anyhow::anyhow!(
+            "Light API not initialized"
+        )))
+    }
+
+    // Set the light API client
+    #[cfg(feature = "network_handler")]
+    pub async fn set_light_api(&self, api: Arc<crate::light_api::LightAPI>) {
+        *self.light_api.lock().await = Some(api);
+    }
+
     // Propagate a new event to registered listeners
     pub async fn propagate_event(&self, event: Event) {
         let kind = event.kind();
-        trace!("Propagate event {:?}: {:?}", kind, event);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Propagate event {:?}: {:?}", kind, event);
+        }
         // Broadcast it to the API Server
         #[cfg(feature = "api_server")]
         {
@@ -500,7 +562,9 @@ impl Wallet {
 
     // Mark an asset tracked by the wallet
     pub async fn track_asset(&self, asset: Hash) -> Result<bool, WalletError> {
-        debug!("track asset {}", asset);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("track asset {}", asset);
+        }
         {
             let mut storage = self.storage.write().await;
             if storage.is_asset_tracked(&asset)? {
@@ -518,7 +582,9 @@ impl Wallet {
         #[cfg(feature = "network_handler")]
         {
             if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
-                debug!("Syncing head state for newly tracked asset {}", asset);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Syncing head state for newly tracked asset {}", asset);
+                }
                 network_handler
                     .sync_head_state(
                         &self.get_address(),
@@ -536,7 +602,9 @@ impl Wallet {
 
     // Mark an asset tracked by the wallet
     pub async fn untrack_asset(&self, asset: Hash) -> Result<bool, WalletError> {
-        debug!("untrack asset {}", asset);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("untrack asset {}", asset);
+        }
         {
             let mut storage = self.storage.write().await;
             if !storage.is_asset_tracked(&asset)? {
@@ -608,6 +676,7 @@ impl Wallet {
     #[cfg(feature = "api_server")]
     pub async fn enable_xswd(
         self: &Arc<Self>,
+        bind_address: Option<String>,
     ) -> Result<Option<UnboundedReceiver<XSWDEvent>>, Error> {
         let receiver = self.init_xswd_channel().await;
 
@@ -618,7 +687,7 @@ impl Wallet {
         let mut rpc_handler = RPCHandler::new(self.clone());
         register_rpc_methods(&mut rpc_handler);
 
-        *lock = Some(APIServer::XSWD(XSWDServer::new(rpc_handler)?));
+        *lock = Some(APIServer::XSWD(XSWDServer::new(rpc_handler, bind_address)?));
 
         Ok(receiver)
     }
@@ -783,7 +852,7 @@ impl Wallet {
     ) -> Result<(Transaction, TransactionBuilderState), WalletError> {
         trace!("create transaction with storage");
         let mut state = self
-            .create_transaction_state_with_storage(storage, &transaction_type, &fee, None)
+            .create_transaction_state_with_storage(&storage, &transaction_type, &fee, None)
             .await?;
         let threshold = storage
             .get_multisig_state()
@@ -809,24 +878,81 @@ impl Wallet {
         nonce: Option<u64>,
     ) -> Result<TransactionBuilderState, WalletError> {
         trace!("create transaction with storage");
-        let nonce = match nonce {
-            Some(n) => n,
-            None => storage.get_unconfirmed_nonce()?,
+
+        // Light mode: Query nonce and reference on-demand from daemon
+        #[cfg(feature = "network_handler")]
+        let (nonce, reference, mut generated) = if self.is_light_mode() {
+            let light_api = self.get_light_api().await?;
+            let address = self.get_address();
+
+            // Query nonce on-demand (ignore provided nonce in light mode)
+            let queried_nonce = light_api.get_nonce(&address).await.map_err(|e| {
+                WalletError::Any(anyhow::anyhow!(
+                    "Failed to query nonce from daemon in light mode: {}",
+                    e
+                ))
+            })?;
+
+            // Query reference on-demand
+            let queried_reference = light_api.get_reference_block().await.map_err(|e| {
+                WalletError::Any(anyhow::anyhow!(
+                    "Failed to query reference from daemon in light mode: {}",
+                    e
+                ))
+            })?;
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Light mode: queried nonce={}, reference.topoheight={}",
+                    queried_nonce, queried_reference.topoheight
+                );
+            }
+
+            (queried_nonce, queried_reference, true)
+        } else {
+            // Normal mode: Use local storage
+            let nonce = match nonce {
+                Some(n) => n,
+                None => storage.get_unconfirmed_nonce()?,
+            };
+
+            let mut generated = false;
+            let reference = if let Some(cache) = storage.get_tx_cache() {
+                cache.reference.clone()
+            } else {
+                generated = true;
+                Reference {
+                    topoheight: storage.get_synced_topoheight()?,
+                    hash: storage.get_top_block_hash()?,
+                }
+            };
+
+            (nonce, reference, generated)
+        };
+
+        #[cfg(not(feature = "network_handler"))]
+        let (nonce, reference, mut generated) = {
+            let nonce = match nonce {
+                Some(n) => n,
+                None => storage.get_unconfirmed_nonce()?,
+            };
+
+            let mut generated = false;
+            let reference = if let Some(cache) = storage.get_tx_cache() {
+                cache.reference.clone()
+            } else {
+                generated = true;
+                Reference {
+                    topoheight: storage.get_synced_topoheight()?,
+                    hash: storage.get_top_block_hash()?,
+                }
+            };
+
+            (nonce, reference, generated)
         };
 
         // Build the state for the builder
         let used_assets = transaction_type.used_assets();
-
-        let mut generated = false;
-        let reference = if let Some(cache) = storage.get_tx_cache() {
-            cache.reference.clone()
-        } else {
-            generated = true;
-            Reference {
-                topoheight: storage.get_synced_topoheight()?,
-                hash: storage.get_top_block_hash()?,
-            }
-        };
 
         // state used to build the transaction
         let mut state = TransactionBuilderState::new(self.network.is_mainnet(), reference, nonce);
@@ -853,10 +979,12 @@ impl Wallet {
                         let stable_topoheight =
                             network_handler.get_api().get_stable_topoheight().await?;
                         daemon_stable_topoheight = Some(stable_topoheight);
-                        debug!(
-                            "stable topoheight: {}, topoheight: {}",
-                            stable_topoheight, topoheight
-                        );
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "stable topoheight: {}, topoheight: {}",
+                                stable_topoheight, topoheight
+                            );
+                        }
                         topoheight > stable_topoheight
                     } else {
                         force_stable_balance
@@ -866,7 +994,9 @@ impl Wallet {
                         // Verify that we don't have a pending TX with unconfirmed balance
                         for asset in used_assets.iter() {
                             if storage.has_unconfirmed_balance_for(asset).await? {
-                                warn!("Cannot use stable balance because we have unconfirmed balance for {}", asset);
+                                if log::log_enabled!(log::Level::Warn) {
+                                    warn!("Cannot use stable balance because we have unconfirmed balance for {}", asset);
+                                }
                                 use_stable_balance = false;
                                 break;
                             }
@@ -884,7 +1014,9 @@ impl Wallet {
                             };
 
                             if stable_topo < entry.get_topoheight() {
-                                warn!("Cannot use stable balance because we have an outgoing TX not confirmed in stable height yet");
+                                if log::log_enabled!(log::Level::Warn) {
+                                    warn!("Cannot use stable balance because we have an outgoing TX not confirmed in stable height yet");
+                                }
                                 use_stable_balance = false;
                             }
                         }
@@ -899,7 +1031,7 @@ impl Wallet {
                             }
                             match network_handler
                                 .get_api()
-                                .get_stable_balance(&address, asset)
+                                .get_stable_balance(&address, &asset)
                                 .await
                             {
                                 Ok(stable_point) => {
@@ -941,7 +1073,9 @@ impl Wallet {
                     }
 
                     if let Some(topoheight) = daemon_stable_topoheight {
-                        debug!("Setting stable topoheight to {} for state", topoheight);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Setting stable topoheight to {} for state", topoheight);
+                        }
                         state.set_stable_topoheight(topoheight);
                     }
                 }
@@ -950,9 +1084,13 @@ impl Wallet {
 
         // Get all balances used
         for asset in used_assets {
-            trace!("Checking balance for asset {}", asset);
-            if state.has_balance_for(asset) {
-                trace!("Already have balance for asset {} in state", asset);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Checking balance for asset {}", asset);
+            }
+            if state.has_balance_for(&asset) {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Already have balance for asset {} in state", asset);
+                }
                 continue;
             }
 
@@ -960,17 +1098,57 @@ impl Wallet {
                 return Err(WalletError::AssetNotTracked(asset.clone()));
             }
 
-            if !storage.has_balance_for(asset).await? {
-                return Err(WalletError::BalanceNotFound(asset.clone()));
-            }
+            // Light mode: Query balance on-demand from daemon
+            #[cfg(feature = "network_handler")]
+            let balance = if self.is_light_mode() {
+                let light_api = self.get_light_api().await?;
+                let address = self.get_address();
+                let balance_amount =
+                    light_api.get_balance(&address, &asset).await.map_err(|e| {
+                        WalletError::Any(anyhow::anyhow!(
+                            "Failed to query balance from daemon in light mode: {}",
+                            e
+                        ))
+                    })?;
 
-            let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(asset).await?;
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Using balance (unconfirmed: {}) for asset {} with amount {}",
-                    unconfirmed, asset, balance.amount
-                );
-            }
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Light mode: queried balance for asset {} = {}",
+                        asset, balance_amount
+                    );
+                }
+
+                Balance::new(balance_amount)
+            } else {
+                // Normal mode: Use local storage
+                if !storage.has_balance_for(asset).await? {
+                    return Err(WalletError::BalanceNotFound(asset.clone()));
+                }
+                let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(asset).await?;
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Using balance (unconfirmed: {}) for asset {} with amount {}",
+                        unconfirmed, asset, balance.amount
+                    );
+                }
+                balance
+            };
+
+            #[cfg(not(feature = "network_handler"))]
+            let balance = {
+                if !storage.has_balance_for(asset).await? {
+                    return Err(WalletError::BalanceNotFound(asset.clone()));
+                }
+                let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(asset).await?;
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Using balance (unconfirmed: {}) for asset {} with amount {}",
+                        unconfirmed, asset, balance.amount
+                    );
+                }
+                balance
+            };
+
             state.add_balance(asset.clone(), balance);
         }
 
@@ -1040,7 +1218,9 @@ impl Wallet {
     // It will increase the local nonce by 1 if the TX is accepted by the daemon
     // returns error if the wallet is in offline mode or if the TX is rejected
     pub async fn submit_transaction(&self, transaction: &Transaction) -> Result<(), WalletError> {
-        trace!("submit transaction {}", transaction.hash());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("submit transaction {}", transaction.hash());
+        }
         #[cfg(feature = "network_handler")]
         {
             let network_handler = self.network_handler.lock().await;
@@ -1077,12 +1257,16 @@ impl Wallet {
                     trace!("Network handler is running, checking if keys are registered");
                     for key in used_keys {
                         let addr = key.as_address(self.network.is_mainnet());
-                        trace!("Checking if {} is registered in stable height", addr);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("Checking if {} is registered in stable height", addr);
+                        }
                         let registered = network_handler
                             .get_api()
                             .is_account_registered(&addr, true)
                             .await?;
-                        trace!("registered: {}", registered);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("registered: {}", registered);
+                        }
                         if registered {
                             state.add_registered_key(addr.to_public_key());
                         }
@@ -1565,6 +1749,90 @@ impl Wallet {
     // Network that the wallet is using
     pub fn get_network(&self) -> &Network {
         &self.network
+    }
+
+    // Check if wallet is synced with daemon
+    #[cfg(feature = "network_handler")]
+    pub async fn is_synced(&self) -> Result<bool, Error> {
+        // Get daemon topoheight
+        let network_handler = self.network_handler.lock().await;
+        let handler = network_handler
+            .as_ref()
+            .ok_or_else(|| Error::msg("Network handler not available"))?;
+
+        let daemon_info = handler.get_api().get_info().await?;
+        let daemon_topoheight = daemon_info.topoheight;
+
+        // Get wallet synced topoheight
+        let storage = self.storage.read().await;
+        let wallet_topoheight = storage.get_synced_topoheight()?;
+
+        Ok(wallet_topoheight >= daemon_topoheight)
+    }
+
+    // Wait for wallet to synchronize with daemon
+    // Polls until wallet_topoheight >= daemon_topoheight
+    // Returns error if timeout is reached
+    #[cfg(feature = "network_handler")]
+    pub async fn wait_for_sync(&self, timeout_secs: u64) -> Result<(), Error> {
+        use tos_common::tokio::time::{sleep, Duration, Instant};
+
+        let start = Instant::now();
+        let timeout = Duration::from_secs(timeout_secs);
+        let poll_interval = Duration::from_millis(500);
+
+        loop {
+            // Check if synced
+            if self.is_synced().await? {
+                return Ok(());
+            }
+
+            // Check timeout
+            if start.elapsed() >= timeout {
+                let storage = self.storage.read().await;
+                let wallet_topoheight = storage.get_synced_topoheight()?;
+
+                let network_handler = self.network_handler.lock().await;
+                let handler = network_handler
+                    .as_ref()
+                    .ok_or_else(|| Error::msg("Network handler not available"))?;
+                let daemon_info = handler.get_api().get_info().await?;
+                let daemon_topoheight = daemon_info.topoheight;
+
+                return Err(Error::msg(format!(
+                    "Sync timeout after {} seconds. Wallet at topoheight {}, daemon at {}",
+                    timeout_secs, wallet_topoheight, daemon_topoheight
+                )));
+            }
+
+            // Wait before next poll
+            sleep(poll_interval).await;
+        }
+    }
+
+    // Get sync progress information
+    // Returns (wallet_topoheight, daemon_topoheight, percentage)
+    #[cfg(feature = "network_handler")]
+    pub async fn get_sync_progress(&self) -> Result<(u64, u64, f64), Error> {
+        let network_handler = self.network_handler.lock().await;
+        let handler = network_handler
+            .as_ref()
+            .ok_or_else(|| Error::msg("Network handler not available"))?;
+
+        let daemon_info = handler.get_api().get_info().await?;
+        let daemon_topoheight = daemon_info.topoheight;
+
+        let storage = self.storage.read().await;
+        let wallet_topoheight = storage.get_synced_topoheight()?;
+
+        // SAFE: f64 for display/UI purposes only, not consensus-critical
+        let percentage = if daemon_topoheight > 0 {
+            (wallet_topoheight as f64 / daemon_topoheight as f64) * 100.0
+        } else {
+            100.0
+        };
+
+        Ok((wallet_topoheight, daemon_topoheight, percentage))
     }
 }
 

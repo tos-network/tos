@@ -8,6 +8,7 @@ use tos_common::{
     account::VersionedBalance,
     api::daemon::*,
     asset::RPCAssetData,
+    contract::Module,
     crypto::{Address, Hash},
     rpc::client::{
         EventReceiver, JsonRPCResult, WebSocketJsonRPCClient, WebSocketJsonRPCClientImpl,
@@ -57,7 +58,9 @@ impl DaemonAPI {
         trace!("disconnect");
         let count = Arc::strong_count(self);
         if count > 1 {
-            debug!("There are still {} references to the daemon API", count);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("There are still {} references to the daemon API", count);
+            }
             return Ok(false);
         }
         self.client.disconnect().await?;
@@ -95,7 +98,9 @@ impl DaemonAPI {
     }
 
     pub async fn call<P: Serialize>(&self, method: &String, params: &P) -> JsonRPCResult<Value> {
-        trace!("call: {}", method);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("call: {}", method);
+        }
         self.client.call_with(method.as_str(), params).await
     }
 
@@ -479,5 +484,89 @@ impl DaemonAPI {
             )
             .await?;
         Ok(multisig)
+    }
+
+    // Contract-related API methods
+
+    /// Get the number of deployed contracts
+    pub async fn count_contracts(&self) -> Result<usize> {
+        trace!("count_contracts");
+        let count = self.client.call("count_contracts").await?;
+        Ok(count)
+    }
+
+    /// Get contract module (bytecode) by contract hash
+    pub async fn get_contract_module(&self, contract: &Hash) -> Result<Module> {
+        trace!("get_contract_module");
+        let module = self
+            .client
+            .call_with(
+                "get_contract_module",
+                &GetContractModuleParams {
+                    contract: Cow::Borrowed(contract),
+                },
+            )
+            .await?;
+        Ok(module)
+    }
+
+    /// Get contract balance for a specific asset
+    pub async fn get_contract_balance(&self, contract: &Hash, asset: &Hash) -> Result<u64> {
+        trace!("get_contract_balance");
+        let balance = self
+            .client
+            .call_with(
+                "get_contract_balance",
+                &GetContractBalanceParams {
+                    contract: Cow::Borrowed(contract),
+                    asset: Cow::Borrowed(asset),
+                },
+            )
+            .await?;
+        Ok(balance)
+    }
+
+    /// Get contract balance at a specific topoheight
+    pub async fn get_contract_balance_at_topoheight(
+        &self,
+        contract: &Hash,
+        asset: &Hash,
+        topoheight: u64,
+    ) -> Result<VersionedBalance> {
+        trace!("get_contract_balance_at_topoheight");
+        let balance = self
+            .client
+            .call_with(
+                "get_contract_balance_at_topoheight",
+                &GetContractBalanceAtTopoHeightParams {
+                    contract: Cow::Borrowed(contract),
+                    asset: Cow::Borrowed(asset),
+                    topoheight,
+                },
+            )
+            .await?;
+        Ok(balance)
+    }
+
+    /// Get all assets held by a contract
+    pub async fn get_contract_assets(
+        &self,
+        contract: &Hash,
+        skip: Option<usize>,
+        maximum: Option<usize>,
+    ) -> Result<Vec<Hash>> {
+        trace!("get_contract_assets");
+        let assets = self
+            .client
+            .call_with(
+                "get_contract_assets",
+                &GetContractBalancesParams {
+                    contract: Cow::Borrowed(contract),
+                    skip,
+                    maximum,
+                },
+            )
+            .await?;
+        Ok(assets)
     }
 }

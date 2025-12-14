@@ -23,7 +23,7 @@ use tos_common::{
     },
     asset::AssetData,
     block::TopoHeight,
-    config::TOS_ASSET,
+    config::{COIN_DECIMALS, MAXIMUM_SUPPLY, TOS_ASSET},
     crypto::{Hash, PrivateKey, PublicKey, HASH_SIZE},
     network::Network,
     serializer::{Reader, Serializer, Skip},
@@ -202,7 +202,9 @@ impl EncryptedStorage {
     pub async fn stop(&mut self) {
         trace!("Stopping storage");
         if let Err(e) = self.inner.db.flush_async().await {
-            error!("Error while flushing the database: {}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while flushing the database: {}", e);
+            }
         }
     }
 
@@ -719,14 +721,38 @@ impl EncryptedStorage {
 
     // Retrieve the stored decimals for this asset for better display
     pub async fn get_asset(&self, asset: &Hash) -> Result<AssetData> {
-        trace!("get asset {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get asset {}", asset);
+        }
         let mut cache = self.assets_cache.lock().await;
         if let Some(asset) = cache.get(asset) {
             return Ok(asset.clone());
         }
 
-        let data: AssetData =
-            self.load_from_disk_with_encrypted_key(&self.assets, asset.as_bytes())?;
+        // Try to load from disk, but provide default for TOS if not found
+        let data: AssetData = match self
+            .load_from_disk_optional_with_encrypted_key(&self.assets, asset.as_bytes())?
+        {
+            Some(data) => data,
+            None => {
+                // If asset data doesn't exist yet, provide default for TOS
+                if asset == &TOS_ASSET {
+                    AssetData::new(
+                        COIN_DECIMALS,
+                        "TOS".to_string(),
+                        "TOS".to_string(),
+                        Some(MAXIMUM_SUPPLY),
+                        None,
+                    )
+                } else {
+                    // For non-TOS assets, return error as before
+                    return Err(anyhow::anyhow!(
+                        "Error while loading data with encrypted key {} from disk",
+                        String::from_utf8_lossy(asset.as_bytes())
+                    ));
+                }
+            }
+        };
         cache.put(asset.clone(), data.clone());
 
         Ok(data)
@@ -734,7 +760,9 @@ impl EncryptedStorage {
 
     // Retrieve the stored decimals for this asset for better display
     pub async fn has_asset(&self, asset: &Hash) -> Result<bool> {
-        trace!("has asset {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has asset {}", asset);
+        }
         {
             let cache = self.assets_cache.lock().await;
             if cache.contains(asset) {
@@ -808,7 +836,9 @@ impl EncryptedStorage {
 
     // Retrieve the plaintext balance for this asset
     pub async fn get_plaintext_balance_for(&self, asset: &Hash) -> Result<u64> {
-        trace!("get plaintext balance for {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get plaintext balance for {}", asset);
+        }
         let mut cache = self.balances_cache.lock().await;
         if let Some(balance) = cache.get(asset) {
             return Ok(balance.amount);
@@ -823,7 +853,9 @@ impl EncryptedStorage {
 
     // Retrieve the balance for this asset
     pub async fn get_balance_for(&self, asset: &Hash) -> Result<Balance> {
-        trace!("get balance for {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get balance for {}", asset);
+        }
         let mut cache = self.balances_cache.lock().await;
         if let Some(balance) = cache.get(asset) {
             return Ok(balance.clone());
@@ -838,7 +870,9 @@ impl EncryptedStorage {
     // Retrieve the unconfirmed balance for this asset if present
     // otherwise, fall back on the confirmed balance
     pub async fn get_unconfirmed_balance_for(&self, asset: &Hash) -> Result<(Balance, bool)> {
-        trace!("get unconfirmed balance for {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get unconfirmed balance for {}", asset);
+        }
         {
             let cache = self.unconfirmed_balances_cache.lock().await;
             if let Some(balances) = cache.get(asset) {

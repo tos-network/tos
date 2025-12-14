@@ -35,7 +35,9 @@ impl Client {
         let (sender, receiver) = mpsc::channel(64);
         spawn_task(format!("xswd-relayer-{}", state.get_id()), async move {
             if let Err(e) = Self::background_task(ws, &state, &relayer, receiver, cipher).await {
-                debug!("Error on xswd relayer #{}: {}", state.get_id(), e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error on xswd relayer #{}: {}", state.get_id(), e);
+                }
             }
 
             relayer.on_close(state).await;
@@ -50,13 +52,17 @@ impl Client {
 
     pub async fn send_message(&self, msg: String) {
         if let Err(e) = self.sender.send(InternalMessage::Send(msg)).await {
-            error!("Error while sending message: {}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while sending message: {}", e);
+            }
         }
     }
 
     pub async fn close(&self) {
         if let Err(e) = self.sender.send(InternalMessage::Close).await {
-            error!("Error while sending close message: {}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while sending close message: {}", e);
+            }
         }
     }
 

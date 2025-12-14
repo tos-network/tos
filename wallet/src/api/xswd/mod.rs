@@ -1,6 +1,7 @@
 mod error;
 mod relayer;
 mod types;
+mod verification;
 
 use anyhow::Error;
 use async_trait::async_trait;
@@ -94,6 +95,10 @@ where
     where
         P: XSWDProvider,
     {
+        // XSWD v2.0: CRITICAL SECURITY CHECK - Verify Ed25519 signature first
+        // This must happen before any other validation to prevent processing of unsigned data
+        verification::verify_application_signature(app_data)?;
+
         if app_data.get_id().len() != 64 {
             return Err(XSWDError::InvalidApplicationId);
         }
@@ -124,7 +129,9 @@ where
 
         for perm in app_data.get_permissions() {
             if !self.handler.has_method(perm) {
-                debug!("Permission '{}' is unknown", perm);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Permission '{}' is unknown", perm);
+                }
                 return Err(XSWDError::UnknownMethodInPermissionsList);
             }
         }
@@ -153,7 +160,9 @@ where
         {
             Ok(v) => v,
             Err(e) => {
-                debug!("Error while requesting permission: {}", e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while requesting permission: {}", e);
+                }
                 PermissionResult::Reject
             }
         };
@@ -242,12 +251,16 @@ where
     }
 
     pub async fn on_close(&self, app: AppStateShared) -> Result<(), Error> {
-        info!("Application {} has disconnected", app.get_name());
+        if log::log_enabled!(log::Level::Info) {
+            info!("Application {} has disconnected", app.get_name());
+        }
         if app.is_requesting() {
-            debug!(
-                "Application {} is requesting a permission, aborting...",
-                app.get_name()
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Application {} is requesting a permission, aborting...",
+                    app.get_name()
+                );
+            }
             self.handler
                 .get_data()
                 .cancel_request_permission(&app)

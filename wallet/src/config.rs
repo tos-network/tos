@@ -16,7 +16,9 @@ use crate::precomputed_tables;
 use tos_common::prompt::{default_logs_datetime_format, LogLevel, ModuleConfig};
 
 pub const DIR_PATH: &str = "wallets/";
-pub const XSWD_BIND_ADDRESS: &str = "0.0.0.0:44325";
+// SECURITY FIX: Default to localhost-only binding to prevent unauthorized remote access
+// Use --xswd-bind-address 0.0.0.0:44325 to explicitly enable external access
+pub const XSWD_BIND_ADDRESS: &str = "127.0.0.1:44325";
 pub const PASSWORD_HASH_SIZE: usize = 32;
 pub const SALT_SIZE: usize = 32;
 pub const KEY_SIZE: usize = 32;
@@ -29,6 +31,7 @@ pub const AUTO_RECONNECT_INTERVAL: u64 = 5;
 lazy_static! {
     pub static ref PASSWORD_ALGORITHM: Argon2<'static> = {
         // 15 MB, 16 iterations
+        #[allow(clippy::unwrap_used)]
         let params = Params::new(15 * 1000, 16, 1, Some(PASSWORD_HASH_SIZE)).unwrap();
         Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
     };
@@ -168,7 +171,164 @@ pub struct LogConfig {
 
 #[cfg(feature = "cli")]
 #[derive(Parser, Serialize, Deserialize, Clone)]
-#[clap(version = VERSION, about = "Tos.")]
+#[clap(
+    version = VERSION,
+    about = "TOS Wallet - Manage your TOS cryptocurrency wallet from command line",
+    long_about = r#"TOS Wallet - Non-Interactive Command Line Interface
+
+IMPORTANT: This wallet operates in NON-INTERACTIVE mode by default for automation and AI tools.
+You do NOT need to use interactive prompts. All commands can be executed with command-line arguments.
+
+═══════════════════════════════════════════════════════════════════════════════
+QUICK START GUIDE - NON-INTERACTIVE MODE
+═══════════════════════════════════════════════════════════════════════════════
+
+1. CREATE A NEW WALLET (non-interactive):
+   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "display_address"
+
+   This will:
+   - Automatically create a new wallet at ./wallets/my_wallet/ if it doesn't exist
+   - Encrypt it with password "mypass123"
+   - Display the wallet address
+   - Exit immediately
+
+   To also see the seed phrase:
+   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "seed"
+
+2. OPEN EXISTING WALLET AND SHOW ADDRESS:
+   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "address"
+
+3. GET WALLET BALANCE:
+   ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+       --wallet-path my_wallet --password mypass123 --exec "balance"
+
+4. SEND TRANSACTION (non-interactive):
+   ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+       --wallet-path my_wallet --password mypass123 \
+       --exec "transfer <asset> <recipient_address> <amount>"
+
+   Example:
+   ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+       --wallet-path my_wallet --password mypass123 \
+       --exec "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.5"
+
+5. RESTORE WALLET FROM SEED:
+   ./tos_wallet --network devnet --wallet-path restored_wallet --password newpass456 \
+       --seed "word1 word2 word3 ... word24" --exec "display_address"
+
+   Note: The --seed flag restores from an existing seed phrase (24 words)
+
+═══════════════════════════════════════════════════════════════════════════════
+PASSWORD OPTIONS (pick one):
+═══════════════════════════════════════════════════════════════════════════════
+
+Option 1: Direct password (quick, less secure):
+  --password mypassword
+
+Option 2: Password from environment variable (more secure):
+  export TOS_WALLET_PASSWORD="mypassword"
+  ./tos_wallet --password-from-env --wallet-path my_wallet --exec "balance"
+
+Option 3: Password from file (most secure):
+  echo "mypassword" > password.txt
+  chmod 600 password.txt
+  ./tos_wallet --password-file password.txt --wallet-path my_wallet --exec "balance"
+
+═══════════════════════════════════════════════════════════════════════════════
+AVAILABLE COMMANDS (use with --exec):
+═══════════════════════════════════════════════════════════════════════════════
+
+Wallet Management:
+  display_address           - Show wallet address (auto-creates wallet if needed)
+  address                   - Alias for display_address
+  seed                      - Display seed phrase (requires password)
+  balance                   - Show wallet balance (requires --daemon-address)
+  sync_status               - Show wallet synchronization status
+
+Transactions:
+  transfer <asset> <address> <amount>      - Send asset to address (asset can be 'TOS' or asset hash)
+  history                                  - Show transaction history
+  nonce                                    - Show current nonce
+
+Asset Management:
+  list_assets               - List tracked assets
+  track_asset <hash>        - Track a new asset
+
+Smart Contracts:
+  deploy_contract <file>                   - Deploy a contract from .so file
+  invoke_contract <contract> <entry_id>    - Invoke a contract function
+  get_contract_info <contract>             - Get contract information
+  get_contract_balance <contract> <asset>  - Get contract balance
+  count_contracts                          - Get total deployed contracts
+
+Advanced:
+  freeze <amount> <days>    - Freeze TOS to generate energy
+  unfreeze <tx_hash>        - Unfreeze previously frozen TOS
+  multisig                  - Manage multisig operations
+
+═══════════════════════════════════════════════════════════════════════════════
+NETWORK OPTIONS:
+═══════════════════════════════════════════════════════════════════════════════
+
+--network devnet          - Development network (default daemon: 127.0.0.1:8080)
+--network testnet         - Test network
+--network mainnet         - Main network (default)
+
+--daemon-address <url>    - Daemon RPC endpoint (default: http://127.0.0.1:8080)
+--offline-mode            - Work without connecting to daemon (limited functionality)
+
+═══════════════════════════════════════════════════════════════════════════════
+EXAMPLES FOR AI TOOLS:
+═══════════════════════════════════════════════════════════════════════════════
+
+# Create wallet, fund it, and send transaction (complete flow):
+
+# Step 1: Create new wallet (auto-creates on first command)
+./tos_wallet --network devnet --wallet-path sender_wallet --password pass123 --exec "display_address"
+
+# Step 2: Get wallet address (to receive funds)
+./tos_wallet --network devnet --wallet-path sender_wallet --password pass123 --exec "address"
+
+# Step 3: Check balance after mining/receiving funds
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path sender_wallet --password pass123 --exec "balance"
+
+# Step 4: Send 4 transactions to trigger parallel execution (devnet threshold = 4)
+for i in {1..4}; do
+    ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+        --wallet-path sender_wallet --password pass123 \
+        --exec "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.0"
+    sleep 0.3
+done
+
+# Step 5: Verify recipient balance
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path recipient_wallet --password pass456 --exec "balance"
+
+═══════════════════════════════════════════════════════════════════════════════
+BATCH MODE (JSON):
+═══════════════════════════════════════════════════════════════════════════════
+
+Create a JSON file (transfer.json):
+{
+  "command": "transfer",
+  "params": {
+    "asset": "TOS",
+    "address": "tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk",
+    "amount": "1.0"
+  }
+}
+
+Execute:
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 --json-file transfer.json
+
+═══════════════════════════════════════════════════════════════════════════════
+
+For interactive mode (with prompts), add --interactive flag.
+For more help on specific commands, use: help <command> in interactive mode.
+"#
+)]
 #[command(styles = tos_common::get_cli_styles())]
 pub struct Config {
     /// RPC Server configuration
@@ -248,6 +408,29 @@ pub struct Config {
     #[serde(skip)]
     #[serde(default)]
     pub json_file: Option<String>,
+    /// Enable light wallet mode (no blockchain synchronization)
+    /// Light mode queries nonce/balance/reference on-demand from daemon, enabling instant startup
+    /// Trade-off: Transaction history is not available locally
+    #[clap(long)]
+    #[serde(default)]
+    pub light_mode: bool,
+    /// XSWD Server bind address (default: 127.0.0.1:44325)
+    /// SECURITY WARNING: Binding to 0.0.0.0 exposes wallet to network. Only use for trusted networks.
+    #[cfg(feature = "api_server")]
+    #[clap(long)]
+    pub xswd_bind_address: Option<String>,
+    /// Enable interactive mode (prompt for missing arguments)
+    /// Default: false (pure command mode)
+    #[clap(long)]
+    #[serde(default)]
+    pub interactive: bool,
+    /// Read password from environment variable TOS_WALLET_PASSWORD
+    #[clap(long)]
+    #[serde(default)]
+    pub password_from_env: bool,
+    /// Read password from file (more secure than --password)
+    #[clap(long)]
+    pub password_file: Option<String>,
 }
 
 #[cfg(feature = "cli")]
@@ -260,6 +443,16 @@ impl Config {
     /// Get the command to execute (from --exec)
     pub fn get_exec_command(&self) -> Option<&String> {
         self.exec.as_ref()
+    }
+
+    /// Check if we're in interactive mode
+    pub fn is_interactive_mode(&self) -> bool {
+        self.interactive && !self.is_exec_mode()
+    }
+
+    /// Check if we're in command mode (default)
+    pub fn is_command_mode(&self) -> bool {
+        !self.is_interactive_mode()
     }
 }
 
@@ -281,7 +474,9 @@ pub struct LogProgressTableGenerationReportFunction;
 
 impl ecdlp::ProgressTableGenerationReportFunction for LogProgressTableGenerationReportFunction {
     fn report(&self, progress: f64, step: ecdlp::ReportStep) -> ControlFlow<()> {
-        info!("Progress: {:.2}% on step {:?}", progress * 100.0, step);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Progress: {:.2}% on step {:?}", progress * 100.0, step);
+        }
         ControlFlow::Continue(())
     }
 }

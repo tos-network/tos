@@ -81,6 +81,23 @@ impl FromStr for ModuleConfig {
     }
 }
 
+/// Configuration for creating a new Prompt
+#[derive(Debug, Clone)]
+pub struct PromptConfig<'a> {
+    pub level: LogLevel,
+    pub dir_path: &'a str,
+    pub filename_log: &'a str,
+    pub disable_file_logging: bool,
+    pub disable_file_log_date_based: bool,
+    pub disable_colors: bool,
+    pub enable_auto_compress_logs: bool,
+    pub interactive: bool,
+    pub module_logs: Vec<ModuleConfig>,
+    pub file_level: LogLevel,
+    pub show_ascii: bool,
+    pub logs_datetime_format: String,
+}
+
 impl From<LogLevel> for LevelFilter {
     fn from(value: LogLevel) -> Self {
         match value {
@@ -159,52 +176,39 @@ pub fn is_maybe_dir(path: &str) -> bool {
 }
 
 impl Prompt {
-    pub fn new(
-        level: LogLevel,
-        dir_path: &str,
-        filename_log: &str,
-        disable_file_logging: bool,
-        disable_file_log_date_based: bool,
-        disable_colors: bool,
-        enable_auto_compress_logs: bool,
-        interactive: bool,
-        module_logs: Vec<ModuleConfig>,
-        file_level: LogLevel,
-        show_ascii: bool,
-        logs_datetime_format: String,
-    ) -> Result<ShareablePrompt, PromptError> {
-        if !is_maybe_dir(dir_path) {
+    pub fn new(config: PromptConfig) -> Result<ShareablePrompt, PromptError> {
+        if !is_maybe_dir(config.dir_path) {
             return Err(PromptError::LogsPathNotFolder);
         }
 
         let (read_input_sender, read_input_receiver) = mpsc::channel(1);
         let mut prompt = Self {
-            state: Arc::new(State::new(interactive)),
+            state: Arc::new(State::new(config.interactive)),
             input_receiver: Mutex::new(None),
             read_input_receiver: AsyncMutex::new(read_input_receiver),
             read_input_sender,
-            disable_colors,
+            disable_colors: config.disable_colors,
             compression_handle: None,
         };
 
-        if enable_auto_compress_logs && disable_file_log_date_based {
+        if config.enable_auto_compress_logs && config.disable_file_log_date_based {
             return Err(PromptError::AutoCompressParam);
         }
 
-        if is_maybe_dir(filename_log) {
+        if is_maybe_dir(config.filename_log) {
             return Err(PromptError::FileNotDir);
         }
 
         prompt.setup_logger(
-            level,
-            dir_path,
-            filename_log,
-            disable_file_logging,
-            disable_file_log_date_based,
-            enable_auto_compress_logs,
-            module_logs,
-            file_level,
-            logs_datetime_format,
+            config.level,
+            config.dir_path,
+            config.filename_log,
+            config.disable_file_logging,
+            config.disable_file_log_date_based,
+            config.enable_auto_compress_logs,
+            config.module_logs,
+            config.file_level,
+            config.logs_datetime_format,
         )?;
 
         // Logs all the panics into the log file
@@ -239,7 +243,7 @@ impl Prompt {
             *lock = Some(input_receiver);
         }
 
-        if show_ascii && log::log_enabled!(log::Level::Info) {
+        if config.show_ascii && log::log_enabled!(log::Level::Info) {
             info!("{}", art::LOGO_ASCII);
         }
 

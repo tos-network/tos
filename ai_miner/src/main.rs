@@ -30,7 +30,7 @@ use tos_common::{
     prompt::{
         argument::{Arg, ArgType, ArgumentManager},
         command::{Command, CommandError, CommandHandler, CommandManager},
-        default_logs_datetime_format, Color, LogLevel, Prompt, ShareablePrompt,
+        default_logs_datetime_format, Color, LogLevel, Prompt, PromptConfig, ShareablePrompt,
     },
 };
 use transaction_builder::AIMiningTransactionBuilder;
@@ -232,20 +232,20 @@ async fn main() -> Result<()> {
     };
 
     // Initialize logging
-    let prompt = Prompt::new(
-        config.log_level,
-        &config.logs_path,
-        &config.filename_log,
-        config.disable_file_logging,
-        false, // disable_file_log_date_based
-        config.disable_log_color,
-        false, // auto_compress_logs
-        !config.disable_interactive_mode,
-        vec![],           // logs_modules
-        config.log_level, // file_log_level
-        true,             // show_ascii
-        default_logs_datetime_format(),
-    )?;
+    let prompt = Prompt::new(PromptConfig {
+        level: config.log_level,
+        dir_path: &config.logs_path,
+        filename_log: &config.filename_log,
+        disable_file_logging: config.disable_file_logging,
+        disable_file_log_date_based: false,
+        disable_colors: config.disable_log_color,
+        enable_auto_compress_logs: false,
+        interactive: !config.disable_interactive_mode,
+        module_logs: vec![],
+        file_level: config.log_level,
+        show_ascii: true,
+        logs_datetime_format: default_logs_datetime_format(),
+    })?;
 
     // Remove init call since it returns ()
 

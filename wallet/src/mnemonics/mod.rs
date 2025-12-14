@@ -10,7 +10,7 @@ const SEED_LENGTH: usize = 24;
 const WORDS_LIST: usize = 1626;
 const WORDS_LIST_U32: u32 = WORDS_LIST as u32;
 
-pub static LANGUAGES: [Language<'static>; 11] = [
+pub const LANGUAGES: [Language<'static>; 11] = [
     english::ENGLISH,
     french::FRENCH,
     italian::ITALIAN,
@@ -140,7 +140,9 @@ pub fn words_to_key(words: &[&str]) -> Result<PrivateKey, MnemonicsError> {
     }
 
     let (indices, language_index) = find_indices(words)?.ok_or(MnemonicsError::NoIndicesFound)?;
-    debug!("Language found: {}", LANGUAGES[language_index].name);
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("Language found: {}", LANGUAGES[language_index].name);
+    }
 
     let mut dest = Vec::with_capacity(KEY_SIZE);
     for i in (0..SEED_LENGTH).step_by(3) {

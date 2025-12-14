@@ -48,6 +48,25 @@ pub enum CommandError {
     MissingArgument(String),
     #[error("Batch mode error: {}", _0)]
     BatchModeError(String),
+    #[error("Missing required argument '{arg}' in command mode.\nUsage: {usage}\nUse --interactive to enable prompts.")]
+    MissingRequiredArgument { arg: String, usage: String },
+    #[error("Missing required argument '{arg}' in command mode.\n\nUsage: {usage}\n\nExample:\n  {example}\n\nUse --interactive to enable prompts.")]
+    MissingRequiredArgumentWithExample {
+        arg: String,
+        usage: String,
+        example: String,
+    },
+    #[error("Invalid {param}: {message}\n\nUsage: {usage}\n\nExample:\n  {example}")]
+    InvalidParameterWithExample {
+        param: String,
+        message: String,
+        usage: String,
+        example: String,
+    },
+    #[error("Missing confirmation for destructive operation.\nAdd '--confirm true' to proceed or '--confirm false' to cancel explicitly.")]
+    MissingConfirmation,
+    #[error("Password required in command mode.\nUse: --password <pwd> OR --password-file <path> OR --password-from-env OR set TOS_WALLET_PASSWORD environment variable.")]
+    PasswordRequired,
 }
 
 impl<T> From<PoisonError<T>> for CommandError {
@@ -179,6 +198,47 @@ impl Command {
             optional_args.join(" ")
         )
     }
+
+    /// Get detailed help information for this command
+    pub fn get_detailed_help(&self) -> String {
+        let mut help = String::new();
+
+        // Command name and description
+        help.push_str(&format!("{}\n", self.name));
+        help.push_str(&format!("{}\n\n", self.description));
+
+        // Usage
+        help.push_str("USAGE:\n");
+        help.push_str(&format!("  {}\n\n", self.get_usage()));
+
+        // Required arguments
+        if !self.required_args.is_empty() {
+            help.push_str("REQUIRED ARGUMENTS:\n");
+            for arg in &self.required_args {
+                help.push_str(&format!(
+                    "  <{}>  {}\n",
+                    arg.get_name(),
+                    arg.get_description()
+                ));
+            }
+            help.push('\n');
+        }
+
+        // Optional arguments
+        if !self.optional_args.is_empty() {
+            help.push_str("OPTIONAL ARGUMENTS:\n");
+            for arg in &self.optional_args {
+                help.push_str(&format!(
+                    "  [{}]  {}\n",
+                    arg.get_name(),
+                    arg.get_description()
+                ));
+            }
+            help.push('\n');
+        }
+
+        help
+    }
 }
 
 // We use Mutex from std instead of tokio so we can use it in sync code too
@@ -232,7 +292,11 @@ impl CommandManager {
         self.add_command(Command::with_optional_arguments(
             "help",
             "Show this help",
-            vec![Arg::new("command", ArgType::String)],
+            vec![Arg::new(
+                "command",
+                ArgType::String,
+                "Command name to get help for",
+            )],
             CommandHandler::Async(async_handler!(help)),
         ))?;
         self.add_command(Command::new(
@@ -248,7 +312,11 @@ impl CommandManager {
         self.add_command(Command::with_required_arguments(
             "set_log_level",
             "Set the log level",
-            vec![Arg::new("level", ArgType::String)],
+            vec![Arg::new(
+                "level",
+                ArgType::String,
+                "Log level (off/error/warn/info/debug/trace)",
+            )],
             CommandHandler::Sync(set_log_level),
         ))?;
 
@@ -302,6 +370,17 @@ impl CommandManager {
 
     pub fn get_commands(&self) -> &Mutex<Vec<Rc<Command>>> {
         &self.commands
+    }
+
+    /// Get detailed help for a specific command
+    pub fn get_command_help(&self, command_name: &str) -> Result<String, CommandError> {
+        let commands = self.commands.lock()?;
+        let command = commands
+            .iter()
+            .find(|cmd| cmd.get_name() == command_name)
+            .ok_or(CommandError::CommandNotFound)?;
+
+        Ok(command.get_detailed_help())
     }
 
     /// Handle command from JSON parameters
@@ -379,15 +458,21 @@ impl CommandManager {
     }
 
     pub fn message<D: Display>(&self, message: D) {
-        info!("{}", message);
+        if log::log_enabled!(log::Level::Info) {
+            info!("{message}");
+        }
     }
 
     pub fn warn<D: Display>(&self, message: D) {
-        warn!("{}", message);
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("{message}");
+        }
     }
 
     pub fn error<D: Display>(&self, message: D) {
-        error!("{}", message);
+        if log::log_enabled!(log::Level::Error) {
+            error!("{message}");
+        }
     }
 
     pub fn running_since(&self) -> Duration {
@@ -505,7 +590,27 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
             .iter()
             .find(|command| *command.get_name() == *arg_value)
             .ok_or(CommandError::CommandNotFound)?;
+
+        // Display command name and description
+        manager.message(format!("Command: {}", cmd.get_name()));
+        manager.message(format!("Description: {}", cmd.get_description()));
         manager.message(format!("Usage: {}", cmd.get_usage()));
+
+        // Display required arguments with descriptions
+        if !cmd.get_required_args().is_empty() {
+            manager.message("Required arguments:");
+            for arg in cmd.get_required_args() {
+                manager.message(format!("  <{}>  {}", arg.get_name(), arg.get_description()));
+            }
+        }
+
+        // Display optional arguments with descriptions
+        if !cmd.get_optional_args().is_empty() {
+            manager.message("Optional arguments:");
+            for arg in cmd.get_optional_args() {
+                manager.message(format!("  [{}]  {}", arg.get_name(), arg.get_description()));
+            }
+        }
     } else {
         manager.display_commands()?;
         manager.message("See how to use a command using help <command>");

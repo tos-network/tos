@@ -42,7 +42,7 @@ use tos_common::{
     },
     prompt::{
         command::CommandManager, default_logs_datetime_format, Color, LogLevel, ModuleConfig,
-        Prompt, ShareablePrompt,
+        Prompt, PromptConfig, ShareablePrompt,
     },
     serializer::Serializer,
     time::get_current_time_in_millis,
@@ -246,20 +246,20 @@ async fn main() -> Result<()> {
     }
 
     let log = config.log;
-    let prompt = Prompt::new(
-        log.log_level,
-        &log.logs_path,
-        &log.filename_log,
-        log.disable_file_logging,
-        log.disable_file_log_date_based,
-        log.disable_log_color,
-        log.auto_compress_logs,
-        !log.disable_interactive_mode,
-        log.logs_modules,
-        log.file_log_level.unwrap_or(log.log_level),
-        !log.disable_ascii_art,
-        log.datetime_format.clone(),
-    )?;
+    let prompt = Prompt::new(PromptConfig {
+        level: log.log_level,
+        dir_path: &log.logs_path,
+        filename_log: &log.filename_log,
+        disable_file_logging: log.disable_file_logging,
+        disable_file_log_date_based: log.disable_file_log_date_based,
+        disable_colors: log.disable_log_color,
+        enable_auto_compress_logs: log.auto_compress_logs,
+        interactive: !log.disable_interactive_mode,
+        module_logs: log.logs_modules,
+        file_level: log.file_log_level.unwrap_or(log.log_level),
+        show_ascii: !log.disable_ascii_art,
+        logs_datetime_format: log.datetime_format.clone(),
+    })?;
 
     // Prevent the user to block the program by selecting text in CLI
     #[cfg(target_os = "windows")]

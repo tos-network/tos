@@ -35,6 +35,10 @@ pub enum XSWDError {
     ApplicationPermissionsNotSigned,
     #[error("Invalid signature for application data")]
     InvalidSignatureForApplicationData,
+    #[error("Invalid timestamp: too old or in future")]
+    InvalidTimestamp,
+    #[error("Invalid Ed25519 public key")]
+    InvalidPublicKey,
 }
 
 impl From<XSWDError> for InternalRpcError {
