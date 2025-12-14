@@ -413,12 +413,19 @@ fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
         for _ in 0..bench {
             let job = MinerWork::new(Hash::zero(), get_current_time_in_millis());
             let mut worker = Worker::new();
-            worker.set_work(job, algorithm).unwrap();
+            if let Err(e) = worker.set_work(job, algorithm) {
+                error!("Failed to set work in benchmark: {}", e);
+                continue;
+            }
 
             let handle = thread::spawn(move || {
                 for _ in 0..iterations {
-                    let _ = worker.get_pow_hash().unwrap();
-                    worker.increase_nonce().unwrap();
+                    if worker.get_pow_hash().is_err() {
+                        break;
+                    }
+                    if worker.increase_nonce().is_err() {
+                        break;
+                    }
                 }
             });
             handles.push(handle);
@@ -426,7 +433,9 @@ fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
 
         for handle in handles {
             // wait on all threads
-            handle.join().unwrap();
+            if let Err(e) = handle.join() {
+                error!("Thread join failed: {:?}", e);
+            }
         }
         let duration = start.elapsed().as_millis();
         let hashrate = format_hashrate(1000f64 / (duration as f64 / (bench * iterations) as f64));
@@ -551,7 +560,9 @@ async fn handle_websocket_message(
                     let block = MinerWork::from_hex(&job.miner_work)
                         .context("Error while decoding new job received from daemon")?;
                     CURRENT_TOPO_HEIGHT.store(job.topoheight, Ordering::SeqCst);
-                    JOB_ELAPSED.write().unwrap().replace(Instant::now());
+                    if let Ok(mut elapsed) = JOB_ELAPSED.write() {
+                        elapsed.replace(Instant::now());
+                    }
 
                     if let Err(e) = job_sender.send(ThreadNotification::NewJob(
                         job.algorithm,
@@ -638,7 +649,10 @@ fn start_thread(
                     // u16 support up to 65535 threads
                     new_job.set_thread_id_u16(id);
                     let initial_timestamp = new_job.get_timestamp();
-                    worker.set_work(new_job, algorithm).unwrap();
+                    if let Err(e) = worker.set_work(new_job, algorithm) {
+                        error!("Mining Thread #{}: failed to set work: {}", id, e);
+                        continue 'main;
+                    }
 
                     let difficulty_target = match compute_difficulty_target(&expected_difficulty) {
                         Ok(value) => value,
@@ -652,10 +666,19 @@ fn start_thread(
                     };
 
                     // Solve block
-                    hash = worker.get_pow_hash().unwrap();
+                    hash = match worker.get_pow_hash() {
+                        Ok(h) => h,
+                        Err(e) => {
+                            error!("Mining Thread #{}: failed to get PoW hash: {}", id, e);
+                            continue 'main;
+                        }
+                    };
                     let mut tries = 0;
                     while !check_difficulty_against_target(&hash, &difficulty_target) {
-                        worker.increase_nonce().unwrap();
+                        if let Err(e) = worker.increase_nonce() {
+                            error!("Mining Thread #{}: failed to increase nonce: {}", id, e);
+                            continue 'main;
+                        }
                         // check if we have a new job pending
                         // Only update every N iterations to avoid too much CPU usage
                         if tries % UPDATE_EVERY_NONCE == 0 {
@@ -664,24 +687,38 @@ fn start_thread(
                             }
                             if let Ok(instant) = JOB_ELAPSED.read() {
                                 if let Some(instant) = instant.as_ref() {
-                                    worker
-                                        .set_timestamp(
-                                            initial_timestamp
-                                                + instant.elapsed().as_millis() as u64,
-                                        )
-                                        .unwrap();
+                                    if let Err(e) = worker.set_timestamp(
+                                        initial_timestamp + instant.elapsed().as_millis() as u64,
+                                    ) {
+                                        error!(
+                                            "Mining Thread #{}: failed to set timestamp: {}",
+                                            id, e
+                                        );
+                                    }
                                 }
                             }
                             HASHRATE_COUNTER
                                 .fetch_add(UPDATE_EVERY_NONCE as usize, Ordering::SeqCst);
                         }
 
-                        hash = worker.get_pow_hash().unwrap();
+                        hash = match worker.get_pow_hash() {
+                            Ok(h) => h,
+                            Err(e) => {
+                                error!("Mining Thread #{}: failed to get PoW hash: {}", id, e);
+                                continue 'main;
+                            }
+                        };
                         tries += 1;
                     }
 
                     // compute the reference hash for easier finding of the block
-                    let block_hash = worker.get_block_hash().unwrap();
+                    let block_hash = match worker.get_block_hash() {
+                        Ok(h) => h,
+                        Err(e) => {
+                            error!("Mining Thread #{}: failed to get block hash: {}", id, e);
+                            continue 'main;
+                        }
+                    };
                     info!(
                         "Thread #{}: block {} found at height {} with difficulty {}",
                         id,
@@ -690,7 +727,10 @@ fn start_thread(
                         format_difficulty(difficulty_from_hash(&hash))
                     );
 
-                    let job = worker.take_work().unwrap();
+                    let Some(job) = worker.take_work() else {
+                        error!("Mining Thread #{}: failed to take work", id);
+                        continue 'main;
+                    };
                     if block_sender.blocking_send(job).is_err() {
                         error!(
                             "Mining Thread #{}: error while sending block found with hash {}",

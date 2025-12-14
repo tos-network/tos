@@ -88,9 +88,7 @@ mod tests {
     #[test]
     fn test_help_command() -> Result<()> {
         let binary_path = get_wallet_binary_path();
-        let output = Command::new(&binary_path)
-            .args(["--help"])
-            .output()?;
+        let output = Command::new(&binary_path).args(["--help"]).output()?;
 
         assert!(output.status.success(), "help command failed");
 
@@ -107,9 +105,7 @@ mod tests {
     #[test]
     fn test_version_command() -> Result<()> {
         let binary_path = get_wallet_binary_path();
-        let output = Command::new(&binary_path)
-            .args(["--version"])
-            .output()?;
+        let output = Command::new(&binary_path).args(["--version"]).output()?;
 
         assert!(output.status.success(), "version command failed");
 
@@ -136,9 +132,7 @@ mod tests {
         );
 
         // Try to get help output to verify it's executable
-        let output = Command::new(&binary_path_str)
-            .args(["--help"])
-            .output();
+        let output = Command::new(&binary_path_str).args(["--help"]).output();
 
         assert!(output.is_ok(), "Wallet binary should be executable");
     }

@@ -1272,7 +1272,7 @@ async fn test_task_publication_workflow(
     let difficulty = DifficultyLevel::Beginner;
     let deadline = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or(std::time::Duration::ZERO)
         .as_secs()
         + 7200; // 2 hours from now
 
@@ -1502,13 +1502,12 @@ async fn test_reward_cycle(
     // Test network-specific fee calculations
     manager.message("");
     manager.message("💰 Network Fee Analysis:");
+    let miner_addr = config
+        .miner_address
+        .as_ref()
+        .ok_or_else(|| CommandError::BatchModeError("No miner address configured".to_string()))?;
     let sample_payload = AIMiningPayload::RegisterMiner {
-        miner_address: config
-            .miner_address
-            .as_ref()
-            .unwrap()
-            .clone()
-            .to_public_key(),
+        miner_address: miner_addr.clone().to_public_key(),
         registration_fee: 1_000_000_000,
     };
 
