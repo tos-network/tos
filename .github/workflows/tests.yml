@@ -127,6 +127,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-release-
 
+      - name: Build binaries for integration tests
+        run: |
+          echo "=========================================="
+          echo "Building Binaries for Integration Tests"
+          echo "=========================================="
+          cargo build --package tos_wallet --release
+
       - name: Run integration tests in Release mode
         run: |
           echo "=========================================="

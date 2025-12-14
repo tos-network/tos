@@ -4,6 +4,24 @@ mod tests {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// Get the wallet binary path based on build profile
+    /// Uses TOS_WALLET_BIN env var if set, otherwise checks release then debug paths
+    fn get_wallet_binary_path() -> String {
+        // Allow override via environment variable
+        if let Ok(path) = std::env::var("TOS_WALLET_BIN") {
+            return path;
+        }
+
+        // Check release path first (CI runs in release mode)
+        let release_path = "../target/release/tos_wallet";
+        if std::path::Path::new(release_path).exists() {
+            return release_path.to_string();
+        }
+
+        // Fall back to debug path
+        "../target/debug/tos_wallet".to_string()
+    }
+
     /// Helper function to create unique wallet name
     fn create_unique_wallet_name(test_name: &str) -> String {
         let timestamp = SystemTime::now()
@@ -16,7 +34,8 @@ mod tests {
 
     /// Helper function to run wallet command
     fn run_wallet_command(cmd: &str, wallet_name: &str) -> Result<std::process::Output> {
-        let output = Command::new("../target/debug/tos_wallet")
+        let binary_path = get_wallet_binary_path();
+        let output = Command::new(&binary_path)
             .args([
                 "--precomputed-tables-l1",
                 "13",
@@ -68,7 +87,8 @@ mod tests {
     /// Test help command
     #[test]
     fn test_help_command() -> Result<()> {
-        let output = Command::new("../target/debug/tos_wallet")
+        let binary_path = get_wallet_binary_path();
+        let output = Command::new(&binary_path)
             .args(["--help"])
             .output()?;
 
@@ -86,7 +106,8 @@ mod tests {
     /// Test version command
     #[test]
     fn test_version_command() -> Result<()> {
-        let output = Command::new("../target/debug/tos_wallet")
+        let binary_path = get_wallet_binary_path();
+        let output = Command::new(&binary_path)
             .args(["--version"])
             .output()?;
 
@@ -106,14 +127,16 @@ mod tests {
     fn test_binary_exists() {
         use std::path::Path;
 
-        let binary_path = Path::new("../target/debug/tos_wallet");
+        let binary_path_str = get_wallet_binary_path();
+        let binary_path = Path::new(&binary_path_str);
         assert!(
             binary_path.exists(),
-            "Wallet binary should exist at ../target/debug/tos_wallet"
+            "Wallet binary should exist at {} (checked release and debug paths)",
+            binary_path_str
         );
 
         // Try to get help output to verify it's executable
-        let output = Command::new("../target/debug/tos_wallet")
+        let output = Command::new(&binary_path_str)
             .args(["--help"])
             .output();
 
