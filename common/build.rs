@@ -4,22 +4,34 @@
 use std::process::Command;
 
 fn main() {
+    // Tell cargo to rerun this build script when git HEAD changes
+    // This ensures version is updated on every new commit
+    println!("cargo:rerun-if-changed=../.git/HEAD");
+    println!("cargo:rerun-if-changed=../.git/index");
+    println!("cargo:rerun-if-env-changed=TOS_COMMIT_HASH");
+
     let commit_hash = if let Some(hash) = option_env!("TOS_COMMIT_HASH") {
         hash[0..7].to_string()
     } else {
         // Run git command to get the commit hash
-        let output = Command::new("git")
+        // SAFETY: Build script - failure defaults to "unknown" instead of panicking
+        let output = match Command::new("git")
             .args(["rev-parse", "--short", "HEAD"])
             .output()
-            .expect("Failed to execute git command");
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            }
+            _ => {
+                // Git command failed or not available - use fallback
+                "unknown".to_string()
+            }
+        };
 
-        // Convert the commit hash to a string
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
+        output
     };
 
     // Set the result as an environment variable for the build
     let build_version = format!("{}-{}", env!("CARGO_PKG_VERSION"), commit_hash);
-    println!("cargo:rerun-if-env-changed=BUILD_VERSION");
-    println!("cargo:BUILD_VERSION={}", build_version);
-    println!("cargo:rustc-env=BUILD_VERSION={}", build_version);
+    println!("cargo:rustc-env=BUILD_VERSION={build_version}");
 }

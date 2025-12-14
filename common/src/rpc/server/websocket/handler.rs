@@ -1,3 +1,8 @@
+#![allow(clippy::disallowed_methods)]
+
+// WebSocket RPC handler uses json! macro which internally uses unwrap
+// This is acceptable for JSON construction which should never fail for valid literals
+
 use super::{WebSocketHandler, WebSocketSessionShared};
 use crate::{
     api::{EventResult, SubscribeParams},
@@ -16,17 +21,13 @@ use std::{
     hash::Hash,
 };
 
-// Type alias for the events map
-type EventsMap<T, E> =
-    RwLock<HashMap<WebSocketSessionShared<EventWebSocketHandler<T, E>>, HashMap<E, Option<Id>>>>;
-
 // generic websocket handler supporting event subscriptions
 pub struct EventWebSocketHandler<
     T: Sync + Send + Clone + 'static,
     E: Serialize + DeserializeOwned + Sync + Send + Eq + Hash + Clone + 'static,
 > {
     // a map of sessions to events
-    events: EventsMap<T, E>,
+    events: RwLock<HashMap<WebSocketSessionShared<Self>, HashMap<E, Option<Id>>>>,
     // the RPC handler containing the methods to call
     // when a message is received
     handler: RPCHandler<T>,
@@ -68,13 +69,16 @@ where
     // Notify all sessions subscribed to the given event
     // This will send the event concurrently to all sessions
     // based on the provided configuration
-    #[allow(clippy::mutable_key_type)]
     pub async fn notify(&self, event: &E, value: Value) {
         let value = json!(EventResult {
             event: Cow::Borrowed(event),
             value
         });
         debug!("notifying event");
+        // SAFE: WebSocketSessionShared contains Arc<WebSocketSession> which has interior mutability,
+        // but the Hash/Eq implementation only depends on immutable fields (session ID).
+        // The interior mutability is used for connection state management, not for hashing.
+        #[allow(clippy::mutable_key_type)]
         let sessions = {
             let events = self.events.read().await;
             trace!("events locked for propagation");
@@ -89,11 +93,17 @@ where
 
                 async move {
                     if let Some(data) = data {
-                        trace!("sending event to #{}", session.id);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("sending event to #{}", session.id);
+                        }
                         if let Err(e) = session.send_text(data.to_string()).await {
-                            debug!("Error occured while notifying a new event: {}", e);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Error occured while notifying a new event: {e}");
+                            }
                         };
-                        trace!("event sent to #{}", session.id);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("event sent to #{}", session.id);
+                        }
                     }
                 }
             })
@@ -173,12 +183,16 @@ where
         match method.as_str() {
             "subscribe" => {
                 let event = self.parse_event(&mut request)?;
-                self.subscribe_session_to_event(
-                    context.get::<WebSocketSessionShared<Self>>().unwrap(),
-                    event,
-                    request.id.clone(),
-                )
-                .await?;
+                // Get WebSocketSessionShared from context with error propagation
+                // This should always succeed if session is properly initialized
+                let session = context.get::<WebSocketSessionShared<Self>>().map_err(|_| {
+                    RpcResponseError::new(
+                        request.id.clone(),
+                        InternalRpcError::InternalError("WebSocket session not found"),
+                    )
+                })?;
+                self.subscribe_session_to_event(session, event, request.id.clone())
+                    .await?;
                 Ok(Some(json!(RpcResponse::new(
                     Cow::Borrowed(&request.id),
                     Cow::Owned(Value::Bool(true))
@@ -186,12 +200,16 @@ where
             }
             "unsubscribe" => {
                 let event = self.parse_event(&mut request)?;
-                self.unsubscribe_session_from_event(
-                    context.get::<WebSocketSessionShared<Self>>().unwrap(),
-                    event,
-                    request.id.clone(),
-                )
-                .await?;
+                // Get WebSocketSessionShared from context with error propagation
+                // This should always succeed if session is properly initialized
+                let session = context.get::<WebSocketSessionShared<Self>>().map_err(|_| {
+                    RpcResponseError::new(
+                        request.id.clone(),
+                        InternalRpcError::InternalError("WebSocket session not found"),
+                    )
+                })?;
+                self.unsubscribe_session_from_event(session, event, request.id.clone())
+                    .await?;
                 Ok(Some(json!(RpcResponse::new(
                     Cow::Borrowed(&request.id),
                     Cow::Owned(Value::Bool(true))

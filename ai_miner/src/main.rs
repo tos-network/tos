@@ -388,8 +388,8 @@ async fn register_ai_mining_commands(
         "register_miner",
         "Register as an AI miner",
         vec![
-            Arg::new("address", ArgType::String),
-            Arg::new("fee", ArgType::Number),
+            Arg::new_simple("address", ArgType::String),
+            Arg::new_simple("fee", ArgType::Number),
         ],
         CommandHandler::Async(async_handler!(register_miner)),
     ))?;
@@ -399,10 +399,10 @@ async fn register_ai_mining_commands(
         "publish_task",
         "Publish a new AI mining task",
         vec![
-            Arg::new("reward", ArgType::Number),
-            Arg::new("difficulty", ArgType::String),
-            Arg::new("deadline", ArgType::Number),
-            Arg::new("description", ArgType::String),
+            Arg::new_simple("reward", ArgType::Number),
+            Arg::new_simple("difficulty", ArgType::String),
+            Arg::new_simple("deadline", ArgType::Number),
+            Arg::new_simple("description", ArgType::String),
         ],
         CommandHandler::Async(async_handler!(publish_task)),
     ))?;
@@ -412,9 +412,9 @@ async fn register_ai_mining_commands(
         "submit_answer",
         "Submit an answer to a task",
         vec![
-            Arg::new("task_id", ArgType::String),
-            Arg::new("answer", ArgType::String),
-            Arg::new("stake", ArgType::Number),
+            Arg::new_simple("task_id", ArgType::String),
+            Arg::new_simple("answer", ArgType::String),
+            Arg::new_simple("stake", ArgType::Number),
         ],
         CommandHandler::Async(async_handler!(submit_answer)),
     ))?;
@@ -424,9 +424,9 @@ async fn register_ai_mining_commands(
         "validate_answer",
         "Validate a submitted answer",
         vec![
-            Arg::new("task_id", ArgType::String),
-            Arg::new("answer_id", ArgType::String),
-            Arg::new("score", ArgType::Number),
+            Arg::new_simple("task_id", ArgType::String),
+            Arg::new_simple("answer_id", ArgType::String),
+            Arg::new_simple("score", ArgType::Number),
         ],
         CommandHandler::Async(async_handler!(validate_answer)),
     ))?;
@@ -449,7 +449,7 @@ async fn register_ai_mining_commands(
     manager.add_command(Command::with_optional_arguments(
         "reputation",
         "Show miner reputation",
-        vec![Arg::new("address", ArgType::String)],
+        vec![Arg::new_simple("address", ArgType::String)],
         CommandHandler::Async(async_handler!(show_reputation)),
     ))?;
 
@@ -482,7 +482,7 @@ async fn register_ai_mining_commands(
     manager.add_command(Command::with_optional_arguments(
         "clear_storage",
         "Clear all storage data (use with caution)",
-        vec![Arg::new("confirm", ArgType::String)],
+        vec![Arg::new_simple("confirm", ArgType::String)],
         CommandHandler::Async(async_handler!(clear_storage)),
     ))?;
 
@@ -490,7 +490,7 @@ async fn register_ai_mining_commands(
     manager.add_command(Command::with_optional_arguments(
         "run_integration_tests",
         "Run comprehensive AI mining workflow tests",
-        vec![Arg::new("mock_mode", ArgType::String)],
+        vec![Arg::new_simple("mock_mode", ArgType::String)],
         CommandHandler::Async(async_handler!(run_integration_tests)),
     ))?;
 

@@ -295,50 +295,50 @@ async fn run_prompt<S: Storage>(
     command_manager.add_command(Command::with_optional_arguments(
         "list_miners",
         "List all miners connected",
-        vec![Arg::new("page", ArgType::Number)],
+        vec![Arg::new_simple("page", ArgType::Number)],
         CommandHandler::Async(async_handler!(list_miners::<S>)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "list_peers",
         "List all peers connected",
-        vec![Arg::new("page", ArgType::Number)],
+        vec![Arg::new_simple("page", ArgType::Number)],
         CommandHandler::Async(async_handler!(list_peers::<S>)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "list_assets",
         "List all assets registered on chain",
-        vec![Arg::new("page", ArgType::Number)],
+        vec![Arg::new_simple("page", ArgType::Number)],
         CommandHandler::Async(async_handler!(list_assets::<S>)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "show_peerlist",
         "Show the stored peerlist",
-        vec![Arg::new("page", ArgType::Number)],
+        vec![Arg::new_simple("page", ArgType::Number)],
         CommandHandler::Async(async_handler!(show_stored_peerlist::<S>)),
     ))?;
     command_manager.add_command(Command::with_arguments(
         "show_balance",
         "Show balance of an address",
         vec![],
-        vec![Arg::new("history", ArgType::Number)],
+        vec![Arg::new_simple("history", ArgType::Number)],
         CommandHandler::Async(async_handler!(show_balance::<S>)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "print_block",
         "Print block in json format",
-        vec![Arg::new("hash", ArgType::Hash)],
+        vec![Arg::new_simple("hash", ArgType::Hash)],
         CommandHandler::Async(async_handler!(print_block::<S>)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "dump_tx",
         "Dump TX in hexadecimal format",
-        vec![Arg::new("hash", ArgType::Hash)],
+        vec![Arg::new_simple("hash", ArgType::Hash)],
         CommandHandler::Async(async_handler!(dump_tx::<S>)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "dump_block",
         "Dump block in hexadecimal format",
-        vec![Arg::new("hash", ArgType::Hash)],
+        vec![Arg::new_simple("hash", ArgType::Hash)],
         CommandHandler::Async(async_handler!(dump_block::<S>)),
     ))?;
     command_manager.add_command(Command::new(
@@ -349,7 +349,7 @@ async fn run_prompt<S: Storage>(
     command_manager.add_command(Command::with_required_arguments(
         "pop_blocks",
         "Delete last N blocks",
-        vec![Arg::new("amount", ArgType::Number)],
+        vec![Arg::new_simple("amount", ArgType::Number)],
         CommandHandler::Async(async_handler!(pop_blocks::<S>)),
     ))?;
     command_manager.add_command(Command::new(
@@ -360,14 +360,14 @@ async fn run_prompt<S: Storage>(
     command_manager.add_command(Command::with_arguments(
         "add_tx",
         "Add a TX in hex format in mempool",
-        vec![Arg::new("hex", ArgType::String)],
-        vec![Arg::new("broadcast", ArgType::Bool)],
+        vec![Arg::new_simple("hex", ArgType::String)],
+        vec![Arg::new_simple("broadcast", ArgType::Bool)],
         CommandHandler::Async(async_handler!(add_tx::<S>)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "prune_chain",
         "Prune the chain until the specified topoheight",
-        vec![Arg::new("topoheight", ArgType::Number)],
+        vec![Arg::new_simple("topoheight", ArgType::Number)],
         CommandHandler::Async(async_handler!(prune_chain::<S>)),
     ))?;
     command_manager.add_command(Command::new(
@@ -378,33 +378,33 @@ async fn run_prompt<S: Storage>(
     command_manager.add_command(Command::with_optional_arguments(
         "blacklist",
         "View blacklist or add a peer ip in it",
-        vec![Arg::new("ip", ArgType::String)],
+        vec![Arg::new_simple("ip", ArgType::String)],
         CommandHandler::Async(async_handler!(blacklist::<S>)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "whitelist",
         "View whitelist or add a peer ip in it",
-        vec![Arg::new("ip", ArgType::String)],
+        vec![Arg::new_simple("ip", ArgType::String)],
         CommandHandler::Async(async_handler!(whitelist::<S>)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "verify_chain",
         "Check chain supply",
-        vec![Arg::new("topoheight", ArgType::Number)],
+        vec![Arg::new_simple("topoheight", ArgType::Number)],
         CommandHandler::Async(async_handler!(verify_chain::<S>)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "kick_peer",
         "Kick a peer using its ip:port",
-        vec![Arg::new("address", ArgType::String)],
+        vec![Arg::new_simple("address", ArgType::String)],
         CommandHandler::Async(async_handler!(kick_peer::<S>)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "temp_ban_address",
         "Temporarily ban an IP address with its formatted duration (ex: 1h)",
         vec![
-            Arg::new("address", ArgType::String),
-            Arg::new("duration", ArgType::String),
+            Arg::new_simple("address", ArgType::String),
+            Arg::new_simple("duration", ArgType::String),
         ],
         CommandHandler::Async(async_handler!(temp_ban_address::<S>)),
     ))?;
@@ -436,19 +436,19 @@ async fn run_prompt<S: Storage>(
     command_manager.add_command(Command::with_optional_arguments(
         "difficulty_dataset",
         "Create a dataset for difficulty from chain",
-        vec![Arg::new("output", ArgType::String)],
+        vec![Arg::new_simple("output", ArgType::String)],
         CommandHandler::Async(async_handler!(difficulty_dataset::<S>)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "mine_block",
         "Mine a block on testnet",
-        vec![Arg::new("count", ArgType::Number)],
+        vec![Arg::new_simple("count", ArgType::Number)],
         CommandHandler::Async(async_handler!(mine_block::<S>)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "add_peer",
         "Connect to a new peer using ip:port format",
-        vec![Arg::new("address", ArgType::String)],
+        vec![Arg::new_simple("address", ArgType::String)],
         CommandHandler::Async(async_handler!(add_peer::<S>)),
     ))?;
     command_manager.add_command(Command::new(
@@ -484,7 +484,7 @@ async fn run_prompt<S: Storage>(
     command_manager.add_command(Command::with_optional_arguments(
         "export_json_config",
         "Export the current config in JSON",
-        vec![Arg::new("filename", ArgType::String)],
+        vec![Arg::new_simple("filename", ArgType::String)],
         CommandHandler::Async(async_handler!(export_json_config::<S>)),
     ))?;
     command_manager.add_command(Command::new(
