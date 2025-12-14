@@ -1257,12 +1257,24 @@ async fn setup_wallet_command_manager(
         "invoke_contract",
         "Invoke a smart contract function",
         vec![
-            Arg::new("contract", ArgType::String, "Contract address or hash"),
-            Arg::new("entry_id", ArgType::String, "Entry point function ID"),
+            Arg::new(
+                "contract",
+                ArgType::String,
+                "Contract address (NOT the deployment TX hash)",
+            ),
+            Arg::new(
+                "entry_id",
+                ArgType::String,
+                "Entry point function ID (0-65535)",
+            ),
         ],
         vec![
             Arg::new("data", ArgType::String, "Call data in hex format"),
-            Arg::new("max_gas", ArgType::Number, "Maximum gas limit"),
+            Arg::new(
+                "max_gas",
+                ArgType::Number,
+                "Maximum gas limit (default: 1000000)",
+            ),
         ],
         CommandHandler::Async(async_handler!(invoke_contract)),
     ))?;
@@ -1274,9 +1286,21 @@ async fn setup_wallet_command_manager(
         vec![Arg::new(
             "contract",
             ArgType::String,
-            "Contract address or hash",
+            "Contract address (NOT the deployment TX hash)",
         )],
         CommandHandler::Async(async_handler!(get_contract_info)),
+    ))?;
+
+    // Get contract address from deployment TX hash
+    command_manager.add_command(Command::with_required_arguments(
+        "get_contract_address",
+        "Get the contract address from a deployment transaction hash",
+        vec![Arg::new(
+            "tx_hash",
+            ArgType::String,
+            "Deployment transaction hash",
+        )],
+        CommandHandler::Async(async_handler!(get_contract_address)),
     ))?;
 
     // Contract balance query command
@@ -4840,7 +4864,8 @@ async fn deploy_contract(
     ));
 
     // Create a TAKO module from the ELF bytecode and serialize it
-    let module = Module::from_bytecode(contract_bytes);
+    // Clone the bytes since we'll need the original for computing the contract address later
+    let module = Module::from_bytecode(contract_bytes.clone());
     let module_bytes = module.to_bytes();
     let module_hex = hex::encode(&module_bytes);
 
@@ -4888,6 +4913,19 @@ async fn deploy_contract(
     let hash = tx.hash();
     manager.message(format!("Contract deployment transaction created: {hash}"));
     manager.message(format!("Contract size: {} bytes", contract_size));
+
+    // Compute the deterministic contract address
+    // The address is computed as: blake3(0xff || deployer_pubkey || blake3(bytecode))
+    let contract_address = tos_common::crypto::compute_deterministic_contract_address(
+        tx.get_source(),
+        &contract_bytes,
+    );
+    manager.message(format!("Contract address: {}", contract_address));
+    manager.message("");
+    manager.message("IMPORTANT: Use the Contract Address (not the TX hash) for:");
+    manager.message("  - invoke_contract <contract_address> <entry_id>");
+    manager.message("  - get_contract_info <contract_address>");
+    manager.message("  - get_contract_balance <contract_address> <asset>");
 
     // Broadcast the transaction
     broadcast_tx(&wallet, manager, tx).await;
@@ -5097,6 +5135,87 @@ async fn get_contract_info(
                 }
                 Err(e) => {
                     manager.error(format!("Failed to get contract info: {e}"));
+                }
+            }
+        } else {
+            manager.error("Not connected to daemon. Use 'online_mode' to connect.");
+        }
+    }
+
+    #[cfg(not(feature = "network_handler"))]
+    {
+        let _ = wallet;
+        manager.error("Network handler feature is not enabled.");
+    }
+
+    Ok(())
+}
+
+// Get contract address from a deployment transaction hash
+async fn get_contract_address(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let prompt = manager.get_prompt();
+    let wallet = {
+        let context = manager.get_context().lock()?;
+        context.get::<Arc<Wallet>>()?.clone()
+    };
+
+    // Get deployment TX hash
+    let tx_hash_str = get_required_arg_with_example(
+        &mut args,
+        "tx_hash",
+        manager,
+        "get_contract_address <tx_hash>",
+        "get_contract_address abc123...def",
+        || async {
+            prompt
+                .read_input(
+                    prompt.colorize_string(Color::Green, "Deployment transaction hash: "),
+                    false,
+                )
+                .await
+        },
+    )
+    .await
+    .context("Error while reading transaction hash")?;
+
+    let tx_hash = match Hash::from_hex(&tx_hash_str) {
+        Ok(h) => h,
+        Err(e) => {
+            manager.error(format!("Invalid transaction hash: {e}"));
+            return Ok(());
+        }
+    };
+
+    manager.message(format!(
+        "Looking up contract address from TX {}...",
+        tx_hash
+    ));
+
+    // Get contract address from daemon
+    #[cfg(feature = "network_handler")]
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let api = handler.get_api();
+            match api.get_contract_address_from_tx(&tx_hash).await {
+                Ok(result) => {
+                    manager.message(format!("Deployment TX: {}", tx_hash));
+                    manager.message(format!("Contract Address: {}", result.contract_address));
+                    manager.message(format!("Deployer: {}", result.deployer));
+                    manager.message("");
+                    manager.message("NOTE: Use the Contract Address (not the TX hash) for:");
+                    manager.message("  - invoke_contract <contract_address> <entry_id>");
+                    manager.message("  - get_contract_info <contract_address>");
+                    manager.message("  - get_contract_balance <contract_address> <asset>");
+                }
+                Err(e) => {
+                    manager.error(format!("Failed to get contract address: {e}"));
+                    manager.message(
+                        "Make sure the transaction hash is from a DeployContract transaction.",
+                    );
                 }
             }
         } else {

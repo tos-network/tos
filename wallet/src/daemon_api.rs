@@ -510,6 +510,28 @@ impl DaemonAPI {
         Ok(module)
     }
 
+    /// Get contract address from a deployment transaction hash
+    ///
+    /// Contract address is NOT the same as the deployment TX hash.
+    /// This method computes the deterministic contract address from:
+    /// `blake3(0xff || deployer_pubkey || blake3(bytecode))`
+    pub async fn get_contract_address_from_tx(
+        &self,
+        tx_hash: &Hash,
+    ) -> Result<GetContractAddressFromTxResult> {
+        trace!("get_contract_address_from_tx");
+        let result = self
+            .client
+            .call_with(
+                "get_contract_address_from_tx",
+                &GetContractAddressFromTxParams {
+                    transaction: Cow::Borrowed(tx_hash),
+                },
+            )
+            .await?;
+        Ok(result)
+    }
+
     /// Get contract balance for a specific asset
     pub async fn get_contract_balance(&self, contract: &Hash, asset: &Hash) -> Result<u64> {
         trace!("get_contract_balance");
