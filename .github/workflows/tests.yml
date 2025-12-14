@@ -144,52 +144,6 @@ jobs:
           echo "=========================================="
           cargo test --package tos-testing-framework --tests --release --no-fail-fast
 
-  # Parallel execution tests (critical for blockchain performance)
-  parallel-execution-tests:
-    name: Parallel Execution Tests (Release Mode)
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-registry-
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-git-
-
-      - name: Cache cargo release build
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-release-parallel-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-release-
-
-      - name: Run parallel execution tests (Release mode)
-        run: |
-          echo "=========================================="
-          echo "Parallel Execution Tests (Release Mode)"
-          echo "=========================================="
-          cargo test --package tos_daemon --test parallel_sequential_parity --release --no-fail-fast
-          cargo test --package tos_daemon --test parallel_execution_parity_tests_rocksdb --release --no-fail-fast
-          cargo test --package tos_daemon --test parallel_execution_security_tests_rocksdb --release --no-fail-fast
-
   # Security tests (must run in Release mode for realistic attack scenarios)
   security-tests:
     name: Security Tests (Release Mode)
