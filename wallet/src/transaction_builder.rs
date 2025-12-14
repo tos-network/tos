@@ -164,11 +164,12 @@ impl TransactionBuilderState {
 
         storage.set_tx_cache(TxCache {
             reference: self.reference.clone(),
-            // NONCE FIX: Keep current nonce instead of incrementing
-            // The nonce will only be incremented after transaction confirmation
-            // during blockchain sync in network_handler.rs (process_block -> line 640, 733)
-            // This prevents nonce desync when transactions fail
-            nonce: self.nonce,
+            // Increment nonce for the next transaction to support batch mode
+            // When multiple transactions are built rapidly, each needs a unique nonce
+            // The confirmed nonce in storage is updated when TX is on-chain
+            // (see network_handler.rs process_block around line 806-814)
+            // If a TX fails, user should rescan or set_nonce to reset
+            nonce: self.nonce + 1,
             last_tx_hash_created: self.tx_hash_built.take(),
         });
 

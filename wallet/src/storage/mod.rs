@@ -845,7 +845,11 @@ impl EncryptedStorage {
             return Ok(balance.amount);
         }
 
-        let balance: Balance = self.load_from_disk(&self.balances, asset.as_bytes())?;
+        // Use load_from_disk_optional to handle missing balance data gracefully
+        // Return 0 balance if no balance exists for this asset
+        let balance: Balance = self
+            .load_from_disk_optional(&self.balances, asset.as_bytes())?
+            .unwrap_or_else(|| Balance::new(0));
         let plaintext_balance = balance.amount;
         cache.put(asset.clone(), balance);
 
@@ -862,7 +866,11 @@ impl EncryptedStorage {
             return Ok(balance.clone());
         }
 
-        let balance: Balance = self.load_from_disk(&self.balances, asset.as_bytes())?;
+        // Use load_from_disk_optional to handle missing balance data gracefully
+        // Return 0 balance if no balance exists for this asset
+        let balance: Balance = self
+            .load_from_disk_optional(&self.balances, asset.as_bytes())?
+            .unwrap_or_else(|| Balance::new(0));
         cache.put(asset.clone(), balance.clone());
 
         Ok(balance)
