@@ -1120,18 +1120,42 @@ impl Wallet {
 
                 Balance::new(balance_amount)
             } else {
-                // Normal mode: Use local storage
-                if !storage.has_balance_for(asset).await? {
+                // Normal mode: Use local storage, with fallback to daemon if not found (Issue #5 fix)
+                if storage.has_balance_for(asset).await? {
+                    let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(asset).await?;
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Using balance (unconfirmed: {}) for asset {} with amount {}",
+                            unconfirmed, asset, balance.amount
+                        );
+                    }
+                    balance
+                } else if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
+                    // Fallback: Query balance from daemon when not in local storage (Issue #5)
+                    // This enables batch mode transfers even when wallet hasn't synced
+                    let address = self.get_address();
+                    let balance_result = network_handler
+                        .get_api()
+                        .get_balance(&address, asset)
+                        .await
+                        .map_err(|e| {
+                            WalletError::Any(anyhow::anyhow!(
+                                "Balance not found locally and failed to query from daemon: {}",
+                                e
+                            ))
+                        })?;
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Fallback: queried balance from daemon for asset {} = {}",
+                            asset, balance_result.balance
+                        );
+                    }
+
+                    Balance::new(balance_result.balance)
+                } else {
                     return Err(WalletError::BalanceNotFound(asset.clone()));
                 }
-                let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(asset).await?;
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Using balance (unconfirmed: {}) for asset {} with amount {}",
-                        unconfirmed, asset, balance.amount
-                    );
-                }
-                balance
             };
 
             #[cfg(not(feature = "network_handler"))]

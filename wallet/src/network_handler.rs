@@ -22,7 +22,8 @@ use tos_common::{
         wallet::BalanceChanged,
         RPCTransactionType,
     },
-    config::TOS_ASSET,
+    asset::AssetData,
+    config::{COIN_DECIMALS, TOS_ASSET},
     crypto::{Address, Hash},
     tokio::{
         select, spawn_task,
@@ -1434,6 +1435,33 @@ impl NetworkHandler {
     // we verify the last valid topoheight where changes happened
     async fn start_syncing(self: &Arc<Self>) -> Result<(), Error> {
         debug!("Starting syncing");
+
+        // Ensure TOS asset is tracked for wallets created before auto-tracking was added (Issue #5 fix)
+        // This allows "transfer TOS ..." to work even on older wallets
+        {
+            let storage = self.wallet.get_storage().read().await;
+            if storage.get_asset(&TOS_ASSET).await.is_err() {
+                drop(storage); // Release read lock before acquiring write lock
+                debug!("TOS asset not found in storage, adding it");
+                let mut storage = self.wallet.get_storage().write().await;
+                storage
+                    .add_asset(
+                        &TOS_ASSET,
+                        AssetData::new(
+                            COIN_DECIMALS,
+                            "TOS".to_string(),
+                            "TOS".to_string(),
+                            None, // No max supply
+                            None, // No owner
+                        ),
+                    )
+                    .await?;
+                storage
+                    .set_asset_name(&TOS_ASSET, "TOS".to_string())
+                    .await?;
+            }
+        }
+
         // Generate only one time the address
         let address = self.wallet.get_address();
         // Do a first sync to be up-to-date with the daemon

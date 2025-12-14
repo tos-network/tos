@@ -736,6 +736,36 @@ async fn setup_wallet_command_manager(
     wallet: Arc<Wallet>,
     command_manager: &CommandManager,
 ) -> Result<(), CommandError> {
+    // Ensure TOS asset is tracked for wallets created before auto-tracking was added (Issue #5 fix)
+    // This allows "transfer TOS ..." to work in batch mode even on older wallets
+    {
+        let storage = wallet.get_storage().read().await;
+        if storage.get_asset(&TOS_ASSET).await.is_err() {
+            drop(storage); // Release read lock before acquiring write lock
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!("TOS asset not found in storage, adding it");
+            }
+            let mut storage = wallet.get_storage().write().await;
+            storage
+                .add_asset(
+                    &TOS_ASSET,
+                    tos_common::asset::AssetData::new(
+                        tos_common::config::COIN_DECIMALS,
+                        "TOS".to_string(),
+                        "TOS".to_string(),
+                        None, // No max supply
+                        None, // No owner
+                    ),
+                )
+                .await
+                .map_err(CommandError::Any)?;
+            storage
+                .set_asset_name(&TOS_ASSET, "TOS".to_string())
+                .await
+                .map_err(CommandError::Any)?;
+        }
+    }
+
     // Delete commands for opening a wallet
     command_manager.remove_command("open")?;
     command_manager.remove_command("recover_seed")?;
@@ -1711,7 +1741,23 @@ async fn set_asset_name(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    let asset = args.get_value("asset")?.to_hash()?;
+    let asset = {
+        let asset_str = args.get_value("asset")?.to_string_value()?;
+        if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
+            TOS_ASSET
+        } else if asset_str.len() == HASH_SIZE * 2 {
+            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
+        } else {
+            let storage = wallet.get_storage().read().await;
+            storage
+                .get_asset_by_name(&asset_str)
+                .await?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
+                    asset_str
+                ))?
+        }
+    };
     let name = if args.has_argument("name") {
         args.get_value("name")?.to_string_value()?
     } else if manager.is_batch_mode() {
@@ -1903,7 +1949,21 @@ async fn track_asset(
     let prompt = manager.get_prompt();
 
     let asset = if args.has_argument("asset") {
-        args.get_value("asset")?.to_hash()?
+        let asset_str = args.get_value("asset")?.to_string_value()?;
+        if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
+            TOS_ASSET
+        } else if asset_str.len() == HASH_SIZE * 2 {
+            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
+        } else {
+            let storage = wallet.get_storage().read().await;
+            storage
+                .get_asset_by_name(&asset_str)
+                .await?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
+                    asset_str
+                ))?
+        }
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("asset".to_string()));
     } else {
@@ -1936,7 +1996,21 @@ async fn untrack_asset(
     let prompt = manager.get_prompt();
 
     let asset = if args.has_argument("asset") {
-        args.get_value("asset")?.to_hash()?
+        let asset_str = args.get_value("asset")?.to_string_value()?;
+        if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
+            TOS_ASSET
+        } else if asset_str.len() == HASH_SIZE * 2 {
+            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
+        } else {
+            let storage = wallet.get_storage().read().await;
+            storage
+                .get_asset_by_name(&asset_str)
+                .await?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
+                    asset_str
+                ))?
+        }
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("asset".to_string()));
     } else {
@@ -2128,7 +2202,25 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     let address = Address::from_string(&str_address).context("Invalid address")?;
 
     let asset = if args.has_argument("asset") {
-        args.get_value("asset")?.to_hash()?
+        let asset_str = args.get_value("asset")?.to_string_value()?;
+        // Handle empty or "TOS" as native asset (restored from backup)
+        if asset_str.is_empty() || asset_str.trim().is_empty() {
+            TOS_ASSET
+        } else if asset_str.to_uppercase() == "TOS" {
+            // Handle "TOS" as asset name without requiring track_asset
+            TOS_ASSET
+        } else if asset_str.len() == HASH_SIZE * 2 {
+            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
+        } else {
+            let storage = wallet.get_storage().read().await;
+            storage
+                .get_asset_by_name(&asset_str)
+                .await?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS' for native token.",
+                    asset_str
+                ))?
+        }
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("asset".to_string()));
     } else {
@@ -2351,7 +2443,21 @@ async fn transfer_all(
     let address = Address::from_string(&str_address).context("Invalid address")?;
 
     let asset = if args.has_argument("asset") {
-        args.get_value("asset")?.to_hash()?
+        let asset_str = args.get_value("asset")?.to_string_value()?;
+        if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
+            TOS_ASSET
+        } else if asset_str.len() == HASH_SIZE * 2 {
+            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
+        } else {
+            let storage = wallet.get_storage().read().await;
+            storage
+                .get_asset_by_name(&asset_str)
+                .await?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
+                    asset_str
+                ))?
+        }
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("asset".to_string()));
     } else {
@@ -2540,7 +2646,21 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
     let wallet: &Arc<Wallet> = context.get()?;
 
     let asset = if args.has_argument("asset") {
-        args.get_value("asset")?.to_hash()?
+        let asset_str = args.get_value("asset")?.to_string_value()?;
+        if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
+            TOS_ASSET
+        } else if asset_str.len() == HASH_SIZE * 2 {
+            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
+        } else {
+            let storage = wallet.get_storage().read().await;
+            storage
+                .get_asset_by_name(&asset_str)
+                .await?
+                .context(format!(
+                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
+                    asset_str
+                ))?
+        }
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("asset".to_string()));
     } else {

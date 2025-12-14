@@ -1373,6 +1373,10 @@ impl Transaction {
     }
 
     /// Assume the tx is valid, apply it to `state`. May panic if a ciphertext is ill-formed.
+    ///
+    /// BLOCKDAG alignment: This function now performs balance deduction inline,
+    /// matching the original BLOCKDAG architecture where balance is deducted
+    /// before calling add_sender_output.
     pub async fn apply_without_verify<
         'a,
         P: ContractProvider + Send,
@@ -1386,25 +1390,128 @@ impl Transaction {
         // Balance simplification: No decompression needed for plaintext balances
         // Private deposits are not supported, only Public deposits with plain u64 amounts
 
-        // This section previously processed source commitments for each asset
-        // With plaintext balances, no commitments to process
+        // BLOCKDAG alignment: Calculate spending per asset and deduct from sender balance
+        // This matches BLOCKDAG's approach where balance deduction happens here,
+        // before calling add_sender_output.
         //
-        // Previous functionality:
+        // Original BLOCKDAG code (tos_common/src/transaction/verify/mod.rs:1321-1342):
         // for commitment in &self.source_commitments {
         //     let asset = commitment.get_asset();
         //     let current_source_balance = state.get_sender_balance(...).await?;
-        //     let output = self.get_sender_output_ct(asset, &transfers_decompressed, &deposits_decompressed)?;
+        //     let output = self.get_sender_output_ct(...)?;
         //     *current_source_balance -= &output;
         //     state.add_sender_output(&self.source, asset, output).await?;
         // }
-        //
-        // New plaintext approach (implemented in apply()):
-        // For each asset used in transaction:
-        // 1. Get current sender balance (plain u64) from state
-        // 2. Calculate total spent = sum(transfer.amount) + sum(deposit.amount)
-        // 3. Verify balance >= total spent (done elsewhere in verification)
-        // 4. Update state: new_balance = balance - total_spent
-        trace!("Skipping source commitment processing (plaintext balances)");
+
+        // Calculate spending per asset (same logic as pre_verify)
+        let mut spending_per_asset: IndexMap<&'a Hash, u64> = IndexMap::new();
+
+        match &self.data {
+            TransactionType::Transfers(transfers) => {
+                for transfer in transfers {
+                    let asset = transfer.get_asset();
+                    let amount = transfer.get_amount();
+                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    *current = current
+                        .checked_add(amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            }
+            TransactionType::Burn(payload) => {
+                let current = spending_per_asset.entry(&payload.asset).or_insert(0);
+                *current = current
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::InvokeContract(payload) => {
+                for (asset, deposit) in &payload.deposits {
+                    let amount = deposit
+                        .get_amount()
+                        .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    *current = current
+                        .checked_add(amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+                // Add max_gas to TOS spending
+                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                *current = current
+                    .checked_add(payload.max_gas)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DeployContract(payload) => {
+                // Add BURN_PER_CONTRACT to TOS spending
+                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                *current = current
+                    .checked_add(BURN_PER_CONTRACT)
+                    .ok_or(VerificationError::Overflow)?;
+
+                if let Some(invoke) = &payload.invoke {
+                    for (asset, deposit) in &invoke.deposits {
+                        let amount = deposit
+                            .get_amount()
+                            .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+                        let current = spending_per_asset.entry(asset).or_insert(0);
+                        *current = current
+                            .checked_add(amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    // Add max_gas to TOS spending
+                    let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                    *current = current
+                        .checked_add(invoke.max_gas)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            }
+            TransactionType::Energy(payload) => {
+                match payload {
+                    EnergyPayload::FreezeTos { amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    EnergyPayload::UnfreezeTos { .. } => {
+                        // Unfreeze doesn't spend, it releases frozen funds
+                    }
+                }
+            }
+            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+                // No asset spending for these types
+            }
+        };
+
+        // Add fee to TOS spending (unless using energy fee)
+        if !self.get_fee_type().is_energy() {
+            let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+            *current = current
+                .checked_add(self.fee)
+                .ok_or(VerificationError::Overflow)?;
+        }
+
+        // Deduct spending from sender balance
+        // This matches BLOCKDAG's behavior where balance deduction happens before apply()
+        // NOTE: We do NOT call add_sender_output() here because apply() already does that.
+        // The apply() function tracks outputs for final balance calculation.
+        for (asset, output_sum) in &spending_per_asset {
+            let current_balance = state
+                .get_sender_balance(&self.source, asset, &self.reference)
+                .await
+                .map_err(VerificationError::State)?;
+
+            // Deduct spending from balance (BLOCKDAG: *current_source_balance -= &output)
+            *current_balance = current_balance
+                .checked_sub(*output_sum)
+                .ok_or(VerificationError::Overflow)?;
+
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "apply_without_verify: deducted {} from sender balance for asset {}",
+                    output_sum,
+                    asset
+                );
+            }
+        }
 
         self.apply(tx_hash, state).await
     }
@@ -1412,6 +1519,9 @@ impl Transaction {
     /// Verify only that the final sender balance is the expected one for each commitment
     /// Then apply ciphertexts to the state
     /// Checks done are: commitment eq proofs only
+    ///
+    /// BLOCKDAG alignment: With plaintext balances, no proof verification is needed.
+    /// This function delegates to apply_without_verify which handles balance deduction.
     pub async fn apply_with_partial_verify<
         'a,
         P: ContractProvider + Send,
@@ -1428,6 +1538,8 @@ impl Transaction {
         // Private deposits are not supported, only Public deposits with plain u64 amounts
         trace!("Partial verify with plaintext balances - no proof verification needed");
 
-        self.apply(tx_hash, state).await
+        // Delegate to apply_without_verify which handles balance deduction
+        // (BLOCKDAG alignment: both functions now perform inline balance deduction)
+        self.apply_without_verify(tx_hash, state).await
     }
 }

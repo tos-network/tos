@@ -638,7 +638,12 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
 
                             new_version
                         } else {
-                            // Version was based on final balance, all good, nothing to do
+                            // BLOCKDAG alignment: Balance deduction now happens in apply_without_verify,
+                            // so version.balance already has the correct deducted balance.
+                            // We just need to set the balance type for storage.
+                            //
+                            // Original BLOCKDAG behavior: apply_without_verify subtracts output before
+                            // calling add_sender_output, so the version stored here is already correct.
                             version.set_balance_type(BalanceType::Output);
                             version
                         };
