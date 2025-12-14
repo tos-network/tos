@@ -822,7 +822,9 @@ async fn submit_block<S: Storage>(
     let mut header = BlockHeader::from_hex(&params.block_template)?;
     if let Some(work) = params.miner_work {
         let work = MinerWork::from_hex(&work)?;
-        header.apply_miner_work(work);
+        header
+            .apply_miner_work(work)
+            .map_err(|e| InternalRpcError::InvalidParams(e))?;
     }
 
     let blockchain: &Arc<Blockchain<S>> = context.get()?;

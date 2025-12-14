@@ -107,7 +107,11 @@ impl<F: Future> Stream for Scheduler<F> {
         for state in this.states.iter_mut().take(n.unwrap_or(len)) {
             match state {
                 State::New(fut) => {
-                    let mut fut = fut.take().expect("new future available");
+                    // Take the future; should always be Some for New state
+                    // Skip this entry if already taken (defensive check)
+                    let Some(mut fut) = fut.take() else {
+                        continue;
+                    };
 
                     // Try poll it, if its already ready, just mark it has such
                     // otherwise, we mark it has pending

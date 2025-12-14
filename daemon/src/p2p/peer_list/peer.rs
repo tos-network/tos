@@ -4,9 +4,10 @@ use super::{
 };
 use crate::{
     config::{
-        CHAIN_SYNC_TIMEOUT_SECS, PEER_BLOCK_CACHE_SIZE, PEER_FAIL_TIME_RESET,
-        PEER_OBJECTS_CONCURRENCY, PEER_PACKET_CHANNEL_SIZE, PEER_PEERS_CACHE_SIZE,
-        PEER_TIMEOUT_BOOTSTRAP_STEP, PEER_TIMEOUT_REQUEST_OBJECT, PEER_TX_CACHE_SIZE,
+        CHAIN_SYNC_TIMEOUT_SECS, PEER_BLOCK_CACHE_SIZE_NONZERO, PEER_FAIL_TIME_RESET,
+        PEER_OBJECTS_CONCURRENCY, PEER_OBJECTS_CONCURRENCY_NONZERO, PEER_PACKET_CHANNEL_SIZE,
+        PEER_PEERS_CACHE_SIZE_NONZERO, PEER_TIMEOUT_BOOTSTRAP_STEP, PEER_TIMEOUT_REQUEST_OBJECT,
+        PEER_TX_CACHE_SIZE_NONZERO,
     },
     p2p::packet::PacketWrapper,
 };
@@ -21,7 +22,6 @@ use std::{
     fmt::{Display, Error, Formatter},
     hash::{Hash as StdHash, Hasher},
     net::{IpAddr, SocketAddr},
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
         Arc,
@@ -183,26 +183,14 @@ impl Peer {
                 fail_count: AtomicU8::new(0),
                 last_chain_sync: AtomicU64::new(0),
                 peer_list,
-                objects_requested: Mutex::new(LruCache::new(
-                    NonZeroUsize::new(PEER_OBJECTS_CONCURRENCY)
-                        .expect("PEER_OBJECTS_CONCURRENCY must be non-zero"),
-                )),
-                peers: Mutex::new(LruCache::new(
-                    NonZeroUsize::new(PEER_PEERS_CACHE_SIZE)
-                        .expect("PEER_PEERS_CACHE_SIZE must be non-zero"),
-                )),
+                objects_requested: Mutex::new(LruCache::new(PEER_OBJECTS_CONCURRENCY_NONZERO)),
+                peers: Mutex::new(LruCache::new(PEER_PEERS_CACHE_SIZE_NONZERO)),
                 last_peer_list: AtomicU64::new(0),
                 last_ping: AtomicU64::new(0),
                 last_ping_sent: AtomicU64::new(0),
                 cumulative_difficulty: Mutex::new(cumulative_difficulty),
-                txs_cache: Mutex::new(LruCache::new(
-                    NonZeroUsize::new(PEER_TX_CACHE_SIZE)
-                        .expect("PEER_TX_CACHE_SIZE must be non-zero"),
-                )),
-                blocks_propagation: Mutex::new(LruCache::new(
-                    NonZeroUsize::new(PEER_BLOCK_CACHE_SIZE)
-                        .expect("PEER_BLOCK_CACHE_SIZE must be non-zero"),
-                )),
+                txs_cache: Mutex::new(LruCache::new(PEER_TX_CACHE_SIZE_NONZERO)),
+                blocks_propagation: Mutex::new(LruCache::new(PEER_BLOCK_CACHE_SIZE_NONZERO)),
                 last_inventory: AtomicU64::new(0),
                 requested_inventory: AtomicBool::new(false),
                 pruned_topoheight: AtomicU64::new(pruned_topoheight.unwrap_or(0)),

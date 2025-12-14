@@ -163,7 +163,7 @@ impl AIMiningTask {
         self.submitted_answers
             .iter()
             .filter(|answer| answer.average_score.is_some())
-            .max_by_key(|answer| answer.average_score.unwrap())
+            .max_by_key(|answer| answer.average_score.unwrap_or(0))
     }
 
     /// Mark task as completed if deadline has passed or best answer found

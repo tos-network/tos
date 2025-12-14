@@ -133,9 +133,7 @@ impl ContractDataProvider for RocksStorage {
                 return Ok(Some(topo));
             }
 
-            prev_topo = self
-                .load_from_disk(Column::VersionedContractsData, &versioned_key)
-                .unwrap();
+            prev_topo = self.load_from_disk(Column::VersionedContractsData, &versioned_key)?;
         }
 
         Ok(None)

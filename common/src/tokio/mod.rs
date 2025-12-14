@@ -191,7 +191,7 @@ where
                 .map_err(|e| anyhow::anyhow!("Failed to spawn blocking task: {e}"))
         } else {
             trace!("simulated spawn blocking");
-            return async move {
+            async move {
                 // We can use the block_in_place_safe function to ensure we are blocking correctly
                 let res = block_in_place_safe(f);
                 Ok(res)

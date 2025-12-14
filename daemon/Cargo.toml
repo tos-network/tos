@@ -79,9 +79,22 @@ tempdir = "*"
 criterion = "0.6.0"
 rayon = "1.8"
 sysinfo = "0.32"
+tos-testing-framework = { path = "../testing-framework" }
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 libsecp256k1 = { version = "0.7", features = ["hmac"] }
 sha3 = "0.10"
 rand = "0.8"
 proptest = "1.4"
 arbitrary = { version = "1.3", features = ["derive"] }
+
+[[bin]]
+name = "tps_benchmark"
+path = "benches/transaction_throughput.rs"
+
+[[bench]]
+name = "tps"
+harness = false
+
+[[bench]]
+name = "security_benchmarks"
+harness = false

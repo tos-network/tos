@@ -83,12 +83,16 @@ impl BlockHeader {
     }
 
     // Apply a MinerWork to this block header to match the POW hash
-    pub fn apply_miner_work(&mut self, work: MinerWork) {
+    // Returns error if MinerWork does not contain a miner public key
+    pub fn apply_miner_work(&mut self, work: MinerWork) -> Result<(), &'static str> {
         let (_, timestamp, nonce, miner, extra_nonce) = work.take();
-        self.miner = miner.unwrap().into_owned();
+        self.miner = miner
+            .ok_or("MinerWork missing miner public key")?
+            .into_owned();
         self.timestamp = timestamp;
         self.nonce = nonce;
         self.extra_nonce = extra_nonce;
+        Ok(())
     }
 
     pub fn get_version(&self) -> BlockVersion {

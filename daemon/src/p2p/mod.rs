@@ -45,7 +45,6 @@ use std::{
     collections::HashSet,
     io,
     net::{IpAddr, SocketAddr},
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
@@ -75,6 +74,10 @@ use tos_common::{
 };
 
 pub const TRANSACTIONS_CHANNEL_CAPACITY: usize = 128;
+
+// SAFETY: TRANSACTIONS_CHANNEL_CAPACITY is a compile-time constant set to 128 (non-zero)
+const TRANSACTIONS_CAPACITY_NONZERO: std::num::NonZeroUsize =
+    unsafe { std::num::NonZeroUsize::new_unchecked(TRANSACTIONS_CHANNEL_CAPACITY) };
 
 // P2pServer is a fully async TCP server
 // Each connection will block on a data to send or to receive
@@ -260,14 +263,10 @@ impl<S: Storage> P2pServer<S> {
             is_running: AtomicBool::new(true),
             peer_sender,
             blocks_propagation_queue: RwLock::new(LruCache::new(
-                NonZeroUsize::new(STABLE_LIMIT as usize * TIPS_LIMIT)
-                    .expect("non-zero blocks propagation queue"),
+                BLOCKS_PROPAGATION_CAPACITY_NONZERO,
             )),
             blocks_processor,
-            txs_propagation_queue: RwLock::new(LruCache::new(
-                NonZeroUsize::new(TRANSACTIONS_CHANNEL_CAPACITY)
-                    .expect("non-zero transactions propagation queue"),
-            )),
+            txs_propagation_queue: RwLock::new(LruCache::new(TRANSACTIONS_CAPACITY_NONZERO)),
             txs_processor,
             allow_fast_sync_mode,
             allow_boost_sync_mode,
@@ -1406,10 +1405,9 @@ impl<S: Storage> P2pServer<S> {
                                         "No peer found in peerlist, selecting a random seed node"
                                     );
                                     let seed_nodes = get_seed_nodes(self.blockchain.get_network());
+                                    // Filter out any seed nodes that fail to parse (should not happen with valid config)
                                     self.select_random_socket_address(
-                                        seed_nodes
-                                            .iter()
-                                            .map(|v| v.parse().expect("seed node socket address")),
+                                        seed_nodes.iter().filter_map(|v| v.parse().ok()),
                                     )
                                     .await
                                     .map(|v| (v, true))

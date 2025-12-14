@@ -62,6 +62,11 @@ const ENERGY_RESOURCE: &[u8] = b"ENERGY";
 // Default cache size
 const DEFAULT_CACHE_SIZE: usize = 100;
 
+// Compile-time NonZeroUsize constant for LruCache initialization
+// SAFETY: DEFAULT_CACHE_SIZE is a compile-time constant set to 100 (non-zero)
+const DEFAULT_CACHE_SIZE_NONZERO: NonZeroUsize =
+    unsafe { NonZeroUsize::new_unchecked(DEFAULT_CACHE_SIZE) };
+
 // Use this struct to get access to non-encrypted keys (such as salt for KDF and encrypted master key)
 pub struct Storage {
     db: Db,
@@ -134,14 +139,10 @@ impl EncryptedStorage {
             changes_topoheight: inner.db.open_tree(cipher.hash_key("changes_topoheight"))?,
             cipher,
             inner,
-            balances_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE).unwrap(),
-            )),
+            balances_cache: Mutex::new(LruCache::new(DEFAULT_CACHE_SIZE_NONZERO)),
             unconfirmed_balances_cache: Mutex::new(HashMap::new()),
             tx_cache: None,
-            assets_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE).unwrap(),
-            )),
+            assets_cache: Mutex::new(LruCache::new(DEFAULT_CACHE_SIZE_NONZERO)),
             synced_topoheight: None,
             last_coinbase_reward_topoheight: None,
             tx_version: TxVersion::T0,

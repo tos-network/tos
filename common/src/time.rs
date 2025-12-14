@@ -12,9 +12,9 @@ pub type TimestampSeconds = u64;
 pub fn get_current_time() -> Duration {
     let start = SystemTime::now();
 
-    start
-        .duration_since(UNIX_EPOCH)
-        .expect("Incorrect time returned from get_current_time")
+    // Returns Duration::ZERO if system time is before UNIX_EPOCH (1970)
+    // This should never happen on a properly configured system
+    start.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO)
 }
 
 // return timestamp in seconds

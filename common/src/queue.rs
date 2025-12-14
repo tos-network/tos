@@ -52,7 +52,9 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
         let key = self.order.pop_front()?;
         let value = self.keys.remove(&key)?;
 
-        let key = Arc::try_unwrap(key).expect("Failed to unwrap Arc");
+        // After removing from both keys and order, we should be the only owner
+        // If not, return None as this indicates an unexpected state
+        let key = Arc::try_unwrap(key).ok()?;
         Some((key, value))
     }
 
@@ -71,7 +73,9 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
         let value = self.keys.remove(key)?;
         let key = self.remove_order_internal(key)?;
 
-        let key = Arc::try_unwrap(key).expect("Failed to unwrap Arc");
+        // After removing from both keys and order, we should be the only owner
+        // If not, return None as this indicates an unexpected state
+        let key = Arc::try_unwrap(key).ok()?;
         Some((key, value))
     }
 
@@ -152,7 +156,9 @@ impl<K: Hash + Eq + Debug, V> Queue<K, V> {
             if f(&k, &v) {
                 self.remove_order_internal(&k)?;
 
-                let key = Arc::try_unwrap(k).expect("Failed to unwrap Arc");
+                // After removing from order, we should be the only owner
+                // If not, skip this entry
+                let key = Arc::try_unwrap(k).ok()?;
                 Some((key, v))
             } else {
                 self.keys.insert(k, v);

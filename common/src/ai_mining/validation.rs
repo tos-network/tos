@@ -347,7 +347,11 @@ impl<'a> AIMiningValidator<'a> {
         );
 
         // Add answer to task
-        let task = self.state.get_task_mut(task_id).unwrap();
+        // Task existence was verified earlier in this function
+        let task = self
+            .state
+            .get_task_mut(task_id)
+            .ok_or_else(|| AIMiningError::TaskNotFound(task_id.clone()))?;
         task.add_answer(answer)?;
 
         // Update miner statistics
@@ -470,12 +474,18 @@ impl<'a> AIMiningValidator<'a> {
             validated_at: self.block_height,
         };
 
-        let task = self.state.get_task_mut(task_id).unwrap();
+        // Task and answer existence were verified earlier in this function
+        let task = self
+            .state
+            .get_task_mut(task_id)
+            .ok_or_else(|| AIMiningError::TaskNotFound(task_id.clone()))?;
         let answer = task
             .submitted_answers
             .iter_mut()
             .find(|a| a.answer_id == *answer_id)
-            .unwrap();
+            .ok_or_else(|| {
+                AIMiningError::ValidationFailed("Answer not found in task".to_string())
+            })?;
 
         answer.add_validation(validation)?;
 

@@ -110,7 +110,8 @@ where
     let tips_len = tips.len();
     match tips_len {
         0 => Err(BlockchainError::ExpectedTips),
-        1 => Ok(tips.into_iter().next().unwrap()),
+        // Single tip case: iterator must yield exactly one element
+        1 => tips.into_iter().next().ok_or(BlockchainError::ExpectedTips),
         _ => {
             let mut highest_cumulative_difficulty = CumulativeDifficulty::zero();
             let mut selected_tip = None;
@@ -143,7 +144,11 @@ where
     match tips_len {
         0 => Err(BlockchainError::ExpectedTips),
         1 => {
-            let hash = tips.into_iter().next().unwrap();
+            // Single tip case: iterator must yield exactly one element
+            let hash = tips
+                .into_iter()
+                .next()
+                .ok_or(BlockchainError::ExpectedTips)?;
             let timestamp = provider.get_timestamp_for_block_hash(hash).await?;
             Ok((hash, timestamp))
         }

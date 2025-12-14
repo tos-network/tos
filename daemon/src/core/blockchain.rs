@@ -1,6 +1,6 @@
 use crate::{
     config::{
-        get_genesis_block_hash, get_hex_genesis_block, DEFAULT_CACHE_SIZE, DEV_FEES,
+        get_genesis_block_hash, get_hex_genesis_block, DEFAULT_CACHE_SIZE_NONZERO, DEV_FEES,
         DEV_PUBLIC_KEY, EMISSION_SPEED_FACTOR, GENESIS_BLOCK_DIFFICULTY, MILLIS_PER_SECOND,
         PRUNE_SAFETY_LIMIT, SIDE_BLOCK_REWARD_MAX_BLOCKS, SIDE_BLOCK_REWARD_MIN_PERCENT,
         SIDE_BLOCK_REWARD_PERCENT, STABLE_LIMIT, TIMESTAMP_IN_FUTURE_LIMIT,
@@ -38,7 +38,6 @@ use std::{
     borrow::Cow,
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     net::SocketAddr,
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -258,22 +257,10 @@ impl<S: Storage> Blockchain<S> {
             skip_pow_verification: config.skip_pow_verification || config.simulator.is_some(),
             simulator: config.simulator,
             network,
-            tip_base_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE)
-                    .expect("Default cache size for tip base must be above 0"),
-            )),
-            tip_work_score_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE)
-                    .expect("Default cache size for tip work score must be above 0"),
-            )),
-            common_base_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE)
-                    .expect("Default cache size for common base must be above 0"),
-            )),
-            full_order_cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(DEFAULT_CACHE_SIZE)
-                    .expect("Default cache size for full order must be above 0"),
-            )),
+            tip_base_cache: Mutex::new(LruCache::new(DEFAULT_CACHE_SIZE_NONZERO)),
+            tip_work_score_cache: Mutex::new(LruCache::new(DEFAULT_CACHE_SIZE_NONZERO)),
+            common_base_cache: Mutex::new(LruCache::new(DEFAULT_CACHE_SIZE_NONZERO)),
+            full_order_cache: Mutex::new(LruCache::new(DEFAULT_CACHE_SIZE_NONZERO)),
             auto_prune_keep_n_blocks: config.auto_prune_keep_n_blocks,
             skip_block_template_txs_verification: config.skip_block_template_txs_verification,
             checkpoints: config.checkpoints.into_iter().collect(),

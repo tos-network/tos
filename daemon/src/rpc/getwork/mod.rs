@@ -1,7 +1,7 @@
 mod miner;
 
 use crate::{
-    config::{DEV_PUBLIC_KEY, STABLE_LIMIT},
+    config::{BLOCKS_PROPAGATION_CAPACITY_NONZERO, DEV_PUBLIC_KEY},
     core::{
         blockchain::{Blockchain, BroadcastOption},
         hard_fork::get_pow_algorithm_for_version,
@@ -19,7 +19,6 @@ use serde::Serialize;
 use std::{
     borrow::Cow,
     collections::HashMap,
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
@@ -29,7 +28,6 @@ use std::{
 use tos_common::{
     api::daemon::{GetBlockTemplateResult, GetMinerWorkResult, NotifyEvent, SubmitMinerWorkParams},
     block::{BlockHeader, MinerWork},
-    config::TIPS_LIMIT,
     crypto::{Address, Hash, Hashable, PublicKey},
     difficulty::Difficulty,
     immutable::Immutable,
@@ -93,10 +91,7 @@ impl<S: Storage> GetWorkServer<S> {
         let server = Arc::new(Self {
             miners: Mutex::new(HashMap::new()),
             blockchain,
-            mining_jobs: Mutex::new(LruCache::new(
-                NonZeroUsize::new(STABLE_LIMIT as usize * TIPS_LIMIT)
-                    .expect("Non zero mining jobs cache"),
-            )),
+            mining_jobs: Mutex::new(LruCache::new(BLOCKS_PROPAGATION_CAPACITY_NONZERO)),
             last_header_hash: Mutex::new(None),
             last_notify: AtomicU64::new(0),
             is_job_dirty: AtomicBool::new(false),
@@ -394,7 +389,9 @@ impl<S: Storage> GetWorkServer<S> {
             if let Some((header, _)) = mining_jobs.peek(job.get_header_work_hash()) {
                 // job is found in cache, clone it and put miner data inside
                 miner_header = header.clone();
-                miner_header.apply_miner_work(job);
+                miner_header
+                    .apply_miner_work(job)
+                    .map_err(|e| InternalRpcError::InvalidParams(e))?;
             } else {
                 // really old job, or miner send invalid job
                 debug!("Job {} was not found in cache", job.get_header_work_hash());

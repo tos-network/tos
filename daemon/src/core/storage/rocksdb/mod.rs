@@ -155,6 +155,9 @@ impl RocksStorage {
         opts.set_max_open_files(config.max_open_files);
         opts.set_keep_log_file_num(config.keep_max_log_files);
 
+        // SAFE: Env::new() only fails if RocksDB cannot allocate the environment,
+        // which indicates a severe system resource issue. Panicking is appropriate here.
+        #[allow(clippy::expect_used)]
         let mut env = Env::new().expect("Creating new env");
         env.set_low_priority_background_threads(config.low_priority_background_threads as _);
         opts.set_env(&env);
@@ -182,6 +185,9 @@ impl RocksStorage {
             opts.set_write_buffer_size(config.write_buffer_size as _);
         }
 
+        // SAFE: RocksDB initialization failure is a fatal startup error.
+        // If the database cannot be opened, the node cannot function and should panic.
+        #[allow(clippy::expect_used)]
         let db = DBWithThreadMode::<MultiThreaded>::open_cf_descriptors(
             &opts,
             format!("{}{}", dir, network.to_string().to_lowercase()),

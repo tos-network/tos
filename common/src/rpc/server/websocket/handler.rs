@@ -21,13 +21,20 @@ use std::{
     hash::Hash,
 };
 
+// Type alias for event subscriptions per session
+type SessionEventSubscriptions<E> = HashMap<E, Option<Id>>;
+
+// Type alias for the full sessions map to reduce type complexity
+type SessionsEventMap<T, E> =
+    HashMap<WebSocketSessionShared<EventWebSocketHandler<T, E>>, SessionEventSubscriptions<E>>;
+
 // generic websocket handler supporting event subscriptions
 pub struct EventWebSocketHandler<
     T: Sync + Send + Clone + 'static,
     E: Serialize + DeserializeOwned + Sync + Send + Eq + Hash + Clone + 'static,
 > {
     // a map of sessions to events
-    events: RwLock<HashMap<WebSocketSessionShared<Self>, HashMap<E, Option<Id>>>>,
+    events: RwLock<SessionsEventMap<T, E>>,
     // the RPC handler containing the methods to call
     // when a message is received
     handler: RPCHandler<T>,

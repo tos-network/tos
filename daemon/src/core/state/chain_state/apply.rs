@@ -358,9 +358,12 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             .await
     }
 
+    #[allow(clippy::panic)]
     fn get_contract_executor(&self) -> std::sync::Arc<dyn tos_common::contract::ContractExecutor> {
         // TODO: Add contract executor support
-        // For now, return a placeholder that panics if called
+        // INTENTIONAL PANIC: This is a placeholder for unimplemented functionality.
+        // Contract execution is not yet supported in ApplicableChainState.
+        // This will be replaced with a proper implementation when contract support is added.
         panic!("Contract executor not yet implemented in ApplicableChainState")
     }
 

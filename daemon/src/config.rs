@@ -86,6 +86,14 @@ pub const PRUNE_SAFETY_LIMIT: u64 = STABLE_LIMIT * 10;
 // in how many height we consider the block stable
 pub const STABLE_LIMIT: u64 = 8;
 
+// Blocks propagation queue capacity: STABLE_LIMIT * TIPS_LIMIT = 8 * 3 = 24
+pub const BLOCKS_PROPAGATION_CAPACITY: usize =
+    STABLE_LIMIT as usize * tos_common::config::TIPS_LIMIT;
+
+// SAFETY: BLOCKS_PROPAGATION_CAPACITY is computed from non-zero constants (8 * 3 = 24)
+pub const BLOCKS_PROPAGATION_CAPACITY_NONZERO: NonZeroUsize =
+    unsafe { NonZeroUsize::new_unchecked(BLOCKS_PROPAGATION_CAPACITY) };
+
 // Emission rules
 // 15% (6 months), 10% (6 months), 5% per block going to dev address
 // NOTE: The explained emission above was the expected one
@@ -213,6 +221,18 @@ pub const PEER_TX_CACHE_SIZE: usize = 1024;
 pub const PEER_PEERS_CACHE_SIZE: usize = 1024;
 // Peer Block cache size
 pub const PEER_BLOCK_CACHE_SIZE: usize = 1024;
+
+// Compile-time NonZeroUsize constants for peer LruCache initialization
+// SAFETY: All peer cache/concurrency constants are compile-time set to non-zero values
+pub const PEER_OBJECTS_CONCURRENCY_NONZERO: NonZeroUsize =
+    unsafe { NonZeroUsize::new_unchecked(PEER_OBJECTS_CONCURRENCY) };
+pub const PEER_TX_CACHE_SIZE_NONZERO: NonZeroUsize =
+    unsafe { NonZeroUsize::new_unchecked(PEER_TX_CACHE_SIZE) };
+pub const PEER_PEERS_CACHE_SIZE_NONZERO: NonZeroUsize =
+    unsafe { NonZeroUsize::new_unchecked(PEER_PEERS_CACHE_SIZE) };
+pub const PEER_BLOCK_CACHE_SIZE_NONZERO: NonZeroUsize =
+    unsafe { NonZeroUsize::new_unchecked(PEER_BLOCK_CACHE_SIZE) };
+
 // Peer packet channel size
 pub const PEER_PACKET_CHANNEL_SIZE: usize = 1024;
 // Peer timeout for packet channel
@@ -320,11 +340,17 @@ pub fn get_hex_genesis_block(network: &Network) -> Option<&str> {
     }
 }
 
-lazy_static! {
-    // Developer public key is lazily converted from address to support any network
-    pub static ref DEV_PUBLIC_KEY: PublicKey = Address::from_string(&DEV_ADDRESS)
+// Developer public key is lazily converted from address to support any network
+// SAFE: DEV_ADDRESS is a compile-time constant with a known valid format
+#[allow(clippy::expect_used)]
+fn create_dev_public_key() -> PublicKey {
+    Address::from_string(&DEV_ADDRESS)
         .expect("valid dev address")
-        .to_public_key();
+        .to_public_key()
+}
+
+lazy_static! {
+    pub static ref DEV_PUBLIC_KEY: PublicKey = create_dev_public_key();
 }
 
 // Genesis block hash based on network selected
