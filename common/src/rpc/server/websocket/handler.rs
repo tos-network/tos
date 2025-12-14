@@ -16,13 +16,16 @@ use std::{
     hash::Hash,
 };
 
+// Type alias for the events map
+type EventsMap<T, E> = RwLock<HashMap<WebSocketSessionShared<EventWebSocketHandler<T, E>>, HashMap<E, Option<Id>>>>;
+
 // generic websocket handler supporting event subscriptions
 pub struct EventWebSocketHandler<
     T: Sync + Send + Clone + 'static,
     E: Serialize + DeserializeOwned + Sync + Send + Eq + Hash + Clone + 'static,
 > {
     // a map of sessions to events
-    events: RwLock<HashMap<WebSocketSessionShared<Self>, HashMap<E, Option<Id>>>>,
+    events: EventsMap<T, E>,
     // the RPC handler containing the methods to call
     // when a message is received
     handler: RPCHandler<T>,
@@ -50,7 +53,7 @@ where
         trace!("getting tracked events");
         let sessions = self.events.read().await;
         trace!("tracked events sessions locked");
-        HashSet::from_iter(sessions.values().map(|e| e.keys().cloned()).flatten())
+        HashSet::from_iter(sessions.values().flat_map(|e| e.keys().cloned()))
     }
 
     // Check if an event is tracked by any session
@@ -60,13 +63,13 @@ where
         trace!("tracked events sessions locked");
         sessions
             .values()
-            .find(|e| e.keys().into_iter().find(|x| *x == event).is_some())
-            .is_some()
+            .any(|e| e.keys().any(|x| x == event))
     }
 
     // Notify all sessions subscribed to the given event
     // This will send the event concurrently to all sessions
     // based on the provided configuration
+    #[allow(clippy::mutable_key_type)]
     pub async fn notify(&self, event: &E, value: Value) {
         let value = json!(EventResult {
             event: Cow::Borrowed(event),
@@ -83,7 +86,7 @@ where
             .for_each_concurrent(self.notify_concurrency, |(session, subscriptions)| {
                 let data = subscriptions
                     .get(event)
-                    .map(|id| json!(RpcResponse::new(Cow::Borrowed(&id), Cow::Borrowed(&value))));
+                    .map(|id| json!(RpcResponse::new(Cow::Borrowed(id), Cow::Borrowed(&value))));
 
                 async move {
                     if let Some(data) = data {
@@ -237,12 +240,10 @@ where
                     RpcResponseError::new(None, InternalRpcError::SerializeResponse(err))
                 })?)
             }
-            _ => {
-                return Err(RpcResponseError::new(
-                    None,
-                    InternalRpcError::InvalidJSONRequest,
-                ))
-            }
+            _ => Err(RpcResponseError::new(
+                None,
+                InternalRpcError::InvalidJSONRequest,
+            )),
         }
     }
 

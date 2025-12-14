@@ -121,7 +121,7 @@ pub fn calculate_tx_fee(
     let mut size_in_kb = tx_size as u64 / BYTES_PER_KB as u64;
 
     // we consume a full kb for fee
-    if tx_size % BYTES_PER_KB != 0 {
+    if !tx_size.is_multiple_of(BYTES_PER_KB) {
         size_in_kb += 1;
     }
 
@@ -147,10 +147,10 @@ pub fn format_hashrate(mut hashrate: f64) -> String {
     let mut count = 0;
     while hashrate >= 1000f64 && count < max {
         count += 1;
-        hashrate = hashrate / 1000f64;
+        hashrate /= 1000f64;
     }
 
-    return format!("{:.2} {}", hashrate, HASHRATE_FORMATS[count]);
+    format!("{:.2} {}", hashrate, HASHRATE_FORMATS[count])
 }
 
 const DIFFICULTY_FORMATS: [&str; 7] = ["", "K", "M", "G", "T", "P", "E"];
@@ -173,7 +173,7 @@ pub fn format_difficulty(mut difficulty: Difficulty) -> String {
         format!(".{}", left / 10)
     };
 
-    return format!("{}{}{}", difficulty, left_str, DIFFICULTY_FORMATS[count]);
+    format!("{}{}{}", difficulty, left_str, DIFFICULTY_FORMATS[count])
 }
 
 // Sanitize a ws address to make sure it's a valid websocket address

@@ -36,17 +36,12 @@ impl EnergyFeeCalculator {
     pub fn calculate_energy_cost(
         _tx_size: usize,
         output_count: usize,
-        new_addresses: usize,
+        _new_addresses: usize,
     ) -> u64 {
-        let mut energy_cost = 0;
-
         // Energy cost for transfers (1 energy per transfer, regardless of size)
-        energy_cost += output_count as u64 * ENERGY_PER_TRANSFER;
-
-        // Energy cost for new account activations (0 energy per new address)
-        energy_cost += new_addresses as u64 * 0;
-
-        energy_cost
+        // Note: new_addresses parameter is intentionally unused as new account
+        // creation is free in the current energy model
+        output_count as u64 * ENERGY_PER_TRANSFER
     }
 }
 

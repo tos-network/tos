@@ -123,7 +123,7 @@ impl EnergyBuilder {
             }
 
             // Check if amount is a whole number of TOS (no decimals)
-            if self.amount % crate::config::COIN_VALUE != 0 {
+            if !self.amount.is_multiple_of(crate::config::COIN_VALUE) {
                 return Err("Freeze amount must be a whole number of TOS (no decimals)");
             }
 
@@ -139,7 +139,7 @@ impl EnergyBuilder {
             }
         } else {
             // Check if unfreeze amount is a whole number of TOS (no decimals)
-            if self.amount % crate::config::COIN_VALUE != 0 {
+            if !self.amount.is_multiple_of(crate::config::COIN_VALUE) {
                 return Err("Unfreeze amount must be a whole number of TOS (no decimals)");
             }
 

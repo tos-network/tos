@@ -159,15 +159,15 @@ impl AsRef<[u8]> for Hash {
     }
 }
 
-impl<'a> Into<Cow<'a, Hash>> for Hash {
-    fn into(self) -> Cow<'a, Hash> {
-        Cow::Owned(self)
+impl<'a> From<Hash> for Cow<'a, Hash> {
+    fn from(val: Hash) -> Self {
+        Cow::Owned(val)
     }
 }
 
-impl<'a> Into<Cow<'a, Hash>> for &'a Hash {
-    fn into(self) -> Cow<'a, Hash> {
-        Cow::Borrowed(self)
+impl<'a> From<&'a Hash> for Cow<'a, Hash> {
+    fn from(val: &'a Hash) -> Self {
+        Cow::Borrowed(val)
     }
 }
 

@@ -14,11 +14,17 @@ pin_project! {
     }
 }
 
-impl<F: Future> Executor<F> {
-    pub fn new() -> Self {
+impl<F: Future> Default for Executor<F> {
+    fn default() -> Self {
         Self {
             futures: VecDeque::new(),
         }
+    }
+}
+
+impl<F: Future> Executor<F> {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn push_front(&mut self, future: F) {

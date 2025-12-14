@@ -1,3 +1,11 @@
+// Allow specific clippy lints that are acceptable design decisions
+#![allow(clippy::too_many_arguments)] // API design choice
+#![allow(clippy::module_inception)] // Module organization choice
+#![allow(clippy::upper_case_acronyms)] // Style choice for acronyms like RPC, TX
+#![allow(clippy::result_unit_err)] // Used for simple validation functions
+#![allow(clippy::ptr_arg)] // API compatibility
+#![allow(clippy::owned_cow)] // Cow usage pattern
+
 pub mod account;
 pub mod api;
 pub mod block;

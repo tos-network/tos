@@ -20,7 +20,7 @@ impl Serializer for HashSet<Hash> {
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let total_size = reader.total_size();
-        if total_size % HASH_SIZE != 0 {
+        if !total_size.is_multiple_of(HASH_SIZE) {
             error!(
                 "Invalid size: {}, expected a multiple of 32 for hashes",
                 total_size
@@ -62,7 +62,7 @@ impl Serializer for HashSet<Cow<'_, Hash>> {
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let total_size = reader.total_size();
-        if total_size % 32 != 0 {
+        if !total_size.is_multiple_of(32) {
             error!(
                 "Invalid size: {}, expected a multiple of 32 for hashes",
                 total_size
@@ -102,7 +102,7 @@ impl Serializer for u128 {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        Ok(reader.read_u128()?)
+        reader.read_u128()
     }
 
     fn size(&self) -> usize {
@@ -117,7 +117,7 @@ impl Serializer for u64 {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        Ok(reader.read_u64()?)
+        reader.read_u64()
     }
 
     fn size(&self) -> usize {
@@ -132,7 +132,7 @@ impl Serializer for u32 {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        Ok(reader.read_u32()?)
+        reader.read_u32()
     }
 
     fn size(&self) -> usize {
@@ -147,7 +147,7 @@ impl Serializer for u16 {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        Ok(reader.read_u16()?)
+        reader.read_u16()
     }
 
     fn size(&self) -> usize {
@@ -163,7 +163,7 @@ impl Serializer for u8 {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        Ok(reader.read_u8()?)
+        reader.read_u8()
     }
 
     fn size(&self) -> usize {
@@ -345,7 +345,7 @@ impl Serializer for String {
 
     fn size(&self) -> usize {
         // 1 for str len as byte + str len
-        1 + self.as_bytes().len().min(u8::MAX as usize)
+        1 + self.len().min(u8::MAX as usize)
     }
 }
 
@@ -599,7 +599,7 @@ impl<T: Serializer> Serializer for Arc<T> {
     }
 }
 
-impl<'a> Serializer for &'a [u8] {
+impl Serializer for &[u8] {
     fn write(&self, writer: &mut Writer) {
         writer.write_bytes(self);
     }

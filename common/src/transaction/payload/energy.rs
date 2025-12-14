@@ -79,7 +79,7 @@ impl EnergyPayload {
     /// Get the freeze duration (only applicable to FreezeTos operations)
     pub fn get_duration(&self) -> Option<FreezeDuration> {
         match self {
-            Self::FreezeTos { duration, .. } => Some(duration.clone()),
+            Self::FreezeTos { duration, .. } => Some(*duration),
             Self::UnfreezeTos { .. } => None,
         }
     }

@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 /// AI Mining state stored in blockchain
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct AIMiningState {
     /// Map of task_id -> AIMiningTask
     pub tasks: HashMap<Hash, AIMiningTask>,
@@ -25,6 +26,7 @@ pub struct AIMiningState {
 
 /// System-wide AI mining statistics
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct AIMiningStatistics {
     /// Total number of tasks published
     pub total_tasks: u64,
@@ -40,29 +42,7 @@ pub struct AIMiningStatistics {
     pub total_staked: u64,
 }
 
-impl Default for AIMiningState {
-    fn default() -> Self {
-        Self {
-            tasks: HashMap::new(),
-            miners: HashMap::new(),
-            account_reputations: HashMap::new(),
-            statistics: AIMiningStatistics::default(),
-        }
-    }
-}
 
-impl Default for AIMiningStatistics {
-    fn default() -> Self {
-        Self {
-            total_tasks: 0,
-            active_tasks: 0,
-            completed_tasks: 0,
-            total_miners: 0,
-            total_rewards_distributed: 0,
-            total_staked: 0,
-        }
-    }
-}
 
 impl AIMiningState {
     /// Create a new empty AI mining state
@@ -248,11 +228,11 @@ impl AIMiningState {
         let old_count = self.tasks.len();
 
         self.tasks.retain(|_, task| {
-            let keep = match task.status {
+            
+            match task.status {
                 TaskStatus::Expired => cutoff_time - task.published_at < max_age,
                 _ => true,
-            };
-            keep
+            }
         });
 
         let removed_count = old_count - self.tasks.len();
@@ -264,23 +244,29 @@ impl AIMiningState {
 
     /// Recalculate all statistics from current state
     pub fn recalculate_statistics(&mut self) {
-        let mut stats = AIMiningStatistics::default();
-        stats.total_miners = self.miners.len() as u64;
-        stats.total_tasks = self.tasks.len() as u64;
+        let mut active_tasks = 0u64;
+        let mut completed_tasks = 0u64;
+        let mut total_rewards_distributed = 0u64;
 
         for task in self.tasks.values() {
             match task.status {
-                TaskStatus::Active => stats.active_tasks += 1,
+                TaskStatus::Active => active_tasks += 1,
                 TaskStatus::Completed => {
-                    stats.completed_tasks += 1;
-                    stats.total_rewards_distributed += task.reward_amount;
+                    completed_tasks += 1;
+                    total_rewards_distributed += task.reward_amount;
                 }
                 _ => {}
             }
         }
 
-        stats.total_staked = self.calculate_total_staked();
-        self.statistics = stats;
+        self.statistics = AIMiningStatistics {
+            total_miners: self.miners.len() as u64,
+            total_tasks: self.tasks.len() as u64,
+            active_tasks,
+            completed_tasks,
+            total_rewards_distributed,
+            total_staked: self.calculate_total_staked(),
+        };
     }
 }
 

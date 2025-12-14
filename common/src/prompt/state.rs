@@ -35,7 +35,7 @@ impl State {
         // enable the raw mode for terminal
         // so we can read each event/action
         let interactive = if allow_interactive {
-            !terminal::enable_raw_mode().is_err()
+            terminal::enable_raw_mode().is_ok()
         } else {
             false
         };
@@ -140,14 +140,12 @@ impl State {
                                         is_in_history = true;
                                     }
 
-                                    if is_in_history {
-                                        if history_index < history.len() {
-                                            buffer.clear();
-                                            buffer.push_str(&history[history_index]);
-                                            self.show_input(&buffer)?;
-                                            if history_index + 1 < history.len() {
-                                                history_index += 1;
-                                            }
+                                    if is_in_history && history_index < history.len() {
+                                        buffer.clear();
+                                        buffer.push_str(&history[history_index]);
+                                        self.show_input(&buffer)?;
+                                        if history_index + 1 < history.len() {
+                                            history_index += 1;
                                         }
                                     }
                                 }
@@ -197,16 +195,18 @@ impl State {
                                     let mut prompt_sender = self.prompt_sender.lock()?;
                                     if let Some(sender) = prompt_sender.take() {
                                         if let Err(e) = sender.send(cloned_buffer) {
-                                            error!("Error while sending input to reader: {}", e);
+                                            if log::log_enabled!(log::Level::Error) {
+                                                error!("Error while sending input to reader: {e}");
+                                            }
                                             break;
                                         }
-                                    } else {
-                                        if !cloned_buffer.is_empty() {
-                                            history.push_front(cloned_buffer.clone());
-                                            if let Err(e) = sender.send(cloned_buffer) {
-                                                error!("Error while sending input to command handler: {}", e);
-                                                break;
+                                    } else if !cloned_buffer.is_empty() {
+                                        history.push_front(cloned_buffer.clone());
+                                        if let Err(e) = sender.send(cloned_buffer) {
+                                            if log::log_enabled!(log::Level::Error) {
+                                                error!("Error while sending input to command handler: {e}");
                                             }
+                                            break;
                                         }
                                     }
                                 }
@@ -217,16 +217,18 @@ impl State {
                     }
                 }
                 Err(e) => {
-                    error!("Error while reading input: {}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while reading input: {e}");
+                    }
                     break;
                 }
             };
         }
 
-        if !self.exit.swap(true, Ordering::SeqCst) {
-            if self.is_interactive() {
-                if let Err(e) = terminal::disable_raw_mode() {
-                    error!("Error while disabling raw mode: {}", e);
+        if !self.exit.swap(true, Ordering::SeqCst) && self.is_interactive() {
+            if let Err(e) = terminal::disable_raw_mode() {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while disabling raw mode: {e}");
                 }
             }
         }
@@ -237,7 +239,9 @@ impl State {
         let mut sender = self.prompt_sender.lock()?;
         if let Some(sender) = sender.take() {
             if let Err(e) = sender.send(String::new()) {
-                error!("Error while sending input to reader: {}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while sending input to reader: {e}");
+                }
             }
         }
 

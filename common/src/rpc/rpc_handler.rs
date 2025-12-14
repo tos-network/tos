@@ -1,7 +1,7 @@
 use log::{error, trace};
 use metrics::{counter, histogram};
 use serde::de::DeserializeOwned;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 use std::{collections::HashMap, future::Future, pin::Pin, time::Instant};
 
 use crate::{
@@ -68,7 +68,11 @@ where
                     if value.is_object() {
                         let request = self.parse_request(value)?;
                         let response = match self.execute_method(&context, request).await {
-                            Ok(response) => json!(response),
+                            // SAFE: Convert response to Value - use explicit conversion instead of json!()
+                            Ok(response) => serde_json::to_value(response).unwrap_or_else(|e| {
+                                RpcResponseError::new(None, InternalRpcError::SerializeResponse(e))
+                                    .to_json()
+                            }),
                             Err(e) => e.to_json(),
                         };
                         responses.push(response);
@@ -83,12 +87,10 @@ where
                     RpcResponseError::new(None, InternalRpcError::SerializeResponse(err))
                 })?)
             }
-            _ => {
-                return Err(RpcResponseError::new(
-                    None,
-                    InternalRpcError::InvalidJSONRequest,
-                ))
-            }
+            _ => Err(RpcResponseError::new(
+                None,
+                InternalRpcError::InvalidJSONRequest,
+            )),
         }
     }
 
@@ -128,7 +130,9 @@ where
                 ))
             }
         };
-        trace!("executing '{}' RPC method", request.method);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("executing '{}' RPC method", request.method);
+        }
         counter!("tos_rpc_calls", "method" => request.method.clone()).increment(1);
 
         let params = request.params.take().unwrap_or(Value::Null);
@@ -142,11 +146,17 @@ where
             .record(start.elapsed().as_millis() as f64);
 
         Ok(if request.id.is_some() {
-            Some(json!({
-                "jsonrpc": JSON_RPC_VERSION,
-                "id": request.id,
-                "result": result
-            }))
+            // SAFE: Build response JSON manually instead of using json!() macro
+            let mut obj = serde_json::Map::new();
+            obj.insert(
+                "jsonrpc".to_string(),
+                Value::String(JSON_RPC_VERSION.to_string()),
+            );
+            // Convert Option<Id> to Value
+            let id_value = serde_json::to_value(&request.id).unwrap_or(Value::Null);
+            obj.insert("id".to_string(), id_value);
+            obj.insert("result".to_string(), result);
+            Some(Value::Object(obj))
         } else {
             None
         })
@@ -154,8 +164,10 @@ where
 
     // register a new RPC method handler
     pub fn register_method(&mut self, name: &str, handler: Handler) {
-        if self.methods.insert(name.into(), handler).is_some() {
-            error!("The method '{}' was already registered !", name);
+        if self.methods.insert(name.into(), handler).is_some()
+            && log::log_enabled!(log::Level::Error)
+        {
+            error!("The method '{name}' was already registered !");
         }
     }
 
@@ -169,7 +181,7 @@ pub fn parse_params<P: DeserializeOwned>(mut value: Value) -> Result<P, Internal
         value = Value::Object(Map::new());
     }
 
-    serde_json::from_value(value).map_err(|e| InternalRpcError::InvalidJSONParams(e))
+    serde_json::from_value(value).map_err(InternalRpcError::InvalidJSONParams)
 }
 
 // RPC Method with no params required

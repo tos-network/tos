@@ -52,20 +52,16 @@ pub fn default_logs_datetime_format() -> String {
 // used for launch param
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum LogLevel {
     Off,
     Error,
     Warn,
+    #[default]
     Info,
     Debug,
     Trace,
-}
-
-impl Default for LogLevel {
-    fn default() -> Self {
-        Self::Info
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,7 +229,9 @@ impl Prompt {
             // spawn a thread to prevent IO blocking - https://github.com/tokio-rs/tokio/issues/2466
             std::thread::spawn(move || {
                 if let Err(e) = state.ioloop(input_sender) {
-                    error!("Error in ioloop: {}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error in ioloop: {e}");
+                    }
                 };
             });
 
@@ -241,7 +239,7 @@ impl Prompt {
             *lock = Some(input_receiver);
         }
 
-        if show_ascii {
+        if show_ascii && log::log_enabled!(log::Level::Info) {
             info!("{}", art::LOGO_ASCII);
         }
 
@@ -287,7 +285,9 @@ impl Prompt {
                 },
                 res = tokio::signal::ctrl_c() => {
                     if let Err(e) = res {
-                        error!("Error received on CTRL+C: {}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error received on CTRL+C: {e}");
+                        }
                     } else {
                         info!("CTRL+C received, exiting...");
                     }
@@ -298,12 +298,14 @@ impl Prompt {
                         match command_manager.handle_command(input).await {
                             Err(CommandError::Exit) => break,
                             Err(e) => {
-                                error!("Error while executing command: {:#}", e);
+                                if log::log_enabled!(log::Level::Error) {
+                                    error!("Error while executing command: {e:#}");
+                                }
                             }
                             _ => {},
                         }
-                    } else {
-                        debug!("You said '{}'", input);
+                    } else if log::log_enabled!(log::Level::Debug) {
+                        debug!("You said '{input}'");
                     }
                 }
                 _ = interval.tick() => {
@@ -314,23 +316,25 @@ impl Prompt {
                             continue;
                         }
                     }
-                    match timeout(Duration::from_secs(5), (*fn_message)(&self, command_manager)).await {
+                    match timeout(Duration::from_secs(5), (*fn_message)(self, command_manager)).await {
                         Ok(res) => {
                             let prompt = res?;
                             self.update_prompt(prompt)?;
                         }
                         Err(e) => {
-                            warn!("Couldn't update prompt message: {}", e);
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Couldn't update prompt message: {e}");
+                            }
                         }
                     };
                 }
             }
         }
 
-        if !self.state.exit().swap(true, Ordering::SeqCst) {
-            if self.state.is_interactive() {
-                if let Err(e) = terminal::disable_raw_mode() {
-                    error!("Error while disabling raw mode: {}", e);
+        if !self.state.exit().swap(true, Ordering::SeqCst) && self.state.is_interactive() {
+            if let Err(e) = terminal::disable_raw_mode() {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while disabling raw mode: {e}");
                 }
             }
         }
@@ -395,7 +399,7 @@ impl Prompt {
                 .state
                 .get_ascii_escape_regex()
                 .replace_all(&original_prompt, "");
-            prompt = self.colorize_string(Color::Red, &escaped_colors.into_owned());
+            prompt = self.colorize_string(Color::Red, &escaped_colors);
         }
     }
 
@@ -534,7 +538,7 @@ impl Prompt {
                     target_with_pad = " ".to_owned() + &target_with_pad;
                 }
 
-                let res = if disable_colors {
+                if disable_colors {
                     out.finish(format_args!(
                         "\x1b[2K{}{} {}{} > {}",
                         if interactive { "\r" } else { "" },
@@ -564,11 +568,11 @@ impl Prompt {
 
                 if interactive {
                     if let Err(e) = state.show() {
-                        error!("Error on prompt refresh: {}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error on prompt refresh: {e}");
+                        }
                     }
                 }
-
-                res
             })
             .chain(std::io::stdout())
             .level(level.into());
@@ -619,7 +623,9 @@ impl Prompt {
                     let dir_path = dir_path.to_string();
                     let handle = spawn_task("loop-compress-log", async move {
                         if let Err(e) = Self::loop_compress_log_file(dir_path, suffix).await {
-                            error!("Error while compressing log file: {}", e);
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Error while compressing log file: {e}");
+                            }
                         }
                     });
 
@@ -688,30 +694,32 @@ impl Prompt {
 
         loop {
             let now = chrono::Local::now().date_naive();
-            trace!(
-                "Checking if we need to compress log file, current: {}, now: {}",
-                current,
-                now
-            );
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Checking if we need to compress log file, current: {current}, now: {now}");
+            }
 
             // We need to check that current != now
             // because we don't want to compress the current file
             if current.succ_opt() == Some(now) {
                 let filename = current.format(suffix.as_str());
-                info!("Compressing log file for {}", filename);
-                let path = format!("{}/{}", dir_path, filename);
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Compressing log file for {filename}");
+                }
+                let path = format!("{dir_path}/{filename}");
                 if Path::new(&path).exists() {
-                    let zip_path = format!("{}.zip", path);
+                    let zip_path = format!("{path}.zip");
                     if let Err(e) = Self::zip_log_file(&path, &zip_path) {
-                        error!("Error while compressing log file: {}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error while compressing log file: {e}");
+                        }
                     }
-                } else {
-                    info!("No log file to compress for {}", filename);
+                } else if log::log_enabled!(log::Level::Info) {
+                    info!("No log file to compress for {filename}");
                 }
 
                 current = now;
-            } else {
-                debug!("No need to compress log file for {}", current);
+            } else if log::log_enabled!(log::Level::Debug) {
+                debug!("No need to compress log file for {current}");
             }
 
             tokio::time::sleep(Duration::from_secs(60)).await;
@@ -734,7 +742,9 @@ impl Drop for Prompt {
         if self.state.is_interactive() {
             if let Ok(true) = terminal::is_raw_mode_enabled() {
                 if let Err(e) = terminal::disable_raw_mode() {
-                    error!("Error while forcing to disable raw mode: {}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while forcing to disable raw mode: {e}");
+                    }
                 }
             }
         }

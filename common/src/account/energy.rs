@@ -28,8 +28,8 @@ pub struct FreezeDuration {
 impl FreezeDuration {
     /// Create a new freeze duration with validation
     pub fn new(days: u32) -> Result<Self, &'static str> {
-        if days < crate::config::MIN_FREEZE_DURATION_DAYS
-            || days > crate::config::MAX_FREEZE_DURATION_DAYS
+        if !(crate::config::MIN_FREEZE_DURATION_DAYS..=crate::config::MAX_FREEZE_DURATION_DAYS)
+            .contains(&days)
         {
             return Err("Freeze duration must be between 3 and 180 days");
         }
@@ -147,11 +147,7 @@ impl FreezeRecord {
 
     /// Get remaining lock time in blocks
     pub fn remaining_blocks(&self, current_topoheight: TopoHeight) -> u64 {
-        if current_topoheight >= self.unlock_topoheight {
-            0
-        } else {
-            self.unlock_topoheight - current_topoheight
-        }
+        self.unlock_topoheight.saturating_sub(current_topoheight)
     }
 }
 
@@ -204,6 +200,7 @@ impl Serializer for FreezeRecord {
 /// - Unfreezing from multiple records follows FIFO order for unlocked records
 /// - Energy total decreases when unfreezing (proportional to amount unfrozen)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct EnergyResource {
     /// Total energy available
     pub total_energy: u64,
@@ -217,15 +214,10 @@ pub struct EnergyResource {
     pub freeze_records: Vec<FreezeRecord>,
 }
 
+
 impl EnergyResource {
     pub fn new() -> Self {
-        Self {
-            total_energy: 0,
-            used_energy: 0,
-            frozen_tos: 0,
-            last_update: 0,
-            freeze_records: Vec::new(),
-        }
+        Self::default()
     }
 
     /// Get available energy
@@ -260,7 +252,7 @@ impl EnergyResource {
             return 0;
         }
 
-        if tos_amount % crate::config::COIN_VALUE != 0 {
+        if !tos_amount.is_multiple_of(crate::config::COIN_VALUE) {
             return 0;
         }
 
@@ -389,8 +381,8 @@ impl EnergyResource {
 
         for record in &self.freeze_records {
             grouped
-                .entry(record.duration.clone())
-                .or_insert_with(Vec::new)
+                .entry(record.duration)
+                .or_default()
                 .push(record);
         }
 

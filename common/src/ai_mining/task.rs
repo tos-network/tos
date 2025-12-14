@@ -168,18 +168,16 @@ impl AIMiningTask {
 
     /// Mark task as completed if deadline has passed or best answer found
     pub fn update_status(&mut self, current_time: u64) {
-        match self.status {
-            TaskStatus::Active => {
-                if self.is_expired(current_time) {
-                    self.status = TaskStatus::Expired;
-                } else if let Some(best_answer) = self.get_best_answer() {
-                    // Mark as completed if we have a validated answer with good score
-                    if best_answer.average_score.unwrap_or(0) >= 70 {
-                        self.status = TaskStatus::Completed;
-                    }
+        // Only update status if the task is currently active
+        if self.status == TaskStatus::Active {
+            if self.is_expired(current_time) {
+                self.status = TaskStatus::Expired;
+            } else if let Some(best_answer) = self.get_best_answer() {
+                // Mark as completed if we have a validated answer with good score
+                if best_answer.average_score.unwrap_or(0) >= 70 {
+                    self.status = TaskStatus::Completed;
                 }
             }
-            _ => {} // No status change for other states
         }
     }
 }

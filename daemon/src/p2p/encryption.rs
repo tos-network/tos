@@ -109,11 +109,22 @@ impl Encryption {
 
     // Encrypt a packet using the shared symetric key
     pub async fn encrypt_packet(&self, input: &mut impl Buffer) -> Result<(), EncryptionError> {
-        trace!("Encrypting packet");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Encrypting packet");
+        }
         let mut lock = self.our_cipher.lock().await;
 
-        trace!("our cipher locked");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("our cipher locked");
+        }
         let cipher_state = lock.as_mut().ok_or(EncryptionError::WriteNotReady)?;
+
+        // SECURITY FIX: Prevent nonce overflow by checking before use
+        // While we rotate keys every 1GB (making this practically impossible),
+        // we add an explicit check to mathematically eliminate nonce reuse risk
+        if cipher_state.nonce == u64::MAX {
+            return Err(EncryptionError::InvalidNonce);
+        }
 
         // fill our buffer
         cipher_state.nonce_buffer[0..8].copy_from_slice(&cipher_state.nonce.to_be_bytes());
@@ -132,11 +143,22 @@ impl Encryption {
 
     // Decrypt a packet using the shared symetric key
     pub async fn decrypt_packet(&self, buf: &mut impl Buffer) -> Result<(), EncryptionError> {
-        trace!("Decrypting packet");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Decrypting packet");
+        }
         let mut lock = self.peer_cipher.lock().await;
 
-        trace!("peer cipher locked");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("peer cipher locked");
+        }
         let cipher_state = lock.as_mut().ok_or(EncryptionError::ReadNotReady)?;
+
+        // SECURITY FIX: Prevent nonce overflow by checking before use
+        // While we rotate keys every 1GB (making this practically impossible),
+        // we add an explicit check to mathematically eliminate nonce reuse risk
+        if cipher_state.nonce == u64::MAX {
+            return Err(EncryptionError::InvalidNonce);
+        }
 
         // fill our buffer
         cipher_state.nonce_buffer[0..8].copy_from_slice(&cipher_state.nonce.to_be_bytes());

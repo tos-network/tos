@@ -101,10 +101,7 @@ impl Address {
 
     // Check if the address is a normal address (no data integrated)
     pub fn is_normal(&self) -> bool {
-        match self.addr_type {
-            AddressType::Normal => true,
-            _ => false,
-        }
+        matches!(self.addr_type, AddressType::Normal)
     }
 
     // Check if the address is a mainnet address
@@ -207,19 +204,19 @@ impl Serializer for Address {
 impl FromStr for Address {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Address::from_string(&s.to_owned())
+        Address::from_string(s)
     }
 }
 
-impl Into<PublicKey> for Address {
-    fn into(self) -> PublicKey {
-        self.to_public_key()
+impl From<Address> for PublicKey {
+    fn from(val: Address) -> Self {
+        val.to_public_key()
     }
 }
 
-impl Into<AddressType> for Address {
-    fn into(self) -> AddressType {
-        self.addr_type
+impl From<Address> for AddressType {
+    fn from(val: Address) -> Self {
+        val.addr_type
     }
 }
 

@@ -141,7 +141,9 @@ impl Packet<'_> {
 impl<'a> Serializer for Packet<'a> {
     fn read(reader: &mut Reader) -> Result<Packet<'a>, ReaderError> {
         let id = reader.read_u8()?;
-        trace!("Packet ID received: {}, size: {}", id, reader.total_size());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Packet ID received: {}, size: {}", id, reader.total_size());
+        }
         let packet = match id {
             KEY_EXCHANGE_ID => Packet::KeyExchange(Cow::Owned(EncryptionKey::read(reader)?)),
             HANDSHAKE_ID => Packet::Handshake(Cow::Owned(Handshake::read(reader)?)),

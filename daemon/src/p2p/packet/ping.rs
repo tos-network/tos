@@ -49,7 +49,9 @@ impl<'a> Ping<'a> {
         peer: &Arc<Peer>,
         blockchain: &Arc<Blockchain<S>>,
     ) -> Result<(), P2pError> {
-        trace!("Updating {} with {}", peer, self);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Updating {} with {}", peer, self);
+        }
         peer.set_top_block_hash(self.top_hash.into_owned()).await;
         peer.set_topoheight(self.topoheight);
         peer.set_height(self.height);
@@ -82,7 +84,9 @@ impl<'a> Ping<'a> {
             .await;
 
         if peer.sharable() {
-            trace!("Locking RPC Server to notify PeerStateUpdated event");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Locking RPC Server to notify PeerStateUpdated event");
+            }
             if let Some(rpc) = blockchain.get_rpc().read().await.as_ref() {
                 if rpc.is_event_tracked(&NotifyEvent::PeerStateUpdated).await {
                     rpc.notify_clients_with(
@@ -92,7 +96,9 @@ impl<'a> Ping<'a> {
                     .await;
                 }
             }
-            trace!("End locking for PeerStateUpdated event");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("End locking for PeerStateUpdated event");
+            }
         }
 
         if !self.peer_list.is_empty() {

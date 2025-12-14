@@ -163,10 +163,7 @@ impl Query {
     }
 
     pub fn is_for_element(&self) -> bool {
-        match self {
-            Self::Element(_) => true,
-            _ => false,
-        }
+        matches!(self, Self::Element(_))
     }
 }
 

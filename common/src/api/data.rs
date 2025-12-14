@@ -48,10 +48,7 @@ pub enum ElementType {
 
 impl ValueType {
     pub fn is_number(&self) -> bool {
-        match self {
-            Self::U128 | Self::U64 | Self::U32 | Self::U16 | Self::U8 => true,
-            _ => false,
-        }
+        matches!(self, Self::U128 | Self::U64 | Self::U32 | Self::U16 | Self::U8)
     }
 }
 
@@ -363,7 +360,7 @@ impl DataValue {
     pub fn to_type<T: Serializer>(self) -> Result<T, DataConversionError> {
         match &self {
             Self::Blob(v) => {
-                T::from_bytes(&v).map_err(|_| DataConversionError::UnexpectedValue(self.kind()))
+                T::from_bytes(v).map_err(|_| DataConversionError::UnexpectedValue(self.kind()))
             }
             _ => Err(DataConversionError::UnexpectedValue(self.kind())),
         }
@@ -428,7 +425,7 @@ impl DataValue {
     pub fn as_type<T: Serializer>(&self) -> Result<T, DataConversionError> {
         match self {
             Self::Blob(v) => {
-                T::from_bytes(&v).map_err(|_| DataConversionError::UnexpectedValue(self.kind()))
+                T::from_bytes(v).map_err(|_| DataConversionError::UnexpectedValue(self.kind()))
             }
             _ => Err(DataConversionError::UnexpectedValue(self.kind())),
         }
@@ -481,18 +478,18 @@ impl DataValue {
     }
 }
 
-impl ToString for DataValue {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for DataValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Bool(v) => format!("{}", v),
-            Self::String(v) => format!("{}", v),
-            Self::U8(v) => format!("{}", v),
-            Self::U16(v) => format!("{}", v),
-            Self::U32(v) => format!("{}", v),
-            Self::U64(v) => format!("{}", v),
-            Self::U128(v) => format!("{}", v),
-            Self::Hash(v) => format!("{}", v),
-            Self::Blob(v) => format!("{:?}", v),
+            Self::Bool(v) => write!(f, "{}", v),
+            Self::String(v) => write!(f, "{}", v),
+            Self::U8(v) => write!(f, "{}", v),
+            Self::U16(v) => write!(f, "{}", v),
+            Self::U32(v) => write!(f, "{}", v),
+            Self::U64(v) => write!(f, "{}", v),
+            Self::U128(v) => write!(f, "{}", v),
+            Self::Hash(v) => write!(f, "{}", v),
+            Self::Blob(v) => write!(f, "{:?}", v),
         }
     }
 }

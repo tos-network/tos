@@ -82,7 +82,7 @@ impl Deref for Block {
     type Target = BlockHeader;
 
     fn deref(&self) -> &Self::Target {
-        &self.get_header()
+        self.get_header()
     }
 }
 

@@ -505,7 +505,7 @@ async fn help(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
             .iter()
             .find(|command| *command.get_name() == *arg_value)
             .ok_or(CommandError::CommandNotFound)?;
-        manager.message(&format!("Usage: {}", cmd.get_usage()));
+        manager.message(format!("Usage: {}", cmd.get_usage()));
     } else {
         manager.display_commands()?;
         manager.message("See how to use a command using help <command>");

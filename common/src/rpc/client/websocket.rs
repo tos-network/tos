@@ -377,12 +377,12 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             let mut lock = self.sender.lock().await;
             *lock = sender;
 
-            let zelf = Arc::clone(&self);
+            let zelf = Arc::clone(self);
             trace!("Starting background task after reconnecting");
             zelf.start_background_task(receiver, ws).await?;
         }
 
-        if let Err(e) = Arc::clone(&self).resubscribe_events().await {
+        if let Err(e) = Arc::clone(self).resubscribe_events().await {
             error!("Error while resubscribing to events: {:?}", e);
         }
 
@@ -601,7 +601,7 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     // Verify if we already subscribed to this event or not
     pub async fn has_event(&self, event: &E) -> bool {
         let events = self.events_to_id.lock().await;
-        events.contains_key(&event)
+        events.contains_key(event)
     }
 
     // Subscribe to an event

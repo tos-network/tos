@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use lazy_static::lazy_static;
 use tos_common::{
     api::daemon::{DevFeeThreshold, HardFork},
@@ -18,10 +20,33 @@ pub const NETWORK_ID: [u8; NETWORK_ID_SIZE] = [
 
 // bind addresses
 pub const DEFAULT_P2P_BIND_ADDRESS: &str = "0.0.0.0:2125";
-pub const DEFAULT_RPC_BIND_ADDRESS: &str = "0.0.0.0:8080";
+
+// SECURITY FIX: Changed from 0.0.0.0 to 127.0.0.1 to prevent unauthorized remote access
+// RPC endpoints include administrative functions (submit_block, mempool inspection, peer management)
+// that should NOT be exposed to the network without authentication.
+// To allow remote access, explicitly set --rpc-bind-address 0.0.0.0:8080 (not recommended without firewall)
+pub const DEFAULT_RPC_BIND_ADDRESS: &str = "127.0.0.1:8080";
 
 // Default cache size for storage DB
 pub const DEFAULT_CACHE_SIZE: usize = 1024;
+
+// Compile-time NonZeroUsize constant for LruCache initialization
+// SAFETY: This constant is compile-time validated to be non-zero
+pub const DEFAULT_CACHE_SIZE_NONZERO: NonZeroUsize = unsafe {
+    // SAFETY: DEFAULT_CACHE_SIZE is a compile-time constant set to 1024 (non-zero)
+    NonZeroUsize::new_unchecked(DEFAULT_CACHE_SIZE)
+};
+
+// V-26 Fix: Maximum number of orphaned transactions to prevent unbounded memory growth
+// Using LRU eviction, oldest transactions are dropped when limit is reached
+pub const MAX_ORPHANED_TRANSACTIONS: usize = 10_000;
+
+// Compile-time NonZeroUsize constant for orphaned transactions LruCache
+// SAFETY: This constant is compile-time validated to be non-zero
+pub const MAX_ORPHANED_TRANSACTIONS_NONZERO: NonZeroUsize = unsafe {
+    // SAFETY: MAX_ORPHANED_TRANSACTIONS is a compile-time constant set to 10,000 (non-zero)
+    NonZeroUsize::new_unchecked(MAX_ORPHANED_TRANSACTIONS)
+};
 
 // Block rules
 // Millis per second, it is used to prevent having random 1000 values anywhere

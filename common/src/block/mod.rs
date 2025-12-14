@@ -21,11 +21,11 @@ pub const BLOCK_WORK_SIZE: usize = 112; // 32 + 8 + 8 + 32 + 32 = 112
 
 // Get combined hash for tips
 // This is used to get a hash that is unique for a set of tips
-pub fn get_combined_hash_for_tips<'a, H: AsRef<Hash>, I: Iterator<Item = H>>(tips: I) -> Hash {
+pub fn get_combined_hash_for_tips<H: AsRef<Hash>, I: Iterator<Item = H>>(tips: I) -> Hash {
     let mut bytes = [0u8; HASH_SIZE];
     for tip in tips {
-        for i in 0..HASH_SIZE {
-            bytes[i] ^= tip.as_ref().as_bytes()[i];
+        for (i, byte) in tip.as_ref().as_bytes().iter().enumerate() {
+            bytes[i] ^= byte;
         }
     }
     Hash::new(bytes)

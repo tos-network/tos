@@ -394,7 +394,9 @@ impl<S: Storage> P2pServer<S> {
                 },
                 res = peer_receiver.recv() => match res {
                     Some((peer, rx)) => {
-                        trace!("New peer received: {}", peer);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("New peer received: {}", peer);
+                        }
                         if !self.is_running() {
                             debug!("blocks processing task is stopped!");
                             break;
@@ -1753,11 +1755,15 @@ impl<S: Storage> P2pServer<S> {
                 biased;
                 // exit message from the read task
                 _ = &mut task_rx => {
-                    trace!("Exit message received from read task for peer {}", peer);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Exit message received from read task for peer {}", peer);
+                    }
                     break;
                 },
                 _ = server_exit.recv() => {
-                    trace!("Exit message from server received for peer {}", peer);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Exit message from server received for peer {}", peer);
+                    }
                     break;
                 },
                 _ = peer_exit.recv() => {
@@ -1765,7 +1771,9 @@ impl<S: Storage> P2pServer<S> {
                     break;
                 },
                 _ = interval.tick() => {
-                    trace!("Checking heartbeat of {}", peer);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Checking heartbeat of {}", peer);
+                    }
                     // Last time we got a ping packet from him
                     let last_ping = peer.get_last_ping();
                     if last_ping != 0 && get_current_time_in_seconds() - last_ping > P2P_PING_TIMEOUT {
@@ -1776,11 +1784,15 @@ impl<S: Storage> P2pServer<S> {
                 // all packets to be sent to the peer are received here
                 Some(bytes) = rx.recv() => {
                     // there is a overhead of 4 for each packet (packet size u32 4 bytes, packet id u8 is counted in the packet size)
-                    trace!("Sending packet with real length: {}", bytes.len());
-                    trace!("Packet id #{} : {:?}", bytes[0], bytes);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Sending packet with real length: {}", bytes.len());
+                        trace!("Packet id #{} : {:?}", bytes[0], bytes);
+                    }
                     let mut buffer = BytesMut::from(bytes);
                     peer.get_connection().send_bytes(&mut buffer).await?;
-                    trace!("data sucessfully sent!");
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("data sucessfully sent!");
+                    }
                 }
             }
         }
@@ -1808,7 +1820,9 @@ impl<S: Storage> P2pServer<S> {
                     .get_connection()
                     .read_packet(&mut buf, PEER_MAX_PACKET_SIZE)
                     .await?;
-                trace!("received a new packet #{} from {}", packet.get_id(), peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("received a new packet #{} from {}", packet.get_id(), peer);
+                }
 
                 sender
                     .send(packet)
@@ -1826,7 +1840,9 @@ impl<S: Storage> P2pServer<S> {
         select! {
             biased;
             _ = server_exit.recv() => {
-                trace!("Exit message received for peer {}", peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Exit message received for peer {}", peer);
+                }
             },
             _ = peer_exit.recv() => {
                 debug!("Peer {} has exited, stopping...", peer);

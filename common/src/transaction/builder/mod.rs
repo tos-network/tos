@@ -737,17 +737,15 @@ impl TransactionTypeBuilder {
             TransactionTypeBuilder::InvokeContract(payload) => {
                 consumed.extend(payload.deposits.keys());
             }
-            TransactionTypeBuilder::AIMining(payload) => {
+            TransactionTypeBuilder::AIMining(
+                crate::ai_mining::AIMiningPayload::RegisterMiner { .. }
+                | crate::ai_mining::AIMiningPayload::SubmitAnswer { .. }
+                | crate::ai_mining::AIMiningPayload::PublishTask { .. },
+            ) => {
                 // AI Mining operations consume TOS asset
-                match payload {
-                    crate::ai_mining::AIMiningPayload::RegisterMiner { .. }
-                    | crate::ai_mining::AIMiningPayload::SubmitAnswer { .. }
-                    | crate::ai_mining::AIMiningPayload::PublishTask { .. } => {
-                        consumed.insert(&TOS_ASSET);
-                    }
-                    _ => {}
-                }
+                consumed.insert(&TOS_ASSET);
             }
+            TransactionTypeBuilder::AIMining(_) => {}
             _ => {}
         }
 
@@ -764,18 +762,16 @@ impl TransactionTypeBuilder {
                     used_keys.insert(transfer.destination.get_public_key());
                 }
             }
-            TransactionTypeBuilder::AIMining(payload) => {
-                // AI Mining operations may specify miner addresses
-                match payload {
-                    crate::ai_mining::AIMiningPayload::RegisterMiner { miner_address, .. } => {
-                        // Add the miner address to used keys
-                        used_keys.insert(miner_address);
-                    }
-                    _ => {
-                        // Other AI Mining operations don't have explicit destination addresses
-                        // They operate on the sender's address implicitly
-                    }
-                }
+            TransactionTypeBuilder::AIMining(crate::ai_mining::AIMiningPayload::RegisterMiner {
+                miner_address,
+                ..
+            }) => {
+                // Add the miner address to used keys
+                used_keys.insert(miner_address);
+            }
+            TransactionTypeBuilder::AIMining(_) => {
+                // Other AI Mining operations don't have explicit destination addresses
+                // They operate on the sender's address implicitly
             }
             _ => {}
         }

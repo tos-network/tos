@@ -74,6 +74,23 @@ const fn default_keep_max_log_files() -> usize {
     4
 }
 
+// WebSocket Security default values
+const fn default_ws_max_message_size() -> usize {
+    1024 * 1024 // 1MB
+}
+
+const fn default_ws_max_subscriptions() -> usize {
+    100
+}
+
+const fn default_ws_max_connections_per_minute() -> u32 {
+    100
+}
+
+const fn default_ws_max_messages_per_second() -> u32 {
+    10
+}
+
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct GetWorkConfig {
     /// Disable GetWork Server (WebSocket for miners).
@@ -141,6 +158,44 @@ pub struct RPCConfig {
     #[clap(name = "rpc-notify-events-concurrency", long, default_value_t = detect_available_parallelism())]
     #[serde(default = "detect_available_parallelism")]
     pub notify_events_concurrency: usize,
+
+    // WebSocket Security Configuration
+    /// Allowed origins for WebSocket connections (CORS protection).
+    /// Comma-separated list of allowed origins, e.g., "https://example.com,https://app.example.com"
+    /// If not set, all origins are allowed (not recommended for production).
+    #[clap(name = "ws-allowed-origins", long)]
+    #[serde(default)]
+    pub ws_allowed_origins: Option<String>,
+
+    /// Require API key authentication for WebSocket connections.
+    /// When enabled, clients must provide a valid API key to connect.
+    #[clap(name = "ws-require-auth", long)]
+    #[serde(default)]
+    pub ws_require_auth: bool,
+
+    /// Maximum WebSocket message size in bytes.
+    /// Messages larger than this will be rejected.
+    #[clap(name = "ws-max-message-size", long, default_value_t = default_ws_max_message_size())]
+    #[serde(default = "default_ws_max_message_size")]
+    pub ws_max_message_size: usize,
+
+    /// Maximum number of subscriptions per WebSocket connection.
+    /// Prevents clients from subscribing to too many events.
+    #[clap(name = "ws-max-subscriptions", long, default_value_t = default_ws_max_subscriptions())]
+    #[serde(default = "default_ws_max_subscriptions")]
+    pub ws_max_subscriptions: usize,
+
+    /// Maximum number of new connections allowed per minute from a single IP.
+    /// Rate limiting to prevent connection spam.
+    #[clap(name = "ws-max-connections-per-minute", long, default_value_t = default_ws_max_connections_per_minute())]
+    #[serde(default = "default_ws_max_connections_per_minute")]
+    pub ws_max_connections_per_minute: u32,
+
+    /// Maximum number of messages allowed per second per connection.
+    /// Rate limiting to prevent message spam.
+    #[clap(name = "ws-max-messages-per-second", long, default_value_t = default_ws_max_messages_per_second())]
+    #[serde(default = "default_ws_max_messages_per_second")]
+    pub ws_max_messages_per_second: u32,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize, strum::Display)]
