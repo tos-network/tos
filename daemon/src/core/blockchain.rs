@@ -1927,7 +1927,9 @@ impl<S: Storage> Blockchain<S> {
 
                 // check that the nonce is in the range
                 if !(tx.get_nonce() <= cache.get_max() + 1 && tx.get_nonce() >= cache.get_min()) {
-                    debug!("TX {} nonce is not in the range of the pending TXs for this owner, received: {}, expected between {} and {}", hash, tx.get_nonce(), cache.get_min(), cache.get_max());
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("TX {} nonce is not in the range of the pending TXs for this owner, received: {}, expected between {} and {}", hash, tx.get_nonce(), cache.get_min(), cache.get_max());
+                    }
                     return Err(BlockchainError::InvalidTxNonceMempoolCache(
                         tx.get_nonce(),
                         cache.get_min(),
@@ -2432,7 +2434,9 @@ impl<S: Storage> Blockchain<S> {
         &self,
         header: Immutable<BlockHeader>,
     ) -> Result<Block, BlockchainError> {
-        trace!("Searching TXs for block at height {}", header.get_height());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Searching TXs for block at height {}", header.get_height());
+        }
         let mut transactions = Vec::with_capacity(header.get_txs_count());
 
         debug!("locking storage for build block from header");
@@ -3330,7 +3334,9 @@ impl<S: Storage> Blockchain<S> {
                             )
                             .await?
                         {
-                            warn!("Malicious TX {}, it is a potential double spending with same nonce {}, skipping...", tx_hash, tx.get_nonce());
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Malicious TX {}, it is a potential double spending with same nonce {}, skipping...", tx_hash, tx.get_nonce());
+                            }
                             // TX will be orphaned
                             orphaned_transactions.insert(tx_hash.clone());
                             continue;
@@ -3653,7 +3659,9 @@ impl<S: Storage> Blockchain<S> {
                         warn!("Error while trying to auto prune chain: {}", e);
                     }
 
-                    info!("Auto pruning done in {}ms", start.elapsed().as_millis());
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Auto pruning done in {}ms", start.elapsed().as_millis());
+                    }
                 }
             }
         }
@@ -3663,7 +3671,9 @@ impl<S: Storage> Blockchain<S> {
         storage.store_tips(&tips).await?;
 
         if current_height == 0 || block.get_height() > current_height {
-            debug!("storing new top height {}", block.get_height());
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("storing new top height {}", block.get_height());
+            }
             storage.set_top_height(block.get_height()).await?;
             self.height.store(block.get_height(), Ordering::Release);
             current_height = block.get_height();
@@ -3730,7 +3740,9 @@ impl<S: Storage> Blockchain<S> {
                     version,
                 )
                 .await;
-            debug!("Took {:?} to clean mempool!", start.elapsed());
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Took {:?} to clean mempool!", start.elapsed());
+            }
             histogram!("tos_mempool_clean_up_ms").record(start.elapsed().as_millis() as f64);
             res
         };

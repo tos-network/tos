@@ -271,7 +271,9 @@ impl BalanceProvider for SledStorage {
             .await?
         {
             Some((topo, mut version)) => {
-                trace!("new versioned balance (balance at maximum topoheight) topo: {}, previous: {:?}, requested topo: {}", topo, version.get_previous_topoheight(), topo);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("new versioned balance (balance at maximum topoheight) topo: {}, previous: {:?}, requested topo: {}", topo, version.get_previous_topoheight(), topo);
+                }
                 // Mark it as clean
                 version.prepare_new(Some(topo));
                 Ok((version, false))

@@ -36,7 +36,7 @@ use futures::{
     Stream, StreamExt, TryStreamExt,
 };
 use indexmap::IndexSet;
-use log::{debug, error, info, log, trace, warn};
+use log::{debug, error, info, log, log_enabled, trace, warn, Level};
 use lru::LruCache;
 use metrics::counter;
 use rand::seq::IteratorRandom;
@@ -347,7 +347,9 @@ impl<S: Storage> P2pServer<S> {
         concurrency: usize,
     ) -> Result<(), P2pError> {
         let listener = TcpListener::bind(self.get_bind_address()).await?;
-        info!("P2p Server will listen on: {}", self.get_bind_address());
+        if log_enabled!(Level::Info) {
+            info!("P2p Server will listen on: {}", self.get_bind_address());
+        }
         if let Some((proxy, addr, auth)) = self.proxy.as_ref() {
             info!(
                 "Proxy to use: {} ({} with auth = {})",
@@ -491,7 +493,9 @@ impl<S: Storage> P2pServer<S> {
                     break;
                 }
                 res = listener.accept() => {
-                    trace!("New listener result received (is err: {})", res.is_err());
+                    if log_enabled!(Level::Trace) {
+                        trace!("New listener result received (is err: {})", res.is_err());
+                    }
                     counter!("tos_p2p_incoming_connections_total").increment(1u64);
 
                     if !self.is_running() {
@@ -945,7 +949,9 @@ impl<S: Storage> P2pServer<S> {
         // search for peers which are greater than us
         // and that are pruned but before our height so we can sync correctly
         let available_peers = self.peer_list.get_cloned_peers().await;
-        debug!("{} peers available for selection", available_peers.len());
+        if log_enabled!(Level::Debug) {
+            debug!("{} peers available for selection", available_peers.len());
+        }
 
         let mut peers = stream::iter(available_peers)
             .map(|p| async move {
@@ -1271,7 +1277,8 @@ impl<S: Storage> P2pServer<S> {
                             }
 
                             // Is it a peer from our local network
-                            let is_local_peer = is_local_address(peer.get_connection().get_address());
+                            let is_local_peer =
+                                is_local_address(peer.get_connection().get_address());
 
                             // all the peers we already shared with this peer
                             let mut shared_peers = peer.get_peers().lock().await;
@@ -1288,13 +1295,18 @@ impl<S: Storage> P2pServer<S> {
                                 let addr = p.get_outgoing_address();
 
                                 // Don't share local network addresses if it's external peer
-                                if (is_local_address(addr) && !is_local_peer) || !is_valid_address(addr) {
-                                    debug!("{} is a local address but peer is external, skipping", addr);
+                                if (is_local_address(addr) && !is_local_peer)
+                                    || !is_valid_address(addr)
+                                {
+                                    debug!(
+                                        "{} is a local address but peer is external, skipping",
+                                        addr
+                                    );
                                     continue;
                                 }
 
                                 let direction = TimedDirection::Out {
-                                    sent_at: get_current_time_in_millis()
+                                    sent_at: get_current_time_in_millis(),
                                 };
 
                                 let send = match shared_peers.get_mut(addr) {
@@ -1307,7 +1319,13 @@ impl<S: Storage> P2pServer<S> {
 
                                 if send {
                                     // add it in our side to not re send it again
-                                    trace!("{} didn't received {} yet, adding it to peerlist in ping packet", peer.get_outgoing_address(), addr);
+                                    if log_enabled!(Level::Trace) {
+                                        trace!(
+                                            "{} didn't received {} yet...",
+                                            peer.get_outgoing_address(),
+                                            addr
+                                        );
+                                    }
 
                                     // add it to new list to send it
                                     ping.add_peer(*addr);
@@ -1318,15 +1336,24 @@ impl<S: Storage> P2pServer<S> {
                             }
 
                             // update the ping packet with the new peers
-                            debug!("Set peers: {:?}, going to {}", ping.get_peers(), peer.get_outgoing_address());
+                            if log_enabled!(Level::Debug) {
+                                debug!(
+                                    "Set peers: {:?}, going to {}",
+                                    ping.get_peers(),
+                                    peer.get_outgoing_address()
+                                );
+                            }
                             // send the ping packet to the peer
-                            if let Err(e) = peer.send_packet(Packet::Ping(Cow::Borrowed(&ping))).await {
+                            if let Err(e) =
+                                peer.send_packet(Packet::Ping(Cow::Borrowed(&ping))).await
+                            {
                                 debug!("Error sending specific ping packet to {}: {}", peer, e);
                             } else {
                                 peer.set_last_ping_sent(current_time);
                             }
                         }
-                    }).await;
+                    })
+                    .await;
 
                 // update the last time we sent our peerlist
                 // We don't use previous current_time variable because it may have been
@@ -2471,7 +2498,9 @@ impl<S: Storage> P2pServer<S> {
             Packet::ObjectResponse(response) => {
                 trace!("Received a object response from {}", peer);
                 let response = response.to_owned();
-                trace!("Object response received is {}", response.get_hash());
+                if log_enabled!(Level::Trace) {
+                    trace!("Object response received is {}", response.get_hash());
+                }
 
                 // check if we requested it from this peer directly
                 // or that we requested it through the object tracker
@@ -2615,7 +2644,9 @@ impl<S: Storage> P2pServer<S> {
                     peer
                 );
                 if let Some(sender) = peer.get_next_bootstrap_request().await {
-                    trace!("Sending bootstrap chain response ({:?})", response.kind());
+                    if log_enabled!(Level::Trace) {
+                        trace!("Sending bootstrap chain response ({:?})", response.kind());
+                    }
                     let response = response.response();
                     if let Err(e) = sender.send(response) {
                         error!(
@@ -2639,7 +2670,13 @@ impl<S: Storage> P2pServer<S> {
                 {
                     let mut shared_peers = peer.get_peers().lock().await;
                     if shared_peers.pop(&addr).is_none() {
-                        debug!("{} disconnected from {} but its not in our shared peer, maybe it disconnected from us too", addr, peer.get_outgoing_address());
+                        if log_enabled!(Level::Debug) {
+                            debug!(
+                                "{} disconnected from {} but...",
+                                addr,
+                                peer.get_outgoing_address()
+                            );
+                        }
                         return Ok(());
                     }
                 }

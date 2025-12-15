@@ -1,5 +1,5 @@
 use anyhow::Result;
-use log::{debug, info, warn};
+use log::{debug, info, log_enabled, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -216,7 +216,9 @@ impl StorageManager {
         }
 
         self.save().await?;
-        info!("Added task: {}", hex::encode(task_id.as_bytes()));
+        if log_enabled!(log::Level::Info) {
+            info!("Added task: {}", hex::encode(task_id.as_bytes()));
+        }
         Ok(())
     }
 

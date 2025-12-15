@@ -87,7 +87,9 @@ impl BalanceProvider for RocksStorage {
             asset
         );
         let Some(account_id) = self.get_optional_account_id(key)? else {
-            trace!("no account found for {}", key.as_address(self.is_mainnet()));
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("no account found for {}", key.as_address(self.is_mainnet()));
+            }
             return Ok(None);
         };
         let asset_id = self.get_asset_id(asset)?;

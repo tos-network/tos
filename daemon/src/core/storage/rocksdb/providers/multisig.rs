@@ -97,7 +97,9 @@ impl MultiSigProvider for RocksStorage {
     // Verify if an account has a multisig setup
     // If the latest version is None, the account has no multisig setup
     async fn has_multisig(&self, account: &PublicKey) -> Result<bool, BlockchainError> {
-        trace!("has multisig for {}", account.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has multisig for {}", account.as_address(self.is_mainnet()));
+        }
         self.get_account_type(account)
             .map(|account| account.multisig_pointer.is_some())
     }

@@ -7,7 +7,7 @@ use super::{
 };
 use crate::config::PEER_TIMEOUT_REQUEST_OBJECT;
 use bytes::Bytes;
-use log::{debug, trace, warn};
+use log::{debug, log_enabled, trace, warn, Level};
 use request::*;
 use std::{
     borrow::Cow,
@@ -167,7 +167,9 @@ impl ObjectTracker {
                         if let Some(requested_at) = request.get_requested() {
                             // check if the request is timed out
                             if requested_at.elapsed() > TIME_OUT {
-                                warn!("Request timed out for object {}", request.get_hash());
+                                if log_enabled!(Level::Warn) {
+                                    warn!("Request timed out for object {}", request.get_hash());
+                                }
                                 let peer_id = request.get_peer().get_id();
                                 let group_id = request.get_group_id();
 
@@ -177,7 +179,9 @@ impl ObjectTracker {
                             }
                         } else {
                             // It wasn't yet requested
-                            debug!("Request not yet sent for object {}", request.get_hash());
+                            if log_enabled!(Level::Debug) {
+                                debug!("Request not yet sent for object {}", request.get_hash());
+                            }
                             break;
                         }
                     }
@@ -229,7 +233,9 @@ impl ObjectTracker {
         &self,
         response: OwnedObjectResponse,
     ) -> Result<bool, P2pError> {
-        trace!("handle object response {}", response.get_hash());
+        if log_enabled!(Level::Trace) {
+            trace!("handle object response {}", response.get_hash());
+        }
         {
             let mut queue = self.queue.lock().await;
             if let Some(request) = queue.remove(response.get_hash()) {
@@ -252,7 +258,9 @@ impl ObjectTracker {
         request: ObjectRequest,
         group_id: Option<u64>,
     ) -> Result<RequestResponse, P2pError> {
-        trace!("Requesting object {} from {}", request.get_hash(), peer);
+        if log_enabled!(Level::Trace) {
+            trace!("Requesting object {} from {}", request.get_hash(), peer);
+        }
         let (listener, hash) = {
             let mut queue = self.queue.lock().await;
             if let Some(request) = queue.get(request.get_hash()) {

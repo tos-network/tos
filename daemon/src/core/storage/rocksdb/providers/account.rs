@@ -148,7 +148,9 @@ impl AccountProvider for RocksStorage {
             maximum_topoheight
         );
         let Some(account) = self.get_optional_account_type(key)? else {
-            trace!("account {} not found", key.as_address(self.is_mainnet()));
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("account {} not found", key.as_address(self.is_mainnet()));
+            }
             return Ok(false);
         };
 
@@ -255,7 +257,9 @@ impl RocksStorage {
     }
 
     pub(super) fn has_account_type(&self, key: &PublicKey) -> Result<bool, BlockchainError> {
-        trace!("has account {}", key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has account {}", key.as_address(self.is_mainnet()));
+        }
         self.contains_data(Column::Account, key.as_bytes())
     }
 
@@ -286,7 +290,9 @@ impl RocksStorage {
     }
 
     pub(super) fn get_account_type(&self, key: &PublicKey) -> Result<Account, BlockchainError> {
-        trace!("get account {}", key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get account {}", key.as_address(self.is_mainnet()));
+        }
         self.load_from_disk(Column::Account, key.as_bytes())
     }
 
@@ -294,7 +300,9 @@ impl RocksStorage {
         &self,
         key: &PublicKey,
     ) -> Result<Option<Account>, BlockchainError> {
-        trace!("get optional account {}", key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get optional account {}", key.as_address(self.is_mainnet()));
+        }
         self.load_optional_from_disk(Column::Account, key.as_bytes())
     }
 
@@ -311,7 +319,9 @@ impl RocksStorage {
         match self.get_optional_account_type(key)? {
             Some(account) => Ok(account),
             None => {
-                trace!("creating account {}", key.as_address(self.is_mainnet()));
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("creating account {}", key.as_address(self.is_mainnet()));
+                }
                 let account = Account {
                     id: self.get_next_account_id()?,
                     registered_at: None,

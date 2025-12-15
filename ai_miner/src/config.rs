@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use log::{debug, info, warn};
+use log::{debug, info, log_enabled, warn};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -694,7 +694,9 @@ impl ValidatedConfig {
             )
         })?;
 
-        info!("Configuration saved to: {}", path.as_ref().display());
+        if log_enabled!(log::Level::Info) {
+            info!("Configuration saved to: {}", path.as_ref().display());
+        }
         Ok(())
     }
 

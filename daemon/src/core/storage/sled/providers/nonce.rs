@@ -93,7 +93,9 @@ impl NonceProvider for SledStorage {
     }
 
     async fn has_nonce(&self, key: &PublicKey) -> Result<bool, BlockchainError> {
-        trace!("has nonce {}", key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has nonce {}", key.as_address(self.is_mainnet()));
+        }
         let contains = self.contains_data(&self.nonces, key.as_bytes())?;
         Ok(contains)
     }
@@ -116,7 +118,9 @@ impl NonceProvider for SledStorage {
         &self,
         key: &PublicKey,
     ) -> Result<(TopoHeight, VersionedNonce), BlockchainError> {
-        trace!("get last nonce {}", key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get last nonce {}", key.as_address(self.is_mainnet()));
+        }
         if !self.has_nonce(key).await? {
             return Err(BlockchainError::NoNonce(key.as_address(self.is_mainnet())));
         }

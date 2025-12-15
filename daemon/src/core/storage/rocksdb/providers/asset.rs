@@ -179,7 +179,9 @@ impl AssetProvider for RocksStorage {
         &'a self,
         key: &'a PublicKey,
     ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
-        trace!("get assets for {}", key.as_address(self.is_mainnet()));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get assets for {}", key.as_address(self.is_mainnet()));
+        }
         let account_id = self.get_account_id(key)?;
         self.iter_keys::<Skip<8, AssetId>>(
             Column::Balances,

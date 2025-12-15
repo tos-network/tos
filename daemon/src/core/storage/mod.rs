@@ -150,11 +150,15 @@ pub trait Storage:
             txs.extend(block_txs);
 
             // generate new tips
-            trace!("Removing {} from {} tips", hash, tips.len());
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Removing {} from {} tips", hash, tips.len());
+            }
             tips.remove(&hash);
 
             for hash in block.get_tips().iter() {
-                trace!("Adding {} to {} tips", hash, tips.len());
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Adding {} to {} tips", hash, tips.len());
+                }
                 tips.insert(hash.clone());
             }
 

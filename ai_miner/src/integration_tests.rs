@@ -1,5 +1,5 @@
 use anyhow::Result;
-use log::{info, warn, error};
+use log::{info, warn, error, log_enabled};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
@@ -224,7 +224,9 @@ impl AIMiningIntegrationTester {
             Ok(task_id) => {
                 scenario.task_id = Some(task_id);
                 scenario.status = TestStatus::Passed;
-                info!("✅ Task publication test passed - Task ID: {}", hex::encode(task_id.as_bytes()));
+                if log_enabled!(log::Level::Info) {
+                    info!("✅ Task publication test passed - Task ID: {}", hex::encode(task_id.as_bytes()));
+                }
             }
             Err(e) => {
                 scenario.status = TestStatus::Failed;
@@ -266,7 +268,9 @@ impl AIMiningIntegrationTester {
             Ok(answer_id) => {
                 scenario.answer_id = Some(answer_id);
                 scenario.status = TestStatus::Passed;
-                info!("✅ Answer submission test passed - Answer ID: {}", hex::encode(answer_id.as_bytes()));
+                if log_enabled!(log::Level::Info) {
+                    info!("✅ Answer submission test passed - Answer ID: {}", hex::encode(answer_id.as_bytes()));
+                }
             }
             Err(e) => {
                 scenario.status = TestStatus::Failed;
@@ -315,7 +319,9 @@ impl AIMiningIntegrationTester {
             Ok(validation_id) => {
                 scenario.validation_id = Some(validation_id);
                 scenario.status = TestStatus::Passed;
-                info!("✅ Answer validation test passed - Validation ID: {}", hex::encode(validation_id.as_bytes()));
+                if log_enabled!(log::Level::Info) {
+                    info!("✅ Answer validation test passed - Validation ID: {}", hex::encode(validation_id.as_bytes()));
+                }
             }
             Err(e) => {
                 scenario.status = TestStatus::Failed;
@@ -522,7 +528,9 @@ impl AIMiningIntegrationTester {
             return Err(anyhow::anyhow!("No transactions found in storage"));
         }
 
-        info!("Storage consistency verified: {} transactions recorded", transactions.len());
+        if log_enabled!(log::Level::Info) {
+            info!("Storage consistency verified: {} transactions recorded", transactions.len());
+        }
         Ok(())
     }
 
@@ -561,10 +569,14 @@ impl AIMiningIntegrationTester {
             }
 
             if let Some(task_id) = &scenario.task_id {
-                info!("   Task ID: {}", hex::encode(task_id.as_bytes()));
+                if log_enabled!(log::Level::Info) {
+                    info!("   Task ID: {}", hex::encode(task_id.as_bytes()));
+                }
             }
             if let Some(answer_id) = &scenario.answer_id {
-                info!("   Answer ID: {}", hex::encode(answer_id.as_bytes()));
+                if log_enabled!(log::Level::Info) {
+                    info!("   Answer ID: {}", hex::encode(answer_id.as_bytes()));
+                }
             }
         }
 

@@ -488,7 +488,9 @@ impl TakoExecutor {
 
         // 7. Not a precompile - proceed with regular contract execution
         // Validate ELF bytecode
-        debug!("Validating ELF bytecode: size={} bytes", bytecode.len());
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Validating ELF bytecode: size={} bytes", bytecode.len());
+        }
         tos_common::contract::validate_contract_bytecode(bytecode).map_err(|e| {
             error!("Bytecode validation failed: {:?}", e);
             TakoExecutionError::invalid_bytecode("Invalid ELF format", Some(e))
@@ -544,8 +546,10 @@ impl TakoExecutor {
 
         // 11. Extract log messages from contract execution
         let log_messages = invoke_context.extract_log_messages().unwrap_or_default();
-        if !log_messages.is_empty() {
-            debug!("Contract emitted {} log messages", log_messages.len());
+        if log::log_enabled!(log::Level::Debug) {
+            if !log_messages.is_empty() {
+                debug!("Contract emitted {} log messages", log_messages.len());
+            }
         }
 
         // 11a. Extract events from contract execution

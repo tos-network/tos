@@ -32,7 +32,9 @@ impl BlocksAtHeightProvider for SledStorage {
         tips: &IndexSet<Hash>,
         height: u64,
     ) -> Result<(), BlockchainError> {
-        trace!("set {} blocks at height {}", tips.len(), height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set {} blocks at height {}", tips.len(), height);
+        }
         Self::insert_into_disk(
             self.snapshot.as_mut(),
             &self.blocks_at_height,
@@ -50,7 +52,9 @@ impl BlocksAtHeightProvider for SledStorage {
         trace!("add block {} at height {}", hash, height);
         let mut tips = if self.has_blocks_at_height(height).await? {
             let hashes = self.get_blocks_at_height(height).await?;
-            trace!("Found {} blocks at this height", hashes.len());
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Found {} blocks at this height", hashes.len());
+            }
             hashes
         } else {
             trace!("No blocks found at this height");

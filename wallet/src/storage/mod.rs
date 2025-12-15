@@ -1259,7 +1259,9 @@ impl EncryptedStorage {
             let tx_key = el?;
             let mut entry: TransactionEntry =
                 self.load_from_disk_with_key(&self.transactions, &tx_key)?;
-            trace!("entry: {}", entry.get_hash());
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("entry: {}", entry.get_hash());
+            }
 
             let mut transfers: Option<Vec<Transfer>> = None;
             match entry.get_mut_entry() {

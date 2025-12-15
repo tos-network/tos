@@ -382,7 +382,9 @@ impl Mempool {
                     // We get an error while retrieving the last nonce for this key,
                     // that means the key is not in storage anymore, so we can delete safely
                     // we just have to skip this iteration so it's not getting re-injected
-                    warn!("Error while getting nonce for owner {}, he maybe has no nonce anymore, skipping: {}", key.as_address(self.mainnet), e);
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Error while getting nonce for owner {}, he maybe has no nonce anymore, skipping: {}", key.as_address(self.mainnet), e);
+                    }
 
                     // Delete all txs from this cache
                     for tx in cache.txs {
@@ -413,7 +415,9 @@ impl Mempool {
             // or, check and delete txs if the nonce is lower than the new nonce
             // otherwise the cache is still up to date
             if nonce < cache.get_min() {
-                warn!("All TXs for {} are orphaned, deleting them because cache min is {} and last nonce is {}", key.as_address(self.mainnet), cache.get_min(), nonce);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("All TXs for {} are orphaned, deleting them because cache min is {} and last nonce is {}", key.as_address(self.mainnet), cache.get_min(), nonce);
+                }
 
                 // Don't let ghost TXs in mempool
                 for tx in cache.txs.drain(..) {

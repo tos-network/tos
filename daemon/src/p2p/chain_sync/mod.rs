@@ -6,7 +6,7 @@ use futures::{
     StreamExt, TryStreamExt,
 };
 use indexmap::IndexSet;
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, info, log_enabled, trace, warn, Level};
 use std::{
     borrow::Cow,
     sync::Arc,
@@ -68,7 +68,9 @@ impl<S: Storage> P2pServer<S> {
                 self.build_list_of_blocks_id(&*storage).await?,
                 requested_max_size as u16,
             );
-            trace!("Built a chain request with {} blocks", request.size());
+            if log_enabled!(Level::Trace) {
+                trace!("Built a chain request with {} blocks", request.size());
+            }
             let ping = self
                 .build_generic_ping_packet_with_storage(&*storage)
                 .await?;
@@ -498,7 +500,9 @@ impl<S: Storage> P2pServer<S> {
         blocks.extend(top_blocks);
 
         if pop_count > 0 {
-            warn!("{} sent us a pop count request of {} with {} blocks (common point: {} at {}, skip stable: {})", peer, pop_count, blocks_len, common_point.get_hash(), common_topoheight, skip_stable_height_check);
+            if log_enabled!(Level::Warn) {
+                warn!("{} sent us a pop count request...", peer);
+            }
         }
 
         // if node asks us to pop blocks, check that the peer's height/topoheight is in advance on us
@@ -626,7 +630,9 @@ impl<S: Storage> P2pServer<S> {
                         // Try to apply any orphaned TX back to our chain
                         // We want to prevent any loss
                         if let Ok((ref mut txs, _)) = res.as_mut() {
-                            debug!("Applying back orphaned {} TXs", txs.len());
+                            if log_enabled!(Level::Debug) {
+                                debug!("Applying back orphaned {} TXs", txs.len());
+                            }
                             for (hash, tx) in txs.drain(..) {
                                 debug!("Trying to apply orphaned TX {}", hash);
                                 if !self.blockchain.is_tx_included(&hash).await? {

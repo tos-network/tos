@@ -11,7 +11,7 @@ use crate::config::{
 use chacha20poly1305::aead::Buffer;
 use human_bytes::human_bytes;
 use humantime::format_duration;
-use log::{debug, error, trace, warn};
+use log::{debug, error, log_enabled, trace, warn, Level};
 use metrics::counter;
 use std::{
     borrow::Cow,
@@ -356,7 +356,9 @@ impl Connection {
         {
             Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => {
-                debug!("Failed to send bytes to {}: {}", self.get_address(), e);
+                if log_enabled!(Level::Debug) {
+                    debug!("Failed to send bytes to {}: {}", self.get_address(), e);
+                }
                 self.closed.store(true, Ordering::SeqCst);
                 Err(e.into())
             }
@@ -563,7 +565,9 @@ impl Connection {
         match self.read_bytes_from_stream_internal(stream, buf).await {
             Ok(read) => Ok(read),
             Err(e) => {
-                debug!("Failed to read bytes from {}: {}", self.get_address(), e);
+                if log_enabled!(Level::Debug) {
+                    debug!("Failed to read bytes from {}: {}", self.get_address(), e);
+                }
                 self.closed.store(true, Ordering::SeqCst);
                 Err(e)
             }

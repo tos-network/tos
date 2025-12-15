@@ -9,7 +9,7 @@ use crate::{
 use bytes::Bytes;
 use futures::{stream, StreamExt};
 use humantime::format_duration;
-use log::{debug, error, info, trace};
+use log::{debug, error, info, log_enabled, trace, Level};
 use metrics::gauge;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -161,19 +161,27 @@ impl PeerList {
             let packet = &packet;
             stream::iter(peers.iter())
                 .for_each_concurrent(self.stream_concurrency, |peer| async move {
-                    trace!("Locking shared peers for {}", peer.get_connection().get_address());
+                    if log_enabled!(Level::Trace) {
+                        trace!("Locking shared peers for {}", peer.get_connection().get_address());
+                    }
                     let mut shared_peers = peer.get_peers().lock().await;
-                    trace!("locked shared peers for {}", peer.get_connection().get_address());
+                    if log_enabled!(Level::Trace) {
+                        trace!("locked shared peers for {}", peer.get_connection().get_address());
+                    }
 
                     // check if it was a common peer (we sent it and we received it)
                     // Because its a common peer, we can expect that he will send us the same packet
                     if let Some(direction) = shared_peers.pop(addr) {
                         // If its a outgoing direction, send a packet to notify that the peer disconnected
                         if !direction.is_in() {
-                            debug!("Sending PeerDisconnected packet to peer {} for {}", peer.get_outgoing_address(), addr);
+                            if log_enabled!(Level::Debug) {
+                                debug!("Sending PeerDisconnected packet to peer {} for {}", peer.get_outgoing_address(), addr);
+                            }
                             // we send the packet to notify the peer that we don't have it in common anymore
                             if let Err(e) = peer.send_bytes(packet.clone()).await {
-                                error!("Error while trying to send PeerDisconnected packet to peer {}: {}", peer.get_connection().get_address(), e);
+                                if log_enabled!(Level::Error) {
+                                    error!("Error while trying to send PeerDisconnected packet to peer {}: {}", peer.get_connection().get_address(), e);
+                                }
                             }
                         }
                     }
@@ -302,7 +310,9 @@ impl PeerList {
             peers.drain().collect::<Vec<(u64, Arc<Peer>)>>()
         };
 
-        info!("Closing {} peers", peers.len());
+        if log_enabled!(Level::Info) {
+            info!("Closing {} peers", peers.len());
+        }
         stream::iter(peers)
             .for_each_concurrent(self.stream_concurrency, |(_, peer)| async move {
                 debug!("Closing {}", peer);

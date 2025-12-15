@@ -312,7 +312,9 @@ impl SledStorage {
     pub fn load_cache_from_disk(&mut self) {
         // Load tips from disk if available
         if let Ok(tips) = self.load_from_disk::<Tips>(&self.extra, TIPS, DiskContext::Tips) {
-            debug!("Found tips: {}", tips.len());
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Found tips: {}", tips.len());
+            }
             self.cache.tips_cache = tips;
         }
 
@@ -613,7 +615,9 @@ impl SledStorage {
             trace!("not found in cache, load optional from disk");
             let value: Option<V> = self.load_optional_from_disk(tree, &key_bytes)?;
 
-            trace!("load optional from disk is present: {}", value.is_some());
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("load optional from disk is present: {}", value.is_some());
+            }
             if let Some(value) = value.as_ref() {
                 cache.put(key.clone(), value.clone());
             }

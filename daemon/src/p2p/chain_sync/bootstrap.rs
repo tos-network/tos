@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashSet, sync::Arc, time::Instant};
 
 use futures::{stream, StreamExt, TryStreamExt};
 use indexmap::{IndexMap, IndexSet};
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, info, log_enabled, trace, warn, Level};
 use tokio::try_join;
 use tos_common::{
     account::{VersionedBalance, VersionedNonce},
@@ -152,7 +152,9 @@ impl<S: Storage> P2pServer<S> {
                 }
 
                 if max > self.blockchain.get_stable_topoheight() {
-                    warn!("Requested spendable balances for topoheight {} but our stable topoheight is {}", max, self.blockchain.get_stable_topoheight());
+                    if log_enabled!(Level::Warn) {
+                        warn!("Requested spendable balances...");
+                    }
                     return Err(P2pError::InvalidRequestedTopoheight.into());
                 }
 
@@ -421,7 +423,9 @@ impl<S: Storage> P2pServer<S> {
 
         loop {
             let response = if let Some(step) = step.take() {
-                info!("Requesting step {:?}", step.kind());
+                if log_enabled!(Level::Info) {
+                    info!("Requesting step {:?}", step.kind());
+                }
                 // This will also verify that the received step is the requested one
                 peer.request_boostrap_chain(step).await?
             } else {
@@ -442,7 +446,12 @@ impl<S: Storage> P2pServer<S> {
                             .get_hash_at_topo_height(common_point.get_topoheight())
                             .await?;
                         if hash_at_topo != *common_point.get_hash() {
-                            warn!("Common point is {} while our hash at topoheight {} is {}. Aborting", common_point.get_hash(), common_point.get_topoheight(), storage.get_hash_at_topo_height(common_point.get_topoheight()).await?);
+                            if log_enabled!(Level::Warn) {
+                                warn!(
+                                    "Common point is {} while our hash...",
+                                    common_point.get_hash()
+                                );
+                            }
                             return Err(BlockchainError::Unknown);
                         }
 
@@ -908,7 +917,9 @@ impl<S: Storage> P2pServer<S> {
                 .try_for_each_concurrent(self.stream_concurrency, |(asset, summary)| async move {
                     // check that the account have balance for this asset
                     if let Some(account) = summary {
-                        debug!("Fetching balance {} history for {}", asset, key.as_address(blockchain.get_network().is_mainnet()));
+                        if log_enabled!(Level::Debug) {
+                            debug!("Fetching balance {} history for {}", asset, key.as_address(blockchain.get_network().is_mainnet()));
+                        }
 
                         // Each version are applied on iteration N+1 of the loop
                         // This is done to get the previous topoheight of the current version
@@ -922,7 +933,9 @@ impl<S: Storage> P2pServer<S> {
                         let mut total_versions = 0;
                         // Go through all balance history
                         while let Some(max) = max_topoheight {
-                            debug!("Requesting spendable balances for asset {} at max topo {} for {}", asset, max, key.as_address(blockchain.get_network().is_mainnet()));
+                            if log_enabled!(Level::Debug) {
+                                debug!("Requesting spendable balances for asset...");
+                            }
                             let StepResponse::SpendableBalances(balances, max_next) = peer.request_boostrap_chain(StepRequest::SpendableBalances(Cow::Borrowed(&key), Cow::Borrowed(&asset), min_topo, max)).await? else {
                                 // shouldn't happen
                                 error!("Received an invalid StepResponse (how ?) while fetching balances");
@@ -962,9 +975,13 @@ impl<S: Storage> P2pServer<S> {
                             storage.set_last_topoheight_for_balance(&key, &asset, highest_topoheight)?;
                         }
 
-                        info!("Synced {} balance versions {} of {}", total_versions, asset, key.as_address(blockchain.get_network().is_mainnet()));
+                        if log_enabled!(Level::Info) {
+                            info!("Synced {} balance versions {} of {}", total_versions, asset, key.as_address(blockchain.get_network().is_mainnet()));
+                        }
                     } else {
-                        debug!("No balance for key {} at topoheight {}", key.as_address(blockchain.get_network().is_mainnet()), stable_topoheight);
+                        if log_enabled!(Level::Debug) {
+                            debug!("No balance for key {} at topoheight {}", key.as_address(blockchain.get_network().is_mainnet()), stable_topoheight);
+                        }
                     }
 
                     Ok(())
@@ -998,7 +1015,9 @@ impl<S: Storage> P2pServer<S> {
         }
 
         let mut start = Instant::now();
-        info!("Updating {} keys", keys.len());
+        if log_enabled!(Level::Info) {
+            info!("Updating {} keys", keys.len());
+        }
         self.handle_accounts(
             peer,
             keys,

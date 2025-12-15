@@ -339,7 +339,9 @@ impl<S: Storage> GetWorkServer<S> {
             // now let's send the job to every miner
             let miners = self.miners.lock().await;
 
-            debug!("Notifying {} miners for new job", miners.len());
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Notifying {} miners for new job", miners.len());
+            }
             stream::iter(miners.iter())
                 .for_each_concurrent(self.notify_job_concurrency, |(addr, miner)| {
                     let mut job = job.clone();
@@ -394,7 +396,9 @@ impl<S: Storage> GetWorkServer<S> {
                     .map_err(|e| InternalRpcError::InvalidParams(e))?;
             } else {
                 // really old job, or miner send invalid job
-                debug!("Job {} was not found in cache", job.get_header_work_hash());
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Job {} was not found in cache", job.get_header_work_hash());
+                }
                 return Err(InternalRpcError::InvalidParams(
                     "Job was not found in cache",
                 ));
