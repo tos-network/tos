@@ -262,6 +262,9 @@ const HARD_FORKS: [HardFork; 3] = [
 ];
 
 // Testnet / Stagenet / Devnet hard forks
+// NOTE: version_requirement must match TOS software version (currently 0.1.x)
+// Previously set to legacy versions (1.13.0, 1.16.0) which caused
+// P2P "Invalid P2P version" errors during node synchronization.
 const OTHERS_NETWORK_HARD_FORKS: [HardFork; 4] = [
     HardFork {
         height: 0,
@@ -273,19 +276,19 @@ const OTHERS_NETWORK_HARD_FORKS: [HardFork; 4] = [
         height: 5,
         version: BlockVersion::V1,
         changelog: "tos-hash v2",
-        version_requirement: Some(">=1.13.0"),
+        version_requirement: Some(">=0.1.0"),
     },
     HardFork {
         height: 10,
         version: BlockVersion::V2,
         changelog: "MultiSig, P2P",
-        version_requirement: Some(">=1.16.0"),
+        version_requirement: Some(">=0.1.0"),
     },
     HardFork {
         height: 15,
         version: BlockVersion::V3,
         changelog: "Smart Contracts",
-        version_requirement: Some(">=1.16.0"),
+        version_requirement: Some(">=0.1.0"),
     },
 ];
 
