@@ -21,7 +21,6 @@ use std::{
     fmt::{Display, Error, Formatter},
     hash::{Hash as StdHash, Hasher},
     net::{IpAddr, SocketAddr},
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
         Arc,
@@ -206,8 +205,7 @@ impl Peer {
                 pruned_topoheight: AtomicU64::new(pruned_topoheight.unwrap_or(0)),
                 is_pruned: AtomicBool::new(pruned_topoheight.is_some()),
                 bootstrap_requests: Mutex::new(LruCache::new(
-                    NonZeroUsize::new(PEER_OBJECTS_CONCURRENCY)
-                        .expect("PEER_OBJECTS_CONCURRENCY must be non-zero"),
+                    PEER_OBJECTS_CONCURRENCY_NONZERO,
                 )),
                 sync_chain: Mutex::new(None),
                 outgoing_address,
