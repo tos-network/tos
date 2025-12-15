@@ -204,9 +204,7 @@ impl Peer {
                 requested_inventory: AtomicBool::new(false),
                 pruned_topoheight: AtomicU64::new(pruned_topoheight.unwrap_or(0)),
                 is_pruned: AtomicBool::new(pruned_topoheight.is_some()),
-                bootstrap_requests: Mutex::new(LruCache::new(
-                    PEER_OBJECTS_CONCURRENCY_NONZERO,
-                )),
+                bootstrap_requests: Mutex::new(LruCache::new(PEER_OBJECTS_CONCURRENCY_NONZERO)),
                 sync_chain: Mutex::new(None),
                 outgoing_address,
                 shareable,
