@@ -129,6 +129,25 @@ cargo fmt --all -- --check
 
 **Note**: Pre-existing clippy warnings in the codebase should be fixed gradually. New code must have zero warnings.
 
+#### Security Clippy (Production Code)
+
+**RULE: Production code (daemon, common, wallet) must pass strict security lints.**
+
+```bash
+cargo clippy --package tos_daemon --package tos_common --package tos_wallet --lib -- \
+    -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic -D warnings
+```
+
+**Prohibited in production code:**
+- `clippy::unwrap_used` - Use `ok_or()`, `unwrap_or()`, `?` operator, or proper error handling instead of `.unwrap()`
+- `clippy::expect_used` - Use pre-defined constants (e.g., `NONZERO` constants) or proper error handling instead of `.expect()`
+- `clippy::panic` - Use `Result` types and `?` operator instead of `panic!()`
+
+**Allowed exceptions:**
+- Test code (`#[cfg(test)]` modules)
+- Build scripts and tools
+- Cases where panic is truly unrecoverable (document with `// SAFETY:` comment)
+
 ### 5. Git Workflow
 
 **RULE: Follow the standard commit and push workflow.**
@@ -168,19 +187,23 @@ cargo fmt --all -- --check
 # 4. Clippy linting (treat warnings as errors)
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# 5. Build verification
+# 5. Security Clippy (production code - REQUIRED)
+cargo clippy --package tos_daemon --package tos_common --package tos_wallet --lib -- \
+    -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic -D warnings
+
+# 6. Build verification
 cargo build --workspace
 
-# 6. Test verification
+# 7. Test verification
 cargo test --workspace
 
-# 7. Stage changes
+# 8. Stage changes
 git add <files>
 
-# 8. Commit with detailed message
+# 9. Commit with detailed message
 git commit -m "<message>"
 
-# 9. Push to GitHub
+# 10. Push to GitHub
 git push origin <branch>
 ```
 
@@ -661,6 +684,8 @@ Before committing, verify:
 - [ ] **No f32/f64 in consensus-critical code** (block validation, fees, rewards, difficulty)
 - [ ] All consensus calculations use `u128` with `SCALE=10000` pattern
 - [ ] All safe f64 usages have `// SAFE:` documentation comments
+- [ ] `cargo clippy --workspace -- -D warnings` produces 0 warnings
+- [ ] **Security Clippy passes** for production code (no `unwrap()`, `expect()`, `panic!()` in daemon/common/wallet)
 - [ ] `cargo build --workspace` produces 0 warnings
 - [ ] `cargo test --workspace` produces 0 warnings and 0 failures
 - [ ] All modified files staged with `git add`
