@@ -2,7 +2,7 @@ use super::{
     error::BlockchainError,
     storage::{DifficultyProvider, Storage},
 };
-use indexmap::IndexSet;
+use itertools::Either;
 use log::trace;
 use tos_common::{crypto::Hash, difficulty::CumulativeDifficulty, time::TimestampMillis};
 
@@ -47,7 +47,10 @@ where
 // Sort the TIPS by cumulative difficulty
 // If the cumulative difficulty is the same, the hash value is used to sort
 // Hashes are sorted in descending order
-pub async fn sort_tips<S, I>(storage: &S, tips: I) -> Result<IndexSet<Hash>, BlockchainError>
+pub async fn sort_tips<S, I>(
+    storage: &S,
+    tips: I,
+) -> Result<impl Iterator<Item = Hash> + ExactSizeIterator, BlockchainError>
 where
     S: Storage,
     I: Iterator<Item = Hash> + ExactSizeIterator,
@@ -56,7 +59,7 @@ where
     let tips_len = tips.len();
     match tips_len {
         0 => Err(BlockchainError::ExpectedTips),
-        1 => Ok(tips.into_iter().collect()),
+        1 => Ok(Either::Left(tips)),
         _ => {
             let mut scores: Vec<(Hash, CumulativeDifficulty)> = Vec::with_capacity(tips_len);
             for hash in tips {
@@ -67,7 +70,7 @@ where
             }
 
             sort_descending_by_cumulative_difficulty(&mut scores);
-            Ok(scores.into_iter().map(|(hash, _)| hash).collect())
+            Ok(Either::Right(scores.into_iter().map(|(hash, _)| hash)))
         }
     }
 }

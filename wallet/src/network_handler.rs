@@ -141,8 +141,8 @@ impl NetworkHandler {
                 if !auto_reconnect {
                     // Turn off the websocket connection
                     if let Err(e) = zelf.api.disconnect().await {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("Error while closing websocket connection: {}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error while closing websocket connection: {}", e);
                         }
                     }
 

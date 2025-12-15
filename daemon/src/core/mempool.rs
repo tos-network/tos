@@ -361,6 +361,7 @@ impl Mempool {
         stable_topoheight: TopoHeight,
         topoheight: TopoHeight,
         block_version: BlockVersion,
+        full: bool,
     ) -> Vec<(Arc<Hash>, SortedTx)> {
         trace!("Cleaning up mempool...");
 
@@ -494,7 +495,8 @@ impl Mempool {
 
                 // Cache is not empty yet, but we deleted some TXs from it, balances may be out-dated, verify TXs left
                 // We must have deleted a TX from its list to trigger a new re-check
-                if !delete_cache && !deleted_txs_hashes.is_empty() {
+                // If full is true, we also need to re-check even if no TXs were deleted (DAG reorg case)
+                if !delete_cache && (!deleted_txs_hashes.is_empty() || full) {
                     // Instead of checking ALL the TXs
                     // We can do the following optimization:
                     // As we know that each TXs added in mempool are validated

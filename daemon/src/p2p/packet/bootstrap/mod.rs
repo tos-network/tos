@@ -8,12 +8,17 @@ pub use step::*;
 
 #[derive(Debug)]
 pub struct BootstrapChainRequest<'a> {
+    id: u64,
     step: StepRequest<'a>,
 }
 
 impl<'a> BootstrapChainRequest<'a> {
-    pub fn new(step: StepRequest<'a>) -> Self {
-        Self { step }
+    pub fn new(id: u64, step: StepRequest<'a>) -> Self {
+        Self { id, step }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     pub fn kind(&self) -> StepKind {
@@ -27,26 +32,34 @@ impl<'a> BootstrapChainRequest<'a> {
 
 impl Serializer for BootstrapChainRequest<'_> {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        Ok(Self::new(StepRequest::read(reader)?))
+        let id = reader.read_u64()?;
+        let step = StepRequest::read(reader)?;
+        Ok(Self::new(id, step))
     }
 
     fn write(&self, writer: &mut Writer) {
+        self.id.write(writer);
         self.step.write(writer);
     }
 
     fn size(&self) -> usize {
-        self.step.size()
+        self.id.size() + self.step.size()
     }
 }
 
 #[derive(Debug)]
 pub struct BootstrapChainResponse {
+    id: u64,
     response: StepResponse,
 }
 
 impl BootstrapChainResponse {
-    pub fn new(response: StepResponse) -> Self {
-        Self { response }
+    pub fn new(id: u64, response: StepResponse) -> Self {
+        Self { id, response }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     pub fn kind(&self) -> StepKind {
@@ -60,14 +73,17 @@ impl BootstrapChainResponse {
 
 impl Serializer for BootstrapChainResponse {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        Ok(Self::new(StepResponse::read(reader)?))
+        let id = reader.read_u64()?;
+        let response = StepResponse::read(reader)?;
+        Ok(Self::new(id, response))
     }
 
     fn write(&self, writer: &mut Writer) {
+        self.id.write(writer);
         self.response.write(writer);
     }
 
     fn size(&self) -> usize {
-        self.response.size()
+        self.id.size() + self.response.size()
     }
 }

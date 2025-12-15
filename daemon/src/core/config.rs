@@ -373,6 +373,11 @@ pub struct P2pConfig {
     #[clap(name = "p2p-handle-peer-packets-in-dedicated-task", long)]
     #[serde(default)]
     pub handle_peer_packets_in_dedicated_task: bool,
+    /// Disable the fast sync support.
+    /// If set to true, other nodes will not be able to use the fast sync mode with us.
+    #[clap(name = "p2p-disable-fast-sync-support", long)]
+    #[serde(default)]
+    pub disable_fast_sync_support: bool,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize)]

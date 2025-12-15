@@ -89,7 +89,8 @@ impl TransactionProvider for SledStorage {
             .map(|res| {
                 let key = res?;
                 let tx_hash = Hash::from_bytes(&key)?;
-                if !self.is_tx_executed_in_a_block(&tx_hash)? {
+                // Return None for executed transactions (we want unexecuted ones)
+                if self.is_tx_executed_in_a_block(&tx_hash)? {
                     return Ok(None);
                 }
 

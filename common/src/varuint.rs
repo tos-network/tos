@@ -47,6 +47,16 @@ impl VarUint {
     pub const fn one() -> Self {
         Self(U256::one())
     }
+
+    // Safely convert to u64, returning None if value exceeds u64::MAX
+    #[inline(always)]
+    pub fn as_u64(&self) -> Option<u64> {
+        if self.0 > U256::from(u64::MAX) {
+            None
+        } else {
+            Some(self.0.as_u64())
+        }
+    }
 }
 
 impl Serializer for VarUint {

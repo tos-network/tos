@@ -879,7 +879,7 @@ impl Serializer for TransactionEntry {
     }
 
     fn size(&self) -> usize {
-        self.hash.size() + self.topoheight.size() + self.entry.size()
+        self.hash.size() + self.topoheight.size() + self.timestamp.size() + self.entry.size()
     }
 }
 

@@ -18,10 +18,10 @@ use lru::LruCache;
 use metrics::counter;
 use std::{
     borrow::Cow,
-    collections::VecDeque,
     fmt::{Display, Error, Formatter},
     hash::{Hash as StdHash, Hasher},
     net::{IpAddr, SocketAddr},
+    num::NonZeroUsize,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
         Arc,
@@ -87,6 +87,8 @@ pub struct Peer {
     height: AtomicU64,
     // last time we got a chain request
     last_chain_sync: AtomicU64,
+    // last time we sent a chain request
+    last_chain_sync_out: AtomicU64,
     // last time we got a fail
     last_fail_count: AtomicU64,
     // fail count: if greater than 20, we should close this connection
@@ -119,16 +121,17 @@ pub struct Peer {
     // cannot be set to false if its already to true (protocol rules)
     is_pruned: AtomicBool,
     // used for await on bootstrap chain packets
-    // Because we are in a TCP stream, we know that all our
-    // requests will be answered in the order we sent them
-    // So we can use a queue to store the senders and pop them
-    bootstrap_requests: Mutex<VecDeque<oneshot::Sender<StepResponse>>>,
+    // We use LruCache with request IDs to match requests with responses
+    // This is order-independent and more robust than relying on TCP ordering
+    bootstrap_requests: Mutex<LruCache<u64, oneshot::Sender<StepResponse>>>,
     // used to wait on chain response when syncing chain
     sync_chain: Mutex<Option<oneshot::Sender<ChainResponse>>>,
     // IP address with local port
     outgoing_address: SocketAddr,
     // Determine if this peer allows to be shared to others and/or through API
-    sharable: bool,
+    shareable: bool,
+    // Does this peer support fast sync (bootstrap chain)?
+    supports_fast_sync: bool,
     // Channel to send bytes to the writer task
     tx: Tx,
     // Channel to notify the tasks to exit
@@ -143,6 +146,11 @@ pub struct Peer {
     // Due to needed order of TXs to be accepted
     // We must wait that the peer received our inventory
     propagate_txs: AtomicBool,
+    // Did the sync chain failed?
+    // It is maybe another (bad) chain
+    sync_chain_failed: AtomicBool,
+    // Request ID counter for bootstrap chain requests
+    request_id: AtomicU64,
 }
 
 impl Peer {
@@ -159,7 +167,8 @@ impl Peer {
         priority: bool,
         cumulative_difficulty: CumulativeDifficulty,
         peer_list: SharedPeerList,
-        sharable: bool,
+        shareable: bool,
+        supports_fast_sync: bool,
         propagate_txs: bool,
     ) -> (Self, Rx) {
         let mut outgoing_address = *connection.get_address();
@@ -182,6 +191,7 @@ impl Peer {
                 last_fail_count: AtomicU64::new(0),
                 fail_count: AtomicU8::new(0),
                 last_chain_sync: AtomicU64::new(0),
+                last_chain_sync_out: AtomicU64::new(0),
                 peer_list,
                 objects_requested: Mutex::new(LruCache::new(PEER_OBJECTS_CONCURRENCY_NONZERO)),
                 peers: Mutex::new(LruCache::new(PEER_PEERS_CACHE_SIZE_NONZERO)),
@@ -195,19 +205,46 @@ impl Peer {
                 requested_inventory: AtomicBool::new(false),
                 pruned_topoheight: AtomicU64::new(pruned_topoheight.unwrap_or(0)),
                 is_pruned: AtomicBool::new(pruned_topoheight.is_some()),
-                bootstrap_requests: Mutex::new(VecDeque::new()),
+                bootstrap_requests: Mutex::new(LruCache::new(
+                    NonZeroUsize::new(PEER_OBJECTS_CONCURRENCY)
+                        .expect("PEER_OBJECTS_CONCURRENCY must be non-zero"),
+                )),
                 sync_chain: Mutex::new(None),
                 outgoing_address,
-                sharable,
+                shareable,
+                supports_fast_sync,
                 exit_channel,
                 tx,
                 read_task: Mutex::new(TaskState::Inactive),
                 write_task: Mutex::new(TaskState::Inactive),
                 objects_semaphore: Semaphore::new(PEER_OBJECTS_CONCURRENCY),
                 propagate_txs: AtomicBool::new(propagate_txs),
+                sync_chain_failed: AtomicBool::new(false),
+                request_id: AtomicU64::new(0),
             },
             rx,
         )
+    }
+
+    // Check if the peer had a failed chain sync
+    pub fn has_sync_chain_failed(&self) -> bool {
+        let tmp = self.sync_chain_failed.load(Ordering::SeqCst);
+        if tmp {
+            let last_chain_sync = self.get_last_chain_sync_out();
+            let current_time = get_current_time_in_seconds();
+
+            // If its been more than 10 minutes since last chain sync, reset the flag
+            if last_chain_sync + 600 < current_time {
+                self.set_sync_chain_failed(false);
+                return false;
+            }
+        }
+
+        tmp
+    }
+
+    pub fn set_sync_chain_failed(&self, value: bool) {
+        self.sync_chain_failed.store(value, Ordering::SeqCst);
     }
 
     // This is used to mark that peer is ready to get our propagated transactions
@@ -342,9 +379,15 @@ impl Peer {
         self.priority
     }
 
-    // Get the sharable flag of the peer
-    pub fn sharable(&self) -> bool {
-        self.sharable
+    // Get the shareable flag of the peer
+    pub fn shareable(&self) -> bool {
+        self.shareable
+    }
+
+    // Check if peer supports fast sync
+    // If peer doesn't support fast sync, we should not use bootstrap chain with it
+    pub fn supports_fast_sync(&self) -> bool {
+        self.supports_fast_sync
     }
 
     // Get the last time we got a fail from the peer
@@ -402,6 +445,17 @@ impl Peer {
     // Store the last time we got a chain sync request
     pub fn set_last_chain_sync(&self, time: TimestampSeconds) {
         self.last_chain_sync.store(time, Ordering::SeqCst);
+    }
+
+    // Get the last time we've sent a chain sync request
+    // This is used to prevent spamming the chain sync packet
+    pub fn get_last_chain_sync_out(&self) -> TimestampSeconds {
+        self.last_chain_sync_out.load(Ordering::SeqCst)
+    }
+
+    // Store the last time we've sent a chain sync request
+    pub fn set_last_chain_sync_out(&self, time: TimestampSeconds) {
+        self.last_chain_sync_out.store(time, Ordering::SeqCst);
     }
 
     // Get all objects requested from this peer
@@ -495,17 +549,17 @@ impl Peer {
         counter!("tos_p2p_bootstrap_requests", "peer" => self.get_id().to_string()).increment(1u64);
 
         let (sender, receiver) = tokio::sync::oneshot::channel();
+        let id = self.request_id.fetch_add(1, Ordering::SeqCst);
+
         {
             let mut senders = self.bootstrap_requests.lock().await;
-
-            // send the packet while holding the lock so we ensure the correct order
-            self.send_packet(Packet::BootstrapChainRequest(BootstrapChainRequest::new(
-                step,
-            )))
-            .await?;
-
-            senders.push_back(sender);
+            senders.put(id, sender);
         }
+
+        self.send_packet(Packet::BootstrapChainRequest(BootstrapChainRequest::new(
+            id, step,
+        )))
+        .await?;
 
         let mut exit_channel = self.get_exit_receiver();
         let response = select! {
@@ -513,10 +567,10 @@ impl Peer {
             res = timeout(Duration::from_millis(PEER_TIMEOUT_BOOTSTRAP_STEP), receiver) => match res {
                 Ok(res) => res?,
                 Err(e) => {
-                    // Clear the bootstrap chain channel to preserve the order
+                    // Remove the request from cache on timeout
                     {
                         let mut senders = self.bootstrap_requests.lock().await;
-                        senders.pop_front();
+                        senders.pop(&id);
                     }
 
                     debug!("Requested bootstrap chain step {:?} has timed out", step_kind);
@@ -567,11 +621,14 @@ impl Peer {
         Ok(response)
     }
 
-    // Get the bootstrap chain channel
-    // Like the sync chain channel, but for bootstrap (fast sync) syncing
-    pub async fn get_next_bootstrap_request(&self) -> Option<oneshot::Sender<StepResponse>> {
+    // Get the bootstrap chain request sender by ID
+    // Returns the sender for the matching request ID to send the response
+    pub async fn get_bootstrap_request_with_id(
+        &self,
+        id: u64,
+    ) -> Option<oneshot::Sender<StepResponse>> {
         let mut requests = self.bootstrap_requests.lock().await;
-        requests.pop_front()
+        requests.pop(&id)
     }
 
     // Clear all pending requests in case something went wrong

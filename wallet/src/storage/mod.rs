@@ -1112,16 +1112,19 @@ impl EncryptedStorage {
         Ok(())
     }
 
+    // Find the best transaction id for a given topoheight
+    // if lowest is set to true, the lowest transaction id with the requested topoheight is returned
+    // if lowest is set to false, the nearest higher transaction id with the requested topoheight
     fn search_transaction_id_for_topoheight(
         &self,
         topoheight: u64,
         left_id: Option<u64>,
         right_id: Option<u64>,
-        nearest: bool,
+        lowest: bool,
     ) -> Result<Option<u64>> {
         debug!(
-            "search transaction id for topoheight {}, nearest = {}",
-            topoheight, nearest
+            "search transaction id for topoheight {}, lowest = {}",
+            topoheight, lowest
         );
 
         let mut right = match right_id {
@@ -1136,7 +1139,16 @@ impl EncryptedStorage {
         };
 
         let mut left = left_id.unwrap_or(0);
-        let mut result = None;
+
+        // Prevent overflow when right < left
+        if right < left {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("right id {} is lower than left id {}", right, left);
+            }
+            return Ok(None);
+        }
+
+        let mut result: Option<u64> = None;
 
         while left <= right {
             let mid = left + (right - left) / 2;
@@ -1150,20 +1162,31 @@ impl EncryptedStorage {
                 self.load_from_disk_with_key(&self.transactions, &tx_hash)?;
             let mid_topo = entry.0;
 
+            trace!(
+                "mid: {}, mid_topo: {}, searching for topoheight: {}",
+                mid,
+                mid_topo,
+                topoheight
+            );
             match mid_topo.cmp(&topoheight) {
                 Ordering::Equal => {
                     result = Some(mid);
-                    if mid == 0 {
-                        break;
+                    if lowest {
+                        // keep searching left for the lowest matching topoheight
+                        if mid == 0 {
+                            break;
+                        }
+                        right = mid - 1;
+                    } else {
+                        // keep searching right for the highest matching topoheight
+                        left = mid + 1;
                     }
-                    // keep looking to the left for the lowest
-                    right = mid - 1;
                 }
                 Ordering::Less => {
                     left = mid + 1;
                 }
                 Ordering::Greater => {
-                    // potential "nearest higher" if exact not found
+                    // mid_topo > topoheight
                     result = result.or(Some(mid));
                     if mid == 0 {
                         break;
@@ -1173,8 +1196,8 @@ impl EncryptedStorage {
             }
         }
 
-        // If we didn’t find an exact match but nearest is true, return nearest higher topoheight
-        if result.is_none() && nearest {
+        // If we didn't find an exact match but lowest is true, return nearest higher topoheight
+        if result.is_none() && lowest {
             // left should points to the insertion point where its the first topoheight above requested
             let tx_hash_opt = self.transactions_indexes.get(left.to_be_bytes())?;
             if let Some(tx_hash) = tx_hash_opt {
@@ -1210,12 +1233,12 @@ impl EncryptedStorage {
 
         // Search the correct range
         let iterator = match (min_topoheight, max_topoheight) {
-            (Some(min), Some(max)) => {
+            (Some(min_topo), Some(max_topo)) => {
                 let min = self
-                    .search_transaction_id_for_topoheight(min, None, None, true)
+                    .search_transaction_id_for_topoheight(min_topo, None, None, true)
                     .context("Error while searching min id")?;
                 let max = self
-                    .search_transaction_id_for_topoheight(max + 1, min, None, true)
+                    .search_transaction_id_for_topoheight(max_topo + 1, min, None, true)
                     .context("Error while searching max id")?;
 
                 if let Some(min) = min {
@@ -1231,9 +1254,9 @@ impl EncryptedStorage {
                     self.transactions_indexes.iter()
                 }
             }
-            (Some(min), None) => {
+            (Some(min_topo), None) => {
                 let min = self
-                    .search_transaction_id_for_topoheight(min, None, None, true)
+                    .search_transaction_id_for_topoheight(min_topo, None, None, true)
                     .context("Error while searching min id only")?;
                 if let Some(min) = min {
                     self.transactions_indexes.range(min.to_be_bytes()..)
@@ -1241,9 +1264,9 @@ impl EncryptedStorage {
                     self.transactions_indexes.iter()
                 }
             }
-            (None, Some(max)) => {
+            (None, Some(max_topo)) => {
                 let max = self
-                    .search_transaction_id_for_topoheight(max + 1, None, None, true)
+                    .search_transaction_id_for_topoheight(max_topo + 1, None, None, true)
                     .context("Error while searching max id only")?;
                 if let Some(max) = max {
                     self.transactions_indexes.range(..max.to_be_bytes())
@@ -1261,6 +1284,14 @@ impl EncryptedStorage {
                 self.load_from_disk_with_key(&self.transactions, &tx_key)?;
             if log::log_enabled!(log::Level::Trace) {
                 trace!("entry: {}", entry.get_hash());
+            }
+
+            // Additional bounds check to ensure entry topoheight is within requested range
+            if min_topoheight.is_some_and(|min| entry.get_topoheight() < min)
+                || max_topoheight.is_some_and(|max| entry.get_topoheight() > max)
+            {
+                warn!("entry topoheight {} out of bounds", entry.get_topoheight());
+                continue;
             }
 
             let mut transfers: Option<Vec<Transfer>> = None;

@@ -951,6 +951,7 @@ async fn get_info<S: Storage>(context: &Context, body: Value) -> Result<Value, I
     let height = blockchain.get_height();
     let topoheight = blockchain.get_topo_height();
     let stableheight = blockchain.get_stable_height();
+    let stable_topoheight = blockchain.get_stable_topoheight();
     let (top_block_hash, emitted_supply, burned_supply, pruned_topoheight, average_block_time) = {
         let storage = blockchain.get_storage().read().await;
         let top_block_hash = storage
@@ -996,6 +997,7 @@ async fn get_info<S: Storage>(context: &Context, body: Value) -> Result<Value, I
         height,
         topoheight,
         stableheight,
+        stable_topoheight,
         pruned_topoheight,
         top_block_hash,
         circulating_supply: emitted_supply - burned_supply,
@@ -1344,7 +1346,7 @@ async fn get_peers<S: Storage>(context: &Context, body: Value) -> Result<Value, 
             let peers_availables = peer_list.get_cloned_peers().await;
 
             let mut peers = Vec::new();
-            for p in peers_availables.iter().filter(|p| p.sharable()) {
+            for p in peers_availables.iter().filter(|p| p.shareable()) {
                 peers.push(get_peer_entry(p).await);
             }
 

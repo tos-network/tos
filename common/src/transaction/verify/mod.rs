@@ -175,8 +175,8 @@ impl Transaction {
                 .map_err(VerificationError::State)?;
             return Err(VerificationError::InvalidNonce(
                 tx_hash.clone(),
-                current,
                 self.nonce,
+                current,
             ));
         }
 
@@ -471,8 +471,8 @@ impl Transaction {
                 .map_err(VerificationError::State)?;
             return Err(VerificationError::InvalidNonce(
                 tx_hash.clone(),
-                current,
                 self.nonce,
+                current,
             ));
         }
 

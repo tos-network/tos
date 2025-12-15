@@ -16,14 +16,16 @@ use tos_common::{
     block::{Block, BlockVersion},
     crypto::Hash,
     immutable::Immutable,
-    time::{get_current_time_in_millis, TimestampMillis},
+    time::{get_current_time_in_millis, get_current_time_in_seconds, TimestampMillis},
     tokio::{select, time::interval, Executor, Scheduler},
     transaction::Transaction,
 };
 
 use crate::{
     config::{CHAIN_SYNC_TOP_BLOCKS, PEER_OBJECTS_CONCURRENCY, STABLE_LIMIT},
-    core::{blockchain::BroadcastOption, error::BlockchainError, hard_fork, storage::Storage},
+    core::{
+        blockchain::BroadcastOption, blockdag, error::BlockchainError, hard_fork, storage::Storage,
+    },
     p2p::{
         error::P2pError,
         packet::{ChainRequest, ObjectRequest, Packet, PacketWrapper},
@@ -82,6 +84,9 @@ impl<S: Storage> P2pServer<S> {
         // we got the chain response
         // This prevent us from requesting too fast the chain from peer
         *last_chain_sync = get_current_time_in_millis();
+
+        // Track when we sent this chain sync request (in seconds for has_sync_chain_failed check)
+        peer.set_last_chain_sync_out(get_current_time_in_seconds());
 
         let response = peer.request_sync_chain(packet).await?;
         debug!(
@@ -215,7 +220,11 @@ impl<S: Storage> P2pServer<S> {
                     for hash in storage.get_blocks_at_height(height).await? {
                         if !response_blocks.contains(&hash) {
                             trace!("Adding top block at height {}: {}", height, hash);
-                            top_blocks.insert(hash);
+                            if !top_blocks.insert(hash) {
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("Top block was already present in response top blocks");
+                                }
+                            }
                         } else {
                             trace!("Top block at height {}: {} was skipped because its already present in response blocks", height, hash);
                         }
@@ -223,14 +232,29 @@ impl<S: Storage> P2pServer<S> {
                     height += 1;
                 }
             }
+
+            // Too many top blocks, use the one with highest difficulty
+            if top_blocks.len() >= u8::MAX as usize {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Too many top blocks ({}), sorting and keeping only the best ones",
+                        top_blocks.len()
+                    );
+                }
+                // sort and keep only the best ones
+                let iter = blockdag::sort_tips(&*storage, top_blocks.into_iter()).await?;
+                top_blocks = iter.take(u8::MAX as usize).collect();
+            }
         }
 
-        debug!(
-            "Sending {} blocks & {} top blocks as response to {}",
-            response_blocks.len(),
-            top_blocks.len(),
-            peer
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Sending {} blocks & {} top blocks as response to {}",
+                response_blocks.len(),
+                top_blocks.len(),
+                peer
+            );
+        }
         peer.send_packet(Packet::ChainResponse(ChainResponse::new(
             common_point,
             lowest_common_height,
@@ -336,7 +360,15 @@ impl<S: Storage> P2pServer<S> {
             select! {
                 biased;
                 Some(res) = blocks_executor.next() => {
-                    res?;
+                    if let Err(e) = res {
+                        if !peer.is_priority() {
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Mark {} as sync chain failed: {}", peer, e);
+                            }
+                            peer.set_sync_chain_failed(true);
+                        }
+                        return Err(e);
+                    }
                     // Increase by one the limit again
                     // allow to request one new block
                     scheduler.increment_n();
@@ -391,6 +423,33 @@ impl<S: Storage> P2pServer<S> {
             .handle_blocks_from_chain_validator(peer, chain_validator, blocks)
             .await;
 
+        // Mark peer as failed if P2P error occurred (unless it's a priority node)
+        if let Err(BlockchainError::ErrorOnP2p(e)) = &res {
+            if !peer.is_priority() {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Mark {} as sync chain from validator failed: {}", peer, e);
+                }
+                peer.set_sync_chain_failed(true);
+
+                // Peer disconnected while trying to reorg us, tempban it
+                if let P2pError::Disconnected = e {
+                    if let Err(e) = self
+                        .peer_list
+                        .temp_ban_address(
+                            &peer.get_connection().get_address().ip(),
+                            60, // 60 seconds tempban
+                            false,
+                        )
+                        .await
+                    {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Couldn't tempban {}: {}", peer, e);
+                        }
+                    }
+                }
+            }
+        }
+
         Ok((txs, res))
     }
 
@@ -423,22 +482,37 @@ impl<S: Storage> P2pServer<S> {
             return Ok(());
         };
 
-        let common_topoheight = common_point.get_topoheight();
-        debug!(
-            "{} found a common point with block {} at topo {} for sync, received {} blocks",
-            peer.get_outgoing_address(),
-            common_point.get_hash(),
-            common_topoheight,
-            response_size
-        );
+        let mut common_topoheight = common_point.get_topoheight();
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "{} found a common point with block {} at topo {} for sync, received {} blocks",
+                peer.get_outgoing_address(),
+                common_point.get_hash(),
+                common_topoheight,
+                response_size
+            );
+        }
         let pop_count = {
             let storage = self.blockchain.get_storage().read().await;
             let expected_common_topoheight = storage
                 .get_topo_height_for_hash(common_point.get_hash())
                 .await?;
+
+            let stable_topoheight = self.blockchain.get_stable_topoheight();
             if expected_common_topoheight != common_topoheight {
-                error!("{} sent us a valid block hash, but at invalid topoheight (expected: {}, got: {})!", peer, expected_common_topoheight, common_topoheight);
-                return Err(P2pError::InvalidCommonPoint(common_topoheight).into());
+                warn!(
+                    "{} sent us a valid block hash, but at a different topoheight (expected: {}, got: {}, stable topoheight: {})!",
+                    peer, expected_common_topoheight, common_topoheight, stable_topoheight
+                );
+
+                // Only reject if expected is at or below stable topoheight AND peer is not priority
+                if expected_common_topoheight <= stable_topoheight && !peer.is_priority() {
+                    return Err(P2pError::InvalidCommonPoint(common_topoheight).into());
+                }
+
+                // Still accept it by using the expected topoheight
+                // We may have some deviation with them and want to check it
+                common_topoheight = expected_common_topoheight;
             }
 
             let block_height = storage
@@ -523,7 +597,9 @@ impl<S: Storage> P2pServer<S> {
                 self.blockchain.rewind_chain(pop_count, false).await?;
             } else {
                 // Verify that someone isn't trying to trick us
-                if pop_count > blocks_len as u64 {
+                // Fast check: because each block represent a topoheight, it should contains
+                // at least the same blockchain size to try to replace it on our side
+                if pop_count > blocks_len as u64 && blocks_len < requested_max_size {
                     // TODO: maybe we could request its whole chain for comparison until chain validator has_higher_cumulative_difficulty ?
                     // If after going through all its chain and we still have a higher cumulative difficulty, we should not rewind
                     warn!(
@@ -565,6 +641,10 @@ impl<S: Storage> P2pServer<S> {
                     futures.push_back(fut);
                 }
 
+                // Retrieve the current cumulative difficulty before chain validator loop
+                let current_cumulative_difficulty =
+                    self.blockchain.get_cumulative_difficulty().await?;
+
                 let mut expected_topoheight = common_topoheight + 1;
                 let mut chain_validator = ChainValidator::new(&self.blockchain);
                 let mut exit_signal = self.exit_sender.subscribe();
@@ -590,7 +670,10 @@ impl<S: Storage> P2pServer<S> {
 
                 // Verify that it has a higher cumulative difficulty than us
                 // Otherwise we don't switch to his chain
-                if !chain_validator.has_higher_cumulative_difficulty().await? {
+                if !chain_validator
+                    .has_higher_cumulative_difficulty(&current_cumulative_difficulty)
+                    .await?
+                {
                     error!(
                         "{} sent us a chain response with lower cumulative difficulty than ours",
                         peer
@@ -610,7 +693,17 @@ impl<S: Storage> P2pServer<S> {
                     .await;
                 {
                     info!("Ending commit point for chain validator");
-                    let apply = res.as_ref().map_or(false, |(_, v)| v.is_ok());
+                    let apply = match res.as_ref() {
+                        // In case we got a partially good chain only, and that its still better than ours
+                        // we can partially switch to it if the topoheight AND the cumulative difficulty is bigger
+                        Ok((_, res)) => {
+                            res.is_ok()
+                                || (our_previous_topoheight < self.blockchain.get_topo_height()
+                                    && current_cumulative_difficulty
+                                        < self.blockchain.get_cumulative_difficulty().await?)
+                        }
+                        Err(_) => false,
+                    };
 
                     {
                         debug!("locking storage write mode for commit point");
@@ -795,6 +888,9 @@ impl<S: Storage> P2pServer<S> {
                 self.ping_peers().await;
             }
         }
+
+        // If we reached this point, the sync was successful
+        peer.set_sync_chain_failed(false);
 
         // ask inventory of this peer if we sync from too far
         // if we are not further than one sync, request the inventory

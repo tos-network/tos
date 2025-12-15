@@ -211,6 +211,8 @@ pub enum P2pError {
     EncryptionError(#[from] EncryptionError),
     #[error(transparent)]
     Any(#[from] Error),
+    #[error("Fast sync is disabled on this peer")]
+    FastSyncDisabled,
 }
 
 impl From<BlockchainError> for P2pError {

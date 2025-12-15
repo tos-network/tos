@@ -24,8 +24,8 @@ use crate::{
     p2p::{
         error::P2pError,
         packet::{
-            BlockMetadata, BootstrapChainResponse, ObjectRequest, Packet, StepRequest,
-            StepResponse, MAX_ITEMS_PER_PAGE,
+            BlockMetadata, BootstrapChainRequest, BootstrapChainResponse, ObjectRequest, Packet,
+            StepRequest, StepResponse, MAX_ITEMS_PER_PAGE,
         },
         P2pServer, Peer,
     },
@@ -38,8 +38,16 @@ impl<S: Storage> P2pServer<S> {
     pub async fn handle_bootstrap_chain_request(
         self: &Arc<Self>,
         peer: &Arc<Peer>,
-        request: StepRequest<'_>,
+        request: BootstrapChainRequest<'_>,
     ) -> Result<(), BlockchainError> {
+        // Check if fast sync support is disabled
+        if self.disable_fast_sync_support {
+            debug!("Fast sync is disabled, ignoring bootstrap chain request");
+            return Err(P2pError::FastSyncDisabled.into());
+        }
+
+        let id = request.id();
+        let request = request.step();
         let request_kind = request.kind();
         debug!(
             "Handle bootstrap chain request {:?} from {}",
@@ -388,7 +396,7 @@ impl<S: Storage> P2pServer<S> {
             }
         };
         peer.send_packet(Packet::BootstrapChainResponse(BootstrapChainResponse::new(
-            response,
+            id, response,
         )))
         .await?;
         Ok(())
@@ -895,17 +903,20 @@ impl<S: Storage> P2pServer<S> {
         );
         let mut page = None;
         loop {
-            let StepResponse::KeyBalances(balances, next_page) = peer
+            let response = peer
                 .request_boostrap_chain(StepRequest::KeyBalances(
                     Cow::Borrowed(&key),
                     our_topoheight,
                     stable_topoheight,
                     page,
                 ))
-                .await?
-            else {
+                .await?;
+            let StepResponse::KeyBalances(balances, next_page) = response else {
                 // shouldn't happen
-                error!("Received an invalid StepResponse (how ?) while fetching key balances");
+                error!(
+                    "Received an invalid StepResponse (how ?) while fetching key balances: {:?}",
+                    response
+                );
                 return Err(P2pError::InvalidPacket.into());
             };
 

@@ -51,6 +51,9 @@ pub struct Handshake<'a> {
     // By default it's true, and peer allow to be shared to others and/or through API
     // If false, we must not share it
     can_be_shared: bool,
+    // Does this peer support fast sync (bootstrap chain)?
+    // If false, we should not try to use fast sync with this peer
+    supports_fast_sync: bool,
 } // Server reply with his own list of peers, but we remove all already known by requester for the response.
 
 impl<'a> Handshake<'a> {
@@ -71,6 +74,7 @@ impl<'a> Handshake<'a> {
         genesis_hash: Cow<'a, Hash>,
         cumulative_difficulty: Cow<'a, CumulativeDifficulty>,
         can_be_shared: bool,
+        supports_fast_sync: bool,
     ) -> Self {
         debug_assert!(version.len() > 0 && version.len() <= Handshake::MAX_LEN);
         // version cannot be greater than 16 chars
@@ -94,6 +98,7 @@ impl<'a> Handshake<'a> {
             genesis_hash,
             cumulative_difficulty,
             can_be_shared,
+            supports_fast_sync,
         }
     }
 
@@ -119,8 +124,14 @@ impl<'a> Handshake<'a> {
             self.cumulative_difficulty.into_owned(),
             peer_list,
             self.can_be_shared,
+            self.supports_fast_sync,
             propagate_txs,
         )
+    }
+
+    // Check if peer supports fast sync
+    pub fn supports_fast_sync(&self) -> bool {
+        self.supports_fast_sync
     }
 
     pub fn get_local_port(&self) -> u16 {
@@ -195,6 +206,7 @@ impl Serializer for Handshake<'_> {
         writer.write_hash(&self.genesis_hash); // Genesis Hash
         self.cumulative_difficulty.write(writer); // Cumulative Difficulty
         writer.write_bool(self.can_be_shared); // Can be shared
+        writer.write_bool(self.supports_fast_sync); // Supports fast sync
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
@@ -236,6 +248,8 @@ impl Serializer for Handshake<'_> {
         let genesis_hash = reader.read_hash()?;
         let cumulative_difficulty = CumulativeDifficulty::read(reader)?;
         let can_be_shared = reader.read_bool()?;
+        // For backward compatibility, default to true if not present
+        let supports_fast_sync = reader.read_bool().unwrap_or(true);
 
         Ok(Handshake::new(
             Cow::Owned(version),
@@ -252,6 +266,7 @@ impl Serializer for Handshake<'_> {
             Cow::Owned(genesis_hash),
             Cow::Owned(cumulative_difficulty),
             can_be_shared,
+            supports_fast_sync,
         ))
     }
 
@@ -283,7 +298,9 @@ impl Serializer for Handshake<'_> {
         // Cumulative Difficulty
         self.cumulative_difficulty.size() +
         // Can be shared
-        self.can_be_shared.size()
+        self.can_be_shared.size() +
+        // Supports fast sync
+        self.supports_fast_sync.size()
     }
 }
 

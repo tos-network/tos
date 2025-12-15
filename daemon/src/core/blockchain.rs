@@ -26,7 +26,7 @@ use crate::{
     },
     tako_integration::TakoContractExecutor,
 };
-use anyhow::Error;
+use anyhow::{Context, Error};
 use futures::{stream, TryStreamExt};
 use indexmap::IndexSet;
 use log::{debug, error, info, trace, warn};
@@ -385,6 +385,7 @@ impl<S: Storage> Blockchain<S> {
                 config.block_propagation_log_level.into(),
                 config.disable_fetching_txs_propagated,
                 config.handle_peer_packets_in_dedicated_task,
+                config.disable_fast_sync_support,
                 proxy,
             ) {
                 Ok(p2p) => {
@@ -890,11 +891,30 @@ impl<S: Storage> Blockchain<S> {
         Arc::clone(&self.executor)
     }
 
+    // Retrieve the cumulative difficulty of the chain
+    pub async fn get_cumulative_difficulty(&self) -> Result<CumulativeDifficulty, BlockchainError> {
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("get cumulative difficulty");
+        }
+        let storage = self.storage.read().await;
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("storage lock acquired for cumulative difficulty");
+        }
+        let top_block_hash = self.get_top_block_hash_for_storage(&storage).await?;
+        storage
+            .get_cumulative_difficulty_for_block_hash(&top_block_hash)
+            .await
+    }
+
     // Get the current emitted supply of TOS at current topoheight
     pub async fn get_supply(&self) -> Result<u64, BlockchainError> {
-        debug!("get supply");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("get supply");
+        }
         let storage = self.storage.read().await;
-        debug!("storage read acquired for get supply");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("storage read acquired for get supply");
+        }
         storage
             .get_supply_at_topo_height(self.get_topo_height())
             .await
@@ -2186,9 +2206,13 @@ impl<S: Storage> Blockchain<S> {
             }
         }
 
-        let mut sorted_tips = blockdag::sort_tips(storage, tips.into_iter()).await?;
+        let mut sorted_tips: IndexSet<_> = blockdag::sort_tips(storage, tips.into_iter())
+            .await?
+            .collect();
         if sorted_tips.len() > TIPS_LIMIT {
-            let dropped_tips = sorted_tips.drain(TIPS_LIMIT..); // keep only first 3 heavier tips
+            // keep only first 3 heavier tips
+            // We drain any tips above the limit
+            let dropped_tips = sorted_tips.drain(TIPS_LIMIT..);
             warn!(
                 "Dropping tips {} because they are not in the first 3 heavier tips",
                 dropped_tips
@@ -2338,6 +2362,9 @@ impl<S: Storage> Blockchain<S> {
             }
 
             while let Some(TxSelectorEntry { size, hash, tx }) = tx_selector.next() {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Considering TX {} for inclusion in block template", hash);
+                }
                 if block_size + total_txs_size + size >= MAX_BLOCK_SIZE
                     || block.txs_hashes.len() >= u16::MAX as usize
                 {
@@ -2915,7 +2942,7 @@ impl<S: Storage> Blockchain<S> {
                             );
                             Transaction::verify_batch(txs.iter(), &mut chain_state, cache).await
                         })
-                        .await?;
+                        .await
                 } else {
                     // Verify all valid transactions in one batch
                     let mut chain_state = ChainState::new(
@@ -2926,8 +2953,12 @@ impl<S: Storage> Blockchain<S> {
                         version,
                     );
                     let iter = txs_grouped.values().flatten();
-                    Transaction::verify_batch(iter, &mut chain_state, &tx_cache).await?;
+                    Transaction::verify_batch(iter, &mut chain_state, &tx_cache).await
                 }
+                .context(format!(
+                    "Failed to verify transactions in block {}",
+                    block_hash
+                ))?;
 
                 debug!(
                     "Verified {} transactions in {}ms",
@@ -3097,9 +3128,10 @@ impl<S: Storage> Blockchain<S> {
         let mut highest_topo = 0;
         // Tells if the new block added is ordered in DAG or not
         let block_is_ordered = full_order.contains(block_hash.as_ref());
+        // Track if the DAG was overwritten (reorged), used for full mempool cleanup
+        let mut is_written = base_topo_height == 0;
         {
             let start = Instant::now();
-            let mut is_written = base_topo_height == 0;
             let mut skipped = 0;
             // detect which part of DAG reorg stay, for other part, undo all executed txs
             debug!("Detecting stable point of DAG and cleaning txs above it");
@@ -3738,6 +3770,7 @@ impl<S: Storage> Blockchain<S> {
                     base_topo_height,
                     highest_topo,
                     version,
+                    is_written,
                 )
                 .await;
             if log::log_enabled!(log::Level::Debug) {
@@ -3853,6 +3886,8 @@ impl<S: Storage> Blockchain<S> {
         histogram!("tos_block_processing_ms").record(elapsed as f64);
         gauge!("tos_block_height").set(current_height as f64);
         gauge!("tos_block_topoheight").set(current_topoheight as f64);
+        gauge!("tos_block_difficulty")
+            .set(self.get_difficulty().await.as_u64().unwrap_or(0) as f64);
 
         if let Some(p2p) = self.p2p.read().await.as_ref().filter(|_| broadcast.p2p()) {
             trace!("P2p locked, ping peers");

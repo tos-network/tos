@@ -17,7 +17,7 @@ pub trait ContractOutputsProvider {
     async fn set_contract_outputs_for_tx(
         &mut self,
         tx_hash: &Hash,
-        contract_output: &Vec<ContractOutput>,
+        contract_outputs: &Vec<ContractOutput>,
     ) -> Result<(), BlockchainError>;
 
     // Delete the contract outputs for a transaction

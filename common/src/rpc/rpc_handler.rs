@@ -164,6 +164,9 @@ where
 
     // register a new RPC method handler
     pub fn register_method(&mut self, name: &str, handler: Handler) {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Registering RPC method: {}", name);
+        }
         if self.methods.insert(name.into(), handler).is_some()
             && log::log_enabled!(log::Level::Error)
         {

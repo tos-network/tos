@@ -24,8 +24,6 @@ use tos_common::{
 pub enum DiskContext {
     #[error("data len")]
     DataLen,
-    #[error("multisig")]
-    Multisig,
     #[error("get multisig at topoheight {0}")]
     MultisigAtTopoHeight(TopoHeight),
     #[error("get top block")]

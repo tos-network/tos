@@ -1601,7 +1601,15 @@ impl Wallet {
             NetworkHandler::new(Arc::clone(self), daemon_address, self.concurrency).await?;
         // start the task
         network_handler.start(auto_reconnect).await?;
-        *self.network_handler.lock().await = Some(network_handler);
+        if let Some(old) = self.network_handler.lock().await.replace(network_handler) {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Replacing existing network handler, stopping the previous one");
+            }
+            // stop the old one if exists
+            if let Err(e) = old.stop(true).await {
+                warn!("Error while stopping previous network handler: {}", e);
+            }
+        }
         Ok(())
     }
 
@@ -1627,7 +1635,15 @@ impl Wallet {
             NetworkHandler::with_api(Arc::clone(self), daemon_api, self.concurrency).await?;
         // start the task
         network_handler.start(auto_reconnect).await?;
-        *self.network_handler.lock().await = Some(network_handler);
+        if let Some(old) = self.network_handler.lock().await.replace(network_handler) {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Replacing existing network handler, stopping the previous one");
+            }
+            // stop the old one if exists
+            if let Err(e) = old.stop(true).await {
+                warn!("Error while stopping previous network handler: {}", e);
+            }
+        }
         Ok(())
     }
 

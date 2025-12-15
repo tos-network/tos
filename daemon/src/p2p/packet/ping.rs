@@ -83,7 +83,7 @@ impl<'a> Ping<'a> {
         peer.set_cumulative_difficulty(self.cumulative_difficulty)
             .await;
 
-        if peer.sharable() {
+        if peer.shareable() {
             if log::log_enabled!(log::Level::Trace) {
                 trace!("Locking RPC Server to notify PeerStateUpdated event");
             }
@@ -152,7 +152,7 @@ impl<'a> Ping<'a> {
                 }
             }
 
-            if peer.sharable() {
+            if peer.shareable() {
                 trace!("Locking RPC Server to notify PeerPeerListUpdated event");
                 if let Some(rpc) = blockchain.get_rpc().read().await.as_ref() {
                     if rpc

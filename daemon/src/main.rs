@@ -323,6 +323,13 @@ async fn run_prompt<S: Storage>(
         vec![Arg::new_simple("history", ArgType::Number)],
         CommandHandler::Async(async_handler!(show_balance::<S>)),
     ))?;
+    command_manager.add_command(Command::with_arguments(
+        "show_multisig",
+        "Show multisig history of an address",
+        vec![],
+        vec![],
+        CommandHandler::Async(async_handler!(show_multisig::<S>)),
+    ))?;
     command_manager.add_command(Command::with_required_arguments(
         "print_block",
         "Print block in json format",
@@ -356,6 +363,11 @@ async fn run_prompt<S: Storage>(
         "clear_mempool",
         "Clear all transactions in mempool",
         CommandHandler::Async(async_handler!(clear_mempool::<S>)),
+    ))?;
+    command_manager.add_command(Command::new(
+        "show_mempool",
+        "Show all transactions in mempool",
+        CommandHandler::Async(async_handler!(show_mempool::<S>)),
     ))?;
     command_manager.add_command(Command::with_arguments(
         "add_tx",
@@ -1514,6 +1526,54 @@ async fn show_balance<S: Storage>(
     Ok(())
 }
 
+async fn show_multisig<S: Storage>(
+    manager: &CommandManager,
+    _: ArgumentManager,
+) -> Result<(), CommandError> {
+    let prompt = manager.get_prompt();
+    // read address
+    let str_address = prompt
+        .read_input(prompt.colorize_string(Color::Green, "Address: "), false)
+        .await
+        .context("Error while reading address")?;
+    let address = Address::from_string(&str_address).context("Invalid address")?;
+
+    let context = manager.get_context().lock()?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+    let (topoheight, multisig) = storage
+        .get_last_multisig(address.get_public_key())
+        .await
+        .context("Error while retrieving multisig")?;
+
+    let mut version = Some(multisig);
+    while let Some(multisig) = version.take() {
+        manager.message(format!("Multisig at topoheight {}:", topoheight));
+        if let Some(multisig) = multisig.get() {
+            manager.message(format!("- Participants: {}", multisig.participants.len()));
+            for owner in multisig.participants.iter() {
+                manager.message(format!(
+                    "  - {}",
+                    owner.as_address(blockchain.get_network().is_mainnet())
+                ));
+            }
+
+            manager.message(format!("- Threshold: {}", multisig.threshold));
+        }
+
+        if let Some(previous) = multisig.get_previous_topoheight() {
+            version = Some(
+                storage
+                    .get_multisig_at_topoheight_for(address.get_public_key(), previous)
+                    .await
+                    .context("Error while retrieving history multisig")?,
+            );
+        }
+    }
+
+    Ok(())
+}
+
 async fn print_block<S: Storage>(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
@@ -1647,6 +1707,26 @@ async fn clear_mempool<S: Storage>(
     mempool.clear();
     info!("Mempool cleared");
 
+    Ok(())
+}
+
+async fn show_mempool<S: Storage>(
+    manager: &CommandManager,
+    _: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let mempool = blockchain.get_mempool().read().await;
+
+    manager.message(format!("Mempool: {} transactions", mempool.get_txs().len()));
+    for (hash, tx) in mempool.get_txs() {
+        manager.message(format!(
+            "- {}: {} TOS fee for {}",
+            hash,
+            format_tos(tx.get_fee()),
+            human_bytes(tx.get_size() as f64)
+        ));
+    }
     Ok(())
 }
 

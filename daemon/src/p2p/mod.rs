@@ -130,7 +130,10 @@ pub struct P2pServer<S: Storage> {
     exclusive_nodes: IndexSet<SocketAddr>,
     // Are we allowing others nodes to share us as a potential peer ?
     // Also if we allows to be listed in get_peers RPC API
-    sharable: bool,
+    shareable: bool,
+    // Disable fast sync support for others peers
+    // If set to true, other nodes will not be able to use the fast sync mode with us
+    disable_fast_sync_support: bool,
     // How many outgoing peers we want to have
     // Set to 0 for none
     max_outgoing_peers: usize,
@@ -187,7 +190,7 @@ impl<S: Storage> P2pServer<S> {
         allow_boost_sync_mode: bool,
         allow_priority_blocks: bool,
         max_chain_response_size: usize,
-        sharable: bool,
+        shareable: bool,
         max_outgoing_peers: usize,
         dh_keypair: Option<diffie_hellman::DHKeyPair>,
         dh_action: diffie_hellman::KeyVerificationAction,
@@ -198,6 +201,7 @@ impl<S: Storage> P2pServer<S> {
         block_propagation_log_level: log::Level,
         disable_fetching_txs_propagated: bool,
         handle_peer_packets_in_dedicated_task: bool,
+        disable_fast_sync_support: bool,
         proxy: Option<(ProxyKind, SocketAddr, Option<(String, String)>)>,
     ) -> Result<Arc<Self>, P2pError> {
         if tag
@@ -274,7 +278,8 @@ impl<S: Storage> P2pServer<S> {
             allow_boost_sync_mode,
             max_chain_response_size,
             exclusive_nodes: IndexSet::from_iter(exclusive_nodes.into_iter()),
-            sharable,
+            shareable,
+            disable_fast_sync_support,
             allow_priority_blocks,
             is_syncing: AtomicBool::new(false),
             syncing_rate_bps: AtomicU64::new(0),
@@ -620,7 +625,8 @@ impl<S: Storage> P2pServer<S> {
             Cow::Borrowed(&top_hash),
             genesis_block,
             Cow::Borrowed(&cumulative_difficulty),
-            self.sharable,
+            self.shareable,
+            !self.disable_fast_sync_support,
         );
         Ok(Packet::Handshake(Cow::Owned(handshake)).to_bytes())
     }
@@ -723,7 +729,7 @@ impl<S: Storage> P2pServer<S> {
 
         self.peer_list.add_peer(peer, self.get_max_peers()).await?;
 
-        if peer.sharable() {
+        if peer.shareable() {
             trace!("Locking RPC Server to notify PeerConnected event");
             if let Some(rpc) = self.blockchain.get_rpc().read().await.as_ref() {
                 if rpc.is_event_tracked(&NotifyEvent::PeerConnected).await {
@@ -955,11 +961,21 @@ impl<S: Storage> P2pServer<S> {
 
         let mut peers = stream::iter(available_peers)
             .map(|p| async move {
+                // Don't select peers that are on a bad chain
+                if p.has_sync_chain_failed() {
+                    if log_enabled!(Level::Debug) {
+                        debug!("{} has failed chain sync before, skipping...", p);
+                    }
+                    return None;
+                }
+
                 // Avoid selecting peers that have a weaker cumulative difficulty than us
                 {
                     let cumulative_difficulty = p.get_cumulative_difficulty().lock().await;
                     if *cumulative_difficulty <= our_cumulative_difficulty {
-                        trace!("{} has a lower cumulative difficulty than us, skipping...", p);
+                        if log_enabled!(Level::Debug) {
+                            debug!("{} has a lower cumulative difficulty than us, skipping...", p);
+                        }
                         return None;
                     }
                 }
@@ -968,21 +984,35 @@ impl<S: Storage> P2pServer<S> {
                 if fast_sync {
                     // Fast sync with nodes that are >=1.17.0 only
                     if !hard_fork::is_version_matching_requirement(p.get_version(), "1.17.0").unwrap_or(false) {
-                        trace!("{} is not matching the version requirement (1.17.0), skipping...", p);
+                        if log_enabled!(Level::Debug) {
+                            debug!("{} is not matching the version requirement (1.17.0), skipping...", p);
+                        }
+                        return None;
+                    }
+
+                    // Check if peer supports fast sync
+                    if !p.supports_fast_sync() {
+                        if log_enabled!(Level::Debug) {
+                            debug!("{} does not support fast sync, skipping...", p);
+                        }
                         return None;
                     }
 
                     // if we want to fast sync, but this peer is not compatible, we skip it
                     // for this we check that the peer topoheight is not less than the prune safety limit
                     if peer_topoheight < PRUNE_SAFETY_LIMIT || our_topoheight + PRUNE_SAFETY_LIMIT > peer_topoheight {
-                        trace!("{} has a topoheight less than the prune safety limit, skipping...", p);
+                        if log_enabled!(Level::Debug) {
+                            debug!("{} has a topoheight less than the prune safety limit, skipping...", p);
+                        }
                         return None;
                     }
                     if let Some(pruned_topoheight) = p.get_pruned_topoheight() {
                         // This shouldn't be possible if following the protocol,
                         // But we may never know if a peer is not following the protocol strictly
                         if peer_topoheight - pruned_topoheight < PRUNE_SAFETY_LIMIT {
-                            trace!("{} has a pruned topoheight {} less than the prune safety limit, skipping...", p, pruned_topoheight);
+                            if log_enabled!(Level::Debug) {
+                                debug!("{} has a pruned topoheight {} less than the prune safety limit, skipping...", p, pruned_topoheight);
+                            }
                             return None;
                         }
                     }
@@ -991,15 +1021,20 @@ impl<S: Storage> P2pServer<S> {
                     // so we can sync chain from pruned chains
                     if let Some(pruned_topoheight) = p.get_pruned_topoheight() {
                         if pruned_topoheight > our_topoheight {
-                            trace!("{} has a pruned topoheight {} higher than our topoheight {}, skipping...", p, pruned_topoheight, our_topoheight);
+                            if log_enabled!(Level::Debug) {
+                                debug!("{} has a pruned topoheight {} higher than our topoheight {}, skipping...", p, pruned_topoheight, our_topoheight);
+                            }
                             return None;
                         }
                     }
                 }
 
                 // check if this peer may have a block we don't have
-                if p.get_height() > our_height || peer_topoheight > our_topoheight {
-                    debug!("{} is a candidate for chain sync, our topoheight: {}, our height: {}", p, our_topoheight, our_height);
+                // Use >= to also sync with peers at same height but possibly better cumulative difficulty
+                if p.get_height() >= our_height || peer_topoheight >= our_topoheight {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("{} is a candidate for chain sync, our topoheight: {}, our height: {}", p, our_topoheight, our_height);
+                    }
                     Some(p)
                 } else {
                     trace!("{} is not ahead of us, skipping it", p);
@@ -1124,16 +1159,32 @@ impl<S: Storage> P2pServer<S> {
                 false
             };
 
-            let peer_selected = match self.select_random_best_peer(fast_sync, previous_peer).await {
-                Ok(peer) => peer,
-                Err(e) => {
-                    error!(
-                        "Error while selecting random best peer for chain sync: {}",
-                        e
-                    );
-                    None
-                }
-            };
+            let mut peer_selected =
+                match self.select_random_best_peer(fast_sync, previous_peer).await {
+                    Ok(peer) => peer,
+                    Err(e) => {
+                        error!(
+                            "Error while selecting random best peer for chain sync: {}",
+                            e
+                        );
+                        None
+                    }
+                };
+
+            // If fast sync was requested but no peer was found, try again without fast sync
+            if fast_sync && peer_selected.is_none() {
+                trace!("No peer found for fast sync, trying again without fast sync");
+                peer_selected = match self.select_random_best_peer(false, previous_peer).await {
+                    Ok(peer) => peer,
+                    Err(e) => {
+                        error!(
+                            "Error while trying to re-select random best peer for chain sync: {}",
+                            e
+                        );
+                        None
+                    }
+                };
+            }
 
             if let Some(peer) = peer_selected {
                 debug!("Selected for chain sync is {}", peer);
@@ -1287,7 +1338,7 @@ impl<S: Storage> P2pServer<S> {
                             for p in all_peers.iter() {
                                 // don't send him itself
                                 // and don't share a peer that don't want to be shared
-                                if p.get_id() == peer.get_id() || !p.sharable() {
+                                if p.get_id() == peer.get_id() || !p.shareable() {
                                     continue;
                                 }
 
@@ -1492,7 +1543,7 @@ impl<S: Storage> P2pServer<S> {
                 },
                 peer = receiver.recv() => {
                     if let Some(peer) = peer {
-                        if peer.sharable() {
+                        if peer.shareable() {
                             if let Some(rpc) = self.blockchain.get_rpc().read().await.as_ref() {
                                 if rpc.is_event_tracked(&NotifyEvent::PeerDisconnected).await {
                                     debug!("Notifying clients with PeerDisconnected event");
@@ -1633,6 +1684,8 @@ impl<S: Storage> P2pServer<S> {
                                 if let Err(e) = zelf.blockchain.add_new_block(block, Some(Immutable::Arc(block_hash.clone())), BroadcastOption::All, false).await {
                                     warn!("Error while adding new block {} from {}: {}", block_hash, peer, e);
                                     peer.increment_fail_count();
+                                } else {
+                                    peer.set_sync_chain_failed(false);
                                 }
 
                                 block_hash
@@ -2634,8 +2687,7 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
             Packet::BootstrapChainRequest(request) => {
-                self.handle_bootstrap_chain_request(peer, request.step())
-                    .await?;
+                self.handle_bootstrap_chain_request(peer, request).await?;
             }
             Packet::BootstrapChainResponse(response) => {
                 debug!(
@@ -2643,7 +2695,7 @@ impl<S: Storage> P2pServer<S> {
                     response.kind(),
                     peer
                 );
-                if let Some(sender) = peer.get_next_bootstrap_request().await {
+                if let Some(sender) = peer.get_bootstrap_request_with_id(response.id()).await {
                     if log_enabled!(Level::Trace) {
                         trace!("Sending bootstrap chain response ({:?})", response.kind());
                     }
@@ -2681,7 +2733,7 @@ impl<S: Storage> P2pServer<S> {
                     }
                 }
 
-                if peer.sharable() {
+                if peer.shareable() {
                     trace!("Locking RPC Server to notify PeerDisconnected event");
                     if let Some(rpc) = self.blockchain.get_rpc().read().await.as_ref() {
                         if rpc
@@ -3220,14 +3272,29 @@ impl<S: Storage> P2pServer<S> {
     // This will sends him a request packet so we get notified of all its TXs hashes in its mempool
     async fn request_inventory_of(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
         if self.disable_fetching_txs_propagated {
-            debug!(
-                "skipping inventory request from {} due to fetching disabled",
-                peer
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "skipping inventory request from {} due to fetching disabled",
+                    peer
+                );
+            }
             return Ok(());
         }
 
-        debug!("Requesting inventory of {}", peer);
+        // Prevent duplicate inventory requests
+        if peer.has_requested_inventory() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "skipping inventory request from {} due to already requested",
+                    peer
+                );
+            }
+            return Ok(());
+        }
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Requesting inventory of {}", peer);
+        }
         counter!("tos_p2p_request_inventory").increment(1u64);
 
         let packet = Cow::Owned(NotifyInventoryRequest::new(None));

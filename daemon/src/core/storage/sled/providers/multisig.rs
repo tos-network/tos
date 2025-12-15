@@ -25,7 +25,7 @@ impl MultiSigProvider for SledStorage {
         self.load_from_disk(
             &self.versioned_multisigs,
             &self.get_versioned_multisig_key(account, topoheight),
-            DiskContext::Multisig,
+            DiskContext::MultisigAtTopoHeight(topoheight),
         )
     }
 
@@ -68,7 +68,7 @@ impl MultiSigProvider for SledStorage {
             previous_topoheight = self.load_from_disk(
                 &self.versioned_multisigs,
                 &self.get_versioned_multisig_key(account, topoheight),
-                DiskContext::Multisig,
+                DiskContext::MultisigAtTopoHeight(topoheight),
             )?;
         }
 
