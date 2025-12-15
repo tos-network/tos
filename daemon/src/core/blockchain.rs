@@ -32,7 +32,6 @@ use indexmap::IndexSet;
 use log::{debug, error, info, trace, warn};
 use lru::LruCache;
 use metrics::{counter, gauge, histogram};
-use rand::Rng;
 use serde_json::{json, Value};
 use std::{
     borrow::Cow,
@@ -62,7 +61,7 @@ use tos_common::{
         COIN_DECIMALS, MAXIMUM_SUPPLY, MAX_BLOCK_SIZE, MAX_TRANSACTION_SIZE, TIPS_LIMIT, TOS_ASSET,
     },
     contract::{build_environment, ContractExecutor},
-    crypto::{Hash, Hashable, PublicKey, HASH_SIZE},
+    crypto::{random::secure_random_bytes, Hash, Hashable, PublicKey, HASH_SIZE},
     difficulty::{check_difficulty, CumulativeDifficulty, Difficulty},
     immutable::Immutable,
     network::Network,
@@ -2141,8 +2140,8 @@ impl<S: Storage> Blockchain<S> {
         trace!("get block header template");
         let start = Instant::now();
 
-        let extra_nonce: [u8; EXTRA_NONCE_SIZE] =
-            rand::thread_rng().gen::<[u8; EXTRA_NONCE_SIZE]>(); // generate random bytes
+        // SECURITY: Use OsRng for cryptographically secure random nonce
+        let extra_nonce: [u8; EXTRA_NONCE_SIZE] = secure_random_bytes::<EXTRA_NONCE_SIZE>();
         let tips_set = storage.get_tips().await?;
         let mut tips = Vec::with_capacity(tips_set.len());
         for hash in tips_set {

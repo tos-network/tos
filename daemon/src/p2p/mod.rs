@@ -39,7 +39,7 @@ use indexmap::IndexSet;
 use log::{debug, error, info, log, trace, warn};
 use lru::LruCache;
 use metrics::counter;
-use rand::{seq::IteratorRandom, Rng};
+use rand::seq::IteratorRandom;
 use std::{
     borrow::Cow,
     collections::HashSet,
@@ -56,7 +56,10 @@ use tos_common::{
     api::daemon::{Direction, NotifyEvent, PeerPeerDisconnectedEvent, TimedDirection},
     block::{Block, BlockHeader, TopoHeight},
     config::{TIPS_LIMIT, VERSION},
-    crypto::{Hash, Hashable},
+    crypto::{
+        random::{secure_random_u32, secure_random_u64},
+        Hash, Hashable,
+    },
     difficulty::CumulativeDifficulty,
     immutable::Immutable,
     serializer::Serializer,
@@ -223,9 +226,8 @@ impl<S: Storage> P2pServer<S> {
         }
 
         // set channel to communicate with listener thread
-        let mut rng = rand::thread_rng();
-        // generate a random peer id for network
-        let peer_id: u64 = rng.gen();
+        // SECURITY: Generate cryptographically secure random peer ID using OsRng
+        let peer_id: u64 = secure_random_u64();
         // parse the bind address
         let bind_address: SocketAddr = bind_address.parse()?;
 
@@ -1025,7 +1027,8 @@ impl<S: Storage> P2pServer<S> {
             return Ok(None);
         }
 
-        let selected = rand::thread_rng().gen_range(0..count);
+        // SECURITY: Use cryptographically secure random for peer selection
+        let selected = (secure_random_u32() as usize) % count;
         // clone the Arc to prevent the lock until the end of the sync request
         Ok(peers.swap_remove_index(selected))
     }
@@ -1376,7 +1379,9 @@ impl<S: Storage> P2pServer<S> {
             }
         }
 
-        availables.into_iter().choose(&mut rand::thread_rng())
+        // SECURITY: Use cryptographically secure random for address selection
+        use rand::rngs::OsRng;
+        availables.into_iter().choose(&mut OsRng)
     }
 
     // try to extend our peerlist each time its possible by searching in known peerlist from disk
