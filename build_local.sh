@@ -5,6 +5,11 @@
 
 set -e
 
+# Ensure cargo is in PATH (required for SSH sessions)
+if [[ -f "$HOME/.cargo/env" ]]; then
+    source "$HOME/.cargo/env"
+fi
+
 binaries=("tos_daemon" "tos_miner" "tos_wallet" "tos_genesis" "tos_ai_miner")
 
 echo "🔨 Building TOS Network for local platform..."

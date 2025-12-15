@@ -5,6 +5,11 @@
 
 set -e  # Exit on error
 
+# Ensure cargo is in PATH (required for SSH sessions)
+if [[ -f "$HOME/.cargo/env" ]]; then
+    source "$HOME/.cargo/env"
+fi
+
 echo "========================================"
 echo "TOS Testnet Daemon Setup"
 echo "========================================"
