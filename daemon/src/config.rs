@@ -341,8 +341,8 @@ const MAINNET_GENESIS_BLOCK_HASH: Hash = Hash::new([
     196, 73, 13, 174, 183, 58, 248, 71, 42, 158, 163,
 ]);
 const TESTNET_GENESIS_BLOCK_HASH: Hash = Hash::new([
-    95, 233, 222, 20, 50, 56, 148, 22, 57, 190, 21, 243, 199, 236, 8, 193, 202, 181, 217, 156,
-    219, 209, 131, 249, 135, 144, 71, 132, 31, 10, 94, 10,
+    95, 233, 222, 20, 50, 56, 148, 22, 57, 190, 21, 243, 199, 236, 8, 193, 202, 181, 217, 156, 219,
+    209, 131, 249, 135, 144, 71, 132, 31, 10, 94, 10,
 ]);
 
 // Genesis block getter
@@ -550,7 +550,7 @@ mod tests {
         assert_eq!(
             block.get_timestamp(),
             EXPECTED_TESTNET_TIMESTAMP,
-            "Testnet genesis block timestamp should be 2026-01-01 00:00:00 UTC ({})",
+            "Testnet genesis block timestamp should be 2025-01-01 00:00:00 UTC ({})",
             EXPECTED_TESTNET_TIMESTAMP
         );
 
@@ -669,7 +669,7 @@ mod tests {
         assert_eq!(
             testnet_block.get_timestamp(),
             EXPECTED_TESTNET_TIMESTAMP,
-            "Testnet timestamp should be 2026-01-01"
+            "Testnet timestamp should be 2025-01-01"
         );
     }
 
