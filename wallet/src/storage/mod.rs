@@ -1636,8 +1636,15 @@ impl EncryptedStorage {
         trace!("get synced topoheight");
 
         if let Some(topoheight) = self.synced_topoheight {
-            trace!("returning cached synced topoheight {}", topoheight);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("returning cached synced topoheight {}", topoheight);
+            }
             return Ok(topoheight);
+        }
+
+        // For new wallets, TOPOHEIGHT_KEY may not exist yet - return 0 as default
+        if !self.contains_data(&self.extra, TOPOHEIGHT_KEY)? {
+            return Ok(0);
         }
 
         let synced_topoheight = self.load_from_disk(&self.extra, TOPOHEIGHT_KEY)?;
