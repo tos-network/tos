@@ -4369,7 +4369,8 @@ async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction
     let tx_hash = tx.hash();
     manager.message(format!("Transaction hash: {}", tx_hash));
 
-    if wallet.is_online().await {
+    // Light mode can submit transactions via daemon API even without sync task running
+    if wallet.is_online().await || wallet.is_light_mode() {
         if let Err(e) = wallet.submit_transaction(&tx).await {
             manager.error(format!("Couldn't submit transaction: {:#}", e));
             manager.error("You can try to rescan your balance with the command 'rescan'");
