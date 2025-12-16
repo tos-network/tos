@@ -1,6 +1,6 @@
 [package]
 name = "tos_genesis"
-version = "1.0.0"
+version = "0.1.3"
 edition = "2021"
 authors = ["TOS Network Team <info@tos.network>"]
 license = "BSD-3-Clause"
