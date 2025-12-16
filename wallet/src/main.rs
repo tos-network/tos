@@ -1884,6 +1884,16 @@ async fn list_balances(
         )));
     }
 
+    // In light mode, get LightAPI for on-demand balance queries
+    #[cfg(feature = "network_handler")]
+    let light_api = if wallet.is_light_mode() {
+        Some(wallet.get_light_api().await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Light mode API not available: {}", e))
+        })?)
+    } else {
+        None
+    };
+
     manager.message(format!("Balances (page {}/{}):", page, max_pages));
     for res in storage
         .get_tracked_assets()?
@@ -1892,7 +1902,18 @@ async fn list_balances(
     {
         let asset = res?;
         if let Some(data) = storage.get_optional_asset(&asset).await? {
+            // In light mode, query balance from daemon via LightAPI
+            #[cfg(feature = "network_handler")]
+            let balance = if let Some(ref api) = light_api {
+                let address = wallet.get_address();
+                api.get_balance(&address, &asset).await.unwrap_or(0)
+            } else {
+                storage.get_plaintext_balance_for(&asset).await?
+            };
+
+            #[cfg(not(feature = "network_handler"))]
             let balance = storage.get_plaintext_balance_for(&asset).await?;
+
             manager.message(format!(
                 "Balance for asset {} ({}): {}",
                 data.get_name(),
@@ -2780,7 +2801,6 @@ async fn balance(
     let context = manager.get_context().lock()?;
     let prompt = manager.get_prompt();
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
 
     let asset = if arguments.has_argument("asset") {
         arguments.get_value("asset")?.to_hash()?
@@ -2792,7 +2812,29 @@ async fn balance(
             .await
             .unwrap_or(TOS_ASSET)
     };
-    let balance = storage.get_plaintext_balance_for(&asset).await?;
+
+    // In light mode, query balance from daemon via LightAPI
+    #[cfg(feature = "network_handler")]
+    let balance = if wallet.is_light_mode() {
+        let light_api = wallet.get_light_api().await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Light mode API not available: {}", e))
+        })?;
+        let address = wallet.get_address();
+        light_api.get_balance(&address, &asset).await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to get balance from daemon: {}", e))
+        })?
+    } else {
+        let storage = wallet.get_storage().read().await;
+        storage.get_plaintext_balance_for(&asset).await?
+    };
+
+    #[cfg(not(feature = "network_handler"))]
+    let balance = {
+        let storage = wallet.get_storage().read().await;
+        storage.get_plaintext_balance_for(&asset).await?
+    };
+
+    let storage = wallet.get_storage().read().await;
     let data = storage.get_asset(&asset).await?;
     manager.message(format!(
         "Balance for asset {} ({}): {}",
