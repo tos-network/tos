@@ -658,7 +658,7 @@ impl<S: Storage> Blockchain<S> {
                     warn!("No genesis block found!");
                     info!("Generating a new genesis block...");
                     let header = BlockHeader::new(
-                        BlockVersion::V0,
+                        BlockVersion::Nobunaga,
                         0,
                         get_current_time_in_millis(),
                         IndexSet::new(),
@@ -2334,13 +2334,14 @@ impl<S: Storage> Blockchain<S> {
             // Keep track of processed sources to avoid re-verifying them
             let mut processed_sources = HashSet::new();
 
-            let is_v3_enabled = block.get_version() >= BlockVersion::V3;
+            // Nobunaga and all future versions support full TX verification
+            let is_tx_verification_enabled = block.get_version() >= BlockVersion::Nobunaga;
 
             // If we are not skipping block template TXs verification,
             // we need to detect any orphaned TXs that were processed in the tips
             // This is required in order to include the next TXs
             // We will compute the exact expected balances/nonces after the orphaned TXs
-            if !self.skip_block_template_txs_verification && is_v3_enabled {
+            if !self.skip_block_template_txs_verification && is_tx_verification_enabled {
                 for hash in processed_txs.iter() {
                     if storage.is_tx_executed_in_a_block(&hash)? {
                         // If the TX is executed in a block, we can skip it
@@ -2745,15 +2746,17 @@ impl<S: Storage> Blockchain<S> {
 
             trace!("verifying {} TXs in block {}", txs_len, block_hash);
 
-            // V2 helps us to determine if we should retrieve all TXs from parents
+            // Nobunaga and all future versions support full TX handling from parents
+            // This helps determine if we should retrieve all TXs from parents
             // that are not only executed, but also just in block tips to prevent re integration
             // as we know that if current block would be accepted, its tips would be also executed in DAG
-            let is_v2_enabled = version >= BlockVersion::V2;
-            // V3 group transactions from orphaned blocks per source to re inject them for verification
+            let is_full_tx_handling_enabled = version >= BlockVersion::Nobunaga;
+            // Nobunaga and all future versions group transactions from orphaned blocks per source
+            // to re inject them for verification
             // This is required in case of complex DAG reorgs where we have orphaned blocks with TXs referencing to
             // each other
             // Because these TXs were already verified, their cost should be amortized by the batching verification
-            let is_v3_enabled = version >= BlockVersion::V3;
+            let is_orphan_tx_grouping_enabled = version >= BlockVersion::Nobunaga;
 
             // All transactions grouped per source key
             // used for batch verifications
@@ -2764,20 +2767,20 @@ impl<S: Storage> Blockchain<S> {
             let parents_txs = if !block.get_txs_hashes().is_empty() {
                 debug!(
                     "Loading all TXs until height {} for block {} (executed only: {})",
-                    stable_height, block_hash, !is_v2_enabled
+                    stable_height, block_hash, !is_full_tx_handling_enabled
                 );
                 self.get_all_txs_until_height(
                     &*storage,
                     stable_height,
                     block.get_tips().iter().cloned(),
-                    !is_v2_enabled,
+                    !is_full_tx_handling_enabled,
                 )
                 .await?
             } else {
                 IndexSet::new()
             };
 
-            if is_v3_enabled {
+            if is_orphan_tx_grouping_enabled {
                 // if V3 is enabled, we should also group the TXs by source
                 // to re inject them in case of orphaned blocks
                 debug!(
@@ -2842,7 +2845,7 @@ impl<S: Storage> Blockchain<S> {
                 // If the TX is already executed,
                 // we should check that the TX is not in block tips
                 // For v2 and above, all TXs that are presents in block TIPs are rejected
-                if is_v2_enabled || (is_executed && !is_v2_enabled) {
+                if is_full_tx_handling_enabled || (is_executed && !is_full_tx_handling_enabled) {
                     // miner knows this tx was already executed because its present in block tips
                     // reject the whole block
                     if parents_txs.contains(&tx_hash) {

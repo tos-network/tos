@@ -620,21 +620,17 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                                 .checked_sub(output_sum)
                                 .ok_or(BlockchainError::Overflow)?;
 
-                            if self.inner.block_version == BlockVersion::V0 {
-                                new_version.set_balance_type(BalanceType::Output);
-                            } else {
-                                // Report the output balance to the next topoheight
-                                // So the edge case where:
-                                // Balance at topo 1000 is referenced
-                                // Balance updated at topo 1001 as input
-                                // TX A is built with reference 1000 but executed at topo 1002
-                                // TX B reference 1000 but output balance is at topo 1002 and it include the final balance of (TX A + input at 1001)
-                                // So we report the output balance for next TX verification
-                                new_version.set_output_balance(Some(
-                                    version.take_balance_with(output_balance_used),
-                                ));
-                                new_version.set_balance_type(BalanceType::Both);
-                            }
+                            // Report the output balance to the next topoheight
+                            // So the edge case where:
+                            // Balance at topo 1000 is referenced
+                            // Balance updated at topo 1001 as input
+                            // TX A is built with reference 1000 but executed at topo 1002
+                            // TX B reference 1000 but output balance is at topo 1002 and it include the final balance of (TX A + input at 1001)
+                            // So we report the output balance for next TX verification
+                            new_version.set_output_balance(Some(
+                                version.take_balance_with(output_balance_used),
+                            ));
+                            new_version.set_balance_type(BalanceType::Both);
 
                             new_version
                         } else {

@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tos_common::{
-    block::{Block, BlockVersion},
+    block::Block,
     crypto::Hash,
     immutable::Immutable,
     time::{get_current_time_in_millis, get_current_time_in_seconds, TimestampMillis},
@@ -23,9 +23,7 @@ use tos_common::{
 
 use crate::{
     config::{CHAIN_SYNC_TOP_BLOCKS, PEER_OBJECTS_CONCURRENCY, STABLE_LIMIT},
-    core::{
-        blockchain::BroadcastOption, blockdag, error::BlockchainError, hard_fork, storage::Storage,
-    },
+    core::{blockchain::BroadcastOption, blockdag, error::BlockchainError, storage::Storage},
     p2p::{
         error::P2pError,
         packet::{ChainRequest, ObjectRequest, Packet, PacketWrapper},
@@ -162,51 +160,14 @@ impl<S: Storage> P2pServer<S> {
                     lowest_height = height;
                 }
 
-                let mut swap = false;
-                if let Some(previous_hash) = response_blocks.last() {
-                    let version =
-                        hard_fork::get_version_at_height(self.blockchain.get_network(), height);
-                    // Due to the TX being orphaned, some TXs may be in the wrong order in V1
-                    // It has been sorted in V2 and should not happen anymore
-                    if version == BlockVersion::V0
-                        && storage.has_block_position_in_order(&hash).await?
-                        && storage.has_block_position_in_order(&previous_hash).await?
-                    {
-                        if self
-                            .blockchain
-                            .is_side_block_internal(&*storage, &hash, top_topoheight)
-                            .await?
-                        {
-                            let position = storage.get_block_position_in_order(&hash).await?;
-                            let previous_position =
-                                storage.get_block_position_in_order(&previous_hash).await?;
-                            // if the block is a side block, we need to check if it's in the right order
-                            if position < previous_position {
-                                swap = true;
-                            }
-                        }
-                    }
-                }
-
-                if swap {
-                    trace!(
-                        "for chain request, swapping hash {} at topoheight {}",
-                        hash,
-                        topoheight
-                    );
-                    let previous = response_blocks.pop();
-                    response_blocks.insert(hash);
-                    if let Some(previous) = previous {
-                        response_blocks.insert(previous);
-                    }
-                } else {
-                    trace!(
-                        "for chain request, adding hash {} at topoheight {}",
-                        hash,
-                        topoheight
-                    );
-                    response_blocks.insert(hash);
-                }
+                // Nobunaga and all future versions have proper TX ordering
+                // No swap logic needed for Nobunaga
+                trace!(
+                    "for chain request, adding hash {} at topoheight {}",
+                    hash,
+                    topoheight
+                );
+                response_blocks.insert(hash);
                 topoheight += 1;
             }
             lowest_common_height = Some(lowest_height);

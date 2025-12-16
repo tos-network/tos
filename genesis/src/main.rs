@@ -27,9 +27,10 @@ fn main() {
     println!("Developer public key: {}", public_key.to_hex());
 
     // Create genesis block header with different timestamps for different networks
+    // All networks use Nobunaga (genesis version)
     let (version, timestamp) = match network {
-        "testnet" => (BlockVersion::V0, 1696132639000u64), // Different timestamp for testnet
-        _ => (BlockVersion::V2, 1752336822401u64),         // Mainnet timestamp
+        "testnet" => (BlockVersion::Nobunaga, 1767225600000u64), // 2026-01-01 00:00:00 UTC
+        _ => (BlockVersion::Nobunaga, 1772323200000u64),         // 2026-03-01 00:00:00 UTC
     };
 
     let header = BlockHeader::new(

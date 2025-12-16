@@ -21,6 +21,7 @@ use tos_common::{
 use tos_daemon::tako_integration::TakoExecutor;
 
 /// Mock provider for testing with state tracking
+#[allow(clippy::type_complexity)]
 struct MockProvider {
     /// Track storage: (contract_hash, key) -> value
     #[allow(dead_code)]

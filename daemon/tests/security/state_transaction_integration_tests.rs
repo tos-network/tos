@@ -1103,6 +1103,7 @@ async fn test_v07_balance_conservation_during_reorg() {
     }
 
     // Chain state with reorg support
+    #[allow(clippy::type_complexity)]
     struct ReorgChain {
         balances: Arc<RwLock<HashMap<String, u64>>>,
         block_history: Arc<RwLock<Vec<Vec<(String, String, u64)>>>>, // blocks -> transactions

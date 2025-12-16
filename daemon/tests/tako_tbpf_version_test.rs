@@ -40,6 +40,7 @@ const V0_CONTRACT_PATH: &str = "tests/fixtures/hello_world.so"; // e_flags=0
 const V3_CONTRACT_PATH: &str = "tests/fixtures/minimal.so"; // e_flags=3
 
 /// Mock provider for testing
+#[allow(clippy::type_complexity)]
 struct MockProvider {
     balances: Arc<Mutex<HashMap<([u8; 32], [u8; 32]), u64>>>,
 }

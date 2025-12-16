@@ -340,7 +340,7 @@ mod tests {
 
         let miner = KeyPair::new().get_public_key().compress();
         let header = BlockHeader::new(
-            BlockVersion::V0,
+            BlockVersion::Nobunaga,
             0,
             0,
             tips,

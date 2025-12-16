@@ -543,18 +543,371 @@ pub struct DevFeeThreshold {
     pub fee_percentage: u64,
 }
 
-// Struct to define hard fork
+/// Fork activation condition for TIP (TOS Improvement Proposal) activation
+///
+/// This enum defines different conditions under which a hard fork can be activated.
+/// Each condition type serves different use cases:
+///
+/// - `Block`: Deterministic activation at a specific block height
+/// - `Timestamp`: Time-based activation (useful for coordinated upgrades)
+/// - `TCD`: Threshold Cumulative Difficulty activation (network hashrate dependent)
+/// - `Never`: Disabled activation (useful for testnet-only features)
+///
+/// # Examples
+///
+/// ```ignore
+/// // Activate at block height 1,000,000
+/// ForkCondition::Block(1_000_000)
+///
+/// // Activate at Unix timestamp (2026-01-01 00:00:00 UTC)
+/// ForkCondition::Timestamp(1767225600000)
+///
+/// // Activate when cumulative difficulty reaches threshold
+/// ForkCondition::TCD(1_000_000_000)
+///
+/// // Never activate (disabled feature)
+/// ForkCondition::Never
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ForkCondition {
+    /// Activate at a specific block height
+    /// This is the most common and deterministic activation method
+    Block(u64),
+
+    /// Activate at a specific Unix timestamp (in milliseconds)
+    /// Useful for time-coordinated network upgrades
+    /// Note: Timestamp-based activation depends on block timestamps which
+    /// can have some variance due to mining time
+    Timestamp(u64),
+
+    /// Activate when the network's cumulative difficulty reaches a threshold
+    /// This is hashrate-dependent and useful for security-related upgrades
+    /// that should only activate after the network has sufficient hashpower
+    /// The value represents the minimum cumulative difficulty threshold
+    TCD(u64),
+
+    /// Never activate this fork
+    /// Used for features that are disabled or testnet-only
+    Never,
+}
+
+impl ForkCondition {
+    /// Check if this fork condition is satisfied given the current state
+    ///
+    /// # Arguments
+    /// * `height` - Current block height
+    /// * `timestamp` - Current block timestamp (in milliseconds)
+    /// * `cumulative_difficulty` - Current cumulative difficulty of the chain
+    ///
+    /// # Returns
+    /// `true` if the fork condition is satisfied, `false` otherwise
+    pub fn is_satisfied(&self, height: u64, timestamp: u64, cumulative_difficulty: u64) -> bool {
+        match self {
+            ForkCondition::Block(activation_height) => height >= *activation_height,
+            ForkCondition::Timestamp(activation_timestamp) => timestamp >= *activation_timestamp,
+            ForkCondition::TCD(threshold) => cumulative_difficulty >= *threshold,
+            ForkCondition::Never => false,
+        }
+    }
+
+    /// Get the activation height if this is a Block condition
+    pub fn activation_height(&self) -> Option<u64> {
+        match self {
+            ForkCondition::Block(height) => Some(*height),
+            _ => None,
+        }
+    }
+
+    /// Get the activation timestamp if this is a Timestamp condition
+    pub fn activation_timestamp(&self) -> Option<u64> {
+        match self {
+            ForkCondition::Timestamp(ts) => Some(*ts),
+            _ => None,
+        }
+    }
+
+    /// Get the TCD threshold if this is a TCD condition
+    pub fn tcd_threshold(&self) -> Option<u64> {
+        match self {
+            ForkCondition::TCD(threshold) => Some(*threshold),
+            _ => None,
+        }
+    }
+
+    /// Check if this condition is Never (disabled)
+    pub fn is_never(&self) -> bool {
+        matches!(self, ForkCondition::Never)
+    }
+
+    /// Check if this condition uses block height (deterministic)
+    pub fn is_block_based(&self) -> bool {
+        matches!(self, ForkCondition::Block(_))
+    }
+}
+
+impl std::fmt::Display for ForkCondition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ForkCondition::Block(height) => write!(f, "Block({})", height),
+            ForkCondition::Timestamp(ts) => write!(f, "Timestamp({})", ts),
+            ForkCondition::TCD(threshold) => write!(f, "TCD({})", threshold),
+            ForkCondition::Never => write!(f, "Never"),
+        }
+    }
+}
+
+/// Struct to define hard fork configuration
+///
+/// A hard fork represents a protocol upgrade that introduces incompatible changes.
+/// Each hard fork is associated with a `BlockVersion` and activation condition.
+///
+/// # Activation Conditions
+///
+/// Hard forks can be activated based on different conditions (see `ForkCondition`):
+/// - **Block**: Deterministic activation at a specific block height
+/// - **Timestamp**: Time-based activation (Unix timestamp in milliseconds)
+/// - **TCD**: Hashrate-dependent activation (Threshold Cumulative Difficulty)
+/// - **Never**: Disabled features (testnet-only or deprecated)
+///
+/// # Design
+///
+/// This design follows Ethereum's approach (see reth/alloy_hardforks) where
+/// ForkCondition is the single source of truth for activation logic.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct HardFork {
-    // block height to start hard fork
-    pub height: u64,
-    // Block version to use
+    /// Fork activation condition
+    /// Defines when this hard fork becomes active
+    pub condition: ForkCondition,
+
+    /// Block version to use after this fork activates
     pub version: BlockVersion,
-    // All the changes that will be applied
+
+    /// Description of changes in this hard fork
     pub changelog: &'static str,
-    // Version requirement, example: >=1.13.0
-    // This is used for p2p protocol
+
+    /// Minimum software version requirement (e.g., ">=1.13.0")
+    /// Used for P2P protocol compatibility checking
     pub version_requirement: Option<&'static str>,
+}
+
+impl HardFork {
+    /// Get the fork activation condition
+    #[inline]
+    pub fn condition(&self) -> ForkCondition {
+        self.condition
+    }
+
+    /// Check if this hard fork is activated given the current state
+    ///
+    /// # Arguments
+    /// * `height` - Current block height
+    /// * `timestamp` - Current block timestamp (in milliseconds)
+    /// * `cumulative_difficulty` - Current cumulative difficulty
+    pub fn is_activated(&self, height: u64, timestamp: u64, cumulative_difficulty: u64) -> bool {
+        self.condition
+            .is_satisfied(height, timestamp, cumulative_difficulty)
+    }
+
+    /// Check if this hard fork is activated at a specific height
+    /// For Block conditions, checks height directly
+    /// For Timestamp/TCD conditions, returns false (cannot determine by height alone)
+    /// For Never condition, always returns false
+    pub fn is_activated_at_height(&self, height: u64) -> bool {
+        match self.condition {
+            ForkCondition::Block(activation_height) => height >= activation_height,
+            ForkCondition::Never => false,
+            // Timestamp and TCD conditions cannot be checked by height alone
+            ForkCondition::Timestamp(_) | ForkCondition::TCD(_) => false,
+        }
+    }
+
+    /// Get the activation block height if this is a Block-based condition
+    pub fn activation_height(&self) -> Option<u64> {
+        self.condition.activation_height()
+    }
+
+    /// Get the activation timestamp if this is a Timestamp-based condition
+    pub fn activation_timestamp(&self) -> Option<u64> {
+        self.condition.activation_timestamp()
+    }
+
+    /// Get the TCD threshold if this is a TCD-based condition
+    pub fn tcd_threshold(&self) -> Option<u64> {
+        self.condition.tcd_threshold()
+    }
+
+    /// Check if this fork is disabled (Never condition)
+    pub fn is_disabled(&self) -> bool {
+        self.condition.is_never()
+    }
+}
+
+// ============================================================================
+// TosHardfork - Independent TIP Activation (like Ethereum's EthereumHardfork)
+// ============================================================================
+
+/// TOS Hard Fork / TIP enumeration
+///
+/// Each variant represents a specific protocol change that can be independently
+/// activated. This follows Ethereum's EthereumHardfork enum design where each
+/// feature can be queried and activated independently.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Check if a TIP is active at a specific height
+/// if chain_tips.is_active(TosHardfork::SomeFutureTip, height, timestamp, tcd) {
+///     // Feature is enabled
+/// }
+/// ```
+///
+/// # Adding New TIPs
+///
+/// To add a new TIP, add a variant here and configure its activation in
+/// `daemon/src/config.rs` (MAINNET_TIPS, TESTNET_TIPS, DEVNET_TIPS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum TosHardfork {
+    // === Future TIPs will be added here ===
+    // Example:
+    // /// TIP-100: Smart contract support
+    // SmartContracts,
+}
+
+impl TosHardfork {
+    /// Returns all known hard forks in activation order
+    pub const fn all() -> &'static [Self] {
+        &[
+            // Future TIPs will be added here
+        ]
+    }
+
+    /// Returns the TIP number for this hardfork
+    pub const fn tip_number(&self) -> u16 {
+        match *self {
+            // Future TIPs will be added here
+            // Example: Self::SmartContracts => 100,
+        }
+    }
+
+    /// Returns a human-readable name for this hardfork
+    pub const fn name(&self) -> &'static str {
+        match *self {
+            // Future TIPs will be added here
+            // Example: Self::SmartContracts => "SmartContracts",
+        }
+    }
+}
+
+impl std::fmt::Display for TosHardfork {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            // Future TIPs will be added here
+            // Example: _ => write!(f, "TIP-{}: {}", self.tip_number(), self.name()),
+        }
+    }
+}
+
+/// Collection of TIP activations with independent ForkCondition per TIP
+///
+/// This follows the Ethereum/reth design where each hard fork has its own
+/// ForkCondition, enabling independent feature activation.
+///
+/// # Examples
+///
+/// ```ignore
+/// // When TIPs are added, configure them like this:
+/// let tips = ChainTips::new(vec![
+///     (TosHardfork::SomeFutureTip, ForkCondition::Block(100000)),
+/// ]);
+///
+/// if tips.is_active(TosHardfork::SomeFutureTip, height, timestamp, tcd) {
+///     // Feature is active
+/// }
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct ChainTips {
+    /// Map of TIP to its activation condition
+    tips: HashMap<TosHardfork, ForkCondition>,
+}
+
+impl ChainTips {
+    /// Create a new ChainTips from a list of (TIP, ForkCondition) pairs
+    pub fn new(tips: Vec<(TosHardfork, ForkCondition)>) -> Self {
+        Self {
+            tips: tips.into_iter().collect(),
+        }
+    }
+
+    /// Get the ForkCondition for a specific TIP
+    pub fn fork(&self, hardfork: TosHardfork) -> ForkCondition {
+        self.tips
+            .get(&hardfork)
+            .copied()
+            .unwrap_or(ForkCondition::Never)
+    }
+
+    /// Check if a TIP is active given current state
+    pub fn is_active(
+        &self,
+        hardfork: TosHardfork,
+        height: u64,
+        timestamp: u64,
+        cumulative_difficulty: u64,
+    ) -> bool {
+        self.fork(hardfork)
+            .is_satisfied(height, timestamp, cumulative_difficulty)
+    }
+
+    /// Check if a TIP is active at a specific block height (Block conditions only)
+    pub fn is_active_at_height(&self, hardfork: TosHardfork, height: u64) -> bool {
+        match self.fork(hardfork) {
+            ForkCondition::Block(activation_height) => height >= activation_height,
+            _ => false,
+        }
+    }
+
+    /// Check if a TIP is active at a specific timestamp (Timestamp conditions only)
+    pub fn is_active_at_timestamp(&self, hardfork: TosHardfork, timestamp: u64) -> bool {
+        match self.fork(hardfork) {
+            ForkCondition::Timestamp(activation_ts) => timestamp >= activation_ts,
+            _ => false,
+        }
+    }
+
+    /// Get the activation height for a TIP (if Block-based)
+    pub fn activation_height(&self, hardfork: TosHardfork) -> Option<u64> {
+        self.fork(hardfork).activation_height()
+    }
+
+    /// Get the activation timestamp for a TIP (if Timestamp-based)
+    pub fn activation_timestamp(&self, hardfork: TosHardfork) -> Option<u64> {
+        self.fork(hardfork).activation_timestamp()
+    }
+
+    /// Insert or update a TIP's activation condition
+    pub fn insert(&mut self, hardfork: TosHardfork, condition: ForkCondition) {
+        self.tips.insert(hardfork, condition);
+    }
+
+    /// Get all TIPs that are active at the given state
+    pub fn active_tips(
+        &self,
+        height: u64,
+        timestamp: u64,
+        cumulative_difficulty: u64,
+    ) -> Vec<TosHardfork> {
+        self.tips
+            .iter()
+            .filter(|(_, cond)| cond.is_satisfied(height, timestamp, cumulative_difficulty))
+            .map(|(hf, _)| *hf)
+            .collect()
+    }
+
+    /// Get all configured TIPs
+    pub fn all_tips(&self) -> Vec<(TosHardfork, ForkCondition)> {
+        self.tips.iter().map(|(hf, cond)| (*hf, *cond)).collect()
+    }
 }
 
 // Struct to returns the size of the blockchain on disk

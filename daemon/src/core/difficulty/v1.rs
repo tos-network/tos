@@ -1,3 +1,7 @@
+// Legacy difficulty algorithm V1 - kept for reference
+// Nobunaga and all future versions use V2 algorithm
+#![allow(dead_code)]
+
 use crate::core::difficulty::kalman_filter;
 use humantime::format_duration;
 use log::trace;

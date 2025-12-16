@@ -60,7 +60,7 @@ fn kalman_filter(
 
 // Calculate the required difficulty for the next block based on the solve time of the previous block
 // We are using a Kalman filter to estimate the hashrate and adjust the difficulty
-// This function will determine which algorithm to use based on the version
+// Nobunaga and all future versions use V2 algorithm
 pub fn calculate_difficulty(
     parent_timestamp: TimestampMillis,
     timestamp: TimestampMillis,
@@ -72,31 +72,21 @@ pub fn calculate_difficulty(
     let solve_time = (timestamp - parent_timestamp).max(1);
 
     let block_time_target = get_block_time_target_for_version(version);
-    match version {
-        BlockVersion::V0 => v1::calculate_difficulty(
-            solve_time,
-            previous_difficulty,
-            p,
-            minimum_difficulty,
-            block_time_target,
-        ),
-        _ => v2::calculate_difficulty(
-            solve_time,
-            previous_difficulty,
-            p,
-            minimum_difficulty,
-            block_time_target,
-        ),
-    }
+    // All versions use V2 algorithm
+    v2::calculate_difficulty(
+        solve_time,
+        previous_difficulty,
+        p,
+        minimum_difficulty,
+        block_time_target,
+    )
 }
 
 // Get the process noise covariance based on the version
 // It is used by first blocks on a new version
-pub fn get_covariance_p(version: BlockVersion) -> VarUint {
-    match version {
-        BlockVersion::V0 => v1::P,
-        _ => v2::P,
-    }
+// All versions use V2 covariance
+pub fn get_covariance_p(_version: BlockVersion) -> VarUint {
+    v2::P
 }
 
 // Get the difficulty based on the hashrate and block time target
@@ -119,15 +109,15 @@ pub const fn get_minimum_difficulty(network: &Network, version: BlockVersion) ->
 }
 
 // Get minimum difficulty at hard fork
+// Nobunaga is the only version, returns appropriate difficulty
 pub const fn get_difficulty_at_hard_fork(
     network: &Network,
     version: BlockVersion,
 ) -> Option<Difficulty> {
     let hashrate = match network {
         Network::Mainnet => match version {
-            BlockVersion::V0 | BlockVersion::V1 => DEFAULT_MINIMUM_HASHRATE,
-            BlockVersion::V2 => DEFAULT_MINIMUM_HASHRATE,
-            BlockVersion::V3 => return None,
+            BlockVersion::Nobunaga => DEFAULT_MINIMUM_HASHRATE,
+            // Future versions would be added here
         },
         _ => return None,
     };
@@ -145,28 +135,15 @@ mod tests {
 
     #[test]
     fn test_difficulty_at_hard_fork() {
-        // 100 H/s for V0 with 60s target = 100 * 60,000 / 1000 = 6,000
+        // Nobunaga uses 3s blocks
+        // 100 H/s for Nobunaga with 3s target = 100 * 3,000 / 1000 = 300
         assert_eq!(
-            get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V0).unwrap(),
-            Difficulty::from_u64(DEFAULT_MINIMUM_HASHRATE * 60)
-        );
-
-        // TIP-1: V1/V2/V3 now use 3s blocks
-        // 100 H/s for V2 with 3s target = 100 * 3,000 / 1000 = 300
-        assert_eq!(
-            get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::V2).unwrap(),
+            get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::Nobunaga).unwrap(),
             Difficulty::from_u64(3 * DEFAULT_MINIMUM_HASHRATE)
         );
 
         // testnet returns None for all versions
-        for version in [
-            BlockVersion::V0,
-            BlockVersion::V1,
-            BlockVersion::V2,
-            BlockVersion::V3,
-        ] {
-            assert!(get_difficulty_at_hard_fork(&Network::Testnet, version).is_none());
-        }
+        assert!(get_difficulty_at_hard_fork(&Network::Testnet, BlockVersion::Nobunaga).is_none());
     }
 
     #[test]

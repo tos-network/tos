@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 
 use lazy_static::lazy_static;
 use tos_common::{
-    api::daemon::{DevFeeThreshold, HardFork},
+    api::daemon::{ChainTips, DevFeeThreshold, ForkCondition, HardFork},
     block::BlockVersion,
     config::BYTES_PER_KB,
     crypto::{Address, Hash, PublicKey},
@@ -239,58 +239,71 @@ pub const PEER_PACKET_CHANNEL_SIZE: usize = 1024;
 // Millis
 pub const PEER_SEND_BYTES_TIMEOUT: u64 = 3_000;
 
-// Hard Forks configured
-const HARD_FORKS: [HardFork; 3] = [
+// Hard Forks configured - Append-Only Architecture
+// TOS uses Sengoku warlord naming (see version.md for v0-v61)
+// v0: Nobunaga, v1: Nohime, v2: Oichi, v3: Mitsuhide, ...
+//
+// ForkCondition types (following Ethereum/reth design):
+// - Block(height): Activate at specific block height (deterministic)
+// - Timestamp(ms): Activate at Unix timestamp in milliseconds (time-based)
+// - TCD(difficulty): Activate when cumulative difficulty reaches threshold (hashrate-based)
+// - Never: Disabled feature (testnet-only or deprecated)
+const HARD_FORKS: [HardFork; 1] = [
     HardFork {
-        height: 0,
-        version: BlockVersion::V0,
-        changelog: "Initial version",
+        condition: ForkCondition::Block(0),
+        version: BlockVersion::Nobunaga,
+        changelog: "Nobunaga - Genesis with PoW V2, 3s blocks",
         version_requirement: None,
     },
-    HardFork {
-        height: 0,
-        version: BlockVersion::V1,
-        changelog: "tos-hash v2",
-        version_requirement: None,
-    },
-    HardFork {
-        height: 0,
-        version: BlockVersion::V2,
-        changelog: "MultiSig, P2P",
-        version_requirement: None,
-    },
+    // === Future Hard Forks (Append-Only, see version.md) ===
+    // Example: Block-based activation
+    // HardFork {
+    //     condition: ForkCondition::Block(1_000_000),
+    //     version: BlockVersion::Nohime,  // v1
+    //     changelog: "Nohime - ...",
+    //     version_requirement: Some(">=0.2.0"),
+    // },
+    // Example: Timestamp-based activation (2026-01-01 00:00:00 UTC)
+    // HardFork {
+    //     condition: ForkCondition::Timestamp(1767225600000),
+    //     version: BlockVersion::Oichi,  // v2
+    //     changelog: "Oichi - ...",
+    //     version_requirement: Some(">=0.3.0"),
+    // },
+    // Example: TCD-based activation (hashrate-dependent)
+    // HardFork {
+    //     condition: ForkCondition::TCD(1_000_000_000),
+    //     version: BlockVersion::Mitsuhide,  // v3
+    //     changelog: "Mitsuhide - ...",
+    //     version_requirement: Some(">=0.4.0"),
+    // },
 ];
 
-// Testnet / Stagenet / Devnet hard forks
-// NOTE: version_requirement must match TOS software version (currently 0.1.x)
-// Previously set to legacy versions (1.13.0, 1.16.0) which caused
-// P2P "Invalid P2P version" errors during node synchronization.
-const OTHERS_NETWORK_HARD_FORKS: [HardFork; 4] = [
-    HardFork {
-        height: 0,
-        version: BlockVersion::V0,
-        changelog: "Initial version",
-        version_requirement: None,
-    },
-    HardFork {
-        height: 5,
-        version: BlockVersion::V1,
-        changelog: "tos-hash v2",
-        version_requirement: Some(">=0.1.0"),
-    },
-    HardFork {
-        height: 10,
-        version: BlockVersion::V2,
-        changelog: "MultiSig, P2P",
-        version_requirement: Some(">=0.1.0"),
-    },
-    HardFork {
-        height: 15,
-        version: BlockVersion::V3,
-        changelog: "Smart Contracts",
-        version_requirement: Some(">=0.1.0"),
-    },
-];
+// ============================================================================
+// TIP (TOS Improvement Proposal) Configurations - Independent Activation
+// ============================================================================
+// Each TIP can be independently activated using ForkCondition.
+// This follows Ethereum's EIP activation model.
+
+lazy_static! {
+    /// Mainnet TIP activations
+    static ref MAINNET_TIPS: ChainTips = ChainTips::new(vec![
+        // Future TIPs will be configured here
+        // Example: (TosHardfork::SmartContracts, ForkCondition::Block(100000)),
+    ]);
+
+    /// Testnet TIP activations
+    static ref TESTNET_TIPS: ChainTips = ChainTips::new(vec![
+        // Future TIPs will be configured here (typically activated earlier than mainnet)
+        // Example: (TosHardfork::SmartContracts, ForkCondition::Block(50000)),
+    ]);
+
+    /// Devnet TIP activations
+    static ref DEVNET_TIPS: ChainTips = ChainTips::new(vec![
+        // Future TIPs will be configured here (typically activated at genesis for testing)
+        // Example: (TosHardfork::SmartContracts, ForkCondition::Block(0)),
+    ]);
+}
 
 // Mainnet seed nodes
 const MAINNET_SEED_NODES: [&str; 7] = [
@@ -317,19 +330,19 @@ const TESTNET_SEED_NODES: [&str; 1] = [
 ];
 
 // Genesis block to have the same starting point for every nodes
-// Genesis block in hexadecimal format
-const MAINNET_GENESIS_BLOCK: &str = "02000000000000000000000197ff69f08100000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a7410";
-const TESTNET_GENESIS_BLOCK: &str = "0000000000000000000000018ae962291800000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a7410";
+// Genesis block in hexadecimal format (Nobunaga version)
+const MAINNET_GENESIS_BLOCK: &str = "0000000000000000000000019ca6b1dc0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a7410";
+const TESTNET_GENESIS_BLOCK: &str = "0000000000000000000000019b76daa80000000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a7410";
 
-// Genesis block hash for both networks
+// Genesis block hash for both networks (Nobunaga version)
 // It must be the same as the hash of the genesis block
 const MAINNET_GENESIS_BLOCK_HASH: Hash = Hash::new([
-    123, 111, 199, 253, 98, 37, 114, 152, 179, 226, 64, 94, 57, 131, 108, 241, 153, 243, 177, 108,
-    175, 198, 106, 4, 165, 113, 220, 59, 249, 217, 57, 252,
+    221, 209, 7, 100, 97, 8, 80, 224, 81, 145, 186, 236, 51, 103, 32, 182, 9, 114, 45, 183, 90,
+    196, 73, 13, 174, 183, 58, 248, 71, 42, 158, 163,
 ]);
 const TESTNET_GENESIS_BLOCK_HASH: Hash = Hash::new([
-    155, 28, 4, 144, 29, 33, 28, 237, 10, 64, 156, 95, 52, 15, 165, 108, 5, 228, 138, 52, 42, 222,
-    1, 103, 24, 202, 208, 248, 217, 62, 124, 237,
+    143, 217, 115, 3, 236, 199, 184, 62, 204, 46, 227, 212, 184, 217, 194, 62, 208, 63, 204, 120,
+    88, 134, 125, 141, 114, 43, 169, 230, 248, 215, 55, 79,
 ]);
 
 // Genesis block getter
@@ -376,10 +389,18 @@ pub const fn get_seed_nodes(network: &Network) -> &[&str] {
 }
 
 // Get hard forks based on the network
-pub const fn get_hard_forks(network: &Network) -> &'static [HardFork] {
+// All networks use the same hard fork configuration (Nobunaga genesis)
+pub const fn get_hard_forks(_network: &Network) -> &'static [HardFork] {
+    &HARD_FORKS
+}
+
+// Get TIP (TOS Improvement Proposal) activations based on the network
+// Each network can have different TIP activation schedules
+pub fn get_chain_tips(network: &Network) -> &'static ChainTips {
     match network {
-        Network::Mainnet => &HARD_FORKS,
-        _ => &OTHERS_NETWORK_HARD_FORKS,
+        Network::Mainnet => &MAINNET_TIPS,
+        Network::Testnet | Network::Stagenet => &TESTNET_TIPS,
+        Network::Devnet => &DEVNET_TIPS,
     }
 }
 
@@ -400,3 +421,357 @@ static_assert!(
     CHAIN_SYNC_RESPONSE_MAX_BLOCKS <= u16::MAX as usize,
     "Chain sync response max blocks must be less than or equal to u16::MAX"
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tos_common::{
+        block::Block,
+        crypto::{Address, Hashable},
+        serializer::{Reader, Serializer},
+    };
+
+    /// Expected developer address for genesis blocks
+    const EXPECTED_DEV_ADDRESS: &str =
+        "tos1qsl6sj2u0gp37tr6drrq964rd4d8gnaxnezgytmt0cfltnp2wsgqqak28je";
+
+    /// Expected mainnet timestamp: 2026-03-01 00:00:00 UTC
+    const EXPECTED_MAINNET_TIMESTAMP: u64 = 1772323200000;
+
+    /// Expected testnet timestamp: 2026-01-01 00:00:00 UTC
+    const EXPECTED_TESTNET_TIMESTAMP: u64 = 1767225600000;
+
+    /// Test that MAINNET_GENESIS_BLOCK can be deserialized and all fields match expected values
+    #[test]
+    fn test_mainnet_genesis_block_integrity() {
+        // Decode the hex string to bytes
+        let genesis_bytes =
+            hex::decode(MAINNET_GENESIS_BLOCK).expect("MAINNET_GENESIS_BLOCK should be valid hex");
+
+        // Deserialize the block
+        let mut reader = Reader::new(&genesis_bytes);
+        let block = Block::read(&mut reader)
+            .expect("MAINNET_GENESIS_BLOCK should deserialize to a valid Block");
+
+        // === Verify Block Version ===
+        assert_eq!(
+            block.get_header().get_version(),
+            BlockVersion::Nobunaga,
+            "Mainnet genesis block should have Nobunaga version"
+        );
+
+        // === Verify Block Height ===
+        assert_eq!(
+            block.get_height(),
+            0,
+            "Mainnet genesis block height should be 0"
+        );
+
+        // === Verify Timestamp ===
+        assert_eq!(
+            block.get_timestamp(),
+            EXPECTED_MAINNET_TIMESTAMP,
+            "Mainnet genesis block timestamp should be 2026-03-01 00:00:00 UTC ({})",
+            EXPECTED_MAINNET_TIMESTAMP
+        );
+
+        // === Verify Miner (Developer Public Key) ===
+        let expected_dev_pubkey = Address::from_string(EXPECTED_DEV_ADDRESS)
+            .expect("Developer address should be valid")
+            .to_public_key();
+        assert_eq!(
+            block.get_miner(),
+            &expected_dev_pubkey,
+            "Mainnet genesis block miner should be developer public key"
+        );
+
+        // === Verify Tips (should be empty for genesis) ===
+        assert!(
+            block.get_tips().is_empty(),
+            "Mainnet genesis block should have no parent tips"
+        );
+
+        // === Verify Transactions (should be empty for genesis) ===
+        assert!(
+            block.get_transactions().is_empty(),
+            "Mainnet genesis block should have no transactions"
+        );
+
+        // === Verify Extra Nonce (should be all zeros) ===
+        let extra_nonce = block.get_extra_nonce();
+        assert_eq!(extra_nonce.len(), 32, "Extra nonce should be 32 bytes");
+        assert!(
+            extra_nonce.iter().all(|&b| b == 0),
+            "Mainnet genesis block extra_nonce should be all zeros"
+        );
+
+        // === Verify Hash ===
+        let computed_hash = block.get_header().hash();
+        assert_eq!(
+            computed_hash, MAINNET_GENESIS_BLOCK_HASH,
+            "Computed mainnet genesis block hash should match MAINNET_GENESIS_BLOCK_HASH"
+        );
+
+        // === Verify Round-trip Serialization ===
+        let reserialized_hex = block.to_hex();
+        assert_eq!(
+            reserialized_hex, MAINNET_GENESIS_BLOCK,
+            "Re-serialized mainnet genesis block should match original hex"
+        );
+    }
+
+    /// Test that TESTNET_GENESIS_BLOCK can be deserialized and all fields match expected values
+    #[test]
+    fn test_testnet_genesis_block_integrity() {
+        // Decode the hex string to bytes
+        let genesis_bytes =
+            hex::decode(TESTNET_GENESIS_BLOCK).expect("TESTNET_GENESIS_BLOCK should be valid hex");
+
+        // Deserialize the block
+        let mut reader = Reader::new(&genesis_bytes);
+        let block = Block::read(&mut reader)
+            .expect("TESTNET_GENESIS_BLOCK should deserialize to a valid Block");
+
+        // === Verify Block Version ===
+        assert_eq!(
+            block.get_header().get_version(),
+            BlockVersion::Nobunaga,
+            "Testnet genesis block should have Nobunaga version"
+        );
+
+        // === Verify Block Height ===
+        assert_eq!(
+            block.get_height(),
+            0,
+            "Testnet genesis block height should be 0"
+        );
+
+        // === Verify Timestamp ===
+        assert_eq!(
+            block.get_timestamp(),
+            EXPECTED_TESTNET_TIMESTAMP,
+            "Testnet genesis block timestamp should be 2026-01-01 00:00:00 UTC ({})",
+            EXPECTED_TESTNET_TIMESTAMP
+        );
+
+        // === Verify Miner (Developer Public Key) ===
+        let expected_dev_pubkey = Address::from_string(EXPECTED_DEV_ADDRESS)
+            .expect("Developer address should be valid")
+            .to_public_key();
+        assert_eq!(
+            block.get_miner(),
+            &expected_dev_pubkey,
+            "Testnet genesis block miner should be developer public key"
+        );
+
+        // === Verify Tips (should be empty for genesis) ===
+        assert!(
+            block.get_tips().is_empty(),
+            "Testnet genesis block should have no parent tips"
+        );
+
+        // === Verify Transactions (should be empty for genesis) ===
+        assert!(
+            block.get_transactions().is_empty(),
+            "Testnet genesis block should have no transactions"
+        );
+
+        // === Verify Extra Nonce (should be all zeros) ===
+        let extra_nonce = block.get_extra_nonce();
+        assert_eq!(extra_nonce.len(), 32, "Extra nonce should be 32 bytes");
+        assert!(
+            extra_nonce.iter().all(|&b| b == 0),
+            "Testnet genesis block extra_nonce should be all zeros"
+        );
+
+        // === Verify Hash ===
+        let computed_hash = block.get_header().hash();
+        assert_eq!(
+            computed_hash, TESTNET_GENESIS_BLOCK_HASH,
+            "Computed testnet genesis block hash should match TESTNET_GENESIS_BLOCK_HASH"
+        );
+
+        // === Verify Round-trip Serialization ===
+        let reserialized_hex = block.to_hex();
+        assert_eq!(
+            reserialized_hex, TESTNET_GENESIS_BLOCK,
+            "Re-serialized testnet genesis block should match original hex"
+        );
+    }
+
+    /// Test that mainnet and testnet only differ in timestamp (all other fields should be same)
+    #[test]
+    fn test_genesis_blocks_field_comparison() {
+        // Deserialize both blocks
+        let mainnet_bytes =
+            hex::decode(MAINNET_GENESIS_BLOCK).expect("MAINNET_GENESIS_BLOCK should be valid hex");
+        let testnet_bytes =
+            hex::decode(TESTNET_GENESIS_BLOCK).expect("TESTNET_GENESIS_BLOCK should be valid hex");
+
+        let mut mainnet_reader = Reader::new(&mainnet_bytes);
+        let mut testnet_reader = Reader::new(&testnet_bytes);
+
+        let mainnet_block =
+            Block::read(&mut mainnet_reader).expect("MAINNET_GENESIS_BLOCK should deserialize");
+        let testnet_block =
+            Block::read(&mut testnet_reader).expect("TESTNET_GENESIS_BLOCK should deserialize");
+
+        // === Fields that should be SAME ===
+        assert_eq!(
+            mainnet_block.get_header().get_version(),
+            testnet_block.get_header().get_version(),
+            "Both genesis blocks should have same version (Nobunaga)"
+        );
+        assert_eq!(
+            mainnet_block.get_height(),
+            testnet_block.get_height(),
+            "Both genesis blocks should have same height (0)"
+        );
+        assert_eq!(
+            mainnet_block.get_miner(),
+            testnet_block.get_miner(),
+            "Both genesis blocks should have same miner (developer key)"
+        );
+        assert_eq!(
+            mainnet_block.get_tips().len(),
+            testnet_block.get_tips().len(),
+            "Both genesis blocks should have same number of tips (0)"
+        );
+        assert_eq!(
+            mainnet_block.get_transactions().len(),
+            testnet_block.get_transactions().len(),
+            "Both genesis blocks should have same number of transactions (0)"
+        );
+        assert_eq!(
+            mainnet_block.get_extra_nonce(),
+            testnet_block.get_extra_nonce(),
+            "Both genesis blocks should have same extra_nonce (all zeros)"
+        );
+
+        // === Fields that should be DIFFERENT ===
+        assert_ne!(
+            mainnet_block.get_timestamp(),
+            testnet_block.get_timestamp(),
+            "Mainnet and testnet should have different timestamps"
+        );
+        assert_ne!(
+            mainnet_block.hash(),
+            testnet_block.hash(),
+            "Mainnet and testnet should have different hashes"
+        );
+
+        // === Verify exact timestamp difference ===
+        assert_eq!(
+            mainnet_block.get_timestamp(),
+            EXPECTED_MAINNET_TIMESTAMP,
+            "Mainnet timestamp should be 2026-03-01"
+        );
+        assert_eq!(
+            testnet_block.get_timestamp(),
+            EXPECTED_TESTNET_TIMESTAMP,
+            "Testnet timestamp should be 2026-01-01"
+        );
+    }
+
+    /// Test that get_hex_genesis_block returns correct values for each network
+    #[test]
+    fn test_get_hex_genesis_block() {
+        assert_eq!(
+            get_hex_genesis_block(&Network::Mainnet),
+            Some(MAINNET_GENESIS_BLOCK)
+        );
+        assert_eq!(
+            get_hex_genesis_block(&Network::Testnet),
+            Some(TESTNET_GENESIS_BLOCK)
+        );
+        assert_eq!(
+            get_hex_genesis_block(&Network::Stagenet),
+            Some(TESTNET_GENESIS_BLOCK)
+        );
+        assert_eq!(get_hex_genesis_block(&Network::Devnet), None);
+    }
+
+    /// Test that get_genesis_block_hash returns correct values for each network
+    #[test]
+    fn test_get_genesis_block_hash() {
+        assert_eq!(
+            get_genesis_block_hash(&Network::Mainnet),
+            Some(&MAINNET_GENESIS_BLOCK_HASH)
+        );
+        assert_eq!(
+            get_genesis_block_hash(&Network::Testnet),
+            Some(&TESTNET_GENESIS_BLOCK_HASH)
+        );
+        assert_eq!(
+            get_genesis_block_hash(&Network::Stagenet),
+            Some(&TESTNET_GENESIS_BLOCK_HASH)
+        );
+        assert_eq!(get_genesis_block_hash(&Network::Devnet), None);
+    }
+
+    /// Test that mainnet and testnet genesis blocks have different hashes
+    #[test]
+    fn test_genesis_blocks_are_different() {
+        assert_ne!(
+            MAINNET_GENESIS_BLOCK, TESTNET_GENESIS_BLOCK,
+            "Mainnet and testnet genesis blocks should be different"
+        );
+        assert_ne!(
+            MAINNET_GENESIS_BLOCK_HASH, TESTNET_GENESIS_BLOCK_HASH,
+            "Mainnet and testnet genesis block hashes should be different"
+        );
+    }
+
+    /// Test that genesis block hex strings are valid and have expected format
+    #[test]
+    fn test_genesis_block_hex_format() {
+        // Both genesis blocks should be valid hex
+        let mainnet_bytes = hex::decode(MAINNET_GENESIS_BLOCK);
+        let testnet_bytes = hex::decode(TESTNET_GENESIS_BLOCK);
+
+        assert!(
+            mainnet_bytes.is_ok(),
+            "MAINNET_GENESIS_BLOCK should be valid hex"
+        );
+        assert!(
+            testnet_bytes.is_ok(),
+            "TESTNET_GENESIS_BLOCK should be valid hex"
+        );
+
+        // Genesis blocks should have reasonable size (header only, no transactions)
+        let mainnet_len = mainnet_bytes.unwrap().len();
+        let testnet_len = testnet_bytes.unwrap().len();
+
+        assert!(
+            mainnet_len > 50 && mainnet_len < 500,
+            "Mainnet genesis block size should be reasonable: {} bytes",
+            mainnet_len
+        );
+        assert!(
+            testnet_len > 50 && testnet_len < 500,
+            "Testnet genesis block size should be reasonable: {} bytes",
+            testnet_len
+        );
+    }
+
+    /// Test developer address constant matches DEV_ADDRESS in config
+    #[test]
+    fn test_developer_address_consistency() {
+        // Verify the expected dev address matches the config DEV_ADDRESS
+        assert_eq!(
+            EXPECTED_DEV_ADDRESS, DEV_ADDRESS,
+            "Test expected dev address should match config DEV_ADDRESS"
+        );
+
+        // Verify the address can be parsed and converted to public key
+        let address =
+            Address::from_string(EXPECTED_DEV_ADDRESS).expect("Developer address should be valid");
+        let pubkey = address.to_public_key();
+
+        // Verify it matches DEV_PUBLIC_KEY from lazy_static
+        assert_eq!(
+            pubkey, *DEV_PUBLIC_KEY,
+            "Parsed developer public key should match DEV_PUBLIC_KEY"
+        );
+    }
+}

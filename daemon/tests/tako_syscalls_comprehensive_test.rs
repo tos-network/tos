@@ -12,6 +12,7 @@ use tos_common::{
 use tos_daemon::tako_integration::TakoExecutor;
 
 /// Mock provider for testing with state tracking
+#[allow(clippy::type_complexity)]
 struct MockProvider {
     /// Track balances for contracts and accounts: (address, asset) -> balance
     balances: Arc<Mutex<HashMap<([u8; 32], [u8; 32]), u64>>>,
