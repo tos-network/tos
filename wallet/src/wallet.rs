@@ -1,6 +1,6 @@
 use anyhow::{Context, Error};
 use chrono::TimeZone;
-use log::{debug, error, trace};
+use log::{debug, error, info, trace};
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
 use std::{
@@ -1586,29 +1586,54 @@ impl Wallet {
         daemon_address: &String,
         auto_reconnect: bool,
     ) -> Result<(), WalletError> {
-        trace!(
-            "Set online mode to daemon {} with auto reconnect set to {}",
-            daemon_address,
-            auto_reconnect
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Set online mode to daemon {} with auto reconnect set to {}",
+                daemon_address,
+                auto_reconnect
+            );
+        }
         if self.is_online().await {
             // user have to set in offline mode himself first
             return Err(WalletError::AlreadyOnlineMode);
         }
 
-        // create the network handler
+        // Create DaemonAPI first so we can share it between NetworkHandler and LightAPI
+        use crate::daemon_api::DaemonAPI;
+        use tos_common::utils::sanitize_ws_address;
+        let daemon_api = Arc::new(
+            DaemonAPI::new(format!(
+                "{}/json_rpc",
+                sanitize_ws_address(daemon_address.as_str())
+            ))
+            .await?,
+        );
+
+        // create the network handler with the shared DaemonAPI
         let network_handler =
-            NetworkHandler::new(Arc::clone(self), daemon_address, self.concurrency).await?;
-        // start the task
-        network_handler.start(auto_reconnect).await?;
-        if let Some(old) = self.network_handler.lock().await.replace(network_handler) {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("Replacing existing network handler, stopping the previous one");
+            NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone(), self.concurrency)
+                .await?;
+
+        // Initialize LightAPI if in light mode
+        if self.is_light_mode() {
+            let light_api = Arc::new(crate::light_api::LightAPI::new(daemon_api));
+            self.set_light_api(light_api).await;
+
+            if log::log_enabled!(log::Level::Info) {
+                info!("Light mode: LightAPI initialized for on-demand queries");
             }
-            // stop the old one if exists
-            if let Err(e) = old.stop(true).await {
-                warn!("Error while stopping previous network handler: {}", e);
+
+            // In light mode, we don't start NetworkHandler sync loop
+            // We only keep the network_handler for the DaemonAPI connection
+            *self.network_handler.lock().await = Some(network_handler);
+
+            if log::log_enabled!(log::Level::Info) {
+                info!("Light mode: Skipping blockchain sync, queries will be on-demand");
             }
+        } else {
+            // Normal mode: start the sync task
+            network_handler.start(auto_reconnect).await?;
+            *self.network_handler.lock().await = Some(network_handler);
         }
         Ok(())
     }
@@ -1621,10 +1646,12 @@ impl Wallet {
         daemon_api: Arc<DaemonAPI>,
         auto_reconnect: bool,
     ) -> Result<(), WalletError> {
-        trace!(
-            "Set online mode with API with auto reconnect set to {}",
-            auto_reconnect
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Set online mode with API with auto reconnect set to {}",
+                auto_reconnect
+            );
+        }
         if self.is_online().await {
             // user have to set in offline mode himself first
             return Err(WalletError::AlreadyOnlineMode);
@@ -1632,17 +1659,29 @@ impl Wallet {
 
         // create the network handler
         let network_handler =
-            NetworkHandler::with_api(Arc::clone(self), daemon_api, self.concurrency).await?;
-        // start the task
-        network_handler.start(auto_reconnect).await?;
-        if let Some(old) = self.network_handler.lock().await.replace(network_handler) {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("Replacing existing network handler, stopping the previous one");
+            NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone(), self.concurrency)
+                .await?;
+
+        // Initialize LightAPI if in light mode
+        if self.is_light_mode() {
+            let light_api = Arc::new(crate::light_api::LightAPI::new(daemon_api));
+            self.set_light_api(light_api).await;
+
+            if log::log_enabled!(log::Level::Info) {
+                info!("Light mode: LightAPI initialized for on-demand queries (shared daemon API)");
             }
-            // stop the old one if exists
-            if let Err(e) = old.stop(true).await {
-                warn!("Error while stopping previous network handler: {}", e);
+
+            // In light mode, we don't start NetworkHandler sync loop
+            // We only keep the network_handler for the DaemonAPI connection
+            *self.network_handler.lock().await = Some(network_handler);
+
+            if log::log_enabled!(log::Level::Info) {
+                info!("Light mode: Skipping blockchain sync, queries will be on-demand");
             }
+        } else {
+            // Normal mode: start the sync task
+            network_handler.start(auto_reconnect).await?;
+            *self.network_handler.lock().await = Some(network_handler);
         }
         Ok(())
     }
