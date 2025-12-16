@@ -60,9 +60,13 @@ impl LightAPI {
             Ok(result) => Ok(result.balance),
             Err(e) => {
                 let error_msg = format!("{:#}", e);
-                // Fresh accounts (no balance) return "Data not found" error
-                // In this case, default balance is 0
-                if error_msg.contains("Data not found") {
+                // Fresh accounts (no balance) return various errors:
+                // - "Data not found" - general not found error
+                // - "No account found" - account has never received any funds
+                // In these cases, default balance is 0
+                if error_msg.contains("Data not found")
+                    || error_msg.contains("No account found")
+                {
                     Ok(0)
                 } else {
                     Err(e).context("Failed to get balance from daemon")
