@@ -64,9 +64,7 @@ impl LightAPI {
                 // - "Data not found" - general not found error
                 // - "No account found" - account has never received any funds
                 // In these cases, default balance is 0
-                if error_msg.contains("Data not found")
-                    || error_msg.contains("No account found")
-                {
+                if error_msg.contains("Data not found") || error_msg.contains("No account found") {
                     Ok(0)
                 } else {
                     Err(e).context("Failed to get balance from daemon")

@@ -921,9 +921,31 @@ impl Wallet {
                 cache.reference.clone()
             } else {
                 generated = true;
-                Reference {
-                    topoheight: storage.get_synced_topoheight()?,
-                    hash: storage.get_top_block_hash()?,
+                // BUG-008 fix: Check if top_block_hash exists before loading
+                // For new wallets that haven't synced, these values may not exist
+                if storage.has_top_block_hash()? {
+                    Reference {
+                        topoheight: storage.get_synced_topoheight()?,
+                        hash: storage.get_top_block_hash()?,
+                    }
+                } else {
+                    // Fallback: Query reference from daemon via network handler
+                    if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
+                        let info = network_handler.get_api().get_info().await.map_err(|e| {
+                            WalletError::Any(anyhow::anyhow!(
+                                "Wallet not synced and failed to query reference from daemon: {}",
+                                e
+                            ))
+                        })?;
+                        Reference {
+                            topoheight: info.topoheight,
+                            hash: info.top_block_hash,
+                        }
+                    } else {
+                        return Err(WalletError::Any(anyhow::anyhow!(
+                            "Wallet not synced: no top_block_hash in storage and no network handler available"
+                        )));
+                    }
                 }
             };
 
@@ -942,6 +964,12 @@ impl Wallet {
                 cache.reference.clone()
             } else {
                 generated = true;
+                // BUG-008 fix: Check if top_block_hash exists before loading
+                if !storage.has_top_block_hash()? {
+                    return Err(WalletError::Any(anyhow::anyhow!(
+                        "Wallet not synced: no top_block_hash in storage (network handler disabled)"
+                    )));
+                }
                 Reference {
                     topoheight: storage.get_synced_topoheight()?,
                     hash: storage.get_top_block_hash()?,
