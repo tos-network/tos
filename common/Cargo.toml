@@ -12,7 +12,7 @@ build = "build.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tos-hash = { git = "https://github.com/tos-network/tos-hash", branch = "master" }
+tos-hash = { git = "https://github.com/tos-network/tos-hash", rev = "b661e5a" }
 # TOS Kernel - Simplified re-export crate in TAKO
 tos-kernel = { git = "https://github.com/tos-network/tako", rev = "336c254" }
 # TOS Crypto - Extracted cryptographic primitives to avoid circular dependencies

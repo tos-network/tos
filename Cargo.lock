@@ -5147,7 +5147,7 @@ dependencies = [
 [[package]]
 name = "tos-hash"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tos-hash?branch=master#b661e5a4fc450073ffc5a18311d907f73132b04b"
+source = "git+https://github.com/tos-network/tos-hash?rev=b661e5a#b661e5a4fc450073ffc5a18311d907f73132b04b"
 dependencies = [
  "aes 0.8.4",
  "blake3",
