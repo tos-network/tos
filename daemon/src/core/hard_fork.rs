@@ -43,9 +43,9 @@ pub fn get_version_at_height(network: &Network, height: u64) -> BlockVersion {
 }
 
 // This function returns the PoW algorithm at a given version
-// Nobunaga (and all future versions) use Algorithm::V2
+// All versions now use Algorithm::V3 (GPU/ASIC-friendly)
 pub const fn get_pow_algorithm_for_version(_version: BlockVersion) -> Algorithm {
-    Algorithm::V2
+    Algorithm::V3
 }
 
 // This function returns the block time target for a given version
@@ -546,10 +546,10 @@ mod tests {
 
     #[test]
     fn test_get_pow_algorithm_for_version() {
-        // All versions use Algorithm::V2
+        // All versions use Algorithm::V3 (GPU/ASIC-friendly)
         assert_eq!(
             get_pow_algorithm_for_version(BlockVersion::Nobunaga),
-            Algorithm::V2
+            Algorithm::V3
         );
     }
 

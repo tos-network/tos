@@ -14,7 +14,7 @@ use std::{
 };
 
 pub use tos_hash::Error as TosHashError;
-use tos_hash::{v1, v2};
+use tos_hash::{v1, v2, v3};
 
 pub const HASH_SIZE: usize = 32; // 32 bytes / 256 bits
 
@@ -80,6 +80,10 @@ pub fn pow_hash(work: &[u8], algorithm: Algorithm) -> Result<Hash, TosHashError>
         Algorithm::V2 => {
             let mut scratchpad = v2::ScratchPad::default();
             v2::tos_hash(work, &mut scratchpad)
+        }
+        Algorithm::V3 => {
+            let mut scratchpad = v3::ScratchPad::default();
+            v3::tos_hash(work, &mut scratchpad)
         }
     }
     .map(Hash::new)

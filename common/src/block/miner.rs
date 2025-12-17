@@ -8,7 +8,7 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, str::FromStr};
 use thiserror::Error;
-use tos_hash::{v1, v2, Error as TosHashError};
+use tos_hash::{v1, v2, v3, Error as TosHashError};
 
 use super::{BlockHeader, BLOCK_WORK_SIZE, EXTRA_NONCE_SIZE};
 
@@ -16,6 +16,7 @@ pub enum WorkVariant {
     Uninitialized,
     V1(v1::ScratchPad),
     V2(v2::ScratchPad),
+    V3(v3::ScratchPad),
 }
 
 impl WorkVariant {
@@ -24,6 +25,7 @@ impl WorkVariant {
             WorkVariant::Uninitialized => return None,
             WorkVariant::V1(_) => Algorithm::V1,
             WorkVariant::V2(_) => Algorithm::V2,
+            WorkVariant::V3(_) => Algorithm::V3,
         })
     }
 }
@@ -34,6 +36,7 @@ impl WorkVariant {
 pub enum Algorithm {
     V1 = 0,
     V2 = 1,
+    V3 = 2,
 }
 
 impl FromStr for Algorithm {
@@ -43,6 +46,7 @@ impl FromStr for Algorithm {
         match s {
             "tos/v1" => Ok(Algorithm::V1),
             "tos/v2" => Ok(Algorithm::V2),
+            "tos/v3" => Ok(Algorithm::V3),
             _ => Err("invalid algorithm"),
         }
     }
@@ -75,6 +79,7 @@ impl fmt::Display for Algorithm {
             match self {
                 Algorithm::V1 => "tos/v1",
                 Algorithm::V2 => "tos/v2",
+                Algorithm::V3 => "tos/v3",
             }
         )
     }
@@ -143,6 +148,10 @@ impl<'a> Worker<'a> {
                     let scratch_pad = v2::ScratchPad::default();
                     self.variant = WorkVariant::V2(scratch_pad);
                 }
+                Algorithm::V3 => {
+                    let scratch_pad = v3::ScratchPad::default();
+                    self.variant = WorkVariant::V3(scratch_pad);
+                }
             }
         }
 
@@ -197,6 +206,7 @@ impl<'a> Worker<'a> {
                 v1::tos_hash(slice, scratch_pad).map(Hash::new)?
             }
             WorkVariant::V2(scratch_pad) => v2::tos_hash(work, scratch_pad).map(Hash::new)?,
+            WorkVariant::V3(scratch_pad) => v3::tos_hash(work, scratch_pad).map(Hash::new)?,
         };
 
         Ok(hash)
