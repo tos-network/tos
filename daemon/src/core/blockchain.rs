@@ -1761,10 +1761,11 @@ impl<S: Storage> Blockchain<S> {
         let (has_hard_fork, version) = has_hard_fork_at_height(self.get_network(), height);
 
         if tips.len() == 0 {
-            // Genesis difficulty
-            trace!("genesis difficulty");
+            // Genesis block: use minimal difficulty (1) since genesis is hardcoded with nonce=0
+            // GENESIS_BLOCK_DIFFICULTY (300) is used for cache initialization, not genesis verification
+            trace!("genesis difficulty (hardcoded block, minimal difficulty)");
             return Ok((
-                GENESIS_BLOCK_DIFFICULTY,
+                Difficulty::from_u64(1),
                 difficulty::get_covariance_p(version),
             ));
         }
