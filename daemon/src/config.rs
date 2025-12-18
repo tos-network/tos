@@ -71,9 +71,10 @@ pub const MAINNET_MINIMUM_HASHRATE: u64 = 100 * HASH;
 // Currently set to 100 H/s (reduced from 2 KH/s for easier development)
 pub const DEFAULT_MINIMUM_HASHRATE: u64 = 100 * HASH;
 
-// This is also used as testnet and devnet minimum difficulty
-// Reduced from 1 H/s to 0.1 H/s for easier development
-pub const GENESIS_BLOCK_DIFFICULTY: Difficulty = Difficulty::from_u64(1);
+// Genesis block difficulty - must match minimum_difficulty for consistency
+// Formula: MINIMUM_HASHRATE * BLOCK_TIME_TARGET / MILLIS_PER_SECOND
+// Current: 100 H/s * 3000ms / 1000 = 300
+pub const GENESIS_BLOCK_DIFFICULTY: Difficulty = Difficulty::from_u64(300);
 
 // 2 seconds maximum in future (prevent any attack on reducing difficulty but keep margin for unsynced devices)
 pub const TIMESTAMP_IN_FUTURE_LIMIT: TimestampSeconds = 2 * MILLIS_PER_SECOND;
