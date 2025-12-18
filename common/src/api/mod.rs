@@ -1,5 +1,6 @@
 pub mod daemon;
 mod data;
+pub mod payment;
 pub mod query;
 pub mod wallet;
 

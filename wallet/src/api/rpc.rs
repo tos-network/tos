@@ -89,6 +89,13 @@ pub fn register_methods(handler: &mut RPCHandler<Arc<Wallet>>) {
     handler.register_method("delete_tree_entries", async_handler!(delete_tree_entries));
     handler.register_method("has_key", async_handler!(has_key));
     handler.register_method("query_db", async_handler!(query_db));
+
+    // QR Code Payment methods
+    handler.register_method(
+        "parse_payment_request",
+        async_handler!(parse_payment_request),
+    );
+    handler.register_method("pay_request", async_handler!(pay_request));
 }
 
 // Retrieve the version of the wallet
@@ -929,4 +936,135 @@ async fn query_db(context: &Context, body: Value) -> Result<Value, InternalRpcEr
     let storage = wallet.get_storage().read().await;
     let result = storage.query_db(&tree, params.key, params.value, params.limit, params.skip)?;
     Ok(json!(result))
+}
+
+// ============================================================================
+// QR Code Payment Methods
+// ============================================================================
+
+use tos_common::{
+    api::{
+        payment::{
+            ParsePaymentRequestParams, ParsePaymentRequestResult, PayRequestParams,
+            PayRequestResult, PaymentRequest,
+        },
+        DataValue,
+    },
+    transaction::builder::{TransactionTypeBuilder, TransferBuilder},
+};
+
+/// Parse a payment URI without executing payment
+async fn parse_payment_request(_: &Context, body: Value) -> Result<Value, InternalRpcError> {
+    let params: ParsePaymentRequestParams = parse_params(body)?;
+
+    let request = PaymentRequest::from_uri(&params.uri)
+        .map_err(|e| InternalRpcError::InvalidParamsAny(e.into()))?;
+
+    let is_expired = request.is_expired();
+
+    Ok(json!(ParsePaymentRequestResult {
+        address: request.address,
+        amount: request.amount,
+        asset: request.asset.map(|a| a.into_owned()),
+        memo: request.memo.map(|m| m.into_owned()),
+        payment_id: Some(request.payment_id.into_owned()),
+        expires_at: request.expires_at,
+        is_expired,
+    }))
+}
+
+/// Pay a payment request URI
+async fn pay_request(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+    let params: PayRequestParams = parse_params(body)?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Check if wallet is online
+    if !wallet.is_online().await {
+        return Err(WalletError::NotOnlineMode)?;
+    }
+
+    // Parse the payment URI
+    let request = PaymentRequest::from_uri(&params.uri)
+        .map_err(|e| InternalRpcError::InvalidParamsAny(e.into()))?;
+
+    // Check if expired
+    if request.is_expired() {
+        return Err(InternalRpcError::InvalidParams(
+            "Payment request has expired",
+        ));
+    }
+
+    // Determine amount (use override if provided, otherwise use request amount)
+    let amount = params.amount.or(request.amount).ok_or_else(|| {
+        InternalRpcError::InvalidParams("No amount specified in payment request or override")
+    })?;
+
+    // Get asset (default to TOS)
+    let asset = request.asset.map(|a| a.into_owned()).unwrap_or(TOS_ASSET);
+
+    // Build extra_data with payment_id if available
+    let extra_data: Option<DataElement> =
+        if !request.payment_id.is_empty() || request.memo.is_some() {
+            // Combine payment_id and memo into extra_data
+            let data = match (&*request.payment_id, request.memo.as_deref()) {
+                (id, Some(memo)) if !id.is_empty() => format!("{}:{}", id, memo),
+                (id, None) if !id.is_empty() => id.to_string(),
+                (_, Some(memo)) => memo.to_string(),
+                _ => String::new(),
+            };
+            if data.is_empty() {
+                None
+            } else {
+                Some(DataElement::Value(DataValue::String(data)))
+            }
+        } else {
+            None
+        };
+
+    // Create the transfer
+    let transfer = TransferBuilder {
+        asset,
+        amount,
+        destination: request.address.clone(),
+        extra_data,
+    };
+
+    // Build and submit the transaction
+    let mut storage = wallet.get_storage().write().await;
+    let version = storage.get_tx_version().await?;
+    let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
+    let fee = FeeBuilder::default();
+
+    let mut state = wallet
+        .create_transaction_state_with_storage(&storage, &tx_type, &fee, None)
+        .await?;
+
+    let tx = wallet.create_transaction_with(&mut state, None, version, tx_type, fee)?;
+    let tx_hash = tx.hash();
+    let tx_fee = tx.get_fee();
+
+    // Submit the transaction
+    if let Err(e) = wallet.submit_transaction(&tx).await {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!(
+                "Clearing Tx cache & unconfirmed balances because of broadcasting error: {}",
+                e
+            );
+        }
+        storage.clear_tx_cache();
+        storage.delete_unconfirmed_balances().await;
+        return Err(e.into());
+    }
+
+    state
+        .apply_changes(&mut storage)
+        .await
+        .context("Error while applying state changes")?;
+
+    Ok(json!(PayRequestResult {
+        tx_hash,
+        amount,
+        fee: tx_fee,
+        payment_id: Some(request.payment_id.into_owned()),
+    }))
 }

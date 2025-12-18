@@ -1382,3 +1382,20 @@ pub struct NewContractEvent<'a> {
     pub block_hash: Cow<'a, Hash>,
     pub topoheight: TopoHeight,
 }
+
+// ============================================================================
+// QR Code Payment Types
+// ============================================================================
+
+/// Request to get payments received by an address
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetAddressPaymentsParams {
+    /// Address to check for incoming payments
+    pub address: Address,
+    /// Minimum topoheight to start search from
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_topoheight: Option<TopoHeight>,
+    /// Maximum number of payments to return
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}

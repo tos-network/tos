@@ -67,6 +67,8 @@ metrics = { workspace = true, optional = true }
 
 # Query system
 regex = "1"
+# URL encoding for payment URIs
+urlencoding = "2.1"
 # Query system
 serde_regex = "1.1.0"
 # Used for U256

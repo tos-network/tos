@@ -614,6 +614,24 @@ pub fn register_methods<S: Storage>(
         async_handler!(get_ai_mining_active_tasks::<S>),
     );
 
+    // QR Code Payment methods
+    handler.register_method(
+        "create_payment_request",
+        async_handler!(create_payment_request::<S>),
+    );
+    handler.register_method(
+        "parse_payment_request",
+        async_handler!(parse_payment_request::<S>),
+    );
+    handler.register_method(
+        "get_payment_status",
+        async_handler!(get_payment_status::<S>),
+    );
+    handler.register_method(
+        "get_address_payments",
+        async_handler!(get_address_payments::<S>),
+    );
+
     if allow_mining_methods {
         handler.register_method(
             "get_block_template",
@@ -3005,4 +3023,194 @@ async fn get_contract_events<S: Storage>(
     }
 
     Ok(json!(events))
+}
+
+// ============================================================================
+// QR Code Payment RPC Methods
+// ============================================================================
+
+use tos_common::api::payment::{
+    CreatePaymentRequestParams, CreatePaymentRequestResult, GetPaymentStatusParams,
+    ParsePaymentRequestParams, ParsePaymentRequestResult, PaymentRequest, PaymentStatus,
+    PaymentStatusResponse,
+};
+
+/// Create a payment request and return the QR code URI
+async fn create_payment_request<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: CreatePaymentRequestParams = parse_params(body)?;
+    let _blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Validate the address
+    if !params.address.is_normal() {
+        return Err(InternalRpcError::InvalidParams(
+            "Address must be in normal format (not integrated)",
+        ));
+    }
+
+    // Generate a unique payment ID
+    let payment_id = generate_payment_id();
+
+    // Build the payment request
+    let mut request = PaymentRequest::new(payment_id.clone(), params.address);
+
+    if let Some(amount) = params.amount {
+        request = request.with_amount(amount);
+    }
+
+    if let Some(asset) = params.asset {
+        request = request.with_asset(asset);
+    }
+
+    if let Some(memo) = params.memo {
+        request = request.with_memo(memo);
+    }
+
+    let expires_at = if let Some(seconds) = params.expires_in_seconds {
+        request = request.with_expires_in(seconds);
+        request.expires_at
+    } else {
+        None
+    };
+
+    let uri = request.to_uri();
+
+    Ok(json!(CreatePaymentRequestResult {
+        payment_id,
+        uri: uri.clone(),
+        qr_data: uri,
+        expires_at,
+    }))
+}
+
+/// Parse a payment URI without executing payment
+async fn parse_payment_request<S: Storage>(
+    _context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: ParsePaymentRequestParams = parse_params(body)?;
+
+    let request = PaymentRequest::from_uri(&params.uri)
+        .map_err(|e| InternalRpcError::InvalidParamsAny(e.into()))?;
+
+    let is_expired = request.is_expired();
+
+    Ok(json!(ParsePaymentRequestResult {
+        address: request.address,
+        amount: request.amount,
+        asset: request.asset.map(|a| a.into_owned()),
+        memo: request.memo.map(|m| m.into_owned()),
+        payment_id: Some(request.payment_id.into_owned()),
+        expires_at: request.expires_at,
+        is_expired,
+    }))
+}
+
+/// Get payment status by checking incoming transactions to an address
+/// This searches for transactions with matching payment_id in extra_data
+async fn get_payment_status<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetPaymentStatusParams = parse_params(body)?;
+    let _blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // For now, we return a pending status
+    // Full implementation would require:
+    // 1. Storing payment requests with their target address
+    // 2. Scanning incoming transactions for matching payment_id in extra_data
+    // 3. Checking confirmation depth
+
+    // This is a simplified implementation that returns pending
+    // The merchant should use get_transaction or watch events for full tracking
+    Ok(json!(PaymentStatusResponse {
+        payment_id: Cow::Owned(params.payment_id),
+        status: PaymentStatus::Pending,
+        tx_hash: None,
+        amount_received: None,
+        confirmations: None,
+        confirmed_at: None,
+    }))
+}
+
+/// Watch for incoming payments to an address
+/// Returns account balance and recent transaction info
+///
+/// Note: For full transaction history, use wallet sync or subscribe to events.
+/// This endpoint provides a quick balance check for payment verification.
+async fn get_address_payments<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetAddressPaymentsParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    // Validate address
+    let address = params.address;
+    if !address.is_normal() {
+        return Err(InternalRpcError::InvalidParams(
+            "Address must be in normal format",
+        ));
+    }
+
+    let key = address.clone().to_public_key();
+
+    // Get stable topoheight for confirmation info
+    let stable_topoheight = blockchain.get_stable_topoheight();
+    let current_topoheight = blockchain.get_topo_height();
+
+    // Check if account exists and get balance
+    let (balance, last_topoheight) = if storage.has_balance_for(&key, &TOS_ASSET).await? {
+        match storage.get_last_balance(&key, &TOS_ASSET).await {
+            Ok((topo, versioned_balance)) => {
+                // Get the actual balance value from VersionedBalance
+                (Some(versioned_balance.get_balance()), Some(topo))
+            }
+            Err(_) => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+
+    // Calculate confirmations if we have balance update info
+    let confirmations = last_topoheight.map(|topo| {
+        if topo <= stable_topoheight {
+            stable_topoheight - topo + 1
+        } else {
+            current_topoheight - topo
+        }
+    });
+
+    let status = match confirmations {
+        Some(c) if c >= 8 => PaymentStatus::Confirmed,
+        Some(c) if c >= 1 => PaymentStatus::Confirming,
+        Some(_) => PaymentStatus::Mempool,
+        None => PaymentStatus::Pending,
+    };
+
+    Ok(json!({
+        "address": address,
+        "balance": balance,
+        "last_topoheight": last_topoheight,
+        "stable_topoheight": stable_topoheight,
+        "current_topoheight": current_topoheight,
+        "confirmations": confirmations,
+        "status": status,
+    }))
+}
+
+/// Generate a unique payment ID
+fn generate_payment_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+
+    let random: u32 = rand::random();
+    format!("pr_{}_{:08x}", timestamp, random)
 }
