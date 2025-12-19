@@ -83,7 +83,7 @@ jobs:
           cargo clean --release
           df -h
 
-  # Integration tests in Release mode (following Kaspa best practice)
+  # Integration tests in Release mode
   # Debug mode can be 10-100x slower than Release mode for integration tests
   integration-tests:
     name: Integration Tests (Release Mode)
@@ -138,7 +138,6 @@ jobs:
         run: |
           echo "=========================================="
           echo "Running Integration Tests in Release Mode"
-          echo "Following Kaspa best practice:"
           echo "  - Debug mode: 10-100x slower"
           echo "  - Release mode: Production-like performance"
           echo "=========================================="

@@ -6,6 +6,9 @@ authors = ["TOS Network Team"]
 description = "Comprehensive testing framework for TOS blockchain - V3.0 Production-Ready"
 license = "MIT"
 
+[lib]
+doctest = false
+
 [dependencies]
 tokio = { version = "1.35", features = ["full", "test-util"] }
 anyhow = "1.0"

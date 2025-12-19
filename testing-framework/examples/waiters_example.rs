@@ -325,7 +325,7 @@ async fn example_network_partition_recovery() -> Result<()> {
     wait_all_tips_equal(&nodes_ref[..], Duration::from_secs(5)).await?;
 
     println!("\n✓ Network recovered! All nodes converged");
-    println!("  Now safe to verify GHOSTDAG invariants and state consistency");
+    println!("  Now safe to verify BlockDAG invariants and state consistency");
 
     Ok(())
 }

@@ -648,14 +648,14 @@ impl TakoExecutor {
     /// Generate instant randomness for randomness syscalls
     ///
     /// Uses multi-layer entropy from TOS blockchain state:
-    /// - Block hash: GHOSTDAG + POW entropy
+    /// - Block hash: BlockDAG + POW entropy
     /// - Block height: Temporal entropy
     /// - Block timestamp: Additional temporal entropy
     /// - Transaction hash: Per-transaction entropy
     ///
     /// This implements TOS's instant randomness model which is:
     /// - Unpredictable: No advance knowledge due to POW randomness
-    /// - Unbiasable: Cannot skip blocks in GHOSTDAG (all blocks count)
+    /// - Unbiasable: Cannot skip blocks in BlockDAG (all blocks count)
     /// - Deterministic: Same inputs produce same randomness
     /// - 0-delay: Available immediately
     ///
@@ -667,7 +667,7 @@ impl TakoExecutor {
     ///
     /// # Arguments
     ///
-    /// * `block_hash` - 32-byte block hash from GHOSTDAG
+    /// * `block_hash` - 32-byte block hash from BlockDAG
     /// * `block_height` - Block height in the chain
     /// * `block_timestamp` - Unix timestamp of the block
     /// * `tx_hash` - 32-byte transaction hash
@@ -686,7 +686,7 @@ impl TakoExecutor {
         // Combine multiple entropy sources using Keccak256
         let mut hasher = Keccak256::new();
 
-        // Entropy source 1: Block hash (GHOSTDAG + POW entropy)
+        // Entropy source 1: Block hash (BlockDAG + POW entropy)
         hasher.update(b"INSTANT_RANDOM_V1");
         hasher.update(block_hash);
 

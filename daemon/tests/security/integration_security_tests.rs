@@ -119,13 +119,13 @@ async fn test_concurrent_block_processing_safety() {
     use tokio::spawn;
     use tokio::sync::RwLock;
 
-    // VALIDATES: V-04 (GHOSTDAG races), V-15 (state atomicity), V-20 (balance atomicity)
+    // VALIDATES: V-04 (BlockDAG races), V-15 (state atomicity), V-20 (balance atomicity)
 
     // Test scenario:
     // 1. Create 10 blocks in parallel branches
     // 2. Process all blocks concurrently
     // 3. Verify blockchain state is consistent
-    // 4. Verify no duplicate GHOSTDAG computations
+    // 4. Verify no duplicate BlockDAG computations
     // 5. Verify all balances are correct
 
     // Simulated blockchain with concurrent block processing
@@ -521,32 +521,32 @@ async fn test_high_load_concurrent_operations() {
     }
 }
 
-/// Integration test: Complete GHOSTDAG pipeline with security
+/// Integration test: Complete BlockDAG pipeline with security
 ///
-/// Tests GHOSTDAG from block creation through storage.
+/// Tests BlockDAG from block creation through storage.
 #[tokio::test]
-async fn test_ghostdag_complete_pipeline() {
+async fn test_blockdag_complete_pipeline() {
     use primitive_types::U256;
 
-    // VALIDATES: V-01-V-07 (GHOSTDAG security fixes)
+    // VALIDATES: V-01-V-07 (BlockDAG security fixes)
 
     // Test scenario:
     // 1. Create DAG with complex merging
     // 2. Validate parents exist (V-05)
-    // 3. Compute GHOSTDAG (V-03: k-cluster, V-06: zero difficulty)
+    // 3. Compute BlockDAG (V-03: k-cluster, V-06: zero difficulty)
     // 4. Check overflow protection (V-01)
     // 5. Calculate DAA (V-07: timestamp validation)
     // 6. Store with atomic CAS (V-04)
 
-    struct GhostdagBlock {
+    struct BlockdagBlock {
         id: u64,
         parents: Vec<u64>,
-        blue_score: u64,
-        blue_work: U256,
+        topoheight: u64,
+        cumulative_difficulty: U256,
         daa_score: u64,
     }
 
-    impl GhostdagBlock {
+    impl BlockdagBlock {
         fn new(id: u64, parents: Vec<u64>) -> Result<Self, String> {
             // V-05: Validate parents exist (simplified check)
             if id > 0 && parents.is_empty() {
@@ -555,18 +555,18 @@ async fn test_ghostdag_complete_pipeline() {
 
             // V-06: Calculate work (zero difficulty protection)
             let difficulty = 1000u64;
-            let blue_work = if difficulty == 0 {
+            let cumulative_difficulty = if difficulty == 0 {
                 U256::zero()
             } else {
                 U256::from(difficulty)
             };
 
             // V-01: Overflow protection
-            let blue_score = if id > 0 {
+            let topoheight = if id > 0 {
                 let parent_max_score = if !parents.is_empty() { id - 1 } else { 0 };
                 parent_max_score
                     .checked_add(1)
-                    .ok_or_else(|| "Blue score overflow".to_string())?
+                    .ok_or_else(|| "Topoheight overflow".to_string())?
             } else {
                 0
             };
@@ -577,34 +577,34 @@ async fn test_ghostdag_complete_pipeline() {
             Ok(Self {
                 id,
                 parents,
-                blue_score,
-                blue_work,
+                topoheight,
+                cumulative_difficulty,
                 daa_score,
             })
         }
     }
 
     // Create a small DAG
-    let genesis = GhostdagBlock::new(0, vec![]).unwrap();
-    let block1 = GhostdagBlock::new(1, vec![0]).unwrap();
-    let block2 = GhostdagBlock::new(2, vec![1]).unwrap();
-    let block3 = GhostdagBlock::new(3, vec![1, 2]).unwrap(); // Merge block
+    let genesis = BlockdagBlock::new(0, vec![]).unwrap();
+    let block1 = BlockdagBlock::new(1, vec![0]).unwrap();
+    let block2 = BlockdagBlock::new(2, vec![1]).unwrap();
+    let block3 = BlockdagBlock::new(3, vec![1, 2]).unwrap(); // Merge block
 
-    // Verify GHOSTDAG properties
-    assert_eq!(genesis.blue_score, 0);
-    assert_eq!(block1.blue_score, 1);
-    assert_eq!(block2.blue_score, 2);
-    assert_eq!(block3.blue_score, 3);
+    // Verify BlockDAG properties
+    assert_eq!(genesis.topoheight, 0);
+    assert_eq!(block1.topoheight, 1);
+    assert_eq!(block2.topoheight, 2);
+    assert_eq!(block3.topoheight, 3);
 
     // Verify blue work is non-zero (unless zero difficulty)
-    assert!(block1.blue_work > U256::zero());
+    assert!(block1.cumulative_difficulty > U256::zero());
 
     // Verify DAA scores are monotonic
     assert!(block1.daa_score > genesis.daa_score);
     assert!(block2.daa_score > block1.daa_score);
     assert!(block3.daa_score > block2.daa_score);
 
-    // Test passed - GHOSTDAG pipeline complete
+    // Test passed - BlockDAG pipeline complete
 }
 
 /// Integration test: Mempool to blockchain flow
@@ -1350,7 +1350,7 @@ async fn test_transaction_throughput_with_security() {
 ///
 /// This test simulates a network partition scenario where an attacker attempts
 /// to double-spend by creating conflicting transactions on different network
-/// partitions. When partitions merge, GHOSTDAG consensus should resolve
+/// partitions. When partitions merge, BlockDAG consensus should resolve
 /// conflicts and prevent double-spending.
 ///
 /// Scenario:
@@ -1359,7 +1359,7 @@ async fn test_transaction_throughput_with_security() {
 /// 3. Attacker submits TX2 (spend 100 to Bob) on partition B using same nonce
 /// 4. Both partitions mine blocks containing their respective transactions
 /// 5. Network heals - partitions reconnect
-/// 6. GHOSTDAG consensus selects winning chain
+/// 6. BlockDAG consensus selects winning chain
 /// 7. Only ONE transaction should be valid; the other is rejected
 /// 8. Final balance should reflect only ONE spend, not both
 #[tokio::test]
@@ -1377,8 +1377,8 @@ async fn test_network_partition_double_spend_attack() {
         nonces: Arc<RwLock<HashMap<String, u64>>>,
         /// Blocks mined on this partition (block_id, tx_data)
         blocks: Arc<RwLock<Vec<(u64, TransactionData)>>>,
-        /// Block height / blue score for GHOSTDAG ordering
-        blue_score: Arc<RwLock<u64>>,
+        /// Block height / topoheight for BlockDAG ordering
+        topoheight: Arc<RwLock<u64>>,
     }
 
     #[derive(Clone, Debug)]
@@ -1396,7 +1396,7 @@ async fn test_network_partition_double_spend_attack() {
                 balances: Arc::new(RwLock::new(initial_balances)),
                 nonces: Arc::new(RwLock::new(HashMap::new())),
                 blocks: Arc::new(RwLock::new(Vec::new())),
-                blue_score: Arc::new(RwLock::new(0)),
+                topoheight: Arc::new(RwLock::new(0)),
             }
         }
 
@@ -1428,16 +1428,16 @@ async fn test_network_partition_double_spend_attack() {
 
             // Mine block containing this transaction
             let mut blocks = self.blocks.write().await;
-            let mut blue_score = self.blue_score.write().await;
-            *blue_score += 1;
-            blocks.push((*blue_score, tx));
+            let mut topoheight = self.topoheight.write().await;
+            *topoheight += 1;
+            blocks.push((*topoheight, tx));
 
             Ok(())
         }
 
-        /// Get current blue score (for GHOSTDAG chain selection)
-        async fn get_blue_score(&self) -> u64 {
-            *self.blue_score.read().await
+        /// Get current topoheight (for BlockDAG chain selection)
+        async fn get_topoheight(&self) -> u64 {
+            *self.topoheight.read().await
         }
 
         /// Get all blocks from this partition
@@ -1446,16 +1446,16 @@ async fn test_network_partition_double_spend_attack() {
         }
     }
 
-    /// Simulates GHOSTDAG consensus when partitions merge
-    /// Returns the winning partition ID based on blue_work
+    /// Simulates BlockDAG consensus when partitions merge
+    /// Returns the winning partition ID based on cumulative_difficulty
     async fn resolve_partition_conflict(
         partition_a: &PartitionNode,
         partition_b: &PartitionNode,
     ) -> String {
-        let score_a = partition_a.get_blue_score().await;
-        let score_b = partition_b.get_blue_score().await;
+        let score_a = partition_a.get_topoheight().await;
+        let score_b = partition_b.get_topoheight().await;
 
-        // GHOSTDAG selects chain with higher blue_work
+        // BlockDAG selects chain with higher cumulative_difficulty
         // In case of tie, use deterministic tiebreaker (lower hash wins)
         if score_a > score_b {
             partition_a.id.clone()
@@ -1542,36 +1542,36 @@ async fn test_network_partition_double_spend_attack() {
     );
     assert!(result_b.is_ok(), "TX to Bob should succeed on partition B");
 
-    // Mine additional blocks on partition A to give it higher blue_work
+    // Mine additional blocks on partition A to give it higher cumulative_difficulty
     // This ensures partition A wins (deterministic test outcome)
     for i in 1..=3 {
         let dummy_tx = TransactionData {
             sender: "alice".to_string(),
             receiver: "attacker".to_string(),
-            amount: 0, // No-op transaction to increase blue_score
+            amount: 0, // No-op transaction to increase topoheight
             nonce: i - 1,
         };
-        // Ignore result - alice may not have balance, but blue_score still increases
+        // Ignore result - alice may not have balance, but topoheight still increases
         let _ = partition_a.submit_transaction(dummy_tx).await;
     }
 
-    // Verify partition A has higher blue_score
-    let score_a = partition_a.get_blue_score().await;
-    let score_b = partition_b.get_blue_score().await;
+    // Verify partition A has higher topoheight
+    let score_a = partition_a.get_topoheight().await;
+    let score_b = partition_b.get_topoheight().await;
     assert!(
         score_a > score_b,
-        "Partition A should have higher blue_score: {} > {}",
+        "Partition A should have higher topoheight: {} > {}",
         score_a,
         score_b
     );
 
     // ========== NETWORK HEALS - PARTITIONS MERGE ==========
 
-    // GHOSTDAG resolves conflict by selecting higher blue_work chain
+    // BlockDAG resolves conflict by selecting higher cumulative_difficulty chain
     let winner = resolve_partition_conflict(&partition_a, &partition_b).await;
     assert_eq!(
         winner, "partition_a",
-        "Partition A should win with higher blue_work"
+        "Partition A should win with higher cumulative_difficulty"
     );
 
     // Apply winning partition's transactions to fresh state
@@ -1623,8 +1623,8 @@ async fn test_network_partition_double_spend_attack() {
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Network partition double-spend attack test PASSED");
-        log::info!("  Partition A blue_score: {}", score_a);
-        log::info!("  Partition B blue_score: {}", score_b);
+        log::info!("  Partition A topoheight: {}", score_a);
+        log::info!("  Partition B topoheight: {}", score_b);
         log::info!("  Winner: {}", winner);
         log::info!(
             "  Final balances: attacker={}, alice={}, bob={}",
@@ -1652,7 +1652,7 @@ mod documentation {
     //! 3. **Transaction lifecycle**: V-08-V-12, V-13-V-19, V-20-V-21
     //! 4. **Chain reorganization**: V-15, V-19, V-23, V-25
     //! 5. **High-load operations**: V-04, V-11, V-13, V-18, V-20, V-25
-    //! 6. **GHOSTDAG pipeline**: V-01-V-07
+    //! 6. **BlockDAG pipeline**: V-01-V-07
     //! 7. **Mempool flow**: V-13, V-14, V-15, V-17, V-19
     //! 8. **Crypto operations**: V-08-V-12
     //! 9. **Storage consistency**: V-20-V-27

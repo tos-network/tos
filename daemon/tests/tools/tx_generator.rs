@@ -184,7 +184,7 @@ struct RpcError {
 #[derive(Debug, Deserialize)]
 struct GetInfoResult {
     topoheight: u64,
-    stable_blue_score: u64,
+    stable_topoheight: u64,
     top_block_hash: String,
     // We only need these fields, but daemon returns more
     // Using #[serde(default)] for fields we don't care about
@@ -606,13 +606,13 @@ async fn main() -> Result<()> {
 
     info!("Chain info:");
     info!("  Topoheight:    {}", chain_info.topoheight);
-    info!("  Stable score:  {}", chain_info.stable_blue_score);
+    info!("  Stable score:  {}", chain_info.stable_topoheight);
     info!("  Top block:     {}", chain_info.top_block_hash);
     info!("");
 
     // Create reference from chain info
     let reference = Reference {
-        topoheight: chain_info.stable_blue_score,
+        topoheight: chain_info.stable_topoheight,
         hash: Hash::from_hex(&chain_info.top_block_hash).unwrap_or_else(|_| Hash::zero()),
     };
 

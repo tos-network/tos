@@ -75,7 +75,7 @@ struct TestAccounts {
 struct GetInfoResult {
     topoheight: u64,
     #[allow(dead_code)]
-    stable_blue_score: u64,
+    stable_topoheight: u64,
     top_block_hash: String,
 }
 

@@ -8,7 +8,7 @@
 //!
 //! ## Organization:
 //!
-//! - `ghostdag_security_tests`: Tests for GHOSTDAG consensus vulnerabilities (V-01 to V-07)
+//! - `blockdag_security_tests`: Tests for BlockDAG consensus vulnerabilities (V-01 to V-07)
 //! - `state_security_tests`: Tests for state management vulnerabilities (V-13 to V-19)
 //! - `storage_security_tests`: Tests for storage and concurrency vulnerabilities (V-20 to V-27)
 //! - `block_submission_tests`: Tests for block submission path security
@@ -40,7 +40,7 @@
 //!
 //! | Category | Vulnerabilities | Tests | Status |
 //! |----------|----------------|-------|--------|
-//! | GHOSTDAG Consensus | V-01 to V-07 | 17 | All Active |
+//! | BlockDAG Consensus | V-01 to V-07 | 17 | All Active |
 //! | Cryptography | V-08 to V-12 | 19 | All Active |
 //! | State Management | V-13 to V-19 | 14 | All Active |
 //! | Storage & Concurrency | V-20 to V-27 | 13 | All Active |
@@ -94,13 +94,13 @@ mod meta_tests {
         // This helps track which vulnerability each test addresses
 
         // Verify vulnerability coverage ranges
-        const GHOSTDAG_VULNS: std::ops::RangeInclusive<u8> = 1..=7; // V-01 to V-07
+        const BLOCKDAG_VULNS: std::ops::RangeInclusive<u8> = 1..=7; // V-01 to V-07
         const CRYPTO_VULNS: std::ops::RangeInclusive<u8> = 8..=12; // V-08 to V-12
         const STATE_VULNS: std::ops::RangeInclusive<u8> = 13..=19; // V-13 to V-19
         const STORAGE_VULNS: std::ops::RangeInclusive<u8> = 20..=27; // V-20 to V-27
 
         // Verify ranges cover all 27 vulnerabilities
-        let total_covered = GHOSTDAG_VULNS.clone().count()
+        let total_covered = BLOCKDAG_VULNS.clone().count()
             + CRYPTO_VULNS.clone().count()
             + STATE_VULNS.clone().count()
             + STORAGE_VULNS.clone().count();
@@ -111,14 +111,14 @@ mod meta_tests {
 
         // Verify ranges are contiguous
         assert_eq!(
-            *GHOSTDAG_VULNS.start(),
+            *BLOCKDAG_VULNS.start(),
             1,
-            "GHOSTDAG vulns should start at V-01"
+            "BlockDAG vulns should start at V-01"
         );
         assert_eq!(
-            *GHOSTDAG_VULNS.end() + 1,
+            *BLOCKDAG_VULNS.end() + 1,
             *CRYPTO_VULNS.start(),
-            "GHOSTDAG -> Crypto ranges should be contiguous"
+            "BlockDAG -> Crypto ranges should be contiguous"
         );
         assert_eq!(
             *CRYPTO_VULNS.end() + 1,
