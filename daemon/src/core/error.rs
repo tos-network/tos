@@ -282,8 +282,6 @@ pub enum BlockchainError {
     SmartContractTodo,
     #[error("Unexpected transaction variant to set fees")]
     UnexpectedTransactionVariant,
-    #[error("Unexpected error on database: {}", _0)]
-    DatabaseError(#[from] sled::Error),
     #[error("Unsupported operation")]
     UnsupportedOperation,
     #[error("Data not found on disk: {}", _0)]

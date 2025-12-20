@@ -17,23 +17,42 @@ use tos_common::{
     versioned_type::Versioned,
 };
 use tos_daemon::core::{
+    config::RocksDBConfig,
     error::BlockchainError,
     state::parallel_chain_state::ParallelChainState,
-    storage::{sled::{SledStorage, StorageMode}, AssetProvider, BalanceProvider, NonceProvider},
+    storage::{AssetProvider, BalanceProvider, NonceProvider, RocksStorage},
 };
 use tos_environment::Environment;
 
+/// Create a test RocksDBConfig with sensible defaults
+fn create_test_rocksdb_config() -> RocksDBConfig {
+    use tos_common::utils::detect_available_parallelism;
+    use tos_daemon::core::storage::rocksdb::{CacheMode, CompressionMode};
+
+    RocksDBConfig {
+        parallelism: detect_available_parallelism(),
+        max_background_jobs: detect_available_parallelism(),
+        max_subcompaction_jobs: detect_available_parallelism(),
+        low_priority_background_threads: detect_available_parallelism(),
+        max_open_files: 1000,
+        keep_max_log_files: 10,
+        compression_mode: CompressionMode::default(),
+        cache_mode: CacheMode::default(),
+        cache_size: 64 * 1024 * 1024,       // 64MB
+        write_buffer_size: 64 * 1024 * 1024, // 64MB
+        write_buffer_shared: false,
+    }
+}
+
 /// Create a test storage instance with TOS asset registered
-pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<SledStorage>> {
+pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<RocksStorage>> {
     let temp_dir = TempDir::new("tos_parallel_test").unwrap();
-    let storage = SledStorage::new(
-        temp_dir.path().to_string_lossy().to_string(),
-        Some(1024 * 1024),
+    let config = create_test_rocksdb_config();
+    let storage = RocksStorage::new(
+        &temp_dir.path().to_string_lossy().to_string(),
         Network::Devnet,
-        1024 * 1024,
-        StorageMode::HighThroughput,
-    )
-    .unwrap();
+        &config,
+    );
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
 
@@ -78,19 +97,18 @@ pub fn create_dummy_block() -> (Block, Hash) {
     (block, hash)
 }
 
-/// Setup account state WITHOUT deadlock - SAFE version for parallel execution tests
+/// Setup account state - SAFE version for parallel execution tests
 ///
-/// DEADLOCK FIX: This function performs storage writes in a single-threaded context,
-/// then adds a small delay to let sled complete internal operations before parallel
-/// execution begins. This avoids the deadlock caused by concurrent storage reads
-/// during parallel execution hitting uncommitted sled internal state.
+/// This function performs storage writes in a single-threaded context,
+/// then adds a small delay to let RocksDB complete internal operations before parallel
+/// execution begins.
 ///
-/// KEY DIFFERENCE from legacy version:
+/// KEY FEATURES:
 /// 1. Writes are done BEFORE ParallelChainState creation
-/// 2. Adds tokio::time::sleep(5ms) to let sled flush internal state
+/// 2. Adds tokio::time::sleep(5ms) to let RocksDB flush internal state
 /// 3. No concurrent storage access during the write phase
 pub async fn setup_account_safe(
-    storage: &Arc<tokio::sync::RwLock<SledStorage>>,
+    storage: &Arc<tokio::sync::RwLock<RocksStorage>>,
     account: &CompressedPublicKey,
     balance: u64,
     nonce: u64,
@@ -123,44 +141,35 @@ pub async fn setup_account_safe(
         // Explicitly drop write lock before sleep
     }
 
-    // CRITICAL: Give sled time to complete internal flush operations
-    // Without this delay, parallel executor may read uncommitted sled state
-    // causing LRU cache Mutex deadlocks
-    //
-    // NOTE: 5ms may not be enough for heavy loads. If tests still timeout,
-    // increase this value or call flush_storage_and_wait() after setup.
+    // Give RocksDB time to complete internal flush operations
+    // RocksDB is generally faster than sled, but we keep a small delay for safety
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
     Ok(())
 }
 
-/// Force flush sled storage and wait for completion
+/// Force flush RocksDB storage and wait for completion
 ///
 /// Call this AFTER all account setup is complete and BEFORE creating ParallelChainState.
-/// This ensures sled's internal state is fully committed before parallel execution begins.
-pub async fn flush_storage_and_wait(storage: &Arc<tokio::sync::RwLock<SledStorage>>) {
+/// This ensures RocksDB's internal state is fully committed before parallel execution begins.
+pub async fn flush_storage_and_wait(storage: &Arc<tokio::sync::RwLock<RocksStorage>>) {
     {
-        let storage_read = storage.read().await;
-        // Sled's flush() is a synchronous operation that ensures all writes are persisted
-        // We wrap it in tokio::task::spawn_blocking to avoid blocking the async runtime
-        let _ = tokio::task::spawn_blocking(|| {
-            // Force flush to disk (note: SledStorage may not expose flush())
-            // As a workaround, we just add a longer delay
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }).await;
+        let mut storage_write = storage.write().await;
+        // RocksDB flush is synchronous
+        let _ = storage_write.flush().await;
     }
 
-    // Additional safety delay to let LRU caches settle
+    // Additional safety delay to let caches settle
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 }
 
-/// LEGACY: Setup account state by writing to storage (MAY CAUSE DEADLOCK IN TESTS)
+/// LEGACY: Setup account state by writing to storage (MAY CAUSE ISSUES IN TESTS)
 ///
-/// This function is kept for reference but should NOT be used in parallel execution tests
-/// as it causes sled deadlocks. Use setup_account_in_parallel_state() instead.
+/// This function is kept for reference but should NOT be used in parallel execution tests.
+/// Use setup_account_safe() instead.
 #[allow(dead_code)]
 pub async fn setup_account_in_storage_legacy(
-    storage: &Arc<tokio::sync::RwLock<SledStorage>>,
+    storage: &Arc<tokio::sync::RwLock<RocksStorage>>,
     account: &CompressedPublicKey,
     balance: u64,
     nonce: u64,

@@ -1,3 +1,7 @@
+// Storage cache module - used for application-level caching
+// Currently unused after sled removal, but kept for potential future use
+#![allow(dead_code)]
+
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,

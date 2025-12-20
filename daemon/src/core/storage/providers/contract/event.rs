@@ -177,7 +177,7 @@ impl EventFilter {
 
 /// Contract event storage provider trait
 ///
-/// Implementations must support both RocksDB and Sled storage backends.
+/// Implementations use RocksDB as the storage backend.
 #[async_trait]
 pub trait ContractEventProvider {
     /// Store a contract event
