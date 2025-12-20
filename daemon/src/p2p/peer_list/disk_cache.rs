@@ -1,7 +1,8 @@
 use std::net::IpAddr;
+use std::path::Path;
 use std::sync::Arc;
 
-use log::info;
+use log::{info, warn};
 use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options, WriteBatch};
 use thiserror::Error;
 use tokio::task::spawn_blocking;
@@ -12,6 +13,8 @@ use super::PeerListEntry;
 // Type alias for thread-safe RocksDB
 type DB = DBWithThreadMode<MultiThreaded>;
 
+// Column family names
+const DEFAULT_CF: &str = "default";
 const PEERLIST_CF: &str = "peerlist";
 
 #[derive(Debug, Error)]
@@ -38,8 +41,35 @@ pub struct DiskCache {
 }
 
 impl DiskCache {
+    // Detect if a directory contains old sled database files
+    fn is_sled_directory(path: &Path) -> bool {
+        // Sled creates specific files: conf, blobs subdirectory
+        path.join("conf").exists() || path.join("blobs").exists()
+    }
+
+    // Migrate from sled to RocksDB by removing old sled data
+    fn migrate_from_sled(path: &Path) -> Result<(), DiskError> {
+        if Self::is_sled_directory(path) {
+            warn!(
+                "Detected old sled peerlist cache at {:?}, removing for RocksDB migration",
+                path
+            );
+            // Remove the old sled directory
+            std::fs::remove_dir_all(path)?;
+            info!("Successfully removed old sled peerlist cache");
+        }
+        Ok(())
+    }
+
     // Create a new disk cache
     pub fn new(filename: String) -> Result<Self, DiskError> {
+        let path = Path::new(&filename);
+
+        // Check for and handle sled-to-RocksDB migration
+        if path.exists() {
+            Self::migrate_from_sled(path)?;
+        }
+
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
@@ -47,11 +77,11 @@ impl DiskCache {
         opts.set_write_buffer_size(16 * 1024);
         opts.set_max_write_buffer_number(2);
 
-        // Define column family for peerlist
-        let cf_opts = Options::default();
-        let cf_descriptor = ColumnFamilyDescriptor::new(PEERLIST_CF, cf_opts);
+        // Define column families - must include "default" for RocksDB
+        let default_cf = ColumnFamilyDescriptor::new(DEFAULT_CF, Options::default());
+        let peerlist_cf = ColumnFamilyDescriptor::new(PEERLIST_CF, Options::default());
 
-        let db = DB::open_cf_descriptors(&opts, &filename, vec![cf_descriptor])?;
+        let db = DB::open_cf_descriptors(&opts, &filename, vec![default_cf, peerlist_cf])?;
 
         Ok(Self { db: Arc::new(db) })
     }
