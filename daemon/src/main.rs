@@ -1742,9 +1742,9 @@ async fn snapshot_mode<S: Storage>(
     manager.message("Starting snapshot mode...");
     let mut storage = blockchain.get_storage().write().await;
     storage
-        .start_commit_point()
+        .start_snapshot()
         .await
-        .context("Error on commit point")?;
+        .context("Error on snapshot")?;
     manager.message("Snapshot mode enabled");
 
     Ok(())
@@ -1875,7 +1875,7 @@ async fn status<S: Storage>(
         .await
         .context("Error while retrieving pruned topoheight")?;
     let snapshot = storage
-        .has_commit_point()
+        .has_snapshot()
         .await
         .context("Error while checking snapshot")?;
     let version = get_version_at_height(blockchain.get_network(), height);

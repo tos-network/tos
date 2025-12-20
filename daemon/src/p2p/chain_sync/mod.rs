@@ -359,7 +359,7 @@ impl<S: Storage> P2pServer<S> {
     }
 
     // Handle the chain validator by rewinding our current chain first
-    // This should only be called with a commit point enabled
+    // This should only be called with a snapshot enabled
     async fn handle_chain_validator_with_rewind(
         &self,
         peer: &Arc<Peer>,
@@ -644,16 +644,16 @@ impl<S: Storage> P2pServer<S> {
 
                 // Handle the chain validator
                 {
-                    info!("Starting commit point for chain validator");
+                    info!("Starting snapshot for chain validator");
                     let mut storage = self.blockchain.get_storage().write().await;
-                    storage.start_commit_point().await?;
-                    info!("Commit point started for chain validator");
+                    storage.start_snapshot().await?;
+                    info!("Snapshot started for chain validator");
                 }
                 let mut res = self
                     .handle_chain_validator_with_rewind(peer, pop_count, chain_validator, blocks)
                     .await;
                 {
-                    info!("Ending commit point for chain validator");
+                    info!("Ending snapshot for chain validator");
                     let apply = match res.as_ref() {
                         // In case we got a partially good chain only, and that its still better than ours
                         // we can partially switch to it if the topoheight AND the cumulative difficulty is bigger
@@ -667,18 +667,16 @@ impl<S: Storage> P2pServer<S> {
                     };
 
                     {
-                        debug!("locking storage write mode for commit point");
+                        debug!("locking storage write mode for snapshot");
                         let mut storage = self.blockchain.get_storage().write().await;
-                        debug!("locked storage write mode for commit point");
+                        debug!("locked storage write mode for snapshot");
 
-                        storage.end_commit_point(apply).await?;
-                        info!("Commit point ended for chain validator, apply: {}", apply);
+                        storage.end_snapshot(apply).await?;
+                        info!("Snapshot ended for chain validator, apply: {}", apply);
                     }
 
                     if !apply {
-                        debug!(
-                            "Reloading chain caches from disk due to invalidation of commit point"
-                        );
+                        debug!("Reloading chain caches from disk due to invalidation of snapshot");
                         self.blockchain.reload_from_disk().await?;
 
                         // Try to apply any orphaned TX back to our chain
@@ -700,7 +698,7 @@ impl<S: Storage> P2pServer<S> {
                                         )
                                         .await
                                     {
-                                        debug!("Couldn't add back to mempool after commit point rollbacked: {}", e);
+                                        debug!("Couldn't add back to mempool after snapshot rollbacked: {}", e);
                                     }
                                 } else {
                                     debug!("TX {} is already in chain, skipping", hash);

@@ -34,7 +34,7 @@ pub trait Storage:
     + NetworkProvider
     + MultiSigProvider
     + TipsProvider
-    + CommitPointProvider
+    + SnapshotProvider
     + ContractProvider
     + ContractDataProvider
     + ContractOutputsProvider

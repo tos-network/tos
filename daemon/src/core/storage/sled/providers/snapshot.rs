@@ -1,21 +1,21 @@
 use crate::core::{
     error::BlockchainError,
-    storage::{sled::Snapshot, CacheProvider, CommitPointProvider, SledStorage},
+    storage::{sled::Snapshot, CacheProvider, SledStorage, SnapshotProvider},
 };
 use async_trait::async_trait;
 use log::{debug, trace};
 
 #[async_trait]
-impl CommitPointProvider for SledStorage {
-    // Check if we have a commit point already set
-    async fn has_commit_point(&self) -> Result<bool, BlockchainError> {
+impl SnapshotProvider for SledStorage {
+    // Check if we have a snapshot already set
+    async fn has_snapshot(&self) -> Result<bool, BlockchainError> {
         Ok(self.snapshot.is_some())
     }
 
-    async fn start_commit_point(&mut self) -> Result<(), BlockchainError> {
-        trace!("Starting commit point");
+    async fn start_snapshot(&mut self) -> Result<(), BlockchainError> {
+        trace!("Starting snapshot");
         if self.snapshot.is_some() {
-            return Err(BlockchainError::CommitPointAlreadyStarted);
+            return Err(BlockchainError::SnapshotAlreadyStarted);
         }
 
         let snapshot = Snapshot::new(self.cache.clone());
@@ -23,12 +23,12 @@ impl CommitPointProvider for SledStorage {
         Ok(())
     }
 
-    async fn end_commit_point(&mut self, apply: bool) -> Result<(), BlockchainError> {
-        trace!("end commit point");
+    async fn end_snapshot(&mut self, apply: bool) -> Result<(), BlockchainError> {
+        trace!("end snapshot");
         let snapshot = self
             .snapshot
             .take()
-            .ok_or(BlockchainError::CommitPointNotStarted)?;
+            .ok_or(BlockchainError::SnapshotNotStarted)?;
 
         if apply {
             self.cache = snapshot.cache;
@@ -52,7 +52,7 @@ impl CommitPointProvider for SledStorage {
                 };
             }
         } else {
-            debug!("Clearing caches due to invalidation of the commit point");
+            debug!("Clearing caches due to invalidation of the snapshot");
             self.clear_caches().await?;
         }
 

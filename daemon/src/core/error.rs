@@ -158,10 +158,10 @@ pub enum BlockchainError {
     ContractNotFound(Hash),
     #[error("Invalid tip order for block {}, expected {}, got {}", _0, _1, _2)]
     InvalidTipsOrder(Hash, Hash, Hash),
-    #[error("commit point already started")]
-    CommitPointAlreadyStarted,
-    #[error("commit point not started")]
-    CommitPointNotStarted,
+    #[error("snapshot already started")]
+    SnapshotAlreadyStarted,
+    #[error("snapshot not started")]
+    SnapshotNotStarted,
     #[error("no multisig found")]
     NoMultisig,
     #[error("Versioned data not found in disk")]
