@@ -3,7 +3,7 @@ use log::trace;
 
 use crate::core::{
     error::BlockchainError,
-    storage::{rocksdb::Column, sled::TIPS, RocksStorage, Tips, TipsProvider},
+    storage::{constants::TIPS, rocksdb::Column, RocksStorage, Tips, TipsProvider},
 };
 
 #[async_trait]

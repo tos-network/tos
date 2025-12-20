@@ -5426,7 +5426,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha3",
- "sled",
  "strum",
  "sysinfo",
  "tako-sdk",

@@ -9,8 +9,8 @@ use tos_common::{
 use crate::core::{
     error::BlockchainError,
     storage::{
+        constants::{TOP_HEIGHT, TOP_TOPO_HEIGHT},
         rocksdb::Column,
-        sled::{TOP_HEIGHT, TOP_TOPO_HEIGHT},
         BlockProvider, DagOrderProvider, DifficultyProvider, RocksStorage, StateProvider,
     },
 };

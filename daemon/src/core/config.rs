@@ -1,6 +1,5 @@
 use crate::{
     config::*,
-    core::storage::sled::StorageMode,
     p2p::diffie_hellman::{KeyVerificationAction, WrappedSecret},
 };
 use humantime::Duration as HumanDuration;
@@ -32,10 +31,6 @@ fn default_rpc_bind_address() -> String {
 
 fn default_prometheus_route() -> String {
     "/metrics".to_owned()
-}
-
-const fn default_cache_size() -> usize {
-    DEFAULT_CACHE_SIZE
 }
 
 const fn default_p2p_concurrency_task_count_limit() -> usize {
@@ -380,37 +375,6 @@ pub struct P2pConfig {
     pub disable_fast_sync_support: bool,
 }
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize)]
-pub enum StorageBackend {
-    #[serde(rename = "sled")]
-    Sled,
-    #[serde(rename = "rocksdb")]
-    #[clap(name = "rocksdb")]
-    RocksDB,
-}
-
-impl Default for StorageBackend {
-    fn default() -> Self {
-        Self::RocksDB
-    }
-}
-
-#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
-pub struct SledConfig {
-    /// Set LRUCache size (0 = disabled).
-    #[clap(name = "sled-cache-size", long, default_value_t = default_cache_size())]
-    #[serde(default = "default_cache_size")]
-    pub cache_size: usize,
-    /// DB cache size in bytes
-    #[clap(name = "sled-internal-cache-size", long, default_value_t = default_db_cache_size())]
-    #[serde(default = "default_db_cache_size")]
-    pub internal_cache_size: u64,
-    /// Internal DB mode to use
-    #[clap(name = "sled-internal-db-mode", long, value_enum, default_value_t = StorageMode::LowSpace)]
-    #[serde(default)]
-    pub internal_db_mode: StorageMode,
-}
-
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct RocksDBConfig {
     /// How many background threads RocksDB should use for parallelism.
@@ -475,10 +439,7 @@ pub struct Config {
     /// P2P configuration
     #[clap(flatten)]
     pub p2p: P2pConfig,
-    /// Sled DB Backend if enabled
-    #[clap(flatten)]
-    pub sled: SledConfig,
-    /// RocksDB Backend if enabled
+    /// RocksDB Backend configuration
     #[clap(flatten)]
     pub rocksdb: RocksDBConfig,
     /// Set dir path for blockchain storage.
@@ -536,12 +497,6 @@ pub struct Config {
     #[clap(long)]
     #[serde(default)]
     pub flush_db_every_n_blocks: Option<u64>,
-    /// Use a different DB backend from the default.
-    /// Note that the data will not be migrated from one to another
-    /// and you may lose your data.
-    #[clap(long, value_enum, default_value_t)]
-    #[serde(default)]
-    pub use_db_backend: StorageBackend,
     // Disable the TX Cache (ZKP Cache)
     // ZKP Cache is enabled by default and
     // prevent to re-verify the same ZK Proofs more than once.

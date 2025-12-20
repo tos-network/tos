@@ -288,9 +288,7 @@ impl PeerList {
     }
 
     // Get stored peers locked
-    pub fn get_peerlist_entries(
-        &self,
-    ) -> impl Iterator<Item = Result<(IpAddr, PeerListEntry), DiskError>> {
+    pub fn get_peerlist_entries(&self) -> Result<Vec<(IpAddr, PeerListEntry)>, DiskError> {
         self.cache.get_peerlist_entries()
     }
 
@@ -474,13 +472,11 @@ impl PeerList {
         &self,
         state: &PeerListEntryState,
     ) -> Result<Vec<(IpAddr, PeerListEntry)>, P2pError> {
-        let mut values = Vec::new();
-        for res in self.cache.get_peerlist_entries() {
-            let (ip, entry) = res?;
-            if entry.get_state() == state {
-                values.push((ip, entry));
-            }
-        }
+        let entries = self.cache.get_peerlist_entries()?;
+        let values = entries
+            .into_iter()
+            .filter(|(_, entry)| entry.get_state() == state)
+            .collect();
 
         Ok(values)
     }
@@ -577,14 +573,13 @@ impl PeerList {
         out_success_only: bool,
     ) -> Result<Option<SocketAddr>, P2pError> {
         let peers = self.peers.read().await;
-        let peerlist_entries = self.cache.get_peerlist_entries();
+        let peerlist_entries = self.cache.get_peerlist_entries()?;
 
         let current_time = get_current_time_in_seconds();
 
         // Search the first peer that we can connect to
         let mut potential_gray_peer = None;
-        for res in peerlist_entries {
-            let (ip, mut entry) = res?;
+        for (ip, mut entry) in peerlist_entries {
             trace!("Checking peer {}: {}", ip, entry);
 
             // Check for out success only
