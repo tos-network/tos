@@ -259,8 +259,8 @@ impl Serializer for Handshake<'_> {
         let top_hash = reader.read_hash()?;
         let genesis_hash = reader.read_hash()?;
         let cumulative_difficulty = CumulativeDifficulty::read(reader)?;
-        // Read flags bitfield, default to SHARED for backward compatibility
-        let flags = Flags::new(reader.read_u8().unwrap_or(Flags::SHARED));
+        // Read flags bitfield (required field, no backward compatibility fallback)
+        let flags = Flags::new(reader.read_u8()?);
 
         Ok(Handshake::new(
             Cow::Owned(version),
@@ -307,8 +307,8 @@ impl Serializer for Handshake<'_> {
         self.genesis_hash.size() +
         // Cumulative Difficulty
         self.cumulative_difficulty.size() +
-        // Flags bitfield (1 byte)
-        1
+        // Flags bitfield
+        self.flags.bits().size()
     }
 }
 
