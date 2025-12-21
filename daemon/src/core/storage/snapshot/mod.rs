@@ -2,7 +2,11 @@ mod bytes_view;
 mod changes;
 mod iterator_mode;
 
-use std::{collections::HashMap, error::Error as StdError, hash::Hash};
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error as StdError,
+    hash::Hash,
+};
 
 use anyhow::Context;
 use bytes::Bytes;
@@ -144,23 +148,52 @@ impl<C: Hash + Eq> Snapshot<C> {
         iterator: impl Iterator<Item = Result<(I, I), E>>,
     ) -> usize {
         let changes = self.trees.get(&column);
-        iterator
-            .map(|res| {
-                let (k, _) = res?;
+        let has_stored = changes.map_or(false, |changes| {
+            changes.writes.values().any(|value| value.is_some())
+        });
+        let mut disk_keys = if has_stored {
+            Some(HashSet::new())
+        } else {
+            None
+        };
+        let mut count = 0usize;
 
-                let is_deleted = changes.map_or(false, |changes| {
-                    changes
-                        .writes
-                        .get(k.as_ref())
-                        .map_or(false, |v| v.is_none())
-                });
+        for res in iterator {
+            match res {
+                Ok((k, _)) => {
+                    if let Some(keys) = disk_keys.as_mut() {
+                        keys.insert(Bytes::copy_from_slice(k.as_ref()));
+                    }
 
-                let v = if is_deleted { None } else { Some(()) };
+                    let is_deleted = changes.map_or(false, |changes| {
+                        changes
+                            .writes
+                            .get(k.as_ref())
+                            .map_or(false, |v| v.is_none())
+                    });
 
-                Ok::<_, E>(v)
-            })
-            .filter_map(Result::transpose)
-            .count()
+                    if !is_deleted {
+                        count += 1;
+                    }
+                }
+                Err(_) => {
+                    // Preserve previous behavior: treat iterator errors as entries.
+                    count += 1;
+                }
+            }
+        }
+
+        if has_stored {
+            if let (Some(changes), Some(keys)) = (changes, disk_keys.as_ref()) {
+                for (k, v) in changes.writes.iter() {
+                    if v.is_some() && !keys.contains(k) {
+                        count += 1;
+                    }
+                }
+            }
+        }
+
+        count
     }
 
     /// Check if snapshot is empty based on our snapshot state and the provided
@@ -176,7 +209,7 @@ impl<C: Hash + Eq> Snapshot<C> {
             let any = batch.writes.iter().find(|(_, v)| v.is_some());
 
             if any.is_some() {
-                return true;
+                return false;
             }
         }
 
@@ -523,6 +556,7 @@ impl<C: Hash + Eq> Snapshot<C> {
 mod tests {
     use super::*;
     use crate::core::storage::StorageCache;
+    use bytes::Bytes;
 
     #[test]
     fn test_entry_state_methods() {
@@ -636,5 +670,15 @@ mod tests {
         // Cloned should have both keys
         assert!(cloned.get("col", b"key1").is_stored());
         assert!(cloned.get("col", b"key2").is_stored());
+    }
+
+    #[test]
+    fn test_snapshot_count_entries_snapshot_only() {
+        let cache = StorageCache::default();
+        let mut snapshot: Snapshot<&str> = Snapshot::new(cache);
+        snapshot.put("col", "key1", "value1");
+
+        let iterator = std::iter::empty::<Result<(Bytes, Bytes), std::io::Error>>();
+        assert_eq!(snapshot.count_entries("col", iterator), 1);
     }
 }

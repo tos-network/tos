@@ -66,40 +66,49 @@ impl Compression {
     /// If compression was not enabled, this is a no-op
     pub async fn compress(&self, input: &mut impl Buffer) -> Result<(), CompressionError> {
         if let Some(mutex) = self.encoder.as_ref() {
-            let should_compress = input.len() > COMPRESSION_THRESHOLD;
+            let mut should_compress = input.len() > COMPRESSION_THRESHOLD;
             if should_compress {
                 let start = Instant::now();
 
                 let mut lock = mutex.lock().await;
                 let (encoder, buffer) = &mut *lock;
 
+                let len = input.len();
                 let mut n = encoder
                     .compress(input.as_ref(), buffer)
                     .map_err(|_| CompressionError::Compression)?;
 
-                let len = input.len();
-                if len < n {
-                    input
-                        .extend_from_slice(&buffer[len..n])
-                        .map_err(|_| CompressionError::Buffer)?;
-                    n = input.len();
+                let use_compressed = n < len && n + 1 <= PEER_MAX_PACKET_SIZE as usize;
+                if use_compressed {
+                    if len < n {
+                        input
+                            .extend_from_slice(&buffer[len..n])
+                            .map_err(|_| CompressionError::Buffer)?;
+                        n = input.len();
+                    } else {
+                        input.truncate(n);
+                    }
+
+                    // Reinject the compressed data in our input buffer
+                    input.as_mut().copy_from_slice(&buffer[..n]);
+
+                    let elapsed = start.elapsed();
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!(
+                            "Packet compressed from {} to {} in {:?}",
+                            human_bytes(len as f64),
+                            human_bytes(n as f64),
+                            elapsed
+                        );
+                    }
+                    histogram!("tos_p2p_compress").record(elapsed.as_millis() as f64);
                 } else {
-                    input.truncate(n);
+                    should_compress = false;
                 }
+            }
 
-                // Reinject the compressed data in our input buffer
-                input.as_mut().copy_from_slice(&buffer[..n]);
-
-                let elapsed = start.elapsed();
-                if log::log_enabled!(log::Level::Trace) {
-                    trace!(
-                        "Packet compressed from {} to {} in {:?}",
-                        human_bytes(len as f64),
-                        human_bytes(n as f64),
-                        elapsed
-                    );
-                }
-                histogram!("tos_p2p_compress").record(elapsed.as_millis() as f64);
+            if input.len() + 1 > PEER_MAX_PACKET_SIZE as usize {
+                return Err(CompressionError::Buffer);
             }
 
             // Add compression flag byte at the end
