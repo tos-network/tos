@@ -94,7 +94,7 @@ pub const MAX_TIP_HEIGHT_DIFFERENCE: u64 = 8;
 /// Get the stable limit for a given block version.
 /// This allows different stability requirements for different protocol versions.
 /// Currently TOS uses a uniform stable limit, but this function allows for future
-/// version-specific adjustments like XELIS.
+/// version-specific adjustments.
 pub const fn get_stable_limit(_version: BlockVersion) -> u64 {
     // For now, TOS uses a uniform stable limit across all versions.
     // In the future, this can be adjusted per version like:

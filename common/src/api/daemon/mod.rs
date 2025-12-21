@@ -1382,3 +1382,95 @@ pub struct NewContractEvent<'a> {
     pub block_hash: Cow<'a, Hash>,
     pub topoheight: TopoHeight,
 }
+
+// ============================================================================
+// Extended RPC Types
+// ============================================================================
+
+/// Parameters for get_contracts RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetContractsParams {
+    pub skip: Option<usize>,
+    pub maximum: Option<usize>,
+    pub minimum_topoheight: Option<TopoHeight>,
+    pub maximum_topoheight: Option<TopoHeight>,
+}
+
+/// Parameters for get_contract_data_entries RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetContractDataEntriesParams<'a> {
+    pub contract: Cow<'a, Hash>,
+    pub minimum_topoheight: Option<TopoHeight>,
+    pub maximum_topoheight: Option<TopoHeight>,
+    pub skip: Option<usize>,
+    pub maximum: Option<usize>,
+}
+
+/// Contract data entry result
+#[derive(Serialize, Deserialize)]
+pub struct ContractDataEntry {
+    pub key: ValueCell,
+    pub value: ValueCell,
+}
+
+/// Parameters for get_contract_scheduled_executions_at_topoheight RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetContractScheduledExecutionsAtTopoHeightParams {
+    pub topoheight: TopoHeight,
+    pub max: Option<usize>,
+    pub skip: Option<usize>,
+}
+
+/// Parameters for key_to_address RPC method
+/// Accepts either raw bytes or hex string representation of a public key
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyToAddressParams {
+    Bytes([u8; 32]),
+    Hex(String),
+}
+
+/// Parameters for get_contract_assets (alias for GetContractBalancesParams)
+#[derive(Serialize, Deserialize)]
+pub struct GetContractAssetsParams<'a> {
+    pub contract: Cow<'a, Hash>,
+    pub skip: Option<usize>,
+    pub maximum: Option<usize>,
+}
+
+// ============================================================================
+// Admin RPC Types
+// ============================================================================
+
+/// Parameters for prune_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct PruneChainParams {
+    /// Topoheight to prune the chain to
+    pub topoheight: TopoHeight,
+}
+
+/// Result of prune_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct PruneChainResult {
+    /// New pruned topoheight
+    pub pruned_topoheight: TopoHeight,
+}
+
+/// Parameters for rewind_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct RewindChainParams {
+    /// Number of blocks to rewind
+    pub count: u64,
+    /// Should it stop at stable height
+    #[serde(default)]
+    pub until_stable_height: bool,
+}
+
+/// Result of rewind_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct RewindChainResult {
+    /// New topoheight after rewind
+    pub topoheight: TopoHeight,
+    /// All transactions that were removed from the chain
+    pub txs: Vec<Hash>,
+}
