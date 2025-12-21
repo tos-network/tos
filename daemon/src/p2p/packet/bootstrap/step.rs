@@ -47,6 +47,7 @@ pub enum StepKind {
     Accounts,
     MultiSigs,
     Contracts,
+    ContractsExecutions,
     BlocksMetadata,
 }
 
@@ -59,7 +60,8 @@ impl StepKind {
             Self::KeyBalances => Self::Accounts,
             Self::Accounts => Self::MultiSigs,
             Self::MultiSigs => Self::Contracts,
-            Self::Contracts => Self::BlocksMetadata,
+            Self::Contracts => Self::ContractsExecutions,
+            Self::ContractsExecutions => Self::BlocksMetadata,
             Self::BlocksMetadata => return None,
         })
     }
@@ -96,8 +98,11 @@ pub enum StepRequest<'a> {
     // Hash of the contract, topoheight, page
     ContractBalances(Cow<'a, Hash>, TopoHeight, Option<u64>),
     // Request the contract stores
-    // Hash of the contract, topoheight, page
-    ContractStores(Cow<'a, Hash>, TopoHeight, Option<u64>),
+    // Hash of the contract, topoheight, skip count
+    ContractStores(Cow<'a, Hash>, TopoHeight, u64),
+    // Request scheduled contract executions
+    // min TopoHeight, max TopoHeight, pagination
+    ContractsExecutions(TopoHeight, TopoHeight, Option<u64>),
     // Request blocks metadata starting topoheight
     BlocksMetadata(TopoHeight),
 }
@@ -116,6 +121,7 @@ impl<'a> StepRequest<'a> {
             Self::ContractModule(_, _, _) => StepKind::Contracts,
             Self::ContractBalances(_, _, _) => StepKind::Contracts,
             Self::ContractStores(_, _, _) => StepKind::Contracts,
+            Self::ContractsExecutions(_, _, _) => StepKind::ContractsExecutions,
             Self::BlocksMetadata(_) => StepKind::BlocksMetadata,
         }
     }
@@ -131,6 +137,7 @@ impl<'a> StepRequest<'a> {
             Self::Contracts(_, topo, _) => topo,
             Self::ContractModule(_, topo, _) => topo,
             Self::ContractBalances(_, topo, _) => topo,
+            Self::ContractsExecutions(_, topo, _) => topo,
             Self::BlocksMetadata(topo) => topo,
             _ => return None,
         })
@@ -284,12 +291,22 @@ impl Serializer for StepRequest<'_> {
             10 => {
                 let hash = Cow::read(reader)?;
                 let topoheight = reader.read_u64()?;
-                let page = Option::read(reader)?;
-                Self::ContractStores(hash, topoheight, page)
+                let skip = reader.read_u64()?;
+                Self::ContractStores(hash, topoheight, skip)
             }
-            11 => Self::BlocksMetadata(reader.read_u64()?),
+            11 => {
+                let min_topoheight = reader.read_u64()?;
+                let max_topoheight = reader.read_u64()?;
+                if min_topoheight > max_topoheight {
+                    debug!("Invalid min topoheight in ContractsExecutions Step Request");
+                    return Err(ReaderError::InvalidValue);
+                }
+                let page = Option::read(reader)?;
+                Self::ContractsExecutions(min_topoheight, max_topoheight, page)
+            }
+            12 => Self::BlocksMetadata(reader.read_u64()?),
             id => {
-                debug!("Received invalid value for StepResponse: {}", id);
+                debug!("Received invalid value for StepRequest: {}", id);
                 return Err(ReaderError::InvalidValue);
             }
         })
@@ -362,14 +379,20 @@ impl Serializer for StepRequest<'_> {
                 topoheight.write(writer);
                 page.write(writer);
             }
-            Self::ContractStores(hash, topoheight, page) => {
+            Self::ContractStores(hash, topoheight, skip) => {
                 writer.write_u8(10);
                 hash.write(writer);
                 topoheight.write(writer);
+                writer.write_u64(skip);
+            }
+            Self::ContractsExecutions(min, max, page) => {
+                writer.write_u8(11);
+                writer.write_u64(min);
+                writer.write_u64(max);
                 page.write(writer);
             }
             Self::BlocksMetadata(topoheight) => {
-                writer.write_u8(11);
+                writer.write_u8(12);
                 writer.write_u64(topoheight);
             }
         };
@@ -396,9 +419,10 @@ impl Serializer for StepRequest<'_> {
             Self::ContractBalances(hash, topoheight, page) => {
                 hash.size() + topoheight.size() + page.size()
             }
-            Self::ContractStores(hash, topoheight, page) => {
-                hash.size() + topoheight.size() + page.size()
+            Self::ContractStores(hash, topoheight, skip) => {
+                hash.size() + topoheight.size() + skip.size()
             }
+            Self::ContractsExecutions(min, max, page) => min.size() + max.size() + page.size(),
             Self::BlocksMetadata(topoheight) => topoheight.size(),
         };
         // 1 for the id
@@ -434,9 +458,11 @@ pub enum StepResponse {
     // Contract assets
     // all assets detected, pagination
     ContractBalances(IndexMap<Hash, u64>, Option<u64>),
-    // Contract assets
-    // all assets detected, pagination
-    ContractStores(IndexMap<ValueCell, ValueCell>, Option<u64>),
+    // Contract stores
+    // all entries, next skip offset
+    ContractStores(IndexMap<ValueCell, ValueCell>, u64),
+    // Scheduled contract executions with pagination
+    ContractsExecutions(IndexSet<super::ScheduledExecutionMetadata>, Option<u64>),
     // top blocks metadata
     BlocksMetadata(IndexSet<BlockMetadata>),
 }
@@ -455,6 +481,7 @@ impl StepResponse {
             Self::ContractModule(_) => StepKind::Contracts,
             Self::ContractBalances(_, _) => StepKind::Contracts,
             Self::ContractStores(_, _) => StepKind::Contracts,
+            Self::ContractsExecutions(_, _) => StepKind::ContractsExecutions,
             Self::BlocksMetadata(_) => StepKind::BlocksMetadata,
         }
     }
@@ -649,7 +676,7 @@ impl Serializer for StepResponse {
             10 => {
                 let len = reader.read_u16()?;
                 if len > MAX_ITEMS_PER_PAGE as u16 {
-                    debug!("Invalid contracts assets response length: {}", len);
+                    debug!("Invalid contracts stores response length: {}", len);
                     return Err(ReaderError::InvalidValue);
                 }
 
@@ -663,17 +690,29 @@ impl Serializer for StepResponse {
                     }
                 }
 
-                let page = Option::read(reader)?;
-                if let Some(page_number) = &page {
-                    if *page_number == 0 {
-                        debug!("Invalid page number (0) in Step Response");
+                let next_skip = reader.read_u64()?;
+                Self::ContractStores(entries, next_skip)
+            }
+            11 => {
+                let len = reader.read_u16()?;
+                if len > MAX_ITEMS_PER_PAGE as u16 {
+                    debug!("Invalid contracts executions response length: {}", len);
+                    return Err(ReaderError::InvalidValue);
+                }
+
+                let mut executions = IndexSet::with_capacity(len as usize);
+                for _ in 0..len {
+                    let metadata = super::ScheduledExecutionMetadata::read(reader)?;
+                    if !executions.insert(metadata) {
+                        debug!("Duplicated scheduled execution in Step Response");
                         return Err(ReaderError::InvalidValue);
                     }
                 }
 
-                Self::ContractStores(entries, page)
+                let page = Option::read(reader)?;
+                Self::ContractsExecutions(executions, page)
             }
-            11 => {
+            12 => {
                 let len = reader.read_u16()?;
                 if len > PRUNE_SAFETY_LIMIT as u16 + 1 {
                     debug!("Invalid blocks metadata response length: {}", len);
@@ -753,13 +792,18 @@ impl Serializer for StepResponse {
                 assets.write(writer);
                 page.write(writer);
             }
-            Self::ContractStores(entries, page) => {
+            Self::ContractStores(entries, next_skip) => {
                 writer.write_u8(10);
                 entries.write(writer);
+                writer.write_u64(next_skip);
+            }
+            Self::ContractsExecutions(executions, page) => {
+                writer.write_u8(11);
+                executions.write(writer);
                 page.write(writer);
             }
             Self::BlocksMetadata(blocks) => {
-                writer.write_u8(11);
+                writer.write_u8(12);
                 blocks.write(writer);
             }
         };
@@ -782,7 +826,8 @@ impl Serializer for StepResponse {
             Self::Contracts(contracts, page) => contracts.size() + page.size(),
             Self::ContractModule(metadata) => metadata.size(),
             Self::ContractBalances(assets, page) => assets.size() + page.size(),
-            Self::ContractStores(entries, page) => entries.size() + page.size(),
+            Self::ContractStores(entries, next_skip) => entries.size() + next_skip.size(),
+            Self::ContractsExecutions(executions, page) => executions.size() + page.size(),
             Self::BlocksMetadata(blocks) => blocks.size(),
         };
         // 1 for the id

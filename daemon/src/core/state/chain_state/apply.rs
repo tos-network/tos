@@ -20,7 +20,7 @@ use tos_common::{
     block::{Block, BlockVersion, TopoHeight},
     contract::{
         AssetChanges, ChainState as ContractChainState, ContractCache, ContractEventTracker,
-        ContractOutput,
+        ContractOutput, ScheduledExecution, ScheduledExecutionKind,
     },
     crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
     transaction::{
@@ -39,6 +39,8 @@ struct ContractManager {
     // global assets cache
     assets: HashMap<Hash, Option<AssetChanges>>,
     tracker: ContractEventTracker,
+    // Planned executions for the current block
+    scheduled_executions: IndexMap<Hash, ScheduledExecution>,
 }
 
 // Chain State that can be applied to the mutable storage
@@ -436,6 +438,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 caches: HashMap::new(),
                 assets: HashMap::new(),
                 tracker: ContractEventTracker::default(),
+                scheduled_executions: IndexMap::new(),
             },
             block_hash,
             block,
@@ -790,6 +793,28 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 .await?;
         }
 
+        // Apply all scheduled executions at their topoheight
+        debug!("applying scheduled executions at topoheights");
+        for (_, execution) in self.contract_manager.scheduled_executions {
+            if let ScheduledExecutionKind::TopoHeight(execution_topoheight) = execution.kind {
+                trace!(
+                    "storing scheduled execution of contract {} with caller {} at topoheight {}",
+                    execution.contract,
+                    execution.hash,
+                    self.inner.topoheight
+                );
+                self.inner
+                    .storage
+                    .set_contract_scheduled_execution_at_topoheight(
+                        &execution.contract,
+                        self.inner.topoheight,
+                        &execution,
+                        execution_topoheight,
+                    )
+                    .await?;
+            }
+        }
+
         // Apply all balances changes at topoheight
         // We injected the sender balances in the receiver balances previously
         for (account, balances) in self.inner.receiver_balances {
@@ -836,6 +861,86 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                     .set_last_balance_to(&account, &asset, self.inner.topoheight, &version)
                     .await?;
             }
+        }
+
+        Ok(())
+    }
+
+    // Execute all the block end scheduled executions
+    pub async fn process_executions_at_block_end(&mut self) -> Result<(), BlockchainError> {
+        trace!("process executions at block end");
+
+        let mut remaining_executions = IndexMap::new();
+        let mut block_end_executions = Vec::new();
+
+        // Collect all scheduled executions for block end
+        for (hash, execution) in self.contract_manager.scheduled_executions.drain(..) {
+            match execution.kind {
+                ScheduledExecutionKind::BlockEnd => {
+                    block_end_executions.push(execution);
+                }
+                _ => {
+                    remaining_executions.insert(hash, execution);
+                }
+            }
+        }
+
+        self.contract_manager.scheduled_executions = remaining_executions;
+
+        // Process block end executions
+        for execution in block_end_executions {
+            debug!(
+                "processing block end scheduled execution of contract {} with caller {}",
+                execution.contract, execution.hash
+            );
+            // TODO: Implement actual contract execution when VM integration is complete
+            // For now, we just log the execution
+        }
+
+        Ok(())
+    }
+
+    // Execute all scheduled executions for current topoheight
+    pub async fn process_scheduled_executions(&mut self) -> Result<(), BlockchainError> {
+        trace!("process scheduled executions at topoheight");
+
+        let topoheight = self.inner.topoheight;
+
+        // Do it in batches of 64 to avoid loading too much in memory at once
+        let mut skip = 0;
+        loop {
+            let executions: Vec<_> = self
+                .inner
+                .storage
+                .get_contract_scheduled_executions_at_topoheight(topoheight)
+                .await?
+                .skip(skip)
+                .take(64)
+                .collect::<Result<Vec<_>, _>>()?;
+
+            if executions.is_empty() {
+                break;
+            }
+
+            let count = executions.len();
+            skip += count;
+
+            // Process the executions
+            for execution in executions {
+                debug!(
+                    "processing scheduled execution of contract {} with caller {} at topoheight {}",
+                    execution.contract, execution.hash, topoheight
+                );
+                // TODO: Implement actual contract execution when VM integration is complete
+                // For now, we just log the execution
+            }
+        }
+
+        if skip > 0 {
+            debug!(
+                "finished processing {} scheduled executions for topoheight {}",
+                skip, topoheight
+            );
         }
 
         Ok(())

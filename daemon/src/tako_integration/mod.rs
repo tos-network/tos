@@ -6,6 +6,7 @@ mod feature_set;
 mod loader;
 pub mod precompile_cost;
 mod precompile_verifier;
+mod scheduled_execution_adapter;
 /// TOS Kernel(TAKO) integration module for TOS blockchain.
 ///
 /// This module provides the adapter layer that bridges TOS blockchain's contract infrastructure
@@ -51,5 +52,6 @@ pub use precompile_cost::{
 pub use precompile_verifier::{
     estimate_precompile_cost, verify_all_precompiles, verify_precompile_instruction,
 };
+pub use scheduled_execution_adapter::TosScheduledExecutionAdapter;
 pub use storage::TosStorageAdapter;
 pub use transaction_cost::{estimate_transaction_cost, validate_transaction_cost, TransactionCost};

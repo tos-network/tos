@@ -19,7 +19,7 @@ use crate::{
         hard_fork::get_version_at_height,
         storage::{
             Storage, VersionedContract, VersionedContractBalance, VersionedContractData,
-            VersionedMultiSig,
+            VersionedMultiSig, VersionedSupply,
         },
     },
     p2p::{
@@ -343,8 +343,7 @@ impl<S: Storage> P2pServer<S> {
                 };
                 StepResponse::ContractBalances(balances, page)
             }
-            StepRequest::ContractStores(contract, topoheight, page) => {
-                let page_id = page.unwrap_or(0);
+            StepRequest::ContractStores(contract, topoheight, skip) => {
                 // Skip will skip only the N results
                 // So they are still computing! We must find a better way to scale better
                 // if we have millions of entries
@@ -359,12 +358,45 @@ impl<S: Storage> P2pServer<S> {
                 let stream = storage
                     .get_contract_data_entries_at_maximum_topoheight(&contract, topoheight)
                     .await?
-                    .skip(page_id as usize * MAX_ITEMS_PER_PAGE)
+                    .skip(skip as usize)
                     .take(MAX_ITEMS_PER_PAGE);
 
-                let entries = stream.boxed().try_collect().await?;
+                let entries: IndexMap<_, _> = stream.boxed().try_collect().await?;
+                let next_skip = skip + entries.len() as u64;
 
-                StepResponse::ContractStores(entries, page)
+                StepResponse::ContractStores(entries, next_skip)
+            }
+            StepRequest::ContractsExecutions(min, max, page) => {
+                let page = page.unwrap_or(0);
+                let stream = storage
+                    .get_registered_contract_scheduled_executions_in_range(min, max)
+                    .await?
+                    .skip(page as usize * MAX_ITEMS_PER_PAGE)
+                    .take(MAX_ITEMS_PER_PAGE);
+
+                use crate::p2p::packet::ScheduledExecutionMetadata;
+                let executions: IndexSet<_> = stream
+                    .boxed()
+                    .map(|res| {
+                        res.map(
+                            |(execution_topoheight, registration_topoheight, execution)| {
+                                ScheduledExecutionMetadata {
+                                    execution,
+                                    execution_topoheight,
+                                    registration_topoheight,
+                                }
+                            },
+                        )
+                    })
+                    .try_collect()
+                    .await?;
+
+                let page = if executions.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                StepResponse::ContractsExecutions(executions, page)
             }
             StepRequest::BlocksMetadata(topoheight) => {
                 // go from the lowest available point until the requested stable topoheight
@@ -527,6 +559,51 @@ impl<S: Storage> P2pServer<S> {
                     top_block_hash = Some(hash);
                     stable_topoheight = topoheight;
 
+                    // Request the supply for each local asset we have
+                    {
+                        let mut storage = self.blockchain.get_storage().write().await;
+                        let mut skip = 0;
+                        loop {
+                            let assets: IndexSet<Hash> = storage
+                                .get_assets()
+                                .await?
+                                .skip(skip)
+                                .take(MAX_ITEMS_PER_PAGE)
+                                .collect::<Result<_, _>>()?;
+
+                            if assets.is_empty() {
+                                break;
+                            }
+
+                            skip += assets.len();
+
+                            let StepResponse::AssetsSupply(supply) = peer
+                                .request_boostrap_chain(StepRequest::AssetsSupply(
+                                    stable_topoheight,
+                                    Cow::Borrowed(&assets),
+                                ))
+                                .await?
+                            else {
+                                error!("Received an invalid StepResponse while fetching local assets supply");
+                                return Err(P2pError::InvalidPacket.into());
+                            };
+
+                            for asset in assets {
+                                if let Some(s) = supply.get(&asset) {
+                                    storage
+                                        .set_last_supply_for_asset(
+                                            &asset,
+                                            stable_topoheight,
+                                            &VersionedSupply::new(*s, None),
+                                        )
+                                        .await?;
+                                } else {
+                                    warn!("No supply found for local asset {}", asset);
+                                }
+                            }
+                        }
+                    }
+
                     Some(StepRequest::Assets(our_topoheight, topoheight, None))
                 }
                 // fetch all assets from peer
@@ -648,6 +725,42 @@ impl<S: Storage> P2pServer<S> {
 
                     if page.is_some() {
                         Some(StepRequest::Contracts(
+                            our_topoheight,
+                            stable_topoheight,
+                            page,
+                        ))
+                    } else {
+                        // Go to next step: sync scheduled executions
+                        Some(StepRequest::ContractsExecutions(
+                            our_topoheight,
+                            stable_topoheight,
+                            None,
+                        ))
+                    }
+                }
+                StepResponse::ContractsExecutions(executions, page) => {
+                    info!(
+                        "Received {} scheduled executions #{}",
+                        executions.len(),
+                        page.unwrap_or(0)
+                    );
+
+                    {
+                        let mut storage = self.blockchain.get_storage().write().await;
+                        for metadata in executions {
+                            storage
+                                .set_contract_scheduled_execution_at_topoheight(
+                                    &metadata.execution.contract,
+                                    metadata.registration_topoheight,
+                                    &metadata.execution,
+                                    metadata.execution_topoheight,
+                                )
+                                .await?;
+                        }
+                    }
+
+                    if page.is_some() {
+                        Some(StepRequest::ContractsExecutions(
                             our_topoheight,
                             stable_topoheight,
                             page,
@@ -865,11 +978,18 @@ impl<S: Storage> P2pServer<S> {
                         "Saving nonce for {}",
                         key.as_address(self.blockchain.get_network().is_mainnet())
                     );
+                    // Keep the link with the previous nonce
+                    let prev_nonce = storage
+                        .get_nonce_at_maximum_topoheight(key, stable_topoheight)
+                        .await?
+                        .and_then(|(_, v)| v.get_previous_topoheight())
+                        .filter(|v| *v < stable_topoheight);
+
                     storage
                         .set_last_nonce_to(
                             key,
                             stable_topoheight,
-                            &VersionedNonce::new(nonce, None),
+                            &VersionedNonce::new(nonce, prev_nonce),
                         )
                         .await?;
                     if update_registration {
@@ -899,7 +1019,14 @@ impl<S: Storage> P2pServer<S> {
                         "Saving multisig for {}",
                         key.as_address(self.blockchain.get_network().is_mainnet())
                     );
-                    let data = VersionedMultiSig::new(Some(Cow::Owned(multisig)), None);
+                    // Keep the link with the previous multisig
+                    let prev_multisig = storage
+                        .get_multisig_at_maximum_topoheight_for(key, stable_topoheight)
+                        .await?
+                        .and_then(|(_, v)| v.get_previous_topoheight())
+                        .filter(|v| *v < stable_topoheight);
+
+                    let data = VersionedMultiSig::new(Some(Cow::Owned(multisig)), prev_multisig);
                     storage
                         .set_last_multisig_to(key, stable_topoheight, data)
                         .await?;
@@ -1190,13 +1317,13 @@ impl<S: Storage> P2pServer<S> {
         contract: &Hash,
         stable_topoheight: u64,
     ) -> Result<(), P2pError> {
-        let mut next_page = None;
+        let mut skip: u64 = 0;
         loop {
-            let StepResponse::ContractStores(entries, page) = peer
+            let StepResponse::ContractStores(entries, next_skip) = peer
                 .request_boostrap_chain(StepRequest::ContractStores(
                     Cow::Borrowed(&contract),
                     stable_topoheight,
-                    next_page,
+                    skip,
                 ))
                 .await?
             else {
@@ -1204,6 +1331,10 @@ impl<S: Storage> P2pServer<S> {
                 error!("Received an invalid StepResponse (how ?) while fetching contract stores");
                 return Err(P2pError::InvalidPacket.into());
             };
+
+            if entries.is_empty() {
+                break;
+            }
 
             let mut storage = self.blockchain.get_storage().write().await;
             for (key, value) in entries {
@@ -1217,10 +1348,7 @@ impl<S: Storage> P2pServer<S> {
                     .await?;
             }
 
-            next_page = page;
-            if next_page.is_none() {
-                break;
-            }
+            skip = next_skip;
         }
 
         Ok(())

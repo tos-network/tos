@@ -1,5 +1,6 @@
 mod balance;
 mod data;
+mod scheduled_execution;
 mod supply;
 
 use crate::core::error::BlockchainError;
@@ -8,6 +9,7 @@ use tos_common::block::TopoHeight;
 
 pub use balance::*;
 pub use data::*;
+pub use scheduled_execution::*;
 pub use supply::*;
 
 #[async_trait]

@@ -123,6 +123,13 @@ pub enum Column {
     // Contract events indexed by topic0 (event signature)
     // {contract_id}{topic0}{topoheight}{log_index} => {StoredContractEvent}
     ContractEventsByTopic,
+
+    // Scheduled/delayed contract executions
+    // {topoheight}{contract_id} => {ScheduledExecution}
+    DelayedExecution,
+    // Registration metadata for efficient range queries
+    // {registration_topoheight}{contract_id}{execution_topoheight} => {}
+    DelayedExecutionRegistrations,
 }
 
 impl Column {
@@ -151,6 +158,10 @@ impl Column {
             ContractEventsByTx => Some(32),
             // Events by topic: prefix by contract_id (8 bytes)
             ContractEventsByTopic => Some(PREFIX_ID_LEN),
+
+            // Delayed executions: prefix by topoheight (8 bytes)
+            DelayedExecution => Some(PREFIX_TOPOHEIGHT_LEN),
+            DelayedExecutionRegistrations => Some(PREFIX_TOPOHEIGHT_LEN),
 
             _ => None,
         }

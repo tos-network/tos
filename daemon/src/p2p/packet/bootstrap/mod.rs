@@ -1,10 +1,12 @@
 mod block_metadata;
 mod step;
+mod types;
 
 use tos_common::serializer::*;
 
 pub use block_metadata::BlockMetadata;
 pub use step::*;
+pub use types::*;
 
 #[derive(Debug)]
 pub struct BootstrapChainRequest<'a> {

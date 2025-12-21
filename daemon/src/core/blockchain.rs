@@ -305,8 +305,9 @@ impl<S: Storage> Blockchain<S> {
             debug!("Retrieving tips for computing current stable height");
             let top_height = storage.get_top_height().await?;
             let version = get_version_at_height(&network, top_height);
-            let (stable_hash, stable_height) =
-                blockchain.find_common_base::<S, _>(&storage, &tips, version).await?;
+            let (stable_hash, stable_height) = blockchain
+                .find_common_base::<S, _>(&storage, &tips, version)
+                .await?;
             // Search the stable topoheight
             let stable_topoheight = storage.get_topo_height_for_hash(&stable_hash).await?;
 
@@ -806,12 +807,7 @@ impl<S: Storage> Blockchain<S> {
         let current_height = self.get_height_for_storage(&*storage).await;
         let version = get_version_at_height(self.get_network(), current_height);
         let located_sync_topoheight = self
-            .locate_nearest_sync_block_for_topoheight(
-                storage,
-                topoheight,
-                current_height,
-                version,
-            )
+            .locate_nearest_sync_block_for_topoheight(storage, topoheight, current_height, version)
             .await?;
         debug!(
             "Located sync topoheight found {} in {}ms",
@@ -2279,7 +2275,12 @@ impl<S: Storage> Blockchain<S> {
                     }
 
                     if !self
-                        .is_near_enough_from_main_chain(storage, &hash, current_height, version_at_height)
+                        .is_near_enough_from_main_chain(
+                            storage,
+                            &hash,
+                            current_height,
+                            version_at_height,
+                        )
                         .await?
                     {
                         warn!("Tip {} is not selected for mining: too far from mainchain at height: {}", hash, current_height);
@@ -3174,7 +3175,9 @@ impl<S: Storage> Blockchain<S> {
             GENESIS_BLOCK_DIFFICULTY.into()
         } else {
             debug!("Computing cumulative difficulty for block {}", block_hash);
-            let (base, base_height) = self.find_common_base(&*storage, block.get_tips(), version).await?;
+            let (base, base_height) = self
+                .find_common_base(&*storage, block.get_tips(), version)
+                .await?;
             debug!(
                 "Common base found: {}, height: {}, calculating cumulative difficulty",
                 base, base_height
@@ -3843,7 +3846,8 @@ impl<S: Storage> Blockchain<S> {
         // save highest topo height
         debug!("Highest topo height found: {}", highest_topo);
         // if the DAG has been reorganized, we update the topoheight
-        let chain_topoheight_extended = current_height == 0 || highest_topo > current_topoheight || is_written;
+        let chain_topoheight_extended =
+            current_height == 0 || highest_topo > current_topoheight || is_written;
         if chain_topoheight_extended {
             debug!(
                 "Blockchain height extended, current topoheight is now {} (previous was {})",
@@ -3866,7 +3870,10 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // auto prune mode
-        if let Some(keep_only) = self.auto_prune_keep_n_blocks.filter(|_| chain_topoheight_extended) {
+        if let Some(keep_only) = self
+            .auto_prune_keep_n_blocks
+            .filter(|_| chain_topoheight_extended)
+        {
             // check that the topoheight is greater than the safety limit
             // and that we can prune the chain using the config while respecting the safety limit
             if current_topoheight % keep_only == 0 && current_topoheight - keep_only > 0 {
@@ -4257,8 +4264,7 @@ impl<S: Storage> Blockchain<S> {
                     if !hashes.contains(tx) {
                         // Then check that it's executed in this block
                         if !txs_executed_only
-                            || (txs_executed_only
-                                && provider.is_tx_executed_in_block(tx, &hash)?)
+                            || (txs_executed_only && provider.is_tx_executed_in_block(tx, &hash)?)
                         {
                             // add it to the list
                             hashes.insert(tx.clone());
@@ -4468,8 +4474,9 @@ impl<S: Storage> Blockchain<S> {
         if !stop_at_stable_height {
             let tips = storage.get_tips().await?;
             let version = get_version_at_height(self.get_network(), new_height);
-            let (stable_hash, stable_height) =
-                self.find_common_base::<S, _>(&storage, &tips, version).await?;
+            let (stable_hash, stable_height) = self
+                .find_common_base::<S, _>(&storage, &tips, version)
+                .await?;
             let stable_topoheight = storage.get_topo_height_for_hash(&stable_hash).await?;
 
             // if we have a RPC server, propagate the StableHeightChanged if necessary

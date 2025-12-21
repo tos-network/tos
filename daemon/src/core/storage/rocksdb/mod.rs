@@ -13,7 +13,8 @@ use crate::core::{
             ACCOUNTS_COUNT, ASSETS_COUNT, BLOCKS_COUNT, BLOCKS_EXECUTION_ORDER_COUNT,
             CONTRACTS_COUNT, PRUNED_TOPOHEIGHT, TIPS, TXS_COUNT,
         },
-        BlocksAtHeightProvider, ClientProtocolProvider, ContractOutputsProvider, StorageCache, Tips,
+        BlocksAtHeightProvider, ClientProtocolProvider, ContractOutputsProvider, StorageCache,
+        Tips,
     },
 };
 use anyhow::Context;
@@ -255,9 +256,7 @@ impl RocksStorage {
         trace!("load cache from disk");
 
         // Load tips from disk if available
-        if let Ok(Some(tips)) =
-            self.load_optional_from_disk::<_, Tips>(Column::Common, TIPS)
-        {
+        if let Ok(Some(tips)) = self.load_optional_from_disk::<_, Tips>(Column::Common, TIPS) {
             debug!("Found tips: {}", tips.len());
             self.cache.chain.tips = tips;
         }
