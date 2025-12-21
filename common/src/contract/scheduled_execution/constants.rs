@@ -24,6 +24,11 @@ pub const MAX_SCHEDULING_HORIZON: u64 = 100_800;
 /// After MAX_DEFER_COUNT deferrals, execution is cancelled with gas refund
 pub const MAX_DEFER_COUNT: u8 = 10;
 
+/// Minimum blocks before execution that cancellation is allowed
+/// Must cancel at least this many blocks before the target topoheight
+/// Prevents last-minute cancellation manipulation and MEV attacks
+pub const MIN_CANCELLATION_WINDOW: u64 = 1;
+
 // ============================================================================
 // Gas Requirements
 // ============================================================================

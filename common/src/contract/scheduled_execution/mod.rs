@@ -133,9 +133,31 @@ impl ScheduledExecution {
         Hash::new(*result.as_bytes())
     }
 
-    /// Check if this execution can be cancelled
-    pub fn can_cancel(&self) -> bool {
-        self.status == ScheduledExecutionStatus::Pending
+    /// Check if this execution can be cancelled at the given topoheight
+    ///
+    /// Cancellation is allowed if:
+    /// 1. Status is still Pending
+    /// 2. Current topoheight is at least MIN_CANCELLATION_WINDOW blocks before execution
+    ///
+    /// For BlockEnd scheduling, cancellation is always allowed while Pending
+    /// (since BlockEnd executes at end of current block, not a future one)
+    pub fn can_cancel(&self, current_topoheight: TopoHeight) -> bool {
+        if self.status != ScheduledExecutionStatus::Pending {
+            return false;
+        }
+
+        match self.kind {
+            ScheduledExecutionKind::TopoHeight(target_topo) => {
+                // Must cancel at least MIN_CANCELLATION_WINDOW blocks before execution
+                // target_topo > current_topoheight + MIN_CANCELLATION_WINDOW
+                target_topo > current_topoheight.saturating_add(MIN_CANCELLATION_WINDOW)
+            }
+            ScheduledExecutionKind::BlockEnd => {
+                // BlockEnd executes at end of current block, so cannot cancel
+                // once in the same block
+                false
+            }
+        }
     }
 
     /// Check if this execution is still pending

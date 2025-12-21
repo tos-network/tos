@@ -406,8 +406,8 @@ impl<'a> ScheduledExecutionProvider for TosScheduledExecutionAdapter<'a> {
             return Ok(error_codes::ERR_NOT_AUTHORIZED);
         }
 
-        // Check if cancellable
-        if !execution.can_cancel() {
+        // Check if cancellable (must be at least MIN_CANCELLATION_WINDOW blocks before execution)
+        if !execution.can_cancel(self.current_topoheight) {
             return Ok(error_codes::ERR_CANNOT_CANCEL);
         }
 
@@ -808,5 +808,89 @@ mod tests {
 
         let info = adapter.get_scheduled_execution(handle).unwrap().unwrap();
         assert!(info.is_block_end);
+    }
+
+    #[test]
+    fn test_cancel_too_close_to_execution_fails() {
+        let mut scheduled_executions = IndexMap::new();
+        let mut balance_changes = HashMap::new();
+        let current_contract = Hash::new([1u8; 32]);
+        let provider = MockProvider { balance: 1_000_000 };
+
+        // Current topoheight = 100, target = 101
+        // With MIN_CANCELLATION_WINDOW = 1, cannot cancel when target <= current + 1
+        let mut adapter = TosScheduledExecutionAdapter::new(
+            &mut scheduled_executions,
+            &mut balance_changes,
+            100, // current_topoheight
+            &current_contract,
+            &provider,
+        );
+
+        let target_contract = [2u8; 32];
+        let handle = adapter
+            .schedule_execution(
+                current_contract.as_bytes(),
+                &target_contract,
+                0,
+                &[],
+                MIN_SCHEDULED_EXECUTION_GAS,
+                1000,
+                101, // target_topoheight = current + 1 (too close)
+                false,
+            )
+            .unwrap();
+
+        // Try to cancel - should fail because too close to execution
+        let result = adapter
+            .cancel_scheduled_execution(current_contract.as_bytes(), handle)
+            .unwrap();
+
+        // Should return ERR_CANNOT_CANCEL (11)
+        assert_eq!(result, error_codes::ERR_CANNOT_CANCEL);
+
+        // Execution should still exist
+        assert_eq!(scheduled_executions.len(), 1);
+    }
+
+    #[test]
+    fn test_cancel_block_end_fails() {
+        let mut scheduled_executions = IndexMap::new();
+        let mut balance_changes = HashMap::new();
+        let current_contract = Hash::new([1u8; 32]);
+        let provider = MockProvider { balance: 1_000_000 };
+
+        let mut adapter = TosScheduledExecutionAdapter::new(
+            &mut scheduled_executions,
+            &mut balance_changes,
+            100,
+            &current_contract,
+            &provider,
+        );
+
+        let target_contract = [2u8; 32];
+        let handle = adapter
+            .schedule_execution(
+                current_contract.as_bytes(),
+                &target_contract,
+                0,
+                &[],
+                MIN_SCHEDULED_EXECUTION_GAS,
+                1000,
+                0,    // ignored for block end
+                true, // is_block_end
+            )
+            .unwrap();
+
+        // Try to cancel BlockEnd - should fail
+        let result = adapter
+            .cancel_scheduled_execution(current_contract.as_bytes(), handle)
+            .unwrap();
+
+        // Should return ERR_CANNOT_CANCEL (11)
+        assert_eq!(result, error_codes::ERR_CANNOT_CANCEL);
+
+        // Execution should still exist
+        assert_eq!(scheduled_executions.len(), 1);
     }
 }

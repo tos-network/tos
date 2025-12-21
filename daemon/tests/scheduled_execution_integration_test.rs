@@ -495,7 +495,10 @@ fn test_cancel_scheduled_execution() {
 
     println!("✅ Successfully cancelled execution");
     println!("   Refund: {refund}");
-    println!("   Expected: gas({MIN_SCHEDULED_EXECUTION_GAS}) + 70% offer({})", offer_amount * 70 / 100);
+    println!(
+        "   Expected: gas({MIN_SCHEDULED_EXECUTION_GAS}) + 70% offer({})",
+        offer_amount * 70 / 100
+    );
 }
 
 #[test]
@@ -552,6 +555,117 @@ fn test_cancel_not_authorized_fails() {
     println!("✅ Correctly rejected unauthorized cancellation");
 }
 
+#[test]
+fn test_cancel_too_close_to_execution_fails() {
+    println!("\n=== Test: Cancel Too Close to Execution Fails ===\n");
+
+    let current_contract = Hash::new([1u8; 32]);
+    let target_contract = [2u8; 32];
+    let current_topoheight = 100;
+    // Target is only 1 block away - too close to cancel
+    // MIN_CANCELLATION_WINDOW = 1, so target must be > current + 1
+    let target_topoheight = 101;
+
+    let provider =
+        MockScheduledExecProvider::new().with_contract_balance(current_contract.clone(), 1_000_000);
+
+    let mut scheduled_executions = IndexMap::new();
+    let mut balance_changes = HashMap::new();
+
+    let mut adapter = TosScheduledExecutionAdapter::new(
+        &mut scheduled_executions,
+        &mut balance_changes,
+        current_topoheight,
+        &current_contract,
+        &provider,
+    );
+
+    let handle = adapter
+        .schedule_execution(
+            current_contract.as_bytes(),
+            &target_contract,
+            0,
+            &[],
+            MIN_SCHEDULED_EXECUTION_GAS,
+            1000,
+            target_topoheight,
+            false,
+        )
+        .unwrap();
+
+    // Try to cancel - should fail because too close to execution
+    let result = adapter.cancel_scheduled_execution(current_contract.as_bytes(), handle);
+
+    // Should return error code 11 (ERR_CANNOT_CANCEL)
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), 11, "Should return ERR_CANNOT_CANCEL");
+
+    // Execution should still exist
+    assert_eq!(
+        scheduled_executions.len(),
+        1,
+        "Execution should not be removed"
+    );
+
+    println!("✅ Correctly rejected cancellation too close to execution");
+    println!("   Current topoheight: {current_topoheight}");
+    println!("   Target topoheight: {target_topoheight}");
+    println!("   MIN_CANCELLATION_WINDOW: 1 block");
+}
+
+#[test]
+fn test_cancel_block_end_fails() {
+    println!("\n=== Test: Cancel BlockEnd Execution Fails ===\n");
+
+    let current_contract = Hash::new([1u8; 32]);
+    let target_contract = [2u8; 32];
+    let current_topoheight = 100;
+
+    let provider =
+        MockScheduledExecProvider::new().with_contract_balance(current_contract.clone(), 1_000_000);
+
+    let mut scheduled_executions = IndexMap::new();
+    let mut balance_changes = HashMap::new();
+
+    let mut adapter = TosScheduledExecutionAdapter::new(
+        &mut scheduled_executions,
+        &mut balance_changes,
+        current_topoheight,
+        &current_contract,
+        &provider,
+    );
+
+    let handle = adapter
+        .schedule_execution(
+            current_contract.as_bytes(),
+            &target_contract,
+            0,
+            &[],
+            MIN_SCHEDULED_EXECUTION_GAS,
+            1000,
+            0,    // ignored for BlockEnd
+            true, // is_block_end
+        )
+        .unwrap();
+
+    // Try to cancel BlockEnd - should fail
+    let result = adapter.cancel_scheduled_execution(current_contract.as_bytes(), handle);
+
+    // Should return error code 11 (ERR_CANNOT_CANCEL)
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), 11, "Should return ERR_CANNOT_CANCEL");
+
+    // Execution should still exist
+    assert_eq!(
+        scheduled_executions.len(),
+        1,
+        "Execution should not be removed"
+    );
+
+    println!("✅ Correctly rejected BlockEnd cancellation");
+    println!("   BlockEnd executions cannot be cancelled");
+}
+
 // ============================================================================
 // Priority Ordering Tests
 // ============================================================================
@@ -569,7 +683,7 @@ fn test_priority_ordering_by_offer_amount() {
         0,
         vec![],
         MIN_SCHEDULED_EXECUTION_GAS,
-        1_000,  // Low offer
+        1_000, // Low offer
         Hash::new([10u8; 32]),
         ScheduledExecutionKind::TopoHeight(target_topoheight),
         current_topoheight,
@@ -580,7 +694,7 @@ fn test_priority_ordering_by_offer_amount() {
         0,
         vec![],
         MIN_SCHEDULED_EXECUTION_GAS,
-        100_000,  // High offer
+        100_000, // High offer
         Hash::new([10u8; 32]),
         ScheduledExecutionKind::TopoHeight(target_topoheight),
         current_topoheight,
@@ -591,14 +705,14 @@ fn test_priority_ordering_by_offer_amount() {
         0,
         vec![],
         MIN_SCHEDULED_EXECUTION_GAS,
-        10_000,  // Medium offer
+        10_000, // Medium offer
         Hash::new([10u8; 32]),
         ScheduledExecutionKind::TopoHeight(target_topoheight),
         current_topoheight,
     );
 
     // Sort by priority (using Ord implementation)
-    let mut executions = vec![exec_low.clone(), exec_high.clone(), exec_medium.clone()];
+    let mut executions = [exec_low.clone(), exec_high.clone(), exec_medium.clone()];
     executions.sort_by(|a, b| b.cmp(a)); // Reverse order for highest priority first
 
     // Verify order: high → medium → low
@@ -637,7 +751,7 @@ fn test_priority_ordering_fifo_for_equal_offers() {
         offer_amount,
         Hash::new([10u8; 32]),
         ScheduledExecutionKind::TopoHeight(target_topoheight),
-        100,  // Registered first
+        100, // Registered first
     );
 
     let exec_second = ScheduledExecution::new_offercall(
@@ -648,7 +762,7 @@ fn test_priority_ordering_fifo_for_equal_offers() {
         offer_amount,
         Hash::new([10u8; 32]),
         ScheduledExecutionKind::TopoHeight(target_topoheight),
-        101,  // Registered second
+        101, // Registered second
     );
 
     let exec_third = ScheduledExecution::new_offercall(
@@ -659,11 +773,11 @@ fn test_priority_ordering_fifo_for_equal_offers() {
         offer_amount,
         Hash::new([10u8; 32]),
         ScheduledExecutionKind::TopoHeight(target_topoheight),
-        102,  // Registered third
+        102, // Registered third
     );
 
     // Sort by priority
-    let mut executions = vec![exec_third.clone(), exec_first.clone(), exec_second.clone()];
+    let mut executions = [exec_third.clone(), exec_first.clone(), exec_second.clone()];
     executions.sort_by(|a, b| b.cmp(a));
 
     // Verify FIFO order (earlier registration = higher priority)
@@ -717,8 +831,8 @@ fn test_get_scheduled_execution_info() {
         .schedule_execution(
             current_contract.as_bytes(),
             &target_contract,
-            42,                          // chunk_id
-            &[1, 2, 3, 4],               // input_data
+            42,            // chunk_id
+            &[1, 2, 3, 4], // input_data
             MIN_SCHEDULED_EXECUTION_GAS,
             5_000,
             target_topoheight,
@@ -823,7 +937,10 @@ fn test_schedule_with_input_data() {
 
     // Verify input data was stored
     let execution = scheduled_executions.values().next().unwrap();
-    assert_eq!(execution.input_data, input_data, "Input data should be stored");
+    assert_eq!(
+        execution.input_data, input_data,
+        "Input data should be stored"
+    );
 
     println!("✅ Successfully stored input data:");
     println!("   Handle: {handle}");
@@ -842,8 +959,8 @@ fn test_multiple_scheduled_executions() {
     let current_contract = Hash::new([1u8; 32]);
     let current_topoheight = 100;
 
-    let provider =
-        MockScheduledExecProvider::new().with_contract_balance(current_contract.clone(), 10_000_000);
+    let provider = MockScheduledExecProvider::new()
+        .with_contract_balance(current_contract.clone(), 10_000_000);
 
     let mut scheduled_executions = IndexMap::new();
     let mut balance_changes = HashMap::new();
@@ -872,7 +989,7 @@ fn test_multiple_scheduled_executions() {
                     &[i],
                     MIN_SCHEDULED_EXECUTION_GAS,
                     (i as u64 + 1) * 1_000, // Different offers
-                    150 + i as u64,          // Different target topoheights
+                    150 + i as u64,         // Different target topoheights
                     false,
                 )
                 .unwrap();
@@ -942,6 +1059,8 @@ fn test_summary() {
     println!("  - Block end scheduling");
     println!("  - Validation (past topoheight, horizon, gas, balance)");
     println!("  - Cancellation and refunds");
+    println!("  - Cancellation window (MIN_CANCELLATION_WINDOW = 1 block)");
+    println!("  - BlockEnd cannot be cancelled");
     println!("  - Authorization checks");
     println!("  - Priority ordering (offer amount, FIFO)");
     println!("  - Query scheduled execution info");

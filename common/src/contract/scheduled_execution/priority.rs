@@ -73,7 +73,6 @@ impl PartialOrd for ScheduledExecution {
 mod tests {
     use super::*;
     use crate::contract::scheduled_execution::{ScheduledExecutionKind, ScheduledExecutionStatus};
-    use crate::contract::Source;
     use crate::crypto::Hash;
     use indexmap::IndexMap;
 
@@ -148,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_sorting() {
-        let mut executions = vec![
+        let mut executions = [
             make_execution(100, 300, 0x33),  // Low offer, late
             make_execution(1000, 100, 0x11), // High offer, early
             make_execution(500, 200, 0x22),  // Medium offer, medium time

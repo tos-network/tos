@@ -94,9 +94,11 @@ mod tests {
             ScheduledExecutionStatus::Failed,
             ScheduledExecutionStatus::Expired,
         ] {
-            let mut writer = Writer::new();
-            status.write(&mut writer);
-            let bytes = writer.bytes();
+            let mut bytes = Vec::new();
+            {
+                let mut writer = Writer::new(&mut bytes);
+                status.write(&mut writer);
+            }
 
             let mut reader = Reader::new(&bytes);
             let decoded = ScheduledExecutionStatus::read(&mut reader).unwrap();
