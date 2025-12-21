@@ -20,7 +20,9 @@ use tos_common::{
     block::{Block, BlockVersion, TopoHeight},
     contract::{
         AssetChanges, ChainState as ContractChainState, ContractCache, ContractEventTracker,
-        ContractOutput, ScheduledExecution, ScheduledExecutionKind,
+        ContractOutput, ContractProvider as ContractInfoProvider, ScheduledExecution,
+        ScheduledExecutionKind, MAX_SCHEDULED_EXECUTIONS_PER_BLOCK,
+        MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK, OFFER_MINER_PERCENT,
     },
     crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
     transaction::{
@@ -900,46 +902,289 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         Ok(())
     }
 
-    // Execute all scheduled executions for current topoheight
+    /// Execute all scheduled executions for current topoheight with priority ordering.
+    ///
+    /// Executions are processed in priority order:
+    /// 1. Higher offer amount first
+    /// 2. Earlier registration time (FIFO) for equal offers
+    /// 3. Contract hash for deterministic ordering
+    ///
+    /// Per-block limits are enforced:
+    /// - MAX_SCHEDULED_EXECUTIONS_PER_BLOCK (100)
+    /// - MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK (100M CU)
+    ///
+    /// Executions that exceed limits are deferred to the next topoheight.
     pub async fn process_scheduled_executions(&mut self) -> Result<(), BlockchainError> {
-        trace!("process scheduled executions at topoheight");
-
         let topoheight = self.inner.topoheight;
 
-        // Do it in batches of 64 to avoid loading too much in memory at once
-        let mut skip = 0;
-        loop {
-            let executions: Vec<_> = self
-                .inner
-                .storage
-                .get_contract_scheduled_executions_at_topoheight(topoheight)
-                .await?
-                .skip(skip)
-                .take(64)
-                .collect::<Result<Vec<_>, _>>()?;
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("process scheduled executions at topoheight {}", topoheight);
+        }
 
-            if executions.is_empty() {
-                break;
+        // Fetch all executions sorted by priority (higher offer first)
+        let executions: Vec<ScheduledExecution> = self
+            .inner
+            .storage
+            .get_priority_sorted_scheduled_executions_at_topoheight(topoheight)
+            .await?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if executions.is_empty() {
+            return Ok(());
+        }
+
+        // Track limits
+        let mut exec_count = 0usize;
+        let mut gas_budget = MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK;
+        let mut executed = Vec::new();
+        let mut deferred = Vec::new();
+
+        for execution in executions {
+            // Check per-block limits
+            if exec_count >= MAX_SCHEDULED_EXECUTIONS_PER_BLOCK {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Deferring execution {} - max executions per block reached",
+                        execution.hash
+                    );
+                }
+                deferred.push(execution);
+                continue;
             }
 
-            let count = executions.len();
-            skip += count;
+            if gas_budget < execution.max_gas {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Deferring execution {} - insufficient gas budget ({} < {})",
+                        execution.hash, gas_budget, execution.max_gas
+                    );
+                }
+                deferred.push(execution);
+                continue;
+            }
 
-            // Process the executions
-            for execution in executions {
-                debug!(
-                    "processing scheduled execution of contract {} with caller {} at topoheight {}",
-                    execution.contract, execution.hash, topoheight
-                );
-                // TODO: Implement actual contract execution when VM integration is complete
-                // For now, we just log the execution
+            // Execute the scheduled call
+            let result = self.execute_scheduled_call(&execution).await;
+
+            match result {
+                Ok(gas_used) => {
+                    // Successful execution
+                    gas_budget = gas_budget.saturating_sub(gas_used);
+                    exec_count = exec_count.saturating_add(1);
+
+                    // Pay 70% of offer to miner
+                    let miner_reward = execution
+                        .offer_amount
+                        .saturating_mul(OFFER_MINER_PERCENT)
+                        .saturating_div(100);
+                    self.gas_fee = self.gas_fee.saturating_add(miner_reward);
+
+                    // Refund unused gas to scheduler contract
+                    let gas_refund = execution.max_gas.saturating_sub(gas_used);
+                    if gas_refund > 0 {
+                        self.refund_gas_to_contract(&execution.scheduler_contract, gas_refund)
+                            .await?;
+                    }
+
+                    executed.push(execution);
+                }
+                Err(e) => {
+                    // Execution failed - still count gas, no refund
+                    if log::log_enabled!(log::Level::Warn) {
+                        log::warn!("Scheduled execution {} failed: {}", execution.hash, e);
+                    }
+                    gas_budget = gas_budget.saturating_sub(execution.max_gas);
+                    exec_count = exec_count.saturating_add(1);
+
+                    // Pay 70% of offer to miner even on failure
+                    let miner_reward = execution
+                        .offer_amount
+                        .saturating_mul(OFFER_MINER_PERCENT)
+                        .saturating_div(100);
+                    self.gas_fee = self.gas_fee.saturating_add(miner_reward);
+
+                    // Mark as failed but still remove from pending
+                    executed.push(execution);
+                }
             }
         }
 
-        if skip > 0 {
+        // Delete executed entries from storage
+        for execution in &executed {
+            self.inner
+                .storage
+                .delete_contract_scheduled_execution(&execution.contract, execution)
+                .await?;
+        }
+
+        // Defer overflow executions to next topoheight
+        if !deferred.is_empty() {
+            let next_topoheight = topoheight.saturating_add(1);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Deferring {} executions to topoheight {}",
+                    deferred.len(),
+                    next_topoheight
+                );
+            }
+
+            for mut execution in deferred {
+                // Increment defer count
+                execution.defer_count = execution.defer_count.saturating_add(1);
+
+                // Update kind to next topoheight
+                execution.kind = ScheduledExecutionKind::TopoHeight(next_topoheight);
+
+                // Re-register for next topoheight
+                self.inner
+                    .storage
+                    .set_contract_scheduled_execution_at_topoheight(
+                        &execution.contract,
+                        execution.registration_topoheight,
+                        &execution,
+                        next_topoheight,
+                    )
+                    .await?;
+            }
+        }
+
+        if log::log_enabled!(log::Level::Debug) && exec_count > 0 {
             debug!(
-                "finished processing {} scheduled executions for topoheight {}",
-                skip, topoheight
+                "Processed {} scheduled executions at topoheight {} (gas used: {})",
+                exec_count,
+                topoheight,
+                MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK.saturating_sub(gas_budget)
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Execute a single scheduled contract call.
+    /// Returns the gas used on success.
+    async fn execute_scheduled_call(
+        &mut self,
+        execution: &ScheduledExecution,
+    ) -> Result<u64, BlockchainError> {
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Executing scheduled call: contract={}, chunk={}, max_gas={}, offer={}",
+                execution.contract, execution.chunk_id, execution.max_gas, execution.offer_amount
+            );
+        }
+
+        // Load contract module
+        let contract_data = self
+            .inner
+            .storage
+            .get_contract_at_maximum_topoheight_for(&execution.contract, self.inner.topoheight)
+            .await?;
+
+        let bytecode = match contract_data {
+            Some((_, versioned_contract)) => {
+                let module = versioned_contract
+                    .get()
+                    .as_ref()
+                    .ok_or_else(|| BlockchainError::ContractNotFound(execution.contract.clone()))?;
+                module
+                    .get_bytecode()
+                    .ok_or_else(|| {
+                        BlockchainError::ModuleError("Contract does not have bytecode".to_string())
+                    })?
+                    .to_vec()
+            }
+            None => {
+                return Err(BlockchainError::ContractNotFound(
+                    execution.contract.clone(),
+                ));
+            }
+        };
+
+        // Get block info for execution context
+        // Convert timestamp from milliseconds to seconds for contract execution
+        let block_timestamp = self.block.get_timestamp() / 1000;
+        let block_height = self.block.get_height();
+
+        // Get mutable storage as ContractProvider for executor
+        // StorageReference<S> implements DerefMut to S, and S: Storage implies S: ContractInfoProvider
+        let provider: &mut (dyn ContractInfoProvider + Send) = self.inner.storage.as_mut();
+
+        // Execute using the contract executor
+        let result = self
+            .executor
+            .execute(
+                &bytecode,
+                provider,
+                self.inner.topoheight,
+                &execution.contract,
+                self.block_hash,
+                block_height,
+                block_timestamp,
+                &execution.hash, // Use execution hash as "tx_hash" for scheduled calls
+                &execution.scheduler_contract,
+                execution.max_gas,
+                Some(execution.input_data.clone()),
+            )
+            .await
+            .map_err(BlockchainError::Any)?;
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Scheduled execution {} completed: gas_used={}, exit_code={:?}",
+                execution.hash, result.gas_used, result.exit_code
+            );
+        }
+
+        Ok(result.gas_used)
+    }
+
+    /// Refund unused gas to a contract's balance.
+    async fn refund_gas_to_contract(
+        &mut self,
+        contract: &Hash,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        if amount == 0 {
+            return Ok(());
+        }
+
+        // Get current contract balance for native asset (Hash::zero())
+        let native_asset = Hash::zero();
+        let current_balance = self
+            .inner
+            .storage
+            .get_contract_balance_at_maximum_topoheight(
+                contract,
+                &native_asset,
+                self.inner.topoheight,
+            )
+            .await?
+            .map(|(_, balance)| balance.take())
+            .unwrap_or(0);
+
+        // Add refund to balance
+        let new_balance = current_balance.saturating_add(amount);
+
+        // Update balance using versioned storage
+        let versioned_balance =
+            VersionedContractBalance::new(new_balance, Some(self.inner.topoheight));
+        self.inner
+            .storage
+            .set_last_contract_balance_to(
+                contract,
+                &native_asset,
+                self.inner.topoheight,
+                versioned_balance,
+            )
+            .await?;
+
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Refunded {} gas to contract {}: {} -> {}",
+                amount,
+                contract,
+                current_balance,
+                new_balance
             );
         }
 

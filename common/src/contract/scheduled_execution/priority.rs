@@ -35,7 +35,10 @@ impl ScheduledExecutionPriority for ScheduledExecution {
             Ordering::Equal => {
                 // 2. Earlier registration = higher priority (FIFO)
                 // Note: lower topoheight = earlier = higher priority
-                match other.registration_topoheight.cmp(&self.registration_topoheight) {
+                match other
+                    .registration_topoheight
+                    .cmp(&self.registration_topoheight)
+                {
                     Ordering::Equal => {
                         // 3. Deterministic tiebreaker by hash
                         self.hash.cmp(&other.hash)
@@ -69,18 +72,12 @@ impl PartialOrd for ScheduledExecution {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::Hash;
-    use crate::contract::scheduled_execution::{
-        ScheduledExecutionKind, ScheduledExecutionStatus,
-    };
+    use crate::contract::scheduled_execution::{ScheduledExecutionKind, ScheduledExecutionStatus};
     use crate::contract::Source;
+    use crate::crypto::Hash;
     use indexmap::IndexMap;
 
-    fn make_execution(
-        offer: u64,
-        reg_topo: u64,
-        hash_byte: u8,
-    ) -> ScheduledExecution {
+    fn make_execution(offer: u64, reg_topo: u64, hash_byte: u8) -> ScheduledExecution {
         let mut hash_bytes = [0u8; 32];
         hash_bytes[0] = hash_byte;
 
@@ -152,9 +149,9 @@ mod tests {
     #[test]
     fn test_sorting() {
         let mut executions = vec![
-            make_execution(100, 300, 0x33), // Low offer, late
+            make_execution(100, 300, 0x33),  // Low offer, late
             make_execution(1000, 100, 0x11), // High offer, early
-            make_execution(500, 200, 0x22), // Medium offer, medium time
+            make_execution(500, 200, 0x22),  // Medium offer, medium time
             make_execution(1000, 200, 0x44), // High offer, late
         ];
 

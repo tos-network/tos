@@ -15,11 +15,11 @@ use tos_kernel::ValueCell;
 
 use crate::{block::TopoHeight, crypto::Hash, serializer::*};
 
+use super::Source;
 pub use constants::*;
 pub use kind::*;
 pub use priority::*;
 pub use status::*;
-use super::Source;
 
 /// Scheduled execution for a contract.
 /// Supports OFFERCALL-style priority scheduling inspired by EIP-7833.
@@ -49,7 +49,6 @@ pub struct ScheduledExecution {
     pub gas_sources: IndexMap<Source, u64>,
 
     // === OFFERCALL fields (EIP-7833 inspired) ===
-
     /// Offer amount in native tokens for priority scheduling
     /// 30% burned on registration, 70% paid to miner on execution
     /// Higher offer = higher priority in execution order
@@ -90,12 +89,7 @@ impl ScheduledExecution {
         registration_topoheight: TopoHeight,
     ) -> Self {
         // Compute unique hash for this execution
-        let hash = Self::compute_hash(
-            &contract,
-            &kind,
-            registration_topoheight,
-            chunk_id,
-        );
+        let hash = Self::compute_hash(&contract, &kind, registration_topoheight, chunk_id);
 
         Self {
             hash,
