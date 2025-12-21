@@ -1,3 +1,4 @@
+use crate::core::storage::Direction;
 use crate::core::{
     error::BlockchainError,
     storage::{
@@ -8,7 +9,6 @@ use crate::core::{
 use async_trait::async_trait;
 use futures::{stream, Stream, StreamExt};
 use log::trace;
-use rocksdb::Direction;
 use tos_common::{block::TopoHeight, crypto::Hash, serializer::Serializer};
 use tos_kernel::ValueCell;
 

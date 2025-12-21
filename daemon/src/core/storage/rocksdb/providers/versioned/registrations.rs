@@ -1,3 +1,4 @@
+use crate::core::storage::Direction;
 use crate::core::{
     error::BlockchainError,
     storage::{
@@ -6,7 +7,6 @@ use crate::core::{
     },
 };
 use async_trait::async_trait;
-use rocksdb::Direction;
 use tos_common::{
     block::TopoHeight,
     serializer::{RawBytes, Serializer},

@@ -1,3 +1,4 @@
+use crate::core::storage::Direction;
 use crate::core::{
     error::BlockchainError,
     storage::{
@@ -7,7 +8,6 @@ use crate::core::{
 };
 use async_trait::async_trait;
 use log::trace;
-use rocksdb::Direction;
 use tos_common::{
     asset::{AssetData, VersionedAssetData},
     block::TopoHeight,

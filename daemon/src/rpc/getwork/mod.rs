@@ -3,7 +3,7 @@ mod miner;
 use crate::{
     config::{BLOCKS_PROPAGATION_CAPACITY_NONZERO, DEV_PUBLIC_KEY},
     core::{
-        blockchain::{Blockchain, BroadcastOption},
+        blockchain::{Blockchain, BroadcastOption, PreVerifyBlock},
         hard_fork::get_pow_algorithm_for_version,
         storage::Storage,
     },
@@ -226,7 +226,7 @@ impl<S: Storage> GetWorkServer<S> {
 
         // get the algorithm for the current version
         let algorithm = get_pow_algorithm_for_version(version);
-        let topoheight = self.blockchain.get_topo_height();
+        let topoheight = self.blockchain.get_topo_height().await;
 
         debug!("Sending job to new miner");
         session
@@ -300,7 +300,7 @@ impl<S: Storage> GetWorkServer<S> {
         let algorithm = get_pow_algorithm_for_version(version);
         // Also send the node topoheight to miners
         // This is for visual purposes only
-        let topoheight = self.blockchain.get_topo_height();
+        let topoheight = self.blockchain.get_topo_height().await;
 
         if is_event_tracked {
             debug!("Notifying RPC clients for new block template");
@@ -416,7 +416,7 @@ impl<S: Storage> GetWorkServer<S> {
                 .blockchain
                 .add_new_block(
                     block,
-                    Some(Immutable::Arc(block_hash.clone())),
+                    PreVerifyBlock::Hash(Immutable::Arc(block_hash.clone())),
                     BroadcastOption::All,
                     true,
                 )

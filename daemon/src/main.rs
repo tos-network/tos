@@ -15,7 +15,7 @@ use anyhow::{Context as AnyContext, Result};
 use clap::Parser;
 use config::{DEV_PUBLIC_KEY, STABLE_LIMIT};
 use core::{
-    blockchain::{get_block_reward, Blockchain, BroadcastOption},
+    blockchain::{get_block_reward, Blockchain, BroadcastOption, PreVerifyBlock},
     blockdag,
     config::Config as InnerConfig,
     hard_fork::{get_block_time_target_for_version, get_version_at_height},
@@ -488,6 +488,23 @@ async fn run_prompt<S: Storage>(
         "Force to be in snapshot mode (memory only)",
         CommandHandler::Async(async_handler!(snapshot_mode::<S>)),
     ))?;
+    command_manager.add_command(Command::with_optional_arguments(
+        "import_block",
+        "Import a block in hexadecimal format",
+        vec![Arg::new_simple("hex", ArgType::String)],
+        CommandHandler::Async(async_handler!(import_block::<S>)),
+    ))?;
+    command_manager.add_command(Command::new(
+        "show_block_execution_position",
+        "Show the position of a block execution",
+        CommandHandler::Async(async_handler!(show_block_execution_position::<S>)),
+    ))?;
+    command_manager.add_command(Command::with_optional_arguments(
+        "circulating_supply_dataset",
+        "Create a dataset for circulating supply from chain",
+        vec![Arg::new("output", ArgType::String, "Output file path")],
+        CommandHandler::Async(async_handler!(circulating_supply_dataset::<S>)),
+    ))?;
 
     // Don't keep the lock for ever
     let p2p = { blockchain.get_p2p().read().await.as_ref().cloned() };
@@ -499,7 +516,7 @@ async fn run_prompt<S: Storage>(
 
     let closure = |_: &_, _: _| async {
         trace!("Retrieving P2P peers and median topoheight");
-        let topoheight = blockchain.get_topo_height();
+        let topoheight = blockchain.get_topo_height().await;
         let (peers, median, syncing_rate) = match &p2p {
             Some(p2p) => {
                 let peer_list = p2p.get_peer_list();
@@ -509,7 +526,7 @@ async fn run_prompt<S: Storage>(
                     p2p.get_syncing_rate_bps(),
                 )
             }
-            None => (0, blockchain.get_topo_height(), None),
+            None => (0, topoheight, None),
         };
 
         trace!("Retrieving RPC connections count");
@@ -536,7 +553,8 @@ async fn run_prompt<S: Storage>(
         let mempool = blockchain.get_mempool_size().await;
 
         trace!("Retrieving network hashrate");
-        let version = get_version_at_height(blockchain.get_network(), blockchain.get_height());
+        let height = blockchain.get_height().await;
+        let version = get_version_at_height(blockchain.get_network(), height);
         let block_time_target = get_block_time_target_for_version(version);
         // SAFE: f64 for display/monitoring only, not consensus-critical
         let network_hashrate: f64 =
@@ -691,7 +709,7 @@ async fn verify_chain<S: Storage>(
     let topoheight = if args.has_argument("topoheight") {
         args.get_value("topoheight")?.to_number()?
     } else {
-        blockchain.get_topo_height()
+        blockchain.get_topo_height().await
     };
 
     if log::log_enabled!(log::Level::Info) {
@@ -1649,7 +1667,7 @@ async fn pop_blocks<S: Storage>(
         let blockchain: &Arc<Blockchain<S>> = context.get()?;
         blockchain.clone()
     };
-    if amount == 0 || amount >= blockchain.get_topo_height() {
+    if amount == 0 || amount >= blockchain.get_topo_height().await {
         return Err(anyhow::anyhow!("Invalid amount of blocks to pop").into());
     }
 
@@ -1728,6 +1746,84 @@ async fn snapshot_mode<S: Storage>(
     Ok(())
 }
 
+// Import a block from hexadecimal format
+async fn import_block<S: Storage>(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let blockchain = {
+        let context = manager.get_context().lock()?;
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        blockchain.clone()
+    };
+    let prompt = manager.get_prompt();
+
+    let hex = if args.has_argument("hex") {
+        args.get_value("hex")?.to_string_value()?
+    } else {
+        prompt
+            .read_input("Block hex: ", false)
+            .await
+            .context("Error while reading block hex")?
+    };
+
+    use tos_common::block::Block;
+    let block = Block::from_hex(&hex).context("Error parsing block from hex")?;
+    let hash = block.hash();
+
+    if blockchain
+        .has_block(&hash)
+        .await
+        .context("Error while checking block existence")?
+    {
+        let mut storage = blockchain.get_storage().write().await;
+        debug!("storage write acquired for block forced re-execution");
+
+        storage
+            .delete_block_with_hash(&hash)
+            .await
+            .context("Error while deleting block")?;
+        let mut tips = storage
+            .get_tips()
+            .await
+            .context("Error while getting tips")?;
+        if tips.remove(&hash) {
+            debug!("Block {} was a tip, removing it from tips", hash);
+            storage
+                .store_tips(&tips)
+                .await
+                .context("Error while storing tips")?;
+        }
+
+        let mut blocks = storage
+            .get_blocks_at_height(block.get_height())
+            .await
+            .context("Error while getting blocks at height")?;
+        if blocks.shift_remove(&hash) {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} was at height {}, removing it from blocks at height",
+                    hash,
+                    block.get_height()
+                );
+            }
+            storage
+                .set_blocks_at_height(&blocks, block.get_height())
+                .await
+                .context("Error while setting blocks at height")?;
+        }
+    }
+
+    blockchain
+        .add_new_block(block, PreVerifyBlock::None, BroadcastOption::None, false)
+        .await
+        .context("Error while importing block")?;
+
+    manager.message("Block imported successfully");
+
+    Ok(())
+}
+
 // add manually a TX in mempool
 async fn add_tx<S: Storage>(
     manager: &CommandManager,
@@ -1798,10 +1894,10 @@ async fn status<S: Storage>(
 
     debug!("Retrieving blockchain status");
 
-    let height = blockchain.get_height();
-    let topoheight = blockchain.get_topo_height();
-    let stableheight = blockchain.get_stable_height();
-    let stable_topoheight = blockchain.get_stable_topoheight();
+    let height = blockchain.get_height().await;
+    let topoheight = blockchain.get_topo_height().await;
+    let stableheight = blockchain.get_stable_height().await;
+    let stable_topoheight = blockchain.get_stable_topoheight().await;
     let difficulty = blockchain.get_difficulty().await;
 
     debug!("Retrieving blockchain info from storage");
@@ -2038,7 +2134,7 @@ async fn clear_caches<S: Storage>(
     let mut storage = blockchain.get_storage().write().await;
 
     storage
-        .clear_caches()
+        .clear_objects_cache()
         .await
         .context("Error while clearing caches")?;
     manager.message("Caches cleared");
@@ -2176,7 +2272,8 @@ async fn difficulty_dataset<S: Storage>(
     };
 
     manager.message("Creating difficulty dataset...");
-    for topoheight in 0..=blockchain.get_topo_height() {
+    let current_topoheight = blockchain.get_topo_height().await;
+    for topoheight in 0..=current_topoheight {
         // Retrieve block hash and header
         let (solve_time, difficulty, version, timestamp) = {
             let storage = blockchain.get_storage().read().await;
@@ -2283,7 +2380,7 @@ async fn mine_block<S: Storage>(
         blockchain
             .add_new_block(
                 block,
-                Some(Immutable::Owned(block_hash)),
+                PreVerifyBlock::Hash(Immutable::Owned(block_hash)),
                 BroadcastOption::All,
                 true,
             )
@@ -2319,6 +2416,78 @@ async fn add_peer<S: Storage>(
             manager.error("P2P is not enabled");
         }
     };
+
+    Ok(())
+}
+
+async fn show_block_execution_position<S: Storage>(
+    manager: &CommandManager,
+    _: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let prompt = manager.get_prompt();
+    let storage = blockchain.get_storage().read().await;
+
+    let hash = prompt
+        .read_hash("Block hash: ")
+        .await
+        .context("Error while reading block hash")?;
+
+    let position = storage
+        .get_block_position_in_order(&hash)
+        .await
+        .context("Error while retrieving block execution position")?;
+
+    manager.message(format!(
+        "Block {} is at execution position {}",
+        hash, position
+    ));
+
+    Ok(())
+}
+
+async fn circulating_supply_dataset<S: Storage>(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
+    let output_path = if arguments.has_argument("output") {
+        arguments.get_value("output")?.to_string_value()?
+    } else {
+        "circulating_supply_dataset.csv".to_string()
+    };
+
+    manager.message(format!("Creating file {}...", output_path));
+    let mut file = File::create(&output_path).context("Error while creating file")?;
+    file.write_all(b"topoheight,circulating_supply\n")
+        .context("Error while writing header to file")?;
+
+    let context = manager.get_context().lock()?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    manager.message("Creating circulating supply dataset...");
+    let storage = blockchain.get_storage().read().await;
+    let top_topoheight = blockchain.get_topo_height().await;
+
+    for topoheight in (0..=top_topoheight).rev() {
+        let emitted_supply = storage
+            .get_supply_at_topo_height(topoheight)
+            .await
+            .context("Error while retrieving emitted supply")?;
+        let burned_supply = storage
+            .get_burned_supply_at_topo_height(topoheight)
+            .await
+            .context("Error while retrieving burned supply")?;
+        let circulating_supply = emitted_supply.saturating_sub(burned_supply);
+
+        // Write to file
+        file.write_all(format!("{},{}\n", topoheight, circulating_supply).as_bytes())
+            .context("Error while writing to file")?;
+    }
+
+    manager.message("Flushing file...");
+    file.flush().context("Error while flushing file")?;
+    manager.message(format!("Dataset written to {}", output_path));
 
     Ok(())
 }

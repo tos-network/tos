@@ -1,3 +1,4 @@
+use crate::core::storage::Direction;
 use crate::core::{
     error::BlockchainError,
     storage::{
@@ -6,7 +7,6 @@ use crate::core::{
     },
 };
 use log::trace;
-use rocksdb::Direction;
 use tos_common::{block::TopoHeight, serializer::RawBytes, versioned_type::Versioned};
 
 mod asset;

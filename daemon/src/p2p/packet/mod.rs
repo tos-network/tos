@@ -1,5 +1,6 @@
 mod bootstrap;
 mod chain;
+mod flags;
 mod handshake;
 mod inventory;
 mod object;
@@ -17,6 +18,7 @@ use tos_common::{
 
 pub use bootstrap::*;
 pub use chain::*;
+pub use flags::Flags;
 pub use handshake::*;
 pub use inventory::*;
 pub use object::*;

@@ -7,13 +7,13 @@
 // - (contract, topic0) for event signature filtering
 
 use crate::core::error::BlockchainError;
+use crate::core::storage::Direction;
 use crate::core::storage::{
     rocksdb::{Column, IteratorMode},
     ContractEventProvider, RocksStorage, StoredContractEvent, MAX_EVENTS_PER_QUERY,
 };
 use async_trait::async_trait;
 use log::trace;
-use rocksdb::Direction;
 use tos_common::{
     block::TopoHeight,
     crypto::Hash,

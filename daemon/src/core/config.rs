@@ -294,6 +294,34 @@ pub struct P2pConfig {
     #[clap(long)]
     #[serde(default)]
     pub allow_priority_blocks: bool,
+    /// Only allow chain reorganization requests from priority nodes.
+    ///
+    /// When enabled, non-priority nodes cannot trigger chain reorganizations.
+    /// This is a security feature to prevent potential attacks from untrusted peers.
+    ///
+    /// By default, this is disabled.
+    #[clap(name = "p2p-reorg-from-priority-only", long)]
+    #[serde(default)]
+    pub reorg_from_priority_only: bool,
+    /// During the sync from peers, only sync from priority nodes.
+    ///
+    /// This is useful to ensure that we only sync from trusted nodes.
+    ///
+    /// By default, this is disabled.
+    #[clap(name = "p2p-sync-from-priority-only", long)]
+    #[serde(default)]
+    pub sync_from_priority_only: bool,
+    /// Experimental: Enable compression for packets being sent to peers.
+    ///
+    /// Compression is done using the Snappy algorithm.
+    /// It is only used for packets greater than 1 KiB.
+    /// This is useful to reduce the bandwidth usage when having several peers.
+    /// Note that it may increase the CPU usage due to the compression/decompression.
+    ///
+    /// By default, this is disabled.
+    #[clap(name = "p2p-enable-compression", long)]
+    #[serde(default)]
+    pub enable_compression: bool,
     /// Configure the maximum chain response size.
     ///
     /// This is useful for low devices who want to reduce resources usage
@@ -478,6 +506,12 @@ pub struct Config {
     #[clap(long, default_value_t = detect_available_parallelism())]
     #[serde(default = "detect_available_parallelism")]
     pub txs_verification_threads_count: usize,
+    /// Set the threads count to use during block pre-verification (PoW hash computation).
+    /// This limits concurrent pre-verification to prevent resource exhaustion.
+    /// By default, will detect the best value based on available parallelism.
+    #[clap(long, default_value_t = detect_available_parallelism())]
+    #[serde(default = "detect_available_parallelism")]
+    pub pre_verify_block_threads_count: usize,
     /// Enable the DB integrity check that happen on chain initialization.
     /// This may take some times on huge DB as it's iterating through all versioned data
     /// to verify that no pointer or version is above our current topoheight.

@@ -1,3 +1,4 @@
+pub mod compression;
 pub mod connection;
 pub mod diffie_hellman;
 pub mod error;
@@ -14,7 +15,7 @@ pub use encryption::EncryptionKey;
 use crate::{
     config::*,
     core::{
-        blockchain::{Blockchain, BroadcastOption},
+        blockchain::{Blockchain, BroadcastOption, PreVerifyBlock},
         config::ProxyKind,
         error::BlockchainError,
         hard_fork,
@@ -56,10 +57,7 @@ use tos_common::{
     api::daemon::{Direction, NotifyEvent, PeerPeerDisconnectedEvent, TimedDirection},
     block::{Block, BlockHeader, TopoHeight},
     config::{TIPS_LIMIT, VERSION},
-    crypto::{
-        random::{secure_random_u32, secure_random_u64},
-        Hash, Hashable,
-    },
+    crypto::{random::secure_random_u64, Hash, Hashable},
     difficulty::CumulativeDifficulty,
     immutable::Immutable,
     serializer::Serializer,
@@ -128,12 +126,6 @@ pub struct P2pServer<S: Storage> {
     // Configured exclusive nodes
     // If not empty, no other peer than those listed can connect to this node
     exclusive_nodes: IndexSet<SocketAddr>,
-    // Are we allowing others nodes to share us as a potential peer ?
-    // Also if we allows to be listed in get_peers RPC API
-    shareable: bool,
-    // Disable fast sync support for others peers
-    // If set to true, other nodes will not be able to use the fast sync mode with us
-    disable_fast_sync_support: bool,
     // How many outgoing peers we want to have
     // Set to 0 for none
     max_outgoing_peers: usize,
@@ -160,6 +152,12 @@ pub struct P2pServer<S: Storage> {
     temp_ban_time: u64,
     // Fail count threshold to ban a peer
     fail_count_limit: u8,
+    // Only allow reorg from priority nodes
+    // This prevents non-priority nodes from triggering chain reorganizations
+    reorg_from_priority_only: bool,
+    // Only sync from priority nodes
+    // This prevents syncing from untrusted nodes
+    sync_from_priority_only: bool,
     // Sender used to notify the ping loop
     notify_ping_loop: mpsc::Sender<()>,
     // This is used to reexecute blocks on chain sync
@@ -175,6 +173,8 @@ pub struct P2pServer<S: Storage> {
     // Proxy address to use in case we try to connect
     // to an outgoing peer
     proxy: Option<(ProxyKind, SocketAddr, Option<(String, String)>)>,
+    // Flags to use in handshake
+    flags: packet::Flags,
 }
 
 impl<S: Storage> P2pServer<S> {
@@ -197,11 +197,14 @@ impl<S: Storage> P2pServer<S> {
         stream_concurrency: usize,
         temp_ban_time: u64,
         fail_count_limit: u8,
+        reorg_from_priority_only: bool,
+        sync_from_priority_only: bool,
         disable_reexecute_blocks_on_sync: bool,
         block_propagation_log_level: log::Level,
         disable_fetching_txs_propagated: bool,
         handle_peer_packets_in_dedicated_task: bool,
         disable_fast_sync_support: bool,
+        enable_compression: bool,
         proxy: Option<(ProxyKind, SocketAddr, Option<(String, String)>)>,
     ) -> Result<Arc<Self>, P2pError> {
         if tag
@@ -278,8 +281,6 @@ impl<S: Storage> P2pServer<S> {
             allow_boost_sync_mode,
             max_chain_response_size,
             exclusive_nodes: IndexSet::from_iter(exclusive_nodes.into_iter()),
-            shareable,
-            disable_fast_sync_support,
             allow_priority_blocks,
             is_syncing: AtomicBool::new(false),
             syncing_rate_bps: AtomicU64::new(0),
@@ -290,12 +291,27 @@ impl<S: Storage> P2pServer<S> {
             stream_concurrency,
             temp_ban_time,
             fail_count_limit,
+            reorg_from_priority_only,
+            sync_from_priority_only,
             notify_ping_loop: ping_sender,
             disable_reexecute_blocks_on_sync,
             block_propagation_log_level,
             disable_fetching_txs_propagated,
             handle_peer_packets_in_dedicated_task,
             proxy,
+            flags: {
+                let mut flags = packet::Flags::new(packet::Flags::NONE);
+                if shareable {
+                    flags.insert(packet::Flags::SHARED);
+                }
+                if enable_compression {
+                    flags.insert(packet::Flags::COMPRESSION);
+                }
+                if disable_fast_sync_support {
+                    flags.insert(packet::Flags::DISABLE_FAST_SYNC);
+                }
+                flags
+            },
         };
 
         let arc = Arc::new(server);
@@ -581,7 +597,7 @@ impl<S: Storage> P2pServer<S> {
         // check if the version of this peer is allowed
         if !hard_fork::is_version_allowed_at_height(
             self.blockchain.get_network(),
-            self.blockchain.get_height(),
+            self.blockchain.get_height().await,
             handshake.get_version(),
         )
         .map_err(|e| P2pError::InvalidP2pVersion(e.to_string()))?
@@ -599,7 +615,7 @@ impl<S: Storage> P2pServer<S> {
         let storage = self.blockchain.get_storage().read().await;
         debug!("storage lock acquired for building handshake");
         let (block, top_hash) = storage.get_top_block_header().await?;
-        let topoheight = self.blockchain.get_topo_height();
+        let topoheight = self.blockchain.get_topo_height().await;
         let pruned_topoheight = storage.get_pruned_topoheight().await?;
         let cumulative_difficulty = storage
             .get_cumulative_difficulty_for_block_hash(&top_hash)
@@ -625,8 +641,7 @@ impl<S: Storage> P2pServer<S> {
             Cow::Borrowed(&top_hash),
             genesis_block,
             Cow::Borrowed(&cumulative_difficulty),
-            self.shareable,
-            !self.disable_fast_sync_support,
+            self.flags,
         );
         Ok(Packet::Handshake(Cow::Owned(handshake)).to_bytes())
     }
@@ -716,6 +731,17 @@ impl<S: Storage> P2pServer<S> {
 
         // if we reach here, handshake is all good, we can start listening this new peer
         connection.set_state(State::Success);
+
+        // Check if both peers support compression and enable it
+        if self.flags.contains(packet::Flags::COMPRESSION) && handshake.supports_compression() {
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Enabling compression with {}", connection.get_address());
+            }
+            connection
+                .compression_mut()
+                .enable()
+                .map_err(P2pError::CompressionError)?;
+        }
 
         Ok(handshake)
     }
@@ -896,8 +922,8 @@ impl<S: Storage> P2pServer<S> {
                 .await?;
             (cumulative_difficulty, top_block_hash, pruned_topoheight)
         };
-        let highest_topo_height = self.blockchain.get_topo_height();
-        let highest_height = self.blockchain.get_height();
+        let highest_topo_height = self.blockchain.get_topo_height().await;
+        let highest_height = self.blockchain.get_height().await;
         let new_peers = IndexSet::new();
         Ok(Ping::new(
             Cow::Owned(block_top_hash),
@@ -938,8 +964,8 @@ impl<S: Storage> P2pServer<S> {
             let storage = self.blockchain.get_storage().read().await;
 
             // We read those after having the storage locked to prevent issue
-            let our_height = self.blockchain.get_height();
-            let our_topoheight = self.blockchain.get_topo_height();
+            let our_height = self.blockchain.get_height().await;
+            let our_topoheight = self.blockchain.get_topo_height().await;
 
             debug!("storage locked for cumulative difficulty");
             let hash = storage.get_hash_at_topo_height(our_topoheight).await?;
@@ -959,18 +985,28 @@ impl<S: Storage> P2pServer<S> {
             debug!("{} peers available for selection", available_peers.len());
         }
 
-        let mut peers = stream::iter(available_peers)
+        // Collect peers with their cumulative difficulty for sorting
+        let mut peers: Vec<(Arc<Peer>, CumulativeDifficulty)> = stream::iter(available_peers)
             .map(|p| async move {
                 // Don't select peers that are on a bad chain
-                if p.has_sync_chain_failed() {
+                // Priority peers are allowed to retry even after sync failure
+                if p.has_sync_chain_failed() && !p.is_priority() {
                     if log_enabled!(Level::Debug) {
                         debug!("{} has failed chain sync before, skipping...", p);
                     }
                     return None;
                 }
 
-                // Avoid selecting peers that have a weaker cumulative difficulty than us
-                {
+                // If sync_from_priority_only is enabled, skip non-priority nodes
+                if self.sync_from_priority_only && !p.is_priority() {
+                    if log_enabled!(Level::Debug) {
+                        debug!("{} is not a priority node for syncing, skipping...", p);
+                    }
+                    return None;
+                }
+
+                // Get and check cumulative difficulty
+                let peer_cumulative_difficulty = {
                     let cumulative_difficulty = p.get_cumulative_difficulty().lock().await;
                     if *cumulative_difficulty <= our_cumulative_difficulty {
                         if log_enabled!(Level::Debug) {
@@ -978,7 +1014,8 @@ impl<S: Storage> P2pServer<S> {
                         }
                         return None;
                     }
-                }
+                    *cumulative_difficulty
+                };
 
                 let peer_topoheight = p.get_topoheight();
                 if fast_sync {
@@ -1035,7 +1072,7 @@ impl<S: Storage> P2pServer<S> {
                     if log::log_enabled!(log::Level::Debug) {
                         debug!("{} is a candidate for chain sync, our topoheight: {}, our height: {}", p, our_topoheight, our_height);
                     }
-                    Some(p)
+                    Some((p, peer_cumulative_difficulty))
                 } else {
                     trace!("{} is not ahead of us, skipping it", p);
                     None
@@ -1043,7 +1080,7 @@ impl<S: Storage> P2pServer<S> {
             })
             .buffer_unordered(self.stream_concurrency)
             .filter_map(|x| async move { x })
-            .collect::<IndexSet<_>>()
+            .collect::<Vec<_>>()
             .await;
 
         // Try to not reuse the same peer between each sync if we had an error
@@ -1052,26 +1089,36 @@ impl<S: Storage> P2pServer<S> {
             // and that we have still another peer for syncing, remove previous peer
             if peers.len() > 1 && (err && !priority) {
                 debug!(
-                    "removing previous peer {} from random selection, err: {}, priority: {}",
+                    "removing previous peer {} from selection, err: {}, priority: {}",
                     previous_peer, err, priority
                 );
-                // We don't need to preserve the order
-                if let Some(position) = peers.iter().position(|p| p.get_id() == previous_peer) {
-                    peers.swap_remove_index(position);
-                }
+                // Remove the previous peer from the list
+                peers.retain(|(p, _)| p.get_id() != previous_peer);
             }
         }
 
         let count = peers.len();
-        debug!("filtered peers available for random selection: {}", count);
+        debug!("filtered peers available for selection: {}", count);
         if count == 0 {
             return Ok(None);
         }
 
-        // SECURITY: Use cryptographically secure random for peer selection
-        let selected = (secure_random_u32() as usize) % count;
-        // clone the Arc to prevent the lock until the end of the sync request
-        Ok(peers.swap_remove_index(selected))
+        // If we have priority nodes, select from them exclusively
+        // They are called "priority" for a reason
+        let priority_peers: Vec<_> = peers
+            .iter()
+            .filter(|(p, _)| p.is_priority())
+            .cloned()
+            .collect();
+
+        if !priority_peers.is_empty() {
+            debug!("selecting from {} priority peers", priority_peers.len());
+            peers = priority_peers;
+        }
+
+        // Sort by cumulative difficulty descending and select the best peer
+        peers.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+        Ok(Some(peers.swap_remove(0).0))
     }
 
     // Check if user has allowed fast sync mode
@@ -1144,7 +1191,7 @@ impl<S: Storage> P2pServer<S> {
                 trace!("locking peer list for fast sync check");
                 let peerlist = self.peer_list.get_peers().read().await;
                 trace!("peer list locked for fast sync check");
-                let our_topoheight = self.blockchain.get_topo_height();
+                let our_topoheight = self.blockchain.get_topo_height().await;
                 peerlist
                     .values()
                     .find(|p| {
@@ -1223,7 +1270,7 @@ impl<S: Storage> P2pServer<S> {
                 warned = false;
             } else {
                 if !self.allow_fast_sync() && self.get_peer_count().await > 0 && !warned {
-                    let our_topoheight = self.blockchain.get_topo_height();
+                    let our_topoheight = self.blockchain.get_topo_height().await;
                     let has_peer = self
                         .peer_list
                         .get_cloned_peers()
@@ -1681,7 +1728,7 @@ impl<S: Storage> P2pServer<S> {
                                 }
 
                                 debug!("Adding received block {} from {} to chain", block_hash, peer);
-                                if let Err(e) = zelf.blockchain.add_new_block(block, Some(Immutable::Arc(block_hash.clone())), BroadcastOption::All, false).await {
+                                if let Err(e) = zelf.blockchain.add_new_block(block, PreVerifyBlock::Hash(Immutable::Arc(block_hash.clone())), BroadcastOption::All, false).await {
                                     warn!("Error while adding new block {} from {}: {}", block_hash, peer, e);
                                     peer.increment_fail_count();
                                 } else {
@@ -2038,7 +2085,7 @@ impl<S: Storage> P2pServer<S> {
         }
 
         // verify that we are synced with him to receive all TXs correctly
-        let our_height = self.blockchain.get_height();
+        let our_height = self.blockchain.get_height().await;
         let peer_height = peer.get_height();
         if our_height == peer_height {
             if let Err(e) = self.request_inventory_of(&peer).await {
@@ -2901,7 +2948,7 @@ impl<S: Storage> P2pServer<S> {
 
     // determine if we are connected to a priority node and that this node is equal / greater to our chain
     async fn is_connected_to_a_synced_priority_node(&self) -> bool {
-        let topoheight = self.blockchain.get_topo_height();
+        let topoheight = self.blockchain.get_topo_height().await;
         trace!("locking peer list for checking if connected to a synced priority node");
 
         for peer in self.peer_list.get_peers().read().await.values() {
@@ -2930,6 +2977,11 @@ impl<S: Storage> P2pServer<S> {
         self.peer_id
     }
 
+    // Get the flags used in handshake
+    pub fn get_flags(&self) -> &packet::Flags {
+        &self.flags
+    }
+
     // Check if we are accepting new connections by verifying if we have free slots available
     pub async fn accept_new_connections(&self) -> bool {
         self.get_peer_count().await < self.get_max_peers()
@@ -2947,7 +2999,7 @@ impl<S: Storage> P2pServer<S> {
 
     // Returns the median topoheight based on all peers
     pub async fn get_median_topoheight_of_peers(&self) -> TopoHeight {
-        let topoheight = self.blockchain.get_topo_height();
+        let topoheight = self.blockchain.get_topo_height().await;
         self.peer_list.get_median_topoheight(Some(topoheight)).await
     }
 
@@ -3233,7 +3285,7 @@ impl<S: Storage> P2pServer<S> {
         storage: &S,
     ) -> Result<IndexSet<BlockId>, BlockchainError> {
         let mut blocks = IndexSet::new();
-        let topoheight = self.blockchain.get_topo_height();
+        let topoheight = self.blockchain.get_topo_height().await;
         let pruned_topoheight = storage.get_pruned_topoheight().await?.unwrap_or(0);
         let mut i = 0;
 

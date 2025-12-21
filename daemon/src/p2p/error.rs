@@ -1,4 +1,5 @@
 use super::{
+    compression::CompressionError,
     encryption::EncryptionError,
     packet::{ObjectRequest, OwnedObjectResponse, StepKind},
     peer_list::DiskError,
@@ -210,9 +211,13 @@ pub enum P2pError {
     #[error(transparent)]
     EncryptionError(#[from] EncryptionError),
     #[error(transparent)]
+    CompressionError(#[from] CompressionError),
+    #[error(transparent)]
     Any(#[from] Error),
     #[error("Fast sync is disabled on this peer")]
     FastSyncDisabled,
+    #[error("Reorg from non-priority node is disabled")]
+    ReorgFromPriorityOnly,
 }
 
 impl From<BlockchainError> for P2pError {

@@ -3,8 +3,14 @@ mod providers;
 
 pub mod constants;
 pub mod rocksdb;
+pub mod snapshot;
 
-pub use self::{providers::*, rocksdb::RocksStorage};
+pub use self::{
+    cache::{ChainCache, CounterCache, ObjectsCache, StorageCache},
+    providers::*,
+    rocksdb::RocksStorage,
+    snapshot::{BytesView, Changes, Direction, EntryState, IteratorMode, Snapshot},
+};
 
 use crate::{config::PRUNE_SAFETY_LIMIT, core::error::BlockchainError};
 use async_trait::async_trait;
@@ -187,9 +193,39 @@ pub trait Storage:
 
         trace!("Cleaning caches");
         // Clear all caches to not have old data after rewind
-        self.clear_caches().await?;
+        self.clear_objects_cache().await?;
 
         trace!("Storing new pointers");
+
+        // Validate tips before storing
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "New tips: {}",
+                tips.iter()
+                    .map(|h| h.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
+        }
+
+        for tip in tips.clone() {
+            // Check if tip block still exists
+            if !self.has_block_with_hash(&tip).await? {
+                warn!("Tip {} does not exist anymore, removing", tip);
+                tips.remove(&tip);
+            }
+
+            // Verify reachability by one depth
+            // If a tip is reachable from another tip, it should not be a tip
+            let past_blocks = self.get_past_blocks_for_block_hash(&tip).await?;
+            for past_tip in past_blocks.iter() {
+                if tips.contains(past_tip) {
+                    warn!("Tip {} is reachable from tip {}, removing", past_tip, tip);
+                    tips.remove(past_tip);
+                }
+            }
+        }
+
         // store the new tips and topo topoheight
         self.store_tips(&tips).await?;
         self.set_top_topoheight(topoheight).await?;

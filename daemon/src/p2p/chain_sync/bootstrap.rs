@@ -13,7 +13,7 @@ use tos_common::{
 };
 
 use crate::{
-    config::PRUNE_SAFETY_LIMIT,
+    config::{DEV_PUBLIC_KEY, PRUNE_SAFETY_LIMIT},
     core::{
         error::BlockchainError,
         storage::{
@@ -24,8 +24,8 @@ use crate::{
     p2p::{
         error::P2pError,
         packet::{
-            BlockMetadata, BootstrapChainRequest, BootstrapChainResponse, ObjectRequest, Packet,
-            StepRequest, StepResponse, MAX_ITEMS_PER_PAGE,
+            BlockMetadata, BootstrapChainRequest, BootstrapChainResponse, Flags, ObjectRequest,
+            Packet, StepRequest, StepResponse, MAX_ITEMS_PER_PAGE,
         },
         P2pServer, Peer,
     },
@@ -41,7 +41,7 @@ impl<S: Storage> P2pServer<S> {
         request: BootstrapChainRequest<'_>,
     ) -> Result<(), BlockchainError> {
         // Check if fast sync support is disabled
-        if self.disable_fast_sync_support {
+        if self.flags.contains(Flags::DISABLE_FAST_SYNC) {
             debug!("Fast sync is disabled, ignoring bootstrap chain request");
             return Err(P2pError::FastSyncDisabled.into());
         }
@@ -57,7 +57,8 @@ impl<S: Storage> P2pServer<S> {
         let storage = self.blockchain.get_storage().read().await;
         let pruned_topoheight = storage.get_pruned_topoheight().await?.unwrap_or(0);
         if let Some(topoheight) = request.get_requested_topoheight() {
-            let our_topoheight = self.blockchain.get_topo_height();
+            let chain_cache = storage.chain_cache().await;
+            let our_topoheight = chain_cache.topoheight;
             if
             // Special case, spendable balances needs to go below the pruned point because we store versions
             // at precise topoheight.
@@ -70,12 +71,10 @@ impl<S: Storage> P2pServer<S> {
             }
 
             // Check that the block is in stable topoheight
-            if topoheight > self.blockchain.get_stable_topoheight() {
+            if topoheight > chain_cache.stable_topoheight {
                 warn!(
                     "Requested topoheight {} is not stable ({}), ignoring {:?}",
-                    topoheight,
-                    self.blockchain.get_stable_topoheight(),
-                    request_kind
+                    topoheight, chain_cache.stable_topoheight, request_kind
                 );
                 return Err(P2pError::InvalidRequestedTopoheight.into());
             }
@@ -116,6 +115,18 @@ impl<S: Storage> P2pServer<S> {
                     None
                 };
                 StepResponse::Assets(assets, page)
+            }
+            StepRequest::AssetsSupply(topoheight, assets) => {
+                let mut supplies = IndexMap::with_capacity(assets.len());
+                for asset in assets.iter() {
+                    if let Some((_, versioned)) = storage
+                        .get_asset_supply_at_maximum_topoheight(asset, topoheight)
+                        .await?
+                    {
+                        supplies.insert(asset.clone(), *versioned.get());
+                    }
+                }
+                StepResponse::AssetsSupply(supplies)
             }
             StepRequest::KeyBalances(key, min, max, page) => {
                 if min > max {
@@ -159,16 +170,26 @@ impl<S: Storage> P2pServer<S> {
                     return Err(P2pError::InvalidPacket.into());
                 }
 
-                if max > self.blockchain.get_stable_topoheight() {
-                    if log_enabled!(Level::Warn) {
-                        warn!("Requested spendable balances...");
-                    }
+                let chain_cache = storage.chain_cache().await;
+                if max > chain_cache.stable_topoheight {
+                    warn!(
+                        "Requested spendable balances for topoheight {} but our stable topoheight is {}",
+                        max, chain_cache.stable_topoheight
+                    );
                     return Err(P2pError::InvalidRequestedTopoheight.into());
                 }
 
-                let (balances, next_max) = storage
+                let (balances, mut next_max) = storage
                     .get_spendable_balances_for(&key, &asset, min, max, MAX_ITEMS_PER_PAGE)
                     .await?;
+
+                // Because the dev public key may be updated at EACH block
+                // it will create a huge amount of data to load
+                // So we only give one round for it
+                if next_max.is_some() && &*key == &*DEV_PUBLIC_KEY {
+                    next_max = None;
+                }
+
                 StepResponse::SpendableBalances(balances, next_max)
             }
             StepRequest::Accounts(min, max, keys) => {
@@ -412,7 +433,7 @@ impl<S: Storage> P2pServer<S> {
         let start = Instant::now();
         info!("Starting fast sync with {}", peer);
 
-        let mut our_topoheight = self.blockchain.get_topo_height();
+        let mut our_topoheight = self.blockchain.get_topo_height().await;
         let is_fresh_sync = our_topoheight == 0;
 
         let mut stable_topoheight = 0;
@@ -789,7 +810,7 @@ impl<S: Storage> P2pServer<S> {
         );
 
         // Request its inventory
-        if self.blockchain.get_height() == peer.get_height() {
+        if self.blockchain.get_height().await == peer.get_height() {
             self.request_inventory_of(peer).await?;
         }
 

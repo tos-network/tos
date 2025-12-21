@@ -15,15 +15,29 @@ use std::{
 use tos_common::{
     block::Block,
     crypto::Hash,
+    difficulty::CumulativeDifficulty,
     immutable::Immutable,
     time::{get_current_time_in_millis, get_current_time_in_seconds, TimestampMillis},
-    tokio::{select, time::interval, Executor, Scheduler},
+    tokio::{
+        select,
+        sync::Mutex,
+        time::{interval, sleep},
+        Executor, Scheduler,
+    },
     transaction::Transaction,
 };
 
 use crate::{
-    config::{CHAIN_SYNC_TOP_BLOCKS, PEER_OBJECTS_CONCURRENCY, STABLE_LIMIT},
-    core::{blockchain::BroadcastOption, blockdag, error::BlockchainError, storage::Storage},
+    config::{
+        CHAIN_SYNC_DELAY, CHAIN_SYNC_TOP_BLOCKS, MILLIS_PER_SECOND, PEER_OBJECTS_CONCURRENCY,
+        STABLE_LIMIT,
+    },
+    core::{
+        blockchain::{BroadcastOption, PreVerifyBlock},
+        blockdag,
+        error::BlockchainError,
+        storage::Storage,
+    },
     p2p::{
         error::P2pError,
         packet::{ChainRequest, ObjectRequest, Packet, PacketWrapper},
@@ -38,7 +52,8 @@ use super::{
 pub use chain_validator::*;
 
 enum ResponseHelper {
-    Requested(Block, Immutable<Hash>),
+    /// Block was requested and received, with block hash and optional pre-computed pow_hash
+    Requested(Block, Immutable<Hash>, Option<Hash>),
     NotRequested(Immutable<Hash>),
 }
 
@@ -134,16 +149,17 @@ impl<S: Storage> P2pServer<S> {
         if let Some(common_point) = &common_point {
             let mut topoheight = common_point.get_topoheight();
             // lets add all blocks ordered hash
-            let top_topoheight = self.blockchain.get_topo_height();
+            let chain_cache = storage.chain_cache().await;
+            let top_topoheight = chain_cache.topoheight;
             // used to detect if we find unstable height for alt tips
             let mut unstable_height = None;
-            let top_height = self.blockchain.get_height();
+            let top_height = chain_cache.height;
             // check to see if we should search for alt tips (and above unstable height)
             let should_search_alt_tips =
                 top_topoheight - topoheight < accepted_response_size as u64;
             if should_search_alt_tips {
                 debug!("Peer is near to be synced, will send him alt tips blocks");
-                unstable_height = Some(self.blockchain.get_stable_height() + 1);
+                unstable_height = Some(chain_cache.stable_height + 1);
             }
 
             // Search the lowest height
@@ -174,7 +190,7 @@ impl<S: Storage> P2pServer<S> {
 
             // now, lets check if peer is near to be synced, and send him alt tips blocks
             if let Some(mut height) = unstable_height {
-                let top_height = self.blockchain.get_height();
+                // top_height already available from chain_cache above
                 trace!("unstable height: {}, top height: {}", height, top_height);
                 while height <= top_height && top_blocks.len() < CHAIN_SYNC_TOP_BLOCKS {
                     trace!("get blocks at height {} for top blocks", height);
@@ -226,6 +242,219 @@ impl<S: Storage> P2pServer<S> {
         Ok(())
     }
 
+    /// Iteratively request the peer's chain in chunks and validate it
+    /// This method will request blocks starting from a common point until we have enough blocks to validate the pop_count
+    /// or until we find that the peer has a higher cumulative difficulty
+    async fn validate_peer_chain(
+        &self,
+        peer: &Arc<Peer>,
+        common_topoheight: u64,
+        pop_count: u64,
+        current_cumulative_difficulty: &CumulativeDifficulty,
+        initial_blocks: IndexSet<Hash>,
+        requested_max_size: usize,
+    ) -> Result<ChainValidator<'_, S>, BlockchainError> {
+        let chain_validator = Mutex::new(ChainValidator::new(&self.blockchain));
+        let mut all_blocks = initial_blocks;
+        let mut expected_topoheight = common_topoheight + 1;
+        let mut total_validated = 0u64;
+        let mut processed = IndexSet::new();
+
+        let capacity = if self.allow_boost_sync() {
+            debug!("Requesting needed blocks in boost sync mode");
+            Some(PEER_OBJECTS_CONCURRENCY)
+        } else {
+            Some(1)
+        };
+
+        // Continue requesting chunks until we have enough blocks to validate pop_count
+        // or until we find higher cumulative difficulty
+        while total_validated < pop_count {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Validating chunk at topoheight {}, total validated: {}/{}",
+                    expected_topoheight, total_validated, pop_count
+                );
+            }
+            let Some(last_block) = all_blocks.last().cloned() else {
+                debug!("No more blocks to validate from peer {}", peer);
+                break;
+            };
+
+            // Request blocks from the peer in chunks
+            let mut futures = Scheduler::new(capacity);
+            for hash in all_blocks.drain(..) {
+                let hash = Arc::new(hash);
+                if !processed.insert(hash.clone()) {
+                    warn!(
+                        "Block {} was already processed for chain validation, skipping",
+                        hash
+                    );
+                    continue;
+                }
+
+                trace!("Request block {} for chain validator", hash);
+
+                let fut = async {
+                    // check if we already have the block to not request it
+                    if self.blockchain.has_block(&hash).await? {
+                        trace!("We already have block {}, skipping", hash);
+                        return Ok((None, hash));
+                    }
+
+                    peer.request_blocking_object(ObjectRequest::BlockHeader(Immutable::Arc(
+                        hash.clone(),
+                    )))
+                    .await?
+                    .into_block_header()
+                    .map(|(block, _)| (Some(block), hash))
+                };
+
+                futures.push_back(fut);
+            }
+
+            // Process the chunk
+            let mut blocks_executor = Executor::new();
+            let mut exit_signal = self.exit_sender.subscribe();
+            let mut validated_in_chunk = 0u64;
+            let mut found_higher_difficulty = false;
+
+            'chunk: loop {
+                select! {
+                    biased;
+                    _ = exit_signal.recv() => {
+                        debug!("Stopping chain validator due to exit signal");
+                        return Err(P2pError::Disconnected.into());
+                    },
+                    Some(res) = blocks_executor.next() => {
+                        if res? {
+                            debug!("Higher cumulative difficulty found during validation");
+                            found_higher_difficulty = true;
+                            drop(futures);
+                            break 'chunk;
+                        }
+                        futures.increment_n();
+                    },
+                    next = futures.next() => {
+                        let Some(res) = next else {
+                            debug!("No more items in futures for chunk validator");
+                            break 'chunk;
+                        };
+
+                        let (block, hash) = res?;
+                        futures.decrement_n();
+                        let chain_validator = &chain_validator;
+                        let current_expected_topoheight = expected_topoheight;
+                        blocks_executor.push_back(async move {
+                            let mut chain_validator = chain_validator.lock().await;
+                            chain_validator
+                                .insert_block(hash, block, current_expected_topoheight)
+                                .await?;
+                            chain_validator
+                                .has_higher_cumulative_difficulty(current_cumulative_difficulty)
+                                .await
+                        });
+
+                        expected_topoheight += 1;
+                        validated_in_chunk += 1;
+                    }
+                };
+            }
+
+            total_validated += validated_in_chunk;
+
+            // If we found higher difficulty or validated enough, stop
+            if found_higher_difficulty || total_validated >= pop_count {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Stopping validation from peer {} (higher difficulty: {}, total validated: {}/{})",
+                        peer, found_higher_difficulty, total_validated, pop_count
+                    );
+                }
+                break;
+            }
+
+            // If we processed all available blocks but still need more, request another chunk
+            if total_validated < pop_count {
+                info!(
+                    "Requesting more blocks from peer for validation using last block {}",
+                    last_block
+                );
+                // Request the next chunk from the peer
+                let packet = {
+                    let storage = self.blockchain.get_storage().read().await;
+                    let mut blocks_id = IndexSet::new();
+                    // Start from where we left off
+                    blocks_id.insert(BlockId::new(last_block, expected_topoheight - 1));
+
+                    let genesis_block = storage.get_hash_at_topo_height(0).await?;
+                    blocks_id.insert(BlockId::new(genesis_block, 0));
+
+                    let request = ChainRequest::new(blocks_id, requested_max_size as u16);
+                    let ping = self
+                        .build_generic_ping_packet_with_storage(&*storage)
+                        .await?;
+                    PacketWrapper::new(Cow::Owned(request), Cow::Owned(ping))
+                };
+
+                let last_sync_time = peer.get_last_chain_sync_out();
+                let current_time = get_current_time_in_millis();
+                let tmp = last_sync_time + (CHAIN_SYNC_DELAY * MILLIS_PER_SECOND);
+                if tmp > current_time {
+                    let wait_duration = Duration::from_millis(tmp - current_time);
+                    info!(
+                        "Waiting {:?} before requesting next chain chunk from {}",
+                        wait_duration, peer
+                    );
+
+                    sleep(wait_duration).await;
+                }
+
+                info!("Requesting additional chain chunk for validation");
+                let response = peer.request_sync_chain(packet).await;
+                peer.set_last_chain_sync_out(get_current_time_in_millis());
+                let response = match response {
+                    Ok(r) => r,
+                    Err(e) => {
+                        warn!("Error while waiting on next chain response: {}", e);
+                        break;
+                    }
+                };
+                if response.blocks_size() == 0 {
+                    warn!("Peer has no more blocks to send for validation");
+                    break;
+                }
+
+                let (new_blocks, _) = response.consume();
+                info!("Received {} new blocks for validation", new_blocks.len());
+                all_blocks.extend(new_blocks);
+            } else if validated_in_chunk == 0 {
+                debug!("No new blocks validated in this chunk, stopping validation");
+                // No progress made
+                break;
+            }
+        }
+
+        let chain_validator = chain_validator.into_inner();
+        if !chain_validator
+            .has_higher_cumulative_difficulty(current_cumulative_difficulty)
+            .await?
+        {
+            error!(
+                "{} sent us a chain response with lower cumulative difficulty than ours",
+                peer
+            );
+            return Err(BlockchainError::LowerCumulativeDifficulty);
+        }
+
+        warn!(
+            "Validated peer chain from {} with higher cumulative difficulty",
+            peer
+        );
+
+        Ok(chain_validator)
+    }
+
     // Handle the blocks from chain validator by requesting missing TXs from each header
     // We don't request the full block itself as we already have the block header
     // This may be faster, but we would use slightly more bandwidth
@@ -234,8 +463,7 @@ impl<S: Storage> P2pServer<S> {
     async fn handle_blocks_from_chain_validator(
         &self,
         peer: &Arc<Peer>,
-        mut chain_validator: ChainValidator<'_, S>,
-        blocks: IndexSet<Hash>,
+        chain_validator: ChainValidator<'_, S>,
     ) -> Result<(), BlockchainError> {
         // now retrieve all txs from all blocks header and add block in chain
 
@@ -247,16 +475,18 @@ impl<S: Storage> P2pServer<S> {
         };
 
         let mut scheduler = Scheduler::new(capacity);
-        for hash in blocks {
-            let hash = Immutable::Arc(Arc::new(hash));
+        for (hash, (_emulated_topoheight, data)) in chain_validator.blocks().into_iter() {
+            let hash = Immutable::Arc(hash);
             trace!("Processing block {} from chain validator", hash);
-            let header = chain_validator.get_block(&hash);
 
             let future = async move {
                 // we don't already have this block, lets retrieve its txs and add in our chain
                 if !self.blockchain.has_block(&hash).await? {
-                    let block = match header {
-                        Some(header) => {
+                    // Return (block, optional_pow_hash) tuple
+                    let (block, pow_hash) = match data {
+                        Some(data) => {
+                            let header = data.header;
+                            let cached_pow_hash = data.pow_hash;
                             let mut futures = FuturesOrdered::new();
                             let mut txs_to_request = 0;
                             for tx_hash in header.get_txs_hashes() {
@@ -288,26 +518,36 @@ impl<S: Storage> P2pServer<S> {
 
                             // If we have more than one request, lets request big block (for one time big packet)
                             if txs_to_request > 1 {
-                                debug!("requesting big block {} because we have more than one TX to request from peer", hash);
-                                peer.request_blocking_object(ObjectRequest::Block(hash.clone()))
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("requesting big block {} because we have more than one TX to request from peer", hash);
+                                }
+                                let block = peer
+                                    .request_blocking_object(ObjectRequest::Block(hash.clone()))
                                     .await?
                                     .into_block()?
-                                    .0
+                                    .0;
+                                // When requesting full block, we still have the cached pow_hash from validation
+                                (block, Some(cached_pow_hash))
                             } else {
                                 let transactions = futures.try_collect().await?;
                                 // Assemble back the block and add it to the chain
-                                Block::new(Immutable::Arc(header), transactions)
+                                let block = Block::new(Immutable::Arc(header), transactions);
+                                // Use cached pow_hash from chain validation
+                                (block, Some(cached_pow_hash))
                             }
                         }
                         None => {
-                            peer.request_blocking_object(ObjectRequest::Block(hash.clone()))
+                            let block = peer
+                                .request_blocking_object(ObjectRequest::Block(hash.clone()))
                                 .await?
                                 .into_block()?
-                                .0
+                                .0;
+                            // No cached pow_hash when we don't have BlockData
+                            (block, None)
                         }
                     };
 
-                    Ok::<_, BlockchainError>(ResponseHelper::Requested(block, hash))
+                    Ok::<_, BlockchainError>(ResponseHelper::Requested(block, hash, pow_hash))
                 } else {
                     Ok(ResponseHelper::NotRequested(hash))
                 }
@@ -337,7 +577,14 @@ impl<S: Storage> P2pServer<S> {
                 Some(res) = scheduler.next() => {
                     let future = async move {
                         match res? {
-                            ResponseHelper::Requested(block, hash) => self.blockchain.add_new_block(block, Some(hash), BroadcastOption::Miners, false).await,
+                            ResponseHelper::Requested(block, hash, pow_hash) => {
+                                // Use PreVerifyBlock::Partial if we have cached pow_hash from chain validation
+                                let pre_verify = match pow_hash {
+                                    Some(pow) => PreVerifyBlock::Partial { block_hash: hash, pow_hash: pow },
+                                    None => PreVerifyBlock::Hash(hash),
+                                };
+                                self.blockchain.add_new_block(block, pre_verify, BroadcastOption::Miners, false).await
+                            },
                             ResponseHelper::NotRequested(hash) => self.try_re_execution_block(hash).await,
                         }
                     };
@@ -365,7 +612,6 @@ impl<S: Storage> P2pServer<S> {
         peer: &Arc<Peer>,
         pop_count: u64,
         chain_validator: ChainValidator<'_, S>,
-        blocks: IndexSet<Hash>,
     ) -> Result<
         (
             Vec<(Hash, Immutable<Transaction>)>,
@@ -381,7 +627,7 @@ impl<S: Storage> P2pServer<S> {
         let (topoheight, txs) = self.blockchain.rewind_chain(pop_count, false).await?;
         debug!("Rewinded chain until topoheight {}", topoheight);
         let res = self
-            .handle_blocks_from_chain_validator(peer, chain_validator, blocks)
+            .handle_blocks_from_chain_validator(peer, chain_validator)
             .await;
 
         // Mark peer as failed if P2P error occurred (unless it's a priority node)
@@ -453,14 +699,15 @@ impl<S: Storage> P2pServer<S> {
                 response_size
             );
         }
-        let pop_count = {
+        let (pop_count, our_previous_topoheight, our_previous_height, our_stable_topoheight) = {
             let storage = self.blockchain.get_storage().read().await;
             let expected_common_topoheight = storage
                 .get_topo_height_for_hash(common_point.get_hash())
                 .await?;
 
-            let stable_topoheight = self.blockchain.get_stable_topoheight();
+            let chain_cache = storage.chain_cache().await;
             if expected_common_topoheight != common_topoheight {
+                let stable_topoheight = chain_cache.stable_topoheight;
                 warn!(
                     "{} sent us a valid block hash, but at a different topoheight (expected: {}, got: {}, stable topoheight: {})!",
                     peer, expected_common_topoheight, common_topoheight, stable_topoheight
@@ -482,16 +729,16 @@ impl<S: Storage> P2pServer<S> {
             trace!(
                 "block height: {}, stable height: {}, topoheight: {}, hash: {}",
                 block_height,
-                self.blockchain.get_stable_height(),
+                chain_cache.stable_height,
                 expected_common_topoheight,
                 common_point.get_hash()
             );
             // We are under the stable height, rewind is necessary
             let mut count = if skip_stable_height_check
                 || peer.is_priority()
-                || lowest_height <= self.blockchain.get_stable_height()
+                || lowest_height <= chain_cache.stable_height
             {
-                let our_topoheight = self.blockchain.get_topo_height();
+                let our_topoheight = chain_cache.topoheight;
                 if our_topoheight > expected_common_topoheight {
                     our_topoheight - expected_common_topoheight
                 } else {
@@ -502,9 +749,9 @@ impl<S: Storage> P2pServer<S> {
             };
 
             if let Some(pruned_topo) = storage.get_pruned_topoheight().await? {
-                let available_diff = self.blockchain.get_topo_height() - pruned_topo;
+                let available_diff = chain_cache.topoheight - pruned_topo;
                 if count > available_diff && !(available_diff == 0 && peer.is_priority()) {
-                    warn!(
+                    debug!(
                         "Peer sent us a pop count of {} but we only have {} blocks available",
                         count, available_diff
                     );
@@ -512,7 +759,12 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
 
-            count
+            (
+                count,
+                chain_cache.topoheight,
+                chain_cache.height,
+                chain_cache.stable_topoheight,
+            )
         };
 
         // Packet verification ended, handle the chain response now
@@ -526,8 +778,6 @@ impl<S: Storage> P2pServer<S> {
             pop_count
         );
 
-        let our_previous_topoheight = self.blockchain.get_topo_height();
-        let our_previous_height = self.blockchain.get_height();
         let top_len = top_blocks.len();
         let blocks_len = blocks.len();
 
@@ -535,14 +785,14 @@ impl<S: Storage> P2pServer<S> {
         blocks.extend(top_blocks);
 
         if pop_count > 0 {
-            if log_enabled!(Level::Warn) {
-                warn!("{} sent us a pop count request...", peer);
-            }
+            warn!(
+                "{} sent us a pop count request of {} with {} blocks (common point: {} at {}, skip stable: {})",
+                peer, pop_count, blocks_len, common_point.get_hash(), common_topoheight, skip_stable_height_check
+            );
         }
 
         // if node asks us to pop blocks, check that the peer's height/topoheight is in advance on us
         let peer_topoheight = peer.get_topoheight();
-        let our_stable_topoheight = self.blockchain.get_stable_topoheight();
 
         if pop_count > 0
             && peer_topoheight > our_previous_topoheight
@@ -556,91 +806,33 @@ impl<S: Storage> P2pServer<S> {
                 warn!("Rewinding chain without checking because {} is a priority node (pop count: {})", peer, pop_count);
                 // User trust him as a priority node, rewind chain without checking, allow to go below stable height also
                 self.blockchain.rewind_chain(pop_count, false).await?;
+            } else if self.reorg_from_priority_only {
+                warn!("Ignoring reorg request from non-priority node {} because reorg_from_priority_only is enabled", peer);
+                return Err(P2pError::ReorgFromPriorityOnly.into());
             } else {
                 // Verify that someone isn't trying to trick us
-                // Fast check: because each block represent a topoheight, it should contains
-                // at least the same blockchain size to try to replace it on our side
-                if pop_count > blocks_len as u64 && blocks_len < requested_max_size {
-                    // TODO: maybe we could request its whole chain for comparison until chain validator has_higher_cumulative_difficulty ?
-                    // If after going through all its chain and we still have a higher cumulative difficulty, we should not rewind
-                    warn!(
-                        "{} sent us a pop count of {} but only sent us {} blocks, ignoring",
-                        peer, pop_count, blocks_len
-                    );
-                    return Err(P2pError::InvalidPopCount(pop_count, blocks_len as u64).into());
-                }
+                // If the peer sent fewer blocks than the pop_count and didn't fill the response,
+                // we need to iteratively request more blocks to validate the full chain
+                warn!(
+                    "{} sent us a pop count of {} with {} blocks",
+                    peer, pop_count, blocks_len
+                );
 
-                let capacity = if self.allow_boost_sync() {
-                    debug!("Requesting needed blocks in boost sync mode");
-                    Some(PEER_OBJECTS_CONCURRENCY)
-                } else {
-                    Some(1)
-                };
-
-                // request all blocks header and verify basic chain structure
-                // Starting topoheight must be the next topoheight after common block
-                // Blocks in chain response must be ordered by topoheight otherwise it will give incorrect results
-                let mut futures = Scheduler::new(capacity);
-                for hash in blocks.iter().cloned() {
-                    trace!("Request block header for chain validator: {}", hash);
-
-                    let fut = async {
-                        // check if we already have the block to not request it
-                        if self.blockchain.has_block(&hash).await? {
-                            trace!("We already have block {}, skipping", hash);
-                            return Ok(None);
-                        }
-
-                        peer.request_blocking_object(ObjectRequest::BlockHeader(Immutable::Owned(
-                            hash,
-                        )))
-                        .await?
-                        .into_block_header()
-                        .map(Some)
-                    };
-
-                    futures.push_back(fut);
-                }
-
-                // Retrieve the current cumulative difficulty before chain validator loop
+                // Retrieve the current cumulative difficulty
                 let current_cumulative_difficulty =
                     self.blockchain.get_cumulative_difficulty().await?;
 
-                let mut expected_topoheight = common_topoheight + 1;
-                let mut chain_validator = ChainValidator::new(&self.blockchain);
-                let mut exit_signal = self.exit_sender.subscribe();
-                'main: loop {
-                    select! {
-                        _ = exit_signal.recv() => {
-                            debug!("Stopping chain validator due to exit signal");
-                            break 'main;
-                        },
-                        next = futures.next() => {
-                            let Some(res) = next else {
-                                debug!("No more items in futures for chain validator");
-                                break 'main;
-                            };
-
-                            if let Some((block, hash)) = res? {
-                                chain_validator.insert_block(hash, block, expected_topoheight).await?;
-                                expected_topoheight += 1;
-                            }
-                        }
-                    };
-                }
-
-                // Verify that it has a higher cumulative difficulty than us
-                // Otherwise we don't switch to his chain
-                if !chain_validator
-                    .has_higher_cumulative_difficulty(&current_cumulative_difficulty)
-                    .await?
-                {
-                    error!(
-                        "{} sent us a chain response with lower cumulative difficulty than ours",
-                        peer
-                    );
-                    return Err(BlockchainError::LowerCumulativeDifficulty);
-                }
+                // Iteratively request and validate the peer's chain in chunks
+                let chain_validator = self
+                    .validate_peer_chain(
+                        peer,
+                        common_topoheight,
+                        pop_count,
+                        &current_cumulative_difficulty,
+                        blocks,
+                        requested_max_size,
+                    )
+                    .await?;
 
                 // Handle the chain validator
                 {
@@ -650,7 +842,7 @@ impl<S: Storage> P2pServer<S> {
                     info!("Snapshot started for chain validator");
                 }
                 let mut res = self
-                    .handle_chain_validator_with_rewind(peer, pop_count, chain_validator, blocks)
+                    .handle_chain_validator_with_rewind(peer, pop_count, chain_validator)
                     .await;
                 {
                     info!("Ending snapshot for chain validator");
@@ -659,7 +851,8 @@ impl<S: Storage> P2pServer<S> {
                         // we can partially switch to it if the topoheight AND the cumulative difficulty is bigger
                         Ok((_, res)) => {
                             res.is_ok()
-                                || (our_previous_topoheight < self.blockchain.get_topo_height()
+                                || (our_previous_topoheight
+                                    < self.blockchain.get_topo_height().await
                                     && current_cumulative_difficulty
                                         < self.blockchain.get_cumulative_difficulty().await?)
                         }
@@ -736,7 +929,8 @@ impl<S: Storage> P2pServer<S> {
                         peer.request_blocking_object(ObjectRequest::Block(hash.clone()))
                             .await?
                             .into_block()
-                            .map(|(block, _)| ResponseHelper::Requested(block, hash))
+                            // No cached pow_hash in boost sync mode
+                            .map(|(block, _)| ResponseHelper::Requested(block, hash, None))
                     } else {
                         debug!(
                             "Block {} is already in chain or being processed, verify if its in DAG",
@@ -784,17 +978,25 @@ impl<S: Storage> P2pServer<S> {
                         let future = async {
                             match res {
                                 Ok(response) => match response {
-                                    ResponseHelper::Requested(block, hash) => {
+                                    ResponseHelper::Requested(block, hash, pow_hash) => {
                                         // Lets ensure that the block is not already in chain
                                         // This may happen if we try to chain sync with peer
                                         // while we got the block through propagation
                                         if !self.blockchain.has_block(&hash).await? {
-                                            if let Err(e) = self.blockchain.add_new_block(block, Some(hash), BroadcastOption::Miners, false).await {
+                                            // Use PreVerifyBlock::Partial if we have cached pow_hash
+                                            let pre_verify = match pow_hash {
+                                                Some(pow) => PreVerifyBlock::Partial { block_hash: hash, pow_hash: pow },
+                                                None => PreVerifyBlock::Hash(hash),
+                                            };
+                                            // Use BroadcastOption::All to propagate synced blocks to P2P network
+                                            if let Err(e) = self.blockchain.add_new_block(block, pre_verify, BroadcastOption::All, false).await {
                                                 self.object_tracker.mark_group_as_fail(group_id).await;
                                                 return Err(e)
                                             }
                                         } else {
-                                            debug!("Block {} is already in chain despite requesting it, skipping it..", hash);
+                                            if log::log_enabled!(log::Level::Debug) {
+                                                debug!("Block {} is already in chain despite requesting it, skipping it..", hash);
+                                            }
                                         }
 
                                         Ok(true)
@@ -854,7 +1056,7 @@ impl<S: Storage> P2pServer<S> {
         // ask inventory of this peer if we sync from too far
         // if we are not further than one sync, request the inventory
         if blocks_len > 0 && blocks_len < requested_max_size {
-            let our_topoheight = self.blockchain.get_topo_height();
+            let our_topoheight = self.blockchain.get_topo_height().await;
 
             stream::iter(self.peer_list.get_cloned_peers().await)
                 .for_each_concurrent(None, |peer| async move {
@@ -865,7 +1067,9 @@ impl<S: Storage> P2pServer<S> {
                             error!("Error while asking inventory to {}: {}", peer, e);
                         }
                     } else {
-                        debug!("Skipping inventory request for {} because its topoheight {} is not in range of our topoheight {}", peer, peer_topoheight, our_topoheight);
+                        if log_enabled!(Level::Debug) {
+                            debug!("Skipping inventory request for {} because its topoheight {} is not in range of our topoheight {}", peer, peer_topoheight, our_topoheight);
+                        }
                     }
                 }).await;
         }
@@ -895,6 +1099,9 @@ impl<S: Storage> P2pServer<S> {
             let mut storage = self.blockchain.get_storage().write().await;
             debug!("storage write acquired for block forced re-execution");
 
+            // Get the block height before deleting (needed for blocks_at_height cleanup)
+            let block_height = storage.get_height_for_block_hash(&hash).await?;
+
             let block = storage.delete_block_with_hash(&hash).await?;
             let mut tips = storage.get_tips().await?;
             if tips.remove(&hash) {
@@ -902,12 +1109,29 @@ impl<S: Storage> P2pServer<S> {
                 storage.store_tips(&tips).await?;
             }
 
+            // Also remove from blocks_at_height index for full cleanup
+            storage
+                .remove_block_hash_at_height(&hash, block_height)
+                .await?;
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} removed from blocks_at_height at height {}",
+                    hash, block_height
+                );
+            }
+
             block
         };
 
         // Replicate same behavior as above branch
+        // Use BroadcastOption::All to propagate re-executed blocks to P2P network
         self.blockchain
-            .add_new_block(block, Some(hash), BroadcastOption::Miners, false)
+            .add_new_block(
+                block,
+                PreVerifyBlock::Hash(hash),
+                BroadcastOption::All,
+                false,
+            )
             .await
     }
 }

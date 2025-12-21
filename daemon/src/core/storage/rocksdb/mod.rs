@@ -8,7 +8,9 @@ use std::sync::Arc;
 use crate::core::{
     config::RocksDBConfig,
     error::{BlockchainError, DiskContext},
-    storage::{BlocksAtHeightProvider, ClientProtocolProvider, ContractOutputsProvider, Tips},
+    storage::{
+        BlocksAtHeightProvider, ClientProtocolProvider, ContractOutputsProvider, StorageCache, Tips,
+    },
 };
 use anyhow::Context;
 use async_trait::async_trait;
@@ -16,9 +18,12 @@ use itertools::Either;
 use log::{debug, info, trace};
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompactionStyle, DBCompressionType,
-    DBWithThreadMode, Direction, Env, IteratorMode as InternalIteratorMode, MultiThreaded, Options,
+    DBWithThreadMode, Env, IteratorMode as InternalIteratorMode, MultiThreaded, Options,
     ReadOptions, SliceTransform, WaitForCompactOptions,
 };
+
+// Re-export snapshot types
+pub use super::snapshot::{Direction, EntryState, IteratorMode};
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use tos_common::{
@@ -97,26 +102,35 @@ impl CompressionMode {
     }
 }
 
-#[derive(Copy, Clone)]
-pub enum IteratorMode<'a> {
-    Start,
-    End,
-    // Allow for range start operations
-    From(&'a [u8], Direction),
-    // Strict prefix to all keys
-    WithPrefix(&'a [u8], Direction),
+/// Extension trait to convert IteratorMode to RocksDB types
+pub trait IteratorModeExt<'a> {
+    fn convert(self) -> (InternalIteratorMode<'a>, ReadOptions);
 }
 
-impl<'a> IteratorMode<'a> {
-    pub fn convert(self) -> (InternalIteratorMode<'a>, ReadOptions) {
+impl<'a> IteratorModeExt<'a> for IteratorMode<'a> {
+    fn convert(self) -> (InternalIteratorMode<'a>, ReadOptions) {
         let mut opts = ReadOptions::default();
         let mode = match self {
-            Self::Start => InternalIteratorMode::Start,
-            Self::End => InternalIteratorMode::End,
-            Self::From(prefix, direction) => InternalIteratorMode::From(prefix, direction),
-            Self::WithPrefix(prefix, direction) => {
+            IteratorMode::Start => InternalIteratorMode::Start,
+            IteratorMode::End => InternalIteratorMode::End,
+            IteratorMode::From(prefix, direction) => {
+                InternalIteratorMode::From(prefix, direction.into())
+            }
+            IteratorMode::WithPrefix(prefix, direction) => {
                 opts.set_prefix_same_as_start(true);
-                InternalIteratorMode::From(prefix, direction)
+                InternalIteratorMode::From(prefix, direction.into())
+            }
+            IteratorMode::Range {
+                lower_bound,
+                upper_bound,
+                direction,
+            } => {
+                opts.set_iterate_lower_bound(lower_bound);
+                opts.set_iterate_upper_bound(upper_bound);
+                match direction {
+                    Direction::Forward => InternalIteratorMode::Start,
+                    Direction::Reverse => InternalIteratorMode::End,
+                }
             }
         };
 
@@ -128,6 +142,8 @@ pub struct RocksStorage {
     db: Arc<InnerDB>,
     network: Network,
     snapshot: Option<Snapshot>,
+    /// Application-level cache for blockchain state and objects
+    cache: StorageCache,
 }
 
 impl RocksStorage {
@@ -195,10 +211,38 @@ impl RocksStorage {
         )
         .expect("Failed to open RocksDB");
 
+        // Initialize the application-level cache with the configured cache size
+        // The cache_size from config is used for both RocksDB block cache and our LRU caches
+        let cache_size = Some(config.cache_size as usize);
+        let cache = StorageCache::new(cache_size);
+
         Self {
             db: Arc::new(db),
             network,
             snapshot: None,
+            cache,
+        }
+    }
+
+    /// Get the cache, respecting snapshot state
+    ///
+    /// If a snapshot is active, returns the snapshot's cache.
+    /// Otherwise, returns the main storage cache.
+    pub fn cache(&self) -> &StorageCache {
+        match self.snapshot.as_ref() {
+            Some(snapshot) => snapshot.cache(),
+            None => &self.cache,
+        }
+    }
+
+    /// Get mutable access to the cache, respecting snapshot state
+    ///
+    /// If a snapshot is active, returns the snapshot's cache for modification.
+    /// Otherwise, returns the main storage cache.
+    pub fn cache_mut(&mut self) -> &mut StorageCache {
+        match self.snapshot.as_mut() {
+            Some(snapshot) => snapshot.cache_mut(),
+            None => &mut self.cache,
         }
     }
 
@@ -221,6 +265,22 @@ impl RocksStorage {
         key: K,
     ) -> Result<(), BlockchainError> {
         Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column, key)
+    }
+
+    /// Insert raw bytes directly into disk without serialization.
+    /// This is used when applying snapshot changes where data is already serialized.
+    pub(super) fn insert_raw_into_disk<K: AsRef<[u8]>>(
+        &mut self,
+        column: Column,
+        key: K,
+        value: &[u8],
+    ) -> Result<(), BlockchainError> {
+        trace!("insert raw into disk {:?}", column);
+        let cf = cf_handle!(self.db, column);
+        self.db
+            .put_cf(&cf, key.as_ref(), value)
+            .with_context(|| format!("Error while inserting raw into disk column {:?}", column))?;
+        Ok(())
     }
 
     pub fn contains_data<K: AsRef<[u8]>>(
@@ -299,14 +359,13 @@ impl RocksStorage {
     ) -> Result<usize, BlockchainError> {
         trace!("load from disk internal {:?}", column);
 
-        if let Some(v) = self
-            .snapshot
-            .as_ref()
-            .and_then(|s| s.get_size(column, key.as_ref()))
-        {
-            match v {
-                Some(v) => return Ok(v),
-                None => return Err(BlockchainError::NotFoundOnDisk(DiskContext::DataLen)),
+        if let Some(snapshot) = self.snapshot.as_ref() {
+            match snapshot.get_size(column, key.as_ref()) {
+                EntryState::Stored(size) => return Ok(size),
+                EntryState::Deleted => {
+                    return Err(BlockchainError::NotFoundOnDisk(DiskContext::DataLen))
+                }
+                EntryState::Absent => {} // Fall through to disk lookup
             }
         }
 
@@ -331,10 +390,11 @@ impl RocksStorage {
     ) -> Result<Option<V>, BlockchainError> {
         trace!("load optional {:?} from disk internal", column);
 
-        if let Some(v) = snapshot.and_then(|s| s.get(column, key.as_ref())) {
-            match v {
-                Some(v) => return Ok(Some(V::from_bytes(&v)?)),
-                None => return Ok(None),
+        if let Some(snapshot) = snapshot {
+            match snapshot.get(column, key.as_ref()) {
+                EntryState::Stored(v) => return Ok(Some(V::from_bytes(v)?)),
+                EntryState::Deleted => return Ok(None),
+                EntryState::Absent => {} // Fall through to disk lookup
             }
         }
 
@@ -358,15 +418,17 @@ impl RocksStorage {
         trace!("insert into disk {:?}", column);
 
         match snapshot {
-            Some(snapshot) => snapshot.put(column, key.as_ref().to_vec(), value.to_bytes()),
+            Some(snapshot) => {
+                snapshot.put(column, key.as_ref().to_vec(), value.to_bytes());
+            }
             None => {
                 let cf = cf_handle!(db, column);
                 db.put_cf(&cf, key.as_ref(), value.to_bytes())
                     .with_context(|| {
                         format!("Error while inserting into disk column {:?}", column)
-                    })?
+                    })?;
             }
-        };
+        }
 
         Ok(())
     }
@@ -381,14 +443,16 @@ impl RocksStorage {
 
         let bytes = key.as_ref();
         match snapshot {
-            Some(snapshot) => snapshot.delete(column, bytes.to_vec()),
+            Some(snapshot) => {
+                snapshot.delete(column, bytes.to_vec());
+            }
             None => {
                 let cf = cf_handle!(db, column);
                 db.delete_cf(&cf, bytes).with_context(|| {
                     format!("Error while removing from disk column {:?}", column)
                 })?;
             }
-        };
+        }
 
         Ok(())
     }

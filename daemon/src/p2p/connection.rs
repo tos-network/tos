@@ -1,4 +1,5 @@
 use super::{
+    compression::Compression,
     diffie_hellman,
     encryption::{CipherSide, Encryption},
     error::P2pError,
@@ -76,6 +77,8 @@ pub struct Connection {
     rotate_key_out: AtomicUsize,
     // Encryption state used for packets
     encryption: Encryption,
+    // Compression state used for packets
+    compression: Compression,
 }
 
 // We are rotating every 1GB sent
@@ -98,6 +101,7 @@ impl Connection {
             rotate_key_in: AtomicUsize::new(0),
             rotate_key_out: AtomicUsize::new(0),
             encryption: Encryption::new(),
+            compression: Compression::new(),
         }
     }
 
@@ -385,6 +389,9 @@ impl Connection {
         // Count the bytes sent
         self.bytes_out.fetch_add(packet.len(), Ordering::Relaxed);
 
+        // Compress packet if compression is enabled (before encryption)
+        self.compression.compress(packet).await?;
+
         // We check if the encryption is enabled to manage it ourself here
         if self.encryption.is_ready() {
             self.encryption.encrypt_packet(packet).await?;
@@ -525,6 +532,9 @@ impl Connection {
             self.encryption.decrypt_packet(&mut bytes).await?;
         }
 
+        // Decompress packet if compression is enabled (after decryption)
+        self.compression.decompress(&mut bytes).await?;
+
         Ok(bytes)
     }
 
@@ -645,6 +655,16 @@ impl Connection {
     // Verify if the connection is closed
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
+    }
+
+    // Get the compression handler
+    pub fn compression(&self) -> &Compression {
+        &self.compression
+    }
+
+    // Get the mutable compression handler
+    pub fn compression_mut(&mut self) -> &mut Compression {
+        &mut self.compression
     }
 }
 
