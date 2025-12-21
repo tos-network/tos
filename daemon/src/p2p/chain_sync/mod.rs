@@ -562,12 +562,11 @@ impl<S: Storage> P2pServer<S> {
                 biased;
                 Some(res) = blocks_executor.next() => {
                     if let Err(e) = res {
-                        if !peer.is_priority() {
-                            if log::log_enabled!(log::Level::Debug) {
-                                debug!("Mark {} as sync chain failed: {}", peer, e);
-                            }
-                            peer.set_sync_chain_failed(true);
+                        // Mark all peers as failed (including priority) for consistent behavior
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Mark {} as sync chain failed: {}", peer, e);
                         }
+                        peer.set_sync_chain_failed(true);
                         return Err(e);
                     }
                     // Increase by one the limit again
@@ -630,28 +629,26 @@ impl<S: Storage> P2pServer<S> {
             .handle_blocks_from_chain_validator(peer, chain_validator)
             .await;
 
-        // Mark peer as failed if P2P error occurred (unless it's a priority node)
+        // Mark peer as failed if P2P error occurred (all peers, including priority)
         if let Err(BlockchainError::ErrorOnP2p(e)) = &res {
-            if !peer.is_priority() {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!("Mark {} as sync chain from validator failed: {}", peer, e);
-                }
-                peer.set_sync_chain_failed(true);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Mark {} as sync chain from validator failed: {}", peer, e);
+            }
+            peer.set_sync_chain_failed(true);
 
-                // Peer disconnected while trying to reorg us, tempban it
-                if let P2pError::Disconnected = e {
-                    if let Err(e) = self
-                        .peer_list
-                        .temp_ban_address(
-                            &peer.get_connection().get_address().ip(),
-                            60, // 60 seconds tempban
-                            false,
-                        )
-                        .await
-                    {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("Couldn't tempban {}: {}", peer, e);
-                        }
+            // Peer disconnected while trying to reorg us, tempban it
+            if let P2pError::Disconnected = e {
+                if let Err(e) = self
+                    .peer_list
+                    .temp_ban_address(
+                        &peer.get_connection().get_address().ip(),
+                        60, // 60 seconds tempban
+                        false,
+                    )
+                    .await
+                {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Couldn't tempban {}: {}", peer, e);
                     }
                 }
             }

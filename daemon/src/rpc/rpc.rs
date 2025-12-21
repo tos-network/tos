@@ -950,12 +950,27 @@ async fn has_balance<S: Storage>(
 async fn get_info<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     require_no_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    let height = blockchain.get_height().await;
-    let topoheight = blockchain.get_topo_height().await;
-    let stableheight = blockchain.get_stable_height().await;
-    let stable_topoheight = blockchain.get_stable_topoheight().await;
-    let (top_block_hash, emitted_supply, burned_supply, pruned_topoheight, average_block_time) = {
+    // Use chain_cache to batch read chain state (more efficient than 5 separate calls)
+    let (
+        height,
+        topoheight,
+        stableheight,
+        stable_topoheight,
+        difficulty,
+        top_block_hash,
+        emitted_supply,
+        burned_supply,
+        pruned_topoheight,
+        average_block_time,
+    ) = {
         let storage = blockchain.get_storage().read().await;
+        let chain_cache = storage.chain_cache().await;
+        let height = chain_cache.height;
+        let topoheight = chain_cache.topoheight;
+        let stableheight = chain_cache.stable_height;
+        let stable_topoheight = chain_cache.stable_topoheight;
+        let difficulty = chain_cache.difficulty;
+
         let top_block_hash = storage
             .get_hash_at_topo_height(topoheight)
             .await
@@ -977,6 +992,11 @@ async fn get_info<S: Storage>(context: &Context, body: Value) -> Result<Value, I
             .await
             .context("Error while retrieving average block time")?;
         (
+            height,
+            topoheight,
+            stableheight,
+            stable_topoheight,
+            difficulty,
             top_block_hash,
             emitted_supply,
             burned_supply,
@@ -984,7 +1004,6 @@ async fn get_info<S: Storage>(context: &Context, body: Value) -> Result<Value, I
             average_block_time,
         )
     };
-    let difficulty = blockchain.get_difficulty().await;
 
     let mempool_size = blockchain.get_mempool_size().await;
     let version = VERSION.into();

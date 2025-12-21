@@ -274,7 +274,7 @@ impl<S: Storage> GetWorkServer<S> {
             .store(get_current_time_in_millis(), Ordering::SeqCst);
         self.is_job_dirty.store(false, Ordering::SeqCst);
         debug!("Notify all miners for a new job");
-        let (header, difficulty) = {
+        let (header, difficulty, topoheight) = {
             debug!("locking storage for new job");
             let storage = self.blockchain.get_storage().read().await;
             debug!("storage read acquired for new job");
@@ -289,7 +289,10 @@ impl<S: Storage> GetWorkServer<S> {
                 .get_difficulty_at_tips(&*storage, header.get_tips().iter())
                 .await
                 .context("Error while retrieving difficulty at tips when notifying new job")?;
-            (header, difficulty)
+            // Get topoheight from chain_cache inside storage lock (consistent with header/difficulty)
+            let chain_cache = storage.chain_cache().await;
+            let topoheight = chain_cache.topoheight;
+            (header, difficulty, topoheight)
         };
 
         let job = MinerWork::new(header.get_work_hash(), header.timestamp);
@@ -298,9 +301,6 @@ impl<S: Storage> GetWorkServer<S> {
 
         // get the algorithm for the current version
         let algorithm = get_pow_algorithm_for_version(version);
-        // Also send the node topoheight to miners
-        // This is for visual purposes only
-        let topoheight = self.blockchain.get_topo_height().await;
 
         if is_event_tracked {
             debug!("Notifying RPC clients for new block template");

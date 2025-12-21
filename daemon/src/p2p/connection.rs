@@ -389,11 +389,10 @@ impl Connection {
         // Count the bytes sent
         self.bytes_out.fetch_add(packet.len(), Ordering::Relaxed);
 
-        // Compress packet if compression is enabled (before encryption)
-        self.compression.compress(packet).await?;
-
         // We check if the encryption is enabled to manage it ourself here
         if self.encryption.is_ready() {
+            // Compress packet if compression is enabled (only when encryption is ready)
+            self.compression.compress(packet).await?;
             self.encryption.encrypt_packet(packet).await?;
             // Send the bytes in encrypted format
             self.send_packet_bytes_internal(&mut stream, packet.as_ref())
