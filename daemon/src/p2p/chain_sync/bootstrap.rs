@@ -16,6 +16,7 @@ use crate::{
     config::{DEV_PUBLIC_KEY, PRUNE_SAFETY_LIMIT},
     core::{
         error::BlockchainError,
+        hard_fork::get_version_at_height,
         storage::{
             Storage, VersionedContract, VersionedContractBalance, VersionedContractData,
             VersionedMultiSig,
@@ -84,9 +85,11 @@ impl<S: Storage> P2pServer<S> {
             StepRequest::ChainInfo(blocks) => {
                 let common_point = self.find_common_point(&*storage, blocks).await?;
                 let tips = storage.get_tips().await?;
+                let top_height = storage.get_top_height().await?;
+                let version = get_version_at_height(self.blockchain.get_network(), top_height);
                 let (hash, height) = self
                     .blockchain
-                    .find_common_base::<S, _>(&storage, &tips)
+                    .find_common_base::<S, _>(&storage, &tips, version)
                     .await?;
                 let stable_topo = storage.get_topo_height_for_hash(&hash).await?;
                 StepResponse::ChainInfo(common_point, stable_topo, height, hash)

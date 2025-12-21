@@ -9,6 +9,10 @@ use crate::core::{
     config::RocksDBConfig,
     error::{BlockchainError, DiskContext},
     storage::{
+        constants::{
+            ACCOUNTS_COUNT, ASSETS_COUNT, BLOCKS_COUNT, BLOCKS_EXECUTION_ORDER_COUNT,
+            CONTRACTS_COUNT, PRUNED_TOPOHEIGHT, TIPS, TXS_COUNT,
+        },
         BlocksAtHeightProvider, ClientProtocolProvider, ContractOutputsProvider, StorageCache, Tips,
     },
 };
@@ -246,8 +250,73 @@ impl RocksStorage {
         }
     }
 
+    /// Load all the needed cache and counters in memory from disk
     pub fn load_cache_from_disk(&mut self) {
         trace!("load cache from disk");
+
+        // Load tips from disk if available
+        if let Ok(Some(tips)) =
+            self.load_optional_from_disk::<_, Tips>(Column::Common, TIPS)
+        {
+            debug!("Found tips: {}", tips.len());
+            self.cache.chain.tips = tips;
+        }
+
+        // Load the pruned topoheight from disk if available
+        if let Ok(Some(pruned_topoheight)) =
+            self.load_optional_from_disk::<_, u64>(Column::Common, PRUNED_TOPOHEIGHT)
+        {
+            debug!("Found pruned topoheight: {}", pruned_topoheight);
+            self.cache.pruned_topoheight = Some(pruned_topoheight);
+        }
+
+        // Load the assets count from disk if available
+        if let Ok(Some(assets_count)) =
+            self.load_optional_from_disk::<_, u64>(Column::Common, ASSETS_COUNT)
+        {
+            debug!("Found assets count: {}", assets_count);
+            self.cache.assets_count = assets_count;
+        }
+
+        // Load the txs count from disk if available
+        if let Ok(Some(txs_count)) =
+            self.load_optional_from_disk::<_, u64>(Column::Common, TXS_COUNT)
+        {
+            debug!("Found txs count: {}", txs_count);
+            self.cache.transactions_count = txs_count;
+        }
+
+        // Load the blocks count from disk if available
+        if let Ok(Some(blocks_count)) =
+            self.load_optional_from_disk::<_, u64>(Column::Common, BLOCKS_COUNT)
+        {
+            debug!("Found blocks count: {}", blocks_count);
+            self.cache.blocks_count = blocks_count;
+        }
+
+        // Load the accounts count from disk if available
+        if let Ok(Some(accounts_count)) =
+            self.load_optional_from_disk::<_, u64>(Column::Common, ACCOUNTS_COUNT)
+        {
+            debug!("Found accounts count: {}", accounts_count);
+            self.cache.accounts_count = accounts_count;
+        }
+
+        // Load the blocks execution count from disk if available
+        if let Ok(Some(blocks_execution_count)) =
+            self.load_optional_from_disk::<_, u64>(Column::Common, BLOCKS_EXECUTION_ORDER_COUNT)
+        {
+            debug!("Found blocks execution count: {}", blocks_execution_count);
+            self.cache.blocks_execution_count = blocks_execution_count;
+        }
+
+        // Load the contracts count from disk if available
+        if let Ok(Some(contracts_count)) =
+            self.load_optional_from_disk::<_, u64>(Column::Common, CONTRACTS_COUNT)
+        {
+            debug!("Found contracts count: {}", contracts_count);
+            self.cache.contracts_count = contracts_count;
+        }
     }
 
     pub(super) fn insert_into_disk<K: AsRef<[u8]>, V: Serializer>(

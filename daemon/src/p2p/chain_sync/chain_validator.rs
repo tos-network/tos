@@ -233,7 +233,7 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         // Find the common base between the block and the current blockchain
         let (base, base_height) = self
             .blockchain
-            .find_common_base(&provider, header.get_tips())
+            .find_common_base(&provider, header.get_tips(), version)
             .await?;
 
         trace!(

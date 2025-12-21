@@ -87,6 +87,24 @@ pub const PRUNE_SAFETY_LIMIT: u64 = STABLE_LIMIT * 10;
 // in how many height we consider the block stable
 pub const STABLE_LIMIT: u64 = 8;
 
+// Maximum height difference allowed between a tip and the block being validated (V4+)
+// This prevents using tips that are too far back in height
+pub const MAX_TIP_HEIGHT_DIFFERENCE: u64 = 8;
+
+/// Get the stable limit for a given block version.
+/// This allows different stability requirements for different protocol versions.
+/// Currently TOS uses a uniform stable limit, but this function allows for future
+/// version-specific adjustments like XELIS.
+pub const fn get_stable_limit(_version: BlockVersion) -> u64 {
+    // For now, TOS uses a uniform stable limit across all versions.
+    // In the future, this can be adjusted per version like:
+    // match version {
+    //     BlockVersion::V0 | BlockVersion::V1 | BlockVersion::V2 => 8,
+    //     BlockVersion::V3 | BlockVersion::V4 | BlockVersion::V5 => 24,
+    // }
+    STABLE_LIMIT
+}
+
 // Blocks propagation queue capacity: STABLE_LIMIT * TIPS_LIMIT = 8 * 3 = 24
 pub const BLOCKS_PROPAGATION_CAPACITY: usize =
     STABLE_LIMIT as usize * tos_common::config::TIPS_LIMIT;

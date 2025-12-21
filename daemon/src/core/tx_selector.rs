@@ -16,6 +16,11 @@ pub struct TxSelectorEntry<'a> {
     pub tx: &'a Arc<Transaction>,
     // Size in bytes of the TX
     pub size: usize,
+    // Calculated fee per kB
+    // Doesn't contains the fee extra
+    pub fee_per_kb: u64,
+    // Calculated fee limit per kB
+    pub fee_limit_per_kb: u64,
 }
 
 impl PartialEq for TxSelectorEntry<'_> {
@@ -36,8 +41,8 @@ impl PartialOrd for Transactions<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.0
             .front()
-            .map(|e| e.tx.get_fee())
-            .partial_cmp(&other.0.front().map(|e| e.tx.get_fee()))
+            .map(|e| e.fee_per_kb)
+            .partial_cmp(&other.0.front().map(|e| e.fee_per_kb))
     }
 }
 
@@ -45,8 +50,8 @@ impl Ord for Transactions<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0
             .front()
-            .map(|e| e.tx.get_fee())
-            .cmp(&other.0.front().map(|e| e.tx.get_fee()))
+            .map(|e| e.fee_per_kb)
+            .cmp(&other.0.front().map(|e| e.fee_per_kb))
     }
 }
 
@@ -81,13 +86,19 @@ impl<'a> TxSelector<'a> {
     // Create a TxSelector from a list of transactions with their hash and size
     pub fn new<I>(iter: I) -> Self
     where
-        I: Iterator<Item = (usize, &'a Arc<Hash>, &'a Arc<Transaction>)>,
+        I: Iterator<Item = (usize, &'a Arc<Hash>, &'a Arc<Transaction>, u64, u64)>,
     {
         let mut groups: HashMap<&PublicKey, Vec<TxSelectorEntry>> = HashMap::new();
 
         // Create groups of transactions
-        for (size, hash, tx) in iter {
-            let entry = TxSelectorEntry { hash, tx, size };
+        for (size, hash, tx, fee_per_kb, fee_limit_per_kb) in iter {
+            let entry = TxSelectorEntry {
+                hash,
+                tx,
+                size,
+                fee_per_kb,
+                fee_limit_per_kb,
+            };
 
             match groups.entry(tx.get_source()) {
                 Entry::Occupied(mut e) => {

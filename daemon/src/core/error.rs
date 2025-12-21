@@ -146,6 +146,8 @@ pub enum DiskContext {
 
 #[derive(Error, Debug, EnumDiscriminants)]
 pub enum BlockchainError {
+    #[error("tip is too far back in height from block being validated")]
+    TipTooFarBack,
     #[error("Invalid configuration provided")]
     InvalidConfig,
     #[error("Invalid data on disk: corrupted")]
