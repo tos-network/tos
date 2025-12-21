@@ -633,6 +633,29 @@ impl RocksStorage {
     {
         Self::iter_keys_internal(&self.db, self.snapshot.as_ref(), mode, column)
     }
+
+    /// Iterate over raw key bytes in a column.
+    /// This is useful when the key structure doesn't have a Serializer implementation
+    /// (e.g., 4-tuple keys for priority indexes).
+    #[inline(always)]
+    pub fn iter_raw_keys<'a>(
+        &'a self,
+        column: Column,
+        mode: IteratorMode,
+    ) -> Result<impl Iterator<Item = Result<Vec<u8>, BlockchainError>> + 'a, BlockchainError> {
+        trace!("iter raw keys {:?}", column);
+
+        let cf = cf_handle!(self.db, column);
+        let (m, opts) = mode.convert();
+        let iterator = self.db.iterator_cf_opt(&cf, opts, m);
+
+        // Note: This doesn't use snapshot since we're returning raw bytes
+        // For snapshot support, we'd need to extend the snapshot type
+        Ok(iterator.map(|res| {
+            let (key, _) = res.context("Internal read error in iter_raw_keys")?;
+            Ok(key.to_vec())
+        }))
+    }
 }
 
 #[async_trait]

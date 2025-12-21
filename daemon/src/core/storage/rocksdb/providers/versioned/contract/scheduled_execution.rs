@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use log::trace;
-use tos_common::block::TopoHeight;
+use tos_common::{block::TopoHeight, contract::ScheduledExecution};
 
 use crate::core::{
     error::BlockchainError,
@@ -76,10 +76,14 @@ impl RocksStorage {
             )?
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Delete from both tables
+        // Delete from all tables
         for (registration_topo, contract_id, execution_topo) in keys_to_delete {
-            // Delete from DelayedExecution
+            // Load execution to get offer_amount for priority key
             let exec_key = Self::get_contract_scheduled_execution_key(contract_id, execution_topo);
+            let execution: Option<ScheduledExecution> =
+                self.load_optional_from_disk(Column::DelayedExecution, &exec_key)?;
+
+            // Delete from DelayedExecution
             self.remove_from_disk(Column::DelayedExecution, &exec_key)?;
 
             // Delete from DelayedExecutionRegistrations
@@ -89,6 +93,17 @@ impl RocksStorage {
                 execution_topo,
             );
             self.remove_from_disk(Column::DelayedExecutionRegistrations, &reg_key)?;
+
+            // Delete from DelayedExecutionPriority (if execution was found)
+            if let Some(exec) = execution {
+                let priority_key = Self::get_scheduled_execution_priority_key(
+                    execution_topo,
+                    exec.offer_amount,
+                    exec.registration_topoheight,
+                    contract_id,
+                );
+                self.remove_from_disk(Column::DelayedExecutionPriority, &priority_key)?;
+            }
         }
 
         Ok(())

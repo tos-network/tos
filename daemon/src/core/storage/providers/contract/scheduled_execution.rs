@@ -65,4 +65,23 @@ pub trait ContractScheduledExecutionProvider {
             + 'a,
         BlockchainError,
     >;
+
+    /// Get scheduled executions at topoheight, sorted by priority (OFFERCALL ordering).
+    /// Priority order: higher offer first, then FIFO by registration time, then by contract ID.
+    /// This is used by the execution engine to process high-priority executions first.
+    async fn get_priority_sorted_scheduled_executions_at_topoheight<'a>(
+        &'a self,
+        topoheight: TopoHeight,
+    ) -> Result<
+        impl Iterator<Item = Result<ScheduledExecution, BlockchainError>> + Send + 'a,
+        BlockchainError,
+    >;
+
+    /// Delete a scheduled execution and its priority index entry.
+    /// Called when execution is complete, cancelled, or failed.
+    async fn delete_contract_scheduled_execution(
+        &mut self,
+        contract: &Hash,
+        execution: &ScheduledExecution,
+    ) -> Result<(), BlockchainError>;
 }

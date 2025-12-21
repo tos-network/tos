@@ -130,6 +130,13 @@ pub enum Column {
     // Registration metadata for efficient range queries
     // {registration_topoheight}{contract_id}{execution_topoheight} => {}
     DelayedExecutionRegistrations,
+    // Priority index for OFFERCALL - enables efficient top-N selection by offer amount
+    // Key format: {exec_topo}{inverted_offer}{reg_topo}{contract_id} => {}
+    // - exec_topo: execution topoheight (8 bytes, ascending)
+    // - inverted_offer: u64::MAX - offer_amount (8 bytes, so higher offers sort first)
+    // - reg_topo: registration topoheight (8 bytes, FIFO for equal offers)
+    // - contract_id: contract ID (8 bytes, deterministic tiebreaker)
+    DelayedExecutionPriority,
 }
 
 impl Column {
@@ -162,6 +169,8 @@ impl Column {
             // Delayed executions: prefix by topoheight (8 bytes)
             DelayedExecution => Some(PREFIX_TOPOHEIGHT_LEN),
             DelayedExecutionRegistrations => Some(PREFIX_TOPOHEIGHT_LEN),
+            // Priority index: prefix by exec_topoheight (8 bytes)
+            DelayedExecutionPriority => Some(PREFIX_TOPOHEIGHT_LEN),
 
             _ => None,
         }
