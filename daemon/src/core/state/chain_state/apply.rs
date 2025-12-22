@@ -20,7 +20,7 @@ use tos_common::{
     block::{Block, BlockVersion, TopoHeight},
     contract::{
         AssetChanges, ChainState as ContractChainState, ContractCache, ContractEventTracker,
-        ContractOutput,
+        ContractOutput, ScheduledExecution,
     },
     crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
     transaction::{
@@ -39,6 +39,9 @@ struct ContractManager {
     // global assets cache
     assets: HashMap<Hash, Option<AssetChanges>>,
     tracker: ContractEventTracker,
+    // Scheduled executions registered during this block
+    // Key: (contract_hash, execution_topoheight)
+    scheduled_executions: Vec<(Hash, TopoHeight, ScheduledExecution)>,
 }
 
 // Chain State that can be applied to the mutable storage
@@ -436,6 +439,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 caches: HashMap::new(),
                 assets: HashMap::new(),
                 tracker: ContractEventTracker::default(),
+                scheduled_executions: Vec::new(),
             },
             block_hash,
             block,
@@ -467,6 +471,35 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
     // Get the total amount of burned coins
     pub fn get_burned_supply(&self) -> u64 {
         self.burned_supply
+    }
+
+    /// Register a scheduled execution to be stored when apply_changes is called
+    ///
+    /// This is used during OFFERCALL syscall processing to schedule future contract executions.
+    /// The execution will be stored in the scheduled execution storage and processed at the
+    /// target topoheight.
+    ///
+    /// # Arguments
+    ///
+    /// * `contract` - The contract that scheduled this execution
+    /// * `execution_topoheight` - The topoheight at which the execution should run
+    /// * `execution` - The scheduled execution details
+    pub fn register_scheduled_execution(
+        &mut self,
+        contract: Hash,
+        execution_topoheight: TopoHeight,
+        execution: ScheduledExecution,
+    ) {
+        self.contract_manager.scheduled_executions.push((
+            contract,
+            execution_topoheight,
+            execution,
+        ));
+    }
+
+    /// Get the number of scheduled executions registered in this block
+    pub fn get_scheduled_execution_count(&self) -> usize {
+        self.contract_manager.scheduled_executions.len()
     }
 
     async fn remove_contract_module_internal(
@@ -788,6 +821,32 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 .storage
                 .set_contract_outputs_for_tx(&key, &outputs)
                 .await?;
+        }
+
+        // Store scheduled executions registered during this block
+        if !self.contract_manager.scheduled_executions.is_empty() {
+            debug!(
+                "storing {} scheduled executions",
+                self.contract_manager.scheduled_executions.len()
+            );
+            for (contract, execution_topoheight, execution) in
+                self.contract_manager.scheduled_executions.drain(..)
+            {
+                trace!(
+                    "Storing scheduled execution for contract {} at topoheight {}",
+                    contract,
+                    execution_topoheight
+                );
+                self.inner
+                    .storage
+                    .set_contract_scheduled_execution_at_topoheight(
+                        &contract,
+                        self.inner.topoheight,
+                        &execution,
+                        execution_topoheight,
+                    )
+                    .await?;
+            }
         }
 
         // Apply all balances changes at topoheight

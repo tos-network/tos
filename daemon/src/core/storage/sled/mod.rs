@@ -162,6 +162,15 @@ pub struct SledStorage {
     // Contract events indexed by topic0 (event signature)
     // Key is contract_hash + topic0 + topoheight + log_index, value is StoredContractEvent
     pub(super) contract_events_by_topic: Tree,
+    // Scheduled executions storage
+    // Key is [topoheight][contract_hash], value is ScheduledExecution
+    pub(super) scheduled_executions: Tree,
+    // Scheduled executions by registration topoheight
+    // Key is [reg_topoheight][contract_hash][exec_topoheight], value is empty
+    pub(super) scheduled_execution_registrations: Tree,
+    // Priority index for scheduled executions (OFFERCALL ordering)
+    // Key is [exec_topoheight][inverted_offer][reg_topoheight][contract_hash], value is empty
+    pub(super) scheduled_execution_priority: Tree,
     // opened DB used for assets to create dynamic assets
     pub(super) db: sled::Db,
 
@@ -281,6 +290,10 @@ impl SledStorage {
             contract_events: sled.open_tree("contract_events")?,
             contract_events_by_tx: sled.open_tree("contract_events_by_tx")?,
             contract_events_by_topic: sled.open_tree("contract_events_by_topic")?,
+            scheduled_executions: sled.open_tree("scheduled_executions")?,
+            scheduled_execution_registrations: sled
+                .open_tree("scheduled_execution_registrations")?,
+            scheduled_execution_priority: sled.open_tree("scheduled_execution_priority")?,
             db: sled,
             cache: StorageCache::new(cache_size),
 
@@ -432,7 +445,7 @@ impl SledStorage {
             .ok_or(BlockchainError::NotFoundOnDisk(context))
     }
 
-    // Scan prefix
+    // Scan prefix (returns keys only)
     pub(super) fn scan_prefix(
         snapshot: Option<&Snapshot>,
         tree: &Tree,
@@ -441,6 +454,34 @@ impl SledStorage {
         match snapshot {
             Some(snapshot) => Either::Left(snapshot.scan_prefix(tree, prefix)),
             None => Either::Right(tree.scan_prefix(prefix).into_iter().keys()),
+        }
+    }
+
+    // Scan prefix with key-value pairs
+    pub(super) fn scan_prefix_kv(
+        snapshot: Option<&Snapshot>,
+        tree: &Tree,
+        prefix: &[u8],
+    ) -> impl Iterator<Item = Result<(IVec, IVec), BlockchainError>> {
+        match snapshot {
+            Some(snapshot) => Either::Left(snapshot.scan_prefix_kv(tree, prefix)),
+            None => Either::Right(
+                tree.scan_prefix(prefix)
+                    .into_iter()
+                    .map(|r| r.map_err(BlockchainError::from)),
+            ),
+        }
+    }
+
+    // Iterate from a key with key-value pairs
+    pub(super) fn iter_from(
+        snapshot: Option<&Snapshot>,
+        tree: &Tree,
+        from: &[u8],
+    ) -> impl Iterator<Item = Result<(IVec, IVec), BlockchainError>> {
+        match snapshot {
+            Some(snapshot) => Either::Left(snapshot.iter_from(tree, from)),
+            None => Either::Right(tree.range(from..).map(|r| r.map_err(BlockchainError::from))),
         }
     }
 

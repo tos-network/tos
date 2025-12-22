@@ -122,6 +122,8 @@ pub enum DiskContext {
     ContractOutputs,
     #[error("get contract balance")]
     ContractBalance,
+    #[error("get scheduled execution")]
+    ScheduledExecution,
     #[error("get asset supply")]
     AssetSupply,
     #[error("get asset supply at topoheight {0}")]

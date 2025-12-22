@@ -17,6 +17,7 @@ mod dag_order;
 mod multisig;
 mod nonce;
 mod registrations;
+mod scheduled_execution;
 
 impl VersionedProvider for RocksStorage {}
 

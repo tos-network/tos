@@ -3,6 +3,7 @@ mod data;
 mod event;
 mod output;
 mod provider;
+mod scheduled_execution;
 mod supply;
 
 use crate::core::{

@@ -27,6 +27,7 @@ use tos_common::{
     block::{Block, BlockHeader, MinerWork, TopoHeight},
     config::{MAXIMUM_SUPPLY, MAX_TRANSACTION_SIZE, TOS_ASSET, VERSION},
     context::Context,
+    contract::ScheduledExecution,
     crypto::{elgamal::CompressedPublicKey, Address, AddressType, Hash},
     difficulty::{CumulativeDifficulty, Difficulty},
     immutable::Immutable,
@@ -573,6 +574,10 @@ pub fn register_methods<S: Storage>(
     handler.register_method(
         "get_contract_events",
         async_handler!(get_contract_events::<S>),
+    );
+    handler.register_method(
+        "get_contract_scheduled_executions_at_topoheight",
+        async_handler!(get_contract_scheduled_executions_at_topoheight::<S>),
     );
 
     // P2p
@@ -3005,4 +3010,37 @@ async fn get_contract_events<S: Storage>(
     }
 
     Ok(json!(events))
+}
+
+/// Maximum number of scheduled executions to return in a single RPC call
+const MAX_SCHEDULED_EXECUTIONS: usize = 100;
+
+/// Get contract scheduled executions at a specific topoheight
+///
+/// Returns scheduled executions that are planned to execute at the given topoheight.
+async fn get_contract_scheduled_executions_at_topoheight<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetContractScheduledExecutionsAtTopoHeightParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    if params.max.is_some_and(|max| max > MAX_SCHEDULED_EXECUTIONS) {
+        return Err(InternalRpcError::InvalidParams(
+            "Maximum scheduled executions requested cannot be greater than 100",
+        ));
+    }
+
+    let max = params.max.unwrap_or(MAX_SCHEDULED_EXECUTIONS);
+
+    let storage = blockchain.get_storage().read().await;
+    let executions: Vec<ScheduledExecution> = storage
+        .get_contract_scheduled_executions_at_topoheight(params.topoheight)
+        .await
+        .context("Error while retrieving contract scheduled executions")?
+        .skip(params.skip.unwrap_or(0))
+        .take(max)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(json!(executions))
 }

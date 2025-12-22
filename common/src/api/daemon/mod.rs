@@ -1382,3 +1382,11 @@ pub struct NewContractEvent<'a> {
     pub block_hash: Cow<'a, Hash>,
     pub topoheight: TopoHeight,
 }
+
+/// Parameters for get_contract_scheduled_executions_at_topoheight RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetContractScheduledExecutionsAtTopoHeightParams {
+    pub topoheight: TopoHeight,
+    pub max: Option<usize>,
+    pub skip: Option<usize>,
+}

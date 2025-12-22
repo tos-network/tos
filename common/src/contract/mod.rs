@@ -5,6 +5,8 @@ mod opaque;
 mod output;
 mod provider;
 mod random;
+pub mod scheduled_execution;
+mod source;
 
 use crate::{
     block::{Block, TopoHeight},
@@ -43,6 +45,8 @@ pub use contract_type::*;
 pub use executor::*;
 pub use opaque::*;
 pub use provider::*;
+pub use scheduled_execution::*;
+pub use source::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferOutput {

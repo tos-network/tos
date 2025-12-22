@@ -6,6 +6,7 @@ mod dag_order;
 mod multisig;
 mod nonce;
 mod registrations;
+mod scheduled_execution;
 
 use crate::core::{
     error::{BlockchainError, DiskContext},
