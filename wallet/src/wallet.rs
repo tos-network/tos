@@ -855,7 +855,7 @@ impl Wallet {
     // Stateless wallet: Always queries daemon for nonce, reference, and balance
     pub async fn create_transaction_state_with_storage(
         &self,
-        storage: &EncryptedStorage,
+        _storage: &EncryptedStorage,
         transaction_type: &TransactionTypeBuilder,
         fee: &FeeBuilder,
         _nonce: Option<u64>,
@@ -953,11 +953,8 @@ impl Wallet {
                 continue;
             }
 
-            if !storage.is_asset_tracked(asset)? {
-                return Err(WalletError::AssetNotTracked(asset.clone()));
-            }
-
             // Stateless wallet: Query balance on-demand from daemon
+            // Note: Removed asset tracking check - stateless wallet queries daemon directly
             let balance_amount = light_api.get_balance(&address, &asset).await.map_err(|e| {
                 WalletError::Any(anyhow::anyhow!(
                     "Failed to query balance from daemon: {}",

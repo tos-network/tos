@@ -4104,8 +4104,9 @@ async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction
     let tx_hash = tx.hash();
     manager.message(format!("Transaction hash: {}", tx_hash));
 
-    // Stateless wallet: Check if we have daemon connection
-    if wallet.is_online().await {
+    // Stateless wallet: Check if we have daemon connection (network_handler exists)
+    let has_connection = wallet.get_network_handler().lock().await.is_some();
+    if has_connection {
         if let Err(e) = wallet.submit_transaction(&tx).await {
             manager.error(format!("Couldn't submit transaction: {:#}", e));
             manager.error("Transaction failed. Check your connection to the daemon and try again.");
