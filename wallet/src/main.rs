@@ -941,14 +941,14 @@ async fn setup_wallet_command_manager(
             Arg::new("amount", ArgType::String, "Amount of TOS to freeze"),
             Arg::new(
                 "duration",
-                ArgType::String,
+                ArgType::Number,
                 "Freeze duration in days (3/7/14/30, longer = higher rewards)",
             ),
         ],
         vec![Arg::new(
             "confirm",
-            ArgType::Bool,
-            "Confirm action (auto-confirms in command mode)",
+            ArgType::String,
+            "Confirm action (yes/no, auto-confirms in command mode)",
         )],
         CommandHandler::Async(async_handler!(freeze_tos)),
     ))?;
@@ -962,8 +962,8 @@ async fn setup_wallet_command_manager(
         )],
         vec![Arg::new(
             "confirm",
-            ArgType::Bool,
-            "Confirm action (auto-confirms in command mode)",
+            ArgType::String,
+            "Confirm action (yes/no, auto-confirms in command mode)",
         )],
         CommandHandler::Async(async_handler!(unfreeze_tos)),
     ))?;
