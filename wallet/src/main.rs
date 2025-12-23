@@ -802,8 +802,8 @@ async fn setup_wallet_command_manager(
             ),
             Arg::new(
                 "confirm",
-                ArgType::Bool,
-                "Confirm action (auto-confirms in command mode)",
+                ArgType::String,
+                "Confirm action (yes/no, auto-confirms in command mode)",
             ),
         ],
         CommandHandler::Async(async_handler!(transfer)),
@@ -823,8 +823,8 @@ async fn setup_wallet_command_manager(
             ),
             Arg::new(
                 "confirm",
-                ArgType::Bool,
-                "Confirm action (auto-confirms in command mode)",
+                ArgType::String,
+                "Confirm action (yes/no, auto-confirms in command mode)",
             ),
         ],
         CommandHandler::Async(async_handler!(transfer_all)),
@@ -842,8 +842,8 @@ async fn setup_wallet_command_manager(
         ],
         vec![Arg::new(
             "confirm",
-            ArgType::Bool,
-            "Confirm action (auto-confirms in command mode)",
+            ArgType::String,
+            "Confirm action (yes/no, auto-confirms in command mode)",
         )],
         CommandHandler::Async(async_handler!(burn)),
     ))?;
