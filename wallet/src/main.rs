@@ -2597,13 +2597,29 @@ async fn transfer_all(
         fee_display
     ));
 
-    if !args.get_flag("confirm")?
-        && !manager.is_batch_mode()
-        && !prompt
+    // Parse confirmation
+    let confirmed = if args.has_argument("confirm") {
+        let confirm_str = args.get_value("confirm")?.to_string_value()?;
+        match confirm_str.to_lowercase().as_str() {
+            "yes" | "y" | "true" => true,
+            "no" | "n" | "false" => false,
+            _ => {
+                prompt
+                    .ask_confirmation()
+                    .await
+                    .context("Error while confirming action")?
+            }
+        }
+    } else if manager.is_batch_mode() {
+        true // auto-confirm in batch mode
+    } else {
+        prompt
             .ask_confirmation()
             .await
             .context("Error while confirming action")?
-    {
+    };
+
+    if !confirmed {
         manager.message("Transaction has been aborted");
         return Ok(());
     }
@@ -2751,13 +2767,30 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         asset_data.get_name(),
         asset
     ));
-    if !args.get_flag("confirm")?
-        && !manager.is_batch_mode()
-        && !prompt
+
+    // Parse confirmation
+    let confirmed = if args.has_argument("confirm") {
+        let confirm_str = args.get_value("confirm")?.to_string_value()?;
+        match confirm_str.to_lowercase().as_str() {
+            "yes" | "y" | "true" => true,
+            "no" | "n" | "false" => false,
+            _ => {
+                prompt
+                    .ask_confirmation()
+                    .await
+                    .context("Error while confirming action")?
+            }
+        }
+    } else if manager.is_batch_mode() {
+        true // auto-confirm in batch mode
+    } else {
+        prompt
             .ask_confirmation()
             .await
             .context("Error while confirming action")?
-    {
+    };
+
+    if !confirmed {
         manager.message("Transaction has been aborted");
         return Ok(());
     }
