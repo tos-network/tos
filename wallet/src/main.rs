@@ -993,26 +993,7 @@ async fn setup_wallet_command_manager(
         )],
         CommandHandler::Async(async_handler!(list_tracked_assets)),
     ))?;
-    command_manager.add_command(Command::with_required_arguments(
-        "track_asset",
-        "Mark an asset hash as tracked",
-        vec![Arg::new(
-            "asset",
-            ArgType::String,
-            "Asset name or hash to track",
-        )],
-        CommandHandler::Async(async_handler!(track_asset)),
-    ))?;
-    command_manager.add_command(Command::with_required_arguments(
-        "untrack_asset",
-        "Remove an asset hash from being tracked",
-        vec![Arg::new(
-            "asset",
-            ArgType::String,
-            "Asset name or hash to untrack",
-        )],
-        CommandHandler::Async(async_handler!(untrack_asset)),
-    ))?;
+    // REMOVED: track_asset and untrack_asset commands (stateless mode - assets from daemon)
 
     #[cfg(feature = "network_handler")]
     {
@@ -1958,101 +1939,8 @@ async fn list_tracked_assets(
     Ok(())
 }
 
-async fn track_asset(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    manager.validate_batch_params("track_asset", &args)?;
-
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-    let prompt = manager.get_prompt();
-
-    let asset = if args.has_argument("asset") {
-        let asset_str = args.get_value("asset")?.to_string_value()?;
-        if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
-            TOS_ASSET
-        } else if asset_str.len() == HASH_SIZE * 2 {
-            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
-        } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_str)
-                .await?
-                .context(format!(
-                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
-                    asset_str
-                ))?
-        }
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
-    } else {
-        prompt
-            .read_hash(prompt.colorize_string(Color::BrightGreen, "Asset ID: "))
-            .await?
-    };
-
-    if wallet
-        .track_asset(asset)
-        .await
-        .context("Error while tracking asset")?
-    {
-        manager.message("Asset ID is already tracked!");
-    } else {
-        manager.message("Asset ID is now tracked");
-    }
-
-    Ok(())
-}
-
-async fn untrack_asset(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    manager.validate_batch_params("untrack_asset", &args)?;
-
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-    let prompt = manager.get_prompt();
-
-    let asset = if args.has_argument("asset") {
-        let asset_str = args.get_value("asset")?.to_string_value()?;
-        if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
-            TOS_ASSET
-        } else if asset_str.len() == HASH_SIZE * 2 {
-            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
-        } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_str)
-                .await?
-                .context(format!(
-                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
-                    asset_str
-                ))?
-        }
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
-    } else {
-        prompt
-            .read_hash(prompt.colorize_string(Color::BrightGreen, "Asset ID: "))
-            .await?
-    };
-
-    if asset == TOS_ASSET {
-        manager.message("TOS asset cannot be untracked");
-    } else if wallet
-        .untrack_asset(asset)
-        .await
-        .context("Error while untracking asset")?
-    {
-        manager.message("Asset ID is not marked as tracked!");
-    } else {
-        manager.message("Asset ID is not tracked anymore");
-    }
-
-    Ok(())
-}
+// REMOVED: track_asset and untrack_asset commands
+// In stateless mode, assets are not tracked locally - use list_assets to query daemon
 
 // Change wallet password
 async fn change_password(
@@ -4588,34 +4476,9 @@ async fn freeze_tos(
         duration.reward_multiplier()
     ));
 
-    // Update energy resource in storage
-    let mut storage = wallet.get_storage().write().await;
-    let current_topoheight = if wallet.is_online().await {
-        if let Some(network_handler) = wallet.get_network_handler().lock().await.as_ref() {
-            match network_handler.get_api().get_info().await {
-                Ok(info) => info.topoheight,
-                Err(_) => 0,
-            }
-        } else {
-            0
-        }
-    } else {
-        0
-    };
-
-    // Get or create energy resource
-    let mut energy_resource = if let Some(resource) = storage.get_energy_resource().await? {
-        resource.clone()
-    } else {
-        tos_common::account::EnergyResource::new()
-    };
-
-    // Add energy from this freeze operation
-    let energy_gained = energy_resource.freeze_tos_for_energy(amount, duration, current_topoheight);
-    storage.set_energy_resource(energy_resource).await?;
-
-    // Energy uses integer units (not 10^8 atomic units like TOS)
-    manager.message(format!("Energy gained: {} energy", energy_gained));
+    // Note: Energy state is now tracked by daemon, not local storage
+    // The actual energy gained will be calculated by daemon when the transaction is confirmed
+    manager.message("Note: Energy will be credited after transaction confirmation.");
 
     // Broadcast the transaction
     broadcast_tx(wallet, manager, tx).await;
@@ -4720,35 +4583,9 @@ async fn unfreeze_tos(
     manager.message(format!("Unfreeze transaction created: {}", hash));
     manager.message(format!("Amount: {} TOS", format_coin(amount, 8)));
 
-    // Update energy resource in storage
-    let mut storage = wallet.get_storage().write().await;
-    let current_topoheight = if wallet.is_online().await {
-        if let Some(network_handler) = wallet.get_network_handler().lock().await.as_ref() {
-            match network_handler.get_api().get_info().await {
-                Ok(info) => info.topoheight,
-                Err(_) => 0,
-            }
-        } else {
-            0
-        }
-    } else {
-        0
-    };
-
-    // Update energy resource if it exists
-    if let Some(mut energy_resource) = storage.get_energy_resource().await? {
-        match energy_resource.unfreeze_tos(amount, current_topoheight) {
-            Ok(energy_removed) => {
-                storage.set_energy_resource(energy_resource).await?;
-                // Energy uses integer units (not 10^8 atomic units like TOS)
-                manager.message(format!("Energy removed: {} energy", energy_removed));
-            }
-            Err(e) => {
-                manager.warn(format!("Could not update energy resource: {}", e));
-                manager.message("Energy resource will be updated when transaction is confirmed");
-            }
-        }
-    }
+    // Note: Energy state is now tracked by daemon, not local storage
+    // The actual energy removed will be calculated by daemon when the transaction is confirmed
+    manager.message("Note: Energy will be updated after transaction confirmation.");
 
     // Broadcast the transaction
     broadcast_tx(wallet, manager, tx).await;
