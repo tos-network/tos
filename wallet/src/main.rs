@@ -476,8 +476,6 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
     ))?;
 
     manager.register_default_commands()?;
-    // Display available commands
-    manager.display_commands()?;
 
     Ok(())
 }
@@ -1194,7 +1192,7 @@ async fn setup_wallet_command_manager(
     let mut context = command_manager.get_context().lock()?;
     context.store(wallet);
 
-    command_manager.display_commands()
+    Ok(())
 }
 
 // Open a wallet based on the wallet name and its password

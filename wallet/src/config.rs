@@ -74,6 +74,11 @@ fn default_logs_path() -> String {
     String::from("logs/")
 }
 
+// Default to disabled (true) for batch-mode wallet
+fn default_disable_ascii_art() -> bool {
+    true
+}
+
 #[cfg(feature = "cli")]
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct NetworkConfig {
@@ -149,9 +154,9 @@ pub struct LogConfig {
     #[clap(long)]
     #[serde(default)]
     pub logs_modules: Vec<ModuleConfig>,
-    /// Disable the ascii art at startup
-    #[clap(long)]
-    #[serde(default)]
+    /// Disable the ascii art at startup (default: true for batch mode)
+    #[clap(long, default_value_t = true)]
+    #[serde(default = "default_disable_ascii_art")]
     pub disable_ascii_art: bool,
     /// Change the datetime format used by the logger
     #[clap(long, default_value_t = default_logs_datetime_format())]
