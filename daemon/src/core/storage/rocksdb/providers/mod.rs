@@ -11,6 +11,7 @@ mod commit_point;
 mod contract;
 mod dag_order;
 mod difficulty;
+mod energy;
 mod merkle;
 mod multisig;
 mod network;

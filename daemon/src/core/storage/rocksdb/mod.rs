@@ -22,10 +22,9 @@ use rocksdb::{
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use tos_common::{
-    account::EnergyResource,
     ai_mining::AIMiningState,
     block::{BlockHeader, TopoHeight},
-    crypto::{Hash, PublicKey},
+    crypto::Hash,
     immutable::Immutable,
     network::Network,
     serializer::{Count, Serializer},
@@ -668,80 +667,7 @@ impl Storage for RocksStorage {
     }
 }
 
-// EnergyProvider implementation for RocksStorage
-#[async_trait]
-impl crate::core::storage::EnergyProvider for RocksStorage {
-    async fn get_energy_resource(
-        &self,
-        account: &PublicKey,
-    ) -> Result<Option<EnergyResource>, BlockchainError> {
-        trace!(
-            "get energy resource for account {}",
-            account.as_address(self.network.is_mainnet())
-        );
-
-        // Get the latest topoheight for this account's energy resource
-        let topoheight = self.load_optional_from_disk::<Vec<u8>, u64>(
-            Column::EnergyResources,
-            &account.to_bytes(),
-        )?;
-
-        match topoheight {
-            Some(topoheight) => {
-                // Get the versioned energy resource at that topoheight
-                let key = format!(
-                    "{}_{}",
-                    topoheight,
-                    account.as_address(self.network.is_mainnet())
-                );
-                let energy = self.load_optional_from_disk::<Vec<u8>, EnergyResource>(
-                    Column::VersionedEnergyResources,
-                    &key.as_bytes().to_vec(),
-                )?;
-                trace!(
-                    "Found energy resource at topoheight {}: {:?}",
-                    topoheight,
-                    energy
-                );
-                Ok(energy)
-            }
-            None => {
-                trace!(
-                    "No energy resource found for account {}",
-                    account.as_address(self.network.is_mainnet())
-                );
-                Ok(None)
-            }
-        }
-    }
-
-    async fn set_energy_resource(
-        &mut self,
-        account: &PublicKey,
-        topoheight: TopoHeight,
-        energy: &EnergyResource,
-    ) -> Result<(), BlockchainError> {
-        trace!(
-            "set energy resource for account {} at topoheight {}: {:?}",
-            account.as_address(self.network.is_mainnet()),
-            topoheight,
-            energy
-        );
-
-        // Store the versioned energy resource
-        let key = format!(
-            "{}_{}",
-            topoheight,
-            account.as_address(self.network.is_mainnet())
-        );
-        self.insert_into_disk(Column::VersionedEnergyResources, key.as_bytes(), energy)?;
-
-        // Update the latest topoheight pointer
-        self.insert_into_disk(Column::EnergyResources, &account.to_bytes(), &topoheight)?;
-
-        Ok(())
-    }
-}
+// EnergyProvider implementation is now in providers/energy.rs
 
 #[async_trait]
 impl crate::core::storage::AIMiningProvider for RocksStorage {

@@ -100,10 +100,8 @@ pub enum Column {
     // {topoheight}{asset_id} => {version}
     VersionedAssetsSupply,
 
-    // Energy resources for each account
-    // {account_key} => {topoheight}
-    EnergyResources,
     // Versioned energy resources for each account
+    // Energy pointer is now stored in Account.energy_pointer
     // {topoheight}_{account_address} => {energy_resource}
     VersionedEnergyResources,
 
