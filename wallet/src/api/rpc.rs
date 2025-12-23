@@ -1,6 +1,6 @@
 use crate::{
-    api::XSWDAppId, error::WalletError, storage::Balance,
-    transaction_builder::TransactionBuilderState, wallet::Wallet,
+    api::XSWDAppId, error::WalletError,
+    transaction_builder::{Balance, TransactionBuilderState}, wallet::Wallet,
 };
 use anyhow::Context as AnyContext;
 use serde_json::{json, Value};

@@ -40,8 +40,8 @@ use crate::{
     mnemonics,
     network_handler::{NetworkHandler, SharedNetworkHandler},
     precomputed_tables::PrecomputedTablesShared,
-    storage::{Balance, EncryptedStorage, Storage},
-    transaction_builder::{EstimateFeesState, TransactionBuilderState},
+    storage::{EncryptedStorage, Storage},
+    transaction_builder::{Balance, EstimateFeesState, TransactionBuilderState},
 };
 use log::warn;
 

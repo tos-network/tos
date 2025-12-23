@@ -1,5 +1,3 @@
-#[allow(unused_imports)]
-use crate::storage::Balance;
 use crate::{error::WalletError, storage::EncryptedStorage};
 use log::trace;
 use std::collections::{HashMap, HashSet};
@@ -10,6 +8,19 @@ use tos_common::{
         Reference, Transaction,
     },
 };
+
+// Simple balance container for transaction building
+// Holds the amount available for a given asset
+#[derive(Debug, Clone)]
+pub struct Balance {
+    pub amount: u64,
+}
+
+impl Balance {
+    pub fn new(amount: u64) -> Self {
+        Self { amount }
+    }
+}
 
 // State used to estimate fees for a transaction
 // Because fees can be higher if a destination account is not registered

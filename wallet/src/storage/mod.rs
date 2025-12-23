@@ -1,5 +1,4 @@
 mod backend;
-mod types;
 
 use crate::{cipher::Cipher, config::SALT_SIZE};
 use anyhow::{anyhow, Context, Result};
@@ -19,8 +18,6 @@ use tos_common::{
 };
 
 use backend::{Db, Tree};
-
-pub use types::*;
 
 // Keys used to retrieve from storage
 

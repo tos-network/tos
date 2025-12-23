@@ -267,7 +267,7 @@ impl StatelessWallet {
                 debug!("Asset {} balance: {}", asset, balance);
             }
 
-            state.add_balance(asset.clone(), crate::storage::Balance::new(balance));
+            state.add_balance(asset.clone(), crate::transaction_builder::Balance::new(balance));
         }
 
         // Get multisig threshold if applicable
