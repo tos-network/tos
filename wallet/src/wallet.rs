@@ -87,17 +87,20 @@ pub enum Event {
     BalanceChanged(BalanceChanged),
     // When a new asset is added to wallet
     NewAsset(RPCAssetData<'static>),
-    // When a rescan happened (because of user request or DAG reorg/fork)
-    // Value is topoheight until it deleted transactions
-    // Next sync will restart at this topoheight
+    // DEPRECATED in stateless wallet: Rescan is not needed
+    // Kept for RPC API backward compatibility
+    #[allow(dead_code)]
     Rescan { start_topoheight: u64 },
-    // Called when the `sync_new_blocks` is done
+    // DEPRECATED in stateless wallet: History sync is not needed
+    // Kept for RPC API backward compatibility
+    #[allow(dead_code)]
     HistorySynced { topoheight: u64 },
-    // Wallet is now in online mode
+    // Wallet is now in online mode (connected to daemon)
     Online,
-    // Wallet is now in offline mode
+    // Wallet is now in offline mode (disconnected from daemon)
     Offline,
-    SyncError { message: String },
+    // Connection error occurred (repurposed from sync error)
+    ConnectionError { message: String },
     TrackAsset { asset: Hash },
     UntrackAsset { asset: Hash },
 }
@@ -113,7 +116,7 @@ impl Event {
             Event::HistorySynced { .. } => NotifyEvent::HistorySynced,
             Event::Online => NotifyEvent::Online,
             Event::Offline => NotifyEvent::Offline,
-            Event::SyncError { .. } => NotifyEvent::SyncError,
+            Event::ConnectionError { .. } => NotifyEvent::SyncError,
             Event::TrackAsset { .. } => NotifyEvent::TrackAsset,
             Event::UntrackAsset { .. } => NotifyEvent::UntrackAsset,
         }
@@ -1464,13 +1467,11 @@ impl Wallet {
     // REMOVED: rescan() - not needed in stateless wallet mode
     // All data is queried on-demand from daemon
 
-    // Check if the wallet is in online mode
+    // Check if the wallet is in online mode (has daemon connection)
+    // In stateless wallet, this checks if network_handler exists (not if sync loop is running)
     pub async fn is_online(&self) -> bool {
-        if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
-            return network_handler.is_running().await;
-        }
-
-        false
+        // Stateless wallet: check if we have a network handler (daemon connection)
+        self.network_handler.lock().await.is_some()
     }
 
     // this function allow to user to get the network handler in case in want to stay in online mode

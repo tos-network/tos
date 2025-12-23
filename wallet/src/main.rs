@@ -2676,7 +2676,7 @@ async fn export_transactions_csv(
     Ok(())
 }
 
-// Show wallet synchronization status with daemon
+// Show wallet connection status with daemon (stateless wallet)
 
 async fn sync_status(
     manager: &CommandManager,
@@ -2687,25 +2687,24 @@ async fn sync_status(
         context.get::<Arc<Wallet>>()?.clone()
     };
 
-    match wallet.get_sync_progress().await {
-        Ok((wallet_topo, daemon_topo, percentage)) => {
-            if wallet_topo >= daemon_topo {
+    // Stateless wallet: check daemon connection status
+    let is_online = wallet.is_online().await;
+
+    if is_online {
+        match wallet.get_sync_progress().await {
+            Ok((_, daemon_topo, _)) => {
                 manager.message(format!(
-                    "Wallet fully synchronized\n  Topoheight: {wallet_topo} / {daemon_topo} (100.0%)"
+                    "Stateless wallet: Connected to daemon\n  Daemon topoheight: {daemon_topo}\n  Status: Ready (queries on-demand)"
                 ));
-            } else {
+            }
+            Err(e) => {
                 manager.message(format!(
-                    "Syncing in progress\n  Topoheight: {} / {} ({:.1}%)\n  Blocks remaining: {}",
-                    wallet_topo,
-                    daemon_topo,
-                    percentage,
-                    daemon_topo - wallet_topo
+                    "Stateless wallet: Connected but error getting info: {e:#}"
                 ));
             }
         }
-        Err(e) => {
-            manager.error(format!("Error checking sync status: {e:#}"));
-        }
+    } else {
+        manager.message("Stateless wallet: Offline (not connected to daemon)");
     }
 
     Ok(())

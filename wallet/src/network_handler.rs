@@ -104,7 +104,7 @@ impl NetworkHandler {
                         error!("Error while maintaining connection: {}", e);
                     }
                     zelf.wallet
-                        .propagate_event(Event::SyncError {
+                        .propagate_event(Event::ConnectionError {
                             message: e.to_string(),
                         })
                         .await;

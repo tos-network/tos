@@ -252,7 +252,7 @@ Wallet Management:
   address                   - Alias for display_address
   seed                      - Display seed phrase (requires password)
   balance                   - Show wallet balance (requires --daemon-address)
-  sync_status               - Show wallet synchronization status
+  sync_status               - Show wallet connection status
 
 Transactions:
   transfer <asset> <address> <amount>      - Send asset to address (asset can be 'TOS' or asset hash)
