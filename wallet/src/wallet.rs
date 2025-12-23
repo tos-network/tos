@@ -146,9 +146,7 @@ pub struct Wallet {
     history_scan: AtomicBool,
     // flag to prioritize the usage of stable balance version when its online
     force_stable_balance: AtomicBool,
-    // Light wallet mode flag (no blockchain sync, query on-demand)
-    light_mode: AtomicBool,
-    // Light API for querying on-demand from daemon (light mode only)
+    // API for querying on-demand from daemon (stateless wallet)
     light_api: Mutex<Option<Arc<crate::light_api::LightAPI>>>,
     // Concurrency to use across the wallet
     concurrency: usize,
@@ -213,7 +211,6 @@ impl Wallet {
         precomputed_tables: PrecomputedTablesShared,
         n_threads: usize,
         concurrency: usize,
-        light_mode: bool,
     ) -> Arc<Self> {
         let zelf = Self {
             storage: RwLock::new(storage),
@@ -228,7 +225,6 @@ impl Wallet {
             event_broadcaster: Mutex::new(None),
             history_scan: AtomicBool::new(true),
             force_stable_balance: AtomicBool::new(false),
-            light_mode: AtomicBool::new(light_mode),
             light_api: Mutex::new(None),
             account: Account::new(precomputed_tables, keypair, n_threads),
             concurrency,
@@ -246,7 +242,6 @@ impl Wallet {
         precomputed_tables: PrecomputedTablesShared,
         n_threads: usize,
         concurrency: usize,
-        light_mode: bool,
     ) -> Result<Arc<Self>, Error> {
         if name.is_empty() {
             return Err(WalletError::EmptyName.into());
@@ -339,7 +334,6 @@ impl Wallet {
             precomputed_tables,
             n_threads,
             concurrency,
-            light_mode,
         ))
     }
 
@@ -351,7 +345,6 @@ impl Wallet {
         precomputed_tables: PrecomputedTablesShared,
         n_threads: usize,
         concurrency: usize,
-        light_mode: bool,
     ) -> Result<Arc<Self>, Error> {
         if name.is_empty() {
             return Err(WalletError::EmptyName.into());
@@ -410,7 +403,6 @@ impl Wallet {
             precomputed_tables,
             n_threads,
             concurrency,
-            light_mode,
         ))
     }
 
@@ -492,12 +484,7 @@ impl Wallet {
         self.force_stable_balance.load(Ordering::SeqCst)
     }
 
-    // Check if wallet is in light mode (no blockchain sync, query on-demand)
-    pub fn is_light_mode(&self) -> bool {
-        self.light_mode.load(Ordering::SeqCst)
-    }
-
-    // Get the light API client for querying on-demand (light mode only)
+    // Get the light API client for querying on-demand (stateless wallet)
     pub async fn get_light_api(&self) -> Result<Arc<crate::light_api::LightAPI>, WalletError> {
         let lock = self.light_api.lock().await;
         lock.clone().ok_or(WalletError::Any(anyhow::anyhow!(
@@ -818,6 +805,27 @@ impl Wallet {
         Ok(tx)
     }
 
+    // Query multisig threshold from daemon
+    // Returns None if no multisig is configured or not connected to daemon
+    async fn get_multisig_threshold_from_daemon(&self) -> Option<u8> {
+        if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
+            let daemon_api = network_handler.get_api();
+            let wallet_address = self.get_address();
+            match daemon_api.get_multisig(&wallet_address).await {
+                Ok(multisig) => {
+                    use tos_common::api::daemon::MultisigState;
+                    match multisig.state {
+                        MultisigState::Active { threshold, .. } => Some(threshold),
+                        MultisigState::Deleted => None,
+                    }
+                }
+                Err(_) => None, // No multisig or error querying
+            }
+        } else {
+            None // Not connected to daemon
+        }
+    }
+
     // Create a transaction with the given transaction type and fee
     // this will apply the changes to the storage if the transaction
     pub async fn create_transaction_with_storage(
@@ -830,10 +838,8 @@ impl Wallet {
         let mut state = self
             .create_transaction_state_with_storage(&storage, &transaction_type, &fee, None)
             .await?;
-        let threshold = storage
-            .get_multisig_state()
-            .await?
-            .map(|m| m.payload.threshold);
+        // Stateless wallet: Query multisig threshold from daemon
+        let threshold = self.get_multisig_threshold_from_daemon().await;
         let tx_version = storage.get_tx_version().await?;
         let transaction =
             self.create_transaction_with(&mut state, threshold, tx_version, transaction_type, fee)?;
@@ -846,86 +852,41 @@ impl Wallet {
     // This will returns the transaction builder state along the transaction
     // You must handle "apply changes" to the storage
     // Warning: this is locking the network handler to access to the daemon api
+    // Stateless wallet: Always queries daemon for nonce, reference, and balance
     pub async fn create_transaction_state_with_storage(
         &self,
         storage: &EncryptedStorage,
         transaction_type: &TransactionTypeBuilder,
         fee: &FeeBuilder,
-        nonce: Option<u64>,
+        _nonce: Option<u64>,
     ) -> Result<TransactionBuilderState, WalletError> {
-        trace!("create transaction with storage");
+        trace!("create transaction with storage (stateless)");
 
-        // Light mode: Query nonce and reference on-demand from daemon
-        let (nonce, reference, mut generated) = if self.is_light_mode() {
-            let light_api = self.get_light_api().await?;
-            let address = self.get_address();
+        // Stateless wallet: Query nonce and reference on-demand from daemon
+        let light_api = self.get_light_api().await?;
+        let address = self.get_address();
 
-            // Query nonce on-demand (ignore provided nonce in light mode)
-            let queried_nonce = light_api.get_nonce(&address).await.map_err(|e| {
-                WalletError::Any(anyhow::anyhow!(
-                    "Failed to query nonce from daemon in light mode: {}",
-                    e
-                ))
-            })?;
+        // Query nonce on-demand
+        let nonce = light_api.get_nonce(&address).await.map_err(|e| {
+            WalletError::Any(anyhow::anyhow!("Failed to query nonce from daemon: {}", e))
+        })?;
 
-            // Query reference on-demand
-            let queried_reference = light_api.get_reference_block().await.map_err(|e| {
-                WalletError::Any(anyhow::anyhow!(
-                    "Failed to query reference from daemon in light mode: {}",
-                    e
-                ))
-            })?;
+        // Query reference on-demand
+        let reference = light_api.get_reference_block().await.map_err(|e| {
+            WalletError::Any(anyhow::anyhow!(
+                "Failed to query reference from daemon: {}",
+                e
+            ))
+        })?;
 
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Light mode: queried nonce={}, reference.topoheight={}",
-                    queried_nonce, queried_reference.topoheight
-                );
-            }
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Stateless: queried nonce={}, reference.topoheight={}",
+                nonce, reference.topoheight
+            );
+        }
 
-            (queried_nonce, queried_reference, true)
-        } else {
-            // Normal mode: Use local storage
-            let nonce = match nonce {
-                Some(n) => n,
-                None => storage.get_unconfirmed_nonce()?,
-            };
-
-            let mut generated = false;
-            let reference = if let Some(cache) = storage.get_tx_cache() {
-                cache.reference.clone()
-            } else {
-                generated = true;
-                // BUG-008 fix: Check if top_block_hash exists before loading
-                // For new wallets that haven't synced, these values may not exist
-                if storage.has_top_block_hash()? {
-                    Reference {
-                        topoheight: storage.get_synced_topoheight()?,
-                        hash: storage.get_top_block_hash()?,
-                    }
-                } else {
-                    // Fallback: Query reference from daemon via network handler
-                    if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
-                        let info = network_handler.get_api().get_info().await.map_err(|e| {
-                            WalletError::Any(anyhow::anyhow!(
-                                "Wallet not synced and failed to query reference from daemon: {}",
-                                e
-                            ))
-                        })?;
-                        Reference {
-                            topoheight: info.topoheight,
-                            hash: info.top_block_hash,
-                        }
-                    } else {
-                        return Err(WalletError::Any(anyhow::anyhow!(
-                            "Wallet not synced: no top_block_hash in storage and no network handler available"
-                        )));
-                    }
-                }
-            };
-
-            (nonce, reference, generated)
-        };
+        let generated = true;
 
         // Build the state for the builder
         let used_assets = transaction_type.used_assets();
@@ -936,127 +897,51 @@ impl Wallet {
         self.add_registered_keys_for_fees_estimation(state.as_mut(), fee, transaction_type)
             .await?;
 
-        // Lets prevent any front running due to mining
-        {
-            let force_stable_balance = self.should_force_stable_balance();
-            // Reference must be none in order to use the last stable balance
-            // Otherwise that mean we're still waiting on a TX to be confirmed
-            if generated && (used_assets.contains(&TOS_ASSET) || force_stable_balance) {
-                if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
-                    let mut daemon_stable_topoheight = None;
-                    // Last mining reward is above stable topoheight, this may increase orphans rate
-                    // To avoid this, we will use the last balance version in stable topoheight as reference
-                    let mut use_stable_balance = if let Some(topoheight) = storage
-                        .get_last_coinbase_reward_topoheight()
-                        .filter(|_| !force_stable_balance)
+        // Stateless wallet: Optionally use stable balance if force_stable_balance is set
+        let force_stable_balance = self.should_force_stable_balance();
+        if force_stable_balance {
+            if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Using stable balance for TX creation (force_stable_balance enabled)");
+                }
+                for asset in used_assets.iter() {
+                    match network_handler
+                        .get_api()
+                        .get_stable_balance(&address, asset)
+                        .await
                     {
-                        let stable_topoheight =
-                            network_handler.get_api().get_stable_topoheight().await?;
-                        daemon_stable_topoheight = Some(stable_topoheight);
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!(
-                                "stable topoheight: {}, topoheight: {}",
-                                stable_topoheight, topoheight
-                            );
-                        }
-                        topoheight > stable_topoheight
-                    } else {
-                        force_stable_balance
-                    };
-
-                    if use_stable_balance && !force_stable_balance {
-                        // Verify that we don't have a pending TX with unconfirmed balance
-                        for asset in used_assets.iter() {
-                            if storage.has_unconfirmed_balance_for(asset).await? {
-                                if log::log_enabled!(log::Level::Warn) {
-                                    warn!("Cannot use stable balance because we have unconfirmed balance for {}", asset);
-                                }
-                                use_stable_balance = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    // We also need to check if we have made an outgoing TX
-                    // Because we need to keep the order of TX and use correct ciphertexts
-                    if use_stable_balance {
-                        if let Some(entry) = storage.get_last_outgoing_transaction()? {
-                            let stable_topo = if let Some(topo) = daemon_stable_topoheight {
-                                topo
-                            } else {
-                                network_handler.get_api().get_stable_topoheight().await?
-                            };
-
-                            if stable_topo < entry.get_topoheight() {
-                                if log::log_enabled!(log::Level::Warn) {
-                                    warn!("Cannot use stable balance because we have an outgoing TX not confirmed in stable height yet");
-                                }
-                                use_stable_balance = false;
-                            }
-                        }
-                    }
-
-                    if use_stable_balance {
-                        warn!("Using stable balance for TX creation");
-                        let address = self.get_address();
-                        for asset in used_assets.iter() {
+                        Ok(stable_point) => {
+                            let balance = Balance::new(stable_point.balance);
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("Searching stable balance for asset {}", asset);
+                                debug!(
+                                    "Using stable balance for asset {} with amount {}",
+                                    asset, balance.amount
+                                );
                             }
-                            match network_handler
-                                .get_api()
-                                .get_stable_balance(&address, &asset)
-                                .await
+                            state.add_balance((*asset).clone(), balance);
+
+                            // Update reference to stable point if higher
+                            if generated
+                                || state.get_reference().topoheight < stable_point.stable_topoheight
                             {
-                                Ok(stable_point) => {
-                                    // Balance simplification: Stable balance is plain u64 from daemon
-                                    let amount = stable_point.balance;
-                                    let balance = Balance::new(amount);
-
-                                    if log::log_enabled!(log::Level::Debug) {
-                                        debug!(
-                                            "Using stable balance for asset {} with amount {}",
-                                            asset, balance.amount
-                                        );
-                                    }
-                                    state.add_balance((*asset).clone(), balance);
-
-                                    // Build the stable reference
-                                    // We need to find the highest stable point
-                                    if generated
-                                        || state.get_reference().topoheight
-                                            < stable_point.stable_topoheight
-                                    {
-                                        if log::log_enabled!(log::Level::Debug) {
-                                            debug!("Setting stable reference for TX creation at topoheight {} with hash {}", stable_point.stable_topoheight, stable_point.stable_block_hash);
-                                        }
-                                        state.set_reference(Reference {
-                                            topoheight: stable_point.stable_topoheight,
-                                            hash: stable_point.stable_block_hash,
-                                        });
-                                        generated = false;
-                                    }
-                                }
-                                Err(e) => {
-                                    if log::log_enabled!(log::Level::Warn) {
-                                        warn!("Couldn't fetch stable balance for asset ({}), will try without: {}", asset, e);
-                                    }
-                                }
+                                state.set_reference(Reference {
+                                    topoheight: stable_point.stable_topoheight,
+                                    hash: stable_point.stable_block_hash,
+                                });
+                            }
+                            state.set_stable_topoheight(stable_point.stable_topoheight);
+                        }
+                        Err(e) => {
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Couldn't fetch stable balance for asset ({}): {}", asset, e);
                             }
                         }
-                    }
-
-                    if let Some(topoheight) = daemon_stable_topoheight {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("Setting stable topoheight to {} for state", topoheight);
-                        }
-                        state.set_stable_topoheight(topoheight);
                     }
                 }
             }
         }
 
-        // Get all balances used
+        // Stateless wallet: Query all balances from daemon
         for asset in used_assets {
             if log::log_enabled!(log::Level::Trace) {
                 trace!("Checking balance for asset {}", asset);
@@ -1072,66 +957,22 @@ impl Wallet {
                 return Err(WalletError::AssetNotTracked(asset.clone()));
             }
 
-            // Light mode: Query balance on-demand from daemon
-            let balance = if self.is_light_mode() {
-                let light_api = self.get_light_api().await?;
-                let address = self.get_address();
-                let balance_amount =
-                    light_api.get_balance(&address, &asset).await.map_err(|e| {
-                        WalletError::Any(anyhow::anyhow!(
-                            "Failed to query balance from daemon in light mode: {}",
-                            e
-                        ))
-                    })?;
+            // Stateless wallet: Query balance on-demand from daemon
+            let balance_amount = light_api.get_balance(&address, &asset).await.map_err(|e| {
+                WalletError::Any(anyhow::anyhow!(
+                    "Failed to query balance from daemon: {}",
+                    e
+                ))
+            })?;
 
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Light mode: queried balance for asset {} = {}",
-                        asset, balance_amount
-                    );
-                }
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Stateless: queried balance for asset {} = {}",
+                    asset, balance_amount
+                );
+            }
 
-                Balance::new(balance_amount)
-            } else {
-                // Normal mode: Use local storage, with fallback to daemon if not found (Issue #5 fix)
-                if storage.has_balance_for(asset).await? {
-                    let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(asset).await?;
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!(
-                            "Using balance (unconfirmed: {}) for asset {} with amount {}",
-                            unconfirmed, asset, balance.amount
-                        );
-                    }
-                    balance
-                } else if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
-                    // Fallback: Query balance from daemon when not in local storage (Issue #5)
-                    // This enables batch mode transfers even when wallet hasn't synced
-                    let address = self.get_address();
-                    let balance_result = network_handler
-                        .get_api()
-                        .get_balance(&address, asset)
-                        .await
-                        .map_err(|e| {
-                            WalletError::Any(anyhow::anyhow!(
-                                "Balance not found locally and failed to query from daemon: {}",
-                                e
-                            ))
-                        })?;
-
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!(
-                            "Fallback: queried balance from daemon for asset {} = {}",
-                            asset, balance_result.balance
-                        );
-                    }
-
-                    Balance::new(balance_result.balance)
-                } else {
-                    return Err(WalletError::BalanceNotFound(asset.clone()));
-                }
-            };
-
-            state.add_balance(asset.clone(), balance);
+            state.add_balance(asset.clone(), Balance::new(balance_amount));
         }
 
         Ok(state)
@@ -1269,14 +1110,11 @@ impl Wallet {
         self.add_registered_keys_for_fees_estimation(&mut state, &fee, &tx_type)
             .await?;
 
-        let (threshold, version) = {
+        // Stateless wallet: Query multisig threshold from daemon, tx_version from local config
+        let threshold = self.get_multisig_threshold_from_daemon().await;
+        let version = {
             let storage = self.storage.read().await;
-            let threshold = storage
-                .get_multisig_state()
-                .await?
-                .map(|m| m.payload.threshold);
-            let version = storage.get_tx_version().await?;
-            (threshold, version)
+            storage.get_tx_version().await?
         };
 
         let builder = TransactionBuilder::new(
@@ -1565,26 +1403,20 @@ impl Wallet {
         let network_handler =
             NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone()).await?;
 
-        // Initialize LightAPI if in light mode
-        if self.is_light_mode() {
-            let light_api = Arc::new(crate::light_api::LightAPI::new(daemon_api));
-            self.set_light_api(light_api).await;
+        // Stateless wallet: Initialize LightAPI for on-demand queries
+        let light_api = Arc::new(crate::light_api::LightAPI::new(daemon_api));
+        self.set_light_api(light_api).await;
 
-            if log::log_enabled!(log::Level::Info) {
-                info!("Light mode: LightAPI initialized for on-demand queries");
-            }
+        if log::log_enabled!(log::Level::Info) {
+            info!("Stateless wallet: LightAPI initialized for on-demand queries");
+        }
 
-            // In light mode, we don't start NetworkHandler sync loop
-            // We only keep the network_handler for the DaemonAPI connection
-            *self.network_handler.lock().await = Some(network_handler);
+        // Stateless wallet: We don't start NetworkHandler sync loop
+        // We only keep the network_handler for the DaemonAPI connection
+        *self.network_handler.lock().await = Some(network_handler);
 
-            if log::log_enabled!(log::Level::Info) {
-                info!("Light mode: Skipping blockchain sync, queries will be on-demand");
-            }
-        } else {
-            // Normal mode: start the sync task
-            network_handler.start(auto_reconnect).await?;
-            *self.network_handler.lock().await = Some(network_handler);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Stateless wallet: Connected to daemon, queries will be on-demand");
         }
         Ok(())
     }
@@ -1611,26 +1443,22 @@ impl Wallet {
         let network_handler =
             NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone()).await?;
 
-        // Initialize LightAPI if in light mode
-        if self.is_light_mode() {
-            let light_api = Arc::new(crate::light_api::LightAPI::new(daemon_api));
-            self.set_light_api(light_api).await;
+        // Stateless wallet: Initialize LightAPI for on-demand queries
+        let light_api = Arc::new(crate::light_api::LightAPI::new(daemon_api));
+        self.set_light_api(light_api).await;
 
-            if log::log_enabled!(log::Level::Info) {
-                info!("Light mode: LightAPI initialized for on-demand queries (shared daemon API)");
-            }
+        if log::log_enabled!(log::Level::Info) {
+            info!(
+                "Stateless wallet: LightAPI initialized for on-demand queries (shared daemon API)"
+            );
+        }
 
-            // In light mode, we don't start NetworkHandler sync loop
-            // We only keep the network_handler for the DaemonAPI connection
-            *self.network_handler.lock().await = Some(network_handler);
+        // Stateless wallet: We don't start NetworkHandler sync loop
+        // We only keep the network_handler for the DaemonAPI connection
+        *self.network_handler.lock().await = Some(network_handler);
 
-            if log::log_enabled!(log::Level::Info) {
-                info!("Light mode: Skipping blockchain sync, queries will be on-demand");
-            }
-        } else {
-            // Normal mode: start the sync task
-            network_handler.start(auto_reconnect).await?;
-            *self.network_handler.lock().await = Some(network_handler);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Stateless wallet: Connected to daemon, queries will be on-demand");
         }
         Ok(())
     }
@@ -1649,62 +1477,8 @@ impl Wallet {
         Ok(())
     }
 
-    // DEPRECATED: rescan is no longer needed in stateless wallet mode
-    // In light mode, all data is queried on-demand from the daemon
-    // This method is kept for backward compatibility but should not be used
-    #[allow(dead_code)]
-    pub async fn rescan(
-        &self,
-        mut topoheight: u64,
-        auto_reconnect: bool,
-    ) -> Result<(), WalletError> {
-        trace!("Rescan wallet from topoheight {}", topoheight);
-        if !self.is_online().await {
-            // user have to set it online
-            return Err(WalletError::NotOnlineMode);
-        }
-
-        let mut storage = self.get_storage().write().await;
-        if topoheight > storage.get_synced_topoheight()? {
-            return Err(WalletError::RescanTopoheightTooHigh);
-        }
-
-        let handler = self.network_handler.lock().await;
-        if let Some(network_handler) = handler.as_ref() {
-            let pruned_topoheight = network_handler.get_api().get_pruned_topoheight().await?;
-            let pruned_topo = pruned_topoheight.unwrap_or(0);
-            // Prevent people losing their history if they rescan from a pruned chain
-            if topoheight < pruned_topo {
-                warn!("Rescan topoheight is below pruned topoheight, setting it to {} to avoid losing history", pruned_topo);
-                topoheight = pruned_topo;
-            }
-
-            debug!("Stopping network handler!");
-            network_handler.stop(false).await?;
-            {
-                debug!("set synced topoheight to {}", topoheight);
-                storage.set_synced_topoheight(topoheight)?;
-                storage.delete_top_block_hash()?;
-                // balances will be re-fetched from daemon
-                storage.delete_balances().await?;
-                storage.delete_assets().await?;
-                // unconfirmed balances are going to be outdated, we delete them
-                storage.delete_unconfirmed_balances().await;
-                storage.clear_tx_cache();
-
-                if !network_handler.get_api().is_online() {
-                    debug!("reconnect API");
-                    network_handler.get_api().reconnect().await?;
-                }
-            }
-            debug!("Starting again network handler");
-            network_handler.start(auto_reconnect).await?;
-        } else {
-            return Err(WalletError::NotOnlineMode);
-        }
-
-        Ok(())
-    }
+    // REMOVED: rescan() - not needed in stateless wallet mode
+    // All data is queried on-demand from daemon
 
     // Check if the wallet is in online mode
     pub async fn is_online(&self) -> bool {
@@ -1766,53 +1540,24 @@ impl Wallet {
             trace!("get_balance for asset {}", asset);
         }
 
-        // In light mode, use light API for on-demand queries
-        if self.is_light_mode() {
-            let light_api = self.get_light_api().await?;
-            let address = self.get_address();
-            let balance = light_api.get_balance(&address, asset).await.map_err(|e| {
-                WalletError::Any(anyhow::anyhow!(
-                    "Failed to query balance from daemon in light mode: {}",
-                    e
-                ))
-            })?;
+        // Stateless wallet: Query balance on-demand from daemon
+        let light_api = self.get_light_api().await?;
+        let address = self.get_address();
+        let balance = light_api.get_balance(&address, asset).await.map_err(|e| {
+            WalletError::Any(anyhow::anyhow!(
+                "Failed to query balance from daemon: {}",
+                e
+            ))
+        })?;
 
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Light mode: queried balance for asset {} = {}",
-                    asset, balance
-                );
-            }
-
-            return Ok(balance);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Stateless: queried balance for asset {} = {}",
+                asset, balance
+            );
         }
 
-        // Normal mode: Query daemon via network handler
-        let network_handler = self.network_handler.lock().await;
-        if let Some(handler) = network_handler.as_ref() {
-            let address = self.get_address();
-            let balance_result = handler
-                .get_api()
-                .get_balance(&address, asset)
-                .await
-                .map_err(|e| {
-                    WalletError::Any(anyhow::anyhow!(
-                        "Failed to query balance from daemon: {}",
-                        e
-                    ))
-                })?;
-
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Queried balance from daemon for asset {} = {}",
-                    asset, balance_result.balance
-                );
-            }
-
-            Ok(balance_result.balance)
-        } else {
-            Err(WalletError::NotOnlineMode)
-        }
+        Ok(balance)
     }
 
     // Current account nonce for transactions
@@ -1823,42 +1568,18 @@ impl Wallet {
             trace!("get_nonce");
         }
 
-        // In light mode, use light API for on-demand queries
-        if self.is_light_mode() {
-            let light_api = self.get_light_api().await?;
-            let address = self.get_address();
-            let nonce = light_api.get_nonce(&address).await.map_err(|e| {
-                WalletError::Any(anyhow::anyhow!(
-                    "Failed to query nonce from daemon in light mode: {}",
-                    e
-                ))
-            })?;
+        // Stateless wallet: Query nonce on-demand from daemon
+        let light_api = self.get_light_api().await?;
+        let address = self.get_address();
+        let nonce = light_api.get_nonce(&address).await.map_err(|e| {
+            WalletError::Any(anyhow::anyhow!("Failed to query nonce from daemon: {}", e))
+        })?;
 
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("Light mode: queried nonce = {}", nonce);
-            }
-
-            return Ok(nonce);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Stateless: queried nonce = {}", nonce);
         }
 
-        // Normal mode: Query daemon via network handler
-        let network_handler = self.network_handler.lock().await;
-        if let Some(handler) = network_handler.as_ref() {
-            let address = self.get_address();
-            let nonce_result = handler.get_api().get_nonce(&address).await.map_err(|e| {
-                WalletError::Any(anyhow::anyhow!("Failed to query nonce from daemon: {}", e))
-            })?;
-
-            let nonce = nonce_result.version.get_nonce();
-
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("Queried nonce from daemon = {}", nonce);
-            }
-
-            Ok(nonce)
-        } else {
-            Err(WalletError::NotOnlineMode)
-        }
+        Ok(nonce)
     }
 
     // Encrypted storage of the wallet
@@ -1873,103 +1594,42 @@ impl Wallet {
 
     // Check if wallet is connected to daemon
     // In stateless mode, "synced" means having an active daemon connection
-    // In light mode, there is no sync state - all queries are on-demand
+    // All queries are on-demand via LightAPI
     pub async fn is_synced(&self) -> Result<bool, Error> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("is_synced: checking daemon connection");
         }
 
-        // In light mode, "synced" means having a working light API
-        if self.is_light_mode() {
-            let light_api_available = self.light_api.lock().await.is_some();
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Light mode: is_synced = {} (light API available)",
-                    light_api_available
-                );
-            }
-            return Ok(light_api_available);
-        }
-
-        // In normal mode, check if network handler is running
-        let network_handler = self.network_handler.lock().await;
-        let handler = network_handler
-            .as_ref()
-            .ok_or_else(|| Error::msg("Network handler not available"))?;
-
-        let is_running = handler.is_running().await;
+        // Stateless wallet: "synced" means having a working light API
+        let light_api_available = self.light_api.lock().await.is_some();
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Normal mode: is_synced = {} (network handler running)",
-                is_running
+                "Stateless mode: is_synced = {} (light API available)",
+                light_api_available
             );
         }
 
-        Ok(is_running)
+        Ok(light_api_available)
     }
 
-    // DEPRECATED: wait_for_sync is no longer needed in stateless wallet mode
-    // In light mode, there is no sync state to wait for - all queries are on-demand
-    // This method is kept for backward compatibility but should not be used
-    #[allow(dead_code)]
-    pub async fn wait_for_sync(&self, timeout_secs: u64) -> Result<(), Error> {
-        use tos_common::tokio::time::{sleep, Duration, Instant};
-
-        let start = Instant::now();
-        let timeout = Duration::from_secs(timeout_secs);
-        let poll_interval = Duration::from_millis(500);
-
-        loop {
-            // Check if synced
-            if self.is_synced().await? {
-                return Ok(());
-            }
-
-            // Check timeout
-            if start.elapsed() >= timeout {
-                let storage = self.storage.read().await;
-                let wallet_topoheight = storage.get_synced_topoheight()?;
-
-                let network_handler = self.network_handler.lock().await;
-                let handler = network_handler
-                    .as_ref()
-                    .ok_or_else(|| Error::msg("Network handler not available"))?;
-                let daemon_info = handler.get_api().get_info().await?;
-                let daemon_topoheight = daemon_info.topoheight;
-
-                return Err(Error::msg(format!(
-                    "Sync timeout after {} seconds. Wallet at topoheight {}, daemon at {}",
-                    timeout_secs, wallet_topoheight, daemon_topoheight
-                )));
-            }
-
-            // Wait before next poll
-            sleep(poll_interval).await;
-        }
-    }
+    // REMOVED: wait_for_sync() - not needed in stateless wallet mode
+    // Use is_synced() to check if daemon is connected
 
     // Get sync progress information
-    // Returns (wallet_topoheight, daemon_topoheight, percentage)
+    // In stateless mode, we query daemon directly - always "synced" at 100%
+    // Returns (daemon_topoheight, daemon_topoheight, 100.0)
     pub async fn get_sync_progress(&self) -> Result<(u64, u64, f64), Error> {
-        let network_handler = self.network_handler.lock().await;
-        let handler = network_handler
-            .as_ref()
-            .ok_or_else(|| Error::msg("Network handler not available"))?;
-
-        let daemon_info = handler.get_api().get_info().await?;
+        // Stateless wallet: Query daemon topoheight via LightAPI
+        let light_api = self.get_light_api().await?;
+        let daemon_info = light_api
+            .get_info()
+            .await
+            .map_err(|e| Error::msg(format!("Failed to query daemon info: {}", e)))?;
         let daemon_topoheight = daemon_info.topoheight;
 
-        let storage = self.storage.read().await;
-        let wallet_topoheight = storage.get_synced_topoheight()?;
-
+        // Stateless wallet: Always at daemon's topoheight (100% synced)
         // SAFE: f64 for display/UI purposes only, not consensus-critical
-        let percentage = if daemon_topoheight > 0 {
-            (wallet_topoheight as f64 / daemon_topoheight as f64) * 100.0
-        } else {
-            100.0
-        };
-
-        Ok((wallet_topoheight, daemon_topoheight, percentage))
+        Ok((daemon_topoheight, daemon_topoheight, 100.0))
     }
 }
 
@@ -2053,15 +1713,15 @@ impl XSWDHandler for Arc<Wallet> {
         if let Some(network_handler) = network_handler.as_ref() {
             if network_handler.is_running().await {
                 let api = network_handler.get_api();
-                let response =
-                    api.call(&request.method, &request.params)
-                        .await
-                        .map_err(|e| {
-                            RpcResponseError::new(
-                                id.clone(),
-                                InternalRpcError::Custom(-31999, e.to_string()),
-                            )
-                        })?;
+                let response = api
+                    .call(&request.method, &request.params)
+                    .await
+                    .map_err(|e| {
+                        RpcResponseError::new(
+                            id.clone(),
+                            InternalRpcError::Custom(-31999, e.to_string()),
+                        )
+                    })?;
 
                 return Ok(json!({
                     "jsonrpc": JSON_RPC_VERSION,

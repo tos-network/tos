@@ -406,12 +406,6 @@ pub struct Config {
     #[serde(skip)]
     #[serde(default)]
     pub json_file: Option<String>,
-    /// Enable light wallet mode (no blockchain synchronization)
-    /// Light mode queries nonce/balance/reference on-demand from daemon, enabling instant startup
-    /// Trade-off: Transaction history is not available locally
-    #[clap(long)]
-    #[serde(default)]
-    pub light_mode: bool,
     /// XSWD Server bind address (default: 127.0.0.1:44325)
     /// SECURITY WARNING: Binding to 0.0.0.0 exposes wallet to network. Only use for trusted networks.
     #[cfg(feature = "api_server")]

@@ -2,8 +2,9 @@ use crate::daemon_api::DaemonAPI;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tos_common::{
+    api::daemon::{AccountHistoryEntry, GetInfoResult},
     crypto::{Address, Hash},
-    transaction::Reference,
+    transaction::{Reference, Transaction},
 };
 
 /// Lightweight API client for light wallet mode
@@ -71,5 +72,40 @@ impl LightAPI {
                 }
             }
         }
+    }
+
+    /// Get daemon info (chain height, topoheight, etc.)
+    pub async fn get_info(&self) -> Result<GetInfoResult> {
+        self.daemon
+            .get_info()
+            .await
+            .context("Failed to get daemon info")
+    }
+
+    /// Get transaction by hash from daemon
+    pub async fn get_transaction(&self, hash: &Hash) -> Result<Transaction> {
+        self.daemon
+            .get_transaction(hash)
+            .await
+            .context("Failed to get transaction from daemon")
+    }
+
+    /// Get account history from daemon
+    pub async fn get_account_history(
+        &self,
+        address: &Address,
+        asset: &Hash,
+        min_topoheight: Option<u64>,
+        max_topoheight: Option<u64>,
+    ) -> Result<Vec<AccountHistoryEntry>> {
+        self.daemon
+            .get_account_history(address, asset, min_topoheight, max_topoheight)
+            .await
+            .context("Failed to get account history from daemon")
+    }
+
+    /// Get underlying daemon API for advanced queries
+    pub fn get_daemon(&self) -> &Arc<DaemonAPI> {
+        &self.daemon
     }
 }

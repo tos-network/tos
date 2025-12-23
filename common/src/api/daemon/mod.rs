@@ -598,9 +598,7 @@ pub enum AIMiningHistoryType {
     },
 
     /// Miner registration by this address
-    RegisterMiner {
-        registration_fee: u64,
-    },
+    RegisterMiner { registration_fee: u64 },
 }
 
 /// Summary statistics for AI Mining participant

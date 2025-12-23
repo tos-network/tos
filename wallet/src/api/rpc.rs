@@ -31,7 +31,7 @@ pub fn register_methods(handler: &mut RPCHandler<Arc<Wallet>>) {
     handler.register_method("get_topoheight", async_handler!(get_topoheight));
     handler.register_method("get_address", async_handler!(get_address));
     handler.register_method("split_address", async_handler!(split_address));
-    handler.register_method("rescan", async_handler!(rescan));
+    // REMOVED: rescan - not needed in stateless wallet mode
     handler.register_method("get_balance", async_handler!(get_balance));
     handler.register_method("has_balance", async_handler!(has_balance));
     handler.register_method("get_tracked_assets", async_handler!(get_tracked_assets));
@@ -59,7 +59,7 @@ pub fn register_methods(handler: &mut RPCHandler<Arc<Wallet>>) {
         async_handler!(sign_unsigned_transaction),
     );
 
-    handler.register_method("clear_tx_cache", async_handler!(clear_tx_cache));
+    // REMOVED: clear_tx_cache - not needed in stateless wallet mode
     handler.register_method("list_transactions", async_handler!(list_transactions));
     handler.register_method("is_online", async_handler!(is_online));
     handler.register_method("set_online_mode", async_handler!(set_online_mode));
@@ -105,24 +105,28 @@ async fn get_network(context: &Context, body: Value) -> Result<Value, InternalRp
     Ok(json!(network))
 }
 
-// Retrieve the current nonce of the wallet
+// Retrieve the current nonce of the wallet (stateless: queries daemon)
 async fn get_nonce(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     require_no_params(body)?;
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let nonce = storage.get_nonce()?;
+    // Stateless wallet: Query nonce from daemon via LightAPI
+    let nonce = wallet.get_nonce().await?;
     Ok(json!(nonce))
 }
 
-// Retrieve the current topoheight until which the wallet is synced
+// Retrieve the current daemon topoheight (stateless: queries daemon)
 async fn get_topoheight(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     require_no_params(body)?;
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let topoheight = storage.get_synced_topoheight()?;
-    Ok(json!(topoheight))
+    // Stateless wallet: Query topoheight from daemon via LightAPI
+    let light_api = wallet.get_light_api().await?;
+    let info = light_api
+        .get_info()
+        .await
+        .map_err(|e| InternalRpcError::Custom(-32000, format!("Failed to query daemon: {}", e)))?;
+    Ok(json!(info.topoheight))
 }
 
 // Retrieve the wallet address
@@ -207,42 +211,30 @@ async fn decrypt_extra_data(context: &Context, body: Value) -> Result<Value, Int
     Ok(json!(data))
 }
 
-// Rescan the wallet from the provided topoheight (or from the beginning if not provided)
-async fn rescan(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
-    let params: RescanParams = parse_params(body)?;
-    let wallet: &Arc<Wallet> = context.get()?;
+// REMOVED: rescan RPC - not needed in stateless wallet mode
+// All data is queried on-demand from daemon
 
-    wallet.rescan(params.until_topoheight.unwrap_or(0), params.auto_reconnect).await?;
-
-    Ok(json!(true))
-}
-
-// Retrieve the balance of the wallet for a specific asset
-// By default, it will returns 0 if no balance is found on disk
+// Retrieve the balance of the wallet for a specific asset (stateless: queries daemon)
+// Returns 0 if account has no balance for the asset
 async fn get_balance(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetBalanceParams = parse_params(body)?;
     let asset = params.asset.unwrap_or(TOS_ASSET);
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
 
-    // If the asset is not found, it will returns 0
-    // Use has_balance below to check if the wallet has a balance for a specific asset
-    let balance = storage.get_plaintext_balance_for(&asset).await.unwrap_or(0);
+    // Stateless wallet: Query balance from daemon via LightAPI
+    let balance = wallet.get_balance(&asset).await?;
     Ok(json!(balance))
 }
 
-// Check if the wallet has a balance for a specific asset
+// Check if the wallet has a balance for a specific asset (stateless: queries daemon)
 async fn has_balance(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetBalanceParams = parse_params(body)?;
     let asset = params.asset.unwrap_or(TOS_ASSET);
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
 
-    let exist = storage
-        .has_balance_for(&asset)
-        .await
-        .context("Error while checking if balance exists")?;
-    Ok(json!(exist))
+    // Stateless wallet: Query balance from daemon, non-zero means has balance
+    let balance = wallet.get_balance(&asset).await?;
+    Ok(json!(balance > 0))
 }
 
 // Retrieve all tracked assets by wallet
@@ -321,62 +313,62 @@ async fn get_asset(context: &Context, body: Value) -> Result<Value, InternalRpcE
     Ok(json!(data))
 }
 
-// Retrieve a transaction from the wallet storage using its hash
+// Retrieve a transaction by hash (stateless: queries daemon)
 async fn get_transaction(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetTransactionParams = parse_params(body)?;
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    if !storage.has_transaction(&params.hash)? {
-        return Err(InternalRpcError::CustomStr(
-            404,
-            "Transaction is not found in wallet",
-        ));
-    }
 
-    let transaction = storage.get_transaction(&params.hash)?;
+    // Stateless wallet: Query transaction from daemon
+    let light_api = wallet.get_light_api().await?;
+    let transaction = light_api.get_transaction(&params.hash).await.map_err(|e| {
+        let error_msg = format!("{:#}", e);
+        if error_msg.contains("not found") || error_msg.contains("Data not found") {
+            InternalRpcError::CustomStr(404, "Transaction is not found")
+        } else {
+            InternalRpcError::Custom(-32000, format!("Failed to query daemon: {}", e))
+        }
+    })?;
 
-    Ok(json!(
-        transaction.serializable(wallet.get_network().is_mainnet())
-    ))
+    // Return raw transaction data from daemon
+    Ok(json!(transaction))
 }
 
-// Debug rpc method to perform a search across all entries for a transaction from the wallet storage using its hash
+// Search for a transaction by hash (stateless: queries daemon)
+// Note: In stateless mode, this simply queries the daemon for the transaction
 async fn search_transaction(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: SearchTransactionParams = parse_params(body)?;
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
 
-    let index = storage.get_transaction_id(&params.hash)?;
-    if storage.has_transaction(&params.hash)? {
-        let transaction = storage.get_transaction(&params.hash)?;
-
-        return Ok(json!(SearchTransactionResult {
-            transaction: Some(transaction.serializable(wallet.get_network().is_mainnet())),
-            index,
-            is_raw_search: false
-        }));
+    // Stateless wallet: Query transaction from daemon
+    let light_api = wallet.get_light_api().await?;
+    match light_api.get_transaction(&params.hash).await {
+        Ok(transaction) => Ok(json!({
+            "transaction": transaction,
+            "index": null,
+            "is_raw_search": true
+        })),
+        Err(_) => Ok(json!({
+            "transaction": null,
+            "index": null,
+            "is_raw_search": true
+        })),
     }
-
-    let transaction = storage
-        .search_transaction(&params.hash)?
-        .map(|transaction| transaction.serializable(wallet.get_network().is_mainnet()));
-
-    Ok(json!(SearchTransactionResult {
-        transaction,
-        index,
-        is_raw_search: true
-    }))
 }
 
-// Dump the TX in hex format
+// Dump the TX in hex format (stateless: queries daemon)
 async fn dump_transaction(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetTransactionParams = parse_params(body)?;
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let transaction = storage.get_transaction(&params.hash)?;
+
+    // Stateless wallet: Query transaction from daemon
+    let light_api = wallet.get_light_api().await?;
+    let transaction = light_api
+        .get_transaction(&params.hash)
+        .await
+        .map_err(|e| InternalRpcError::Custom(-32000, format!("Failed to query daemon: {}", e)))?;
 
     Ok(json!(transaction.to_hex()))
 }
@@ -446,16 +438,12 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
     if params.broadcast {
         if let Err(e) = wallet.submit_transaction(&tx).await {
             if log::log_enabled!(log::Level::Warn) {
-                warn!(
-                    "Clearing Tx cache & unconfirmed balances because of broadcasting error: {}",
-                    e
-                );
+                warn!("Failed to broadcast transaction: {}", e);
             }
             if log::log_enabled!(log::Level::Debug) {
                 debug!("TX HEX: {}", tx.to_hex());
             }
-            storage.clear_tx_cache();
-            storage.delete_unconfirmed_balances().await;
+            // Stateless wallet: No local cache to clear
             return Err(e.into());
         }
     }
@@ -565,10 +553,26 @@ async fn build_unsigned_transaction(
         .await?;
 
     let version = storage.get_tx_version().await?;
-    let threshold = storage
-        .get_multisig_state()
-        .await?
-        .map(|state| state.payload.threshold);
+    // Stateless wallet: Query multisig threshold from daemon
+    let threshold = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let daemon_api = handler.get_api();
+            let wallet_address = wallet.get_address();
+            match daemon_api.get_multisig(&wallet_address).await {
+                Ok(multisig) => {
+                    use tos_common::api::daemon::MultisigState;
+                    match multisig.state {
+                        MultisigState::Active { threshold, .. } => Some(threshold),
+                        MultisigState::Deleted => None,
+                    }
+                }
+                Err(_) => None, // No multisig or error querying
+            }
+        } else {
+            None // Not connected to daemon
+        }
+    };
 
     // Generate the TX
     let builder = TransactionBuilder::new(
@@ -638,16 +642,12 @@ async fn finalize_unsigned_transaction(
     if params.broadcast {
         if let Err(e) = wallet.submit_transaction(&tx).await {
             if log::log_enabled!(log::Level::Warn) {
-                warn!(
-                    "Clearing Tx cache & unconfirmed balances because of broadcasting error: {}",
-                    e
-                );
+                warn!("Failed to broadcast transaction: {}", e);
             }
             if log::log_enabled!(log::Level::Debug) {
                 debug!("TX HEX: {}", tx.to_hex());
             }
-            storage.clear_tx_cache();
-            storage.delete_unconfirmed_balances().await;
+            // Stateless wallet: No local cache to clear
             return Err(e.into());
         }
     }
@@ -685,16 +685,8 @@ async fn sign_unsigned_transaction(
     }))
 }
 
-// Clear the transaction cache
-async fn clear_tx_cache(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
-    require_no_params(body)?;
-
-    let wallet: &Arc<Wallet> = context.get()?;
-    let mut storage = wallet.get_storage().write().await;
-    storage.clear_tx_cache();
-
-    Ok(json!(true))
-}
+// REMOVED: clear_tx_cache RPC - not needed in stateless wallet mode
+// No local cache to clear, all data is queried on-demand from daemon
 
 // Estimate fees for a transaction
 async fn estimate_fees(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -764,7 +756,9 @@ async fn set_online_mode(context: &Context, body: Value) -> Result<Value, Intern
         ));
     }
 
-    wallet.set_online_mode(&params.daemon_address, params.auto_reconnect).await?;
+    wallet
+        .set_online_mode(&params.daemon_address, params.auto_reconnect)
+        .await?;
     Ok(json!(true))
 }
 

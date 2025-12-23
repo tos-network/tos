@@ -10,9 +10,7 @@ use indexmap::IndexSet;
 #[allow(unused_imports)]
 use log::{error, info, warn};
 use sha3::{Digest, Keccak256};
-use std::{
-    borrow::Cow, fs::File, io::Write, path::Path, sync::Arc, time::Duration,
-};
+use std::{borrow::Cow, fs::File, io::Write, path::Path, sync::Arc, time::Duration};
 use tos_common::{
     ai_mining::{AIMiningPayload, DifficultyLevel},
     async_handler,
@@ -342,7 +340,6 @@ async fn main() -> Result<()> {
                 precomputed_tables,
                 config.n_decryption_threads,
                 config.network_concurrency,
-                config.light_mode,
             )?
         } else {
             if log::log_enabled!(log::Level::Info) {
@@ -356,7 +353,6 @@ async fn main() -> Result<()> {
                 precomputed_tables,
                 config.n_decryption_threads,
                 config.network_concurrency,
-                config.light_mode,
             )
             .await?
         };
@@ -647,7 +643,6 @@ async fn apply_config(
     wallet: &Arc<Wallet>,
     #[cfg(feature = "xswd")] prompt: &ShareablePrompt,
 ) {
-
     if !config.network_handler.offline_mode {
         if log::log_enabled!(log::Level::Info) {
             info!(
@@ -985,7 +980,6 @@ async fn setup_wallet_command_manager(
     // REMOVED: list_tracked_assets, track_asset, untrack_asset commands
     // In stateless mode, use list_balances to query account assets from daemon
 
-
     {
         command_manager.add_command(Command::new(
             "sync_status",
@@ -1280,12 +1274,16 @@ async fn prompt_message_builder(
             };
 
             // Query topoheight and balance from daemon (stateless wallet)
-        
+
             let (topoheight, balance_value, is_online) = {
                 let network_handler = wallet.get_network_handler().lock().await;
                 if let Some(handler) = network_handler.as_ref() {
                     let daemon_api = handler.get_api();
-                    let topo = daemon_api.get_info().await.map(|info| info.topoheight).unwrap_or(0);
+                    let topo = daemon_api
+                        .get_info()
+                        .await
+                        .map(|info| info.topoheight)
+                        .unwrap_or(0);
                     let bal = daemon_api
                         .get_balance(&wallet_address, &TOS_ASSET)
                         .await
@@ -1407,7 +1405,6 @@ async fn open_wallet(
             precomputed_tables,
             config.n_decryption_threads,
             config.network_concurrency,
-            config.light_mode,
         )?
     };
 
@@ -1503,7 +1500,6 @@ async fn create_wallet(
             precomputed_tables,
             config.n_decryption_threads,
             config.network_concurrency,
-            config.light_mode,
         )
         .await?
     };
@@ -1657,7 +1653,6 @@ async fn recover_wallet(
             precomputed_tables,
             config.n_decryption_threads,
             config.network_concurrency,
-            config.light_mode,
         )
         .await?
     };
@@ -2050,9 +2045,8 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     // Parse asset - TOS or hash only (no name lookup from local storage)
     let asset = if args.has_argument("asset") {
         let asset_str = args.get_value("asset")?.to_string_value()?;
-        if asset_str.is_empty() || asset_str.trim().is_empty() {
-            TOS_ASSET
-        } else if asset_str.to_uppercase() == "TOS" {
+        if asset_str.is_empty() || asset_str.trim().is_empty() || asset_str.to_uppercase() == "TOS"
+        {
             TOS_ASSET
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
@@ -2820,7 +2814,6 @@ async fn history(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-
     {
         use tos_common::api::daemon::AccountHistoryType;
 
@@ -2955,7 +2948,6 @@ async fn transaction(
     let wallet: &Arc<Wallet> = context.get()?;
     let hash = arguments.get_value("hash")?.to_hash()?;
 
-
     {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -2964,14 +2956,19 @@ async fn transaction(
         let daemon_api = handler.get_api();
 
         // Query transaction from daemon
-        let tx = daemon_api.get_transaction(&hash).await.map_err(|e| {
-            CommandError::InvalidArgument(format!("Transaction not found: {}", e))
-        })?;
+        let tx = daemon_api
+            .get_transaction(&hash)
+            .await
+            .map_err(|e| CommandError::InvalidArgument(format!("Transaction not found: {}", e)))?;
 
         // Display transaction details
         manager.message(format!("Transaction: {}", hash));
         manager.message(format!("Version: {}", tx.get_version()));
-        manager.message(format!("Source: {}", tx.get_source().as_address(wallet.get_network().is_mainnet())));
+        manager.message(format!(
+            "Source: {}",
+            tx.get_source()
+                .as_address(wallet.get_network().is_mainnet())
+        ));
         manager.message(format!("Nonce: {}", tx.get_nonce()));
         manager.message(format!("Fee: {} TOS", format_tos(tx.get_fee())));
         manager.message(format!("Reference: {}", tx.get_reference()));
@@ -2982,28 +2979,38 @@ async fn transaction(
             TransactionType::Transfers(transfers) => {
                 manager.message(format!("Type: Transfers ({} outputs)", transfers.len()));
                 for (i, transfer) in transfers.iter().enumerate() {
-                    let dest = transfer.get_destination().as_address(wallet.get_network().is_mainnet());
+                    let dest = transfer
+                        .get_destination()
+                        .as_address(wallet.get_network().is_mainnet());
                     let amount = transfer.get_amount();
                     let asset = transfer.get_asset();
                     if *asset == TOS_ASSET {
-                        manager.message(format!("  [{}] {} TOS -> {}", i, format_tos(amount), dest));
+                        manager.message(format!(
+                            "  [{}] {} TOS -> {}",
+                            i,
+                            format_tos(amount),
+                            dest
+                        ));
                     } else {
-                        manager.message(format!("  [{}] {} (asset: {}) -> {}", i, amount, asset, dest));
+                        manager.message(format!(
+                            "  [{}] {} (asset: {}) -> {}",
+                            i, amount, asset, dest
+                        ));
                     }
                 }
             }
             TransactionType::Burn(payload) => {
-                manager.message(format!("Type: Burn"));
+                manager.message("Type: Burn".to_string());
                 manager.message(format!("  Amount: {}", payload.amount));
                 manager.message(format!("  Asset: {}", payload.asset));
             }
             TransactionType::MultiSig(payload) => {
-                manager.message(format!("Type: MultiSig"));
+                manager.message("Type: MultiSig".to_string());
                 manager.message(format!("  Threshold: {}", payload.threshold));
                 manager.message(format!("  Participants: {}", payload.participants.len()));
             }
             TransactionType::InvokeContract(payload) => {
-                manager.message(format!("Type: InvokeContract"));
+                manager.message("Type: InvokeContract".to_string());
                 manager.message(format!("  Contract: {}", payload.contract));
             }
             TransactionType::DeployContract(_) => {
@@ -3024,7 +3031,7 @@ async fn transaction(
                 }
             }
             TransactionType::AIMining(payload) => {
-                manager.message(format!("Type: AIMining"));
+                manager.message("Type: AIMining".to_string());
                 manager.message(format!("  Payload: {:?}", payload));
             }
         }
@@ -3040,7 +3047,6 @@ async fn export_transactions_csv(
     let filename = arguments.get_value("filename")?.to_string_value()?;
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-
 
     {
         use tos_common::api::daemon::AccountHistoryType;
@@ -3069,7 +3075,8 @@ async fn export_transactions_csv(
         let mut file = File::create(&filename).context("Error while creating CSV file")?;
 
         // Write CSV header
-        writeln!(file, "topoheight,hash,type,details,timestamp").context("Error writing CSV header")?;
+        writeln!(file, "topoheight,hash,type,details,timestamp")
+            .context("Error writing CSV header")?;
 
         // Write each transaction
         for entry in &history {
@@ -3089,8 +3096,15 @@ async fn export_transactions_csv(
                 AccountHistoryType::Incoming { from } => {
                     format!("Incoming,from:{}", from)
                 }
-                AccountHistoryType::MultiSig { participants, threshold } => {
-                    format!("MultiSig,threshold:{} participants:{}", threshold, participants.len())
+                AccountHistoryType::MultiSig {
+                    participants,
+                    threshold,
+                } => {
+                    format!(
+                        "MultiSig,threshold:{} participants:{}",
+                        threshold,
+                        participants.len()
+                    )
                 }
                 AccountHistoryType::InvokeContract { contract, entry_id } => {
                     format!("InvokeContract,contract:{} entry:{}", contract, entry_id)
@@ -3107,10 +3121,7 @@ async fn export_transactions_csv(
             writeln!(
                 file,
                 "{},{},{},{}",
-                entry.topoheight,
-                entry.hash,
-                type_str,
-                entry.block_timestamp
+                entry.topoheight, entry.hash, type_str, entry.block_timestamp
             )
             .context("Error writing CSV row")?;
         }
@@ -3386,7 +3397,6 @@ async fn ai_mining_history(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-
     {
         use tos_common::api::daemon::{AIMiningHistoryType, AIMiningTransactionType};
 
@@ -3525,7 +3535,6 @@ async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-
     {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -3539,12 +3548,12 @@ async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result
         let result = daemon_api
             .get_ai_mining_history(
                 &wallet_address,
-                None, // difficulty filter
-                None, // transaction type filter
-                None, // task_id filter
-                None, // min topoheight
-                None, // max topoheight
-                None, // skip
+                None,    // difficulty filter
+                None,    // transaction type filter
+                None,    // task_id filter
+                None,    // min topoheight
+                None,    // max topoheight
+                None,    // skip
                 Some(0), // maximum - we only need the summary
             )
             .await
@@ -3563,15 +3572,25 @@ async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result
         manager.message("");
 
         manager.message("--- Activity Summary ---");
-        manager.message(format!("Tasks Published: {}", summary.total_tasks_published));
-        manager.message(format!("Answers Submitted: {}", summary.total_answers_submitted));
+        manager.message(format!(
+            "Tasks Published: {}",
+            summary.total_tasks_published
+        ));
+        manager.message(format!(
+            "Answers Submitted: {}",
+            summary.total_answers_submitted
+        ));
         manager.message(format!(
             "Validations Performed: {}",
             summary.total_validations_performed
         ));
         manager.message(format!(
             "Registered Miner: {}",
-            if summary.is_registered_miner { "Yes" } else { "No" }
+            if summary.is_registered_miner {
+                "Yes"
+            } else {
+                "No"
+            }
         ));
         if let Some(registered_at) = summary.registered_at {
             manager.message(format!("Registered at Block: {}", registered_at));
@@ -3603,7 +3622,6 @@ async fn ai_mining_tasks(
 ) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-
 
     {
         use tos_common::api::daemon::AIMiningHistoryType;
@@ -3657,7 +3675,10 @@ async fn ai_mining_tasks(
         manager.message("=".repeat(80));
 
         for entry in &result.transactions {
-            manager.message(format!("[TopoHeight: {}] TX: {}", entry.topoheight, entry.tx_hash));
+            manager.message(format!(
+                "[TopoHeight: {}] TX: {}",
+                entry.topoheight, entry.tx_hash
+            ));
 
             match &entry.transaction {
                 AIMiningHistoryType::PublishTask {
@@ -3722,7 +3743,6 @@ async fn ai_mining_rewards(
 ) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-
 
     {
         use tos_common::api::daemon::AccountHistoryType;
@@ -4199,7 +4219,11 @@ async fn multisig_setup(
         if let Some(handler) = network_handler.as_ref() {
             let daemon_api = handler.get_api();
             let wallet_address = wallet.get_address();
-            if daemon_api.has_multisig(&wallet_address).await.unwrap_or(false) {
+            if daemon_api
+                .has_multisig(&wallet_address)
+                .await
+                .unwrap_or(false)
+            {
                 daemon_api
                     .get_multisig(&wallet_address)
                     .await
@@ -4395,20 +4419,48 @@ async fn multisig_setup(
 
     manager.message("Building transaction...");
 
-    let multisig = {
-        let storage = wallet.get_storage().read().await;
-        storage
-            .get_multisig_state()
-            .await
-            .context("Error while reading multisig state")?
+    // Stateless wallet: Query existing multisig from daemon
+    let existing_multisig = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let daemon_api = handler.get_api();
+            let wallet_address = wallet.get_address();
+            match daemon_api.get_multisig(&wallet_address).await {
+                Ok(multisig) => {
+                    use indexmap::IndexSet;
+                    use tos_common::api::daemon::MultisigState;
+                    match multisig.state {
+                        MultisigState::Active {
+                            threshold: existing_threshold,
+                            participants: existing_participants,
+                        } => {
+                            // Convert Vec<Address> to IndexSet<CompressedPublicKey>
+                            // Note: PublicKey = CompressedPublicKey in this context
+                            let compressed_keys: IndexSet<_> = existing_participants
+                                .into_iter()
+                                .map(|addr| addr.to_public_key())
+                                .collect();
+                            Some(tos_common::transaction::MultiSigPayload {
+                                participants: compressed_keys,
+                                threshold: existing_threshold,
+                            })
+                        }
+                        MultisigState::Deleted => None,
+                    }
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        }
     };
     let payload = MultiSigBuilder {
         participants: keys,
         threshold,
     };
     let tx_type = TransactionTypeBuilder::MultiSig(payload);
-    let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
+    let tx = if let Some(multisig_payload) = existing_multisig {
+        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig_payload).await?
     } else {
         match wallet
             .create_transaction(tx_type, FeeBuilder::default())
@@ -4470,26 +4522,51 @@ async fn multisig_sign(
 async fn multisig_show(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let multisig = storage
-        .get_multisig_state()
-        .await
-        .context("Error while reading multisig state")?;
 
-    if let Some(multisig) = multisig {
-        manager.message(format!(
-            "MultiSig payload ({} participants with threshold at {}):",
-            multisig.payload.participants.len(),
-            multisig.payload.threshold
-        ));
-        for key in multisig.payload.participants.iter() {
-            manager.message(format!(
-                "- {}",
-                key.as_address(wallet.get_network().is_mainnet())
-            ));
+    // Stateless wallet: Query multisig state from daemon
+    let network_handler = wallet.get_network_handler().lock().await;
+    if let Some(handler) = network_handler.as_ref() {
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
+
+        match daemon_api.has_multisig(&wallet_address).await {
+            Ok(true) => {
+                match daemon_api.get_multisig(&wallet_address).await {
+                    Ok(multisig) => {
+                        use tos_common::api::daemon::MultisigState;
+                        match multisig.state {
+                            MultisigState::Active {
+                                threshold,
+                                participants,
+                            } => {
+                                manager.message(format!(
+                                    "MultiSig payload ({} participants with threshold at {}):",
+                                    participants.len(),
+                                    threshold
+                                ));
+                                for addr in participants.iter() {
+                                    manager.message(format!("- {}", addr));
+                                }
+                            }
+                            MultisigState::Deleted => {
+                                manager.message("Multisig: Deleted");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        manager.error(format!("Could not query multisig state: {}", e));
+                    }
+                }
+            }
+            Ok(false) => {
+                manager.message("No multisig configured");
+            }
+            Err(e) => {
+                manager.error(format!("Could not query multisig state: {}", e));
+            }
         }
     } else {
-        manager.message("No multisig configured");
+        manager.error("Not connected to daemon. Use 'online_mode' to connect first.");
     }
 
     Ok(())
@@ -4501,8 +4578,8 @@ async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction
     let tx_hash = tx.hash();
     manager.message(format!("Transaction hash: {}", tx_hash));
 
-    // Light mode can submit transactions via daemon API even without sync task running
-    if wallet.is_online().await || wallet.is_light_mode() {
+    // Stateless wallet: Check if we have daemon connection
+    if wallet.is_online().await {
         if let Err(e) = wallet.submit_transaction(&tx).await {
             manager.error(format!("Couldn't submit transaction: {:#}", e));
             manager.error("Transaction failed. Check your connection to the daemon and try again.");
@@ -4924,16 +5001,10 @@ async fn deploy_contract(
 
     // Wait for wallet to sync before creating transaction
 
-    {
-        if wallet.is_online().await && !wallet.is_synced().await.unwrap_or(false) {
-            manager.message("Waiting for wallet to synchronize...");
-            if let Err(e) = wallet.wait_for_sync(30).await {
-                manager.error(format!("Sync timeout: {e:#}"));
-                manager.message("Tip: Check sync status with 'sync_status' command");
-                return Ok(());
-            }
-            manager.message("Wallet synchronized");
-        }
+    // Stateless wallet: Just check if daemon is connected
+    if !wallet.is_synced().await.unwrap_or(false) {
+        manager.error("Wallet is not connected to daemon. Use 'online_mode' command first.");
+        return Ok(());
     }
 
     // Get contract file path
@@ -5062,16 +5133,10 @@ async fn invoke_contract(
 
     // Wait for wallet to sync before creating transaction
 
-    {
-        if wallet.is_online().await && !wallet.is_synced().await.unwrap_or(false) {
-            manager.message("Waiting for wallet to synchronize...");
-            if let Err(e) = wallet.wait_for_sync(30).await {
-                manager.error(format!("Sync timeout: {e:#}"));
-                manager.message("Tip: Check sync status with 'sync_status' command");
-                return Ok(());
-            }
-            manager.message("Wallet synchronized");
-        }
+    // Stateless wallet: Just check if daemon is connected
+    if !wallet.is_synced().await.unwrap_or(false) {
+        manager.error("Wallet is not connected to daemon. Use 'online_mode' command first.");
+        return Ok(());
     }
 
     // Get contract address (deployment TX hash)

@@ -14,8 +14,8 @@ pub mod wallet;
 pub mod precomputed_tables;
 
 pub mod daemon_api;
-pub mod network_handler;
 pub mod light_api;
+pub mod network_handler;
 pub mod stateless_wallet;
 
 pub mod api;
