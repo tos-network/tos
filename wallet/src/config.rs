@@ -78,12 +78,10 @@ fn default_logs_path() -> String {
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct NetworkConfig {
     /// Daemon address to use
-    #[cfg(feature = "network_handler")]
     #[clap(long, default_value_t = String::from(DEFAULT_DAEMON_ADDRESS))]
     #[serde(default = "default_daemon_address")]
     pub daemon_address: String,
     /// Disable online mode
-    #[cfg(feature = "network_handler")]
     #[clap(long)]
     pub offline_mode: bool,
 }

@@ -34,22 +34,16 @@ use tos_common::{
 use crate::{
     cipher::Cipher,
     config::{PASSWORD_ALGORITHM, PASSWORD_HASH_SIZE, SALT_SIZE},
+    daemon_api::DaemonAPI,
     entry::{EntryData, TransactionEntry as InnerTransactionEntry},
     error::WalletError,
     mnemonics,
+    network_handler::{NetworkHandler, SharedNetworkHandler},
     precomputed_tables::PrecomputedTablesShared,
-    storage::{EncryptedStorage, Storage},
+    storage::{Balance, EncryptedStorage, Storage},
     transaction_builder::{EstimateFeesState, TransactionBuilderState},
 };
-#[cfg(feature = "network_handler")]
-use {
-    crate::{
-        daemon_api::DaemonAPI,
-        network_handler::{NetworkHandler, SharedNetworkHandler},
-        storage::Balance,
-    },
-    log::warn,
-};
+use log::warn;
 
 #[cfg(feature = "xswd")]
 use {
@@ -133,7 +127,6 @@ pub struct Wallet {
     // so it can be shared to another thread for decrypting ciphertexts
     account: Account,
     // network handler for online mode to keep wallet synced
-    #[cfg(feature = "network_handler")]
     network_handler: Mutex<Option<SharedNetworkHandler>>,
     // network on which we are connected
     network: Network,
@@ -156,7 +149,6 @@ pub struct Wallet {
     // Light wallet mode flag (no blockchain sync, query on-demand)
     light_mode: AtomicBool,
     // Light API for querying on-demand from daemon (light mode only)
-    #[cfg(feature = "network_handler")]
     light_api: Mutex<Option<Arc<crate::light_api::LightAPI>>>,
     // Concurrency to use across the wallet
     concurrency: usize,
@@ -225,7 +217,6 @@ impl Wallet {
     ) -> Arc<Self> {
         let zelf = Self {
             storage: RwLock::new(storage),
-            #[cfg(feature = "network_handler")]
             network_handler: Mutex::new(None),
             network,
             #[cfg(feature = "api_server")]
@@ -238,7 +229,6 @@ impl Wallet {
             history_scan: AtomicBool::new(true),
             force_stable_balance: AtomicBool::new(false),
             light_mode: AtomicBool::new(light_mode),
-            #[cfg(feature = "network_handler")]
             light_api: Mutex::new(None),
             account: Account::new(precomputed_tables, keypair, n_threads),
             concurrency,
@@ -454,7 +444,6 @@ impl Wallet {
         }
 
         // Stop gracefully the network handler
-        #[cfg(feature = "network_handler")]
         {
             let mut lock = self.network_handler.lock().await;
             if let Some(handler) = lock.take() {
@@ -509,7 +498,6 @@ impl Wallet {
     }
 
     // Get the light API client for querying on-demand (light mode only)
-    #[cfg(feature = "network_handler")]
     pub async fn get_light_api(&self) -> Result<Arc<crate::light_api::LightAPI>, WalletError> {
         let lock = self.light_api.lock().await;
         lock.clone().ok_or(WalletError::Any(anyhow::anyhow!(
@@ -518,7 +506,6 @@ impl Wallet {
     }
 
     // Set the light API client
-    #[cfg(feature = "network_handler")]
     pub async fn set_light_api(&self, api: Arc<crate::light_api::LightAPI>) {
         *self.light_api.lock().await = Some(api);
     }
@@ -578,14 +565,11 @@ impl Wallet {
         })
         .await;
 
-        #[cfg(feature = "network_handler")]
-        {
-            if let Some(_network_handler) = self.network_handler.lock().await.as_ref() {
-                // Stateless wallet: No need to sync head state for tracked assets
-                // Balance will be queried on-demand via get_balance() when needed
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!("Asset {} tracked, balance will be queried on-demand", asset);
-                }
+        if let Some(_network_handler) = self.network_handler.lock().await.as_ref() {
+            // Stateless wallet: No need to sync head state for tracked assets
+            // Balance will be queried on-demand via get_balance() when needed
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Asset {} tracked, balance will be queried on-demand", asset);
             }
         }
 
@@ -872,7 +856,6 @@ impl Wallet {
         trace!("create transaction with storage");
 
         // Light mode: Query nonce and reference on-demand from daemon
-        #[cfg(feature = "network_handler")]
         let (nonce, reference, mut generated) = if self.is_light_mode() {
             let light_api = self.get_light_api().await?;
             let address = self.get_address();
@@ -944,45 +927,16 @@ impl Wallet {
             (nonce, reference, generated)
         };
 
-        #[cfg(not(feature = "network_handler"))]
-        let (nonce, reference, mut generated) = {
-            let nonce = match nonce {
-                Some(n) => n,
-                None => storage.get_unconfirmed_nonce()?,
-            };
-
-            let mut generated = false;
-            let reference = if let Some(cache) = storage.get_tx_cache() {
-                cache.reference.clone()
-            } else {
-                generated = true;
-                // BUG-008 fix: Check if top_block_hash exists before loading
-                if !storage.has_top_block_hash()? {
-                    return Err(WalletError::Any(anyhow::anyhow!(
-                        "Wallet not synced: no top_block_hash in storage (network handler disabled)"
-                    )));
-                }
-                Reference {
-                    topoheight: storage.get_synced_topoheight()?,
-                    hash: storage.get_top_block_hash()?,
-                }
-            };
-
-            (nonce, reference, generated)
-        };
-
         // Build the state for the builder
         let used_assets = transaction_type.used_assets();
 
         // state used to build the transaction
         let mut state = TransactionBuilderState::new(self.network.is_mainnet(), reference, nonce);
 
-        #[cfg(feature = "network_handler")]
         self.add_registered_keys_for_fees_estimation(state.as_mut(), fee, transaction_type)
             .await?;
 
         // Lets prevent any front running due to mining
-        #[cfg(feature = "network_handler")]
         {
             let force_stable_balance = self.should_force_stable_balance();
             // Reference must be none in order to use the last stable balance
@@ -1119,7 +1073,6 @@ impl Wallet {
             }
 
             // Light mode: Query balance on-demand from daemon
-            #[cfg(feature = "network_handler")]
             let balance = if self.is_light_mode() {
                 let light_api = self.get_light_api().await?;
                 let address = self.get_address();
@@ -1176,21 +1129,6 @@ impl Wallet {
                 } else {
                     return Err(WalletError::BalanceNotFound(asset.clone()));
                 }
-            };
-
-            #[cfg(not(feature = "network_handler"))]
-            let balance = {
-                if !storage.has_balance_for(asset).await? {
-                    return Err(WalletError::BalanceNotFound(asset.clone()));
-                }
-                let (balance, unconfirmed) = storage.get_unconfirmed_balance_for(asset).await?;
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Using balance (unconfirmed: {}) for asset {} with amount {}",
-                        unconfirmed, asset, balance.amount
-                    );
-                }
-                balance
             };
 
             state.add_balance(asset.clone(), balance);
@@ -1265,22 +1203,18 @@ impl Wallet {
         if log::log_enabled!(log::Level::Trace) {
             trace!("submit transaction {}", transaction.hash());
         }
-        #[cfg(feature = "network_handler")]
-        {
-            let network_handler = self.network_handler.lock().await;
-            if let Some(network_handler) = network_handler.as_ref() {
-                network_handler
-                    .get_api()
-                    .submit_transaction(transaction)
-                    .await?;
-                return Ok(());
-            }
+        let network_handler = self.network_handler.lock().await;
+        if let Some(network_handler) = network_handler.as_ref() {
+            network_handler
+                .get_api()
+                .submit_transaction(transaction)
+                .await?;
+            return Ok(());
         }
         Err(WalletError::NotOnlineMode)
     }
 
     // Search if possible all registered keys for the transaction type
-    #[cfg(feature = "network_handler")]
     pub async fn add_registered_keys_for_fees_estimation(
         &self,
         state: &mut EstimateFeesState,
@@ -1332,7 +1266,6 @@ impl Wallet {
         trace!("estimate fees");
         let mut state = EstimateFeesState::new();
 
-        #[cfg(feature = "network_handler")]
         self.add_registered_keys_for_fees_estimation(&mut state, &fee, &tx_type)
             .await?;
 
@@ -1600,7 +1533,6 @@ impl Wallet {
     }
 
     // set wallet in online mode: start a communication task which will keep the wallet synced
-    #[cfg(feature = "network_handler")]
     pub async fn set_online_mode(
         self: &Arc<Self>,
         daemon_address: &String,
@@ -1659,7 +1591,6 @@ impl Wallet {
 
     // set the wallet in online mode using a shared daemon API
     // this allows to share the same connection/Daemon API across several wallets to save resources
-    #[cfg(feature = "network_handler")]
     pub async fn set_online_mode_with_api(
         self: &Arc<Self>,
         daemon_api: Arc<DaemonAPI>,
@@ -1705,7 +1636,6 @@ impl Wallet {
     }
 
     // set wallet in offline mode: stop communication task if exists
-    #[cfg(feature = "network_handler")]
     pub async fn set_offline_mode(&self) -> Result<(), WalletError> {
         trace!("Set offline mode");
 
@@ -1723,7 +1653,6 @@ impl Wallet {
     // In light mode, all data is queried on-demand from the daemon
     // This method is kept for backward compatibility but should not be used
     #[allow(dead_code)]
-    #[cfg(feature = "network_handler")]
     pub async fn rescan(
         &self,
         mut topoheight: u64,
@@ -1779,7 +1708,6 @@ impl Wallet {
 
     // Check if the wallet is in online mode
     pub async fn is_online(&self) -> bool {
-        #[cfg(feature = "network_handler")]
         if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
             return network_handler.is_running().await;
         }
@@ -1789,7 +1717,6 @@ impl Wallet {
 
     // this function allow to user to get the network handler in case in want to stay in online mode
     // but want to pause / resume the syncing task through start/stop functions from it
-    #[cfg(feature = "network_handler")]
     pub fn get_network_handler(&self) -> &Mutex<Option<Arc<NetworkHandler>>> {
         &self.network_handler
     }
@@ -1834,7 +1761,6 @@ impl Wallet {
 
     // Get balance for a specific asset by querying daemon
     // This is the stateless version that queries the daemon directly
-    #[cfg(feature = "network_handler")]
     pub async fn get_balance(&self, asset: &Hash) -> Result<u64, WalletError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get_balance for asset {}", asset);
@@ -1889,21 +1815,9 @@ impl Wallet {
         }
     }
 
-    #[cfg(not(feature = "network_handler"))]
-    pub async fn get_balance(&self, asset: &Hash) -> Result<u64, WalletError> {
-        // Without network handler, must read from storage (legacy mode)
-        let storage = self.storage.read().await;
-        if !storage.has_balance_for(asset).await? {
-            return Err(WalletError::BalanceNotFound(asset.clone()));
-        }
-        let (balance, _) = storage.get_unconfirmed_balance_for(asset).await?;
-        Ok(balance.amount)
-    }
-
     // Current account nonce for transactions
     // Nonce is used against replay attacks on-chain
     // This is the stateless version that queries the daemon directly
-    #[cfg(feature = "network_handler")]
     pub async fn get_nonce(&self) -> Result<u64, WalletError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get_nonce");
@@ -1947,13 +1861,6 @@ impl Wallet {
         }
     }
 
-    #[cfg(not(feature = "network_handler"))]
-    pub async fn get_nonce(&self) -> Result<u64, WalletError> {
-        // Without network handler, must read from storage (legacy mode)
-        let storage = self.storage.read().await;
-        Ok(storage.get_nonce().unwrap_or(0))
-    }
-
     // Encrypted storage of the wallet
     pub fn get_storage(&self) -> &RwLock<EncryptedStorage> {
         &self.storage
@@ -1967,7 +1874,6 @@ impl Wallet {
     // Check if wallet is connected to daemon
     // In stateless mode, "synced" means having an active daemon connection
     // In light mode, there is no sync state - all queries are on-demand
-    #[cfg(feature = "network_handler")]
     pub async fn is_synced(&self) -> Result<bool, Error> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("is_synced: checking daemon connection");
@@ -2006,7 +1912,6 @@ impl Wallet {
     // In light mode, there is no sync state to wait for - all queries are on-demand
     // This method is kept for backward compatibility but should not be used
     #[allow(dead_code)]
-    #[cfg(feature = "network_handler")]
     pub async fn wait_for_sync(&self, timeout_secs: u64) -> Result<(), Error> {
         use tos_common::tokio::time::{sleep, Duration, Instant};
 
@@ -2045,7 +1950,6 @@ impl Wallet {
 
     // Get sync progress information
     // Returns (wallet_topoheight, daemon_topoheight, percentage)
-    #[cfg(feature = "network_handler")]
     pub async fn get_sync_progress(&self) -> Result<(u64, u64, f64), Error> {
         let network_handler = self.network_handler.lock().await;
         let handler = network_handler
@@ -2145,28 +2049,25 @@ impl XSWDHandler for Arc<Wallet> {
 
     async fn call_node_with(&self, request: RpcRequest) -> Result<Value, RpcResponseError> {
         let id = request.id;
-        #[cfg(feature = "network_handler")]
-        {
-            let network_handler = self.network_handler.lock().await;
-            if let Some(network_handler) = network_handler.as_ref() {
-                if network_handler.is_running().await {
-                    let api = network_handler.get_api();
-                    let response =
-                        api.call(&request.method, &request.params)
-                            .await
-                            .map_err(|e| {
-                                RpcResponseError::new(
-                                    id.clone(),
-                                    InternalRpcError::Custom(-31999, e.to_string()),
-                                )
-                            })?;
+        let network_handler = self.network_handler.lock().await;
+        if let Some(network_handler) = network_handler.as_ref() {
+            if network_handler.is_running().await {
+                let api = network_handler.get_api();
+                let response =
+                    api.call(&request.method, &request.params)
+                        .await
+                        .map_err(|e| {
+                            RpcResponseError::new(
+                                id.clone(),
+                                InternalRpcError::Custom(-31999, e.to_string()),
+                            )
+                        })?;
 
-                    return Ok(json!({
-                        "jsonrpc": JSON_RPC_VERSION,
-                        "id": id,
-                        "result": response
-                    }));
-                }
+                return Ok(json!({
+                    "jsonrpc": JSON_RPC_VERSION,
+                    "id": id,
+                    "result": response
+                }));
             }
         }
 

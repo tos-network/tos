@@ -1,4 +1,3 @@
-#[cfg(feature = "network_handler")]
 use super::network_handler::NetworkError;
 use chacha20poly1305::Error as CryptoError;
 use strum::{EnumDiscriminants, IntoDiscriminant};
@@ -87,7 +86,6 @@ pub enum WalletError {
     EmptyName,
     #[error("No handler available for this request")]
     NoHandlerAvailable,
-    #[cfg(feature = "network_handler")]
     #[error(transparent)]
     NetworkError(#[from] NetworkError),
     #[error("Balance for asset {} was not found", _0)]

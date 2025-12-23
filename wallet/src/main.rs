@@ -647,7 +647,7 @@ async fn apply_config(
     wallet: &Arc<Wallet>,
     #[cfg(feature = "xswd")] prompt: &ShareablePrompt,
 ) {
-    #[cfg(feature = "network_handler")]
+
     if !config.network_handler.offline_mode {
         if log::log_enabled!(log::Level::Info) {
             info!(
@@ -985,7 +985,7 @@ async fn setup_wallet_command_manager(
     // REMOVED: list_tracked_assets, track_asset, untrack_asset commands
     // In stateless mode, use list_balances to query account assets from daemon
 
-    #[cfg(feature = "network_handler")]
+
     {
         command_manager.add_command(Command::new(
             "sync_status",
@@ -1280,7 +1280,7 @@ async fn prompt_message_builder(
             };
 
             // Query topoheight and balance from daemon (stateless wallet)
-            #[cfg(feature = "network_handler")]
+        
             let (topoheight, balance_value, is_online) = {
                 let network_handler = wallet.get_network_handler().lock().await;
                 if let Some(handler) = network_handler.as_ref() {
@@ -1296,9 +1296,6 @@ async fn prompt_message_builder(
                     (0, 0, false)
                 }
             };
-
-            #[cfg(not(feature = "network_handler"))]
-            let (topoheight, balance_value, is_online) = (0u64, 0u64, false);
 
             let topoheight_str = format!(
                 "{}: {}",
@@ -1803,13 +1800,8 @@ async fn list_balances(
         0
     };
 
-    #[cfg(not(feature = "network_handler"))]
-    return Err(CommandError::InvalidArgument(
-        "network_handler feature required for daemon queries".to_string(),
-    ));
-
     // Query all data from daemon API (stateless - no local storage)
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -2094,7 +2086,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     };
 
     // Query balance, asset data, and multisig from daemon API (stateless)
-    #[cfg(feature = "network_handler")]
+
     let (max_balance, asset_data, multisig) = {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -2128,11 +2120,6 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
 
         (balance, asset_data, multisig)
     };
-
-    #[cfg(not(feature = "network_handler"))]
-    return Err(CommandError::InvalidArgument(
-        "network_handler feature required for daemon queries".to_string(),
-    ));
 
     // read amount
     let amount = if args.has_argument("amount") {
@@ -2390,7 +2377,7 @@ async fn transfer_all(
     }
 
     // Query balance, asset data, and multisig from daemon API (stateless)
-    #[cfg(feature = "network_handler")]
+
     let (mut amount, asset_data, multisig) = {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -2424,11 +2411,6 @@ async fn transfer_all(
 
         (balance, asset_data, multisig)
     };
-
-    #[cfg(not(feature = "network_handler"))]
-    return Err(CommandError::InvalidArgument(
-        "network_handler feature required for daemon queries".to_string(),
-    ));
 
     let transfer = TransferBuilder {
         destination: address.clone(),
@@ -2640,7 +2622,7 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
     };
 
     // Query balance, asset data, and multisig from daemon API (stateless)
-    #[cfg(feature = "network_handler")]
+
     let (max_balance, asset_data, multisig) = {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -2674,11 +2656,6 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
 
         (balance, asset_data, multisig)
     };
-
-    #[cfg(not(feature = "network_handler"))]
-    return Err(CommandError::InvalidArgument(
-        "network_handler feature required for daemon queries".to_string(),
-    ));
 
     // read amount
     let amount = if args.has_argument("amount") {
@@ -2797,7 +2774,7 @@ async fn balance(
     };
 
     // Query balance from daemon API (stateless - no local storage)
-    #[cfg(feature = "network_handler")]
+
     let balance = {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -2814,15 +2791,8 @@ async fn balance(
         result.balance
     };
 
-    #[cfg(not(feature = "network_handler"))]
-    let balance = {
-        return Err(CommandError::InvalidArgument(
-            "network_handler feature required for daemon queries".to_string(),
-        ));
-    };
-
     // Query asset info from daemon
-    #[cfg(feature = "network_handler")]
+
     let data = {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -2850,7 +2820,7 @@ async fn history(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    #[cfg(feature = "network_handler")]
+
     {
         use tos_common::api::daemon::AccountHistoryType;
 
@@ -2974,11 +2944,6 @@ async fn history(
         }
     }
 
-    #[cfg(not(feature = "network_handler"))]
-    {
-        manager.message("History command requires network_handler feature");
-    }
-
     Ok(())
 }
 
@@ -2990,7 +2955,7 @@ async fn transaction(
     let wallet: &Arc<Wallet> = context.get()?;
     let hash = arguments.get_value("hash")?.to_hash()?;
 
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -3065,11 +3030,6 @@ async fn transaction(
         }
     }
 
-    #[cfg(not(feature = "network_handler"))]
-    {
-        manager.message("Transaction command requires network_handler feature");
-    }
-
     Ok(())
 }
 
@@ -3081,7 +3041,7 @@ async fn export_transactions_csv(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    #[cfg(feature = "network_handler")]
+
     {
         use tos_common::api::daemon::AccountHistoryType;
 
@@ -3162,16 +3122,11 @@ async fn export_transactions_csv(
         ));
     }
 
-    #[cfg(not(feature = "network_handler"))]
-    {
-        manager.message("Export command requires network_handler feature");
-    }
-
     Ok(())
 }
 
 // Show wallet synchronization status with daemon
-#[cfg(feature = "network_handler")]
+
 async fn sync_status(
     manager: &CommandManager,
     _arguments: ArgumentManager,
@@ -3259,7 +3214,7 @@ async fn nonce(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comma
     let wallet: &Arc<Wallet> = context.get()?;
 
     // Query nonce from daemon API (stateless - no local storage)
-    #[cfg(feature = "network_handler")]
+
     let nonce = {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -3271,11 +3226,6 @@ async fn nonce(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comma
         })?;
         result.version.get_nonce()
     };
-
-    #[cfg(not(feature = "network_handler"))]
-    return Err(CommandError::InvalidArgument(
-        "network_handler feature required for daemon queries".to_string(),
-    ));
 
     manager.message(format!("Nonce: {}", nonce));
     Ok(())
@@ -3358,7 +3308,7 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
     }
 
     // Query multisig state from daemon
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         if let Some(handler) = network_handler.as_ref() {
@@ -3417,12 +3367,6 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
         }
     }
 
-    #[cfg(not(feature = "network_handler"))]
-    {
-        manager.message("No multisig state (network_handler disabled)");
-        manager.message("Nonce: (network_handler disabled)");
-    }
-
     let storage = wallet.get_storage().read().await;
     let tx_version = storage.get_tx_version().await?;
     manager.message(format!("Transaction version: {}", tx_version));
@@ -3442,7 +3386,7 @@ async fn ai_mining_history(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    #[cfg(feature = "network_handler")]
+
     {
         use tos_common::api::daemon::{AIMiningHistoryType, AIMiningTransactionType};
 
@@ -3573,11 +3517,6 @@ async fn ai_mining_history(
         }
     }
 
-    #[cfg(not(feature = "network_handler"))]
-    {
-        manager.message("AI mining history command requires network_handler feature");
-    }
-
     Ok(())
 }
 
@@ -3586,7 +3525,7 @@ async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -3654,11 +3593,6 @@ async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result
         ));
     }
 
-    #[cfg(not(feature = "network_handler"))]
-    {
-        manager.message("AI mining stats command requires network_handler feature");
-    }
-
     Ok(())
 }
 
@@ -3670,7 +3604,7 @@ async fn ai_mining_tasks(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    #[cfg(feature = "network_handler")]
+
     {
         use tos_common::api::daemon::AIMiningHistoryType;
 
@@ -3778,11 +3712,6 @@ async fn ai_mining_tasks(
         }
     }
 
-    #[cfg(not(feature = "network_handler"))]
-    {
-        manager.message("AI mining tasks command requires network_handler feature");
-    }
-
     Ok(())
 }
 
@@ -3794,7 +3723,7 @@ async fn ai_mining_rewards(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    #[cfg(feature = "network_handler")]
+
     {
         use tos_common::api::daemon::AccountHistoryType;
 
@@ -3873,11 +3802,6 @@ async fn ai_mining_rewards(
                 page + 1
             ));
         }
-    }
-
-    #[cfg(not(feature = "network_handler"))]
-    {
-        manager.message("AI mining rewards command requires network_handler feature");
     }
 
     Ok(())
@@ -4269,7 +4193,7 @@ async fn multisig_setup(
     let prompt = manager.get_prompt();
 
     // Query multisig state from daemon (stateless wallet)
-    #[cfg(feature = "network_handler")]
+
     let multisig = {
         let network_handler = wallet.get_network_handler().lock().await;
         if let Some(handler) = network_handler.as_ref() {
@@ -4290,11 +4214,6 @@ async fn multisig_setup(
             ));
         }
     };
-
-    #[cfg(not(feature = "network_handler"))]
-    return Err(CommandError::InvalidArgument(
-        "Multisig setup requires network_handler feature".to_string(),
-    ));
 
     if !manager.is_batch_mode() {
         manager.warn("IMPORTANT: Make sure you have the correct participants and threshold before proceeding.");
@@ -5004,7 +4923,7 @@ async fn deploy_contract(
     };
 
     // Wait for wallet to sync before creating transaction
-    #[cfg(feature = "network_handler")]
+
     {
         if wallet.is_online().await && !wallet.is_synced().await.unwrap_or(false) {
             manager.message("Waiting for wallet to synchronize...");
@@ -5142,7 +5061,7 @@ async fn invoke_contract(
     };
 
     // Wait for wallet to sync before creating transaction
-    #[cfg(feature = "network_handler")]
+
     {
         if wallet.is_online().await && !wallet.is_synced().await.unwrap_or(false) {
             manager.message("Waiting for wallet to synchronize...");
@@ -5318,7 +5237,7 @@ async fn get_contract_info(
     manager.message(format!("Querying contract {}...", contract));
 
     // Get contract module from daemon
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         if let Some(handler) = network_handler.as_ref() {
@@ -5337,12 +5256,6 @@ async fn get_contract_info(
         } else {
             manager.error("Not connected to daemon. Ensure daemon is running and accessible.");
         }
-    }
-
-    #[cfg(not(feature = "network_handler"))]
-    {
-        let _ = wallet;
-        manager.error("Network handler feature is not enabled.");
     }
 
     Ok(())
@@ -5392,7 +5305,7 @@ async fn get_contract_address(
     ));
 
     // Get contract address from daemon
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         if let Some(handler) = network_handler.as_ref() {
@@ -5418,12 +5331,6 @@ async fn get_contract_address(
         } else {
             manager.error("Not connected to daemon. Ensure daemon is running and accessible.");
         }
-    }
-
-    #[cfg(not(feature = "network_handler"))]
-    {
-        let _ = wallet;
-        manager.error("Network handler feature is not enabled.");
     }
 
     Ok(())
@@ -5501,7 +5408,7 @@ async fn get_contract_balance(
     manager.message(format!("Querying balance for contract {}...", contract));
 
     // Get contract balance from daemon
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         if let Some(handler) = network_handler.as_ref() {
@@ -5522,13 +5429,6 @@ async fn get_contract_balance(
         }
     }
 
-    #[cfg(not(feature = "network_handler"))]
-    {
-        let _ = wallet;
-        let _ = asset;
-        manager.error("Network handler feature is not enabled.");
-    }
-
     Ok(())
 }
 
@@ -5545,7 +5445,7 @@ async fn count_contracts(
     manager.message("Querying contract count...");
 
     // Get contract count from daemon
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         if let Some(handler) = network_handler.as_ref() {
@@ -5561,12 +5461,6 @@ async fn count_contracts(
         } else {
             manager.error("Not connected to daemon. Ensure daemon is running and accessible.");
         }
-    }
-
-    #[cfg(not(feature = "network_handler"))]
-    {
-        let _ = wallet;
-        manager.error("Network handler feature is not enabled.");
     }
 
     Ok(())
