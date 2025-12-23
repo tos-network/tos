@@ -81,9 +81,6 @@ pub struct NetworkConfig {
     #[clap(long, default_value_t = String::from(DEFAULT_DAEMON_ADDRESS))]
     #[serde(default = "default_daemon_address")]
     pub daemon_address: String,
-    /// Disable online mode
-    #[clap(long)]
-    pub offline_mode: bool,
 }
 
 #[cfg(feature = "cli")]

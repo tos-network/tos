@@ -60,10 +60,10 @@ pub fn register_methods(handler: &mut RPCHandler<Arc<Wallet>>) {
     );
 
     // REMOVED: clear_tx_cache - not needed in stateless wallet mode
+    // REMOVED: set_offline_mode - stateless wallet always requires daemon connection
     handler.register_method("list_transactions", async_handler!(list_transactions));
     handler.register_method("is_online", async_handler!(is_online));
     handler.register_method("set_online_mode", async_handler!(set_online_mode));
-    handler.register_method("set_offline_mode", async_handler!(set_offline_mode));
     handler.register_method("sign_data", async_handler!(sign_data));
     handler.register_method("estimate_fees", async_handler!(estimate_fees));
     handler.register_method(
@@ -762,21 +762,7 @@ async fn set_online_mode(context: &Context, body: Value) -> Result<Value, Intern
     Ok(json!(true))
 }
 
-// Connect the wallet to a daemon if not already connected
-async fn set_offline_mode(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
-    require_no_params(body)?;
-
-    let wallet: &Arc<Wallet> = context.get()?;
-    if !wallet.is_online().await {
-        return Err(InternalRpcError::InvalidRequestStr(
-            "Wallet is already in offline mode",
-        ));
-    }
-
-    wallet.set_offline_mode().await?;
-
-    Ok(json!(true))
-}
+// REMOVED: set_offline_mode - stateless wallet always requires daemon connection
 
 // Sign any data converted in bytes format
 async fn sign_data(context: &Context, body: Value) -> Result<Value, InternalRpcError> {

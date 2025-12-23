@@ -70,8 +70,7 @@ pub enum WalletError {
     AlreadyOnlineMode,
     #[error("Asset is already present on disk")]
     AssetAlreadyRegistered,
-    #[error("Topoheight is too high to rescan")]
-    RescanTopoheightTooHigh,
+    // REMOVED: RescanTopoheightTooHigh - rescan not needed in stateless wallet
     #[error(transparent)]
     Any(#[from] Error),
     #[error("No API Server is running")]

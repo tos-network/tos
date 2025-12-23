@@ -1463,20 +1463,7 @@ impl Wallet {
         Ok(())
     }
 
-    // set wallet in offline mode: stop communication task if exists
-    pub async fn set_offline_mode(&self) -> Result<(), WalletError> {
-        trace!("Set offline mode");
-
-        let mut handler = self.network_handler.lock().await;
-        if let Some(network_handler) = handler.take() {
-            network_handler.stop(true).await?;
-        } else {
-            return Err(WalletError::NotOnlineMode);
-        }
-
-        Ok(())
-    }
-
+    // REMOVED: set_offline_mode() - stateless wallet always requires daemon connection
     // REMOVED: rescan() - not needed in stateless wallet mode
     // All data is queried on-demand from daemon
 

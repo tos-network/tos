@@ -549,26 +549,25 @@ async fn apply_config(
     wallet: &Arc<Wallet>,
     #[cfg(feature = "xswd")] prompt: &ShareablePrompt,
 ) {
-    if !config.network_handler.offline_mode {
+    // Always connect to daemon (stateless wallet requires daemon connection)
+    if log::log_enabled!(log::Level::Info) {
+        info!(
+            "Trying to connect to daemon at '{}'",
+            config.network_handler.daemon_address
+        );
+    }
+    if let Err(e) = wallet
+        .set_online_mode(&config.network_handler.daemon_address, true)
+        .await
+    {
+        if log::log_enabled!(log::Level::Error) {
+            error!("Couldn't connect to daemon: {e:#}");
+        }
         if log::log_enabled!(log::Level::Info) {
-            info!(
-                "Trying to connect to daemon at '{}'",
-                config.network_handler.daemon_address
-            );
+            info!("Wallet will run in stateless mode. Ensure daemon is running to use wallet features.");
         }
-        if let Err(e) = wallet
-            .set_online_mode(&config.network_handler.daemon_address, true)
-            .await
-        {
-            if log::log_enabled!(log::Level::Error) {
-                error!("Couldn't connect to daemon: {e:#}");
-            }
-            if log::log_enabled!(log::Level::Info) {
-                info!("Wallet will run in stateless mode. Ensure daemon is running to use wallet features.");
-            }
-        } else if log::log_enabled!(log::Level::Info) {
-            info!("Online mode enabled");
-        }
+    } else if log::log_enabled!(log::Level::Info) {
+        info!("Online mode enabled");
     }
 
     wallet.set_history_scan(!config.disable_history_scan);
