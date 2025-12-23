@@ -133,11 +133,6 @@ pub struct LogConfig {
     #[clap(long)]
     #[serde(default)]
     pub disable_log_color: bool,
-    /// Disable terminal interactive mode
-    /// You will not be able to write CLI commands in it or to have an updated prompt
-    #[clap(long)]
-    #[serde(default)]
-    pub disable_interactive_mode: bool,
     /// Log filename
     ///
     /// By default filename is tos-wallet.log.
@@ -323,8 +318,7 @@ Execute:
 
 ═══════════════════════════════════════════════════════════════════════════════
 
-For interactive mode (with prompts), add --interactive flag.
-For more help on specific commands, use: help <command> in interactive mode.
+For more help on specific commands, use: --exec "help <command>"
 "#
 )]
 #[command(styles = tos_common::get_cli_styles())]
@@ -411,11 +405,6 @@ pub struct Config {
     #[cfg(feature = "api_server")]
     #[clap(long)]
     pub xswd_bind_address: Option<String>,
-    /// Enable interactive mode (prompt for missing arguments)
-    /// Default: false (pure command mode)
-    #[clap(long)]
-    #[serde(default)]
-    pub interactive: bool,
     /// Read password from environment variable TOS_WALLET_PASSWORD
     #[clap(long)]
     #[serde(default)]
@@ -437,14 +426,9 @@ impl Config {
         self.exec.as_ref()
     }
 
-    /// Check if we're in interactive mode
-    pub fn is_interactive_mode(&self) -> bool {
-        self.interactive && !self.is_exec_mode()
-    }
-
-    /// Check if we're in command mode (default)
+    /// Check if we're in command mode (always true - batch mode only)
     pub fn is_command_mode(&self) -> bool {
-        !self.is_interactive_mode()
+        true
     }
 }
 

@@ -247,7 +247,7 @@ pub struct CommandManager {
     context: Mutex<Context>,
     prompt: ShareablePrompt,
     running_since: Instant,
-    batch_mode: bool,
+    // Note: batch_mode removed - wallet now always operates in batch mode
 }
 
 impl CommandManager {
@@ -257,7 +257,6 @@ impl CommandManager {
             context: Mutex::new(context),
             prompt,
             running_since: Instant::now(),
-            batch_mode: false,
         }
     }
 
@@ -265,22 +264,18 @@ impl CommandManager {
         Self::with_context(Context::new(), prompt)
     }
 
+    /// Create CommandManager (always in batch mode)
+    /// The exec_mode parameter is kept for API compatibility but ignored
+    #[allow(unused_variables)]
     pub fn with_batch_mode(context: Context, prompt: ShareablePrompt, exec_mode: bool) -> Self {
-        Self {
-            commands: Mutex::new(Vec::new()),
-            context: Mutex::new(context),
-            prompt,
-            running_since: Instant::now(),
-            batch_mode: exec_mode,
-        }
+        Self::with_context(context, prompt)
     }
 
+    /// Create CommandManager (always in batch mode)
+    /// The exec_mode parameter is kept for API compatibility but ignored
+    #[allow(unused_variables)]
     pub fn new_with_batch_mode(prompt: ShareablePrompt, exec_mode: bool) -> Self {
-        Self::with_batch_mode(Context::new(), prompt, exec_mode)
-    }
-
-    pub fn is_batch_mode(&self) -> bool {
-        self.batch_mode
+        Self::new(prompt)
     }
 
     // Register default commands:
@@ -479,27 +474,25 @@ impl CommandManager {
         self.running_since.elapsed()
     }
 
-    /// Require a parameter in batch mode, throw error if missing
+    /// Require a parameter, throw error if missing (always in batch mode)
     pub fn require_param(
         &self,
         args: &ArgumentManager,
         param_name: &str,
     ) -> Result<(), CommandError> {
-        if self.batch_mode && !args.has_argument(param_name) {
+        if !args.has_argument(param_name) {
             return Err(CommandError::MissingArgument(param_name.to_string()));
         }
         Ok(())
     }
 
-    /// Validate required parameters for batch mode
+    /// Validate required parameters (always in batch mode)
     pub fn validate_batch_params(
         &self,
         command_name: &str,
         args: &ArgumentManager,
     ) -> Result<(), CommandError> {
-        if !self.batch_mode {
-            return Ok(());
-        }
+        // Always validate - we're always in batch mode
 
         match command_name {
             "open" => {
