@@ -36,7 +36,7 @@ use tos_common::{
     utils::{format_coin, format_tos, from_coin},
 };
 use tos_wallet::{
-    config::{Config, JsonBatchConfig, LogProgressTableGenerationReportFunction, DIR_PATH},
+    config::{Config, JsonBatchConfig, LogProgressTableGenerationReportFunction, WalletCommand, DIR_PATH},
     precomputed_tables,
     wallet::{RecoverOption, Wallet},
 };
@@ -270,7 +270,42 @@ async fn main() -> Result<()> {
         )
         .await?;
         let p = Path::new(path);
-        let wallet = if p.exists() && p.is_dir() && Path::new(&format!("{path}/db")).exists() {
+        let wallet_exists = p.exists() && p.is_dir() && Path::new(&format!("{path}/db")).exists();
+
+        // Handle explicit 'create' subcommand
+        if let Some(WalletCommand::Create) = config.command {
+            if wallet_exists {
+                anyhow::bail!(
+                    "Wallet already exists at '{path}'. Use without 'create' subcommand to open it."
+                );
+            }
+            if log::log_enabled!(log::Level::Info) {
+                info!("Creating a new wallet at {path}");
+            }
+            let wallet = Wallet::create(
+                path,
+                &password,
+                config.seed.as_deref().map(RecoverOption::Seed),
+                config.network,
+                precomputed_tables,
+                config.n_decryption_threads,
+                config.network_concurrency,
+            )
+            .await?;
+
+            // Display wallet info and exit
+            println!("Wallet created successfully!");
+            println!("Address: {}", wallet.get_address());
+            if let Ok(seed) = wallet.get_seed(0) {
+                println!("\nSeed phrase (SAVE THIS SECURELY):");
+                println!("{}", seed);
+                println!("\nWARNING: Never share your seed phrase with anyone!");
+            }
+            return Ok(());
+        }
+
+        // Default behavior: open existing or create new
+        let wallet = if wallet_exists {
             if log::log_enabled!(log::Level::Info) {
                 info!("Opening wallet {path}");
             }

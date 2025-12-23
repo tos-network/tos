@@ -2,7 +2,7 @@ use std::ops::ControlFlow;
 
 use argon2::{Algorithm, Argon2, Params, Version};
 #[cfg(feature = "cli")]
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use lazy_static::lazy_static;
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -157,6 +157,20 @@ pub struct LogConfig {
     #[clap(long, default_value_t = default_logs_datetime_format())]
     #[serde(default = "default_logs_datetime_format")]
     pub datetime_format: String,
+}
+
+/// Wallet subcommands
+#[cfg(feature = "cli")]
+#[derive(Subcommand, Clone, Debug)]
+pub enum WalletCommand {
+    /// Create a new wallet at the specified path
+    ///
+    /// This command explicitly creates a new wallet. If a wallet already exists
+    /// at the specified path, an error will be returned.
+    ///
+    /// Example:
+    ///   tos_wallet --network devnet --wallet-path my_wallet --password mypass123 create
+    Create,
 }
 
 #[cfg(feature = "cli")]
@@ -409,6 +423,10 @@ pub struct Config {
     /// Read password from file (more secure than --password)
     #[clap(long)]
     pub password_file: Option<String>,
+    /// Subcommand to execute (create, or none to open existing wallet)
+    #[command(subcommand)]
+    #[serde(skip)]
+    pub command: Option<WalletCommand>,
 }
 
 #[cfg(feature = "cli")]
