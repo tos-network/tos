@@ -4,7 +4,6 @@ use log::{debug, error, info, trace};
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
 use std::{
-    collections::HashSet,
     io::Write,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -581,19 +580,12 @@ impl Wallet {
 
         #[cfg(feature = "network_handler")]
         {
-            if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
+            if let Some(_network_handler) = self.network_handler.lock().await.as_ref() {
+                // Stateless wallet: No need to sync head state for tracked assets
+                // Balance will be queried on-demand via get_balance() when needed
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Syncing head state for newly tracked asset {}", asset);
+                    debug!("Asset {} tracked, balance will be queried on-demand", asset);
                 }
-                network_handler
-                    .sync_head_state(
-                        &self.get_address(),
-                        Some(HashSet::from_iter([asset])),
-                        None,
-                        false,
-                        false,
-                    )
-                    .await?;
             }
         }
 
@@ -1639,8 +1631,7 @@ impl Wallet {
 
         // create the network handler with the shared DaemonAPI
         let network_handler =
-            NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone(), self.concurrency)
-                .await?;
+            NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone()).await?;
 
         // Initialize LightAPI if in light mode
         if self.is_light_mode() {
@@ -1687,8 +1678,7 @@ impl Wallet {
 
         // create the network handler
         let network_handler =
-            NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone(), self.concurrency)
-                .await?;
+            NetworkHandler::with_api(Arc::clone(&self), daemon_api.clone()).await?;
 
         // Initialize LightAPI if in light mode
         if self.is_light_mode() {
@@ -1729,9 +1719,10 @@ impl Wallet {
         Ok(())
     }
 
-    // rescan the wallet from the given topoheight
-    // that will delete all transactions above the given topoheight and all balances
-    // then it will re-fetch all transactions and balances from daemon
+    // DEPRECATED: rescan is no longer needed in stateless wallet mode
+    // In light mode, all data is queried on-demand from the daemon
+    // This method is kept for backward compatibility but should not be used
+    #[allow(dead_code)]
     #[cfg(feature = "network_handler")]
     pub async fn rescan(
         &self,
@@ -1841,11 +1832,126 @@ impl Wallet {
         Ok(words.join(" "))
     }
 
+    // Get balance for a specific asset by querying daemon
+    // This is the stateless version that queries the daemon directly
+    #[cfg(feature = "network_handler")]
+    pub async fn get_balance(&self, asset: &Hash) -> Result<u64, WalletError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_balance for asset {}", asset);
+        }
+
+        // In light mode, use light API for on-demand queries
+        if self.is_light_mode() {
+            let light_api = self.get_light_api().await?;
+            let address = self.get_address();
+            let balance = light_api.get_balance(&address, asset).await.map_err(|e| {
+                WalletError::Any(anyhow::anyhow!(
+                    "Failed to query balance from daemon in light mode: {}",
+                    e
+                ))
+            })?;
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Light mode: queried balance for asset {} = {}",
+                    asset, balance
+                );
+            }
+
+            return Ok(balance);
+        }
+
+        // Normal mode: Query daemon via network handler
+        let network_handler = self.network_handler.lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let address = self.get_address();
+            let balance_result = handler
+                .get_api()
+                .get_balance(&address, asset)
+                .await
+                .map_err(|e| {
+                    WalletError::Any(anyhow::anyhow!(
+                        "Failed to query balance from daemon: {}",
+                        e
+                    ))
+                })?;
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Queried balance from daemon for asset {} = {}",
+                    asset, balance_result.balance
+                );
+            }
+
+            Ok(balance_result.balance)
+        } else {
+            Err(WalletError::NotOnlineMode)
+        }
+    }
+
+    #[cfg(not(feature = "network_handler"))]
+    pub async fn get_balance(&self, asset: &Hash) -> Result<u64, WalletError> {
+        // Without network handler, must read from storage (legacy mode)
+        let storage = self.storage.read().await;
+        if !storage.has_balance_for(asset).await? {
+            return Err(WalletError::BalanceNotFound(asset.clone()));
+        }
+        let (balance, _) = storage.get_unconfirmed_balance_for(asset).await?;
+        Ok(balance.amount)
+    }
+
     // Current account nonce for transactions
     // Nonce is used against replay attacks on-chain
-    pub async fn get_nonce(&self) -> u64 {
+    // This is the stateless version that queries the daemon directly
+    #[cfg(feature = "network_handler")]
+    pub async fn get_nonce(&self) -> Result<u64, WalletError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_nonce");
+        }
+
+        // In light mode, use light API for on-demand queries
+        if self.is_light_mode() {
+            let light_api = self.get_light_api().await?;
+            let address = self.get_address();
+            let nonce = light_api.get_nonce(&address).await.map_err(|e| {
+                WalletError::Any(anyhow::anyhow!(
+                    "Failed to query nonce from daemon in light mode: {}",
+                    e
+                ))
+            })?;
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Light mode: queried nonce = {}", nonce);
+            }
+
+            return Ok(nonce);
+        }
+
+        // Normal mode: Query daemon via network handler
+        let network_handler = self.network_handler.lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let address = self.get_address();
+            let nonce_result = handler.get_api().get_nonce(&address).await.map_err(|e| {
+                WalletError::Any(anyhow::anyhow!("Failed to query nonce from daemon: {}", e))
+            })?;
+
+            let nonce = nonce_result.version.get_nonce();
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Queried nonce from daemon = {}", nonce);
+            }
+
+            Ok(nonce)
+        } else {
+            Err(WalletError::NotOnlineMode)
+        }
+    }
+
+    #[cfg(not(feature = "network_handler"))]
+    pub async fn get_nonce(&self) -> Result<u64, WalletError> {
+        // Without network handler, must read from storage (legacy mode)
         let storage = self.storage.read().await;
-        storage.get_nonce().unwrap_or(0)
+        Ok(storage.get_nonce().unwrap_or(0))
     }
 
     // Encrypted storage of the wallet
@@ -1858,28 +1964,48 @@ impl Wallet {
         &self.network
     }
 
-    // Check if wallet is synced with daemon
+    // Check if wallet is connected to daemon
+    // In stateless mode, "synced" means having an active daemon connection
+    // In light mode, there is no sync state - all queries are on-demand
     #[cfg(feature = "network_handler")]
     pub async fn is_synced(&self) -> Result<bool, Error> {
-        // Get daemon topoheight
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is_synced: checking daemon connection");
+        }
+
+        // In light mode, "synced" means having a working light API
+        if self.is_light_mode() {
+            let light_api_available = self.light_api.lock().await.is_some();
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Light mode: is_synced = {} (light API available)",
+                    light_api_available
+                );
+            }
+            return Ok(light_api_available);
+        }
+
+        // In normal mode, check if network handler is running
         let network_handler = self.network_handler.lock().await;
         let handler = network_handler
             .as_ref()
             .ok_or_else(|| Error::msg("Network handler not available"))?;
 
-        let daemon_info = handler.get_api().get_info().await?;
-        let daemon_topoheight = daemon_info.topoheight;
+        let is_running = handler.is_running().await;
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Normal mode: is_synced = {} (network handler running)",
+                is_running
+            );
+        }
 
-        // Get wallet synced topoheight
-        let storage = self.storage.read().await;
-        let wallet_topoheight = storage.get_synced_topoheight()?;
-
-        Ok(wallet_topoheight >= daemon_topoheight)
+        Ok(is_running)
     }
 
-    // Wait for wallet to synchronize with daemon
-    // Polls until wallet_topoheight >= daemon_topoheight
-    // Returns error if timeout is reached
+    // DEPRECATED: wait_for_sync is no longer needed in stateless wallet mode
+    // In light mode, there is no sync state to wait for - all queries are on-demand
+    // This method is kept for backward compatibility but should not be used
+    #[allow(dead_code)]
     #[cfg(feature = "network_handler")]
     pub async fn wait_for_sync(&self, timeout_secs: u64) -> Result<(), Error> {
         use tos_common::tokio::time::{sleep, Duration, Instant};

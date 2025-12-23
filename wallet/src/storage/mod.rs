@@ -35,8 +35,9 @@ use backend::{Db, Tree};
 
 pub use types::*;
 
-// keys used to retrieve from storage
-const NONCE_KEY: &[u8] = b"NONCE";
+// Keys used to retrieve from storage
+
+// KEEP: Security critical keys
 const SALT_KEY: &[u8] = b"SALT";
 // Password + salt is necessary to decrypt master key
 const PASSWORD_SALT_KEY: &[u8] = b"PSALT";
@@ -44,20 +45,17 @@ const PASSWORD_SALT_KEY: &[u8] = b"PSALT";
 const MASTER_KEY: &[u8] = b"MKEY";
 const PRIVATE_KEY: &[u8] = b"PKEY";
 
-// const used for online mode
-// represent the daemon topoheight
-const TOPOHEIGHT_KEY: &[u8] = b"TOPH";
-// represent the daemon top block hash
-const TOP_BLOCK_HASH_KEY: &[u8] = b"TOPBH";
+// KEEP: Network and TX version needed for address generation and transaction building
 const NETWORK: &[u8] = b"NET";
-// Last coinbase reward topoheight
-const LCRT: &[u8] = b"LCRT";
-// Key to store the multisig state
-const MULTISIG: &[u8] = b"MSIG";
-// TX version to determine which version of TX we need
 const TX_VERSION: &[u8] = b"TXV";
-// Key to store the energy resource
-const ENERGY_RESOURCE: &[u8] = b"ENERGY";
+
+// DEPRECATED: Stateless wallet - these are now managed by daemon
+const NONCE_KEY: &[u8] = b"NONCE"; // DEPRECATED: nonce from daemon
+const TOPOHEIGHT_KEY: &[u8] = b"TOPH"; // DEPRECATED: no local sync
+const TOP_BLOCK_HASH_KEY: &[u8] = b"TOPBH"; // DEPRECATED: no local sync
+const LCRT: &[u8] = b"LCRT"; // DEPRECATED: no local sync
+const MULTISIG: &[u8] = b"MSIG"; // DEPRECATED: multisig from daemon
+const ENERGY_RESOURCE: &[u8] = b"ENERGY"; // DEPRECATED: energy from daemon
 
 // Default cache size
 const DEFAULT_CACHE_SIZE: usize = 100;
@@ -76,47 +74,39 @@ pub struct Storage {
 pub struct EncryptedStorage {
     // cipher used to encrypt/decrypt/hash data
     cipher: Cipher,
-    // All transactions where this wallet is part of
+
+    // DEPRECATED: Stateless wallet - these trees are no longer used but kept for backward compatibility
+    #[allow(dead_code)]
     transactions: Tree,
-    // All transactions hashes ordered by topoheight
-    // Key is only a counter incremented by one for each new transaction
-    // Value is the tx hash
+    #[allow(dead_code)]
     transactions_indexes: Tree,
-    // balances for each asset
+    #[allow(dead_code)]
     balances: Tree,
-    // extra data (network, topoheight, etc)
-    extra: Tree,
-    // all assets discovered by the wallet
+    #[allow(dead_code)]
     assets: Tree,
-    // All assets marked as tracked by the asset
+    #[allow(dead_code)]
     tracked_assets: Tree,
-    // This tree is used to store all topoheight where a change in the wallet occured
+    #[allow(dead_code)]
     changes_topoheight: Tree,
+
+    // KEEP: Extra data tree for network, tx_version, and custom data
+    extra: Tree,
+
     // The inner storage
     inner: Storage,
-    // Caches
+
+    // DEPRECATED: Stateless wallet - these caches are no longer used
+    #[allow(dead_code)]
     balances_cache: Mutex<LruCache<Hash, Balance>>,
-    // this cache is used to store unconfirmed balances
-    // it is used to store the balance before the transaction is confirmed
-    // so we can build several txs without having to wait for the confirmation
-    // We store it in a VecDeque so for each TX we have an entry and can just retrieve it
+    #[allow(dead_code)]
     unconfirmed_balances_cache: Mutex<HashMap<Hash, VecDeque<Balance>>>,
-    // Temporary TX Cache used to build ordered TXs
+    #[allow(dead_code)]
     tx_cache: Option<TxCache>,
-    // Cache for the assets with their decimals
+    #[allow(dead_code)]
     assets_cache: Mutex<LruCache<Hash, AssetData>>,
-    // Cache for the synced topoheight
-    synced_topoheight: Option<u64>,
-    // Topoheight of the last coinbase reward
-    // This is used to determine if we should
-    // use a stable balance or not
-    last_coinbase_reward_topoheight: Option<u64>,
-    // Transaction version to use
+
+    // KEEP: Transaction version to use for building transactions
     tx_version: TxVersion,
-    // Multisig state
-    multisig_state: Option<MultiSig>,
-    // Energy resource state
-    energy_resource: Option<tos_common::account::EnergyResource>,
 }
 
 impl EncryptedStorage {
@@ -143,11 +133,7 @@ impl EncryptedStorage {
             unconfirmed_balances_cache: Mutex::new(HashMap::new()),
             tx_cache: None,
             assets_cache: Mutex::new(LruCache::new(DEFAULT_CACHE_SIZE_NONZERO)),
-            synced_topoheight: None,
-            last_coinbase_reward_topoheight: None,
             tx_version: TxVersion::T0,
-            multisig_state: None,
-            energy_resource: None,
         };
 
         if storage.has_network()? {
@@ -162,31 +148,9 @@ impl EncryptedStorage {
             storage.set_network(&network)?;
         }
 
-        // Load one-time the last coinbase reward topoheight
-        if storage.contains_data(&storage.extra, LCRT)? {
-            storage.last_coinbase_reward_topoheight =
-                Some(storage.load_from_disk(&storage.extra, LCRT)?);
-        }
-
-        // Load one-time the transaction version
+        // KEEP: Load one-time the transaction version
         if storage.contains_data(&storage.extra, TX_VERSION)? {
             storage.tx_version = storage.load_from_disk(&storage.extra, TX_VERSION)?;
-        }
-
-        // Load one-time the multisig state
-        if storage.contains_data(&storage.extra, MULTISIG)? {
-            storage.multisig_state = Some(storage.load_from_disk(&storage.extra, MULTISIG)?);
-        }
-
-        // Load one-time the energy resource
-        if storage.contains_data(&storage.extra, ENERGY_RESOURCE)? {
-            storage.energy_resource =
-                Some(storage.load_from_disk(&storage.extra, ENERGY_RESOURCE)?);
-        }
-
-        // Force tracking of native tos asset
-        if !storage.is_asset_tracked(&TOS_ASSET)? {
-            storage.track_asset(&TOS_ASSET)?;
         }
 
         Ok(storage)
@@ -542,22 +506,26 @@ impl EncryptedStorage {
         Ok(count)
     }
 
-    // Check if the asset is tracked
+    // DEPRECATED: stateless wallet - tracked assets now managed by daemon
+    #[allow(dead_code)]
     pub fn is_asset_tracked(&self, hash: &Hash) -> Result<bool> {
         self.contains_with_encrypted_key(&self.tracked_assets, hash.as_bytes())
     }
 
-    // Mark the requested asset as tracked
+    // DEPRECATED: stateless wallet - tracked assets now managed by daemon
+    #[allow(dead_code)]
     pub fn track_asset(&mut self, hash: &Hash) -> Result<()> {
         self.save_to_disk_with_encrypted_key(&self.tracked_assets, hash.as_bytes(), &[])
     }
 
-    // Unmark the requested asset from being tracked
+    // DEPRECATED: stateless wallet - tracked assets now managed by daemon
+    #[allow(dead_code)]
     pub fn untrack_asset(&mut self, hash: &Hash) -> Result<()> {
         self.delete_from_disk_with_encrypted_key(&self.tracked_assets, hash.as_bytes())
     }
 
-    // Get all tracked assets by the wallet
+    // DEPRECATED: stateless wallet - tracked assets now managed by daemon
+    #[allow(dead_code)]
     pub fn get_tracked_assets<'a>(&'a self) -> Result<impl Iterator<Item = Result<Hash>> + 'a> {
         Ok(self.tracked_assets.iter().keys().map(|res| {
             let bytes = res?;
@@ -566,69 +534,72 @@ impl EncryptedStorage {
         }))
     }
 
+    // DEPRECATED: stateless wallet - tracked assets now managed by daemon
+    #[allow(dead_code)]
     pub fn get_tracked_assets_count(&self) -> Result<usize> {
         Ok(self.tracked_assets.len())
     }
 
-    // Set a multisig state
+    // DEPRECATED: stateless wallet - multisig state now managed by daemon
+    #[allow(dead_code)]
     pub async fn set_multisig_state(&mut self, state: MultiSig) -> Result<()> {
         trace!("set multisig state");
         self.save_to_disk(&self.extra, MULTISIG, &state.to_bytes())?;
-        self.multisig_state = Some(state);
-
         Ok(())
     }
 
-    // Delete the multisig state
+    // DEPRECATED: stateless wallet - multisig state now managed by daemon
+    #[allow(dead_code)]
     pub async fn delete_multisig_state(&mut self) -> Result<()> {
         trace!("delete multisig state");
         self.delete_from_disk(&self.extra, MULTISIG)?;
-        self.multisig_state = None;
         Ok(())
     }
 
-    // Get the multisig state
-    pub async fn get_multisig_state(&self) -> Result<Option<&MultiSig>> {
+    // DEPRECATED: stateless wallet - multisig state now managed by daemon
+    #[allow(dead_code)]
+    pub async fn get_multisig_state(&self) -> Result<Option<MultiSig>> {
         trace!("get multisig state");
-        Ok(self.multisig_state.as_ref())
+        self.load_from_disk_optional(&self.extra, MULTISIG)
     }
 
-    // Get the energy resource
-    pub async fn get_energy_resource(
-        &self,
-    ) -> Result<Option<&tos_common::account::EnergyResource>> {
+    // DEPRECATED: stateless wallet - energy resource now managed by daemon
+    #[allow(dead_code)]
+    pub async fn get_energy_resource(&self) -> Result<Option<tos_common::account::EnergyResource>> {
         trace!("get energy resource");
-        Ok(self.energy_resource.as_ref())
+        self.load_from_disk_optional(&self.extra, ENERGY_RESOURCE)
     }
 
-    // Set the energy resource
+    // DEPRECATED: stateless wallet - energy resource now managed by daemon
+    #[allow(dead_code)]
     pub async fn set_energy_resource(
         &mut self,
         energy_resource: tos_common::account::EnergyResource,
     ) -> Result<()> {
         trace!("set energy resource");
         self.save_to_disk(&self.extra, ENERGY_RESOURCE, &energy_resource.to_bytes())?;
-        self.energy_resource = Some(energy_resource);
         Ok(())
     }
 
-    // Update the energy resource (if it exists)
+    // DEPRECATED: stateless wallet - energy resource now managed by daemon
+    #[allow(dead_code)]
     pub async fn update_energy_resource(
         &mut self,
         updater: impl FnOnce(&mut tos_common::account::EnergyResource),
     ) -> Result<()> {
         trace!("update energy resource");
-        if let Some(mut resource) = self.energy_resource.take() {
+        if let Some(mut resource) = self.get_energy_resource().await? {
             updater(&mut resource);
             self.set_energy_resource(resource).await?;
         }
         Ok(())
     }
 
-    // Check if the wallet has a multisig state
+    // DEPRECATED: stateless wallet - multisig state now managed by daemon
+    #[allow(dead_code)]
     pub async fn has_multisig_state(&self) -> Result<bool> {
         trace!("has multisig state");
-        Ok(self.multisig_state.is_some())
+        Ok(self.get_multisig_state().await?.is_some())
     }
 
     // Set the TX Version
@@ -645,8 +616,8 @@ impl EncryptedStorage {
         Ok(self.tx_version)
     }
 
-    // this function is specific because we save the key in encrypted form (and not hashed as others)
-    // returns all saved assets
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub async fn get_assets(&self) -> Result<HashSet<Hash>> {
         trace!("get assets");
         let mut cache = self.assets_cache.lock().await;
@@ -675,11 +646,14 @@ impl EncryptedStorage {
         Ok(assets)
     }
 
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub fn get_assets_count(&self) -> Result<usize> {
         Ok(self.assets.len())
     }
 
-    // Retrieve all assets with their data
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub async fn get_assets_with_data<'a>(
         &'a self,
     ) -> Result<impl Iterator<Item = Result<(Hash, AssetData)>> + 'a> {
@@ -696,7 +670,8 @@ impl EncryptedStorage {
         }))
     }
 
-    // Check if the asset is already registered
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub async fn contains_asset(&self, asset: &Hash) -> Result<bool> {
         trace!("contains asset");
         {
@@ -709,7 +684,8 @@ impl EncryptedStorage {
         self.contains_with_encrypted_key(&self.assets, asset.as_bytes())
     }
 
-    // save asset with its corresponding decimals
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub async fn add_asset(&mut self, asset: &Hash, data: AssetData) -> Result<()> {
         trace!("add asset");
 
@@ -720,7 +696,8 @@ impl EncryptedStorage {
         Ok(())
     }
 
-    // Retrieve the stored decimals for this asset for better display
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub async fn get_asset(&self, asset: &Hash) -> Result<AssetData> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get asset {}", asset);
@@ -759,7 +736,8 @@ impl EncryptedStorage {
         Ok(data)
     }
 
-    // Retrieve the stored decimals for this asset for better display
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub async fn has_asset(&self, asset: &Hash) -> Result<bool> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("has asset {}", asset);
@@ -774,7 +752,8 @@ impl EncryptedStorage {
         self.contains_with_encrypted_key(&self.assets, asset.as_bytes())
     }
 
-    // Retrieve the stored decimals for this asset for better display
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub async fn get_optional_asset(&self, asset: &Hash) -> Result<Option<AssetData>> {
         trace!("get asset");
         let mut cache = self.assets_cache.lock().await;
@@ -791,7 +770,8 @@ impl EncryptedStorage {
         Ok(data)
     }
 
-    // Search an asset by name
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub async fn get_asset_by_name(&self, name: &str) -> Result<Option<Hash>> {
         trace!("get asset by name");
         let cache = self.assets_cache.lock().await;
@@ -819,7 +799,8 @@ impl EncryptedStorage {
         Ok(res)
     }
 
-    // Set the asset name
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub async fn set_asset_name(&mut self, asset: &Hash, name: String) -> Result<()> {
         trace!("set asset name");
         let mut cache = self.assets_cache.lock().await;
@@ -835,7 +816,8 @@ impl EncryptedStorage {
         Ok(())
     }
 
-    // Retrieve the plaintext balance for this asset
+    // DEPRECATED: stateless wallet - balances now from daemon
+    #[allow(dead_code)]
     pub async fn get_plaintext_balance_for(&self, asset: &Hash) -> Result<u64> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get plaintext balance for {}", asset);
@@ -856,7 +838,8 @@ impl EncryptedStorage {
         Ok(plaintext_balance)
     }
 
-    // Retrieve the balance for this asset
+    // DEPRECATED: stateless wallet - balances now from daemon
+    #[allow(dead_code)]
     pub async fn get_balance_for(&self, asset: &Hash) -> Result<Balance> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get balance for {}", asset);
@@ -876,8 +859,8 @@ impl EncryptedStorage {
         Ok(balance)
     }
 
-    // Retrieve the unconfirmed balance for this asset if present
-    // otherwise, fall back on the confirmed balance
+    // DEPRECATED: stateless wallet - balances now from daemon
+    #[allow(dead_code)]
     pub async fn get_unconfirmed_balance_for(&self, asset: &Hash) -> Result<(Balance, bool)> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get unconfirmed balance for {}", asset);
@@ -898,7 +881,8 @@ impl EncryptedStorage {
             .map(|balance| (balance, false))
     }
 
-    // Verify if we have any unconfirmed balance stored
+    // DEPRECATED: stateless wallet - balances now from daemon
+    #[allow(dead_code)]
     pub async fn has_unconfirmed_balance_for(&self, asset: &Hash) -> Result<bool> {
         trace!("has unconfirmed balance for {}", asset);
         let cache = self.unconfirmed_balances_cache.lock().await;
@@ -909,7 +893,8 @@ impl EncryptedStorage {
         Ok(false)
     }
 
-    // Retrieve the unconfirmed balance decoded for this asset if present
+    // DEPRECATED: stateless wallet - balances now from daemon
+    #[allow(dead_code)]
     pub async fn get_unconfirmed_balance_decoded_for(&self, asset: &Hash) -> Result<Option<u64>> {
         trace!("get unconfirmed balance decoded for {}", asset);
         let cache = self.unconfirmed_balances_cache.lock().await;
@@ -924,7 +909,8 @@ impl EncryptedStorage {
         Ok(None)
     }
 
-    // Set the unconfirmed balance for this asset
+    // DEPRECATED: stateless wallet - balances now from daemon
+    #[allow(dead_code)]
     pub async fn set_unconfirmed_balance_for(&self, asset: Hash, balance: Balance) -> Result<()> {
         trace!("set unconfirmed balance for {}", asset);
         let mut cache = self.unconfirmed_balances_cache.lock().await;
@@ -934,7 +920,8 @@ impl EncryptedStorage {
         Ok(())
     }
 
-    // Determine if we have any balance stored
+    // DEPRECATED: stateless wallet - balances now from daemon
+    #[allow(dead_code)]
     pub async fn has_any_balance(&self) -> Result<bool> {
         trace!("has any balance");
         let cache = self.balances_cache.lock().await;
@@ -945,7 +932,8 @@ impl EncryptedStorage {
         Ok(!self.balances.is_empty())
     }
 
-    // Determine if we have any asset stored
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub async fn has_any_asset(&self) -> Result<bool> {
         trace!("has any asset");
         let cache = self.assets_cache.lock().await;
@@ -956,7 +944,8 @@ impl EncryptedStorage {
         Ok(!self.assets.is_empty())
     }
 
-    // Determine if we have a balance for this asset
+    // DEPRECATED: stateless wallet - balances now from daemon
+    #[allow(dead_code)]
     pub async fn has_balance_for(&self, asset: &Hash) -> Result<bool> {
         trace!("has balance for {}", asset);
         let cache = self.balances_cache.lock().await;
@@ -967,7 +956,8 @@ impl EncryptedStorage {
         self.contains_data(&self.balances, asset.as_bytes())
     }
 
-    // Set the balance for this asset
+    // DEPRECATED: stateless wallet - balances now from daemon
+    #[allow(dead_code)]
     pub async fn set_balance_for(&mut self, asset: &Hash, balance: Balance) -> Result<()> {
         trace!("set balance for {}", asset);
         // Clear the cache of all outdated balances
@@ -1002,13 +992,15 @@ impl EncryptedStorage {
         Ok(())
     }
 
-    // Retrieve a transaction saved in wallet using its hash
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn get_transaction(&self, hash: &Hash) -> Result<TransactionEntry> {
         trace!("get transaction {}", hash);
         self.load_from_disk(&self.transactions, hash.as_bytes())
     }
 
-    // Find the transaction index by its hash
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn get_transaction_id(&self, hash: &Hash) -> Result<Option<u64>> {
         trace!("get transaction id of {}", hash);
 
@@ -1025,7 +1017,8 @@ impl EncryptedStorage {
         Ok(None)
     }
 
-    // Raw search of the transaction by its hash
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn search_transaction(&self, hash: &Hash) -> Result<Option<TransactionEntry>> {
         trace!("get transaction id of {}", hash);
 
@@ -1048,7 +1041,8 @@ impl EncryptedStorage {
         Ok(None)
     }
 
-    // read whole disk and returns all transactions
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn get_transactions(&self) -> Result<Vec<TransactionEntry>> {
         trace!("get transactions");
         self.get_filtered_transactions(
@@ -1056,7 +1050,8 @@ impl EncryptedStorage {
         )
     }
 
-    // Find the last outgoing transaction created
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn get_last_outgoing_transaction(&self) -> Result<Option<TransactionEntry>> {
         trace!("get last transaction created");
         let mut last_tx: Option<TransactionEntry> = None;
@@ -1074,7 +1069,8 @@ impl EncryptedStorage {
         Ok(last_tx)
     }
 
-    // Count the number of transactions stored
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn get_transactions_count(&self) -> Result<usize> {
         trace!("get transactions count");
         let id = self
@@ -1086,14 +1082,15 @@ impl EncryptedStorage {
         Ok(id as usize)
     }
 
-    // delete all transactions above the specified topoheight
-    // This will go through each transaction, deserialize it, check topoheight, and delete it if required
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn delete_transactions_above_topoheight(&mut self, topoheight: u64) -> Result<()> {
         warn!("delete transactions above topoheight {}", topoheight);
         self.delete_transactions_at_or_above_topoheight(topoheight + 1)
     }
 
-    // delete all transactions at or above the specified topoheight
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn delete_transactions_at_or_above_topoheight(&mut self, topoheight: u64) -> Result<()> {
         trace!("delete transactions at or above topoheight {}", topoheight);
 
@@ -1112,9 +1109,8 @@ impl EncryptedStorage {
         Ok(())
     }
 
-    // Find the best transaction id for a given topoheight
-    // if lowest is set to true, the lowest transaction id with the requested topoheight is returned
-    // if lowest is set to false, the nearest higher transaction id with the requested topoheight
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     fn search_transaction_id_for_topoheight(
         &self,
         topoheight: u64,
@@ -1212,8 +1208,8 @@ impl EncryptedStorage {
         Ok(result)
     }
 
-    // Filter when the data is deserialized to not load all transactions in memory
-    // Topoheight bounds are inclusive
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     pub fn get_filtered_transactions(
         &self,
@@ -1407,7 +1403,8 @@ impl EncryptedStorage {
         Ok(transactions)
     }
 
-    // Delete a transaction saved in wallet using its hash
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn delete_transaction(&mut self, hash: &Hash) -> Result<()> {
         trace!("delete transaction {}", hash);
         self.transactions
@@ -1415,7 +1412,8 @@ impl EncryptedStorage {
         Ok(())
     }
 
-    // Delete all transactions from this wallet
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn delete_transactions(&mut self) -> Result<()> {
         trace!("delete transactions");
         self.transactions.clear()?;
@@ -1424,7 +1422,8 @@ impl EncryptedStorage {
         Ok(())
     }
 
-    // Delete all balances from this wallet
+    // DEPRECATED: stateless wallet - balances now from daemon
+    #[allow(dead_code)]
     pub async fn delete_balances(&mut self) -> Result<()> {
         trace!("delete balances");
         self.balances.clear()?;
@@ -1433,28 +1432,31 @@ impl EncryptedStorage {
         Ok(())
     }
 
-    // Delete the nonce used to create new transactions
-    // This will reset the nonce to 0
+    // DEPRECATED: stateless wallet - nonce now from daemon
+    #[allow(dead_code)]
     pub async fn delete_nonce(&mut self) -> Result<()> {
         trace!("delete nonce");
         self.delete_from_disk(&self.extra, NONCE_KEY)?;
         Ok(())
     }
 
-    // Delete all unconfirmed balances from this wallet
+    // DEPRECATED: stateless wallet - balances now from daemon
+    #[allow(dead_code)]
     pub async fn delete_unconfirmed_balances(&mut self) {
         trace!("delete unconfirmed balances");
         self.unconfirmed_balances_cache.lock().await.clear();
         self.clear_tx_cache();
     }
 
-    // Delete tx cache
+    // DEPRECATED: stateless wallet - tx cache no longer needed
+    #[allow(dead_code)]
     pub fn clear_tx_cache(&mut self) {
         trace!("clear tx cache");
         self.tx_cache = None;
     }
 
-    // Delete all assets from this wallet
+    // DEPRECATED: stateless wallet - assets now managed by daemon
+    #[allow(dead_code)]
     pub async fn delete_assets(&mut self) -> Result<()> {
         trace!("delete assets");
         self.assets.clear()?;
@@ -1462,14 +1464,16 @@ impl EncryptedStorage {
         Ok(())
     }
 
-    // Get the last transaction id
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn get_last_transaction_id(&self) -> Result<Option<u64>> {
         trace!("get last transaction id");
         let last = self.transactions_indexes.last()?;
         Ok(last.map(|(id, _)| u64::from_bytes(&id)).transpose()?)
     }
 
-    // fetch the next transaction counter id to attribute to a new TX
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     fn get_next_transaction_id(&mut self) -> Result<u64> {
         trace!("get next transaction counter id");
         let id = self
@@ -1479,9 +1483,8 @@ impl EncryptedStorage {
         Ok(id)
     }
 
-    // Save the transaction with its TX hash as key
-    // We hash the hash of the TX to use it as a key to not let anyone being able to see txs saved on disk
-    // with no access to the decrypted master key
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn save_transaction(&mut self, hash: &Hash, transaction: &TransactionEntry) -> Result<()> {
         trace!("save transaction {}", hash);
 
@@ -1502,8 +1505,8 @@ impl EncryptedStorage {
         self.save_to_disk_with_key(&self.transactions, &key, &transaction.to_bytes())
     }
 
-    // Reorg all the TXs written after a certain ID
-    // To reorg them, we only need to reverse the order written
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn reverse_transactions_indexes(&mut self, id: Option<u64>) -> Result<()> {
         trace!("reverse transactions indexes after {:?}", id);
         let Some(end_id) = self.get_last_transaction_id()? else {
@@ -1541,13 +1544,15 @@ impl EncryptedStorage {
         Ok(())
     }
 
-    // Check if the transaction is stored in wallet
+    // DEPRECATED: stateless wallet - transaction history now from daemon
+    #[allow(dead_code)]
     pub fn has_transaction(&self, hash: &Hash) -> Result<bool> {
         trace!("has transaction {}", hash);
         self.contains_data(&self.transactions, hash.as_bytes())
     }
 
-    // Retrieve the nonce used to create new transactions
+    // DEPRECATED: stateless wallet - nonce now from daemon
+    #[allow(dead_code)]
     pub fn get_nonce(&self) -> Result<u64> {
         trace!("get nonce");
         Ok(self
@@ -1555,8 +1560,8 @@ impl EncryptedStorage {
             .unwrap_or(0))
     }
 
-    // Get the unconfirmed nonce to use to build ordered TXs
-    // It will fallback to the real nonce if not set
+    // DEPRECATED: stateless wallet - nonce now from daemon
+    #[allow(dead_code)]
     pub fn get_unconfirmed_nonce(&self) -> Result<u64> {
         trace!("get unconfirmed nonce");
         match self.tx_cache.as_ref().map(|c| c.nonce) {
@@ -1565,51 +1570,46 @@ impl EncryptedStorage {
         }
     }
 
-    // Set the TX cache to use it has reference for next txs
+    // DEPRECATED: stateless wallet - tx cache no longer needed
+    #[allow(dead_code)]
     pub fn set_tx_cache(&mut self, tx_cache: TxCache) {
         trace!("set tx cache");
         self.tx_cache = Some(tx_cache);
     }
 
-    // Get the TX Cache used to build ordered TX
+    // DEPRECATED: stateless wallet - tx cache no longer needed
+    #[allow(dead_code)]
     pub fn get_tx_cache(&self) -> Option<&TxCache> {
         trace!("get tx cache");
         self.tx_cache.as_ref()
     }
 
-    // Set the new nonce used to create new transactions
-    // If the unconfirmed nonce is lower than the new nonce, we reset it
+    // DEPRECATED: stateless wallet - nonce now from daemon
+    #[allow(dead_code)]
     pub fn set_nonce(&mut self, nonce: u64) -> Result<()> {
         trace!("set nonce to {}", nonce);
         self.save_to_disk(&self.extra, NONCE_KEY, &nonce.to_be_bytes())
     }
 
-    // Store the last coinbase reward topoheight
-    // This is used to determine if we should use a stable balance or not
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn set_last_coinbase_reward_topoheight(&mut self, topoheight: Option<u64>) -> Result<()> {
         trace!("set last coinbase reward topoheight to {:?}", topoheight);
         if let Some(topoheight) = topoheight {
-            if let Some(last_topo) = self
-                .last_coinbase_reward_topoheight
-                .filter(|v| *v > topoheight)
-            {
-                debug!("last coinbase reward topoheight ({}) already set to a higher value ({}), ignoring", topoheight, last_topo);
-                return Ok(());
-            }
-
             self.save_to_disk(&self.extra, LCRT, &topoheight.to_be_bytes())?;
         } else {
             self.delete_from_disk(&self.extra, LCRT)?;
         }
-
-        self.last_coinbase_reward_topoheight = topoheight;
         Ok(())
     }
 
-    // Get the last coinbase reward topoheight
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn get_last_coinbase_reward_topoheight(&self) -> Option<u64> {
         trace!("get last coinbase reward topoheight");
-        self.last_coinbase_reward_topoheight
+        self.load_from_disk_optional(&self.extra, LCRT)
+            .ok()
+            .flatten()
     }
 
     // Store the private key
@@ -1624,24 +1624,17 @@ impl EncryptedStorage {
         self.load_from_disk(&self.extra, PRIVATE_KEY)
     }
 
-    // Set the topoheight until which the wallet is synchronized
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn set_synced_topoheight(&mut self, topoheight: u64) -> Result<()> {
         trace!("set synced topoheight to {}", topoheight);
-        self.synced_topoheight = Some(topoheight);
         self.save_to_disk(&self.extra, TOPOHEIGHT_KEY, &topoheight.to_be_bytes())
     }
 
-    // Get the topoheight until which the wallet is synchronized
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn get_synced_topoheight(&self) -> Result<u64> {
         trace!("get synced topoheight");
-
-        if let Some(topoheight) = self.synced_topoheight {
-            if log::log_enabled!(log::Level::Trace) {
-                trace!("returning cached synced topoheight {}", topoheight);
-            }
-            return Ok(topoheight);
-        }
-
         // For new wallets, TOPOHEIGHT_KEY may not exist yet - return 0 as default
         if !self.contains_data(&self.extra, TOPOHEIGHT_KEY)? {
             return Ok(0);
@@ -1651,25 +1644,29 @@ impl EncryptedStorage {
         Ok(synced_topoheight)
     }
 
-    // Delete the top block hash
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn delete_top_block_hash(&mut self) -> Result<()> {
         trace!("delete top block hash");
         self.delete_from_disk(&self.extra, TOP_BLOCK_HASH_KEY)
     }
 
-    // Set the top block hash until which the wallet is synchronized
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn set_top_block_hash(&mut self, hash: &Hash) -> Result<()> {
         trace!("set top block hash to {}", hash);
         self.save_to_disk(&self.extra, TOP_BLOCK_HASH_KEY, hash.as_bytes())
     }
 
-    // Check if a top block hash is set
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn has_top_block_hash(&self) -> Result<bool> {
         trace!("has top block hash");
         self.contains_data(&self.extra, TOP_BLOCK_HASH_KEY)
     }
 
-    // Top block hash until which the wallet is synchronized
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn get_top_block_hash(&self) -> Result<Hash> {
         trace!("get top block hash");
         self.load_from_disk(&self.extra, TOP_BLOCK_HASH_KEY)
@@ -1703,7 +1700,8 @@ impl EncryptedStorage {
         self.contains_data(&self.extra, NETWORK)
     }
 
-    // Add a topoheight where a change occured
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn add_topoheight_to_changes(&mut self, topoheight: u64, block_hash: &Hash) -> Result<()> {
         trace!(
             "add topoheight to changes: {} at {}",
@@ -1717,20 +1715,22 @@ impl EncryptedStorage {
         )
     }
 
-    // Get the block hash for the requested topoheight
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn get_block_hash_for_topoheight(&self, topoheight: u64) -> Result<Hash> {
         trace!("get block hash for topoheight {}", topoheight);
         self.load_from_disk_with_encrypted_key(&self.changes_topoheight, &topoheight.to_be_bytes())
     }
 
-    // Check if the topoheight is present in the changes tree
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn has_topoheight_in_changes(&self, topoheight: u64) -> Result<bool> {
         trace!("has topoheight {} in changes", topoheight);
         self.contains_with_encrypted_key(&self.changes_topoheight, &topoheight.to_be_bytes())
     }
 
-    // Delete all changes above topoheight
-    // This will returns true if a changes was deleted
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn delete_changes_above_topoheight(&mut self, topoheight: u64) -> Result<bool> {
         trace!("delete changes above topoheight {}", topoheight);
         let mut deleted = false;
@@ -1751,8 +1751,8 @@ impl EncryptedStorage {
         Ok(deleted)
     }
 
-    // Delete changes at topoheight
-    // This will returns true if a changes was deleted
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn delete_changes_at_topoheight(&mut self, topoheight: u64) -> Result<()> {
         trace!("delete changes at topoheight {}", topoheight);
         self.delete_from_disk_with_encrypted_key(
@@ -1763,7 +1763,8 @@ impl EncryptedStorage {
         Ok(())
     }
 
-    // Retrieve topoheight changes
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn get_topoheight_changes<'a>(&'a self) -> impl Iterator<Item = Result<(u64, Hash)>> + 'a {
         trace!("get topoheight changes");
         self.changes_topoheight.iter().rev().map(|res| {
@@ -1774,7 +1775,8 @@ impl EncryptedStorage {
         })
     }
 
-    // Find highest topoheight in changes
+    // DEPRECATED: stateless wallet - no local sync state
+    #[allow(dead_code)]
     pub fn get_highest_topoheight_in_changes_below(&self, max: u64) -> Result<u64> {
         trace!("get highest topoheight in changes below {}", max);
         let mut highest = 0;

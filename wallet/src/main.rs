@@ -4176,7 +4176,7 @@ async fn multisig_setup(
 
     let multisig = {
         let storage = wallet.get_storage().read().await;
-        storage.get_multisig_state().await?.cloned()
+        storage.get_multisig_state().await?
     };
 
     if !manager.is_batch_mode() {
@@ -4344,7 +4344,6 @@ async fn multisig_setup(
             .get_multisig_state()
             .await
             .context("Error while reading multisig state")?
-            .cloned()
     };
     let payload = MultiSigBuilder {
         participants: keys,
@@ -4737,7 +4736,7 @@ async fn unfreeze_tos(
     };
 
     // Update energy resource if it exists
-    if let Some(mut energy_resource) = storage.get_energy_resource().await?.cloned() {
+    if let Some(mut energy_resource) = storage.get_energy_resource().await? {
         match energy_resource.unfreeze_tos(amount, current_topoheight) {
             Ok(energy_removed) => {
                 storage.set_energy_resource(energy_resource).await?;
