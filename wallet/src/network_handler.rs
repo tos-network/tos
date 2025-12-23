@@ -165,21 +165,19 @@ impl NetworkHandler {
                 // Notify that we are offline
                 self.wallet.propagate_event(Event::Offline).await;
             }
+        }
 
-            if api {
-                debug!("Network handler stopped, disconnecting api");
-                // Turn off the websocket connection
-                if let Err(e) = self.api.disconnect().await {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Error while closing websocket connection: {}", e);
-                    }
+        // Disconnect API if requested (for both running and stateless wallet modes)
+        if api {
+            debug!("Disconnecting API connection");
+            if let Err(e) = self.api.disconnect().await {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while closing websocket connection: {}", e);
                 }
             }
-
-            Ok(())
-        } else {
-            Err(NetworkError::NotRunning)
         }
+
+        Ok(())
     }
 
     // Retrieve the daemon API used
