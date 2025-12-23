@@ -41,8 +41,7 @@ pub enum CommandError {
     #[error("Poison Error: {}", _0)]
     PoisonError(String),
     #[error(
-        "Missing required argument '{}' in batch mode. Use --{} <value>",
-        _0,
+        "Missing required argument '{}' in batch mode. Provide it as a positional argument in --exec command.",
         _0
     )]
     MissingArgument(String),
