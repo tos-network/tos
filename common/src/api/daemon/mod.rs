@@ -488,6 +488,162 @@ pub struct AccountHistoryEntry {
     pub block_timestamp: TimestampMillis,
 }
 
+// ============================================================================
+// AI Mining History API
+// ============================================================================
+
+/// Filter by AI Mining transaction type
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AIMiningTransactionType {
+    /// User published a task
+    PublishTask,
+    /// User submitted an answer to a task
+    SubmitAnswer,
+    /// User validated an answer
+    ValidateAnswer,
+    /// User registered as a miner
+    RegisterMiner,
+}
+
+/// Request parameters for get_ai_mining_history RPC
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetAIMiningHistoryParams {
+    /// The miner/participant address to query
+    pub address: Address,
+
+    /// Filter by task difficulty level (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub difficulty: Option<crate::ai_mining::DifficultyLevel>,
+
+    /// Filter by transaction type (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_type: Option<AIMiningTransactionType>,
+
+    /// Filter by specific task_id (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Hash>,
+
+    /// Minimum topoheight (block height)
+    pub minimum_topoheight: Option<TopoHeight>,
+
+    /// Maximum topoheight (block height)
+    pub maximum_topoheight: Option<TopoHeight>,
+
+    /// Include published tasks (default: true)
+    #[serde(default = "default_true_value")]
+    pub include_published_tasks: bool,
+
+    /// Include submitted answers (default: true)
+    #[serde(default = "default_true_value")]
+    pub include_submitted_answers: bool,
+
+    /// Include validations performed (default: true)
+    #[serde(default = "default_true_value")]
+    pub include_validations: bool,
+
+    /// Pagination: skip N entries
+    pub skip: Option<usize>,
+
+    /// Pagination: maximum entries to return (default 100, max 1000)
+    pub maximum: Option<usize>,
+}
+
+/// AI Mining transaction history entry
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AIMiningHistoryEntry {
+    /// Block topoheight when transaction occurred
+    pub topoheight: TopoHeight,
+
+    /// Transaction hash
+    pub tx_hash: Hash,
+
+    /// Block hash containing the transaction
+    pub block_hash: Hash,
+
+    /// Timestamp when block was mined (milliseconds)
+    pub block_timestamp: TimestampMillis,
+
+    /// The specific transaction details
+    #[serde(flatten)]
+    pub transaction: AIMiningHistoryType,
+}
+
+/// Union type for all AI Mining transaction variants in history
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AIMiningHistoryType {
+    /// Task published by this address
+    PublishTask {
+        task_id: Hash,
+        reward_amount: u64,
+        difficulty: crate::ai_mining::DifficultyLevel,
+        deadline: u64,
+        description: String,
+    },
+
+    /// Answer submitted by this address
+    SubmitAnswer {
+        task_id: Hash,
+        answer_id: Hash,
+        stake_amount: u64,
+        answer_hash: Hash,
+    },
+
+    /// Validation performed by this address
+    ValidateAnswer {
+        task_id: Hash,
+        answer_id: Hash,
+        validation_score: u8,
+    },
+
+    /// Miner registration by this address
+    RegisterMiner {
+        registration_fee: u64,
+    },
+}
+
+/// Summary statistics for AI Mining participant
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct AIMiningUserSummary {
+    /// Total tasks published by this address
+    pub total_tasks_published: u32,
+
+    /// Total answers submitted
+    pub total_answers_submitted: u32,
+
+    /// Total validations performed
+    pub total_validations_performed: u32,
+
+    /// Current reputation score (0-10000)
+    pub reputation_score: u64,
+
+    /// Total rewards earned (nanoTOS)
+    pub total_rewards_earned: u64,
+
+    /// Total stake in system (nanoTOS)
+    pub total_stake: u64,
+
+    /// Miner registration status
+    pub is_registered_miner: bool,
+
+    /// Block height when registered (if applicable)
+    pub registered_at: Option<u64>,
+}
+
+/// Response for get_ai_mining_history RPC
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetAIMiningHistoryResult {
+    /// List of AI Mining transactions for this address
+    pub transactions: Vec<AIMiningHistoryEntry>,
+
+    /// Total number of AI Mining transactions available (before pagination)
+    pub total: usize,
+
+    /// Summary statistics for this address
+    pub summary: AIMiningUserSummary,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct GetAccountAssetsParams<'a> {
     pub address: Cow<'a, Address>,

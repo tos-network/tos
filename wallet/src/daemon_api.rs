@@ -6,6 +6,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tos_common::{
     account::VersionedBalance,
+    ai_mining,
     api::daemon::*,
     asset::RPCAssetData,
     contract::Module,
@@ -510,6 +511,43 @@ impl DaemonAPI {
             )
             .await?;
         Ok(history)
+    }
+
+    // AI Mining History API methods
+
+    /// Get AI Mining transaction history for an address
+    pub async fn get_ai_mining_history(
+        &self,
+        address: &Address,
+        difficulty: Option<ai_mining::DifficultyLevel>,
+        transaction_type: Option<AIMiningTransactionType>,
+        task_id: Option<&Hash>,
+        minimum_topoheight: Option<u64>,
+        maximum_topoheight: Option<u64>,
+        skip: Option<usize>,
+        maximum: Option<usize>,
+    ) -> Result<GetAIMiningHistoryResult> {
+        trace!("get_ai_mining_history");
+        let result: GetAIMiningHistoryResult = self
+            .client
+            .call_with(
+                "get_ai_mining_history",
+                &GetAIMiningHistoryParams {
+                    address: address.clone(),
+                    difficulty,
+                    transaction_type,
+                    task_id: task_id.cloned(),
+                    minimum_topoheight,
+                    maximum_topoheight,
+                    include_published_tasks: true,
+                    include_submitted_answers: true,
+                    include_validations: true,
+                    skip,
+                    maximum,
+                },
+            )
+            .await?;
+        Ok(result)
     }
 
     // Contract-related API methods
