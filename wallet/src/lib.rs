@@ -22,4 +22,7 @@ pub mod network_handler;
 #[cfg(feature = "network_handler")]
 pub mod light_api;
 
+#[cfg(feature = "network_handler")]
+pub mod stateless_wallet;
+
 pub mod api;
