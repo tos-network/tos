@@ -2897,73 +2897,141 @@ async fn balance(
     Ok(())
 }
 
-// Show all transactions
+// Show all transactions from daemon
 async fn history(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let page = if arguments.has_argument("page") {
-        arguments.get_value("page")?.to_number()? as usize
-    } else {
-        1
-    };
-
-    if page == 0 {
-        return Err(CommandError::InvalidArgument(
-            "Page must be greater than 0".to_string(),
-        ));
-    }
-
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
 
-    let txs_len = storage.get_transactions_count()?;
-    // if we don't have any txs, no need proceed further
-    if txs_len == 0 {
-        manager.message("No transactions available");
-        return Ok(());
-    }
+    #[cfg(feature = "network_handler")]
+    {
+        use tos_common::api::daemon::AccountHistoryType;
 
-    let mut max_pages = txs_len / ELEMENTS_PER_PAGE;
-    if txs_len % ELEMENTS_PER_PAGE != 0 {
-        max_pages += 1;
-    }
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
 
-    if page > max_pages {
-        return Err(CommandError::InvalidArgument(format!(
-            "Page must be less than maximum pages ({})",
-            max_pages
-        )));
-    }
+        // Get asset filter if specified
+        let asset = if arguments.has_argument("asset") {
+            let asset_str = arguments.get_value("asset")?.to_string_value()?;
+            if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
+                TOS_ASSET
+            } else if asset_str.len() == HASH_SIZE * 2 {
+                Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
+            } else {
+                return Err(CommandError::InvalidArgument(
+                    "Invalid asset. Use 64-character hex hash or 'TOS'.".to_string(),
+                ));
+            }
+        } else {
+            TOS_ASSET
+        };
 
-    let transactions = storage.get_filtered_transactions(
-        None,
-        None,
-        None,
-        None,
-        true,
-        true,
-        true,
-        true,
-        None,
-        Some(ELEMENTS_PER_PAGE),
-        Some((page - 1) * ELEMENTS_PER_PAGE),
-    )?;
+        // Query history from daemon
+        let history = daemon_api
+            .get_account_history(&wallet_address, &asset, None, None)
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!("Failed to get history from daemon: {}", e))
+            })?;
 
-    manager.message(format!(
-        "{} Transactions (total {}) page {}/{}:",
-        transactions.len(),
-        txs_len,
-        page,
-        max_pages
-    ));
-    for tx in transactions {
+        if history.is_empty() {
+            manager.message("No transactions available");
+            return Ok(());
+        }
+
+        // Pagination
+        let page = if arguments.has_argument("page") {
+            arguments.get_value("page")?.to_number()? as usize
+        } else {
+            1
+        };
+
+        if page == 0 {
+            return Err(CommandError::InvalidArgument(
+                "Page must be greater than 0".to_string(),
+            ));
+        }
+
+        let txs_len = history.len();
+        let mut max_pages = txs_len / ELEMENTS_PER_PAGE;
+        if txs_len % ELEMENTS_PER_PAGE != 0 {
+            max_pages += 1;
+        }
+
+        if page > max_pages {
+            return Err(CommandError::InvalidArgument(format!(
+                "Page must be less than maximum pages ({})",
+                max_pages
+            )));
+        }
+
+        let start = (page - 1) * ELEMENTS_PER_PAGE;
+        let end = std::cmp::min(start + ELEMENTS_PER_PAGE, txs_len);
+        let page_entries = &history[start..end];
+
         manager.message(format!(
-            "- {}",
-            tx.summary(wallet.get_network().is_mainnet(), &storage)
-                .await?
+            "{} Transactions (total {}) page {}/{}:",
+            page_entries.len(),
+            txs_len,
+            page,
+            max_pages
         ));
+
+        for entry in page_entries {
+            let type_str = match &entry.history_type {
+                AccountHistoryType::Mining { reward } => {
+                    format!("Mining reward: {} TOS", format_tos(*reward))
+                }
+                AccountHistoryType::DevFee { reward } => {
+                    format!("Dev fee: {} TOS", format_tos(*reward))
+                }
+                AccountHistoryType::Burn { amount } => {
+                    format!("Burn: {} TOS", format_tos(*amount))
+                }
+                AccountHistoryType::Outgoing { to } => {
+                    format!("Sent to {}", to)
+                }
+                AccountHistoryType::Incoming { from } => {
+                    format!("Received from {}", from)
+                }
+                AccountHistoryType::MultiSig {
+                    participants,
+                    threshold,
+                } => {
+                    format!(
+                        "Multisig setup: {}/{} participants",
+                        threshold,
+                        participants.len()
+                    )
+                }
+                AccountHistoryType::InvokeContract { contract, entry_id } => {
+                    format!("Contract call: {} (entry {})", contract, entry_id)
+                }
+                AccountHistoryType::DeployContract => "Contract deployed".to_string(),
+                AccountHistoryType::FreezeTos { amount, duration } => {
+                    format!("Freeze: {} TOS for {}", format_tos(*amount), duration)
+                }
+                AccountHistoryType::UnfreezeTos { amount } => {
+                    format!("Unfreeze: {} TOS", format_tos(*amount))
+                }
+            };
+
+            manager.message(format!(
+                "- [{}] {} | TX: {}",
+                entry.topoheight, type_str, entry.hash
+            ));
+        }
+    }
+
+    #[cfg(not(feature = "network_handler"))]
+    {
+        manager.message("History command requires network_handler feature");
     }
 
     Ok(())
@@ -2975,15 +3043,88 @@ async fn transaction(
 ) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
     let hash = arguments.get_value("hash")?.to_hash()?;
-    let tx = storage
-        .get_transaction(&hash)
-        .context("Transaction not found")?;
-    manager.message(
-        tx.summary(wallet.get_network().is_mainnet(), &storage)
-            .await?,
-    );
+
+    #[cfg(feature = "network_handler")]
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+
+        // Query transaction from daemon
+        let tx = daemon_api.get_transaction(&hash).await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Transaction not found: {}", e))
+        })?;
+
+        // Display transaction details
+        manager.message(format!("Transaction: {}", hash));
+        manager.message(format!("Version: {}", tx.get_version()));
+        manager.message(format!("Source: {}", tx.get_source().as_address(wallet.get_network().is_mainnet())));
+        manager.message(format!("Nonce: {}", tx.get_nonce()));
+        manager.message(format!("Fee: {} TOS", format_tos(tx.get_fee())));
+        manager.message(format!("Reference: {}", tx.get_reference()));
+
+        // Display transaction type details
+        use tos_common::transaction::TransactionType;
+        match tx.get_data() {
+            TransactionType::Transfers(transfers) => {
+                manager.message(format!("Type: Transfers ({} outputs)", transfers.len()));
+                for (i, transfer) in transfers.iter().enumerate() {
+                    let dest = transfer.get_destination().as_address(wallet.get_network().is_mainnet());
+                    let amount = transfer.get_amount();
+                    let asset = transfer.get_asset();
+                    if *asset == TOS_ASSET {
+                        manager.message(format!("  [{}] {} TOS -> {}", i, format_tos(amount), dest));
+                    } else {
+                        manager.message(format!("  [{}] {} (asset: {}) -> {}", i, amount, asset, dest));
+                    }
+                }
+            }
+            TransactionType::Burn(payload) => {
+                manager.message(format!("Type: Burn"));
+                manager.message(format!("  Amount: {}", payload.amount));
+                manager.message(format!("  Asset: {}", payload.asset));
+            }
+            TransactionType::MultiSig(payload) => {
+                manager.message(format!("Type: MultiSig"));
+                manager.message(format!("  Threshold: {}", payload.threshold));
+                manager.message(format!("  Participants: {}", payload.participants.len()));
+            }
+            TransactionType::InvokeContract(payload) => {
+                manager.message(format!("Type: InvokeContract"));
+                manager.message(format!("  Contract: {}", payload.contract));
+            }
+            TransactionType::DeployContract(_) => {
+                manager.message("Type: DeployContract".to_string());
+            }
+            TransactionType::Energy(payload) => {
+                use tos_common::transaction::EnergyPayload;
+                match payload {
+                    EnergyPayload::FreezeTos { amount, duration } => {
+                        manager.message("Type: FreezeTos".to_string());
+                        manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
+                        manager.message(format!("  Duration: {:?}", duration));
+                    }
+                    EnergyPayload::UnfreezeTos { amount } => {
+                        manager.message("Type: UnfreezeTos".to_string());
+                        manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
+                    }
+                }
+            }
+            TransactionType::AIMining(payload) => {
+                manager.message(format!("Type: AIMining"));
+                manager.message(format!("  Payload: {:?}", payload));
+            }
+        }
+    }
+
+    #[cfg(not(feature = "network_handler"))]
+    {
+        manager.message("Transaction command requires network_handler feature");
+    }
+
     Ok(())
 }
 
@@ -2994,16 +3135,93 @@ async fn export_transactions_csv(
     let filename = arguments.get_value("filename")?.to_string_value()?;
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let transactions = storage.get_transactions()?;
-    let mut file = File::create(&filename).context("Error while creating CSV file")?;
 
-    wallet
-        .export_transactions_in_csv(&storage, transactions, &mut file)
-        .await
-        .context("Error while exporting transactions to CSV")?;
+    #[cfg(feature = "network_handler")]
+    {
+        use tos_common::api::daemon::AccountHistoryType;
 
-    manager.message(format!("Transactions have been exported to {}", filename));
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
+
+        // Query history from daemon for TOS asset
+        let history = daemon_api
+            .get_account_history(&wallet_address, &TOS_ASSET, None, None)
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!("Failed to get history from daemon: {}", e))
+            })?;
+
+        if history.is_empty() {
+            manager.message("No transactions to export");
+            return Ok(());
+        }
+
+        // Create CSV file
+        let mut file = File::create(&filename).context("Error while creating CSV file")?;
+
+        // Write CSV header
+        writeln!(file, "topoheight,hash,type,details,timestamp").context("Error writing CSV header")?;
+
+        // Write each transaction
+        for entry in &history {
+            let type_str = match &entry.history_type {
+                AccountHistoryType::Mining { reward } => {
+                    format!("Mining,reward:{}", reward)
+                }
+                AccountHistoryType::DevFee { reward } => {
+                    format!("DevFee,reward:{}", reward)
+                }
+                AccountHistoryType::Burn { amount } => {
+                    format!("Burn,amount:{}", amount)
+                }
+                AccountHistoryType::Outgoing { to } => {
+                    format!("Outgoing,to:{}", to)
+                }
+                AccountHistoryType::Incoming { from } => {
+                    format!("Incoming,from:{}", from)
+                }
+                AccountHistoryType::MultiSig { participants, threshold } => {
+                    format!("MultiSig,threshold:{} participants:{}", threshold, participants.len())
+                }
+                AccountHistoryType::InvokeContract { contract, entry_id } => {
+                    format!("InvokeContract,contract:{} entry:{}", contract, entry_id)
+                }
+                AccountHistoryType::DeployContract => "DeployContract,".to_string(),
+                AccountHistoryType::FreezeTos { amount, duration } => {
+                    format!("FreezeTos,amount:{} duration:{}", amount, duration)
+                }
+                AccountHistoryType::UnfreezeTos { amount } => {
+                    format!("UnfreezeTos,amount:{}", amount)
+                }
+            };
+
+            writeln!(
+                file,
+                "{},{},{},{}",
+                entry.topoheight,
+                entry.hash,
+                type_str,
+                entry.block_timestamp
+            )
+            .context("Error writing CSV row")?;
+        }
+
+        manager.message(format!(
+            "{} transactions have been exported to {}",
+            history.len(),
+            filename
+        ));
+    }
+
+    #[cfg(not(feature = "network_handler"))]
+    {
+        manager.message("Export command requires network_handler feature");
+    }
+
     Ok(())
 }
 
@@ -3194,40 +3412,77 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
         }
     }
 
-    let storage = wallet.get_storage().read().await;
-    let multisig = storage.get_multisig_state().await?;
-    if let Some(multisig) = multisig {
-        manager.message("--- Multisig: ---");
-        manager.message(format!("Threshold: {}", multisig.payload.threshold));
-        manager.message(format!(
-            "Participants ({}): {}",
-            multisig.payload.participants.len(),
-            multisig
-                .payload
-                .participants
-                .iter()
-                .map(|p| p.as_address(wallet.get_network().is_mainnet()).to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-        manager.message("---------------");
-    } else {
-        manager.message("No multisig state");
+    // Query multisig state from daemon
+    #[cfg(feature = "network_handler")]
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let daemon_api = handler.get_api();
+            let wallet_address = wallet.get_address();
+
+            // Query multisig from daemon
+            match daemon_api.has_multisig(&wallet_address).await {
+                Ok(true) => {
+                    if let Ok(multisig) = daemon_api.get_multisig(&wallet_address).await {
+                        use tos_common::api::daemon::MultisigState;
+                        match multisig.state {
+                            MultisigState::Active {
+                                threshold,
+                                participants,
+                            } => {
+                                manager.message("--- Multisig: ---");
+                                manager.message(format!("Threshold: {}", threshold));
+                                manager.message(format!(
+                                    "Participants ({}): {}",
+                                    participants.len(),
+                                    participants
+                                        .iter()
+                                        .map(|p| p.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                ));
+                                manager.message("---------------");
+                            }
+                            MultisigState::Deleted => {
+                                manager.message("Multisig: Deleted");
+                            }
+                        }
+                    }
+                }
+                Ok(false) => {
+                    manager.message("No multisig state");
+                }
+                Err(e) => {
+                    manager.warn(format!("Could not query multisig state: {}", e));
+                }
+            }
+
+            // Query nonce from daemon
+            match daemon_api.get_nonce(&wallet_address).await {
+                Ok(nonce_result) => {
+                    manager.message(format!("Nonce: {}", nonce_result.version.get_nonce()));
+                }
+                Err(e) => {
+                    manager.warn(format!("Could not query nonce: {}", e));
+                }
+            }
+        } else {
+            manager.message("No multisig state (not connected to daemon)");
+            manager.message("Nonce: (not connected to daemon)");
+        }
     }
 
+    #[cfg(not(feature = "network_handler"))]
+    {
+        manager.message("No multisig state (network_handler disabled)");
+        manager.message("Nonce: (network_handler disabled)");
+    }
+
+    let storage = wallet.get_storage().read().await;
     let tx_version = storage.get_tx_version().await?;
     manager.message(format!("Transaction version: {}", tx_version));
-    let nonce = storage.get_nonce()?;
-    let unconfirmed_nonce = storage.get_unconfirmed_nonce()?;
-    manager.message(format!("Nonce: {}", nonce));
-    if nonce != unconfirmed_nonce {
-        manager.message(format!("Unconfirmed nonce: {}", unconfirmed_nonce));
-    }
+
     let network = wallet.get_network();
-    manager.message(format!(
-        "Synced topoheight: {}",
-        storage.get_synced_topoheight()?
-    ));
     manager.message(format!("Network: {}", network));
     manager.message(format!("Wallet address: {}", wallet.get_address()));
 
@@ -4327,7 +4582,7 @@ async fn multisig_show(manager: &CommandManager, _: ArgumentManager) -> Result<(
 }
 
 // broadcast tx if possible
-// submit_transaction increase the local nonce in storage in case of success
+// In stateless mode, nonce is always queried from daemon before building tx
 async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction) {
     let tx_hash = tx.hash();
     manager.message(format!("Transaction hash: {}", tx_hash));
@@ -4337,11 +4592,7 @@ async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction
         if let Err(e) = wallet.submit_transaction(&tx).await {
             manager.error(format!("Couldn't submit transaction: {:#}", e));
             manager.error("Transaction failed. Check your connection to the daemon and try again.");
-
-            // Maybe cache is corrupted, clear it
-            let mut storage = wallet.get_storage().write().await;
-            storage.clear_tx_cache();
-            storage.delete_unconfirmed_balances().await;
+            // Stateless mode: no local cache to clear - nonce is queried fresh from daemon
         } else {
             manager.message("Transaction submitted successfully!");
         }

@@ -486,6 +486,32 @@ impl DaemonAPI {
         Ok(multisig)
     }
 
+    /// Get account history from daemon
+    pub async fn get_account_history(
+        &self,
+        address: &Address,
+        asset: &Hash,
+        minimum_topoheight: Option<u64>,
+        maximum_topoheight: Option<u64>,
+    ) -> Result<Vec<AccountHistoryEntry>> {
+        trace!("get_account_history");
+        let history: Vec<AccountHistoryEntry> = self
+            .client
+            .call_with(
+                "get_account_history",
+                &GetAccountHistoryParams {
+                    address: address.clone(),
+                    asset: asset.clone(),
+                    minimum_topoheight,
+                    maximum_topoheight,
+                    incoming_flow: true,
+                    outgoing_flow: true,
+                },
+            )
+            .await?;
+        Ok(history)
+    }
+
     // Contract-related API methods
 
     /// Get the number of deployed contracts
