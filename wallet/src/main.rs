@@ -4299,13 +4299,13 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    if !wallet.is_online().await {
-        manager.error("Wallet is not connected to a daemon. Please enable online mode first.");
-        return Ok(());
-    }
-
+    // Query energy info from daemon API (stateless wallet)
     let network_handler = wallet.get_network_handler().lock().await;
-    if let Some(handler) = network_handler.as_ref() {
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+
+    {
         let api = handler.get_api();
         let address = wallet.get_address();
 
@@ -4383,8 +4383,6 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
                 manager.error(format!("Failed to get energy information: {}", e));
             }
         }
-    } else {
-        manager.error("Wallet is not connected to a daemon");
     }
 
     Ok(())
