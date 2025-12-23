@@ -909,7 +909,7 @@ async fn setup_wallet_command_manager(
         "Set new nonce",
         vec![Arg::new(
             "nonce",
-            ArgType::String,
+            ArgType::Number,
             "Transaction nonce (for manual ordering)",
         )],
         CommandHandler::Async(async_handler!(set_nonce)),
