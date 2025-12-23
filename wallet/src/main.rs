@@ -2244,6 +2244,7 @@ async fn create_transaction_with_multisig(
 }
 
 // Create a new transfer to a specified address
+// NOTE: This command now queries balance/asset from daemon API (no local storage)
 async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
     manager.validate_batch_params("transfer", &args)?;
 
@@ -2264,25 +2265,20 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     };
     let address = Address::from_string(&str_address).context("Invalid address")?;
 
+    // Parse asset - TOS or hash only (no name lookup from local storage)
     let asset = if args.has_argument("asset") {
         let asset_str = args.get_value("asset")?.to_string_value()?;
-        // Handle empty or "TOS" as native asset (restored from backup)
         if asset_str.is_empty() || asset_str.trim().is_empty() {
             TOS_ASSET
         } else if asset_str.to_uppercase() == "TOS" {
-            // Handle "TOS" as asset name without requiring track_asset
             TOS_ASSET
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
         } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_str)
-                .await?
-                .context(format!(
-                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS' for native token.",
-                    asset_str
-                ))?
+            return Err(CommandError::InvalidArgument(format!(
+                "Invalid asset '{}'. Use asset hash (64 hex chars) or 'TOS' for native token.",
+                asset_str
+            )));
         }
     } else if manager.is_batch_mode() {
         return Err(CommandError::MissingArgument("asset".to_string()));
@@ -2297,25 +2293,56 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
             TOS_ASSET
         } else if asset_name.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_name).context("Error while reading hash from hex")?
+        } else if asset_name.to_uppercase() == "TOS" {
+            TOS_ASSET
         } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_name)
-                .await?
-                .context("No asset registered with given name")?
+            return Err(CommandError::InvalidArgument(format!(
+                "Invalid asset '{}'. Use asset hash (64 hex chars) or 'TOS' for native token.",
+                asset_name
+            )));
         }
     };
 
+    // Query balance, asset data, and multisig from daemon API (stateless)
+    #[cfg(feature = "network_handler")]
     let (max_balance, asset_data, multisig) = {
-        let storage = wallet.get_storage().read().await;
-        let balance = storage.get_plaintext_balance_for(&asset).await.unwrap_or(0);
-        let asset = storage.get_asset(&asset).await?;
-        let multisig = storage
-            .get_multisig_state()
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
+
+        // Get balance from daemon
+        let balance = daemon_api
+            .get_balance(&wallet_address, &asset)
             .await
-            .context("Error while reading multisig state")?;
-        (balance, asset, multisig.cloned())
+            .map(|r| r.balance)
+            .unwrap_or(0);
+
+        // Get asset data from daemon
+        let asset_data = daemon_api.get_asset(&asset).await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to get asset info from daemon: {}", e))
+        })?;
+
+        // Get multisig state from daemon
+        let multisig = if daemon_api
+            .has_multisig(&wallet_address)
+            .await
+            .unwrap_or(false)
+        {
+            daemon_api.get_multisig(&wallet_address).await.ok()
+        } else {
+            None
+        };
+
+        (balance, asset_data, multisig)
     };
+
+    #[cfg(not(feature = "network_handler"))]
+    return Err(CommandError::InvalidArgument(
+        "network_handler feature required for daemon queries".to_string(),
+    ));
 
     // read amount
     let amount = if args.has_argument("amount") {
@@ -2328,14 +2355,14 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
                 Color::Green,
                 &format!(
                     "Amount (max: {}): ",
-                    format_coin(max_balance, asset_data.get_decimals())
+                    format_coin(max_balance, asset_data.inner.get_decimals())
                 ),
             ))
             .await
             .context("Error while reading amount")?
     };
 
-    let amount = from_coin(amount, asset_data.get_decimals()).context("Invalid amount")?;
+    let amount = from_coin(amount, asset_data.inner.get_decimals()).context("Invalid amount")?;
 
     // Read fee_type parameter
     let fee_type = if args.has_argument("fee_type") {
@@ -2360,8 +2387,8 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
 
     manager.message(format!(
         "Sending {} of {} ({}) to {}",
-        format_coin(amount, asset_data.get_decimals()),
-        asset_data.get_name(),
+        format_coin(amount, asset_data.inner.get_decimals()),
+        asset_data.inner.get_name(),
         asset,
         address
     ));
@@ -2375,8 +2402,8 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
             _ => {
                 let message = format!(
                     "Send {} of {} ({}) to {}?\n(Y/N): ",
-                    format_coin(amount, asset_data.get_decimals()),
-                    asset_data.get_name(),
+                    format_coin(amount, asset_data.inner.get_decimals()),
+                    asset_data.inner.get_name(),
                     asset,
                     address
                 );
@@ -2413,67 +2440,78 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
 
-    // Create transaction with appropriate fee type
-    let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
-    } else {
-        // Create transaction state and builder
-        let storage = wallet.get_storage().read().await;
-        let mut state = wallet
-            .create_transaction_state_with_storage(&storage, &tx_type, &FeeBuilder::default(), None)
-            .await
-            .context("Error while creating transaction state")?;
+    // Get multisig threshold from daemon result if active
+    let multisig_threshold = multisig.and_then(|m| {
+        use tos_common::api::daemon::MultisigState;
+        match m.state {
+            MultisigState::Active { threshold, .. } => Some(threshold),
+            MultisigState::Deleted => None,
+        }
+    });
 
-        // Create transaction with fee type
-        let tx_version = storage
-            .get_tx_version()
-            .await
-            .context("Error while getting tx version")?;
-        let threshold = None;
+    if multisig_threshold.is_some() {
+        manager.message(format!(
+            "Multisig detected (threshold: {}). Note: Full multisig signing not supported in stateless mode.",
+            multisig_threshold.unwrap()
+        ));
+    }
 
-        // Create a custom fee builder if energy fees are requested
-        let fee_builder = if let Some(ref ft) = fee_type {
-            if *ft == tos_common::transaction::FeeType::Energy {
-                FeeBuilder::Value(0) // Energy fees are 0 TOS
-            } else {
-                FeeBuilder::default()
-            }
+    // Create transaction state and builder using existing wallet infrastructure
+    // (which already has daemon fallback for nonce/balance queries)
+    let storage = wallet.get_storage().read().await;
+    let mut state = wallet
+        .create_transaction_state_with_storage(&storage, &tx_type, &FeeBuilder::default(), None)
+        .await
+        .context("Error while creating transaction state")?;
+
+    // Create transaction with fee type
+    let tx_version = storage
+        .get_tx_version()
+        .await
+        .context("Error while getting tx version")?;
+
+    // Create a custom fee builder if energy fees are requested
+    let fee_builder = if let Some(ref ft) = fee_type {
+        if *ft == tos_common::transaction::FeeType::Energy {
+            FeeBuilder::Value(0) // Energy fees are 0 TOS
         } else {
             FeeBuilder::default()
-        };
-
-        // Create transaction builder with fee type
-        let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
-            tx_version,
-            wallet.get_public_key().clone(),
-            threshold,
-            tx_type,
-            fee_builder,
-        );
-
-        // Set fee type if specified
-        if let Some(ref ft) = fee_type {
-            builder = builder.with_fee_type(ft.clone());
         }
+    } else {
+        FeeBuilder::default()
+    };
 
-        match builder.build(&mut state, wallet.get_keypair()) {
-            Ok(tx) => {
-                manager.message(format!(
-                    "Transaction created with {} fees",
-                    match fee_type
-                        .as_ref()
-                        .unwrap_or(&tos_common::transaction::FeeType::TOS)
-                    {
-                        tos_common::transaction::FeeType::TOS => "TOS",
-                        tos_common::transaction::FeeType::Energy => "Energy",
-                    }
-                ));
-                tx
-            }
-            Err(e) => {
-                manager.error(format!("Error while creating transaction: {}", e));
-                return Ok(());
-            }
+    // Create transaction builder with fee type
+    let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
+        tx_version,
+        wallet.get_public_key().clone(),
+        multisig_threshold,
+        tx_type,
+        fee_builder,
+    );
+
+    // Set fee type if specified
+    if let Some(ref ft) = fee_type {
+        builder = builder.with_fee_type(ft.clone());
+    }
+
+    let tx = match builder.build(&mut state, wallet.get_keypair()) {
+        Ok(tx) => {
+            manager.message(format!(
+                "Transaction created with {} fees",
+                match fee_type
+                    .as_ref()
+                    .unwrap_or(&tos_common::transaction::FeeType::TOS)
+                {
+                    tos_common::transaction::FeeType::TOS => "TOS",
+                    tos_common::transaction::FeeType::Energy => "Energy",
+                }
+            ));
+            tx
+        }
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
         }
     };
 
