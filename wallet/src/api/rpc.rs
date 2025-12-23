@@ -255,11 +255,12 @@ async fn get_tracked_assets(context: &Context, body: Value) -> Result<Value, Int
     // In case of a huge reorg, a tracked asset may be inexistant if the asset got removed temporarily
     // This must be taken in count
     let storage = wallet.get_storage().read().await;
-    let tracked_assets = storage
+    let tracked_assets: Vec<_> = storage
         .get_tracked_assets()?
+        .into_iter()
         .skip(params.skip.unwrap_or(0))
         .take(maximum)
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect();
 
     Ok(json!(tracked_assets))
 }
@@ -293,12 +294,13 @@ async fn get_assets(context: &Context, body: Value) -> Result<Value, InternalRpc
     };
 
     let storage = wallet.get_storage().read().await;
-    let assets = storage
+    let assets: Vec<_> = storage
         .get_assets_with_data()
         .await?
+        .into_iter()
         .skip(params.skip.unwrap_or(0))
         .take(maximum)
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect();
 
     Ok(json!(assets))
 }
@@ -800,7 +802,8 @@ async fn get_matching_keys(context: &Context, body: Value) -> Result<Value, Inte
     let wallet: &Arc<Wallet> = context.get()?;
     let tree = get_tree_name(context, params.tree).await?;
     let storage = wallet.get_storage().read().await;
-    let keys = storage.get_custom_tree_keys(&tree, &params.query, params.limit, params.skip)?;
+    // Stateless wallet: skip is not supported, use limit only
+    let keys = storage.get_custom_tree_keys(&tree, params.query, params.limit)?;
 
     Ok(json!(keys))
 }
@@ -811,7 +814,8 @@ async fn count_matching_entries(context: &Context, body: Value) -> Result<Value,
     let wallet: &Arc<Wallet> = context.get()?;
     let tree = get_tree_name(context, params.tree).await?;
     let storage = wallet.get_storage().read().await;
-    let count = storage.count_custom_tree_entries(&tree, &params.key, &params.value)?;
+    // Stateless wallet: only key query is supported
+    let count = storage.count_custom_tree_entries(&tree, params.key)?;
 
     Ok(json!(count))
 }
@@ -882,6 +886,7 @@ async fn query_db(context: &Context, body: Value) -> Result<Value, InternalRpcEr
     let wallet: &Arc<Wallet> = context.get()?;
     let tree = get_tree_name(context, params.tree).await?;
     let storage = wallet.get_storage().read().await;
-    let result = storage.query_db(&tree, params.key, params.value, params.limit, params.skip)?;
+    // Stateless wallet: skip is not supported
+    let result = storage.query_db(&tree, params.key, params.value, params.limit)?;
     Ok(json!(result))
 }

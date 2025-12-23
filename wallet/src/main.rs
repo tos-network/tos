@@ -1456,94 +1456,25 @@ async fn recover_private_key(
     recover_wallet(manager, args, false).await
 }
 
-// Set the asset name
+// Set the asset name (not supported in stateless wallet)
 async fn set_asset_name(
     manager: &CommandManager,
-    mut args: ArgumentManager,
+    _args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    manager.validate_batch_params("set_asset_name", &args)?;
-
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    let asset = {
-        let asset_str = args.get_value("asset")?.to_string_value()?;
-        if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
-            TOS_ASSET
-        } else if asset_str.len() == HASH_SIZE * 2 {
-            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
-        } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_str)
-                .await?
-                .context(format!(
-                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
-                    asset_str
-                ))?
-        }
-    };
-    let name = if args.has_argument("name") {
-        args.get_value("name")?.to_string_value()?
-    } else {
-        return Err(CommandError::MissingArgument("name".to_string()));
-    };
-
-    let mut storage = wallet.get_storage().write().await;
-    storage.set_asset_name(&asset, name).await?;
-    manager.message("Asset name has been set");
+    // Stateless wallet: asset names are not stored locally
+    manager.message("Note: Asset name setting is not supported in stateless wallet mode.");
+    manager.message("Asset data is fetched from daemon on-demand.");
     Ok(())
 }
 
+// List assets (not supported in stateless wallet)
 async fn list_assets(
     manager: &CommandManager,
-    mut args: ArgumentManager,
+    _args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    let page = if args.has_argument("page") {
-        args.get_value("page")?.to_number()? as usize
-    } else {
-        0
-    };
-
-    let storage = wallet.get_storage().read().await;
-    let count = storage.get_assets_count()?;
-
-    if count == 0 {
-        manager.message("No assets found");
-        return Ok(());
-    }
-
-    let mut max_pages = count / ELEMENTS_PER_PAGE;
-    if count % ELEMENTS_PER_PAGE != 0 {
-        max_pages += 1;
-    }
-
-    if page > max_pages {
-        return Err(CommandError::InvalidArgument(format!(
-            "Page must be less than maximum pages ({})",
-            max_pages - 1
-        )));
-    }
-
-    manager.message(format!("Assets (page {}/{}):", page, max_pages));
-    for res in storage
-        .get_assets_with_data()
-        .await?
-        .skip(page * ELEMENTS_PER_PAGE)
-        .take(ELEMENTS_PER_PAGE)
-    {
-        let (asset, data) = res?;
-        manager.message(format!(
-            "{} ({} decimals): {}",
-            asset,
-            data.get_decimals(),
-            data.get_name()
-        ));
-    }
-
+    // Stateless wallet: assets are not tracked locally
+    manager.message("Note: Asset listing is not supported in stateless wallet mode.");
+    manager.message("Use 'list_balances' to see your current balances from the daemon.");
     Ok(())
 }
 
