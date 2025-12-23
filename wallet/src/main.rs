@@ -1851,6 +1851,7 @@ async fn list_assets(
     Ok(())
 }
 
+// NOTE: This command now queries 100% from daemon API (no local storage)
 async fn list_balances(
     manager: &CommandManager,
     mut args: ArgumentManager,
@@ -1864,64 +1865,81 @@ async fn list_balances(
         0
     };
 
-    let storage = wallet.get_storage().read().await;
-    let count = storage.get_tracked_assets_count()?;
+    #[cfg(not(feature = "network_handler"))]
+    return Err(CommandError::InvalidArgument(
+        "network_handler feature required for daemon queries".to_string(),
+    ));
 
-    if count == 0 {
-        manager.message("No balances found");
-        return Ok(());
-    }
-
-    let mut max_pages = count / ELEMENTS_PER_PAGE;
-    if count % ELEMENTS_PER_PAGE != 0 {
-        max_pages += 1;
-    }
-
-    if page > max_pages {
-        return Err(CommandError::InvalidArgument(format!(
-            "Page must be less than maximum pages ({})",
-            max_pages - 1
-        )));
-    }
-
-    // In light mode, get LightAPI for on-demand balance queries
+    // Query all data from daemon API (stateless - no local storage)
     #[cfg(feature = "network_handler")]
-    let light_api = if wallet.is_light_mode() {
-        Some(wallet.get_light_api().await.map_err(|e| {
-            CommandError::InvalidArgument(format!("Light mode API not available: {}", e))
-        })?)
-    } else {
-        None
-    };
-
-    manager.message(format!("Balances (page {}/{}):", page, max_pages));
-    for res in storage
-        .get_tracked_assets()?
-        .skip(page * ELEMENTS_PER_PAGE)
-        .take(ELEMENTS_PER_PAGE)
     {
-        let asset = res?;
-        if let Some(data) = storage.get_optional_asset(&asset).await? {
-            // In light mode, query balance from daemon via LightAPI
-            #[cfg(feature = "network_handler")]
-            let balance = if let Some(ref api) = light_api {
-                let address = wallet.get_address();
-                api.get_balance(&address, &asset).await.unwrap_or(0)
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let address = wallet.get_address();
+
+        // Get account assets from daemon
+        let assets = daemon_api
+            .get_account_assets(&address, None, None)
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!(
+                    "Failed to get account assets from daemon: {}",
+                    e
+                ))
+            })?;
+
+        let assets_vec: Vec<_> = assets.into_iter().collect();
+        let count = assets_vec.len();
+
+        if count == 0 {
+            manager.message("No balances found");
+            return Ok(());
+        }
+
+        let mut max_pages = count / ELEMENTS_PER_PAGE;
+        if count % ELEMENTS_PER_PAGE != 0 {
+            max_pages += 1;
+        }
+
+        if page > max_pages {
+            return Err(CommandError::InvalidArgument(format!(
+                "Page must be less than maximum pages ({})",
+                max_pages - 1
+            )));
+        }
+
+        manager.message(format!("Balances (page {}/{}):", page, max_pages));
+
+        for asset in assets_vec
+            .iter()
+            .skip(page * ELEMENTS_PER_PAGE)
+            .take(ELEMENTS_PER_PAGE)
+        {
+            // Query balance and asset info from daemon
+            let balance = daemon_api
+                .get_balance(&address, asset)
+                .await
+                .map(|r| r.balance)
+                .unwrap_or(0);
+            let data = daemon_api.get_asset(asset).await.ok();
+
+            if let Some(data) = data {
+                manager.message(format!(
+                    "Balance for asset {} ({}): {}",
+                    data.inner.get_name(),
+                    asset,
+                    format_coin(balance, data.inner.get_decimals())
+                ));
             } else {
-                storage.get_plaintext_balance_for(&asset).await?
-            };
-
-            #[cfg(not(feature = "network_handler"))]
-            let balance = storage.get_plaintext_balance_for(&asset).await?;
-
-            manager.message(format!(
-                "Balance for asset {} ({}): {}",
-                data.get_name(),
-                asset,
-                format_coin(balance, data.get_decimals())
-            ));
-        } else {
-            manager.message(format!("No asset data for {}", asset));
+                manager.message(format!(
+                    "Balance for asset {}: {} (no asset data)",
+                    asset,
+                    format_tos(balance)
+                ));
+            }
         }
     }
 
@@ -2823,6 +2841,7 @@ async fn display_address(manager: &CommandManager, _: ArgumentManager) -> Result
 }
 
 // Show current balance for specified asset or list all non-zero balances
+// NOTE: This command now queries 100% from daemon API (no local storage)
 async fn balance(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
@@ -2842,34 +2861,48 @@ async fn balance(
             .unwrap_or(TOS_ASSET)
     };
 
-    // In light mode, query balance from daemon via LightAPI
+    // Query balance from daemon API (stateless - no local storage)
     #[cfg(feature = "network_handler")]
-    let balance = if wallet.is_light_mode() {
-        let light_api = wallet.get_light_api().await.map_err(|e| {
-            CommandError::InvalidArgument(format!("Light mode API not available: {}", e))
+    let balance = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
         })?;
         let address = wallet.get_address();
-        light_api.get_balance(&address, &asset).await.map_err(|e| {
-            CommandError::InvalidArgument(format!("Failed to get balance from daemon: {}", e))
-        })?
-    } else {
-        let storage = wallet.get_storage().read().await;
-        storage.get_plaintext_balance_for(&asset).await?
+        let result = handler
+            .get_api()
+            .get_balance(&address, &asset)
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!("Failed to get balance from daemon: {}", e))
+            })?;
+        result.balance
     };
 
     #[cfg(not(feature = "network_handler"))]
     let balance = {
-        let storage = wallet.get_storage().read().await;
-        storage.get_plaintext_balance_for(&asset).await?
+        return Err(CommandError::InvalidArgument(
+            "network_handler feature required for daemon queries".to_string(),
+        ));
     };
 
-    let storage = wallet.get_storage().read().await;
-    let data = storage.get_asset(&asset).await?;
+    // Query asset info from daemon
+    #[cfg(feature = "network_handler")]
+    let data = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        handler.get_api().get_asset(&asset).await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to get asset info from daemon: {}", e))
+        })?
+    };
+
     manager.message(format!(
         "Balance for asset {} ({}): {}",
-        data.get_name(),
+        data.inner.get_name(),
         asset,
-        format_coin(balance, data.get_decimals())
+        format_coin(balance, data.inner.get_decimals())
     ));
     Ok(())
 }
@@ -3141,17 +3174,31 @@ async fn seed(
     Ok(())
 }
 
+// NOTE: This command now queries 100% from daemon API (no local storage)
 async fn nonce(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let nonce = storage.get_nonce()?;
-    let unconfirmed_nonce = storage.get_unconfirmed_nonce()?;
-    manager.message(format!("Nonce: {}", nonce));
-    if nonce != unconfirmed_nonce {
-        manager.message(format!("Unconfirmed nonce: {}", unconfirmed_nonce));
-    }
 
+    // Query nonce from daemon API (stateless - no local storage)
+    #[cfg(feature = "network_handler")]
+    let nonce = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let address = wallet.get_address();
+        let result = handler.get_api().get_nonce(&address).await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to get nonce from daemon: {}", e))
+        })?;
+        result.version.get_nonce()
+    };
+
+    #[cfg(not(feature = "network_handler"))]
+    return Err(CommandError::InvalidArgument(
+        "network_handler feature required for daemon queries".to_string(),
+    ));
+
+    manager.message(format!("Nonce: {}", nonce));
     Ok(())
 }
 
