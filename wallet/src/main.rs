@@ -2603,12 +2603,10 @@ async fn transfer_all(
         match confirm_str.to_lowercase().as_str() {
             "yes" | "y" | "true" => true,
             "no" | "n" | "false" => false,
-            _ => {
-                prompt
-                    .ask_confirmation()
-                    .await
-                    .context("Error while confirming action")?
-            }
+            _ => prompt
+                .ask_confirmation()
+                .await
+                .context("Error while confirming action")?,
         }
     } else if manager.is_batch_mode() {
         true // auto-confirm in batch mode
@@ -2774,12 +2772,10 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         match confirm_str.to_lowercase().as_str() {
             "yes" | "y" | "true" => true,
             "no" | "n" | "false" => false,
-            _ => {
-                prompt
-                    .ask_confirmation()
-                    .await
-                    .context("Error while confirming action")?
-            }
+            _ => prompt
+                .ask_confirmation()
+                .await
+                .context("Error while confirming action")?,
         }
     } else if manager.is_batch_mode() {
         true // auto-confirm in batch mode
