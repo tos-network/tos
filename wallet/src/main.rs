@@ -4539,10 +4539,8 @@ async fn freeze_tos(
     let energy_gained = energy_resource.freeze_tos_for_energy(amount, duration, current_topoheight);
     storage.set_energy_resource(energy_resource).await?;
 
-    manager.message(format!(
-        "Energy gained: {} energy",
-        format_coin(energy_gained, 8)
-    ));
+    // Energy uses integer units (not 10^8 atomic units like TOS)
+    manager.message(format!("Energy gained: {} energy", energy_gained));
 
     // Broadcast the transaction
     broadcast_tx(wallet, manager, tx).await;
@@ -4667,10 +4665,8 @@ async fn unfreeze_tos(
         match energy_resource.unfreeze_tos(amount, current_topoheight) {
             Ok(energy_removed) => {
                 storage.set_energy_resource(energy_resource).await?;
-                manager.message(format!(
-                    "Energy removed: {} energy",
-                    format_coin(energy_removed, 8)
-                ));
+                // Energy uses integer units (not 10^8 atomic units like TOS)
+                manager.message(format!("Energy removed: {} energy", energy_removed));
             }
             Err(e) => {
                 manager.warn(format!("Could not update energy resource: {}", e));
