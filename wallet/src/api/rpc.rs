@@ -341,8 +341,8 @@ async fn get_transaction(context: &Context, body: Value) -> Result<Value, Intern
     // Return raw transaction data from daemon (stateless wallet format)
     Ok(json!({
         "transaction": transaction,
-        "format": "daemon",
-        "note": "Stateless wallet mode: Returns raw daemon Transaction format"
+        "format": "daemon_transaction",
+        "api_version": "2.0"
     }))
 }
 
@@ -361,15 +361,15 @@ async fn search_transaction(context: &Context, body: Value) -> Result<Value, Int
     match light_api.get_transaction(&params.hash).await {
         Ok(transaction) => Ok(json!({
             "transaction": transaction,
-            "index": null,
-            "format": "daemon",
-            "note": "Stateless wallet mode: Transaction in daemon format"
+            "in_wallet": true,
+            "format": "daemon_transaction",
+            "api_version": "2.0"
         })),
         Err(_) => Ok(json!({
             "transaction": null,
-            "index": null,
-            "format": "daemon",
-            "note": "Transaction not found"
+            "in_wallet": false,
+            "format": "daemon_transaction",
+            "api_version": "2.0"
         })),
     }
 }
@@ -717,8 +717,11 @@ async fn estimate_fees(context: &Context, body: Value) -> Result<Value, Internal
 }
 
 // List transactions from daemon's account history (stateless wallet)
-// Note: In stateless mode, not all filters are supported. Only asset, min/max topoheight are used.
-// The query, address filter, and accept_* filters are not supported in stateless mode.
+// API Version: 2.0 (stateless wallet mode)
+// Note: In stateless mode, not all filters are supported:
+// - Supported: asset, min_topoheight, max_topoheight, limit, skip
+// - Not supported: address filter (always uses wallet address), accept_* filters, query
+// Response format changed from TransactionEntry to AccountHistoryEntry
 async fn list_transactions(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: ListTransactionsParams = parse_params(body)?;
 
@@ -729,11 +732,29 @@ async fn list_transactions(context: &Context, body: Value) -> Result<Value, Inte
     let wallet_address = wallet.get_address();
 
     // Use TOS_ASSET as default if no asset specified
+    // Note: Daemon API requires a specific asset; multi-asset query not supported
     use tos_common::config::TOS_ASSET;
     let asset = params.asset.unwrap_or(TOS_ASSET);
 
+    // Build list of unsupported filters that were provided
+    let mut unsupported_filters = Vec::new();
+    if params.address.is_some() {
+        unsupported_filters.push("address");
+    }
+    if !params.accept_incoming
+        || !params.accept_outgoing
+        || !params.accept_coinbase
+        || !params.accept_burn
+    {
+        unsupported_filters.push("accept_* filters");
+    }
+    if params.query.is_some() {
+        unsupported_filters.push("query");
+    }
+
     // Query account history from daemon
-    let history = light_api
+    // Return empty list on "not found" instead of error (backward compatible)
+    let history = match light_api
         .get_account_history(
             &wallet_address,
             &asset,
@@ -741,15 +762,21 @@ async fn list_transactions(context: &Context, body: Value) -> Result<Value, Inte
             params.max_topoheight,
         )
         .await
-        .map_err(|e| {
+    {
+        Ok(entries) => entries,
+        Err(e) => {
             let error_msg = format!("{:#}", e);
             if error_msg.contains("Data not found") || error_msg.contains("not found") {
-                // No history for this account/asset
-                InternalRpcError::Custom(-32000, "No transaction history found".to_string())
+                // No history for this account/asset - return empty list
+                Vec::new()
             } else {
-                InternalRpcError::Custom(-32000, format!("Failed to query daemon: {}", e))
+                return Err(InternalRpcError::Custom(
+                    -32000,
+                    format!("Failed to query daemon: {}", e),
+                ));
             }
-        })?;
+        }
+    };
 
     // Apply limit and skip if provided
     let mut entries: Vec<_> = history.into_iter().collect();
@@ -766,13 +793,20 @@ async fn list_transactions(context: &Context, body: Value) -> Result<Value, Inte
         entries.truncate(limit);
     }
 
-    // Note: In stateless mode, we return AccountHistoryEntry format from daemon
-    // This is different from the original TransactionEntry format
-    // Clients should be aware of this change in stateless wallet mode
-    Ok(json!({
+    // Build response with version info for client compatibility
+    let mut response = json!({
         "entries": entries,
-        "note": "Stateless wallet mode: Returns daemon AccountHistoryEntry format. Some filters (address, accept_*, query) are not supported."
-    }))
+        "count": entries.len(),
+        "format": "daemon_account_history",
+        "api_version": "2.0"
+    });
+
+    // Add unsupported filters warning if any were provided
+    if !unsupported_filters.is_empty() {
+        response["ignored_filters"] = json!(unsupported_filters);
+    }
+
+    Ok(response)
 }
 
 // Check if the wallet is currently connected to a daemon

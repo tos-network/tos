@@ -1433,9 +1433,25 @@ impl Wallet {
             info!("Stateless wallet: LightAPI initialized for on-demand queries");
         }
 
-        // Stateless wallet: We don't start NetworkHandler sync loop
-        // We only keep the network_handler for the DaemonAPI connection
-        *self.network_handler.lock().await = Some(network_handler);
+        // Store the network handler
+        *self.network_handler.lock().await = Some(Arc::clone(&network_handler));
+
+        // Start network handler for connection monitoring and auto-reconnect
+        // In stateless mode, this only maintains WebSocket connection (no block syncing)
+        if let Err(e) = network_handler.start(auto_reconnect).await {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "Failed to start network handler: {}. Connection monitoring disabled.",
+                    e
+                );
+            }
+            // Don't fail - wallet can still work with on-demand queries
+        } else if log::log_enabled!(log::Level::Info) {
+            info!(
+                "Stateless wallet: Network handler started (auto_reconnect={})",
+                auto_reconnect
+            );
+        }
 
         if log::log_enabled!(log::Level::Info) {
             info!("Stateless wallet: Connected to daemon, queries will be on-demand");
@@ -1475,9 +1491,25 @@ impl Wallet {
             );
         }
 
-        // Stateless wallet: We don't start NetworkHandler sync loop
-        // We only keep the network_handler for the DaemonAPI connection
-        *self.network_handler.lock().await = Some(network_handler);
+        // Store the network handler
+        *self.network_handler.lock().await = Some(Arc::clone(&network_handler));
+
+        // Start network handler for connection monitoring and auto-reconnect
+        // In stateless mode, this only maintains WebSocket connection (no block syncing)
+        if let Err(e) = network_handler.start(auto_reconnect).await {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "Failed to start network handler: {}. Connection monitoring disabled.",
+                    e
+                );
+            }
+            // Don't fail - wallet can still work with on-demand queries
+        } else if log::log_enabled!(log::Level::Info) {
+            info!(
+                "Stateless wallet: Network handler started (auto_reconnect={})",
+                auto_reconnect
+            );
+        }
 
         if log::log_enabled!(log::Level::Info) {
             info!("Stateless wallet: Connected to daemon, queries will be on-demand");
