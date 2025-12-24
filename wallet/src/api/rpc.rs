@@ -357,17 +357,19 @@ async fn search_transaction(context: &Context, body: Value) -> Result<Value, Int
     let wallet: &Arc<Wallet> = context.get()?;
 
     // Stateless wallet: Query transaction from daemon
+    // Note: "found" indicates if daemon has the tx, NOT if it belongs to this wallet
+    // Stateless mode cannot verify ownership without scanning account history
     let light_api = wallet.get_light_api().await?;
     match light_api.get_transaction(&params.hash).await {
         Ok(transaction) => Ok(json!({
             "transaction": transaction,
-            "in_wallet": true,
+            "found": true,
             "format": "daemon_transaction",
             "api_version": "2.0"
         })),
         Err(_) => Ok(json!({
             "transaction": null,
-            "in_wallet": false,
+            "found": false,
             "format": "daemon_transaction",
             "api_version": "2.0"
         })),
@@ -794,9 +796,10 @@ async fn list_transactions(context: &Context, body: Value) -> Result<Value, Inte
     }
 
     // Build response with version info for client compatibility
+    // Note: "count" is the number of returned entries (after skip/limit), not total available
     let mut response = json!({
         "entries": entries,
-        "count": entries.len(),
+        "count": entries.len(),  // returned page size, not total
         "format": "daemon_account_history",
         "api_version": "2.0"
     });
