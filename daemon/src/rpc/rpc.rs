@@ -3187,6 +3187,18 @@ async fn get_contract_data_entries<S: Storage>(
         current_topoheight
     };
 
+    // Validate maximum parameter
+    let maximum = if let Some(max) = params.maximum {
+        if max > MAX_CONTRACT_DATA_ENTRIES {
+            return Err(InternalRpcError::InvalidParams(
+                "Maximum entries requested cannot be greater than 20",
+            ));
+        }
+        max
+    } else {
+        MAX_CONTRACT_DATA_ENTRIES
+    };
+
     let stream = storage
         .get_contract_data_entries_at_maximum_topoheight(&params.contract, maximum_topoheight)
         .await
@@ -3195,7 +3207,7 @@ async fn get_contract_data_entries<S: Storage>(
     let stream = stream.boxed();
     let entries: Vec<ContractDataEntry> = stream
         .skip(params.skip.unwrap_or(0))
-        .take(params.maximum.unwrap_or(MAX_CONTRACT_DATA_ENTRIES))
+        .take(maximum)
         .map_ok(|(key, value)| ContractDataEntry { key, value })
         .try_collect()
         .await
