@@ -1264,13 +1264,10 @@ impl Transaction {
 
                         // Freeze TOS for energy - get topoheight from the blockchain state
                         let topoheight = state.get_block().get_height(); // BlockDAG uses height
-                        // Use network-aware freeze duration (Devnet uses accelerated timing)
+                                                                         // Use network-aware freeze duration (Devnet uses accelerated timing)
                         let network = state.get_network();
                         energy_resource.freeze_tos_for_energy_with_network(
-                            *amount,
-                            *duration,
-                            topoheight,
-                            &network,
+                            *amount, *duration, topoheight, &network,
                         );
 
                         // Update energy resource in state

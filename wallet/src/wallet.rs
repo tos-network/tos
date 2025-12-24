@@ -82,7 +82,9 @@ pub enum Event {
     // And some topoheight can be skipped because of DAG reorg
     // Example: two blocks at same height, both got same topoheight 69, next block reorg them together
     // and one of the block get topoheight 69, the other 70, next is 71, but 70 is skipped
-    NewTopoHeight { topoheight: u64 },
+    NewTopoHeight {
+        topoheight: u64,
+    },
     // When a balance change occurs on wallet
     BalanceChanged(BalanceChanged),
     // When a new asset is added to wallet
@@ -90,19 +92,29 @@ pub enum Event {
     // DEPRECATED in stateless wallet: Rescan is not needed
     // Kept for RPC API backward compatibility
     #[allow(dead_code)]
-    Rescan { start_topoheight: u64 },
+    Rescan {
+        start_topoheight: u64,
+    },
     // DEPRECATED in stateless wallet: History sync is not needed
     // Kept for RPC API backward compatibility
     #[allow(dead_code)]
-    HistorySynced { topoheight: u64 },
+    HistorySynced {
+        topoheight: u64,
+    },
     // Wallet is now in online mode (connected to daemon)
     Online,
     // Wallet is now in offline mode (disconnected from daemon)
     Offline,
     // Connection error occurred (repurposed from sync error)
-    ConnectionError { message: String },
-    TrackAsset { asset: Hash },
-    UntrackAsset { asset: Hash },
+    ConnectionError {
+        message: String,
+    },
+    TrackAsset {
+        asset: Hash,
+    },
+    UntrackAsset {
+        asset: Hash,
+    },
 }
 
 impl Event {

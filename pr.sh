@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# TOS Pre-commit Check Script
-# Run this before committing to catch issues early.
+# TOS Pre-commit / PR Check Script
+# Run this before committing or creating a PR to catch issues early.
 #
 # Usage:
-#   ./pre-commit.sh          # Run all checks
-#   ./pre-commit.sh quick    # Run quick checks only (fmt + clippy)
-#   ./pre-commit.sh full     # Run all checks + tests
+#   ./pr.sh              # Run full checks (default) - includes tests
+#   ./pr.sh quick        # Run quick checks only (fmt + clippy)
+#   ./pr.sh standard     # Run standard checks (no tests)
 #
 
 set -e
@@ -48,8 +48,8 @@ print_skip() {
     echo -e "${YELLOW}[SKIP]${NC} $1"
 }
 
-# Check mode
-MODE="${1:-standard}"
+# Check mode (default: full)
+MODE="${1:-full}"
 
 print_header "TOS Pre-commit Checks (mode: $MODE)"
 
@@ -127,7 +127,7 @@ if [ "$MODE" = "quick" ]; then
     echo -e "${GREEN}Passed: $PASSED${NC}"
     echo -e "${RED}Failed: $FAILED${NC}"
     echo ""
-    echo "Quick checks completed. Run './pre-commit.sh' for full checks."
+    echo "Quick checks completed. Run './pr.sh' for full checks."
     exit 0
 fi
 
@@ -175,7 +175,7 @@ if [ "$MODE" = "standard" ]; then
     echo -e "${GREEN}Passed: $PASSED${NC}"
     echo -e "${RED}Failed: $FAILED${NC}"
     echo ""
-    echo "Standard checks completed. Run './pre-commit.sh full' to include tests."
+    echo "Standard checks completed. Run './pr.sh' (or './pr.sh full') to include tests."
     exit 0
 fi
 

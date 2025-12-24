@@ -36,7 +36,9 @@ use tos_common::{
     utils::{format_coin, format_tos, from_coin},
 };
 use tos_wallet::{
-    config::{Config, JsonBatchConfig, LogProgressTableGenerationReportFunction, WalletCommand, DIR_PATH},
+    config::{
+        Config, JsonBatchConfig, LogProgressTableGenerationReportFunction, WalletCommand, DIR_PATH,
+    },
     precomputed_tables,
     wallet::{RecoverOption, Wallet},
 };
@@ -977,7 +979,11 @@ async fn setup_wallet_command_manager(
         "multisig_setup",
         "Setup a multisig (use addresses=addr1,addr2,... for batch mode)",
         vec![
-            Arg::new("threshold", ArgType::Number, "Required signatures threshold"),
+            Arg::new(
+                "threshold",
+                ArgType::Number,
+                "Required signatures threshold",
+            ),
             Arg::new(
                 "addresses",
                 ArgType::String,
@@ -1473,10 +1479,7 @@ async fn set_asset_name(
 }
 
 // List assets (not supported in stateless wallet)
-async fn list_assets(
-    manager: &CommandManager,
-    _args: ArgumentManager,
-) -> Result<(), CommandError> {
+async fn list_assets(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
     // Stateless wallet: assets are not tracked locally
     manager.message("Note: Asset listing is not supported in stateless wallet mode.");
     manager.message("Use 'list_balances' to see your current balances from the daemon.");
@@ -2930,7 +2933,12 @@ async fn ai_mining_history(
 
         // Parse filter type
         let filter_type = if arguments.has_argument("type") {
-            Some(arguments.get_value("type")?.to_string_value()?.to_lowercase())
+            Some(
+                arguments
+                    .get_value("type")?
+                    .to_string_value()?
+                    .to_lowercase(),
+            )
         } else {
             None
         };
@@ -2963,8 +2971,10 @@ async fn ai_mining_history(
             .collect();
 
         // Find answers submitted by this wallet
-        let mut my_answers: Vec<(&tos_common::crypto::Hash, &tos_common::ai_mining::SubmittedAnswer)> =
-            Vec::new();
+        let mut my_answers: Vec<(
+            &tos_common::crypto::Hash,
+            &tos_common::ai_mining::SubmittedAnswer,
+        )> = Vec::new();
         for (task_id, task) in &state.tasks {
             for answer in &task.submitted_answers {
                 if answer.submitter == wallet_pubkey {
@@ -3005,10 +3015,7 @@ async fn ai_mining_history(
                         task.description.clone()
                     }
                 ));
-                manager.message(format!(
-                    "  Reward: {} TOS",
-                    format_tos(task.reward_amount)
-                ));
+                manager.message(format!("  Reward: {} TOS", format_tos(task.reward_amount)));
                 manager.message(format!("  Difficulty: {:?}", task.difficulty));
                 manager.message(format!(
                     "  Status: {}",
@@ -3035,10 +3042,7 @@ async fn ai_mining_history(
             for (task_id, answer) in &my_answers {
                 manager.message(format!("Answer ID: {}", answer.answer_id));
                 manager.message(format!("  Task ID: {}", task_id));
-                manager.message(format!(
-                    "  Stake: {} TOS",
-                    format_tos(answer.stake_amount)
-                ));
+                manager.message(format!("  Stake: {} TOS", format_tos(answer.stake_amount)));
                 manager.message(format!("  Submitted at: {}", answer.submitted_at));
                 if let Some(score) = answer.average_score {
                     manager.message(format!("  Average Score: {}", score));
@@ -3079,10 +3083,7 @@ async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result
         })?;
 
         // Query miner-specific information for this wallet
-        let miner_info = daemon_api
-            .get_ai_mining_miner(&wallet_address)
-            .await
-            .ok();
+        let miner_info = daemon_api.get_ai_mining_miner(&wallet_address).await.ok();
 
         manager.message("=== AI Mining Statistics ===");
         manager.message(format!("Wallet Address: {}", wallet_address));
@@ -3114,10 +3115,7 @@ async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result
                 "Validations Performed: {}",
                 miner.validations_performed
             ));
-            manager.message(format!(
-                "Reputation Score: {} / 1000",
-                miner.reputation
-            ));
+            manager.message(format!("Reputation Score: {} / 1000", miner.reputation));
         } else {
             manager.message("Registered: No");
             manager.message("(Use 'register_miner' to register as a miner)");
@@ -3145,15 +3143,12 @@ async fn ai_mining_tasks(
         let daemon_api = handler.get_api();
 
         // Query all active AI mining tasks from daemon
-        let tasks = daemon_api
-            .get_ai_mining_active_tasks()
-            .await
-            .map_err(|e| {
-                CommandError::InvalidArgument(format!(
-                    "Failed to get AI mining tasks from daemon: {}",
-                    e
-                ))
-            })?;
+        let tasks = daemon_api.get_ai_mining_active_tasks().await.map_err(|e| {
+            CommandError::InvalidArgument(format!(
+                "Failed to get AI mining tasks from daemon: {}",
+                e
+            ))
+        })?;
 
         if tasks.is_empty() {
             manager.message("No active AI mining tasks found");
@@ -3177,10 +3172,7 @@ async fn ai_mining_tasks(
                     task.description.clone()
                 }
             ));
-            manager.message(format!(
-                "  Reward: {} TOS",
-                format_tos(task.reward_amount)
-            ));
+            manager.message(format!("  Reward: {} TOS", format_tos(task.reward_amount)));
             manager.message(format!("  Difficulty: {:?}", task.difficulty));
             manager.message(format!(
                 "  Status: {}",
@@ -3936,34 +3928,32 @@ async fn multisig_show(manager: &CommandManager, _: ArgumentManager) -> Result<(
         let wallet_address = wallet.get_address();
 
         match daemon_api.has_multisig(&wallet_address).await {
-            Ok(true) => {
-                match daemon_api.get_multisig(&wallet_address).await {
-                    Ok(multisig) => {
-                        use tos_common::api::daemon::MultisigState;
-                        match multisig.state {
-                            MultisigState::Active {
-                                threshold,
-                                participants,
-                            } => {
-                                manager.message(format!(
-                                    "MultiSig payload ({} participants with threshold at {}):",
-                                    participants.len(),
-                                    threshold
-                                ));
-                                for addr in participants.iter() {
-                                    manager.message(format!("- {}", addr));
-                                }
-                            }
-                            MultisigState::Deleted => {
-                                manager.message("Multisig: Deleted");
+            Ok(true) => match daemon_api.get_multisig(&wallet_address).await {
+                Ok(multisig) => {
+                    use tos_common::api::daemon::MultisigState;
+                    match multisig.state {
+                        MultisigState::Active {
+                            threshold,
+                            participants,
+                        } => {
+                            manager.message(format!(
+                                "MultiSig payload ({} participants with threshold at {}):",
+                                participants.len(),
+                                threshold
+                            ));
+                            for addr in participants.iter() {
+                                manager.message(format!("- {}", addr));
                             }
                         }
-                    }
-                    Err(e) => {
-                        manager.error(format!("Could not query multisig state: {}", e));
+                        MultisigState::Deleted => {
+                            manager.message("Multisig: Deleted");
+                        }
                     }
                 }
-            }
+                Err(e) => {
+                    manager.error(format!("Could not query multisig state: {}", e));
+                }
+            },
             Ok(false) => {
                 manager.message("No multisig configured");
             }

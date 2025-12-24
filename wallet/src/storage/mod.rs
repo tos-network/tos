@@ -456,11 +456,7 @@ impl EncryptedStorage {
     }
 
     // Set the name for an asset (no-op in stateless mode)
-    pub async fn set_asset_name(
-        &mut self,
-        _asset: &Hash,
-        _name: String,
-    ) -> Result<()> {
+    pub async fn set_asset_name(&mut self, _asset: &Hash, _name: String) -> Result<()> {
         Ok(())
     }
 

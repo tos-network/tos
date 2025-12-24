@@ -534,10 +534,7 @@ impl DaemonAPI {
     }
 
     /// Get a specific AI mining task by ID
-    pub async fn get_ai_mining_task(
-        &self,
-        task_id: &Hash,
-    ) -> Result<ai_mining::AIMiningTask> {
+    pub async fn get_ai_mining_task(&self, task_id: &Hash) -> Result<ai_mining::AIMiningTask> {
         trace!("get_ai_mining_task");
         #[derive(Serialize)]
         struct Params<'a> {
@@ -551,10 +548,7 @@ impl DaemonAPI {
     }
 
     /// Get miner information by address
-    pub async fn get_ai_mining_miner(
-        &self,
-        address: &Address,
-    ) -> Result<ai_mining::AIMiner> {
+    pub async fn get_ai_mining_miner(&self, address: &Address) -> Result<ai_mining::AIMiner> {
         trace!("get_ai_mining_miner");
         #[derive(Serialize)]
         struct Params<'a> {
