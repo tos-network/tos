@@ -27,8 +27,8 @@ use tos_common::{
     tokio,
     transaction::{
         builder::{
-            DeployContractBuilder, EnergyBuilder, FeeBuilder, InvokeContractBuilder,
-            MultiSigBuilder, TransactionTypeBuilder, TransferBuilder,
+            ContractDepositBuilder, DeployContractBuilder, EnergyBuilder, FeeBuilder,
+            InvokeContractBuilder, MultiSigBuilder, TransactionTypeBuilder, TransferBuilder,
         },
         multisig::{MultiSig, SignatureId},
         BurnPayload, MultiSigPayload, Transaction, TxVersion,
@@ -1134,6 +1134,11 @@ async fn setup_wallet_command_manager(
                 "max_gas",
                 ArgType::Number,
                 "Maximum gas limit (default: 1000000)",
+            ),
+            Arg::new(
+                "deposit",
+                ArgType::String,
+                "Amount of TOS to deposit to the contract (in atomic units)",
             ),
         ],
         CommandHandler::Async(async_handler!(invoke_contract)),
@@ -4511,6 +4516,16 @@ async fn invoke_contract(
         1_000_000
     };
 
+    // Optional deposit parameter (amount in atomic units to deposit to contract)
+    let deposit_amount: u64 = if args.has_argument("deposit") {
+        args.get_value("deposit")?
+            .to_string_value()?
+            .parse()
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
     manager.message(format!(
         "Invoking contract {} with entry_id={}, max_gas={}, params={}",
         contract,
@@ -4519,15 +4534,30 @@ async fn invoke_contract(
         parameters.len()
     ));
 
-    // Create invoke contract transaction
+    // Build deposits IndexMap
     use indexmap::IndexMap;
+    let mut deposits: IndexMap<Hash, ContractDepositBuilder> = IndexMap::new();
+    if deposit_amount > 0 {
+        manager.message(format!(
+            "Depositing {} TOS to contract",
+            format_tos(deposit_amount)
+        ));
+        deposits.insert(
+            TOS_ASSET,
+            ContractDepositBuilder {
+                amount: deposit_amount,
+                private: false,
+            },
+        );
+    }
 
+    // Create invoke contract transaction
     let invoke_builder = InvokeContractBuilder {
         contract,
         max_gas,
         entry_id,
         parameters,
-        deposits: IndexMap::new(),
+        deposits,
         contract_key: None,
     };
 
