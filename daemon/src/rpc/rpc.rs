@@ -31,7 +31,7 @@ use tos_common::{
     crypto::{elgamal::CompressedPublicKey, Address, AddressType, Hash},
     difficulty::{CumulativeDifficulty, Difficulty},
     immutable::Immutable,
-    rpc::{parse_params, require_no_params, RPCHandler},
+    rpc::{parse_params, require_no_params, server::ClientAddr, RPCHandler},
     serializer::Serializer,
     time::TimestampSeconds,
     transaction::{Transaction, TransactionType},
@@ -3138,6 +3138,16 @@ async fn get_contracts<S: Storage>(
     };
 
     let current_topoheight = blockchain.get_topo_height();
+
+    // Validate minimum_topoheight
+    let minimum_topoheight = params.minimum_topoheight.unwrap_or(0);
+    if minimum_topoheight > current_topoheight {
+        return Err(InternalRpcError::InvalidParams(
+            "Minimum topoheight cannot be greater than current topoheight",
+        ));
+    }
+
+    // Validate maximum_topoheight
     let maximum_topoheight = if let Some(max_topo) = params.maximum_topoheight {
         if max_topo > current_topoheight {
             return Err(InternalRpcError::InvalidParams(
@@ -3149,9 +3159,16 @@ async fn get_contracts<S: Storage>(
         current_topoheight
     };
 
+    // Validate minimum <= maximum
+    if minimum_topoheight > maximum_topoheight {
+        return Err(InternalRpcError::InvalidParams(
+            "Minimum topoheight cannot be greater than maximum topoheight",
+        ));
+    }
+
     let storage = blockchain.get_storage().read().await;
     let contracts: Vec<Hash> = storage
-        .get_contracts(params.minimum_topoheight.unwrap_or(0), maximum_topoheight)
+        .get_contracts(minimum_topoheight, maximum_topoheight)
         .await
         .context("Error while retrieving contracts")?
         .skip(params.skip.unwrap_or(0))
@@ -3274,6 +3291,15 @@ async fn get_block_summary_at_topoheight<S: Storage>(
         .ok();
     let mainnet = blockchain.get_network().is_mainnet();
 
+    // Calculate total block size (header + all transactions)
+    let mut total_size_in_bytes = header.size();
+    for tx_hash in header.get_txs_hashes() {
+        total_size_in_bytes += storage
+            .get_transaction_size(tx_hash)
+            .await
+            .context("Error while retrieving transaction size")?;
+    }
+
     Ok(json!(BlockSummary {
         hash: Cow::Owned(hash.clone()),
         topoheight: Some(params.topoheight),
@@ -3285,7 +3311,7 @@ async fn get_block_summary_at_topoheight<S: Storage>(
         difficulty: Cow::Owned(difficulty),
         cumulative_difficulty: Cow::Owned(cumulative_difficulty),
         txs_count: header.get_transactions().len(),
-        total_size_in_bytes: header.size(),
+        total_size_in_bytes,
         reward,
         total_fees: None,
     }))
@@ -3332,6 +3358,15 @@ async fn get_block_summary_by_hash<S: Storage>(
     let reward = topoheight.and_then(|topo| storage.get_block_reward_at_topo_height(topo).ok());
     let mainnet = blockchain.get_network().is_mainnet();
 
+    // Calculate total block size (header + all transactions)
+    let mut total_size_in_bytes = header.size();
+    for tx_hash in header.get_txs_hashes() {
+        total_size_in_bytes += storage
+            .get_transaction_size(tx_hash)
+            .await
+            .context("Error while retrieving transaction size")?;
+    }
+
     Ok(json!(BlockSummary {
         hash: Cow::Owned(hash.clone()),
         topoheight,
@@ -3343,7 +3378,7 @@ async fn get_block_summary_by_hash<S: Storage>(
         difficulty: Cow::Owned(difficulty),
         cumulative_difficulty: Cow::Owned(cumulative_difficulty),
         txs_count: header.get_transactions().len(),
-        total_size_in_bytes: header.size(),
+        total_size_in_bytes,
         reward,
         total_fees: None,
     }))
@@ -3508,16 +3543,38 @@ async fn get_contract_registered_executions_at_topoheight<S: Storage>(
 // ============================================================================
 // Admin RPC Methods (require --enable-admin-rpc flag)
 // WARNING: These are dangerous operations. Only enable for trusted operators.
+// SECURITY: These methods are restricted to localhost (loopback) connections only.
 // ============================================================================
+
+/// Verify that the request is coming from localhost (loopback address).
+/// Admin methods must only be accessible from the local machine for security.
+/// SECURITY: Fail-closed policy - reject if client address is unknown or non-loopback.
+fn require_localhost(context: &Context) -> Result<(), InternalRpcError> {
+    let client_addr: Option<&ClientAddr> = context.get_optional();
+    match client_addr {
+        Some(addr) if addr.is_loopback() => Ok(()),
+        Some(_) => Err(InternalRpcError::InvalidRequestStr(
+            "Admin methods are only accessible from localhost",
+        )),
+        // SECURITY: Fail-closed - if client address is unknown (e.g., reverse proxy,
+        // missing peer_addr), reject the request to prevent bypass attacks.
+        None => Err(InternalRpcError::InvalidRequestStr(
+            "Admin methods require client address verification (localhost only)",
+        )),
+    }
+}
 
 /// Prune the chain to a specific topoheight
 ///
 /// Removes all block data before the specified topoheight.
 /// This is a destructive operation and cannot be undone.
+/// SECURITY: Only accessible from localhost.
 async fn prune_chain<S: Storage>(
     context: &Context,
     body: Value,
 ) -> Result<Value, InternalRpcError> {
+    require_localhost(context)?;
+
     let params: PruneChainParams = parse_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
 
@@ -3533,10 +3590,13 @@ async fn prune_chain<S: Storage>(
 ///
 /// Removes the most recent blocks from the chain.
 /// All transactions in those blocks will be returned to the mempool.
+/// SECURITY: Only accessible from localhost.
 async fn rewind_chain<S: Storage>(
     context: &Context,
     body: Value,
 ) -> Result<Value, InternalRpcError> {
+    require_localhost(context)?;
+
     let params: RewindChainParams = parse_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
 
@@ -3555,10 +3615,13 @@ async fn rewind_chain<S: Storage>(
 ///
 /// Clears internal caches to free memory.
 /// This is a debugging tool and does not affect chain data.
+/// SECURITY: Only accessible from localhost.
 async fn clear_caches<S: Storage>(
     context: &Context,
     body: Value,
 ) -> Result<Value, InternalRpcError> {
+    require_localhost(context)?;
+
     require_no_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let mut storage = blockchain.get_storage().write().await;

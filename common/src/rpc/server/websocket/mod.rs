@@ -64,6 +64,8 @@ enum InnerMessage {
 pub struct WebSocketSession<H: WebSocketHandler + 'static> {
     id: u64,
     request: HttpRequest,
+    /// Client's peer address (captured at connection time for security checks)
+    peer_addr: Option<std::net::SocketAddr>,
     server: WebSocketServerShared<H>,
     inner: Mutex<Option<Session>>,
     // Sender to send messages to the session
@@ -144,6 +146,13 @@ where
 
     pub fn get_server(&self) -> &WebSocketServerShared<H> {
         &self.server
+    }
+
+    /// Get the client address from the WebSocket connection.
+    /// Used for security checks (e.g., localhost-only admin methods).
+    /// The peer address is captured at connection time from the HTTP request.
+    pub fn get_peer_addr(&self) -> Option<std::net::SocketAddr> {
+        self.peer_addr
     }
 }
 
@@ -278,11 +287,14 @@ where
 
         let (response, session, stream) = actix_ws::handle(&request, body)?;
         let id = self.next_id();
+        // Capture peer address before converting to our HttpRequest type
+        let peer_addr = request.peer_addr();
         let request = HttpRequest::from(request);
         let (tx, rx) = unbounded_channel();
         let session = Arc::new(WebSocketSession {
             id,
             request,
+            peer_addr,
             server: Arc::clone(self),
             inner: Mutex::new(Some(session)),
             channel: tx,
