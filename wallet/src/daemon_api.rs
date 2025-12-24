@@ -513,40 +513,65 @@ impl DaemonAPI {
         Ok(history)
     }
 
-    // AI Mining History API methods
+    // AI Mining API methods
 
-    /// Get AI Mining transaction history for an address
-    pub async fn get_ai_mining_history(
+    /// Get AI Mining statistics
+    pub async fn get_ai_mining_statistics(&self) -> Result<ai_mining::AIMiningStatistics> {
+        trace!("get_ai_mining_statistics");
+        let result: ai_mining::AIMiningStatistics =
+            self.client.call("get_ai_mining_statistics").await?;
+        Ok(result)
+    }
+
+    /// Get all active AI mining tasks
+    pub async fn get_ai_mining_active_tasks(
+        &self,
+    ) -> Result<std::collections::HashMap<Hash, ai_mining::AIMiningTask>> {
+        trace!("get_ai_mining_active_tasks");
+        let result: std::collections::HashMap<Hash, ai_mining::AIMiningTask> =
+            self.client.call("get_ai_mining_active_tasks").await?;
+        Ok(result)
+    }
+
+    /// Get a specific AI mining task by ID
+    pub async fn get_ai_mining_task(
+        &self,
+        task_id: &Hash,
+    ) -> Result<ai_mining::AIMiningTask> {
+        trace!("get_ai_mining_task");
+        #[derive(Serialize)]
+        struct Params<'a> {
+            task_id: &'a Hash,
+        }
+        let result: ai_mining::AIMiningTask = self
+            .client
+            .call_with("get_ai_mining_task", &Params { task_id })
+            .await?;
+        Ok(result)
+    }
+
+    /// Get miner information by address
+    pub async fn get_ai_mining_miner(
         &self,
         address: &Address,
-        difficulty: Option<ai_mining::DifficultyLevel>,
-        transaction_type: Option<AIMiningTransactionType>,
-        task_id: Option<&Hash>,
-        minimum_topoheight: Option<u64>,
-        maximum_topoheight: Option<u64>,
-        skip: Option<usize>,
-        maximum: Option<usize>,
-    ) -> Result<GetAIMiningHistoryResult> {
-        trace!("get_ai_mining_history");
-        let result: GetAIMiningHistoryResult = self
+    ) -> Result<ai_mining::AIMiner> {
+        trace!("get_ai_mining_miner");
+        #[derive(Serialize)]
+        struct Params<'a> {
+            address: &'a Address,
+        }
+        let result: ai_mining::AIMiner = self
             .client
-            .call_with(
-                "get_ai_mining_history",
-                &GetAIMiningHistoryParams {
-                    address: address.clone(),
-                    difficulty,
-                    transaction_type,
-                    task_id: task_id.cloned(),
-                    minimum_topoheight,
-                    maximum_topoheight,
-                    include_published_tasks: true,
-                    include_submitted_answers: true,
-                    include_validations: true,
-                    skip,
-                    maximum,
-                },
-            )
+            .call_with("get_ai_mining_miner", &Params { address })
             .await?;
+        Ok(result)
+    }
+
+    /// Get AI Mining state (full state including all tasks and miners)
+    pub async fn get_ai_mining_state(&self) -> Result<Option<ai_mining::AIMiningState>> {
+        trace!("get_ai_mining_state");
+        let result: Option<ai_mining::AIMiningState> =
+            self.client.call("get_ai_mining_state").await?;
         Ok(result)
     }
 

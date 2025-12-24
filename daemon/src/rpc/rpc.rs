@@ -20,7 +20,7 @@ use log::{debug, info, trace};
 use serde_json::{json, Value};
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 use tos_common::{
-    ai_mining::{AIMiningTask, TaskStatus},
+    ai_mining::{AIMiningStatistics, AIMiningTask, TaskStatus},
     api::{daemon::*, RPCContractOutput, RPCTransaction, SplitAddressParams, SplitAddressResult},
     asset::RPCAssetData,
     async_handler,
@@ -2568,19 +2568,29 @@ async fn get_contract_balance<S: Storage>(
     context: &Context,
     body: Value,
 ) -> Result<Value, InternalRpcError> {
+    use crate::core::error::BlockchainError;
+
     let params: GetContractBalanceParams = parse_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let storage = blockchain.get_storage().read().await;
 
-    let (topoheight, version) = storage
+    match storage
         .get_last_contract_balance(&params.contract, &params.asset)
         .await
-        .context("Error while retrieving contract balance")?;
-
-    Ok(json!(RPCVersioned {
-        topoheight,
-        version,
-    }))
+    {
+        Ok((topoheight, version)) => Ok(json!(RPCVersioned {
+            topoheight,
+            version,
+        })),
+        Err(BlockchainError::NoContractBalance) => {
+            // No balance record means balance is 0
+            Ok(json!(RPCVersioned {
+                topoheight: 0,
+                version: 0u64,
+            }))
+        }
+        Err(e) => Err(e).context("Error while retrieving contract balance")?,
+    }
 }
 
 async fn get_contract_assets<S: Storage>(
@@ -2801,9 +2811,10 @@ async fn get_ai_mining_statistics<S: Storage>(
     let state = storage.get_ai_mining_state().await?;
     match state {
         Some(ai_state) => Ok(json!(ai_state.statistics)),
-        None => Err(InternalRpcError::InvalidRequestStr(
-            "AI mining state not initialized",
-        )),
+        None => {
+            // Return default empty statistics when no AI mining activity yet
+            Ok(json!(AIMiningStatistics::default()))
+        }
     }
 }
 
@@ -2879,9 +2890,12 @@ async fn get_ai_mining_active_tasks<S: Storage>(
 
             Ok(json!(active_tasks))
         }
-        None => Err(InternalRpcError::InvalidRequestStr(
-            "AI mining state not initialized",
-        )),
+        None => {
+            // Return empty map when no AI mining activity yet
+            let empty: std::collections::HashMap<Hash, AIMiningTask> =
+                std::collections::HashMap::new();
+            Ok(json!(empty))
+        }
     }
 }
 

@@ -49,6 +49,32 @@ impl Network {
     pub fn is_mainnet(&self) -> bool {
         matches!(self, Self::Mainnet)
     }
+
+    pub fn is_devnet(&self) -> bool {
+        matches!(self, Self::Devnet)
+    }
+
+    /// Get minimum freeze duration in blocks for this network
+    /// - Mainnet/Testnet: 3 days = 259200 blocks (1 block per second)
+    /// - Devnet: 30 blocks (30 seconds for quick testing)
+    pub fn min_freeze_duration_blocks(&self) -> u64 {
+        match self {
+            Self::Mainnet | Self::Testnet | Self::Stagenet => {
+                crate::config::MIN_FREEZE_DURATION_DAYS as u64 * 24 * 60 * 60
+            }
+            Self::Devnet => 30, // 30 seconds for quick testing
+        }
+    }
+
+    /// Get the freeze duration multiplier for converting days to blocks
+    /// - Mainnet/Testnet: 1 day = 86400 blocks
+    /// - Devnet: 1 day = 10 blocks (accelerated for testing)
+    pub fn freeze_duration_multiplier(&self) -> u64 {
+        match self {
+            Self::Mainnet | Self::Testnet | Self::Stagenet => 24 * 60 * 60, // 86400 blocks per day
+            Self::Devnet => 10, // 10 blocks per "day" for quick testing
+        }
+    }
 }
 
 impl Serialize for Network {

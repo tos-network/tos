@@ -2914,7 +2914,7 @@ async fn ai_mining_history(
     let wallet: &Arc<Wallet> = context.get()?;
 
     {
-        use tos_common::api::daemon::{AIMiningHistoryType, AIMiningTransactionType};
+        use tos_common::ai_mining::TaskStatus;
 
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -2923,124 +2923,129 @@ async fn ai_mining_history(
         let daemon_api = handler.get_api();
         let wallet_address = wallet.get_address();
 
-        let page = if arguments.has_argument("page") {
-            arguments.get_value("page")?.to_number()? as usize
-        } else {
-            0
-        };
-
-        let limit = if arguments.has_argument("limit") {
-            arguments.get_value("limit")?.to_number()? as usize
-        } else {
-            20
-        };
-
-        // Parse transaction type filter
-        let transaction_type = if arguments.has_argument("type") {
-            let filter = arguments.get_value("type")?.to_string_value()?;
-            match filter.to_lowercase().as_str() {
-                "publish" | "publishtask" => Some(AIMiningTransactionType::PublishTask),
-                "submit" | "submitanswer" => Some(AIMiningTransactionType::SubmitAnswer),
-                "validate" | "validateanswer" => Some(AIMiningTransactionType::ValidateAnswer),
-                "register" | "registerminer" => Some(AIMiningTransactionType::RegisterMiner),
-                _ => None,
-            }
+        // Parse filter type
+        let filter_type = if arguments.has_argument("type") {
+            Some(arguments.get_value("type")?.to_string_value()?.to_lowercase())
         } else {
             None
         };
 
-        // Query AI mining history from daemon
-        let result = daemon_api
-            .get_ai_mining_history(
-                &wallet_address,
-                None, // difficulty filter
-                transaction_type,
-                None, // task_id filter
-                None, // min topoheight
-                None, // max topoheight
-                Some(page * limit),
-                Some(limit),
-            )
-            .await
-            .map_err(|e| {
-                CommandError::InvalidArgument(format!(
-                    "Failed to get AI mining history from daemon: {}",
-                    e
-                ))
-            })?;
+        // Get the full AI mining state from daemon
+        let state = daemon_api.get_ai_mining_state().await.map_err(|e| {
+            CommandError::InvalidArgument(format!(
+                "Failed to get AI mining state from daemon: {}",
+                e
+            ))
+        })?;
 
-        if result.transactions.is_empty() {
-            manager.message("No AI mining transactions found");
+        let state = match state {
+            Some(s) => s,
+            None => {
+                manager.message("No AI mining state found");
+                return Ok(());
+            }
+        };
+
+        // Convert wallet address to public key for comparison
+        let wallet_pubkey: tos_common::crypto::elgamal::CompressedPublicKey =
+            wallet_address.clone().into();
+
+        // Find tasks published by this wallet
+        let my_tasks: Vec<_> = state
+            .tasks
+            .iter()
+            .filter(|(_, task)| task.publisher == wallet_pubkey)
+            .collect();
+
+        // Find answers submitted by this wallet
+        let mut my_answers: Vec<(&tos_common::crypto::Hash, &tos_common::ai_mining::SubmittedAnswer)> =
+            Vec::new();
+        for (task_id, task) in &state.tasks {
+            for answer in &task.submitted_answers {
+                if answer.submitter == wallet_pubkey {
+                    my_answers.push((task_id, answer));
+                }
+            }
+        }
+
+        let show_tasks = filter_type.is_none()
+            || filter_type
+                .as_ref()
+                .is_some_and(|t| t == "publish" || t == "task" || t == "all");
+        let show_answers = filter_type.is_none()
+            || filter_type
+                .as_ref()
+                .is_some_and(|t| t == "submit" || t == "answer" || t == "all");
+
+        if my_tasks.is_empty() && my_answers.is_empty() {
+            manager.message("No AI mining activity found for this wallet");
             return Ok(());
         }
 
-        let type_filter_str = transaction_type
-            .map(|t| format!(" (filtered by {:?})", t))
-            .unwrap_or_default();
-        manager.message(format!(
-            "AI Mining Transaction History{} (page {}, showing {} of {})",
-            type_filter_str,
-            page,
-            result.transactions.len(),
-            result.total
-        ));
+        manager.message("=== AI Mining History ===");
+        manager.message(format!("Wallet: {}", wallet_address));
         manager.message("=".repeat(80));
 
-        for entry in &result.transactions {
-            let type_str = match &entry.transaction {
-                AIMiningHistoryType::PublishTask {
-                    task_id,
-                    reward_amount,
-                    difficulty,
-                    ..
-                } => {
-                    format!(
-                        "PublishTask: {} | Reward: {} TOS | Difficulty: {:?}",
-                        task_id,
-                        format_tos(*reward_amount),
-                        difficulty
-                    )
-                }
-                AIMiningHistoryType::SubmitAnswer {
-                    task_id,
-                    answer_id,
-                    stake_amount,
-                    ..
-                } => {
-                    format!(
-                        "SubmitAnswer: {} -> {} | Stake: {} TOS",
-                        answer_id,
-                        task_id,
-                        format_tos(*stake_amount)
-                    )
-                }
-                AIMiningHistoryType::ValidateAnswer {
-                    task_id,
-                    answer_id,
-                    validation_score,
-                } => {
-                    format!(
-                        "ValidateAnswer: {} -> {} | Score: {}",
-                        answer_id, task_id, validation_score
-                    )
-                }
-                AIMiningHistoryType::RegisterMiner { registration_fee } => {
-                    format!("RegisterMiner | Fee: {} TOS", format_tos(*registration_fee))
-                }
-            };
-
-            manager.message(format!(
-                "[{}] {} | TX: {}",
-                entry.topoheight, type_str, entry.tx_hash
-            ));
+        // Show published tasks
+        if show_tasks && !my_tasks.is_empty() {
+            manager.message("");
+            manager.message(format!("--- Tasks Published ({}) ---", my_tasks.len()));
+            for (task_id, task) in &my_tasks {
+                manager.message(format!("Task ID: {}", task_id));
+                manager.message(format!(
+                    "  Description: {}",
+                    if task.description.len() > 50 {
+                        format!("{}...", &task.description[..50])
+                    } else {
+                        task.description.clone()
+                    }
+                ));
+                manager.message(format!(
+                    "  Reward: {} TOS",
+                    format_tos(task.reward_amount)
+                ));
+                manager.message(format!("  Difficulty: {:?}", task.difficulty));
+                manager.message(format!(
+                    "  Status: {}",
+                    match task.status {
+                        TaskStatus::Active => "Active",
+                        TaskStatus::Completed => "Completed",
+                        TaskStatus::Expired => "Expired",
+                        TaskStatus::Cancelled => "Cancelled",
+                    }
+                ));
+                manager.message(format!("  Published at: {}", task.published_at));
+                manager.message(format!(
+                    "  Answers Received: {}",
+                    task.submitted_answers.len()
+                ));
+                manager.message("");
+            }
         }
 
-        if result.transactions.len() < result.total {
-            manager.message(format!(
-                "Use 'ai_mining_history --page {}' to see more transactions",
-                page + 1
-            ));
+        // Show submitted answers
+        if show_answers && !my_answers.is_empty() {
+            manager.message("");
+            manager.message(format!("--- Answers Submitted ({}) ---", my_answers.len()));
+            for (task_id, answer) in &my_answers {
+                manager.message(format!("Answer ID: {}", answer.answer_id));
+                manager.message(format!("  Task ID: {}", task_id));
+                manager.message(format!(
+                    "  Stake: {} TOS",
+                    format_tos(answer.stake_amount)
+                ));
+                manager.message(format!("  Submitted at: {}", answer.submitted_at));
+                if let Some(score) = answer.average_score {
+                    manager.message(format!("  Average Score: {}", score));
+                }
+                manager.message("");
+            }
         }
+
+        // Show summary
+        manager.message("--- Summary ---");
+        manager.message(format!("Total Tasks Published: {}", my_tasks.len()));
+        manager.message(format!("Total Answers Submitted: {}", my_answers.len()));
     }
 
     Ok(())
@@ -3060,115 +3065,83 @@ async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result
         let wallet_address = wallet.get_address();
         let network = wallet.get_network();
 
-        // Query AI mining history with summary from daemon
-        let result = daemon_api
-            .get_ai_mining_history(
-                &wallet_address,
-                None,    // difficulty filter
-                None,    // transaction type filter
-                None,    // task_id filter
-                None,    // min topoheight
-                None,    // max topoheight
-                None,    // skip
-                Some(0), // maximum - we only need the summary
-            )
-            .await
-            .map_err(|e| {
-                CommandError::InvalidArgument(format!(
-                    "Failed to get AI mining stats from daemon: {}",
-                    e
-                ))
-            })?;
+        // Query system-wide AI mining statistics from daemon
+        let stats = daemon_api.get_ai_mining_statistics().await.map_err(|e| {
+            CommandError::InvalidArgument(format!(
+                "Failed to get AI mining stats from daemon: {}",
+                e
+            ))
+        })?;
 
-        let summary = &result.summary;
+        // Query miner-specific information for this wallet
+        let miner_info = daemon_api
+            .get_ai_mining_miner(&wallet_address)
+            .await
+            .ok();
 
         manager.message("=== AI Mining Statistics ===");
         manager.message(format!("Wallet Address: {}", wallet_address));
         manager.message(format!("Network: {}", network));
         manager.message("");
 
-        manager.message("--- Activity Summary ---");
+        manager.message("--- System-wide Statistics ---");
+        manager.message(format!("Total Tasks: {}", stats.total_tasks));
+        manager.message(format!("Active Tasks: {}", stats.active_tasks));
+        manager.message(format!("Completed Tasks: {}", stats.completed_tasks));
+        manager.message(format!("Total Miners: {}", stats.total_miners));
         manager.message(format!(
-            "Tasks Published: {}",
-            summary.total_tasks_published
+            "Total Rewards Distributed: {} TOS",
+            format_tos(stats.total_rewards_distributed)
         ));
         manager.message(format!(
-            "Answers Submitted: {}",
-            summary.total_answers_submitted
+            "Total Staked: {} TOS",
+            format_tos(stats.total_staked)
         ));
-        manager.message(format!(
-            "Validations Performed: {}",
-            summary.total_validations_performed
-        ));
-        manager.message(format!(
-            "Registered Miner: {}",
-            if summary.is_registered_miner {
-                "Yes"
-            } else {
-                "No"
-            }
-        ));
-        if let Some(registered_at) = summary.registered_at {
-            manager.message(format!("Registered at Block: {}", registered_at));
-        }
         manager.message("");
 
-        manager.message("--- Financial Summary ---");
-        manager.message(format!(
-            "Total Rewards Earned: {} TOS",
-            format_tos(summary.total_rewards_earned)
-        ));
-        manager.message(format!(
-            "Total Stake: {} TOS",
-            format_tos(summary.total_stake)
-        ));
-        manager.message(format!(
-            "Reputation Score: {} / 10000",
-            summary.reputation_score
-        ));
+        manager.message("--- Your Miner Status ---");
+        if let Some(miner) = miner_info {
+            manager.message("Registered: Yes");
+            manager.message(format!("Registered at Block: {}", miner.registered_at));
+            manager.message(format!("Tasks Published: {}", miner.tasks_published));
+            manager.message(format!("Answers Submitted: {}", miner.answers_submitted));
+            manager.message(format!(
+                "Validations Performed: {}",
+                miner.validations_performed
+            ));
+            manager.message(format!(
+                "Reputation Score: {} / 1000",
+                miner.reputation
+            ));
+        } else {
+            manager.message("Registered: No");
+            manager.message("(Use 'register_miner' to register as a miner)");
+        }
     }
 
     Ok(())
 }
 
-// Show AI mining tasks this wallet has interacted with
+// Show active AI mining tasks in the network
 async fn ai_mining_tasks(
     manager: &CommandManager,
-    mut arguments: ArgumentManager,
+    _arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
     {
-        use tos_common::api::daemon::AIMiningHistoryType;
+        use tos_common::ai_mining::TaskStatus;
 
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
             CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
         })?;
         let daemon_api = handler.get_api();
-        let wallet_address = wallet.get_address();
 
-        let page = if arguments.has_argument("page") {
-            arguments.get_value("page")?.to_number()? as usize
-        } else {
-            0
-        };
-
-        let limit = 10;
-
-        // Query AI mining tasks from daemon
-        let result = daemon_api
-            .get_ai_mining_history(
-                &wallet_address,
-                None, // difficulty filter
-                None, // transaction_type filter (show all)
-                None, // task_id filter
-                None, // min topoheight
-                None, // max topoheight
-                Some(page * limit),
-                Some(limit),
-            )
+        // Query all active AI mining tasks from daemon
+        let tasks = daemon_api
+            .get_ai_mining_active_tasks()
             .await
             .map_err(|e| {
                 CommandError::InvalidArgument(format!(
@@ -3177,75 +3150,49 @@ async fn ai_mining_tasks(
                 ))
             })?;
 
-        if result.transactions.is_empty() {
-            manager.message("No AI mining transactions found");
+        if tasks.is_empty() {
+            manager.message("No active AI mining tasks found");
             return Ok(());
         }
 
-        manager.message(format!(
-            "AI Mining Transaction History (page {}, showing {} of {})",
-            page,
-            result.transactions.len(),
-            result.total
-        ));
+        manager.message(format!("=== Active AI Mining Tasks ({}) ===", tasks.len()));
         manager.message("=".repeat(80));
 
-        for entry in &result.transactions {
+        let is_mainnet = wallet.get_network().is_mainnet();
+        for (task_id, task) in &tasks {
+            // Convert publisher public key to Address for display
+            let publisher_addr = task.publisher.as_address(is_mainnet);
+            manager.message(format!("Task ID: {}", task_id));
+            manager.message(format!("  Publisher: {}", publisher_addr));
             manager.message(format!(
-                "[TopoHeight: {}] TX: {}",
-                entry.topoheight, entry.tx_hash
+                "  Description: {}",
+                if task.description.len() > 50 {
+                    format!("{}...", &task.description[..50])
+                } else {
+                    task.description.clone()
+                }
             ));
-
-            match &entry.transaction {
-                AIMiningHistoryType::PublishTask {
-                    task_id,
-                    reward_amount,
-                    difficulty,
-                    ..
-                } => {
-                    manager.message("  Type: Publish Task".to_string());
-                    manager.message(format!("  Task ID: {}", task_id));
-                    manager.message(format!("  Reward: {} TOS", format_tos(*reward_amount)));
-                    manager.message(format!("  Difficulty: {:?}", difficulty));
+            manager.message(format!(
+                "  Reward: {} TOS",
+                format_tos(task.reward_amount)
+            ));
+            manager.message(format!("  Difficulty: {:?}", task.difficulty));
+            manager.message(format!(
+                "  Status: {}",
+                match task.status {
+                    TaskStatus::Active => "Active",
+                    TaskStatus::Completed => "Completed",
+                    TaskStatus::Expired => "Expired",
+                    TaskStatus::Cancelled => "Cancelled",
                 }
-                AIMiningHistoryType::SubmitAnswer {
-                    task_id,
-                    answer_id,
-                    stake_amount,
-                    ..
-                } => {
-                    manager.message("  Type: Submit Answer".to_string());
-                    manager.message(format!("  Task ID: {}", task_id));
-                    manager.message(format!("  Answer ID: {}", answer_id));
-                    manager.message(format!("  Stake: {} TOS", format_tos(*stake_amount)));
-                }
-                AIMiningHistoryType::ValidateAnswer {
-                    task_id,
-                    answer_id,
-                    validation_score,
-                } => {
-                    manager.message("  Type: Validate Answer".to_string());
-                    manager.message(format!("  Task ID: {}", task_id));
-                    manager.message(format!("  Answer ID: {}", answer_id));
-                    manager.message(format!("  Validation Score: {}", validation_score));
-                }
-                AIMiningHistoryType::RegisterMiner { registration_fee } => {
-                    manager.message("  Type: Register Miner".to_string());
-                    manager.message(format!("  Address: {}", wallet_address));
-                    manager.message(format!(
-                        "  Registration Fee: {} TOS",
-                        format_tos(*registration_fee)
-                    ));
-                }
-            }
+            ));
+            manager.message(format!("  Published at: {}", task.published_at));
+            manager.message(format!("  Deadline: {}", task.deadline));
+            manager.message(format!(
+                "  Answers Submitted: {}",
+                task.submitted_answers.len()
+            ));
             manager.message("");
-        }
-
-        if result.transactions.len() < result.total && (page + 1) * limit < result.total {
-            manager.message(format!(
-                "Use 'ai_mining_tasks --page {}' to see more transactions",
-                page + 1
-            ));
         }
     }
 
@@ -4298,12 +4245,23 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
                         if record.can_unlock {
                             manager.message("      Status: ✅ Unlockable".to_string());
                         } else {
-                            let remaining_days =
-                                record.remaining_blocks as f64 / (24.0 * 60.0 * 60.0);
-                            manager.message(format!(
-                                "      Status: 🔒 Locked ({} days remaining)",
-                                remaining_days
-                            ));
+                            // Use network-specific blocks per day for accurate display
+                            // Mainnet/Testnet: 86400 blocks/day, Devnet: 10 blocks/day
+                            let blocks_per_day =
+                                wallet.get_network().freeze_duration_multiplier() as f64;
+                            let remaining_days = record.remaining_blocks as f64 / blocks_per_day;
+                            if wallet.get_network().is_devnet() {
+                                // Devnet: show in blocks for clarity
+                                manager.message(format!(
+                                    "      Status: 🔒 Locked ({} blocks remaining, ~{:.1} devnet-days)",
+                                    record.remaining_blocks, remaining_days
+                                ));
+                            } else {
+                                manager.message(format!(
+                                    "      Status: 🔒 Locked ({:.2} days remaining)",
+                                    remaining_days
+                                ));
+                            }
                         }
                     }
                 }

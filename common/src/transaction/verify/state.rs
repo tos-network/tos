@@ -134,6 +134,9 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     /// Is mainnet network
     fn is_mainnet(&self) -> bool;
 
+    /// Get the network type
+    fn get_network(&self) -> crate::network::Network;
+
     /// Track the contract outputs
     async fn set_contract_outputs(
         &mut self,
