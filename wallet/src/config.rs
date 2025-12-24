@@ -182,50 +182,44 @@ pub enum WalletCommand {
 #[derive(Parser, Serialize, Deserialize, Clone)]
 #[clap(
     version = VERSION,
-    about = "TOS Wallet - Manage your TOS cryptocurrency wallet from command line",
-    long_about = r#"TOS Wallet - Non-Interactive Command Line Interface
+    about = "TOS Wallet - Stateless Command Line Interface",
+    long_about = r#"TOS Wallet - Stateless Batch Mode CLI
 
-IMPORTANT: This wallet operates in NON-INTERACTIVE mode by default for automation and AI tools.
-You do NOT need to use interactive prompts. All commands can be executed with command-line arguments.
+This is a stateless wallet that queries all data from the daemon on-demand.
+All commands are executed via --exec and the wallet exits after execution.
 
 ═══════════════════════════════════════════════════════════════════════════════
-QUICK START GUIDE - NON-INTERACTIVE MODE
+QUICK START GUIDE
 ═══════════════════════════════════════════════════════════════════════════════
 
-1. CREATE A NEW WALLET (non-interactive):
+1. CREATE A NEW WALLET:
    ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "display_address"
 
    This will:
-   - Automatically create a new wallet at ./wallets/my_wallet/ if it doesn't exist
-   - Encrypt it with password "mypass123"
-   - Display the wallet address
-   - Exit immediately
+   - Create a new wallet at the specified path if it doesn't exist
+   - Encrypt it with the provided password
+   - Display the wallet address and exit
 
-   To also see the seed phrase:
-   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "seed"
+   To see the seed phrase:
+   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "seed password=mypass123"
 
-2. OPEN EXISTING WALLET AND SHOW ADDRESS:
-   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "address"
+2. CHECK WALLET ADDRESS:
+   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "display_address"
 
 3. GET WALLET BALANCE:
    ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
        --wallet-path my_wallet --password mypass123 --exec "balance"
 
-4. SEND TRANSACTION (non-interactive):
+4. SEND TRANSACTION:
    ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
        --wallet-path my_wallet --password mypass123 \
-       --exec "transfer <asset> <recipient_address> <amount>"
-
-   Example:
-   ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-       --wallet-path my_wallet --password mypass123 \
-       --exec "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.5"
+       --exec "transfer asset=TOS amount=1.5 address=<recipient>"
 
 5. RESTORE WALLET FROM SEED:
    ./tos_wallet --network devnet --wallet-path restored_wallet --password newpass456 \
-       --seed "word1 word2 word3 ... word24" --exec "display_address"
+       --seed "word1 word2 word3 ... word25" --exec "display_address"
 
-   Note: The --seed flag restores from an existing seed phrase (24 words)
+   Note: Use --seed with a 25-word seed phrase to restore an existing wallet
 
 ═══════════════════════════════════════════════════════════════════════════════
 PASSWORD OPTIONS (pick one):
@@ -270,10 +264,16 @@ Smart Contracts:
   get_contract_balance <contract> <asset>  - Get contract balance
   count_contracts                          - Get total deployed contracts
 
-Advanced:
-  freeze <amount> <days>    - Freeze TOS to generate energy
-  unfreeze <tx_hash>        - Unfreeze previously frozen TOS
-  multisig                  - Manage multisig operations
+Energy Management:
+  freeze_tos <amount> <duration>  - Freeze TOS to generate energy
+  unfreeze_tos <amount>           - Unfreeze previously frozen TOS
+  energy_info                     - Show energy status
+
+Multisig (2-of-N threshold signatures):
+  multisig_setup <threshold> <addresses>  - Configure multisig on wallet
+  multisig_show                           - Display multisig configuration
+  multisig_create_tx <asset> <amount> <address> - Create unsigned TX for signing
+  multisig_sign <tx_hash> [source] [signatures] - Sign or submit multisig TX
 
 ═══════════════════════════════════════════════════════════════════════════════
 NETWORK OPTIONS:
@@ -284,7 +284,6 @@ NETWORK OPTIONS:
 --network mainnet         - Main network (default)
 
 --daemon-address <url>    - Daemon RPC endpoint (default: http://127.0.0.1:8080)
---offline-mode            - Work without connecting to daemon (limited functionality)
 
 ═══════════════════════════════════════════════════════════════════════════════
 EXAMPLES FOR AI TOOLS:
@@ -313,6 +312,37 @@ done
 # Step 5: Verify recipient balance
 ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
     --wallet-path recipient_wallet --password pass456 --exec "balance"
+
+═══════════════════════════════════════════════════════════════════════════════
+MULTISIG WORKFLOW (2-of-2 example):
+═══════════════════════════════════════════════════════════════════════════════
+
+# Step 1: Source wallet sets up multisig with 2 participants
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path wallet_a --password pass \
+    --exec "multisig_setup threshold=2 addresses=<participant_b>,<participant_c>"
+
+# Step 2: Source wallet creates unsigned TX
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path wallet_a --password pass \
+    --exec "multisig_create_tx asset=TOS amount=1.0 address=<recipient>"
+# Output: tx_hash=..., tx_data=..., source=...
+
+# Step 3: Each participant signs (share tx_hash and source to participants)
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path wallet_b --password pass \
+    --exec "multisig_sign tx_hash=<tx_hash> source=<wallet_a_address>"
+# Output: 0:<signature_hex>
+
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path wallet_c --password pass \
+    --exec "multisig_sign tx_hash=<tx_hash> source=<wallet_a_address>"
+# Output: 1:<signature_hex>
+
+# Step 4: Source wallet submits with all collected signatures
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path wallet_a --password pass \
+    --exec "multisig_sign tx_hash=<tx_hash> tx_data=<tx_data> signatures=0:<sig_b>,1:<sig_c> submit=true"
 
 ═══════════════════════════════════════════════════════════════════════════════
 BATCH MODE (JSON):
