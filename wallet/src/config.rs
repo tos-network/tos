@@ -2,7 +2,7 @@ use std::ops::ControlFlow;
 
 use argon2::{Algorithm, Argon2, Params, Version};
 #[cfg(feature = "cli")]
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use lazy_static::lazy_static;
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -74,18 +74,18 @@ fn default_logs_path() -> String {
     String::from("logs/")
 }
 
+// Default to disabled (true) for batch-mode wallet
+fn default_disable_ascii_art() -> bool {
+    true
+}
+
 #[cfg(feature = "cli")]
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct NetworkConfig {
     /// Daemon address to use
-    #[cfg(feature = "network_handler")]
     #[clap(long, default_value_t = String::from(DEFAULT_DAEMON_ADDRESS))]
     #[serde(default = "default_daemon_address")]
     pub daemon_address: String,
-    /// Disable online mode
-    #[cfg(feature = "network_handler")]
-    #[clap(long)]
-    pub offline_mode: bool,
 }
 
 #[cfg(feature = "cli")]
@@ -135,11 +135,6 @@ pub struct LogConfig {
     #[clap(long)]
     #[serde(default)]
     pub disable_log_color: bool,
-    /// Disable terminal interactive mode
-    /// You will not be able to write CLI commands in it or to have an updated prompt
-    #[clap(long)]
-    #[serde(default)]
-    pub disable_interactive_mode: bool,
     /// Log filename
     ///
     /// By default filename is tos-wallet.log.
@@ -159,9 +154,9 @@ pub struct LogConfig {
     #[clap(long)]
     #[serde(default)]
     pub logs_modules: Vec<ModuleConfig>,
-    /// Disable the ascii art at startup
-    #[clap(long)]
-    #[serde(default)]
+    /// Disable the ascii art at startup (default: true for batch mode)
+    #[clap(long, default_value_t = true)]
+    #[serde(default = "default_disable_ascii_art")]
     pub disable_ascii_art: bool,
     /// Change the datetime format used by the logger
     #[clap(long, default_value_t = default_logs_datetime_format())]
@@ -169,54 +164,68 @@ pub struct LogConfig {
     pub datetime_format: String,
 }
 
+/// Wallet subcommands
+#[cfg(feature = "cli")]
+#[derive(Subcommand, Clone, Debug)]
+pub enum WalletCommand {
+    /// Create a new wallet at the specified path
+    ///
+    /// This command explicitly creates a new wallet. If a wallet already exists
+    /// at the specified path, an error will be returned.
+    ///
+    /// Example:
+    ///   tos_wallet --network devnet --wallet-path my_wallet --password mypass123 create
+    Create,
+}
+
 #[cfg(feature = "cli")]
 #[derive(Parser, Serialize, Deserialize, Clone)]
 #[clap(
     version = VERSION,
-    about = "TOS Wallet - Manage your TOS cryptocurrency wallet from command line",
-    long_about = r#"TOS Wallet - Non-Interactive Command Line Interface
+    about = "TOS Wallet - Stateless Command Line Interface",
+    long_about = r#"TOS Wallet - Stateless Batch Mode CLI
 
-IMPORTANT: This wallet operates in NON-INTERACTIVE mode by default for automation and AI tools.
-You do NOT need to use interactive prompts. All commands can be executed with command-line arguments.
+This is a stateless wallet that queries all data from the daemon on-demand.
+All commands are executed via --exec and the wallet exits after execution.
 
 ═══════════════════════════════════════════════════════════════════════════════
-QUICK START GUIDE - NON-INTERACTIVE MODE
+QUICK START GUIDE
 ═══════════════════════════════════════════════════════════════════════════════
 
-1. CREATE A NEW WALLET (non-interactive):
+1. CREATE A NEW WALLET:
    ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "display_address"
 
    This will:
-   - Automatically create a new wallet at ./wallets/my_wallet/ if it doesn't exist
-   - Encrypt it with password "mypass123"
-   - Display the wallet address
-   - Exit immediately
+   - Create a new wallet at the specified path if it doesn't exist
+   - Encrypt it with the provided password
+   - Display the wallet address and exit
 
-   To also see the seed phrase:
-   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "seed"
+   To see the seed phrase:
+   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "seed password=mypass123"
 
-2. OPEN EXISTING WALLET AND SHOW ADDRESS:
-   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "address"
+2. CHECK WALLET ADDRESS:
+   ./tos_wallet --network devnet --wallet-path my_wallet --password mypass123 --exec "display_address"
 
 3. GET WALLET BALANCE:
    ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
        --wallet-path my_wallet --password mypass123 --exec "balance"
 
-4. SEND TRANSACTION (non-interactive):
+4. SEND TRANSACTION:
    ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
        --wallet-path my_wallet --password mypass123 \
-       --exec "transfer <asset> <recipient_address> <amount>"
-
-   Example:
-   ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-       --wallet-path my_wallet --password mypass123 \
-       --exec "transfer TOS tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk 1.5"
+       --exec "transfer asset=TOS amount=1.5 address=<recipient>"
 
 5. RESTORE WALLET FROM SEED:
    ./tos_wallet --network devnet --wallet-path restored_wallet --password newpass456 \
-       --seed "word1 word2 word3 ... word24" --exec "display_address"
+       --seed "word1 word2 word3 ... word25" --exec "display_address"
 
-   Note: The --seed flag restores from an existing seed phrase (24 words)
+   Note: Use --seed with a 25-word seed phrase to restore an existing wallet
+
+6. RESTORE WALLET FROM PRIVATE KEY:
+   ./tos_wallet --network devnet --wallet-path restored_wallet --password newpass456 \
+       --private-key "hex_private_key" --exec "display_address"
+
+   Note: Use --private-key with a hex-encoded private key to restore a wallet
 
 ═══════════════════════════════════════════════════════════════════════════════
 PASSWORD OPTIONS (pick one):
@@ -243,7 +252,7 @@ Wallet Management:
   address                   - Alias for display_address
   seed                      - Display seed phrase (requires password)
   balance                   - Show wallet balance (requires --daemon-address)
-  sync_status               - Show wallet synchronization status
+  sync_status               - Show wallet connection status
 
 Transactions:
   transfer <asset> <address> <amount>      - Send asset to address (asset can be 'TOS' or asset hash)
@@ -261,10 +270,16 @@ Smart Contracts:
   get_contract_balance <contract> <asset>  - Get contract balance
   count_contracts                          - Get total deployed contracts
 
-Advanced:
-  freeze <amount> <days>    - Freeze TOS to generate energy
-  unfreeze <tx_hash>        - Unfreeze previously frozen TOS
-  multisig                  - Manage multisig operations
+Energy Management:
+  freeze_tos <amount> <duration>  - Freeze TOS to generate energy
+  unfreeze_tos <amount>           - Unfreeze previously frozen TOS
+  energy_info                     - Show energy status
+
+Multisig (2-of-N threshold signatures):
+  multisig_setup <threshold> <addresses>  - Configure multisig on wallet
+  multisig_show                           - Display multisig configuration
+  multisig_create_tx <asset> <amount> <address> - Create unsigned TX for signing
+  multisig_sign <tx_hash> [source] [signatures] - Sign or submit multisig TX
 
 ═══════════════════════════════════════════════════════════════════════════════
 NETWORK OPTIONS:
@@ -275,7 +290,6 @@ NETWORK OPTIONS:
 --network mainnet         - Main network (default)
 
 --daemon-address <url>    - Daemon RPC endpoint (default: http://127.0.0.1:8080)
---offline-mode            - Work without connecting to daemon (limited functionality)
 
 ═══════════════════════════════════════════════════════════════════════════════
 EXAMPLES FOR AI TOOLS:
@@ -306,6 +320,37 @@ done
     --wallet-path recipient_wallet --password pass456 --exec "balance"
 
 ═══════════════════════════════════════════════════════════════════════════════
+MULTISIG WORKFLOW (2-of-2 example):
+═══════════════════════════════════════════════════════════════════════════════
+
+# Step 1: Source wallet sets up multisig with 2 participants
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path wallet_a --password pass \
+    --exec "multisig_setup threshold=2 addresses=<participant_b>,<participant_c>"
+
+# Step 2: Source wallet creates unsigned TX
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path wallet_a --password pass \
+    --exec "multisig_create_tx asset=TOS amount=1.0 address=<recipient>"
+# Output: tx_hash=..., tx_data=..., source=...
+
+# Step 3: Each participant signs (share tx_hash and source to participants)
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path wallet_b --password pass \
+    --exec "multisig_sign tx_hash=<tx_hash> source=<wallet_a_address>"
+# Output: 0:<signature_hex>
+
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path wallet_c --password pass \
+    --exec "multisig_sign tx_hash=<tx_hash> source=<wallet_a_address>"
+# Output: 1:<signature_hex>
+
+# Step 4: Source wallet submits with all collected signatures
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path wallet_a --password pass \
+    --exec "multisig_sign tx_hash=<tx_hash> tx_data=<tx_data> signatures=0:<sig_b>,1:<sig_c> submit=true"
+
+═══════════════════════════════════════════════════════════════════════════════
 BATCH MODE (JSON):
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -325,8 +370,7 @@ Execute:
 
 ═══════════════════════════════════════════════════════════════════════════════
 
-For interactive mode (with prompts), add --interactive flag.
-For more help on specific commands, use: help <command> in interactive mode.
+For more help on specific commands, use: --exec "help <command>"
 "#
 )]
 #[command(styles = tos_common::get_cli_styles())]
@@ -350,9 +394,12 @@ pub struct Config {
     /// Password used to open wallet
     #[clap(long)]
     pub password: Option<String>,
-    /// Restore wallet using seed
+    /// Restore wallet using seed phrase (25 words)
     #[clap(long)]
     pub seed: Option<String>,
+    /// Restore wallet using private key (hex format)
+    #[clap(long)]
+    pub private_key: Option<String>,
     /// How many threads we want to use
     /// during ciphertext decryption
     #[clap(long, default_value_t = detect_available_parallelism())]
@@ -408,22 +455,11 @@ pub struct Config {
     #[serde(skip)]
     #[serde(default)]
     pub json_file: Option<String>,
-    /// Enable light wallet mode (no blockchain synchronization)
-    /// Light mode queries nonce/balance/reference on-demand from daemon, enabling instant startup
-    /// Trade-off: Transaction history is not available locally
-    #[clap(long)]
-    #[serde(default)]
-    pub light_mode: bool,
     /// XSWD Server bind address (default: 127.0.0.1:44325)
     /// SECURITY WARNING: Binding to 0.0.0.0 exposes wallet to network. Only use for trusted networks.
     #[cfg(feature = "api_server")]
     #[clap(long)]
     pub xswd_bind_address: Option<String>,
-    /// Enable interactive mode (prompt for missing arguments)
-    /// Default: false (pure command mode)
-    #[clap(long)]
-    #[serde(default)]
-    pub interactive: bool,
     /// Read password from environment variable TOS_WALLET_PASSWORD
     #[clap(long)]
     #[serde(default)]
@@ -431,6 +467,10 @@ pub struct Config {
     /// Read password from file (more secure than --password)
     #[clap(long)]
     pub password_file: Option<String>,
+    /// Subcommand to execute (create, or none to open existing wallet)
+    #[command(subcommand)]
+    #[serde(skip)]
+    pub command: Option<WalletCommand>,
 }
 
 #[cfg(feature = "cli")]
@@ -445,14 +485,9 @@ impl Config {
         self.exec.as_ref()
     }
 
-    /// Check if we're in interactive mode
-    pub fn is_interactive_mode(&self) -> bool {
-        self.interactive && !self.is_exec_mode()
-    }
-
-    /// Check if we're in command mode (default)
+    /// Check if we're in command mode (always true - batch mode only)
     pub fn is_command_mode(&self) -> bool {
-        !self.is_interactive_mode()
+        true
     }
 }
 

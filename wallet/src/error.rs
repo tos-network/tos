@@ -1,4 +1,3 @@
-#[cfg(feature = "network_handler")]
 use super::network_handler::NetworkError;
 use chacha20poly1305::Error as CryptoError;
 use strum::{EnumDiscriminants, IntoDiscriminant};
@@ -71,8 +70,7 @@ pub enum WalletError {
     AlreadyOnlineMode,
     #[error("Asset is already present on disk")]
     AssetAlreadyRegistered,
-    #[error("Topoheight is too high to rescan")]
-    RescanTopoheightTooHigh,
+    // REMOVED: RescanTopoheightTooHigh - rescan not needed in stateless wallet
     #[error(transparent)]
     Any(#[from] Error),
     #[error("No API Server is running")]
@@ -87,7 +85,6 @@ pub enum WalletError {
     EmptyName,
     #[error("No handler available for this request")]
     NoHandlerAvailable,
-    #[cfg(feature = "network_handler")]
     #[error(transparent)]
     NetworkError(#[from] NetworkError),
     #[error("Balance for asset {} was not found", _0)]

@@ -10,9 +10,7 @@ use indexmap::IndexSet;
 #[allow(unused_imports)]
 use log::{error, info, warn};
 use sha3::{Digest, Keccak256};
-use std::{
-    borrow::Cow, fs::File, io::Write, ops::AddAssign, path::Path, sync::Arc, time::Duration,
-};
+use std::{borrow::Cow, fs::File, io::Write, path::Path, sync::Arc};
 use tos_common::{
     ai_mining::{AIMiningPayload, DifficultyLevel},
     async_handler,
@@ -23,14 +21,14 @@ use tos_common::{
     prompt::{
         argument::{Arg, ArgType, ArgumentManager},
         command::{Command, CommandError, CommandHandler, CommandManager},
-        Color, Prompt, PromptConfig, PromptError,
+        Color, Prompt, PromptConfig,
     },
     serializer::Serializer,
     tokio,
     transaction::{
         builder::{
-            DeployContractBuilder, EnergyBuilder, FeeBuilder, InvokeContractBuilder,
-            MultiSigBuilder, TransactionTypeBuilder, TransferBuilder,
+            ContractDepositBuilder, DeployContractBuilder, EnergyBuilder, FeeBuilder,
+            InvokeContractBuilder, MultiSigBuilder, TransactionTypeBuilder, TransferBuilder,
         },
         multisig::{MultiSig, SignatureId},
         BurnPayload, MultiSigPayload, Transaction, TxVersion,
@@ -38,14 +36,12 @@ use tos_common::{
     utils::{format_coin, format_tos, from_coin},
 };
 use tos_wallet::{
-    config::{Config, JsonBatchConfig, LogProgressTableGenerationReportFunction, DIR_PATH},
-    entry::EntryData,
+    config::{
+        Config, JsonBatchConfig, LogProgressTableGenerationReportFunction, WalletCommand, DIR_PATH,
+    },
     precomputed_tables,
     wallet::{RecoverOption, Wallet},
 };
-
-#[cfg(feature = "network_handler")]
-use tos_wallet::config::DEFAULT_DAEMON_ADDRESS;
 
 #[cfg(feature = "xswd")]
 use {
@@ -63,122 +59,58 @@ use {
 
 const ELEMENTS_PER_PAGE: usize = 10;
 
-// ========== Helper Functions for Command Mode ==========
+// ========== Helper Functions for Batch Mode ==========
 
-/// Get a required argument from CLI or prompt in interactive mode
+/// Get a required argument from CLI (batch mode only)
 #[allow(dead_code)]
-async fn get_required_arg<F, Fut>(
+fn get_required_arg(
     args: &mut ArgumentManager,
     name: &str,
-    manager: &CommandManager,
     usage: &str,
-    interactive_fn: F,
-) -> Result<String, CommandError>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<String, PromptError>>,
-{
+) -> Result<String, CommandError> {
     if args.has_argument(name) {
         return Ok(args.get_value(name)?.to_string_value()?);
     }
 
-    if manager.is_batch_mode() {
-        return Err(CommandError::MissingRequiredArgument {
-            arg: name.to_string(),
-            usage: usage.to_string(),
-        });
-    }
-
-    interactive_fn().await.map_err(|e| e.into())
+    Err(CommandError::MissingRequiredArgument {
+        arg: name.to_string(),
+        usage: usage.to_string(),
+    })
 }
 
-/// Get a required argument with usage example for better error messages
-#[allow(dead_code)]
-async fn get_required_arg_with_example<F, Fut>(
+/// Get a required argument with usage example for better error messages (batch mode only)
+fn get_required_arg_with_example(
     args: &mut ArgumentManager,
     name: &str,
-    manager: &CommandManager,
     usage: &str,
     example: &str,
-    interactive_fn: F,
-) -> Result<String, CommandError>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<String, PromptError>>,
-{
+) -> Result<String, CommandError> {
     if args.has_argument(name) {
         return Ok(args.get_value(name)?.to_string_value()?);
     }
 
-    if manager.is_batch_mode() {
-        return Err(CommandError::MissingRequiredArgumentWithExample {
-            arg: name.to_string(),
-            usage: usage.to_string(),
-            example: example.to_string(),
-        });
-    }
-
-    interactive_fn().await.map_err(|e| e.into())
+    Err(CommandError::MissingRequiredArgumentWithExample {
+        arg: name.to_string(),
+        usage: usage.to_string(),
+        example: example.to_string(),
+    })
 }
 
-/// Get an optional argument from CLI or prompt in interactive mode
+/// Get an optional argument from CLI (batch mode only)
 #[allow(dead_code)]
-async fn get_optional_arg<F, Fut>(
+fn get_optional_arg(
     args: &mut ArgumentManager,
     name: &str,
-    manager: &CommandManager,
-    interactive_fn: F,
-) -> Result<Option<String>, CommandError>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<String, PromptError>>,
-{
+) -> Result<Option<String>, CommandError> {
     if args.has_argument(name) {
         return Ok(Some(args.get_value(name)?.to_string_value()?));
     }
-
-    if manager.is_batch_mode() {
-        return Ok(None);
-    }
-
-    match interactive_fn().await {
-        Ok(val) if val.is_empty() => Ok(None),
-        Ok(val) => Ok(Some(val)),
-        Err(_) => Ok(None),
-    }
+    Ok(None)
 }
 
-/// Get confirmation from CLI or prompt in interactive mode
-///
-/// In batch/exec mode: auto-confirms (returns true) if --confirm not provided
-/// In interactive mode: prompts user if --confirm not provided
+/// Get password from config with priority: CLI > File > Env > Error (batch mode only)
 #[allow(dead_code)]
-async fn get_confirmation<F, Fut>(
-    args: &mut ArgumentManager,
-    manager: &CommandManager,
-    interactive_fn: F,
-) -> Result<bool, CommandError>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<bool, PromptError>>,
-{
-    // If explicit --confirm flag provided, use its value
-    if args.has_argument("confirm") {
-        return Ok(args.get_value("confirm")?.to_bool()?);
-    }
-
-    // In batch/exec mode: auto-confirm (executing command implies confirmation)
-    if manager.is_batch_mode() {
-        return Ok(true);
-    }
-
-    // In interactive mode: prompt user
-    interactive_fn().await.map_err(|e| e.into())
-}
-
-/// Get password from config with priority: CLI > File > Env > Interactive > Error
-#[allow(dead_code)]
-async fn get_password(config: &Config, prompt: &Prompt) -> Result<String> {
+async fn get_password(config: &Config, _prompt: &Prompt) -> Result<String> {
     // Priority 1: CLI argument (least secure, warn in production)
     if let Some(pwd) = config.password.as_ref() {
         #[cfg(not(debug_assertions))]
@@ -227,12 +159,7 @@ async fn get_password(config: &Config, prompt: &Prompt) -> Result<String> {
             .context("Environment variable TOS_WALLET_PASSWORD not set");
     }
 
-    // Priority 4: Interactive prompt
-    if config.is_interactive_mode() {
-        return Ok(prompt.read_input("Password: ", true).await?);
-    }
-
-    // Priority 5: Error
+    // Priority 4: Error (batch mode only - no interactive prompt)
     Err(CommandError::PasswordRequired.into())
 }
 
@@ -269,10 +196,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Determine if we should enable interactive mode
-    // Interactive mode is ONLY enabled if --interactive flag is set AND we're not in exec mode
-    let is_interactive = config.is_interactive_mode();
-
+    // Batch mode only - no interactive prompt loop
     let log_config = &config.log;
     let prompt = Prompt::new(PromptConfig {
         level: log_config.log_level,
@@ -282,7 +206,7 @@ async fn main() -> Result<()> {
         disable_file_log_date_based: log_config.disable_file_log_date_based,
         disable_colors: log_config.disable_log_color,
         enable_auto_compress_logs: log_config.auto_compress_logs,
-        interactive: is_interactive,
+        interactive: false, // Batch mode only
         module_logs: log_config.logs_modules.clone(),
         file_level: log_config.file_log_level.unwrap_or(log_config.log_level),
         show_ascii: !log_config.disable_ascii_art,
@@ -335,7 +259,52 @@ async fn main() -> Result<()> {
         )
         .await?;
         let p = Path::new(path);
-        let wallet = if p.exists() && p.is_dir() && Path::new(&format!("{path}/db")).exists() {
+        let wallet_exists = p.exists() && p.is_dir() && Path::new(&format!("{path}/db")).exists();
+
+        // Handle explicit 'create' subcommand
+        if let Some(WalletCommand::Create) = config.command {
+            if wallet_exists {
+                anyhow::bail!(
+                    "Wallet already exists at '{path}'. Use without 'create' subcommand to open it."
+                );
+            }
+            if log::log_enabled!(log::Level::Info) {
+                info!("Creating a new wallet at {path}");
+            }
+            // Determine recovery option: private_key takes precedence over seed
+            let recover_option = if let Some(ref pk) = config.private_key {
+                Some(RecoverOption::PrivateKey(pk.as_str()))
+            } else {
+                config.seed.as_deref().map(RecoverOption::Seed)
+            };
+
+            let wallet = Wallet::create(
+                path,
+                &password,
+                recover_option,
+                config.network,
+                precomputed_tables,
+                config.n_decryption_threads,
+                config.network_concurrency,
+            )
+            .await?;
+
+            // Display wallet info and exit
+            println!("Wallet created successfully!");
+            println!("Address: {}", wallet.get_address());
+            // Only show seed if wallet was NOT recovered from private key
+            if config.private_key.is_none() {
+                if let Ok(seed) = wallet.get_seed(0) {
+                    println!("\nSeed phrase (SAVE THIS SECURELY):");
+                    println!("{}", seed);
+                    println!("\nWARNING: Never share your seed phrase with anyone!");
+                }
+            }
+            return Ok(());
+        }
+
+        // Default behavior: open existing or create new
+        let wallet = if wallet_exists {
             if log::log_enabled!(log::Level::Info) {
                 info!("Opening wallet {path}");
             }
@@ -346,21 +315,25 @@ async fn main() -> Result<()> {
                 precomputed_tables,
                 config.n_decryption_threads,
                 config.network_concurrency,
-                config.light_mode,
             )?
         } else {
             if log::log_enabled!(log::Level::Info) {
                 info!("Creating a new wallet at {path}");
             }
+            // Determine recovery option: private_key takes precedence over seed
+            let recover_option = if let Some(ref pk) = config.private_key {
+                Some(RecoverOption::PrivateKey(pk.as_str()))
+            } else {
+                config.seed.as_deref().map(RecoverOption::Seed)
+            };
             Wallet::create(
                 path,
                 &password,
-                config.seed.as_deref().map(RecoverOption::Seed),
+                recover_option,
                 config.network,
                 precomputed_tables,
                 config.n_decryption_threads,
                 config.network_concurrency,
-                config.light_mode,
             )
             .await?
         };
@@ -376,98 +349,63 @@ async fn main() -> Result<()> {
         .await;
         setup_wallet_command_manager(wallet, &command_manager).await?;
 
-        // Execute based on mode
-        if config.is_command_mode() {
-            // Command mode: execute and exit
-            if let Some(json_str) = config.json.as_ref() {
-                if log::log_enabled!(log::Level::Info) {
-                    info!("Executing batch command from JSON string");
-                }
-                execute_json_batch(&command_manager, json_str, &config).await?;
-            } else if let Some(json_file) = config.json_file.as_ref() {
-                if log::log_enabled!(log::Level::Info) {
-                    info!("Executing batch command from JSON file: {json_file}");
-                }
-                let json_content = std::fs::read_to_string(json_file)
-                    .with_context(|| format!("Failed to read JSON file: {json_file}"))?;
-                execute_json_batch(&command_manager, &json_content, &config).await?;
-            } else if let Some(cmd) = config.get_exec_command() {
-                if log::log_enabled!(log::Level::Info) {
-                    info!("Executing command: {cmd}");
-                }
-                match command_manager.handle_command(cmd.clone()).await {
-                    Ok(_) => {
-                        if log::log_enabled!(log::Level::Info) {
-                            info!("Command executed successfully");
-                        }
-                    }
-                    Err(e) => {
-                        if log::log_enabled!(log::Level::Error) {
-                            error!("Error executing command: {e:#}");
-                        }
-                        return Err(e.into());
+        // Batch mode: execute command and exit
+        if let Some(json_str) = config.json.as_ref() {
+            if log::log_enabled!(log::Level::Info) {
+                info!("Executing batch command from JSON string");
+            }
+            execute_json_batch(&command_manager, json_str, &config).await?;
+        } else if let Some(json_file) = config.json_file.as_ref() {
+            if log::log_enabled!(log::Level::Info) {
+                info!("Executing batch command from JSON file: {json_file}");
+            }
+            let json_content = std::fs::read_to_string(json_file)
+                .with_context(|| format!("Failed to read JSON file: {json_file}"))?;
+            execute_json_batch(&command_manager, &json_content, &config).await?;
+        } else if let Some(cmd) = config.get_exec_command() {
+            if log::log_enabled!(log::Level::Info) {
+                info!("Executing command: {cmd}");
+            }
+            match command_manager.handle_command(cmd.clone()).await {
+                Ok(_) => {
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Command executed successfully");
                     }
                 }
-            } else {
-                // Command mode but no command specified
-                return Err(anyhow::anyhow!(
-                    "Command mode requires one of: --exec, --json, or --json-file\n\
-                     Use --interactive to enable interactive mode"
-                ));
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error executing command: {e:#}");
+                    }
+                    return Err(e.into());
+                }
             }
         } else {
-            // Interactive mode: start prompt loop
-            if let Err(e) = prompt
-                .start(
-                    Duration::from_millis(1000),
-                    Box::new(async_handler!(prompt_message_builder)),
-                    Some(&command_manager),
-                )
-                .await
-            {
-                if log::log_enabled!(log::Level::Error) {
-                    error!("Error while running prompt: {e:#}");
-                }
-            }
+            // No command specified
+            return Err(anyhow::anyhow!(
+                "Batch mode requires one of: --exec, --json, or --json-file"
+            ));
         }
     } else {
         // No wallet path provided
         register_default_commands(&command_manager).await?;
 
-        if config.is_command_mode() {
-            // Command mode without wallet: only allow certain commands (help, version, etc.)
-            if let Some(cmd) = config.get_exec_command() {
-                // Allow a few commands without wallet
-                if cmd.starts_with("help") || cmd.starts_with("version") {
-                    if log::log_enabled!(log::Level::Info) {
-                        info!("Executing command: {cmd}");
-                    }
-                    command_manager.handle_command(cmd.clone()).await?;
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "Wallet path required for this command. Use --wallet-path <path>"
-                    ));
+        // Batch mode without wallet: only allow certain commands (help, version, etc.)
+        if let Some(cmd) = config.get_exec_command() {
+            // Allow a few commands without wallet
+            if cmd.starts_with("help") || cmd.starts_with("version") {
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Executing command: {cmd}");
                 }
+                command_manager.handle_command(cmd.clone()).await?;
             } else {
                 return Err(anyhow::anyhow!(
-                    "Command mode requires --wallet-path and one of: --exec, --json, or --json-file\n\
-                     Use --interactive to enable interactive mode without wallet"
+                    "Wallet path required for this command. Use --wallet-path <path>"
                 ));
             }
         } else {
-            // Interactive mode: allow create/open commands
-            if let Err(e) = prompt
-                .start(
-                    Duration::from_millis(1000),
-                    Box::new(async_handler!(prompt_message_builder)),
-                    Some(&command_manager),
-                )
-                .await
-            {
-                if log::log_enabled!(log::Level::Error) {
-                    error!("Error while running prompt: {e:#}");
-                }
-            }
+            return Err(anyhow::anyhow!(
+                "Batch mode requires --wallet-path and one of: --exec, --json, or --json-file"
+            ));
         }
     }
 
@@ -543,8 +481,6 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
     ))?;
 
     manager.register_default_commands()?;
-    // Display available commands
-    manager.display_commands()?;
 
     Ok(())
 }
@@ -651,27 +587,25 @@ async fn apply_config(
     wallet: &Arc<Wallet>,
     #[cfg(feature = "xswd")] prompt: &ShareablePrompt,
 ) {
-    #[cfg(feature = "network_handler")]
-    if !config.network_handler.offline_mode {
+    // Always connect to daemon (stateless wallet requires daemon connection)
+    if log::log_enabled!(log::Level::Info) {
+        info!(
+            "Trying to connect to daemon at '{}'",
+            config.network_handler.daemon_address
+        );
+    }
+    if let Err(e) = wallet
+        .set_online_mode(&config.network_handler.daemon_address, true)
+        .await
+    {
+        if log::log_enabled!(log::Level::Error) {
+            error!("Couldn't connect to daemon: {e:#}");
+        }
         if log::log_enabled!(log::Level::Info) {
-            info!(
-                "Trying to connect to daemon at '{}'",
-                config.network_handler.daemon_address
-            );
+            info!("Wallet will run in stateless mode. Ensure daemon is running to use wallet features.");
         }
-        if let Err(e) = wallet
-            .set_online_mode(&config.network_handler.daemon_address, true)
-            .await
-        {
-            if log::log_enabled!(log::Level::Error) {
-                error!("Couldn't connect to daemon: {e:#}");
-            }
-            if log::log_enabled!(log::Level::Info) {
-                info!("You can activate online mode using 'online_mode [daemon_address]'");
-            }
-        } else if log::log_enabled!(log::Level::Info) {
-            info!("Online mode enabled");
-        }
+    } else if log::log_enabled!(log::Level::Info) {
+        info!("Online mode enabled");
     }
 
     wallet.set_history_scan(!config.disable_history_scan);
@@ -794,18 +728,11 @@ async fn setup_wallet_command_manager(
                 "Amount to transfer (in atomic units)",
             ),
         ],
-        vec![
-            Arg::new(
-                "fee_type",
-                ArgType::String,
-                "Fee payment type: 'tos' or 'energy'",
-            ),
-            Arg::new(
-                "confirm",
-                ArgType::String,
-                "Confirm action (yes/no, auto-confirms in command mode)",
-            ),
-        ],
+        vec![Arg::new(
+            "fee_type",
+            ArgType::String,
+            "Fee payment type: 'tos' or 'energy'",
+        )],
         CommandHandler::Async(async_handler!(transfer)),
     ))?;
     command_manager.add_command(Command::with_arguments(
@@ -815,21 +742,14 @@ async fn setup_wallet_command_manager(
             Arg::new("asset", ArgType::String, "Asset name or hash to transfer"),
             Arg::new("address", ArgType::String, "Recipient wallet address"),
         ],
-        vec![
-            Arg::new(
-                "fee_type",
-                ArgType::String,
-                "Fee payment type: 'tos' or 'energy'",
-            ),
-            Arg::new(
-                "confirm",
-                ArgType::String,
-                "Confirm action (yes/no, auto-confirms in command mode)",
-            ),
-        ],
+        vec![Arg::new(
+            "fee_type",
+            ArgType::String,
+            "Fee payment type: 'tos' or 'energy'",
+        )],
         CommandHandler::Async(async_handler!(transfer_all)),
     ))?;
-    command_manager.add_command(Command::with_arguments(
+    command_manager.add_command(Command::with_required_arguments(
         "burn",
         "Burn amount of asset",
         vec![
@@ -840,11 +760,6 @@ async fn setup_wallet_command_manager(
                 "Amount to burn (permanently destroyed)",
             ),
         ],
-        vec![Arg::new(
-            "confirm",
-            ArgType::String,
-            "Confirm action (yes/no, auto-confirms in command mode)",
-        )],
         CommandHandler::Async(async_handler!(burn)),
     ))?;
     command_manager.add_command(Command::new(
@@ -899,30 +814,25 @@ async fn setup_wallet_command_manager(
         ],
         CommandHandler::Async(async_handler!(seed)),
     ))?;
+    command_manager.add_command(Command::with_required_arguments(
+        "private_key",
+        "Show private key in hex format (for backup/recovery)",
+        vec![Arg::new(
+            "password",
+            ArgType::String,
+            "Password to unlock private key",
+        )],
+        CommandHandler::Async(async_handler!(show_private_key)),
+    ))?;
     command_manager.add_command(Command::new(
         "nonce",
         "Show current nonce",
         CommandHandler::Async(async_handler!(nonce)),
     ))?;
-    command_manager.add_command(Command::with_required_arguments(
-        "set_nonce",
-        "Set new nonce",
-        vec![Arg::new(
-            "nonce",
-            ArgType::Number,
-            "Transaction nonce (for manual ordering)",
-        )],
-        CommandHandler::Async(async_handler!(set_nonce)),
-    ))?;
     command_manager.add_command(Command::new(
         "logout",
         "Logout from existing wallet",
         CommandHandler::Async(async_handler!(logout)),
-    ))?;
-    command_manager.add_command(Command::new(
-        "clear_tx_cache",
-        "Clear the current TX cache",
-        CommandHandler::Async(async_handler!(clear_tx_cache)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "export_transactions",
@@ -934,7 +844,7 @@ async fn setup_wallet_command_manager(
         )],
         CommandHandler::Async(async_handler!(export_transactions_csv)),
     ))?;
-    command_manager.add_command(Command::with_arguments(
+    command_manager.add_command(Command::with_required_arguments(
         "freeze_tos",
         "Freeze TOS to get energy with duration-based rewards (3/7/14 days)",
         vec![
@@ -945,25 +855,15 @@ async fn setup_wallet_command_manager(
                 "Freeze duration in days (3/7/14/30, longer = higher rewards)",
             ),
         ],
-        vec![Arg::new(
-            "confirm",
-            ArgType::String,
-            "Confirm action (yes/no, auto-confirms in command mode)",
-        )],
         CommandHandler::Async(async_handler!(freeze_tos)),
     ))?;
-    command_manager.add_command(Command::with_arguments(
+    command_manager.add_command(Command::with_required_arguments(
         "unfreeze_tos",
         "Unfreeze TOS (release frozen TOS after lock period)",
         vec![Arg::new(
             "amount",
             ArgType::String,
             "Amount of TOS to unfreeze",
-        )],
-        vec![Arg::new(
-            "confirm",
-            ArgType::String,
-            "Confirm action (yes/no, auto-confirms in command mode)",
         )],
         CommandHandler::Async(async_handler!(unfreeze_tos)),
     ))?;
@@ -1001,64 +901,10 @@ async fn setup_wallet_command_manager(
         )],
         CommandHandler::Async(async_handler!(list_balances)),
     ))?;
-    command_manager.add_command(Command::with_optional_arguments(
-        "list_tracked_assets",
-        "List all assets marked as tracked",
-        vec![Arg::new(
-            "page",
-            ArgType::Number,
-            "Page number for pagination (default: 0)",
-        )],
-        CommandHandler::Async(async_handler!(list_tracked_assets)),
-    ))?;
-    command_manager.add_command(Command::with_required_arguments(
-        "track_asset",
-        "Mark an asset hash as tracked",
-        vec![Arg::new(
-            "asset",
-            ArgType::String,
-            "Asset name or hash to track",
-        )],
-        CommandHandler::Async(async_handler!(track_asset)),
-    ))?;
-    command_manager.add_command(Command::with_required_arguments(
-        "untrack_asset",
-        "Remove an asset hash from being tracked",
-        vec![Arg::new(
-            "asset",
-            ArgType::String,
-            "Asset name or hash to untrack",
-        )],
-        CommandHandler::Async(async_handler!(untrack_asset)),
-    ))?;
+    // REMOVED: list_tracked_assets, track_asset, untrack_asset commands
+    // In stateless mode, use list_balances to query account assets from daemon
 
-    #[cfg(feature = "network_handler")]
     {
-        command_manager.add_command(Command::with_optional_arguments(
-            "online_mode",
-            "Set your wallet in online mode",
-            vec![Arg::new(
-                "daemon_address",
-                ArgType::String,
-                "Daemon RPC address (e.g., 127.0.0.1:8080)",
-            )],
-            CommandHandler::Async(async_handler!(online_mode)),
-        ))?;
-        command_manager.add_command(Command::new(
-            "offline_mode",
-            "Set your wallet in offline mode",
-            CommandHandler::Async(async_handler!(offline_mode)),
-        ))?;
-        command_manager.add_command(Command::with_optional_arguments(
-            "rescan",
-            "Rescan balance and transactions",
-            vec![Arg::new(
-                "topoheight",
-                ArgType::Number,
-                "Starting topoheight for rescan (default: 0)",
-            )],
-            CommandHandler::Async(async_handler!(rescan)),
-        ))?;
         command_manager.add_command(Command::new(
             "sync_status",
             "Show wallet synchronization status with daemon",
@@ -1115,32 +961,67 @@ async fn setup_wallet_command_manager(
     // Also add multisig commands
     command_manager.add_command(Command::with_optional_arguments(
         "multisig_setup",
-        "Setup a multisig",
+        "Setup a multisig (use addresses=addr1,addr2,... for batch mode)",
         vec![
-            Arg::new("participants", ArgType::Number, "Number of participants"),
             Arg::new(
                 "threshold",
                 ArgType::Number,
                 "Required signatures threshold",
             ),
-            Arg::new("confirm", ArgType::Bool, "Confirm multisig setup"),
+            Arg::new(
+                "addresses",
+                ArgType::String,
+                "Comma-separated list of participant addresses",
+            ),
         ],
         CommandHandler::Async(async_handler!(multisig_setup)),
     ))?;
-    command_manager.add_command(Command::with_optional_arguments(
+    command_manager.add_command(Command::with_arguments(
         "multisig_sign",
-        "Sign a multisig transaction",
+        "Sign a multisig transaction and optionally submit with collected signatures",
         vec![Arg::new(
             "tx_hash",
             ArgType::Hash,
-            "Transaction hash to sign",
+            "Transaction hash to sign (use get_hash_for_multisig from unsigned TX)",
         )],
+        vec![
+            Arg::new(
+                "source",
+                ArgType::String,
+                "Source wallet address (multisig owner) - required for participant wallets",
+            ),
+            Arg::new(
+                "tx_data",
+                ArgType::String,
+                "Unsigned transaction hex data (required for submit)",
+            ),
+            Arg::new(
+                "signatures",
+                ArgType::String,
+                "Other signatures as 'id:sig_hex,id:sig_hex' format",
+            ),
+            Arg::new(
+                "submit",
+                ArgType::Bool,
+                "Submit transaction after adding all signatures",
+            ),
+        ],
         CommandHandler::Async(async_handler!(multisig_sign)),
     ))?;
     command_manager.add_command(Command::new(
         "multisig_show",
         "Show the current state of multisig",
         CommandHandler::Async(async_handler!(multisig_show)),
+    ))?;
+    command_manager.add_command(Command::with_required_arguments(
+        "multisig_create_tx",
+        "Create an unsigned transaction for multisig signing (outputs tx_hash and tx_data)",
+        vec![
+            Arg::new("asset", ArgType::String, "Asset to transfer (TOS or hash)"),
+            Arg::new("amount", ArgType::String, "Amount to transfer"),
+            Arg::new("address", ArgType::String, "Recipient address"),
+        ],
+        CommandHandler::Async(async_handler!(multisig_create_tx)),
     ))?;
 
     command_manager.add_command(Command::new(
@@ -1275,6 +1156,11 @@ async fn setup_wallet_command_manager(
                 ArgType::Number,
                 "Maximum gas limit (default: 1000000)",
             ),
+            Arg::new(
+                "deposit",
+                ArgType::String,
+                "Amount of TOS to deposit to the contract (in atomic units)",
+            ),
         ],
         CommandHandler::Async(async_handler!(invoke_contract)),
     ))?;
@@ -1332,78 +1218,7 @@ async fn setup_wallet_command_manager(
     let mut context = command_manager.get_context().lock()?;
     context.store(wallet);
 
-    command_manager.display_commands()
-}
-
-// Function passed as param to prompt to build the prompt message shown
-async fn prompt_message_builder(
-    prompt: &Prompt,
-    command_manager: Option<&CommandManager>,
-) -> Result<String, PromptError> {
-    if let Some(manager) = command_manager {
-        let context = manager.get_context().lock()?;
-        if let Ok(wallet) = context.get::<Arc<Wallet>>() {
-            let network = wallet.get_network();
-
-            let addr_str = {
-                let addr = &wallet.get_address().to_string()[..8];
-                prompt.colorize_string(Color::Yellow, addr)
-            };
-
-            let storage = wallet.get_storage().read().await;
-            let topoheight_str = format!(
-                "{}: {}",
-                prompt.colorize_string(Color::Yellow, "TopoHeight"),
-                prompt.colorize_string(
-                    Color::Green,
-                    &format!("{}", storage.get_synced_topoheight().unwrap_or(0))
-                )
-            );
-            let balance = format!(
-                "{}: {}",
-                prompt.colorize_string(Color::Yellow, "Balance"),
-                prompt.colorize_string(
-                    Color::Green,
-                    &format_tos(
-                        storage
-                            .get_plaintext_balance_for(&TOS_ASSET)
-                            .await
-                            .unwrap_or(0)
-                    )
-                ),
-            );
-            let status = if wallet.is_online().await {
-                prompt.colorize_string(Color::Green, "Online")
-            } else {
-                prompt.colorize_string(Color::Red, "Offline")
-            };
-            let network_str = if !network.is_mainnet() {
-                format!(
-                    "{} ",
-                    prompt.colorize_string(Color::Red, &network.to_string())
-                )
-            } else {
-                "".into()
-            };
-
-            return Ok(format!(
-                "{} | {} | {} | {} | {} {}{} ",
-                prompt.colorize_string(Color::Blue, "Tos Wallet"),
-                addr_str,
-                topoheight_str,
-                balance,
-                status,
-                network_str,
-                prompt.colorize_string(Color::BrightBlack, ">>")
-            ));
-        }
-    }
-
-    Ok(format!(
-        "{} {} ",
-        prompt.colorize_string(Color::Blue, "Tos Wallet"),
-        prompt.colorize_string(Color::BrightBlack, ">>")
-    ))
+    Ok(())
 }
 
 // Open a wallet based on the wallet name and its password
@@ -1416,25 +1231,14 @@ async fn open_wallet(
     let prompt = manager.get_prompt();
     let config: Config = Config::parse();
 
-    // Priority: command line args -> config file -> interactive prompt (only if not batch mode)
+    // Priority: command line args -> config file -> error (batch mode only)
     let dir = if args.has_argument("name") {
         let name = args.get_value("name")?.to_string_value()?;
         format!("{}{}", DIR_PATH, name)
     } else if let Some(path) = config.wallet_path.as_ref() {
         path.clone()
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("name".to_string()));
     } else {
-        let name = prompt
-            .read_input("Wallet name: ", false)
-            .await
-            .context("Error while reading wallet name")?;
-
-        if name.is_empty() {
-            manager.error("Wallet name cannot be empty");
-            return Ok(());
-        }
-        format!("{}{}", DIR_PATH, name)
+        return Err(CommandError::MissingArgument("name".to_string()));
     };
 
     if !Path::new(&dir).is_dir() {
@@ -1446,13 +1250,8 @@ async fn open_wallet(
         args.get_value("password")?.to_string_value()?
     } else if let Some(pwd) = config.password.as_ref() {
         pwd.clone()
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("password".to_string()));
     } else {
-        prompt
-            .read_input("Password: ", true)
-            .await
-            .context("Error while reading wallet password")?
+        return Err(CommandError::MissingArgument("password".to_string()));
     };
 
     let wallet = {
@@ -1472,7 +1271,6 @@ async fn open_wallet(
             precomputed_tables,
             config.n_decryption_threads,
             config.network_concurrency,
-            config.light_mode,
         )?
     };
 
@@ -1500,25 +1298,14 @@ async fn create_wallet(
     let prompt = manager.get_prompt();
     let config: Config = Config::parse();
 
-    // Priority: command line args -> config file -> interactive prompt (only if not batch mode)
+    // Priority: command line args -> config file -> error (batch mode only)
     let dir = if args.has_argument("name") {
         let name = args.get_value("name")?.to_string_value()?;
         format!("{}{}", DIR_PATH, name)
     } else if let Some(path) = config.wallet_path.as_ref() {
         path.clone()
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("name".to_string()));
     } else {
-        let name = prompt
-            .read_input("Wallet name: ", false)
-            .await
-            .context("Error while reading wallet name")?;
-
-        if name.is_empty() {
-            manager.error("Wallet name cannot be empty");
-            return Ok(());
-        }
-        format!("{}{}", DIR_PATH, name)
+        return Err(CommandError::MissingArgument("name".to_string()));
     };
 
     if Path::new(&dir).is_dir() {
@@ -1526,28 +1313,13 @@ async fn create_wallet(
         return Ok(());
     }
 
-    // Handle password input with batch mode support
+    // Handle password input (batch mode only)
     let password = if args.has_argument("password") {
         args.get_value("password")?.to_string_value()?
     } else if let Some(pwd) = config.password.as_ref() {
         pwd.clone()
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("password".to_string()));
     } else {
-        let password = prompt
-            .read_input("Password: ", true)
-            .await
-            .context("Error while reading password")?;
-        let confirm_password = prompt
-            .read_input("Confirm Password: ", true)
-            .await
-            .context("Error while reading password")?;
-
-        if password != confirm_password {
-            manager.message("Confirm password doesn't match password");
-            return Ok(());
-        }
-        password
+        return Err(CommandError::MissingArgument("password".to_string()));
     };
 
     let wallet = {
@@ -1568,7 +1340,6 @@ async fn create_wallet(
             precomputed_tables,
             config.n_decryption_threads,
             config.network_concurrency,
-            config.light_mode,
         )
         .await?
     };
@@ -1582,18 +1353,11 @@ async fn create_wallet(
     )
     .await;
 
-    // Display the seed in prompt
+    // Display the seed (batch mode only)
     {
         let seed = wallet.get_seed(0)?; // TODO language index
-        if manager.is_batch_mode() {
-            manager.message(format!("Seed: {}", seed));
-            manager.message("IMPORTANT: Please save this seed phrase in a secure location.");
-        } else {
-            prompt
-                .read_input(format!("Seed: {}\r\nPress ENTER to continue", seed), false)
-                .await
-                .context("Error while displaying seed")?;
-        }
+        manager.message(format!("Seed: {}", seed));
+        manager.message("IMPORTANT: Please save this seed phrase in a secure location.");
     }
 
     setup_wallet_command_manager(wallet, manager).await?;
@@ -1607,27 +1371,17 @@ async fn recover_wallet(
     mut args: ArgumentManager,
     seed: bool,
 ) -> Result<(), CommandError> {
+    #[cfg(feature = "xswd")]
     let prompt = manager.get_prompt();
     let config: Config = Config::parse();
-    // Priority: command line args -> config file -> interactive prompt (only if not batch mode)
+    // Priority: command line args -> config file -> error (batch mode only)
     let dir = if args.has_argument("name") {
         let name = args.get_value("name")?.to_string_value()?;
         format!("{}{}", DIR_PATH, name)
     } else if let Some(path) = config.wallet_path.as_ref() {
         path.clone()
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("name".to_string()));
     } else {
-        let name = prompt
-            .read_input("Wallet name: ", false)
-            .await
-            .context("Error while reading wallet name")?;
-
-        if name.is_empty() {
-            manager.error("Wallet name cannot be empty");
-            return Ok(());
-        }
-        format!("{}{}", DIR_PATH, name)
+        return Err(CommandError::MissingArgument("name".to_string()));
     };
 
     if Path::new(&dir).is_dir() {
@@ -1640,13 +1394,8 @@ async fn recover_wallet(
             args.get_value("seed")?.to_string_value()?
         } else if let Some(s) = config.seed.as_ref() {
             s.clone()
-        } else if manager.is_batch_mode() {
-            return Err(CommandError::MissingArgument("seed".to_string()));
         } else {
-            prompt
-                .read_input("Seed: ", false)
-                .await
-                .context("Error while reading seed")?
+            return Err(CommandError::MissingArgument("seed".to_string()));
         };
 
         let words_count = seed.split_whitespace().count();
@@ -1658,13 +1407,8 @@ async fn recover_wallet(
     } else {
         let private_key = if args.has_argument("private_key") {
             args.get_value("private_key")?.to_string_value()?
-        } else if manager.is_batch_mode() {
-            return Err(CommandError::MissingArgument("private_key".to_string()));
         } else {
-            prompt
-                .read_input("Private Key: ", false)
-                .await
-                .context("Error while reading private key")?
+            return Err(CommandError::MissingArgument("private_key".to_string()));
         };
 
         if private_key.len() != 64 {
@@ -1674,28 +1418,13 @@ async fn recover_wallet(
         private_key
     };
 
-    // Handle password input with batch mode support
+    // Handle password input (batch mode only)
     let password = if args.has_argument("password") {
         args.get_value("password")?.to_string_value()?
     } else if let Some(pwd) = config.password.as_ref() {
         pwd.clone()
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("password".to_string()));
     } else {
-        let password = prompt
-            .read_input("Password: ", true)
-            .await
-            .context("Error while reading password")?;
-        let confirm_password = prompt
-            .read_input("Confirm Password: ", true)
-            .await
-            .context("Error while reading password")?;
-
-        if password != confirm_password {
-            manager.message("Confirm password doesn't match password");
-            return Ok(());
-        }
-        password
+        return Err(CommandError::MissingArgument("password".to_string()));
     };
 
     let wallet = {
@@ -1722,7 +1451,6 @@ async fn recover_wallet(
             precomputed_tables,
             config.n_decryption_threads,
             config.network_concurrency,
-            config.light_mode,
         )
         .await?
     };
@@ -1754,103 +1482,26 @@ async fn recover_private_key(
     recover_wallet(manager, args, false).await
 }
 
-// Set the asset name
+// Set the asset name (not supported in stateless wallet)
 async fn set_asset_name(
     manager: &CommandManager,
-    mut args: ArgumentManager,
+    _args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    manager.validate_batch_params("set_asset_name", &args)?;
-
-    let prompt = manager.get_prompt();
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    let asset = {
-        let asset_str = args.get_value("asset")?.to_string_value()?;
-        if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
-            TOS_ASSET
-        } else if asset_str.len() == HASH_SIZE * 2 {
-            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
-        } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_str)
-                .await?
-                .context(format!(
-                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
-                    asset_str
-                ))?
-        }
-    };
-    let name = if args.has_argument("name") {
-        args.get_value("name")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("name".to_string()));
-    } else {
-        prompt
-            .read_input("Asset name: ", false)
-            .await
-            .context("Error while reading asset name")?
-    };
-
-    let mut storage = wallet.get_storage().write().await;
-    storage.set_asset_name(&asset, name).await?;
-    manager.message("Asset name has been set");
+    // Stateless wallet: asset names are not stored locally
+    manager.message("Note: Asset name setting is not supported in stateless wallet mode.");
+    manager.message("Asset data is fetched from daemon on-demand.");
     Ok(())
 }
 
-async fn list_assets(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    let page = if args.has_argument("page") {
-        args.get_value("page")?.to_number()? as usize
-    } else {
-        0
-    };
-
-    let storage = wallet.get_storage().read().await;
-    let count = storage.get_assets_count()?;
-
-    if count == 0 {
-        manager.message("No assets found");
-        return Ok(());
-    }
-
-    let mut max_pages = count / ELEMENTS_PER_PAGE;
-    if count % ELEMENTS_PER_PAGE != 0 {
-        max_pages += 1;
-    }
-
-    if page > max_pages {
-        return Err(CommandError::InvalidArgument(format!(
-            "Page must be less than maximum pages ({})",
-            max_pages - 1
-        )));
-    }
-
-    manager.message(format!("Assets (page {}/{}):", page, max_pages));
-    for res in storage
-        .get_assets_with_data()
-        .await?
-        .skip(page * ELEMENTS_PER_PAGE)
-        .take(ELEMENTS_PER_PAGE)
-    {
-        let (asset, data) = res?;
-        manager.message(format!(
-            "{} ({} decimals): {}",
-            asset,
-            data.get_decimals(),
-            data.get_name()
-        ));
-    }
-
+// List assets (not supported in stateless wallet)
+async fn list_assets(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
+    // Stateless wallet: assets are not tracked locally
+    manager.message("Note: Asset listing is not supported in stateless wallet mode.");
+    manager.message("Use 'list_balances' to see your current balances from the daemon.");
     Ok(())
 }
 
+// NOTE: This command now queries 100% from daemon API (no local storage)
 async fn list_balances(
     manager: &CommandManager,
     mut args: ArgumentManager,
@@ -1864,220 +1515,84 @@ async fn list_balances(
         0
     };
 
-    let storage = wallet.get_storage().read().await;
-    let count = storage.get_tracked_assets_count()?;
+    // Query all data from daemon API (stateless - no local storage)
 
-    if count == 0 {
-        manager.message("No balances found");
-        return Ok(());
-    }
-
-    let mut max_pages = count / ELEMENTS_PER_PAGE;
-    if count % ELEMENTS_PER_PAGE != 0 {
-        max_pages += 1;
-    }
-
-    if page > max_pages {
-        return Err(CommandError::InvalidArgument(format!(
-            "Page must be less than maximum pages ({})",
-            max_pages - 1
-        )));
-    }
-
-    // In light mode, get LightAPI for on-demand balance queries
-    #[cfg(feature = "network_handler")]
-    let light_api = if wallet.is_light_mode() {
-        Some(wallet.get_light_api().await.map_err(|e| {
-            CommandError::InvalidArgument(format!("Light mode API not available: {}", e))
-        })?)
-    } else {
-        None
-    };
-
-    manager.message(format!("Balances (page {}/{}):", page, max_pages));
-    for res in storage
-        .get_tracked_assets()?
-        .skip(page * ELEMENTS_PER_PAGE)
-        .take(ELEMENTS_PER_PAGE)
     {
-        let asset = res?;
-        if let Some(data) = storage.get_optional_asset(&asset).await? {
-            // In light mode, query balance from daemon via LightAPI
-            #[cfg(feature = "network_handler")]
-            let balance = if let Some(ref api) = light_api {
-                let address = wallet.get_address();
-                api.get_balance(&address, &asset).await.unwrap_or(0)
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let address = wallet.get_address();
+
+        // Get account assets from daemon
+        let assets = daemon_api
+            .get_account_assets(&address, None, None)
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!(
+                    "Failed to get account assets from daemon: {}",
+                    e
+                ))
+            })?;
+
+        let assets_vec: Vec<_> = assets.into_iter().collect();
+        let count = assets_vec.len();
+
+        if count == 0 {
+            manager.message("No balances found");
+            return Ok(());
+        }
+
+        let mut max_pages = count / ELEMENTS_PER_PAGE;
+        if count % ELEMENTS_PER_PAGE != 0 {
+            max_pages += 1;
+        }
+
+        if page > max_pages {
+            return Err(CommandError::InvalidArgument(format!(
+                "Page must be less than maximum pages ({})",
+                max_pages - 1
+            )));
+        }
+
+        manager.message(format!("Balances (page {}/{}):", page, max_pages));
+
+        for asset in assets_vec
+            .iter()
+            .skip(page * ELEMENTS_PER_PAGE)
+            .take(ELEMENTS_PER_PAGE)
+        {
+            // Query balance and asset info from daemon
+            let balance = daemon_api
+                .get_balance(&address, asset)
+                .await
+                .map(|r| r.balance)
+                .unwrap_or(0);
+            let data = daemon_api.get_asset(asset).await.ok();
+
+            if let Some(data) = data {
+                manager.message(format!(
+                    "Balance for asset {} ({}): {}",
+                    data.inner.get_name(),
+                    asset,
+                    format_coin(balance, data.inner.get_decimals())
+                ));
             } else {
-                storage.get_plaintext_balance_for(&asset).await?
-            };
-
-            #[cfg(not(feature = "network_handler"))]
-            let balance = storage.get_plaintext_balance_for(&asset).await?;
-
-            manager.message(format!(
-                "Balance for asset {} ({}): {}",
-                data.get_name(),
-                asset,
-                format_coin(balance, data.get_decimals())
-            ));
-        } else {
-            manager.message(format!("No asset data for {}", asset));
+                manager.message(format!(
+                    "Balance for asset {}: {} (no asset data)",
+                    asset,
+                    format_tos(balance)
+                ));
+            }
         }
     }
 
     Ok(())
 }
 
-async fn list_tracked_assets(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    let page = if args.has_argument("page") {
-        args.get_value("page")?.to_number()? as usize
-    } else {
-        0
-    };
-
-    let storage = wallet.get_storage().read().await;
-
-    let count = storage.get_tracked_assets_count()?;
-    if count == 0 {
-        manager.message("No tracked assets found");
-        return Ok(());
-    }
-
-    let mut max_pages = count / ELEMENTS_PER_PAGE;
-    if count % ELEMENTS_PER_PAGE != 0 {
-        max_pages += 1;
-    }
-
-    if page > max_pages {
-        return Err(CommandError::InvalidArgument(format!(
-            "Page must be less than maximum pages ({})",
-            max_pages - 1
-        )));
-    }
-
-    manager.message(format!("Assets (page {}/{}):", page, max_pages));
-    for res in storage
-        .get_tracked_assets()?
-        .skip(page * ELEMENTS_PER_PAGE)
-        .take(ELEMENTS_PER_PAGE)
-    {
-        let asset = res?;
-        if let Some(data) = storage.get_optional_asset(&asset).await? {
-            manager.message(format!(
-                "{} ({} decimals): {}",
-                asset,
-                data.get_decimals(),
-                data.get_name()
-            ));
-        } else {
-            manager.message(format!("No asset data for {}", asset));
-        }
-    }
-
-    Ok(())
-}
-
-async fn track_asset(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    manager.validate_batch_params("track_asset", &args)?;
-
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-    let prompt = manager.get_prompt();
-
-    let asset = if args.has_argument("asset") {
-        let asset_str = args.get_value("asset")?.to_string_value()?;
-        if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
-            TOS_ASSET
-        } else if asset_str.len() == HASH_SIZE * 2 {
-            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
-        } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_str)
-                .await?
-                .context(format!(
-                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
-                    asset_str
-                ))?
-        }
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
-    } else {
-        prompt
-            .read_hash(prompt.colorize_string(Color::BrightGreen, "Asset ID: "))
-            .await?
-    };
-
-    if wallet
-        .track_asset(asset)
-        .await
-        .context("Error while tracking asset")?
-    {
-        manager.message("Asset ID is already tracked!");
-    } else {
-        manager.message("Asset ID is now tracked");
-    }
-
-    Ok(())
-}
-
-async fn untrack_asset(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    manager.validate_batch_params("untrack_asset", &args)?;
-
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-    let prompt = manager.get_prompt();
-
-    let asset = if args.has_argument("asset") {
-        let asset_str = args.get_value("asset")?.to_string_value()?;
-        if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
-            TOS_ASSET
-        } else if asset_str.len() == HASH_SIZE * 2 {
-            Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
-        } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_str)
-                .await?
-                .context(format!(
-                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
-                    asset_str
-                ))?
-        }
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
-    } else {
-        prompt
-            .read_hash(prompt.colorize_string(Color::BrightGreen, "Asset ID: "))
-            .await?
-    };
-
-    if asset == TOS_ASSET {
-        manager.message("TOS asset cannot be untracked");
-    } else if wallet
-        .untrack_asset(asset)
-        .await
-        .context("Error while untracking asset")?
-    {
-        manager.message("Asset ID is not marked as tracked!");
-    } else {
-        manager.message("Asset ID is not tracked anymore");
-    }
-
-    Ok(())
-}
+// REMOVED: list_tracked_assets, track_asset, untrack_asset functions
+// In stateless mode, use list_balances to query account assets from daemon
 
 // Change wallet password
 async fn change_password(
@@ -2089,34 +1604,16 @@ async fn change_password(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    let prompt = manager.get_prompt();
-
     let old_password = if args.has_argument("old_password") {
         args.get_value("old_password")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("old_password".to_string()));
     } else {
-        prompt
-            .read_input(
-                prompt.colorize_string(Color::BrightRed, "Current Password: "),
-                true,
-            )
-            .await
-            .context("Error while asking old password")?
+        return Err(CommandError::MissingArgument("old_password".to_string()));
     };
 
     let new_password = if args.has_argument("new_password") {
         args.get_value("new_password")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("new_password".to_string()));
     } else {
-        prompt
-            .read_input(
-                prompt.colorize_string(Color::BrightRed, "New Password: "),
-                true,
-            )
-            .await
-            .context("Error while asking new password")?
+        return Err(CommandError::MissingArgument("new_password".to_string()));
     };
 
     manager.message("Changing password...");
@@ -2226,98 +1723,83 @@ async fn create_transaction_with_multisig(
 }
 
 // Create a new transfer to a specified address
+// NOTE: This command now queries balance/asset from daemon API (no local storage)
 async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
     manager.validate_batch_params("transfer", &args)?;
 
-    let prompt = manager.get_prompt();
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // read address
+    // read address (batch mode only)
     let str_address = if args.has_argument("address") {
         args.get_value("address")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("address".to_string()));
     } else {
-        prompt
-            .read_input(prompt.colorize_string(Color::Green, "Address: "), false)
-            .await
-            .context("Error while reading address")?
+        return Err(CommandError::MissingArgument("address".to_string()));
     };
     let address = Address::from_string(&str_address).context("Invalid address")?;
 
+    // Parse asset - TOS or hash only (no name lookup from local storage)
     let asset = if args.has_argument("asset") {
         let asset_str = args.get_value("asset")?.to_string_value()?;
-        // Handle empty or "TOS" as native asset (restored from backup)
-        if asset_str.is_empty() || asset_str.trim().is_empty() {
-            TOS_ASSET
-        } else if asset_str.to_uppercase() == "TOS" {
-            // Handle "TOS" as asset name without requiring track_asset
+        if asset_str.is_empty() || asset_str.trim().is_empty() || asset_str.to_uppercase() == "TOS"
+        {
             TOS_ASSET
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
         } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_str)
-                .await?
-                .context(format!(
-                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS' for native token.",
-                    asset_str
-                ))?
+            return Err(CommandError::InvalidArgument(format!(
+                "Invalid asset '{}'. Use asset hash (64 hex chars) or 'TOS' for native token.",
+                asset_str
+            )));
         }
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
     } else {
-        let asset_name = prompt
-            .read_input(
-                prompt.colorize_string(Color::Green, "Asset (default TOS): "),
-                false,
-            )
-            .await?;
-        if asset_name.is_empty() {
-            TOS_ASSET
-        } else if asset_name.len() == HASH_SIZE * 2 {
-            Hash::from_hex(&asset_name).context("Error while reading hash from hex")?
-        } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_name)
-                .await?
-                .context("No asset registered with given name")?
-        }
+        return Err(CommandError::MissingArgument("asset".to_string()));
     };
 
-    let (max_balance, asset_data, multisig) = {
-        let storage = wallet.get_storage().read().await;
-        let balance = storage.get_plaintext_balance_for(&asset).await.unwrap_or(0);
-        let asset = storage.get_asset(&asset).await?;
-        let multisig = storage
-            .get_multisig_state()
+    // Query balance, asset data, and multisig from daemon API (stateless)
+
+    let (_max_balance, asset_data, multisig) = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
+
+        // Get balance from daemon
+        let balance = daemon_api
+            .get_balance(&wallet_address, &asset)
             .await
-            .context("Error while reading multisig state")?;
-        (balance, asset, multisig.cloned())
+            .map(|r| r.balance)
+            .unwrap_or(0);
+
+        // Get asset data from daemon
+        let asset_data = daemon_api.get_asset(&asset).await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to get asset info from daemon: {}", e))
+        })?;
+
+        // Get multisig state from daemon
+        let multisig = if daemon_api
+            .has_multisig(&wallet_address)
+            .await
+            .unwrap_or(false)
+        {
+            daemon_api.get_multisig(&wallet_address).await.ok()
+        } else {
+            None
+        };
+
+        (balance, asset_data, multisig)
     };
 
-    // read amount
+    // read amount (batch mode only)
     let amount = if args.has_argument("amount") {
         args.get_value("amount")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("amount".to_string()));
     } else {
-        prompt
-            .read(prompt.colorize_string(
-                Color::Green,
-                &format!(
-                    "Amount (max: {}): ",
-                    format_coin(max_balance, asset_data.get_decimals())
-                ),
-            ))
-            .await
-            .context("Error while reading amount")?
+        return Err(CommandError::MissingArgument("amount".to_string()));
     };
 
-    let amount = from_coin(amount, asset_data.get_decimals()).context("Invalid amount")?;
+    let amount = from_coin(amount, asset_data.inner.get_decimals()).context("Invalid amount")?;
 
     // Read fee_type parameter
     let fee_type = if args.has_argument("fee_type") {
@@ -2342,49 +1824,11 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
 
     manager.message(format!(
         "Sending {} of {} ({}) to {}",
-        format_coin(amount, asset_data.get_decimals()),
-        asset_data.get_name(),
+        format_coin(amount, asset_data.inner.get_decimals()),
+        asset_data.inner.get_name(),
         asset,
         address
     ));
-
-    // Parse confirmation
-    let confirmed = if args.has_argument("confirm") {
-        let confirm_str = args.get_value("confirm")?.to_string_value()?;
-        match confirm_str.to_lowercase().as_str() {
-            "yes" | "y" | "true" => true,
-            "no" | "n" | "false" => false,
-            _ => {
-                let message = format!(
-                    "Send {} of {} ({}) to {}?\n(Y/N): ",
-                    format_coin(amount, asset_data.get_decimals()),
-                    asset_data.get_name(),
-                    asset,
-                    address
-                );
-                prompt
-                    .read_valid_str_value(
-                        prompt.colorize_string(Color::Yellow, &message),
-                        vec!["y", "n"],
-                    )
-                    .await
-                    .context("Error while reading confirmation")?
-                    == "y"
-            }
-        }
-    } else if manager.is_batch_mode() {
-        true // Auto-confirm in batch mode when no explicit confirmation parameter
-    } else {
-        prompt
-            .ask_confirmation()
-            .await
-            .context("Error while confirming action")?
-    };
-
-    if !confirmed {
-        manager.message("Transaction has been aborted");
-        return Ok(());
-    }
 
     manager.message("Building transaction...");
     let transfer = TransferBuilder {
@@ -2395,67 +1839,78 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
 
-    // Create transaction with appropriate fee type
-    let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
-    } else {
-        // Create transaction state and builder
-        let storage = wallet.get_storage().read().await;
-        let mut state = wallet
-            .create_transaction_state_with_storage(&storage, &tx_type, &FeeBuilder::default(), None)
-            .await
-            .context("Error while creating transaction state")?;
+    // Get multisig threshold from daemon result if active
+    let multisig_threshold = multisig.and_then(|m| {
+        use tos_common::api::daemon::MultisigState;
+        match m.state {
+            MultisigState::Active { threshold, .. } => Some(threshold),
+            MultisigState::Deleted => None,
+        }
+    });
 
-        // Create transaction with fee type
-        let tx_version = storage
-            .get_tx_version()
-            .await
-            .context("Error while getting tx version")?;
-        let threshold = None;
+    if multisig_threshold.is_some() {
+        manager.message(format!(
+            "Multisig detected (threshold: {}). Note: Full multisig signing not supported in stateless mode.",
+            multisig_threshold.unwrap()
+        ));
+    }
 
-        // Create a custom fee builder if energy fees are requested
-        let fee_builder = if let Some(ref ft) = fee_type {
-            if *ft == tos_common::transaction::FeeType::Energy {
-                FeeBuilder::Value(0) // Energy fees are 0 TOS
-            } else {
-                FeeBuilder::default()
-            }
+    // Create transaction state and builder using existing wallet infrastructure
+    // (which already has daemon fallback for nonce/balance queries)
+    let storage = wallet.get_storage().read().await;
+    let mut state = wallet
+        .create_transaction_state_with_storage(&storage, &tx_type, &FeeBuilder::default(), None)
+        .await
+        .context("Error while creating transaction state")?;
+
+    // Create transaction with fee type
+    let tx_version = storage
+        .get_tx_version()
+        .await
+        .context("Error while getting tx version")?;
+
+    // Create a custom fee builder if energy fees are requested
+    let fee_builder = if let Some(ref ft) = fee_type {
+        if *ft == tos_common::transaction::FeeType::Energy {
+            FeeBuilder::Value(0) // Energy fees are 0 TOS
         } else {
             FeeBuilder::default()
-        };
-
-        // Create transaction builder with fee type
-        let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
-            tx_version,
-            wallet.get_public_key().clone(),
-            threshold,
-            tx_type,
-            fee_builder,
-        );
-
-        // Set fee type if specified
-        if let Some(ref ft) = fee_type {
-            builder = builder.with_fee_type(ft.clone());
         }
+    } else {
+        FeeBuilder::default()
+    };
 
-        match builder.build(&mut state, wallet.get_keypair()) {
-            Ok(tx) => {
-                manager.message(format!(
-                    "Transaction created with {} fees",
-                    match fee_type
-                        .as_ref()
-                        .unwrap_or(&tos_common::transaction::FeeType::TOS)
-                    {
-                        tos_common::transaction::FeeType::TOS => "TOS",
-                        tos_common::transaction::FeeType::Energy => "Energy",
-                    }
-                ));
-                tx
-            }
-            Err(e) => {
-                manager.error(format!("Error while creating transaction: {}", e));
-                return Ok(());
-            }
+    // Create transaction builder with fee type
+    let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
+        tx_version,
+        wallet.get_public_key().clone(),
+        multisig_threshold,
+        tx_type,
+        fee_builder,
+    );
+
+    // Set fee type if specified
+    if let Some(ref ft) = fee_type {
+        builder = builder.with_fee_type(ft.clone());
+    }
+
+    let tx = match builder.build(&mut state, wallet.get_keypair()) {
+        Ok(tx) => {
+            manager.message(format!(
+                "Transaction created with {} fees",
+                match fee_type
+                    .as_ref()
+                    .unwrap_or(&tos_common::transaction::FeeType::TOS)
+                {
+                    tos_common::transaction::FeeType::TOS => "TOS",
+                    tos_common::transaction::FeeType::Energy => "Energy",
+                }
+            ));
+            tx
+        }
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
         }
     };
 
@@ -2470,23 +1925,18 @@ async fn transfer_all(
 ) -> Result<(), CommandError> {
     manager.validate_batch_params("transfer_all", &args)?;
 
-    let prompt = manager.get_prompt();
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // read address
+    // read address (batch mode only)
     let str_address = if args.has_argument("address") {
         args.get_value("address")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("address".to_string()));
     } else {
-        prompt
-            .read_input(prompt.colorize_string(Color::Green, "Address: "), false)
-            .await
-            .context("Error while reading address")?
+        return Err(CommandError::MissingArgument("address".to_string()));
     };
     let address = Address::from_string(&str_address).context("Invalid address")?;
 
+    // Parse asset (batch mode only)
     let asset = if args.has_argument("asset") {
         let asset_str = args.get_value("asset")?.to_string_value()?;
         if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
@@ -2494,23 +1944,13 @@ async fn transfer_all(
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
         } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_str)
-                .await?
-                .context(format!(
-                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
-                    asset_str
-                ))?
+            return Err(CommandError::InvalidArgument(format!(
+                "Invalid asset '{}'. Use asset hash (64 hex chars) or 'TOS' for native token.",
+                asset_str
+            )));
         }
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
     } else {
-        let asset_opt = prompt
-            .read_hash(prompt.colorize_string(Color::Green, "Asset (default TOS): "))
-            .await
-            .ok();
-        asset_opt.unwrap_or(TOS_ASSET)
+        return Err(CommandError::MissingArgument("asset".to_string()));
     };
 
     // Read fee_type parameter
@@ -2534,15 +1974,40 @@ async fn transfer_all(
         return Ok(());
     }
 
+    // Query balance, asset data, and multisig from daemon API (stateless)
+
     let (mut amount, asset_data, multisig) = {
-        let storage = wallet.get_storage().read().await;
-        let amount = storage.get_plaintext_balance_for(&asset).await.unwrap_or(0);
-        let data = storage.get_asset(&asset).await?;
-        let multisig = storage
-            .get_multisig_state()
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
+
+        // Get balance from daemon
+        let balance = daemon_api
+            .get_balance(&wallet_address, &asset)
             .await
-            .context("Error while reading multisig state")?;
-        (amount, data, multisig.cloned())
+            .map(|r| r.balance)
+            .unwrap_or(0);
+
+        // Get asset data from daemon
+        let asset_data = daemon_api.get_asset(&asset).await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to get asset info from daemon: {}", e))
+        })?;
+
+        // Get multisig state from daemon
+        let multisig = if daemon_api
+            .has_multisig(&wallet_address)
+            .await
+            .unwrap_or(false)
+        {
+            daemon_api.get_multisig(&wallet_address).await.ok()
+        } else {
+            None
+        };
+
+        (balance, asset_data, multisig)
     };
 
     let transfer = TransferBuilder {
@@ -2590,37 +2055,12 @@ async fn transfer_all(
 
     manager.message(format!(
         "Sending {} of {} ({}) to {} ({})",
-        format_coin(amount, asset_data.get_decimals()),
-        asset_data.get_name(),
+        format_coin(amount, asset_data.inner.get_decimals()),
+        asset_data.inner.get_name(),
         asset,
         address,
         fee_display
     ));
-
-    // Parse confirmation
-    let confirmed = if args.has_argument("confirm") {
-        let confirm_str = args.get_value("confirm")?.to_string_value()?;
-        match confirm_str.to_lowercase().as_str() {
-            "yes" | "y" | "true" => true,
-            "no" | "n" | "false" => false,
-            _ => prompt
-                .ask_confirmation()
-                .await
-                .context("Error while confirming action")?,
-        }
-    } else if manager.is_batch_mode() {
-        true // auto-confirm in batch mode
-    } else {
-        prompt
-            .ask_confirmation()
-            .await
-            .context("Error while confirming action")?
-    };
-
-    if !confirmed {
-        manager.message("Transaction has been aborted");
-        return Ok(());
-    }
 
     manager.message("Building transaction...");
     let transfer = TransferBuilder {
@@ -2630,9 +2070,24 @@ async fn transfer_all(
         extra_data: None,
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
-    let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
-    } else {
+
+    // Check multisig and show warning (stateless mode doesn't support full multisig signing)
+    let multisig_threshold = multisig.and_then(|m| {
+        use tos_common::api::daemon::MultisigState;
+        match m.state {
+            MultisigState::Active { threshold, .. } => Some(threshold),
+            MultisigState::Deleted => None,
+        }
+    });
+
+    if multisig_threshold.is_some() {
+        manager.message(format!(
+            "Multisig detected (threshold: {}). Note: Full multisig signing not supported in stateless mode.",
+            multisig_threshold.unwrap()
+        ));
+    }
+
+    let tx = {
         // Create transaction with appropriate fee type
         let storage = wallet.get_storage().read().await;
         let mut state = wallet
@@ -2700,10 +2155,10 @@ async fn transfer_all(
 async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(), CommandError> {
     manager.validate_batch_params("burn", &args)?;
 
-    let prompt = manager.get_prompt();
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
+    // Parse asset (batch mode only)
     let asset = if args.has_argument("asset") {
         let asset_str = args.get_value("asset")?.to_string_value()?;
         if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
@@ -2711,102 +2166,88 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         } else if asset_str.len() == HASH_SIZE * 2 {
             Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
         } else {
-            let storage = wallet.get_storage().read().await;
-            storage
-                .get_asset_by_name(&asset_str)
-                .await?
-                .context(format!(
-                    "No asset registered with name '{}'. Use asset hash (64 hex chars) or 'TOS'.",
-                    asset_str
-                ))?
+            return Err(CommandError::InvalidArgument(format!(
+                "Invalid asset '{}'. Use asset hash (64 hex chars) or 'TOS' for native token.",
+                asset_str
+            )));
         }
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("asset".to_string()));
     } else {
-        prompt
-            .read_hash(prompt.colorize_string(Color::Green, "Asset (default TOS): "))
-            .await
-            .unwrap_or(TOS_ASSET)
+        return Err(CommandError::MissingArgument("asset".to_string()));
     };
 
-    let (max_balance, asset_data, multisig) = {
-        let storage = wallet.get_storage().read().await;
-        let balance = storage.get_plaintext_balance_for(&asset).await.unwrap_or(0);
-        let data = storage.get_asset(&asset).await?;
-        let multisig = storage
-            .get_multisig_state()
+    // Query balance, asset data, and multisig from daemon API (stateless)
+
+    let (asset_data, multisig) = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
+
+        // Get asset data from daemon
+        let asset_data = daemon_api.get_asset(&asset).await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to get asset info from daemon: {}", e))
+        })?;
+
+        // Get multisig state from daemon
+        let multisig = if daemon_api
+            .has_multisig(&wallet_address)
             .await
-            .context("Error while reading multisig state")?;
-        (balance, data, multisig.cloned())
+            .unwrap_or(false)
+        {
+            daemon_api.get_multisig(&wallet_address).await.ok()
+        } else {
+            None
+        };
+
+        (asset_data, multisig)
     };
 
-    // read amount
+    // read amount (batch mode only)
     let amount = if args.has_argument("amount") {
         args.get_value("amount")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("amount".to_string()));
     } else {
-        prompt
-            .read(prompt.colorize_string(
-                Color::Green,
-                &format!(
-                    "Amount (max: {}): ",
-                    format_coin(max_balance, asset_data.get_decimals())
-                ),
-            ))
-            .await
-            .context("Error while reading amount")?
+        return Err(CommandError::MissingArgument("amount".to_string()));
     };
 
-    let amount = from_coin(amount, asset_data.get_decimals()).context("Invalid amount")?;
+    let amount = from_coin(amount, asset_data.inner.get_decimals()).context("Invalid amount")?;
     manager.message(format!(
         "Burning {} of {} ({})",
-        format_coin(amount, asset_data.get_decimals()),
-        asset_data.get_name(),
+        format_coin(amount, asset_data.inner.get_decimals()),
+        asset_data.inner.get_name(),
         asset
     ));
-
-    // Parse confirmation
-    let confirmed = if args.has_argument("confirm") {
-        let confirm_str = args.get_value("confirm")?.to_string_value()?;
-        match confirm_str.to_lowercase().as_str() {
-            "yes" | "y" | "true" => true,
-            "no" | "n" | "false" => false,
-            _ => prompt
-                .ask_confirmation()
-                .await
-                .context("Error while confirming action")?,
-        }
-    } else if manager.is_batch_mode() {
-        true // auto-confirm in batch mode
-    } else {
-        prompt
-            .ask_confirmation()
-            .await
-            .context("Error while confirming action")?
-    };
-
-    if !confirmed {
-        manager.message("Transaction has been aborted");
-        return Ok(());
-    }
 
     manager.message("Building transaction...");
     let payload = BurnPayload { amount, asset };
 
     let tx_type = TransactionTypeBuilder::Burn(payload);
-    let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
-    } else {
-        match wallet
-            .create_transaction(tx_type, FeeBuilder::default())
-            .await
-        {
-            Ok(tx) => tx,
-            Err(e) => {
-                manager.error(format!("Error while creating transaction: {}", e));
-                return Ok(());
-            }
+
+    // Check multisig and show warning (stateless mode doesn't support full multisig signing)
+    let multisig_threshold = multisig.and_then(|m| {
+        use tos_common::api::daemon::MultisigState;
+        match m.state {
+            MultisigState::Active { threshold, .. } => Some(threshold),
+            MultisigState::Deleted => None,
+        }
+    });
+
+    if multisig_threshold.is_some() {
+        manager.message(format!(
+            "Multisig detected (threshold: {}). Note: Full multisig signing not supported in stateless mode.",
+            multisig_threshold.unwrap()
+        ));
+    }
+
+    let tx = match wallet
+        .create_transaction(tx_type, FeeBuilder::default())
+        .await
+    {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
         }
     };
 
@@ -2823,124 +2264,189 @@ async fn display_address(manager: &CommandManager, _: ArgumentManager) -> Result
 }
 
 // Show current balance for specified asset or list all non-zero balances
+// NOTE: This command now queries 100% from daemon API (no local storage)
 async fn balance(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
-    let prompt = manager.get_prompt();
     let wallet: &Arc<Wallet> = context.get()?;
 
+    // Parse asset (default to TOS if not specified)
     let asset = if arguments.has_argument("asset") {
         arguments.get_value("asset")?.to_hash()?
-    } else if manager.is_batch_mode() {
-        TOS_ASSET // Default to TOS in batch mode
     } else {
-        prompt
-            .read_hash(prompt.colorize_string(Color::Green, "Asset (default TOS): "))
-            .await
-            .unwrap_or(TOS_ASSET)
+        TOS_ASSET // Default to TOS
     };
 
-    // In light mode, query balance from daemon via LightAPI
-    #[cfg(feature = "network_handler")]
-    let balance = if wallet.is_light_mode() {
-        let light_api = wallet.get_light_api().await.map_err(|e| {
-            CommandError::InvalidArgument(format!("Light mode API not available: {}", e))
+    // Query balance from daemon API (stateless - no local storage)
+
+    let balance = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
         })?;
         let address = wallet.get_address();
-        light_api.get_balance(&address, &asset).await.map_err(|e| {
-            CommandError::InvalidArgument(format!("Failed to get balance from daemon: {}", e))
+        let result = handler
+            .get_api()
+            .get_balance(&address, &asset)
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!("Failed to get balance from daemon: {}", e))
+            })?;
+        result.balance
+    };
+
+    // Query asset info from daemon
+
+    let data = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        handler.get_api().get_asset(&asset).await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to get asset info from daemon: {}", e))
         })?
-    } else {
-        let storage = wallet.get_storage().read().await;
-        storage.get_plaintext_balance_for(&asset).await?
     };
 
-    #[cfg(not(feature = "network_handler"))]
-    let balance = {
-        let storage = wallet.get_storage().read().await;
-        storage.get_plaintext_balance_for(&asset).await?
-    };
-
-    let storage = wallet.get_storage().read().await;
-    let data = storage.get_asset(&asset).await?;
     manager.message(format!(
         "Balance for asset {} ({}): {}",
-        data.get_name(),
+        data.inner.get_name(),
         asset,
-        format_coin(balance, data.get_decimals())
+        format_coin(balance, data.inner.get_decimals())
     ));
     Ok(())
 }
 
-// Show all transactions
+// Show all transactions from daemon
 async fn history(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let page = if arguments.has_argument("page") {
-        arguments.get_value("page")?.to_number()? as usize
-    } else {
-        1
-    };
-
-    if page == 0 {
-        return Err(CommandError::InvalidArgument(
-            "Page must be greater than 0".to_string(),
-        ));
-    }
-
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
 
-    let txs_len = storage.get_transactions_count()?;
-    // if we don't have any txs, no need proceed further
-    if txs_len == 0 {
-        manager.message("No transactions available");
-        return Ok(());
-    }
+    {
+        use tos_common::api::daemon::AccountHistoryType;
 
-    let mut max_pages = txs_len / ELEMENTS_PER_PAGE;
-    if txs_len % ELEMENTS_PER_PAGE != 0 {
-        max_pages += 1;
-    }
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
 
-    if page > max_pages {
-        return Err(CommandError::InvalidArgument(format!(
-            "Page must be less than maximum pages ({})",
-            max_pages
-        )));
-    }
+        // Get asset filter if specified
+        let asset = if arguments.has_argument("asset") {
+            let asset_str = arguments.get_value("asset")?.to_string_value()?;
+            if asset_str.is_empty() || asset_str.to_uppercase() == "TOS" {
+                TOS_ASSET
+            } else if asset_str.len() == HASH_SIZE * 2 {
+                Hash::from_hex(&asset_str).context("Error while parsing asset hash from hex")?
+            } else {
+                return Err(CommandError::InvalidArgument(
+                    "Invalid asset. Use 64-character hex hash or 'TOS'.".to_string(),
+                ));
+            }
+        } else {
+            TOS_ASSET
+        };
 
-    let transactions = storage.get_filtered_transactions(
-        None,
-        None,
-        None,
-        None,
-        true,
-        true,
-        true,
-        true,
-        None,
-        Some(ELEMENTS_PER_PAGE),
-        Some((page - 1) * ELEMENTS_PER_PAGE),
-    )?;
+        // Query history from daemon
+        let history = daemon_api
+            .get_account_history(&wallet_address, &asset, None, None)
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!("Failed to get history from daemon: {}", e))
+            })?;
 
-    manager.message(format!(
-        "{} Transactions (total {}) page {}/{}:",
-        transactions.len(),
-        txs_len,
-        page,
-        max_pages
-    ));
-    for tx in transactions {
+        if history.is_empty() {
+            manager.message("No transactions available");
+            return Ok(());
+        }
+
+        // Pagination
+        let page = if arguments.has_argument("page") {
+            arguments.get_value("page")?.to_number()? as usize
+        } else {
+            1
+        };
+
+        if page == 0 {
+            return Err(CommandError::InvalidArgument(
+                "Page must be greater than 0".to_string(),
+            ));
+        }
+
+        let txs_len = history.len();
+        let mut max_pages = txs_len / ELEMENTS_PER_PAGE;
+        if txs_len % ELEMENTS_PER_PAGE != 0 {
+            max_pages += 1;
+        }
+
+        if page > max_pages {
+            return Err(CommandError::InvalidArgument(format!(
+                "Page must be less than maximum pages ({})",
+                max_pages
+            )));
+        }
+
+        let start = (page - 1) * ELEMENTS_PER_PAGE;
+        let end = std::cmp::min(start + ELEMENTS_PER_PAGE, txs_len);
+        let page_entries = &history[start..end];
+
         manager.message(format!(
-            "- {}",
-            tx.summary(wallet.get_network().is_mainnet(), &storage)
-                .await?
+            "{} Transactions (total {}) page {}/{}:",
+            page_entries.len(),
+            txs_len,
+            page,
+            max_pages
         ));
+
+        for entry in page_entries {
+            let type_str = match &entry.history_type {
+                AccountHistoryType::Mining { reward } => {
+                    format!("Mining reward: {} TOS", format_tos(*reward))
+                }
+                AccountHistoryType::DevFee { reward } => {
+                    format!("Dev fee: {} TOS", format_tos(*reward))
+                }
+                AccountHistoryType::Burn { amount } => {
+                    format!("Burn: {} TOS", format_tos(*amount))
+                }
+                AccountHistoryType::Outgoing { to } => {
+                    format!("Sent to {}", to)
+                }
+                AccountHistoryType::Incoming { from } => {
+                    format!("Received from {}", from)
+                }
+                AccountHistoryType::MultiSig {
+                    participants,
+                    threshold,
+                } => {
+                    format!(
+                        "Multisig setup: {}/{} participants",
+                        threshold,
+                        participants.len()
+                    )
+                }
+                AccountHistoryType::InvokeContract { contract, entry_id } => {
+                    format!("Contract call: {} (entry {})", contract, entry_id)
+                }
+                AccountHistoryType::DeployContract => "Contract deployed".to_string(),
+                AccountHistoryType::FreezeTos { amount, duration } => {
+                    format!("Freeze: {} TOS for {}", format_tos(*amount), duration)
+                }
+                AccountHistoryType::UnfreezeTos { amount } => {
+                    format!("Unfreeze: {} TOS", format_tos(*amount))
+                }
+            };
+
+            manager.message(format!(
+                "- [{}] {} | TX: {}",
+                entry.topoheight, type_str, entry.hash
+            ));
+        }
     }
 
     Ok(())
@@ -2952,15 +2458,97 @@ async fn transaction(
 ) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
     let hash = arguments.get_value("hash")?.to_hash()?;
-    let tx = storage
-        .get_transaction(&hash)
-        .context("Transaction not found")?;
-    manager.message(
-        tx.summary(wallet.get_network().is_mainnet(), &storage)
-            .await?,
-    );
+
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+
+        // Query transaction from daemon
+        let tx = daemon_api
+            .get_transaction(&hash)
+            .await
+            .map_err(|e| CommandError::InvalidArgument(format!("Transaction not found: {}", e)))?;
+
+        // Display transaction details
+        manager.message(format!("Transaction: {}", hash));
+        manager.message(format!("Version: {}", tx.get_version()));
+        manager.message(format!(
+            "Source: {}",
+            tx.get_source()
+                .as_address(wallet.get_network().is_mainnet())
+        ));
+        manager.message(format!("Nonce: {}", tx.get_nonce()));
+        manager.message(format!("Fee: {} TOS", format_tos(tx.get_fee())));
+        manager.message(format!("Reference: {}", tx.get_reference()));
+
+        // Display transaction type details
+        use tos_common::transaction::TransactionType;
+        match tx.get_data() {
+            TransactionType::Transfers(transfers) => {
+                manager.message(format!("Type: Transfers ({} outputs)", transfers.len()));
+                for (i, transfer) in transfers.iter().enumerate() {
+                    let dest = transfer
+                        .get_destination()
+                        .as_address(wallet.get_network().is_mainnet());
+                    let amount = transfer.get_amount();
+                    let asset = transfer.get_asset();
+                    if *asset == TOS_ASSET {
+                        manager.message(format!(
+                            "  [{}] {} TOS -> {}",
+                            i,
+                            format_tos(amount),
+                            dest
+                        ));
+                    } else {
+                        manager.message(format!(
+                            "  [{}] {} (asset: {}) -> {}",
+                            i, amount, asset, dest
+                        ));
+                    }
+                }
+            }
+            TransactionType::Burn(payload) => {
+                manager.message("Type: Burn".to_string());
+                manager.message(format!("  Amount: {}", payload.amount));
+                manager.message(format!("  Asset: {}", payload.asset));
+            }
+            TransactionType::MultiSig(payload) => {
+                manager.message("Type: MultiSig".to_string());
+                manager.message(format!("  Threshold: {}", payload.threshold));
+                manager.message(format!("  Participants: {}", payload.participants.len()));
+            }
+            TransactionType::InvokeContract(payload) => {
+                manager.message("Type: InvokeContract".to_string());
+                manager.message(format!("  Contract: {}", payload.contract));
+            }
+            TransactionType::DeployContract(_) => {
+                manager.message("Type: DeployContract".to_string());
+            }
+            TransactionType::Energy(payload) => {
+                use tos_common::transaction::EnergyPayload;
+                match payload {
+                    EnergyPayload::FreezeTos { amount, duration } => {
+                        manager.message("Type: FreezeTos".to_string());
+                        manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
+                        manager.message(format!("  Duration: {:?}", duration));
+                    }
+                    EnergyPayload::UnfreezeTos { amount } => {
+                        manager.message("Type: UnfreezeTos".to_string());
+                        manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
+                    }
+                }
+            }
+            TransactionType::AIMining(payload) => {
+                manager.message("Type: AIMining".to_string());
+                manager.message(format!("  Payload: {:?}", payload));
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -2971,95 +2559,97 @@ async fn export_transactions_csv(
     let filename = arguments.get_value("filename")?.to_string_value()?;
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let transactions = storage.get_transactions()?;
-    let mut file = File::create(&filename).context("Error while creating CSV file")?;
 
-    wallet
-        .export_transactions_in_csv(&storage, transactions, &mut file)
-        .await
-        .context("Error while exporting transactions to CSV")?;
+    {
+        use tos_common::api::daemon::AccountHistoryType;
 
-    manager.message(format!("Transactions have been exported to {}", filename));
-    Ok(())
-}
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
 
-async fn clear_tx_cache(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-    let mut storage = wallet.get_storage().write().await;
-    storage.clear_tx_cache();
-    manager.message("Transaction cache has been cleared");
-    Ok(())
-}
-
-// Set your wallet in online mode
-#[cfg(feature = "network_handler")]
-async fn online_mode(
-    manager: &CommandManager,
-    mut arguments: ArgumentManager,
-) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-    if wallet.is_online().await {
-        manager.error("Wallet is already online");
-    } else {
-        let daemon_address = if arguments.has_argument("daemon_address") {
-            arguments.get_value("daemon_address")?.to_string_value()?
-        } else {
-            DEFAULT_DAEMON_ADDRESS.to_string()
-        };
-
-        wallet
-            .set_online_mode(&daemon_address, true)
+        // Query history from daemon for TOS asset
+        let history = daemon_api
+            .get_account_history(&wallet_address, &TOS_ASSET, None, None)
             .await
-            .context("Couldn't enable online mode")?;
-        manager.message("Wallet is now online");
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!("Failed to get history from daemon: {}", e))
+            })?;
+
+        if history.is_empty() {
+            manager.message("No transactions to export");
+            return Ok(());
+        }
+
+        // Create CSV file
+        let mut file = File::create(&filename).context("Error while creating CSV file")?;
+
+        // Write CSV header
+        writeln!(file, "topoheight,hash,type,details,timestamp")
+            .context("Error writing CSV header")?;
+
+        // Write each transaction
+        for entry in &history {
+            let type_str = match &entry.history_type {
+                AccountHistoryType::Mining { reward } => {
+                    format!("Mining,reward:{}", reward)
+                }
+                AccountHistoryType::DevFee { reward } => {
+                    format!("DevFee,reward:{}", reward)
+                }
+                AccountHistoryType::Burn { amount } => {
+                    format!("Burn,amount:{}", amount)
+                }
+                AccountHistoryType::Outgoing { to } => {
+                    format!("Outgoing,to:{}", to)
+                }
+                AccountHistoryType::Incoming { from } => {
+                    format!("Incoming,from:{}", from)
+                }
+                AccountHistoryType::MultiSig {
+                    participants,
+                    threshold,
+                } => {
+                    format!(
+                        "MultiSig,threshold:{} participants:{}",
+                        threshold,
+                        participants.len()
+                    )
+                }
+                AccountHistoryType::InvokeContract { contract, entry_id } => {
+                    format!("InvokeContract,contract:{} entry:{}", contract, entry_id)
+                }
+                AccountHistoryType::DeployContract => "DeployContract,".to_string(),
+                AccountHistoryType::FreezeTos { amount, duration } => {
+                    format!("FreezeTos,amount:{} duration:{}", amount, duration)
+                }
+                AccountHistoryType::UnfreezeTos { amount } => {
+                    format!("UnfreezeTos,amount:{}", amount)
+                }
+            };
+
+            writeln!(
+                file,
+                "{},{},{},{}",
+                entry.topoheight, entry.hash, type_str, entry.block_timestamp
+            )
+            .context("Error writing CSV row")?;
+        }
+
+        manager.message(format!(
+            "{} transactions have been exported to {}",
+            history.len(),
+            filename
+        ));
     }
+
     Ok(())
 }
 
-// Set your wallet in offline mode
-#[cfg(feature = "network_handler")]
-async fn offline_mode(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-    if !wallet.is_online().await {
-        manager.error("Wallet is already offline");
-    } else {
-        wallet
-            .set_offline_mode()
-            .await
-            .context("Error on offline mode")?;
-        manager.message("Wallet is now offline");
-    }
-    Ok(())
-}
+// Show wallet connection status with daemon (stateless wallet)
 
-// Show current wallet address
-#[cfg(feature = "network_handler")]
-async fn rescan(
-    manager: &CommandManager,
-    mut arguments: ArgumentManager,
-) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-    let topoheight = if arguments.has_argument("topoheight") {
-        arguments.get_value("topoheight")?.to_number()?
-    } else {
-        0
-    };
-
-    if let Err(e) = wallet.rescan(topoheight, true).await {
-        manager.error(format!("Error while rescanning: {:#}", e));
-    } else {
-        manager.message("Network handler has been restarted!");
-    }
-    Ok(())
-}
-
-// Show wallet synchronization status with daemon
-#[cfg(feature = "network_handler")]
 async fn sync_status(
     manager: &CommandManager,
     _arguments: ArgumentManager,
@@ -3069,25 +2659,24 @@ async fn sync_status(
         context.get::<Arc<Wallet>>()?.clone()
     };
 
-    match wallet.get_sync_progress().await {
-        Ok((wallet_topo, daemon_topo, percentage)) => {
-            if wallet_topo >= daemon_topo {
+    // Stateless wallet: check daemon connection status
+    let is_online = wallet.is_online().await;
+
+    if is_online {
+        match wallet.get_sync_progress().await {
+            Ok((_, daemon_topo, _)) => {
                 manager.message(format!(
-                    "Wallet fully synchronized\n  Topoheight: {wallet_topo} / {daemon_topo} (100.0%)"
+                    "Stateless wallet: Connected to daemon\n  Daemon topoheight: {daemon_topo}\n  Status: Ready (queries on-demand)"
                 ));
-            } else {
+            }
+            Err(e) => {
                 manager.message(format!(
-                    "Syncing in progress\n  Topoheight: {} / {} ({:.1}%)\n  Blocks remaining: {}",
-                    wallet_topo,
-                    daemon_topo,
-                    percentage,
-                    daemon_topo - wallet_topo
+                    "Stateless wallet: Connected but error getting info: {e:#}"
                 ));
             }
         }
-        Err(e) => {
-            manager.error(format!("Error checking sync status: {e:#}"));
-        }
+    } else {
+        manager.message("Stateless wallet: Offline (not connected to daemon)");
     }
 
     Ok(())
@@ -3101,17 +2690,12 @@ async fn seed(
 
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let prompt = manager.get_prompt();
 
+    // Password required (batch mode only)
     let password = if arguments.has_argument("password") {
         arguments.get_value("password")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("password".to_string()));
     } else {
-        prompt
-            .read_input("Password: ", true)
-            .await
-            .context("Error while reading password")?
+        return Err(CommandError::MissingArgument("password".to_string()));
     };
 
     // check if password is valid
@@ -3124,62 +2708,52 @@ async fn seed(
     };
 
     let seed = wallet.get_seed(language as usize)?;
-    if manager.is_batch_mode() {
-        manager.message(format!("Seed: {}", seed));
-    } else {
-        prompt
-            .read_input(
-                prompt.colorize_string(
-                    Color::Green,
-                    &format!("Seed: {}\r\nPress ENTER to continue", seed),
-                ),
-                false,
-            )
-            .await
-            .context("Error while printing seed")?;
-    }
+    manager.message(format!("Seed: {}", seed));
     Ok(())
 }
 
+// Show private key in hex format for backup/recovery
+async fn show_private_key(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
+    manager.validate_batch_params("private_key", &arguments)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Password required (batch mode only)
+    let password = arguments.get_value("password")?.to_string_value()?;
+
+    // Check if password is valid
+    wallet.is_valid_password(&password).await?;
+
+    let private_key_hex = wallet.get_keypair().get_private_key().to_hex();
+    manager.message(format!("Private Key: {}", private_key_hex));
+    manager.message("WARNING: Never share your private key with anyone!");
+    Ok(())
+}
+
+// NOTE: This command now queries 100% from daemon API (no local storage)
 async fn nonce(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let nonce = storage.get_nonce()?;
-    let unconfirmed_nonce = storage.get_unconfirmed_nonce()?;
-    manager.message(format!("Nonce: {}", nonce));
-    if nonce != unconfirmed_nonce {
-        manager.message(format!("Unconfirmed nonce: {}", unconfirmed_nonce));
-    }
 
-    Ok(())
-}
+    // Query nonce from daemon API (stateless - no local storage)
 
-async fn set_nonce(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    manager.validate_batch_params("set_nonce", &args)?;
-
-    let value = if args.has_argument("nonce") {
-        args.get_value("nonce")?.to_number()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("nonce".to_string()));
-    } else {
-        manager
-            .get_prompt()
-            .read("New Nonce: ".to_string())
-            .await
-            .context("Error while reading new nonce to set")?
+    let nonce = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let address = wallet.get_address();
+        let result = handler.get_api().get_nonce(&address).await.map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to get nonce from daemon: {}", e))
+        })?;
+        result.version.get_nonce()
     };
 
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-    let mut storage = wallet.get_storage().write().await;
-    storage.set_nonce(value)?;
-    storage.clear_tx_cache();
-
-    manager.message(format!("New nonce is: {}", value));
+    manager.message(format!("Nonce: {}", nonce));
     Ok(())
 }
 
@@ -3196,19 +2770,14 @@ async fn set_tx_version(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
+    // Version required (batch mode only)
     let value: u8 = if args.has_argument("version") {
         args.get_value("version")?
             .to_number()?
             .try_into()
             .map_err(|_| CommandError::InvalidArgument("Invalid transaction version".to_string()))?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("version".to_string()));
     } else {
-        manager
-            .get_prompt()
-            .read("New Transaction Version: ".to_string())
-            .await
-            .context("Error while reading new transaction version to set")?
+        return Err(CommandError::MissingArgument("version".to_string()));
     };
 
     let tx_version = TxVersion::try_from(value)
@@ -3259,47 +2828,78 @@ async fn status(manager: &CommandManager, _: ArgumentManager) -> Result<(), Comm
         }
     }
 
-    let storage = wallet.get_storage().read().await;
-    let multisig = storage.get_multisig_state().await?;
-    if let Some(multisig) = multisig {
-        manager.message("--- Multisig: ---");
-        manager.message(format!("Threshold: {}", multisig.payload.threshold));
-        manager.message(format!(
-            "Participants ({}): {}",
-            multisig.payload.participants.len(),
-            multisig
-                .payload
-                .participants
-                .iter()
-                .map(|p| p.as_address(wallet.get_network().is_mainnet()).to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-        manager.message("---------------");
-    } else {
-        manager.message("No multisig state");
+    // Query multisig state from daemon
+
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let daemon_api = handler.get_api();
+            let wallet_address = wallet.get_address();
+
+            // Query multisig from daemon
+            match daemon_api.has_multisig(&wallet_address).await {
+                Ok(true) => {
+                    if let Ok(multisig) = daemon_api.get_multisig(&wallet_address).await {
+                        use tos_common::api::daemon::MultisigState;
+                        match multisig.state {
+                            MultisigState::Active {
+                                threshold,
+                                participants,
+                            } => {
+                                manager.message("--- Multisig: ---");
+                                manager.message(format!("Threshold: {}", threshold));
+                                manager.message(format!(
+                                    "Participants ({}): {}",
+                                    participants.len(),
+                                    participants
+                                        .iter()
+                                        .map(|p| p.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                ));
+                                manager.message("---------------");
+                            }
+                            MultisigState::Deleted => {
+                                manager.message("Multisig: Deleted");
+                            }
+                        }
+                    }
+                }
+                Ok(false) => {
+                    manager.message("No multisig state");
+                }
+                Err(e) => {
+                    manager.warn(format!("Could not query multisig state: {}", e));
+                }
+            }
+
+            // Query nonce from daemon
+            match daemon_api.get_nonce(&wallet_address).await {
+                Ok(nonce_result) => {
+                    manager.message(format!("Nonce: {}", nonce_result.version.get_nonce()));
+                }
+                Err(e) => {
+                    manager.warn(format!("Could not query nonce: {}", e));
+                }
+            }
+        } else {
+            manager.message("No multisig state (not connected to daemon)");
+            manager.message("Nonce: (not connected to daemon)");
+        }
     }
 
+    let storage = wallet.get_storage().read().await;
     let tx_version = storage.get_tx_version().await?;
     manager.message(format!("Transaction version: {}", tx_version));
-    let nonce = storage.get_nonce()?;
-    let unconfirmed_nonce = storage.get_unconfirmed_nonce()?;
-    manager.message(format!("Nonce: {}", nonce));
-    if nonce != unconfirmed_nonce {
-        manager.message(format!("Unconfirmed nonce: {}", unconfirmed_nonce));
-    }
+
     let network = wallet.get_network();
-    manager.message(format!(
-        "Synced topoheight: {}",
-        storage.get_synced_topoheight()?
-    ));
     manager.message(format!("Network: {}", network));
     manager.message(format!("Wallet address: {}", wallet.get_address()));
 
     Ok(())
 }
 
-// Show AI mining transaction history
+// Show AI mining transaction history from daemon
 async fn ai_mining_history(
     manager: &CommandManager,
     mut arguments: ArgumentManager,
@@ -3307,330 +2907,276 @@ async fn ai_mining_history(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    let page = if arguments.has_argument("page") {
-        arguments.get_value("page")?.to_number()? as usize
-    } else {
-        0
-    };
+    {
+        use tos_common::ai_mining::TaskStatus;
 
-    let limit = if arguments.has_argument("limit") {
-        arguments.get_value("limit")?.to_number()? as usize
-    } else {
-        20
-    };
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
 
-    let filter_type = if arguments.has_argument("type") {
-        Some(arguments.get_value("type")?.to_string_value()?)
-    } else {
-        None
-    };
+        // Parse filter type
+        let filter_type = if arguments.has_argument("type") {
+            Some(
+                arguments
+                    .get_value("type")?
+                    .to_string_value()?
+                    .to_lowercase(),
+            )
+        } else {
+            None
+        };
 
-    let storage = wallet.get_storage().read().await;
-    let all_transactions = storage.get_transactions()?;
+        // Get the full AI mining state from daemon
+        let state = daemon_api.get_ai_mining_state().await.map_err(|e| {
+            CommandError::InvalidArgument(format!(
+                "Failed to get AI mining state from daemon: {}",
+                e
+            ))
+        })?;
 
-    // Filter for AI mining transactions
-    let ai_transactions: Vec<_> = all_transactions
-        .iter()
-        .filter(|tx| {
-            if let EntryData::AIMining { payload, .. } = tx.get_entry() {
-                if let Some(ref filter) = filter_type {
-                    match filter.to_lowercase().as_str() {
-                        "publish" | "publishtask" => {
-                            matches!(payload, AIMiningPayload::PublishTask { .. })
-                        }
-                        "submit" | "submitanswer" => {
-                            matches!(payload, AIMiningPayload::SubmitAnswer { .. })
-                        }
-                        "validate" | "validateanswer" => {
-                            matches!(payload, AIMiningPayload::ValidateAnswer { .. })
-                        }
-                        "register" | "registerminer" => {
-                            matches!(payload, AIMiningPayload::RegisterMiner { .. })
-                        }
-                        _ => true,
-                    }
-                } else {
-                    true
-                }
-            } else {
-                false
+        let state = match state {
+            Some(s) => s,
+            None => {
+                manager.message("No AI mining state found");
+                return Ok(());
             }
-        })
-        .collect();
+        };
 
-    if ai_transactions.is_empty() {
-        manager.message("No AI mining transactions found");
-        return Ok(());
-    }
+        // Convert wallet address to public key for comparison
+        let wallet_pubkey: tos_common::crypto::elgamal::CompressedPublicKey =
+            wallet_address.clone().into();
 
-    let total_count = ai_transactions.len();
-    let start_idx = page * limit;
-    let end_idx = std::cmp::min(start_idx + limit, total_count);
+        // Find tasks published by this wallet
+        let my_tasks: Vec<_> = state
+            .tasks
+            .iter()
+            .filter(|(_, task)| task.publisher == wallet_pubkey)
+            .collect();
 
-    if start_idx >= total_count {
-        manager.message("No AI mining transactions found on this page");
-        return Ok(());
-    }
+        // Find answers submitted by this wallet
+        let mut my_answers: Vec<(
+            &tos_common::crypto::Hash,
+            &tos_common::ai_mining::SubmittedAnswer,
+        )> = Vec::new();
+        for (task_id, task) in &state.tasks {
+            for answer in &task.submitted_answers {
+                if answer.submitter == wallet_pubkey {
+                    my_answers.push((task_id, answer));
+                }
+            }
+        }
 
-    let type_filter_str = filter_type
-        .map(|t| format!(" (filtered by {})", t))
-        .unwrap_or_default();
-    manager.message(format!(
-        "AI Mining Transaction History{} (page {}, showing {}-{} of {})",
-        type_filter_str,
-        page,
-        start_idx + 1,
-        end_idx,
-        total_count
-    ));
-    manager.message("=".repeat(80));
+        let show_tasks = filter_type.is_none()
+            || filter_type
+                .as_ref()
+                .is_some_and(|t| t == "publish" || t == "task" || t == "all");
+        let show_answers = filter_type.is_none()
+            || filter_type
+                .as_ref()
+                .is_some_and(|t| t == "submit" || t == "answer" || t == "all");
 
-    let network = wallet.get_network();
-    for tx in &ai_transactions[start_idx..end_idx] {
-        let summary = tx.summary(network.is_mainnet(), &storage).await?;
-        manager.message(summary);
-    }
+        if my_tasks.is_empty() && my_answers.is_empty() {
+            manager.message("No AI mining activity found for this wallet");
+            return Ok(());
+        }
 
-    if end_idx < total_count {
-        manager.message(format!(
-            "Use 'ai_mining_history --page {}' to see more transactions",
-            page + 1
-        ));
+        manager.message("=== AI Mining History ===");
+        manager.message(format!("Wallet: {}", wallet_address));
+        manager.message("=".repeat(80));
+
+        // Show published tasks
+        if show_tasks && !my_tasks.is_empty() {
+            manager.message("");
+            manager.message(format!("--- Tasks Published ({}) ---", my_tasks.len()));
+            for (task_id, task) in &my_tasks {
+                manager.message(format!("Task ID: {}", task_id));
+                manager.message(format!(
+                    "  Description: {}",
+                    if task.description.len() > 50 {
+                        format!("{}...", &task.description[..50])
+                    } else {
+                        task.description.clone()
+                    }
+                ));
+                manager.message(format!("  Reward: {} TOS", format_tos(task.reward_amount)));
+                manager.message(format!("  Difficulty: {:?}", task.difficulty));
+                manager.message(format!(
+                    "  Status: {}",
+                    match task.status {
+                        TaskStatus::Active => "Active",
+                        TaskStatus::Completed => "Completed",
+                        TaskStatus::Expired => "Expired",
+                        TaskStatus::Cancelled => "Cancelled",
+                    }
+                ));
+                manager.message(format!("  Published at: {}", task.published_at));
+                manager.message(format!(
+                    "  Answers Received: {}",
+                    task.submitted_answers.len()
+                ));
+                manager.message("");
+            }
+        }
+
+        // Show submitted answers
+        if show_answers && !my_answers.is_empty() {
+            manager.message("");
+            manager.message(format!("--- Answers Submitted ({}) ---", my_answers.len()));
+            for (task_id, answer) in &my_answers {
+                manager.message(format!("Answer ID: {}", answer.answer_id));
+                manager.message(format!("  Task ID: {}", task_id));
+                manager.message(format!("  Stake: {} TOS", format_tos(answer.stake_amount)));
+                manager.message(format!("  Submitted at: {}", answer.submitted_at));
+                if let Some(score) = answer.average_score {
+                    manager.message(format!("  Average Score: {}", score));
+                }
+                manager.message("");
+            }
+        }
+
+        // Show summary
+        manager.message("--- Summary ---");
+        manager.message(format!("Total Tasks Published: {}", my_tasks.len()));
+        manager.message(format!("Total Answers Submitted: {}", my_answers.len()));
     }
 
     Ok(())
 }
 
-// Show AI mining statistics for this wallet
+// Show AI mining statistics for this wallet from daemon
 async fn ai_mining_stats(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    let storage = wallet.get_storage().read().await;
-    let all_transactions = storage.get_transactions()?;
-    let network = wallet.get_network();
-    let wallet_address = wallet.get_address();
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
+        let network = wallet.get_network();
 
-    let mut stats = AIMiningSummary::default();
+        // Query system-wide AI mining statistics from daemon
+        let stats = daemon_api.get_ai_mining_statistics().await.map_err(|e| {
+            CommandError::InvalidArgument(format!(
+                "Failed to get AI mining stats from daemon: {}",
+                e
+            ))
+        })?;
 
-    // Analyze all AI mining transactions
-    for tx in &all_transactions {
-        if let EntryData::AIMining {
-            payload, outgoing, ..
-        } = tx.get_entry()
-        {
-            match payload {
-                AIMiningPayload::PublishTask {
-                    reward_amount,
-                    difficulty,
-                    ..
-                } => {
-                    if *outgoing {
-                        stats.tasks_published += 1;
-                        stats.total_rewards_offered += reward_amount;
-                        stats
-                            .difficulty_breakdown
-                            .entry(format!("{:?}", difficulty))
-                            .or_insert(0)
-                            .add_assign(1);
-                    }
-                }
-                AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
-                    if *outgoing {
-                        stats.answers_submitted += 1;
-                        stats.total_staked += stake_amount;
-                    }
-                }
-                AIMiningPayload::ValidateAnswer {
-                    validation_score, ..
-                } => {
-                    if *outgoing {
-                        stats.validations_performed += 1;
-                        stats.total_validation_score += *validation_score as u64;
-                    }
-                }
-                AIMiningPayload::RegisterMiner {
-                    registration_fee, ..
-                } => {
-                    if *outgoing {
-                        stats.registrations += 1;
-                        stats.total_registration_fees += registration_fee;
-                    }
-                }
-            }
-        }
-    }
+        // Query miner-specific information for this wallet
+        let miner_info = daemon_api.get_ai_mining_miner(&wallet_address).await.ok();
 
-    manager.message("=== AI Mining Statistics ===");
-    manager.message(format!("Wallet Address: {}", wallet_address));
-    manager.message(format!("Network: {}", network));
-    manager.message("");
+        manager.message("=== AI Mining Statistics ===");
+        manager.message(format!("Wallet Address: {}", wallet_address));
+        manager.message(format!("Network: {}", network));
+        manager.message("");
 
-    manager.message("--- Activity Summary ---");
-    manager.message(format!("Tasks Published: {}", stats.tasks_published));
-    manager.message(format!("Answers Submitted: {}", stats.answers_submitted));
-    manager.message(format!(
-        "Validations Performed: {}",
-        stats.validations_performed
-    ));
-    manager.message(format!("Miner Registrations: {}", stats.registrations));
-    manager.message("");
+        manager.message("--- System-wide Statistics ---");
+        manager.message(format!("Total Tasks: {}", stats.total_tasks));
+        manager.message(format!("Active Tasks: {}", stats.active_tasks));
+        manager.message(format!("Completed Tasks: {}", stats.completed_tasks));
+        manager.message(format!("Total Miners: {}", stats.total_miners));
+        manager.message(format!(
+            "Total Rewards Distributed: {} TOS",
+            format_tos(stats.total_rewards_distributed)
+        ));
+        manager.message(format!(
+            "Total Staked: {} TOS",
+            format_tos(stats.total_staked)
+        ));
+        manager.message("");
 
-    manager.message("--- Financial Summary ---");
-    manager.message(format!(
-        "Total Rewards Offered: {} TOS",
-        format_tos(stats.total_rewards_offered)
-    ));
-    manager.message(format!(
-        "Total Amount Staked: {} TOS",
-        format_tos(stats.total_staked)
-    ));
-    manager.message(format!(
-        "Total Registration Fees: {} TOS",
-        format_tos(stats.total_registration_fees)
-    ));
-    if stats.validations_performed > 0 {
-        let avg_score = stats.total_validation_score as f64 / stats.validations_performed as f64;
-        manager.message(format!("Average Validation Score: {:.1}", avg_score));
-    }
-    manager.message("");
-
-    if !stats.difficulty_breakdown.is_empty() {
-        manager.message("--- Task Difficulty Breakdown ---");
-        for (difficulty, count) in stats.difficulty_breakdown {
-            manager.message(format!("{}: {} tasks", difficulty, count));
+        manager.message("--- Your Miner Status ---");
+        if let Some(miner) = miner_info {
+            manager.message("Registered: Yes");
+            manager.message(format!("Registered at Block: {}", miner.registered_at));
+            manager.message(format!("Tasks Published: {}", miner.tasks_published));
+            manager.message(format!("Answers Submitted: {}", miner.answers_submitted));
+            manager.message(format!(
+                "Validations Performed: {}",
+                miner.validations_performed
+            ));
+            manager.message(format!("Reputation Score: {} / 1000", miner.reputation));
+        } else {
+            manager.message("Registered: No");
+            manager.message("(Use 'register_miner' to register as a miner)");
         }
     }
 
     Ok(())
 }
 
-// Show AI mining tasks this wallet has interacted with
+// Show active AI mining tasks in the network
 async fn ai_mining_tasks(
     manager: &CommandManager,
-    mut arguments: ArgumentManager,
+    _arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    let page = if arguments.has_argument("page") {
-        arguments.get_value("page")?.to_number()? as usize
-    } else {
-        0
-    };
+    {
+        use tos_common::ai_mining::TaskStatus;
 
-    let status_filter = if arguments.has_argument("status") {
-        Some(arguments.get_value("status")?.to_string_value()?)
-    } else {
-        None
-    };
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
 
-    // Show AI mining transactions from local history
-    let storage = wallet.get_storage().read().await;
-    let all_transactions = storage.get_transactions()?;
+        // Query all active AI mining tasks from daemon
+        let tasks = daemon_api.get_ai_mining_active_tasks().await.map_err(|e| {
+            CommandError::InvalidArgument(format!(
+                "Failed to get AI mining tasks from daemon: {}",
+                e
+            ))
+        })?;
 
-    // Filter for AI mining transactions
-    let mut ai_transactions: Vec<_> = all_transactions
-        .iter()
-        .filter(|tx| matches!(tx.get_entry(), EntryData::AIMining { .. }))
-        .collect();
+        if tasks.is_empty() {
+            manager.message("No active AI mining tasks found");
+            return Ok(());
+        }
 
-    ai_transactions.sort_by_key(|tx| std::cmp::Reverse(tx.get_topoheight()));
+        manager.message(format!("=== Active AI Mining Tasks ({}) ===", tasks.len()));
+        manager.message("=".repeat(80));
 
-    let total_count = ai_transactions.len();
-    let start_idx = page * 10;
-    let end_idx = std::cmp::min(start_idx + 10, total_count);
-
-    if total_count == 0 {
-        manager.message("No AI mining transactions found in wallet history");
-        return Ok(());
-    }
-
-    if start_idx >= total_count {
-        manager.message("No transactions found on this page");
-        return Ok(());
-    }
-
-    let status_filter_str = status_filter
-        .map(|s| format!(" (filter: {})", s))
-        .unwrap_or_default();
-    manager.message(format!(
-        "AI Mining Transaction History{} (page {}, showing {}-{} of {})",
-        status_filter_str,
-        page,
-        start_idx + 1,
-        end_idx,
-        total_count
-    ));
-    manager.message("=".repeat(80));
-
-    for tx in &ai_transactions[start_idx..end_idx] {
-        if let EntryData::AIMining {
-            payload, outgoing, ..
-        } = tx.get_entry()
-        {
-            let direction = if *outgoing { "OUTGOING" } else { "INCOMING" };
-
-            manager.message(format!("[{}] {}", direction, tx.get_hash()));
-            manager.message(format!("  TopoHeight: {}", tx.get_topoheight()));
-
-            match payload {
-                AIMiningPayload::PublishTask {
-                    task_id,
-                    reward_amount,
-                    difficulty,
-                    ..
-                } => {
-                    manager.message("  Type: Publish Task".to_string());
-                    manager.message(format!("  Task ID: {}", task_id));
-                    manager.message(format!("  Reward: {} TOS", format_tos(*reward_amount)));
-                    manager.message(format!("  Difficulty: {:?}", difficulty));
+        let is_mainnet = wallet.get_network().is_mainnet();
+        for (task_id, task) in &tasks {
+            // Convert publisher public key to Address for display
+            let publisher_addr = task.publisher.as_address(is_mainnet);
+            manager.message(format!("Task ID: {}", task_id));
+            manager.message(format!("  Publisher: {}", publisher_addr));
+            manager.message(format!(
+                "  Description: {}",
+                if task.description.len() > 50 {
+                    format!("{}...", &task.description[..50])
+                } else {
+                    task.description.clone()
                 }
-                AIMiningPayload::SubmitAnswer {
-                    task_id,
-                    answer_hash,
-                    stake_amount,
-                    answer_content: _,
-                } => {
-                    manager.message("  Type: Submit Answer".to_string());
-                    manager.message(format!("  Task ID: {}", task_id));
-                    manager.message(format!("  Answer Hash: {}", answer_hash));
-                    manager.message(format!("  Stake: {} TOS", format_tos(*stake_amount)));
+            ));
+            manager.message(format!("  Reward: {} TOS", format_tos(task.reward_amount)));
+            manager.message(format!("  Difficulty: {:?}", task.difficulty));
+            manager.message(format!(
+                "  Status: {}",
+                match task.status {
+                    TaskStatus::Active => "Active",
+                    TaskStatus::Completed => "Completed",
+                    TaskStatus::Expired => "Expired",
+                    TaskStatus::Cancelled => "Cancelled",
                 }
-                AIMiningPayload::ValidateAnswer {
-                    task_id,
-                    answer_id,
-                    validation_score,
-                } => {
-                    manager.message("  Type: Validate Answer".to_string());
-                    manager.message(format!("  Task ID: {}", task_id));
-                    manager.message(format!("  Answer ID: {}", answer_id));
-                    manager.message(format!("  Validation Score: {}", validation_score));
-                }
-                AIMiningPayload::RegisterMiner {
-                    miner_address,
-                    registration_fee,
-                } => {
-                    manager.message("  Type: Register Miner".to_string());
-                    manager.message(format!(
-                        "  Miner Address: {}",
-                        miner_address.as_address(wallet.get_network().is_mainnet())
-                    ));
-                    manager.message(format!(
-                        "  Registration Fee: {} TOS",
-                        format_tos(*registration_fee)
-                    ));
-                }
-            }
+            ));
+            manager.message(format!("  Published at: {}", task.published_at));
+            manager.message(format!("  Deadline: {}", task.deadline));
+            manager.message(format!(
+                "  Answers Submitted: {}",
+                task.submitted_answers.len()
+            ));
             manager.message("");
         }
-    }
-
-    if end_idx < total_count {
-        manager.message(format!(
-            "Use 'ai_mining_tasks --page {}' to see more transactions",
-            page + 1
-        ));
     }
 
     Ok(())
@@ -3644,86 +3190,84 @@ async fn ai_mining_rewards(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    let page = if arguments.has_argument("page") {
-        arguments.get_value("page")?.to_number()? as usize
-    } else {
-        0
-    };
+    {
+        use tos_common::api::daemon::AccountHistoryType;
 
-    let storage = wallet.get_storage().read().await;
-    let all_transactions = storage.get_transactions()?;
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
 
-    // Find incoming transactions that could be rewards
-    let potential_rewards: Vec<_> = all_transactions
-        .iter()
-        .filter(|tx| {
-            match tx.get_entry() {
-                EntryData::Incoming { transfers, .. } => {
-                    // Look for TOS transfers that could be AI mining rewards
-                    transfers
-                        .iter()
-                        .any(|transfer| transfer.get_asset() == &TOS_ASSET)
-                }
-                EntryData::AIMining { outgoing, .. } => !outgoing, // Incoming AI mining transactions
-                _ => false,
-            }
-        })
-        .collect();
+        let page = if arguments.has_argument("page") {
+            arguments.get_value("page")?.to_number()? as usize
+        } else {
+            0
+        };
 
-    if potential_rewards.is_empty() {
-        manager.message("No potential AI mining rewards found");
-        return Ok(());
-    }
+        // Query account history for TOS incoming transactions from daemon
+        let history = daemon_api
+            .get_account_history(
+                &wallet_address,
+                &TOS_ASSET,
+                None, // min topoheight
+                None, // max topoheight
+            )
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!(
+                    "Failed to get account history from daemon: {}",
+                    e
+                ))
+            })?;
 
-    let total_count = potential_rewards.len();
-    let start_idx = page * 20;
-    let end_idx = std::cmp::min(start_idx + 20, total_count);
+        // Filter for incoming transactions (potential rewards)
+        let incoming_transactions: Vec<_> = history
+            .iter()
+            .filter(|entry| matches!(&entry.history_type, AccountHistoryType::Incoming { .. }))
+            .collect();
 
-    if start_idx >= total_count {
-        manager.message("No rewards found on this page");
-        return Ok(());
-    }
+        if incoming_transactions.is_empty() {
+            manager.message("No potential AI mining rewards found");
+            return Ok(());
+        }
 
-    manager.message(format!(
-        "Potential AI Mining Rewards (page {}, showing {}-{} of {})",
-        page,
-        start_idx + 1,
-        end_idx,
-        total_count
-    ));
-    manager.message("Note: This includes all incoming TOS transfers and AI mining transactions");
-    manager.message("=".repeat(80));
+        let total_count = incoming_transactions.len();
+        let limit = 20;
+        let start_idx = page * limit;
+        let end_idx = std::cmp::min(start_idx + limit, total_count);
 
-    let network = wallet.get_network();
-    let mut total_rewards = 0u64;
+        if start_idx >= total_count {
+            manager.message("No rewards found on this page");
+            return Ok(());
+        }
 
-    for tx in &potential_rewards[start_idx..end_idx] {
-        let summary = tx.summary(network.is_mainnet(), &storage).await?;
-        manager.message(summary);
+        manager.message(format!(
+            "Potential AI Mining Rewards (page {}, showing {}-{} of {})",
+            page,
+            start_idx + 1,
+            end_idx,
+            total_count
+        ));
+        manager.message("Note: This shows all incoming TOS transfers (rewards are included)");
+        manager.message("=".repeat(80));
 
-        // Try to extract reward amounts
-        if let EntryData::Incoming { transfers, .. } = tx.get_entry() {
-            for transfer in transfers {
-                if transfer.get_asset() == &TOS_ASSET {
-                    total_rewards += transfer.get_amount();
-                }
+        for entry in &incoming_transactions[start_idx..end_idx] {
+            if let AccountHistoryType::Incoming { from } = &entry.history_type {
+                manager.message(format!(
+                    "[{}] TX: {} | From: {}",
+                    entry.topoheight, entry.hash, from
+                ));
             }
         }
-    }
 
-    if total_rewards > 0 {
-        manager.message("");
-        manager.message(format!(
-            "Total TOS received in this page: {} TOS",
-            format_tos(total_rewards)
-        ));
-    }
-
-    if end_idx < total_count {
-        manager.message(format!(
-            "Use 'ai_mining_rewards --page {}' to see more rewards",
-            page + 1
-        ));
+        if end_idx < total_count {
+            manager.message(format!(
+                "Use 'ai_mining_rewards --page {}' to see more rewards",
+                page + 1
+            ));
+        }
     }
 
     Ok(())
@@ -3995,19 +3539,6 @@ async fn register_miner(
     Ok(())
 }
 
-#[derive(Default)]
-struct AIMiningSummary {
-    tasks_published: u32,
-    answers_submitted: u32,
-    validations_performed: u32,
-    registrations: u32,
-    total_rewards_offered: u64,
-    total_staked: u64,
-    total_registration_fees: u64,
-    total_validation_score: u64,
-    difficulty_breakdown: std::collections::HashMap<String, u32>,
-}
-
 async fn logout(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
     {
         let context = manager.get_context().lock()?;
@@ -4088,16 +3619,11 @@ async fn add_xswd_relayer(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
+    // App data required (batch mode only)
     let app_data = if args.has_argument("app_data") {
         args.get_value("app_data")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("app_data".to_string()));
     } else {
-        manager
-            .get_prompt()
-            .read("App data")
-            .await
-            .context("Error while reading app data")?
+        return Err(CommandError::MissingArgument("app_data".to_string()));
     };
 
     let app_data =
@@ -4118,76 +3644,80 @@ async fn add_xswd_relayer(
     Ok(())
 }
 
-// Setup a multisig transaction (a multisig is present on chain, but this wallet is offline so can't sync it)
+// Setup a multisig transaction
+// Batch mode: multisig_setup threshold=2 addresses=addr1,addr2,addr3
 async fn multisig_setup(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
+    manager.validate_batch_params("multisig_setup", &args)?;
+
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let prompt = manager.get_prompt();
 
+    // Query multisig state from daemon (stateless wallet)
     let multisig = {
-        let storage = wallet.get_storage().read().await;
-        storage.get_multisig_state().await?.cloned()
-    };
-
-    if !manager.is_batch_mode() {
-        manager.warn("IMPORTANT: Make sure you have the correct participants and threshold before proceeding.");
-        manager.warn("If you are unsure, please cancel and verify the participants and threshold.");
-        manager.warn("An incorrect setup can lead to loss of funds.");
-        manager.warn("Do you want to continue?");
-
-        if !prompt
-            .ask_confirmation()
-            .await
-            .context("Error while confirming action")?
-        {
-            manager.message("Transaction has been aborted");
-            return Ok(());
-        }
-    }
-
-    let participants: u8 = if args.has_argument("participants") {
-        args.get_value("participants")?.to_number()? as u8
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("participants".to_string()));
-    } else {
-        let msg = if multisig.is_some() {
-            "Participants count (0 to delete): "
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let daemon_api = handler.get_api();
+            let wallet_address = wallet.get_address();
+            if daemon_api
+                .has_multisig(&wallet_address)
+                .await
+                .unwrap_or(false)
+            {
+                daemon_api
+                    .get_multisig(&wallet_address)
+                    .await
+                    .ok()
+                    .map(|r| r.state)
+            } else {
+                None
+            }
         } else {
-            "Participants count (min. 1): "
-        };
-        prompt
-            .read(msg)
-            .await
-            .context("Error while reading participants count")?
+            return Err(CommandError::InvalidArgument(
+                "Wallet not connected to daemon".to_string(),
+            ));
+        }
     };
 
-    if participants == 0 {
+    // Get threshold (required)
+    let threshold: u8 = if args.has_argument("threshold") {
+        args.get_value("threshold")?.to_number()? as u8
+    } else {
+        return Err(CommandError::MissingArgument("threshold".to_string()));
+    };
+
+    // Handle delete case (threshold=0)
+    if threshold == 0 {
+        use tos_common::api::daemon::MultisigState;
+
         let Some(multisig) = multisig else {
             return Err(CommandError::InvalidArgument(
-                "Participants count must be greater than 0".to_string(),
+                "No multisig to delete".to_string(),
             ));
         };
 
-        if !manager.is_batch_mode() {
-            manager.warn(
-                "Participants count is 0, this will delete the multisig currently configured",
-            );
-            manager.warn("Do you want to continue?");
-        }
+        // Convert MultisigState to MultiSigPayload for delete operation
+        let current_multisig = match multisig {
+            MultisigState::Active {
+                participants: p,
+                threshold: t,
+            } => MultiSigPayload {
+                threshold: t,
+                participants: p
+                    .into_iter()
+                    .map(|addr| addr.get_public_key().clone())
+                    .collect(),
+            },
+            MultisigState::Deleted => {
+                return Err(CommandError::InvalidArgument(
+                    "Multisig is already deleted".to_string(),
+                ));
+            }
+        };
 
-        if !args.get_flag("confirm")?
-            && !manager.is_batch_mode()
-            && !prompt
-                .ask_confirmation()
-                .await
-                .context("Error while confirming action")?
-        {
-            manager.message("Transaction has been aborted");
-            return Ok(());
-        }
+        manager.message("Deleting multisig...");
 
         let payload = MultiSigBuilder {
             participants: IndexSet::new(),
@@ -4196,10 +3726,10 @@ async fn multisig_setup(
 
         let tx = create_transaction_with_multisig(
             manager,
-            prompt,
+            manager.get_prompt(),
             wallet,
             TransactionTypeBuilder::MultiSig(payload),
-            multisig.payload,
+            current_multisig,
         )
         .await?;
 
@@ -4207,43 +3737,27 @@ async fn multisig_setup(
         return Ok(());
     }
 
-    let threshold: u8 = if args.has_argument("threshold") {
-        args.get_value("threshold")?.to_number()? as u8
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("threshold".to_string()));
+    // Get addresses (required for setup)
+    let addresses_str = if args.has_argument("addresses") {
+        args.get_value("addresses")?.to_string_value()?
     } else {
-        prompt
-            .read("Threshold (min. 1): ")
-            .await
-            .context("Error while reading threshold")?
+        return Err(CommandError::MissingArgument(
+            "addresses (comma-separated list of participant addresses)".to_string(),
+        ));
     };
 
-    if threshold == 0 {
-        return Err(CommandError::InvalidArgument(
-            "Threshold must be greater than 0".to_string(),
-        ));
-    }
-
-    if threshold > participants {
-        return Err(CommandError::InvalidArgument(
-            "Threshold must be less or equal to participants count".to_string(),
-        ));
-    }
-
-    if manager.is_batch_mode() {
-        return Err(CommandError::BatchModeError(
-            "multisig_setup command requires interactive mode to collect participant addresses"
-                .to_string(),
-        ));
-    }
-
+    // Parse comma-separated addresses
     let mainnet = wallet.get_network().is_mainnet();
-    let mut keys = IndexSet::with_capacity(participants as usize);
-    for i in 0..participants {
-        let address: Address = prompt
-            .read(format!("Participant #{} address: ", i + 1))
-            .await
-            .context("Error while reading participant address")?;
+    let mut keys = IndexSet::new();
+    for addr_str in addresses_str.split(',') {
+        let addr_str = addr_str.trim();
+        if addr_str.is_empty() {
+            continue;
+        }
+
+        let address: Address = addr_str
+            .parse()
+            .map_err(|_| CommandError::InvalidArgument(format!("Invalid address: {}", addr_str)))?;
 
         if address.is_mainnet() != mainnet {
             return Err(CommandError::InvalidArgument(
@@ -4265,9 +3779,22 @@ async fn multisig_setup(
 
         if !keys.insert(address) {
             return Err(CommandError::InvalidArgument(
-                "Participant address already exists".to_string(),
+                "Duplicate participant address".to_string(),
             ));
         }
+    }
+
+    let participants = keys.len() as u8;
+    if participants == 0 {
+        return Err(CommandError::InvalidArgument(
+            "At least one participant address required".to_string(),
+        ));
+    }
+
+    if threshold > participants {
+        return Err(CommandError::InvalidArgument(
+            "Threshold must be less or equal to participants count".to_string(),
+        ));
     }
 
     manager.message(format!(
@@ -4278,34 +3805,51 @@ async fn multisig_setup(
         manager.message(format!("- {}", key));
     }
 
-    if !args.get_flag("confirm")?
-        && !manager.is_batch_mode()
-        && !prompt
-            .ask_confirmation()
-            .await
-            .context("Error while confirming action")?
-    {
-        manager.message("Transaction has been aborted");
-        return Ok(());
-    }
-
     manager.message("Building transaction...");
 
-    let multisig = {
-        let storage = wallet.get_storage().read().await;
-        storage
-            .get_multisig_state()
-            .await
-            .context("Error while reading multisig state")?
-            .cloned()
+    // Stateless wallet: Query existing multisig from daemon
+    let existing_multisig = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let daemon_api = handler.get_api();
+            let wallet_address = wallet.get_address();
+            match daemon_api.get_multisig(&wallet_address).await {
+                Ok(multisig) => {
+                    use indexmap::IndexSet;
+                    use tos_common::api::daemon::MultisigState;
+                    match multisig.state {
+                        MultisigState::Active {
+                            threshold: existing_threshold,
+                            participants: existing_participants,
+                        } => {
+                            // Convert Vec<Address> to IndexSet<CompressedPublicKey>
+                            // Note: PublicKey = CompressedPublicKey in this context
+                            let compressed_keys: IndexSet<_> = existing_participants
+                                .into_iter()
+                                .map(|addr| addr.to_public_key())
+                                .collect();
+                            Some(tos_common::transaction::MultiSigPayload {
+                                participants: compressed_keys,
+                                threshold: existing_threshold,
+                            })
+                        }
+                        MultisigState::Deleted => None,
+                    }
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        }
     };
     let payload = MultiSigBuilder {
         participants: keys,
         threshold,
     };
     let tx_type = TransactionTypeBuilder::MultiSig(payload);
-    let tx = if let Some(multisig) = multisig {
-        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig.payload).await?
+    let prompt = manager.get_prompt();
+    let tx = if let Some(multisig_payload) = existing_multisig {
+        create_transaction_with_multisig(manager, prompt, wallet, tx_type, multisig_payload).await?
     } else {
         match wallet
             .create_transaction(tx_type, FeeBuilder::default())
@@ -4328,37 +3872,205 @@ async fn multisig_sign(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
+    use tos_common::api::daemon::MultisigState;
+    use tos_common::transaction::builder::UnsignedTransaction;
+    use tos_common::transaction::multisig::{MultiSig, SignatureId};
+
     manager.validate_batch_params("multisig_sign", &args)?;
 
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let prompt = manager.get_prompt();
 
+    // tx_hash required (batch mode only)
     let tx_hash = if args.has_argument("tx_hash") {
         args.get_value("tx_hash")?.to_hash()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("tx_hash".to_string()));
     } else {
-        prompt
-            .read("Transaction hash: ")
-            .await
-            .context("Error while reading transaction hash")?
+        return Err(CommandError::MissingArgument("tx_hash".to_string()));
     };
 
-    let signature = wallet.sign_data(tx_hash.as_bytes());
-    if manager.is_batch_mode() {
-        manager.message(format!("Signature: {}", signature.to_hex()));
+    // Optional parameters
+    let source_address =
+        if args.has_argument("source") {
+            let source_str = args.get_value("source")?.to_string_value()?;
+            Some(Address::from_string(&source_str).map_err(|e| {
+                CommandError::InvalidArgument(format!("Invalid source address: {}", e))
+            })?)
+        } else {
+            None
+        };
+
+    let tx_data = if args.has_argument("tx_data") {
+        Some(args.get_value("tx_data")?.to_string_value()?)
     } else {
-        prompt
-            .read_input(
-                format!(
-                    "Signature: {}\r\nPress ENTER to continue",
-                    signature.to_hex()
-                ),
-                false,
-            )
-            .await
-            .context("Error while displaying signature")?;
+        None
+    };
+
+    let other_signatures = if args.has_argument("signatures") {
+        Some(args.get_value("signatures")?.to_string_value()?)
+    } else {
+        None
+    };
+
+    let should_submit = args.has_argument("submit") && args.get_flag("submit").unwrap_or(false);
+
+    // Query multisig state from daemon to get signer ID
+    // If source is provided, use that address (for participant wallets)
+    // Otherwise use the current wallet's address (for multisig owner)
+    let network_handler = wallet.get_network_handler().lock().await;
+    let (participants, threshold) = if let Some(handler) = network_handler.as_ref() {
+        let daemon_api = handler.get_api();
+        let multisig_owner = source_address
+            .clone()
+            .unwrap_or_else(|| wallet.get_address());
+
+        match daemon_api.get_multisig(&multisig_owner).await {
+            Ok(multisig) => match multisig.state {
+                MultisigState::Active {
+                    threshold,
+                    participants,
+                } => (participants, threshold),
+                MultisigState::Deleted => {
+                    return Err(CommandError::InvalidArgument(
+                        "Multisig has been deleted".to_string(),
+                    ));
+                }
+            },
+            Err(e) => {
+                let error_msg = format!("{:#}", e);
+                if error_msg.contains("not found") || error_msg.contains("No multisig") {
+                    return Err(CommandError::InvalidArgument(
+                        "No multisig configured for this wallet".to_string(),
+                    ));
+                }
+                return Err(CommandError::InvalidArgument(format!(
+                    "Could not query multisig state: {}",
+                    e
+                )));
+            }
+        }
+    } else {
+        return Err(CommandError::InvalidArgument(
+            "Not connected to daemon".to_string(),
+        ));
+    };
+    drop(network_handler);
+
+    // Check if wallet is a participant or the source (owner)
+    let wallet_address = wallet.get_address();
+    let is_source = source_address.is_none(); // If no source provided, this wallet is the source
+    let signer_id_opt = participants.iter().position(|p| p == &wallet_address);
+
+    // If submitting with all signatures provided, we don't need to be a participant
+    // The source wallet can submit on behalf of all participants
+    if should_submit && other_signatures.is_some() {
+        // Source wallet submitting with collected signatures
+        // We might not be a participant, but we can still submit if we're the source
+        if signer_id_opt.is_none() && !is_source {
+            return Err(CommandError::InvalidArgument(
+                "This wallet is not a participant in the multisig and not the source wallet"
+                    .to_string(),
+            ));
+        }
+    }
+
+    // Sign the transaction hash if we're a participant
+    let (signer_id, signature) = if let Some(id) = signer_id_opt {
+        let sig = wallet.sign_data(tx_hash.as_bytes());
+        (Some(id as u8), Some(sig))
+    } else {
+        (None, None)
+    };
+
+    manager.message(format!("Multisig threshold: {}", threshold));
+    if let (Some(id), Some(sig)) = (signer_id, &signature) {
+        manager.message(format!("Signer ID: {}", id));
+        manager.message(format!("Signature: {}", sig.to_hex()));
+        manager.message(format!("Combined format: {}:{}", id, sig.to_hex()));
+    } else {
+        manager.message(
+            "This wallet is the source (not a participant), submitting collected signatures...",
+        );
+    }
+
+    // If submit requested, build and submit the transaction
+    if should_submit {
+        let tx_data = tx_data.ok_or_else(|| {
+            CommandError::MissingArgument("tx_data is required when submit=true".to_string())
+        })?;
+
+        // Deserialize unsigned transaction
+        let mut unsigned = UnsignedTransaction::from_hex(&tx_data)
+            .map_err(|e| CommandError::InvalidArgument(format!("Invalid tx_data hex: {}", e)))?;
+
+        // Create multisig and add this wallet's signature (if participant)
+        let mut multisig = MultiSig::new();
+        if let (Some(id), Some(sig)) = (signer_id, signature.clone()) {
+            if !multisig.add_signature(SignatureId { id, signature: sig }) {
+                return Err(CommandError::InvalidArgument(
+                    "Failed to add signature".to_string(),
+                ));
+            }
+        }
+
+        // Parse and add other signatures if provided
+        if let Some(sigs_str) = other_signatures {
+            for sig_part in sigs_str.split(',') {
+                let parts: Vec<&str> = sig_part.trim().split(':').collect();
+                if parts.len() != 2 {
+                    return Err(CommandError::InvalidArgument(format!(
+                        "Invalid signature format '{}', expected 'id:signature_hex'",
+                        sig_part
+                    )));
+                }
+                let id: u8 = parts[0].parse().map_err(|_| {
+                    CommandError::InvalidArgument(format!("Invalid signer ID: {}", parts[0]))
+                })?;
+                let sig = Signature::from_hex(parts[1]).map_err(|e| {
+                    CommandError::InvalidArgument(format!("Invalid signature hex: {}", e))
+                })?;
+
+                if !multisig.add_signature(SignatureId { id, signature: sig }) {
+                    manager.warn(format!(
+                        "Duplicate signature for signer ID {}, skipping",
+                        id
+                    ));
+                }
+            }
+        }
+
+        // Check if we have enough signatures
+        let sig_count = multisig.len();
+        if sig_count < threshold as usize {
+            return Err(CommandError::InvalidArgument(format!(
+                "Not enough signatures: have {}, need {}",
+                sig_count, threshold
+            )));
+        }
+
+        // Set multisig on unsigned transaction and finalize
+        unsigned.set_multisig(multisig);
+        let tx = unsigned.finalize(wallet.get_keypair());
+
+        manager.message(format!("Transaction hash: {}", tx.hash()));
+        manager.message("Submitting transaction...");
+
+        // Submit to daemon
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let daemon_api = handler.get_api();
+            match daemon_api.submit_transaction(&tx).await {
+                Ok(()) => {
+                    manager.message("Transaction submitted successfully!");
+                }
+                Err(e) => {
+                    manager.error(format!("Failed to submit transaction: {}", e));
+                }
+            }
+        } else {
+            return Err(CommandError::InvalidArgument(
+                "Not connected to daemon".to_string(),
+            ));
+        }
     }
 
     Ok(())
@@ -4367,47 +4079,168 @@ async fn multisig_sign(
 async fn multisig_show(manager: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let multisig = storage
-        .get_multisig_state()
-        .await
-        .context("Error while reading multisig state")?;
 
-    if let Some(multisig) = multisig {
-        manager.message(format!(
-            "MultiSig payload ({} participants with threshold at {}):",
-            multisig.payload.participants.len(),
-            multisig.payload.threshold
-        ));
-        for key in multisig.payload.participants.iter() {
-            manager.message(format!(
-                "- {}",
-                key.as_address(wallet.get_network().is_mainnet())
-            ));
+    // Stateless wallet: Query multisig state from daemon
+    let network_handler = wallet.get_network_handler().lock().await;
+    if let Some(handler) = network_handler.as_ref() {
+        let daemon_api = handler.get_api();
+        let wallet_address = wallet.get_address();
+
+        match daemon_api.has_multisig(&wallet_address).await {
+            Ok(true) => match daemon_api.get_multisig(&wallet_address).await {
+                Ok(multisig) => {
+                    use tos_common::api::daemon::MultisigState;
+                    match multisig.state {
+                        MultisigState::Active {
+                            threshold,
+                            participants,
+                        } => {
+                            manager.message(format!(
+                                "MultiSig payload ({} participants with threshold at {}):",
+                                participants.len(),
+                                threshold
+                            ));
+                            for addr in participants.iter() {
+                                manager.message(format!("- {}", addr));
+                            }
+                        }
+                        MultisigState::Deleted => {
+                            manager.message("Multisig: Deleted");
+                        }
+                    }
+                }
+                Err(e) => {
+                    manager.error(format!("Could not query multisig state: {}", e));
+                }
+            },
+            Ok(false) => {
+                manager.message("No multisig configured");
+            }
+            Err(e) => {
+                manager.error(format!("Could not query multisig state: {}", e));
+            }
         }
     } else {
-        manager.message("No multisig configured");
+        manager.error("Not connected to daemon. Use 'online_mode' to connect first.");
     }
 
     Ok(())
 }
 
+// Create an unsigned transaction for multisig signing
+// Outputs tx_hash (for signing) and tx_data (for reconstruction)
+async fn multisig_create_tx(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    use tos_common::serializer::Serializer;
+    use tos_common::transaction::builder::TransferBuilder;
+
+    manager.validate_batch_params("multisig_create_tx", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Get parameters
+    let asset_str = args.get_value("asset")?.to_string_value()?;
+    let amount_str = args.get_value("amount")?.to_string_value()?;
+    let address_str = args.get_value("address")?.to_string_value()?;
+
+    // Parse asset
+    let asset = if asset_str.to_lowercase() == "tos" {
+        Hash::zero()
+    } else {
+        Hash::from_hex(&asset_str)
+            .map_err(|e| CommandError::InvalidArgument(format!("Invalid asset hash: {}", e)))?
+    };
+
+    // Parse amount
+    let amount = from_coin(&amount_str, 8)
+        .ok_or_else(|| CommandError::InvalidArgument(format!("Invalid amount: {}", amount_str)))?;
+
+    // Parse address
+    let address = Address::from_string(&address_str)
+        .map_err(|e| CommandError::InvalidArgument(format!("Invalid address: {}", e)))?;
+
+    // Build the transfer
+    let transfer = TransferBuilder {
+        destination: address.clone(),
+        amount,
+        asset: asset.clone(),
+        extra_data: None,
+    };
+    let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
+    // Use a higher fee multiplier to ensure the transaction has sufficient fees
+    // Default fee might be too low for multisig transactions
+    let fee = FeeBuilder::Multiplier(2.0);
+
+    // Create unsigned transaction
+    let storage = wallet.get_storage().write().await;
+    let mut state = wallet
+        .create_transaction_state_with_storage(&storage, &tx_type, &fee, None)
+        .await
+        .context("Error while creating transaction state")?;
+
+    let unsigned = wallet
+        .create_unsigned_transaction(
+            &mut state,
+            None, // No multisig threshold specified - will be set when signing
+            tx_type,
+            fee,
+            storage.get_tx_version().await?,
+        )
+        .context("Error while building unsigned transaction")?;
+
+    // Get the hash for multisig signing
+    let tx_hash = unsigned.get_hash_for_multisig();
+
+    // Serialize the unsigned transaction to hex
+    let tx_data = unsigned.to_hex();
+
+    let wallet_address = wallet.get_address();
+    manager.message("Unsigned transaction created for multisig signing:");
+    manager.message(format!("source: {}", wallet_address));
+    manager.message(format!("tx_hash: {}", tx_hash));
+    manager.message(format!("tx_data: {}", tx_data));
+    manager.message(format!("Recipient: {}", address));
+    manager.message(format!(
+        "Amount: {} {}",
+        format_coin(amount, 8),
+        if asset == Hash::zero() {
+            "TOS"
+        } else {
+            "asset"
+        }
+    ));
+    manager.message("");
+    manager.message("To sign with each participant wallet:");
+    manager.message(format!(
+        "  multisig_sign tx_hash={} source={}",
+        tx_hash, wallet_address
+    ));
+    manager.message("");
+    manager.message("To submit with all signatures collected:");
+    manager.message(format!(
+        "  multisig_sign tx_hash={} source={} tx_data={} signatures=<id:sig,...> submit=true",
+        tx_hash, wallet_address, tx_data
+    ));
+
+    Ok(())
+}
+
 // broadcast tx if possible
-// submit_transaction increase the local nonce in storage in case of success
+// In stateless mode, nonce is always queried from daemon before building tx
 async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction) {
     let tx_hash = tx.hash();
     manager.message(format!("Transaction hash: {}", tx_hash));
 
-    // Light mode can submit transactions via daemon API even without sync task running
-    if wallet.is_online().await || wallet.is_light_mode() {
+    // Stateless wallet: Check if we have daemon connection (network_handler exists)
+    let has_connection = wallet.get_network_handler().lock().await.is_some();
+    if has_connection {
         if let Err(e) = wallet.submit_transaction(&tx).await {
             manager.error(format!("Couldn't submit transaction: {:#}", e));
-            manager.error("You can try to rescan your balance with the command 'rescan'");
-
-            // Maybe cache is corrupted, clear it
-            let mut storage = wallet.get_storage().write().await;
-            storage.clear_tx_cache();
-            storage.delete_unconfirmed_balances().await;
+            manager.error("Transaction failed. Check your connection to the daemon and try again.");
+            // Stateless mode: no local cache to clear - nonce is queried fresh from daemon
         } else {
             manager.message("Transaction submitted successfully!");
         }
@@ -4424,48 +4257,20 @@ async fn freeze_tos(
 ) -> Result<(), CommandError> {
     manager.validate_batch_params("freeze_tos", &args)?;
 
-    let prompt = manager.get_prompt();
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // Get amount, duration, and confirm from arguments
+    // Get amount and duration from arguments (batch mode only)
     let amount_str = if args.has_argument("amount") {
         args.get_value("amount")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("amount".to_string()));
     } else {
-        prompt
-            .read_input(
-                prompt.colorize_string(Color::Green, "Amount (TOS): "),
-                false,
-            )
-            .await
-            .context("Error while reading amount")?
+        return Err(CommandError::MissingArgument("amount".to_string()));
     };
 
     let duration_num = if args.has_argument("duration") {
         args.get_value("duration")?.to_number()?
-    } else if manager.is_batch_mode() {
+    } else {
         return Err(CommandError::MissingArgument("duration".to_string()));
-    } else {
-        prompt
-            .read(prompt.colorize_string(Color::Green, "Duration (3/7/14 days): "))
-            .await
-            .context("Error while reading duration")?
-    };
-
-    let confirm_str = if args.has_argument("confirm") {
-        args.get_value("confirm")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("confirm".to_string()));
-    } else {
-        prompt
-            .read_input(
-                prompt.colorize_string(Color::Green, "Confirm (yes/no): "),
-                false,
-            )
-            .await
-            .context("Error while reading confirmation")?
     };
 
     // Parse amount
@@ -4480,33 +4285,6 @@ async fn freeze_tos(
             "Duration must be between 3 and 90 days".to_string(),
         ));
     };
-
-    // Parse confirmation
-    let confirmed = match confirm_str.to_lowercase().as_str() {
-        "yes" | "y" | "true" => true,
-        "no" | "n" | "false" => false,
-        _ => {
-            let message = format!(
-                "Freeze {} TOS for {:?} to get energy?\nReward multiplier: {}x\n(Y/N): ",
-                format_coin(amount, 8),
-                duration,
-                duration.reward_multiplier()
-            );
-            prompt
-                .read_valid_str_value(
-                    prompt.colorize_string(Color::Yellow, &message),
-                    vec!["y", "n"],
-                )
-                .await
-                .context("Error while reading confirmation")?
-                == "y"
-        }
-    };
-
-    if !confirmed {
-        manager.message("Freeze operation cancelled");
-        return Ok(());
-    }
 
     // Create freeze transaction
     let _payload = tos_common::transaction::EnergyPayload::FreezeTos { amount, duration };
@@ -4542,34 +4320,9 @@ async fn freeze_tos(
         duration.reward_multiplier()
     ));
 
-    // Update energy resource in storage
-    let mut storage = wallet.get_storage().write().await;
-    let current_topoheight = if wallet.is_online().await {
-        if let Some(network_handler) = wallet.get_network_handler().lock().await.as_ref() {
-            match network_handler.get_api().get_info().await {
-                Ok(info) => info.topoheight,
-                Err(_) => 0,
-            }
-        } else {
-            0
-        }
-    } else {
-        0
-    };
-
-    // Get or create energy resource
-    let mut energy_resource = if let Some(resource) = storage.get_energy_resource().await? {
-        resource.clone()
-    } else {
-        tos_common::account::EnergyResource::new()
-    };
-
-    // Add energy from this freeze operation
-    let energy_gained = energy_resource.freeze_tos_for_energy(amount, duration, current_topoheight);
-    storage.set_energy_resource(energy_resource).await?;
-
-    // Energy uses integer units (not 10^8 atomic units like TOS)
-    manager.message(format!("Energy gained: {} energy", energy_gained));
+    // Note: Energy state is now tracked by daemon, not local storage
+    // The actual energy gained will be calculated by daemon when the transaction is confirmed
+    manager.message("Note: Energy will be credited after transaction confirmation.");
 
     // Broadcast the transaction
     broadcast_tx(wallet, manager, tx).await;
@@ -4584,65 +4337,17 @@ async fn unfreeze_tos(
 ) -> Result<(), CommandError> {
     manager.validate_batch_params("unfreeze_tos", &args)?;
 
-    let prompt = manager.get_prompt();
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // Get amount and confirm from arguments
+    // Get amount from arguments (batch mode only)
     let amount_str = if args.has_argument("amount") {
         args.get_value("amount")?.to_string_value()?
-    } else if manager.is_batch_mode() {
+    } else {
         return Err(CommandError::MissingArgument("amount".to_string()));
-    } else {
-        prompt
-            .read_input(
-                prompt.colorize_string(Color::Green, "Amount (TOS): "),
-                false,
-            )
-            .await
-            .context("Error while reading amount")?
-    };
-
-    let confirm_str = if args.has_argument("confirm") {
-        args.get_value("confirm")?.to_string_value()?
-    } else if manager.is_batch_mode() {
-        return Err(CommandError::MissingArgument("confirm".to_string()));
-    } else {
-        prompt
-            .read_input(
-                prompt.colorize_string(Color::Green, "Confirm (yes/no): "),
-                false,
-            )
-            .await
-            .context("Error while reading confirmation")?
     };
 
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
-
-    // Parse confirmation
-    let confirmed = match confirm_str.to_lowercase().as_str() {
-        "yes" | "y" | "true" => true,
-        "no" | "n" | "false" => false,
-        _ => {
-            let message = format!(
-                "Unfreeze {} TOS?\nThis will remove the corresponding energy.\n(Y/N): ",
-                format_coin(amount, 8)
-            );
-            prompt
-                .read_valid_str_value(
-                    prompt.colorize_string(Color::Yellow, &message),
-                    vec!["y", "n"],
-                )
-                .await
-                .context("Error while reading confirmation")?
-                == "y"
-        }
-    };
-
-    if !confirmed {
-        manager.message("Unfreeze operation cancelled");
-        return Ok(());
-    }
 
     // Create unfreeze transaction
     let _payload = tos_common::transaction::EnergyPayload::UnfreezeTos { amount };
@@ -4674,35 +4379,9 @@ async fn unfreeze_tos(
     manager.message(format!("Unfreeze transaction created: {}", hash));
     manager.message(format!("Amount: {} TOS", format_coin(amount, 8)));
 
-    // Update energy resource in storage
-    let mut storage = wallet.get_storage().write().await;
-    let current_topoheight = if wallet.is_online().await {
-        if let Some(network_handler) = wallet.get_network_handler().lock().await.as_ref() {
-            match network_handler.get_api().get_info().await {
-                Ok(info) => info.topoheight,
-                Err(_) => 0,
-            }
-        } else {
-            0
-        }
-    } else {
-        0
-    };
-
-    // Update energy resource if it exists
-    if let Some(mut energy_resource) = storage.get_energy_resource().await?.cloned() {
-        match energy_resource.unfreeze_tos(amount, current_topoheight) {
-            Ok(energy_removed) => {
-                storage.set_energy_resource(energy_resource).await?;
-                // Energy uses integer units (not 10^8 atomic units like TOS)
-                manager.message(format!("Energy removed: {} energy", energy_removed));
-            }
-            Err(e) => {
-                manager.warn(format!("Could not update energy resource: {}", e));
-                manager.message("Energy resource will be updated when transaction is confirmed");
-            }
-        }
-    }
+    // Note: Energy state is now tracked by daemon, not local storage
+    // The actual energy removed will be calculated by daemon when the transaction is confirmed
+    manager.message("Note: Energy will be updated after transaction confirmation.");
 
     // Broadcast the transaction
     broadcast_tx(wallet, manager, tx).await;
@@ -4715,13 +4394,13 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    if !wallet.is_online().await {
-        manager.error("Wallet is not connected to a daemon. Please enable online mode first.");
-        return Ok(());
-    }
-
+    // Query energy info from daemon API (stateless wallet)
     let network_handler = wallet.get_network_handler().lock().await;
-    if let Some(handler) = network_handler.as_ref() {
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+
+    {
         let api = handler.get_api();
         let address = wallet.get_address();
 
@@ -4785,12 +4464,23 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
                         if record.can_unlock {
                             manager.message("      Status: ✅ Unlockable".to_string());
                         } else {
-                            let remaining_days =
-                                record.remaining_blocks as f64 / (24.0 * 60.0 * 60.0);
-                            manager.message(format!(
-                                "      Status: 🔒 Locked ({} days remaining)",
-                                remaining_days
-                            ));
+                            // Use network-specific blocks per day for accurate display
+                            // Mainnet/Testnet: 86400 blocks/day, Devnet: 10 blocks/day
+                            let blocks_per_day =
+                                wallet.get_network().freeze_duration_multiplier() as f64;
+                            let remaining_days = record.remaining_blocks as f64 / blocks_per_day;
+                            if wallet.get_network().is_devnet() {
+                                // Devnet: show in blocks for clarity
+                                manager.message(format!(
+                                    "      Status: 🔒 Locked ({} blocks remaining, ~{:.1} devnet-days)",
+                                    record.remaining_blocks, remaining_days
+                                ));
+                            } else {
+                                manager.message(format!(
+                                    "      Status: 🔒 Locked ({:.2} days remaining)",
+                                    remaining_days
+                                ));
+                            }
                         }
                     }
                 }
@@ -4799,8 +4489,6 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
                 manager.error(format!("Failed to get energy information: {}", e));
             }
         }
-    } else {
-        manager.error("Wallet is not connected to a daemon");
     }
 
     Ok(())
@@ -4868,43 +4556,26 @@ async fn deploy_contract(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let prompt = manager.get_prompt();
     let wallet = {
         let context = manager.get_context().lock()?;
         context.get::<Arc<Wallet>>()?.clone()
     };
 
     // Wait for wallet to sync before creating transaction
-    #[cfg(feature = "network_handler")]
-    {
-        if wallet.is_online().await && !wallet.is_synced().await.unwrap_or(false) {
-            manager.message("Waiting for wallet to synchronize...");
-            if let Err(e) = wallet.wait_for_sync(30).await {
-                manager.error(format!("Sync timeout: {e:#}"));
-                manager.message("Tip: Check sync status with 'sync_status' command");
-                return Ok(());
-            }
-            manager.message("Wallet synchronized");
-        }
+
+    // Stateless wallet: Just check if daemon is connected
+    if !wallet.is_synced().await.unwrap_or(false) {
+        manager.error("Wallet is not connected to daemon. Use 'online_mode' command first.");
+        return Ok(());
     }
 
-    // Get contract file path
+    // Get contract file path (batch mode only)
     let file_path = get_required_arg_with_example(
         &mut args,
         "file",
-        manager,
         "deploy_contract <file>",
         "deploy_contract /path/to/counter.so",
-        || async {
-            prompt
-                .read_input(
-                    prompt.colorize_string(Color::Green, "Contract file path (.so): "),
-                    false,
-                )
-                .await
-        },
     )
-    .await
     .context("Error while reading file path")?;
 
     // Read contract file
@@ -4936,28 +4607,6 @@ async fn deploy_contract(
     let module = Module::from_bytecode(contract_bytes.clone());
     let module_bytes = module.to_bytes();
     let module_hex = hex::encode(&module_bytes);
-
-    // Get confirmation in interactive mode
-    if !manager.is_batch_mode() {
-        let confirmed = prompt
-            .read_valid_str_value(
-                prompt.colorize_string(
-                    Color::Yellow,
-                    &format!(
-                        "Deploy contract ({} bytes) to blockchain? (Y/N): ",
-                        contract_size
-                    ),
-                ),
-                vec!["y", "n"],
-            )
-            .await
-            .context("Error while reading confirmation")?;
-
-        if confirmed != "y" {
-            manager.message("Contract deployment cancelled");
-            return Ok(());
-        }
-    }
 
     manager.message("Building deployment transaction...");
 
@@ -5006,43 +4655,26 @@ async fn invoke_contract(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let prompt = manager.get_prompt();
     let wallet = {
         let context = manager.get_context().lock()?;
         context.get::<Arc<Wallet>>()?.clone()
     };
 
     // Wait for wallet to sync before creating transaction
-    #[cfg(feature = "network_handler")]
-    {
-        if wallet.is_online().await && !wallet.is_synced().await.unwrap_or(false) {
-            manager.message("Waiting for wallet to synchronize...");
-            if let Err(e) = wallet.wait_for_sync(30).await {
-                manager.error(format!("Sync timeout: {e:#}"));
-                manager.message("Tip: Check sync status with 'sync_status' command");
-                return Ok(());
-            }
-            manager.message("Wallet synchronized");
-        }
+
+    // Stateless wallet: Just check if daemon is connected
+    if !wallet.is_synced().await.unwrap_or(false) {
+        manager.error("Wallet is not connected to daemon. Use 'online_mode' command first.");
+        return Ok(());
     }
 
     // Get contract address (deployment TX hash)
     let contract_str = get_required_arg_with_example(
         &mut args,
         "contract",
-        manager,
         "invoke_contract <contract> <entry_id> [max_gas]",
         "invoke_contract abc123...def 0",
-        || async {
-            prompt
-                .read_input(
-                    prompt.colorize_string(Color::Green, "Contract address (TX hash): "),
-                    false,
-                )
-                .await
-        },
     )
-    .await
     .context("Error while reading contract address")?;
 
     let contract = match Hash::from_hex(&contract_str) {
@@ -5057,19 +4689,9 @@ async fn invoke_contract(
     let entry_id_str = get_required_arg_with_example(
         &mut args,
         "entry_id",
-        manager,
         "invoke_contract <contract> <entry_id> [max_gas]",
         "invoke_contract abc123...def 0",
-        || async {
-            prompt
-                .read_input(
-                    prompt.colorize_string(Color::Green, "Entry point ID (0-65535): "),
-                    false,
-                )
-                .await
-        },
     )
-    .await
     .context("Error while reading entry ID")?;
 
     let entry_id: u16 = match entry_id_str.parse() {
@@ -5108,6 +4730,16 @@ async fn invoke_contract(
         1_000_000
     };
 
+    // Optional deposit parameter (amount in atomic units to deposit to contract)
+    let deposit_amount: u64 = if args.has_argument("deposit") {
+        args.get_value("deposit")?
+            .to_string_value()?
+            .parse()
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
     manager.message(format!(
         "Invoking contract {} with entry_id={}, max_gas={}, params={}",
         contract,
@@ -5116,15 +4748,30 @@ async fn invoke_contract(
         parameters.len()
     ));
 
-    // Create invoke contract transaction
+    // Build deposits IndexMap
     use indexmap::IndexMap;
+    let mut deposits: IndexMap<Hash, ContractDepositBuilder> = IndexMap::new();
+    if deposit_amount > 0 {
+        manager.message(format!(
+            "Depositing {} TOS to contract",
+            format_tos(deposit_amount)
+        ));
+        deposits.insert(
+            TOS_ASSET,
+            ContractDepositBuilder {
+                amount: deposit_amount,
+                private: false,
+            },
+        );
+    }
 
+    // Create invoke contract transaction
     let invoke_builder = InvokeContractBuilder {
         contract,
         max_gas,
         entry_id,
         parameters,
-        deposits: IndexMap::new(),
+        deposits,
         contract_key: None,
     };
 
@@ -5153,7 +4800,6 @@ async fn get_contract_info(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let prompt = manager.get_prompt();
     let wallet = {
         let context = manager.get_context().lock()?;
         context.get::<Arc<Wallet>>()?.clone()
@@ -5163,19 +4809,9 @@ async fn get_contract_info(
     let contract_str = get_required_arg_with_example(
         &mut args,
         "contract",
-        manager,
         "get_contract_info <contract>",
         "get_contract_info abc123...def",
-        || async {
-            prompt
-                .read_input(
-                    prompt.colorize_string(Color::Green, "Contract address (TX hash): "),
-                    false,
-                )
-                .await
-        },
     )
-    .await
     .context("Error while reading contract address")?;
 
     let contract = match Hash::from_hex(&contract_str) {
@@ -5189,7 +4825,7 @@ async fn get_contract_info(
     manager.message(format!("Querying contract {}...", contract));
 
     // Get contract module from daemon
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         if let Some(handler) = network_handler.as_ref() {
@@ -5206,14 +4842,8 @@ async fn get_contract_info(
                 }
             }
         } else {
-            manager.error("Not connected to daemon. Use 'online_mode' to connect.");
+            manager.error("Not connected to daemon. Ensure daemon is running and accessible.");
         }
-    }
-
-    #[cfg(not(feature = "network_handler"))]
-    {
-        let _ = wallet;
-        manager.error("Network handler feature is not enabled.");
     }
 
     Ok(())
@@ -5224,7 +4854,6 @@ async fn get_contract_address(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let prompt = manager.get_prompt();
     let wallet = {
         let context = manager.get_context().lock()?;
         context.get::<Arc<Wallet>>()?.clone()
@@ -5234,19 +4863,9 @@ async fn get_contract_address(
     let tx_hash_str = get_required_arg_with_example(
         &mut args,
         "tx_hash",
-        manager,
         "get_contract_address <tx_hash>",
         "get_contract_address abc123...def",
-        || async {
-            prompt
-                .read_input(
-                    prompt.colorize_string(Color::Green, "Deployment transaction hash: "),
-                    false,
-                )
-                .await
-        },
     )
-    .await
     .context("Error while reading transaction hash")?;
 
     let tx_hash = match Hash::from_hex(&tx_hash_str) {
@@ -5263,7 +4882,7 @@ async fn get_contract_address(
     ));
 
     // Get contract address from daemon
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         if let Some(handler) = network_handler.as_ref() {
@@ -5287,14 +4906,8 @@ async fn get_contract_address(
                 }
             }
         } else {
-            manager.error("Not connected to daemon. Use 'online_mode' to connect.");
+            manager.error("Not connected to daemon. Ensure daemon is running and accessible.");
         }
-    }
-
-    #[cfg(not(feature = "network_handler"))]
-    {
-        let _ = wallet;
-        manager.error("Network handler feature is not enabled.");
     }
 
     Ok(())
@@ -5305,7 +4918,6 @@ async fn get_contract_balance(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
-    let prompt = manager.get_prompt();
     let wallet = {
         let context = manager.get_context().lock()?;
         context.get::<Arc<Wallet>>()?.clone()
@@ -5315,19 +4927,9 @@ async fn get_contract_balance(
     let contract_str = get_required_arg_with_example(
         &mut args,
         "contract",
-        manager,
         "get_contract_balance <contract> <asset>",
         "get_contract_balance abc123...def 0",
-        || async {
-            prompt
-                .read_input(
-                    prompt.colorize_string(Color::Green, "Contract address (TX hash): "),
-                    false,
-                )
-                .await
-        },
     )
-    .await
     .context("Error while reading contract address")?;
 
     let contract = match Hash::from_hex(&contract_str) {
@@ -5342,19 +4944,9 @@ async fn get_contract_balance(
     let asset_str = get_required_arg_with_example(
         &mut args,
         "asset",
-        manager,
         "get_contract_balance <contract> <asset>",
         "get_contract_balance abc123...def 0",
-        || async {
-            prompt
-                .read_input(
-                    prompt.colorize_string(Color::Green, "Asset hash (0 for native TOS): "),
-                    false,
-                )
-                .await
-        },
     )
-    .await
     .context("Error while reading asset hash")?;
 
     let asset = if asset_str == "0" {
@@ -5372,7 +4964,7 @@ async fn get_contract_balance(
     manager.message(format!("Querying balance for contract {}...", contract));
 
     // Get contract balance from daemon
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         if let Some(handler) = network_handler.as_ref() {
@@ -5389,15 +4981,8 @@ async fn get_contract_balance(
                 }
             }
         } else {
-            manager.error("Not connected to daemon. Use 'online_mode' to connect.");
+            manager.error("Not connected to daemon. Ensure daemon is running and accessible.");
         }
-    }
-
-    #[cfg(not(feature = "network_handler"))]
-    {
-        let _ = wallet;
-        let _ = asset;
-        manager.error("Network handler feature is not enabled.");
     }
 
     Ok(())
@@ -5416,7 +5001,7 @@ async fn count_contracts(
     manager.message("Querying contract count...");
 
     // Get contract count from daemon
-    #[cfg(feature = "network_handler")]
+
     {
         let network_handler = wallet.get_network_handler().lock().await;
         if let Some(handler) = network_handler.as_ref() {
@@ -5430,14 +5015,8 @@ async fn count_contracts(
                 }
             }
         } else {
-            manager.error("Not connected to daemon. Use 'online_mode' to connect.");
+            manager.error("Not connected to daemon. Ensure daemon is running and accessible.");
         }
-    }
-
-    #[cfg(not(feature = "network_handler"))]
-    {
-        let _ = wallet;
-        manager.error("Network handler feature is not enabled.");
     }
 
     Ok(())

@@ -1,9 +1,10 @@
 use crate::{
-    api::XSWDAppId, error::WalletError, storage::Balance,
-    transaction_builder::TransactionBuilderState, wallet::Wallet,
+    api::XSWDAppId,
+    error::WalletError,
+    transaction_builder::{Balance, TransactionBuilderState},
+    wallet::Wallet,
 };
 use anyhow::Context as AnyContext;
-use cfg_if::cfg_if;
 use serde_json::{json, Value};
 use std::{borrow::Cow, sync::Arc};
 use tos_common::{
@@ -32,7 +33,7 @@ pub fn register_methods(handler: &mut RPCHandler<Arc<Wallet>>) {
     handler.register_method("get_topoheight", async_handler!(get_topoheight));
     handler.register_method("get_address", async_handler!(get_address));
     handler.register_method("split_address", async_handler!(split_address));
-    handler.register_method("rescan", async_handler!(rescan));
+    // REMOVED: rescan - not needed in stateless wallet mode
     handler.register_method("get_balance", async_handler!(get_balance));
     handler.register_method("has_balance", async_handler!(has_balance));
     handler.register_method("get_tracked_assets", async_handler!(get_tracked_assets));
@@ -60,11 +61,11 @@ pub fn register_methods(handler: &mut RPCHandler<Arc<Wallet>>) {
         async_handler!(sign_unsigned_transaction),
     );
 
-    handler.register_method("clear_tx_cache", async_handler!(clear_tx_cache));
+    // REMOVED: clear_tx_cache - not needed in stateless wallet mode
+    // REMOVED: set_offline_mode - stateless wallet always requires daemon connection
     handler.register_method("list_transactions", async_handler!(list_transactions));
     handler.register_method("is_online", async_handler!(is_online));
     handler.register_method("set_online_mode", async_handler!(set_online_mode));
-    handler.register_method("set_offline_mode", async_handler!(set_offline_mode));
     handler.register_method("sign_data", async_handler!(sign_data));
     handler.register_method("estimate_fees", async_handler!(estimate_fees));
     handler.register_method(
@@ -106,24 +107,28 @@ async fn get_network(context: &Context, body: Value) -> Result<Value, InternalRp
     Ok(json!(network))
 }
 
-// Retrieve the current nonce of the wallet
+// Retrieve the current nonce of the wallet (stateless: queries daemon)
 async fn get_nonce(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     require_no_params(body)?;
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let nonce = storage.get_nonce()?;
+    // Stateless wallet: Query nonce from daemon via LightAPI
+    let nonce = wallet.get_nonce().await?;
     Ok(json!(nonce))
 }
 
-// Retrieve the current topoheight until which the wallet is synced
+// Retrieve the current daemon topoheight (stateless: queries daemon)
 async fn get_topoheight(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     require_no_params(body)?;
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let topoheight = storage.get_synced_topoheight()?;
-    Ok(json!(topoheight))
+    // Stateless wallet: Query topoheight from daemon via LightAPI
+    let light_api = wallet.get_light_api().await?;
+    let info = light_api
+        .get_info()
+        .await
+        .map_err(|e| InternalRpcError::Custom(-32000, format!("Failed to query daemon: {}", e)))?;
+    Ok(json!(info.topoheight))
 }
 
 // Retrieve the wallet address
@@ -178,22 +183,16 @@ async fn network_info(context: &Context, body: Value) -> Result<Value, InternalR
 
     let wallet: &Arc<Wallet> = context.get()?;
 
-    cfg_if! {
-        if #[cfg(feature = "network_handler")] {
-            let network_handler = wallet.get_network_handler().lock().await;
-            if let Some(handler) = network_handler.as_ref() {
-                let api = handler.get_api();
-                let inner = api.get_info().await?;
-                Ok(json!(NetworkInfoResult {
-                    inner,
-                    connected_to: api.get_client().get_target().to_owned(),
-                }))
-            } else {
-                Err(WalletError::NotOnlineMode.into())
-            }
-        } else {
-            Err(WalletError::Unsupported.into())
-        }
+    let network_handler = wallet.get_network_handler().lock().await;
+    if let Some(handler) = network_handler.as_ref() {
+        let api = handler.get_api();
+        let inner = api.get_info().await?;
+        Ok(json!(NetworkInfoResult {
+            inner,
+            connected_to: api.get_client().get_target().to_owned(),
+        }))
+    } else {
+        Err(WalletError::NotOnlineMode.into())
     }
 }
 
@@ -214,48 +213,30 @@ async fn decrypt_extra_data(context: &Context, body: Value) -> Result<Value, Int
     Ok(json!(data))
 }
 
-// Rescan the wallet from the provided topoheight (or from the beginning if not provided)
-async fn rescan(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
-    let params: RescanParams = parse_params(body)?;
-    let wallet: &Arc<Wallet> = context.get()?;
+// REMOVED: rescan RPC - not needed in stateless wallet mode
+// All data is queried on-demand from daemon
 
-    cfg_if! {
-        if #[cfg(feature = "network_handler")] {
-            wallet.rescan(params.until_topoheight.unwrap_or(0), params.auto_reconnect).await?;
-
-            Ok(json!(true))
-        } else {
-            Err(WalletError::Unsupported.into())
-        }
-    }
-}
-
-// Retrieve the balance of the wallet for a specific asset
-// By default, it will returns 0 if no balance is found on disk
+// Retrieve the balance of the wallet for a specific asset (stateless: queries daemon)
+// Returns 0 if account has no balance for the asset
 async fn get_balance(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetBalanceParams = parse_params(body)?;
     let asset = params.asset.unwrap_or(TOS_ASSET);
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
 
-    // If the asset is not found, it will returns 0
-    // Use has_balance below to check if the wallet has a balance for a specific asset
-    let balance = storage.get_plaintext_balance_for(&asset).await.unwrap_or(0);
+    // Stateless wallet: Query balance from daemon via LightAPI
+    let balance = wallet.get_balance(&asset).await?;
     Ok(json!(balance))
 }
 
-// Check if the wallet has a balance for a specific asset
+// Check if the wallet has a balance for a specific asset (stateless: queries daemon)
 async fn has_balance(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetBalanceParams = parse_params(body)?;
     let asset = params.asset.unwrap_or(TOS_ASSET);
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
 
-    let exist = storage
-        .has_balance_for(&asset)
-        .await
-        .context("Error while checking if balance exists")?;
-    Ok(json!(exist))
+    // Stateless wallet: Query balance from daemon, non-zero means has balance
+    let balance = wallet.get_balance(&asset).await?;
+    Ok(json!(balance > 0))
 }
 
 // Retrieve all tracked assets by wallet
@@ -276,11 +257,12 @@ async fn get_tracked_assets(context: &Context, body: Value) -> Result<Value, Int
     // In case of a huge reorg, a tracked asset may be inexistant if the asset got removed temporarily
     // This must be taken in count
     let storage = wallet.get_storage().read().await;
-    let tracked_assets = storage
+    let tracked_assets: Vec<_> = storage
         .get_tracked_assets()?
+        .into_iter()
         .skip(params.skip.unwrap_or(0))
         .take(maximum)
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect();
 
     Ok(json!(tracked_assets))
 }
@@ -314,12 +296,13 @@ async fn get_assets(context: &Context, body: Value) -> Result<Value, InternalRpc
     };
 
     let storage = wallet.get_storage().read().await;
-    let assets = storage
+    let assets: Vec<_> = storage
         .get_assets_with_data()
         .await?
+        .into_iter()
         .skip(params.skip.unwrap_or(0))
         .take(maximum)
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect();
 
     Ok(json!(assets))
 }
@@ -334,62 +317,77 @@ async fn get_asset(context: &Context, body: Value) -> Result<Value, InternalRpcE
     Ok(json!(data))
 }
 
-// Retrieve a transaction from the wallet storage using its hash
+// Retrieve a transaction by hash (stateless: queries daemon)
+// BREAKING CHANGE in stateless wallet mode:
+// - Returns raw daemon Transaction object instead of wallet TransactionEntry
+// - Response structure: { owner, data, signature, ... } (daemon format)
+// - Previous format: { hash, topoheight, entry_type, ... } (wallet format)
 async fn get_transaction(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetTransactionParams = parse_params(body)?;
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    if !storage.has_transaction(&params.hash)? {
-        return Err(InternalRpcError::CustomStr(
-            404,
-            "Transaction is not found in wallet",
-        ));
-    }
 
-    let transaction = storage.get_transaction(&params.hash)?;
+    // Stateless wallet: Query transaction from daemon
+    let light_api = wallet.get_light_api().await?;
+    let transaction = light_api.get_transaction(&params.hash).await.map_err(|e| {
+        let error_msg = format!("{:#}", e);
+        if error_msg.contains("not found") || error_msg.contains("Data not found") {
+            InternalRpcError::CustomStr(404, "Transaction is not found")
+        } else {
+            InternalRpcError::Custom(-32000, format!("Failed to query daemon: {}", e))
+        }
+    })?;
 
-    Ok(json!(
-        transaction.serializable(wallet.get_network().is_mainnet())
-    ))
+    // Return raw transaction data from daemon (stateless wallet format)
+    Ok(json!({
+        "transaction": transaction,
+        "format": "daemon_transaction",
+        "api_version": "2.0"
+    }))
 }
 
-// Debug rpc method to perform a search across all entries for a transaction from the wallet storage using its hash
+// Search for a transaction by hash (stateless: queries daemon)
+// BREAKING CHANGE in stateless wallet mode:
+// - Returns raw daemon Transaction object instead of wallet TransactionEntry
+// - Response structure contains "transaction" in daemon format, "index" is always null
+// - "format" field indicates data source ("daemon" in stateless mode)
 async fn search_transaction(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: SearchTransactionParams = parse_params(body)?;
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
 
-    let index = storage.get_transaction_id(&params.hash)?;
-    if storage.has_transaction(&params.hash)? {
-        let transaction = storage.get_transaction(&params.hash)?;
-
-        return Ok(json!(SearchTransactionResult {
-            transaction: Some(transaction.serializable(wallet.get_network().is_mainnet())),
-            index,
-            is_raw_search: false
-        }));
+    // Stateless wallet: Query transaction from daemon
+    // Note: "found" indicates if daemon has the tx, NOT if it belongs to this wallet
+    // Stateless mode cannot verify ownership without scanning account history
+    let light_api = wallet.get_light_api().await?;
+    match light_api.get_transaction(&params.hash).await {
+        Ok(transaction) => Ok(json!({
+            "transaction": transaction,
+            "found": true,
+            "format": "daemon_transaction",
+            "api_version": "2.0"
+        })),
+        Err(_) => Ok(json!({
+            "transaction": null,
+            "found": false,
+            "format": "daemon_transaction",
+            "api_version": "2.0"
+        })),
     }
-
-    let transaction = storage
-        .search_transaction(&params.hash)?
-        .map(|transaction| transaction.serializable(wallet.get_network().is_mainnet()));
-
-    Ok(json!(SearchTransactionResult {
-        transaction,
-        index,
-        is_raw_search: true
-    }))
 }
 
-// Dump the TX in hex format
+// Dump the TX in hex format (stateless: queries daemon)
 async fn dump_transaction(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: GetTransactionParams = parse_params(body)?;
 
     let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let transaction = storage.get_transaction(&params.hash)?;
+
+    // Stateless wallet: Query transaction from daemon
+    let light_api = wallet.get_light_api().await?;
+    let transaction = light_api
+        .get_transaction(&params.hash)
+        .await
+        .map_err(|e| InternalRpcError::Custom(-32000, format!("Failed to query daemon: {}", e)))?;
 
     Ok(json!(transaction.to_hex()))
 }
@@ -459,16 +457,12 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
     if params.broadcast {
         if let Err(e) = wallet.submit_transaction(&tx).await {
             if log::log_enabled!(log::Level::Warn) {
-                warn!(
-                    "Clearing Tx cache & unconfirmed balances because of broadcasting error: {}",
-                    e
-                );
+                warn!("Failed to broadcast transaction: {}", e);
             }
             if log::log_enabled!(log::Level::Debug) {
                 debug!("TX HEX: {}", tx.to_hex());
             }
-            storage.clear_tx_cache();
-            storage.delete_unconfirmed_balances().await;
+            // Stateless wallet: No local cache to clear
             return Err(e.into());
         }
     }
@@ -578,10 +572,26 @@ async fn build_unsigned_transaction(
         .await?;
 
     let version = storage.get_tx_version().await?;
-    let threshold = storage
-        .get_multisig_state()
-        .await?
-        .map(|state| state.payload.threshold);
+    // Stateless wallet: Query multisig threshold from daemon
+    let threshold = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let daemon_api = handler.get_api();
+            let wallet_address = wallet.get_address();
+            match daemon_api.get_multisig(&wallet_address).await {
+                Ok(multisig) => {
+                    use tos_common::api::daemon::MultisigState;
+                    match multisig.state {
+                        MultisigState::Active { threshold, .. } => Some(threshold),
+                        MultisigState::Deleted => None,
+                    }
+                }
+                Err(_) => None, // No multisig or error querying
+            }
+        } else {
+            None // Not connected to daemon
+        }
+    };
 
     // Generate the TX
     let builder = TransactionBuilder::new(
@@ -651,16 +661,12 @@ async fn finalize_unsigned_transaction(
     if params.broadcast {
         if let Err(e) = wallet.submit_transaction(&tx).await {
             if log::log_enabled!(log::Level::Warn) {
-                warn!(
-                    "Clearing Tx cache & unconfirmed balances because of broadcasting error: {}",
-                    e
-                );
+                warn!("Failed to broadcast transaction: {}", e);
             }
             if log::log_enabled!(log::Level::Debug) {
                 debug!("TX HEX: {}", tx.to_hex());
             }
-            storage.clear_tx_cache();
-            storage.delete_unconfirmed_balances().await;
+            // Stateless wallet: No local cache to clear
             return Err(e.into());
         }
     }
@@ -698,16 +704,8 @@ async fn sign_unsigned_transaction(
     }))
 }
 
-// Clear the transaction cache
-async fn clear_tx_cache(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
-    require_no_params(body)?;
-
-    let wallet: &Arc<Wallet> = context.get()?;
-    let mut storage = wallet.get_storage().write().await;
-    storage.clear_tx_cache();
-
-    Ok(json!(true))
-}
+// REMOVED: clear_tx_cache RPC - not needed in stateless wallet mode
+// No local cache to clear, all data is queried on-demand from daemon
 
 // Estimate fees for a transaction
 async fn estimate_fees(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -720,41 +718,98 @@ async fn estimate_fees(context: &Context, body: Value) -> Result<Value, Internal
     Ok(json!(fees))
 }
 
-// List transactions from the wallet storage
+// List transactions from daemon's account history (stateless wallet)
+// API Version: 2.0 (stateless wallet mode)
+// Note: In stateless mode, not all filters are supported:
+// - Supported: asset, min_topoheight, max_topoheight, limit, skip
+// - Not supported: address filter (always uses wallet address), accept_* filters, query
+// Response format changed from TransactionEntry to AccountHistoryEntry
 async fn list_transactions(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: ListTransactionsParams = parse_params(body)?;
-    if let Some(addr) = &params.address {
-        if !addr.is_normal() {
-            return Err(InternalRpcError::InvalidParams(
-                "Address should be in normal format (not integrated address)",
-            ));
+
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Stateless wallet: Query transaction history from daemon
+    let light_api = wallet.get_light_api().await?;
+    let wallet_address = wallet.get_address();
+
+    // Use TOS_ASSET as default if no asset specified
+    // Note: Daemon API requires a specific asset; multi-asset query not supported
+    use tos_common::config::TOS_ASSET;
+    let asset = params.asset.unwrap_or(TOS_ASSET);
+
+    // Build list of unsupported filters that were provided
+    let mut unsupported_filters = Vec::new();
+    if params.address.is_some() {
+        unsupported_filters.push("address");
+    }
+    if !params.accept_incoming
+        || !params.accept_outgoing
+        || !params.accept_coinbase
+        || !params.accept_burn
+    {
+        unsupported_filters.push("accept_* filters");
+    }
+    if params.query.is_some() {
+        unsupported_filters.push("query");
+    }
+
+    // Query account history from daemon
+    // Return empty list on "not found" instead of error (backward compatible)
+    let history = match light_api
+        .get_account_history(
+            &wallet_address,
+            &asset,
+            params.min_topoheight,
+            params.max_topoheight,
+        )
+        .await
+    {
+        Ok(entries) => entries,
+        Err(e) => {
+            let error_msg = format!("{:#}", e);
+            if error_msg.contains("Data not found") || error_msg.contains("not found") {
+                // No history for this account/asset - return empty list
+                Vec::new()
+            } else {
+                return Err(InternalRpcError::Custom(
+                    -32000,
+                    format!("Failed to query daemon: {}", e),
+                ));
+            }
+        }
+    };
+
+    // Apply limit and skip if provided
+    let mut entries: Vec<_> = history.into_iter().collect();
+
+    if let Some(skip) = params.skip {
+        if skip < entries.len() {
+            entries = entries.into_iter().skip(skip).collect();
+        } else {
+            entries.clear();
         }
     }
 
-    let wallet: &Arc<Wallet> = context.get()?;
-    let storage = wallet.get_storage().read().await;
-    let opt_key = params.address.map(|addr| addr.to_public_key());
+    if let Some(limit) = params.limit {
+        entries.truncate(limit);
+    }
 
-    let mainnet = wallet.get_network().is_mainnet();
-    let txs = storage
-        .get_filtered_transactions(
-            opt_key.as_ref(),
-            params.asset.as_ref(),
-            params.min_topoheight,
-            params.max_topoheight,
-            params.accept_incoming,
-            params.accept_outgoing,
-            params.accept_coinbase,
-            params.accept_burn,
-            params.query.as_ref(),
-            params.limit,
-            params.skip,
-        )?
-        .into_iter()
-        .map(|tx| tx.serializable(mainnet))
-        .collect::<Vec<_>>();
+    // Build response with version info for client compatibility
+    // Note: "count" is the number of returned entries (after skip/limit), not total available
+    let mut response = json!({
+        "entries": entries,
+        "count": entries.len(),  // returned page size, not total
+        "format": "daemon_account_history",
+        "api_version": "2.0"
+    });
 
-    Ok(json!(txs))
+    // Add unsupported filters warning if any were provided
+    if !unsupported_filters.is_empty() {
+        response["ignored_filters"] = json!(unsupported_filters);
+    }
+
+    Ok(response)
 }
 
 // Check if the wallet is currently connected to a daemon
@@ -777,37 +832,13 @@ async fn set_online_mode(context: &Context, body: Value) -> Result<Value, Intern
         ));
     }
 
-    cfg_if! {
-        if #[cfg(feature = "network_handler")] {
-            wallet.set_online_mode(&params.daemon_address, params.auto_reconnect).await?;
-            Ok(json!(true))
-        } else {
-            Err(WalletError::Unsupported.into())
-        }
-    }
+    wallet
+        .set_online_mode(&params.daemon_address, params.auto_reconnect)
+        .await?;
+    Ok(json!(true))
 }
 
-// Connect the wallet to a daemon if not already connected
-async fn set_offline_mode(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
-    require_no_params(body)?;
-
-    let wallet: &Arc<Wallet> = context.get()?;
-    if !wallet.is_online().await {
-        return Err(InternalRpcError::InvalidRequestStr(
-            "Wallet is already in offline mode",
-        ));
-    }
-
-    cfg_if! {
-        if #[cfg(feature = "network_handler")] {
-            wallet.set_offline_mode().await?;
-
-            Ok(json!(true))
-        } else {
-            Err(WalletError::Unsupported.into())
-        }
-    }
-}
+// REMOVED: set_offline_mode - stateless wallet always requires daemon connection
 
 // Sign any data converted in bytes format
 async fn sign_data(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -845,7 +876,8 @@ async fn get_matching_keys(context: &Context, body: Value) -> Result<Value, Inte
     let wallet: &Arc<Wallet> = context.get()?;
     let tree = get_tree_name(context, params.tree).await?;
     let storage = wallet.get_storage().read().await;
-    let keys = storage.get_custom_tree_keys(&tree, &params.query, params.limit, params.skip)?;
+    // Stateless wallet: skip is not supported, use limit only
+    let keys = storage.get_custom_tree_keys(&tree, params.query, params.limit)?;
 
     Ok(json!(keys))
 }
@@ -856,7 +888,8 @@ async fn count_matching_entries(context: &Context, body: Value) -> Result<Value,
     let wallet: &Arc<Wallet> = context.get()?;
     let tree = get_tree_name(context, params.tree).await?;
     let storage = wallet.get_storage().read().await;
-    let count = storage.count_custom_tree_entries(&tree, &params.key, &params.value)?;
+    // Stateless wallet: only key query is supported
+    let count = storage.count_custom_tree_entries(&tree, params.key)?;
 
     Ok(json!(count))
 }
@@ -927,6 +960,7 @@ async fn query_db(context: &Context, body: Value) -> Result<Value, InternalRpcEr
     let wallet: &Arc<Wallet> = context.get()?;
     let tree = get_tree_name(context, params.tree).await?;
     let storage = wallet.get_storage().read().await;
-    let result = storage.query_db(&tree, params.key, params.value, params.limit, params.skip)?;
+    // Stateless wallet: skip is not supported
+    let result = storage.query_db(&tree, params.key, params.value, params.limit)?;
     Ok(json!(result))
 }

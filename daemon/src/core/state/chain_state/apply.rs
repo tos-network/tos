@@ -202,6 +202,13 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         self.inner.storage.is_mainnet()
     }
 
+    fn get_network(&self) -> tos_common::network::Network {
+        self.inner
+            .storage
+            .get_network()
+            .unwrap_or(tos_common::network::Network::Mainnet)
+    }
+
     async fn set_contract_outputs(
         &mut self,
         tx_hash: &'a Hash,

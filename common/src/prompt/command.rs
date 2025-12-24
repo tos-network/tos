@@ -40,11 +40,7 @@ pub enum CommandError {
     Any(#[from] Error),
     #[error("Poison Error: {}", _0)]
     PoisonError(String),
-    #[error(
-        "Missing required argument '{}' in batch mode. Use --{} <value>",
-        _0,
-        _0
-    )]
+    #[error("Missing required argument '{}'. Use: {}=<value>", _0, _0)]
     MissingArgument(String),
     #[error("Batch mode error: {}", _0)]
     BatchModeError(String),
@@ -247,7 +243,7 @@ pub struct CommandManager {
     context: Mutex<Context>,
     prompt: ShareablePrompt,
     running_since: Instant,
-    batch_mode: bool,
+    // Note: batch_mode removed - wallet now always operates in batch mode
 }
 
 impl CommandManager {
@@ -257,7 +253,6 @@ impl CommandManager {
             context: Mutex::new(context),
             prompt,
             running_since: Instant::now(),
-            batch_mode: false,
         }
     }
 
@@ -265,22 +260,18 @@ impl CommandManager {
         Self::with_context(Context::new(), prompt)
     }
 
+    /// Create CommandManager (always in batch mode)
+    /// The exec_mode parameter is kept for API compatibility but ignored
+    #[allow(unused_variables)]
     pub fn with_batch_mode(context: Context, prompt: ShareablePrompt, exec_mode: bool) -> Self {
-        Self {
-            commands: Mutex::new(Vec::new()),
-            context: Mutex::new(context),
-            prompt,
-            running_since: Instant::now(),
-            batch_mode: exec_mode,
-        }
+        Self::with_context(context, prompt)
     }
 
+    /// Create CommandManager (always in batch mode)
+    /// The exec_mode parameter is kept for API compatibility but ignored
+    #[allow(unused_variables)]
     pub fn new_with_batch_mode(prompt: ShareablePrompt, exec_mode: bool) -> Self {
-        Self::with_batch_mode(Context::new(), prompt, exec_mode)
-    }
-
-    pub fn is_batch_mode(&self) -> bool {
-        self.batch_mode
+        Self::new(prompt)
     }
 
     // Register default commands:
@@ -421,28 +412,53 @@ impl CommandManager {
                 .cloned()
                 .ok_or(CommandError::CommandNotFound)?
         };
-        let mut arguments: HashMap<String, ArgValue> = HashMap::new();
-        for arg in command.get_required_args() {
-            let arg_value = command_split
-                .next()
-                .ok_or_else(|| CommandError::ExpectedRequiredArg(arg.get_name().to_owned()))?;
-            arguments.insert(arg.get_name().clone(), arg.get_type().to_value(arg_value)?);
-        }
 
-        // include all options args available
-        for optional_arg in command.get_optional_args() {
-            if let Some(arg_value) = command_split.next() {
-                arguments.insert(
-                    optional_arg.get_name().clone(),
-                    optional_arg.get_type().to_value(arg_value)?,
-                );
+        // Parse all arguments as key=value format only
+        let mut named_args: HashMap<String, String> = HashMap::new();
+        for token in command_split {
+            if let Some(eq_pos) = token.find('=') {
+                let key = &token[..eq_pos];
+                let value = &token[eq_pos + 1..];
+                named_args.insert(key.to_string(), value.to_string());
             } else {
-                break;
+                return Err(CommandError::InvalidArgument(format!(
+                    "Invalid argument '{}'. Use key=value format (e.g., {}=<value>)",
+                    token, token
+                )));
             }
         }
 
-        if command_split.next().is_some() {
-            return Err(CommandError::TooManyArguments);
+        let mut arguments: HashMap<String, ArgValue> = HashMap::new();
+
+        // Process required arguments
+        for arg in command.get_required_args() {
+            let arg_name = arg.get_name();
+            if let Some(value) = named_args.remove(arg_name) {
+                arguments.insert(arg_name.clone(), arg.get_type().to_value(&value)?);
+            } else {
+                return Err(CommandError::ExpectedRequiredArg(arg_name.to_owned()));
+            }
+        }
+
+        // Process optional arguments
+        for arg in command.get_optional_args() {
+            let arg_name = arg.get_name();
+            if let Some(value) = named_args.remove(arg_name) {
+                arguments.insert(arg_name.clone(), arg.get_type().to_value(&value)?);
+            }
+        }
+
+        // Check for unknown arguments
+        if !named_args.is_empty() {
+            let unknown_keys: Vec<&String> = named_args.keys().collect();
+            return Err(CommandError::InvalidArgument(format!(
+                "Unknown argument(s): {}",
+                unknown_keys
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
         }
 
         command.execute(self, ArgumentManager::new(arguments)).await
@@ -479,27 +495,25 @@ impl CommandManager {
         self.running_since.elapsed()
     }
 
-    /// Require a parameter in batch mode, throw error if missing
+    /// Require a parameter, throw error if missing (always in batch mode)
     pub fn require_param(
         &self,
         args: &ArgumentManager,
         param_name: &str,
     ) -> Result<(), CommandError> {
-        if self.batch_mode && !args.has_argument(param_name) {
+        if !args.has_argument(param_name) {
             return Err(CommandError::MissingArgument(param_name.to_string()));
         }
         Ok(())
     }
 
-    /// Validate required parameters for batch mode
+    /// Validate required parameters (always in batch mode)
     pub fn validate_batch_params(
         &self,
         command_name: &str,
         args: &ArgumentManager,
     ) -> Result<(), CommandError> {
-        if !self.batch_mode {
-            return Ok(());
-        }
+        // Always validate - we're always in batch mode
 
         match command_name {
             "open" => {
