@@ -271,10 +271,17 @@ async fn main() -> Result<()> {
             if log::log_enabled!(log::Level::Info) {
                 info!("Creating a new wallet at {path}");
             }
+            // Determine recovery option: private_key takes precedence over seed
+            let recover_option = if let Some(ref pk) = config.private_key {
+                Some(RecoverOption::PrivateKey(pk.as_str()))
+            } else {
+                config.seed.as_deref().map(RecoverOption::Seed)
+            };
+
             let wallet = Wallet::create(
                 path,
                 &password,
-                config.seed.as_deref().map(RecoverOption::Seed),
+                recover_option,
                 config.network,
                 precomputed_tables,
                 config.n_decryption_threads,
@@ -285,10 +292,13 @@ async fn main() -> Result<()> {
             // Display wallet info and exit
             println!("Wallet created successfully!");
             println!("Address: {}", wallet.get_address());
-            if let Ok(seed) = wallet.get_seed(0) {
-                println!("\nSeed phrase (SAVE THIS SECURELY):");
-                println!("{}", seed);
-                println!("\nWARNING: Never share your seed phrase with anyone!");
+            // Only show seed if wallet was NOT recovered from private key
+            if config.private_key.is_none() {
+                if let Ok(seed) = wallet.get_seed(0) {
+                    println!("\nSeed phrase (SAVE THIS SECURELY):");
+                    println!("{}", seed);
+                    println!("\nWARNING: Never share your seed phrase with anyone!");
+                }
             }
             return Ok(());
         }
@@ -310,10 +320,16 @@ async fn main() -> Result<()> {
             if log::log_enabled!(log::Level::Info) {
                 info!("Creating a new wallet at {path}");
             }
+            // Determine recovery option: private_key takes precedence over seed
+            let recover_option = if let Some(ref pk) = config.private_key {
+                Some(RecoverOption::PrivateKey(pk.as_str()))
+            } else {
+                config.seed.as_deref().map(RecoverOption::Seed)
+            };
             Wallet::create(
                 path,
                 &password,
-                config.seed.as_deref().map(RecoverOption::Seed),
+                recover_option,
                 config.network,
                 precomputed_tables,
                 config.n_decryption_threads,
@@ -797,6 +813,16 @@ async fn setup_wallet_command_manager(
             ),
         ],
         CommandHandler::Async(async_handler!(seed)),
+    ))?;
+    command_manager.add_command(Command::with_required_arguments(
+        "private_key",
+        "Show private key in hex format (for backup/recovery)",
+        vec![Arg::new(
+            "password",
+            ArgType::String,
+            "Password to unlock private key",
+        )],
+        CommandHandler::Async(async_handler!(show_private_key)),
     ))?;
     command_manager.add_command(Command::new(
         "nonce",
@@ -2683,6 +2709,28 @@ async fn seed(
 
     let seed = wallet.get_seed(language as usize)?;
     manager.message(format!("Seed: {}", seed));
+    Ok(())
+}
+
+// Show private key in hex format for backup/recovery
+async fn show_private_key(
+    manager: &CommandManager,
+    mut arguments: ArgumentManager,
+) -> Result<(), CommandError> {
+    manager.validate_batch_params("private_key", &arguments)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Password required (batch mode only)
+    let password = arguments.get_value("password")?.to_string_value()?;
+
+    // Check if password is valid
+    wallet.is_valid_password(&password).await?;
+
+    let private_key_hex = wallet.get_keypair().get_private_key().to_hex();
+    manager.message(format!("Private Key: {}", private_key_hex));
+    manager.message("WARNING: Never share your private key with anyone!");
     Ok(())
 }
 

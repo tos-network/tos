@@ -221,6 +221,12 @@ QUICK START GUIDE
 
    Note: Use --seed with a 25-word seed phrase to restore an existing wallet
 
+6. RESTORE WALLET FROM PRIVATE KEY:
+   ./tos_wallet --network devnet --wallet-path restored_wallet --password newpass456 \
+       --private-key "hex_private_key" --exec "display_address"
+
+   Note: Use --private-key with a hex-encoded private key to restore a wallet
+
 ═══════════════════════════════════════════════════════════════════════════════
 PASSWORD OPTIONS (pick one):
 ═══════════════════════════════════════════════════════════════════════════════
@@ -388,9 +394,12 @@ pub struct Config {
     /// Password used to open wallet
     #[clap(long)]
     pub password: Option<String>,
-    /// Restore wallet using seed
+    /// Restore wallet using seed phrase (25 words)
     #[clap(long)]
     pub seed: Option<String>,
+    /// Restore wallet using private key (hex format)
+    #[clap(long)]
+    pub private_key: Option<String>,
     /// How many threads we want to use
     /// during ciphertext decryption
     #[clap(long, default_value_t = detect_available_parallelism())]
