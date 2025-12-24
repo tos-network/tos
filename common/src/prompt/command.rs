@@ -40,10 +40,7 @@ pub enum CommandError {
     Any(#[from] Error),
     #[error("Poison Error: {}", _0)]
     PoisonError(String),
-    #[error(
-        "Missing required argument '{}' in batch mode. Provide it as a positional argument in --exec command.",
-        _0
-    )]
+    #[error("Missing required argument '{}'. Use: {}=<value>", _0, _0)]
     MissingArgument(String),
     #[error("Batch mode error: {}", _0)]
     BatchModeError(String),
@@ -415,28 +412,53 @@ impl CommandManager {
                 .cloned()
                 .ok_or(CommandError::CommandNotFound)?
         };
-        let mut arguments: HashMap<String, ArgValue> = HashMap::new();
-        for arg in command.get_required_args() {
-            let arg_value = command_split
-                .next()
-                .ok_or_else(|| CommandError::ExpectedRequiredArg(arg.get_name().to_owned()))?;
-            arguments.insert(arg.get_name().clone(), arg.get_type().to_value(arg_value)?);
-        }
 
-        // include all options args available
-        for optional_arg in command.get_optional_args() {
-            if let Some(arg_value) = command_split.next() {
-                arguments.insert(
-                    optional_arg.get_name().clone(),
-                    optional_arg.get_type().to_value(arg_value)?,
-                );
+        // Parse all arguments as key=value format only
+        let mut named_args: HashMap<String, String> = HashMap::new();
+        for token in command_split {
+            if let Some(eq_pos) = token.find('=') {
+                let key = &token[..eq_pos];
+                let value = &token[eq_pos + 1..];
+                named_args.insert(key.to_string(), value.to_string());
             } else {
-                break;
+                return Err(CommandError::InvalidArgument(format!(
+                    "Invalid argument '{}'. Use key=value format (e.g., {}=<value>)",
+                    token, token
+                )));
             }
         }
 
-        if command_split.next().is_some() {
-            return Err(CommandError::TooManyArguments);
+        let mut arguments: HashMap<String, ArgValue> = HashMap::new();
+
+        // Process required arguments
+        for arg in command.get_required_args() {
+            let arg_name = arg.get_name();
+            if let Some(value) = named_args.remove(arg_name) {
+                arguments.insert(arg_name.clone(), arg.get_type().to_value(&value)?);
+            } else {
+                return Err(CommandError::ExpectedRequiredArg(arg_name.to_owned()));
+            }
+        }
+
+        // Process optional arguments
+        for arg in command.get_optional_args() {
+            let arg_name = arg.get_name();
+            if let Some(value) = named_args.remove(arg_name) {
+                arguments.insert(arg_name.clone(), arg.get_type().to_value(&value)?);
+            }
+        }
+
+        // Check for unknown arguments
+        if !named_args.is_empty() {
+            let unknown_keys: Vec<&String> = named_args.keys().collect();
+            return Err(CommandError::InvalidArgument(format!(
+                "Unknown argument(s): {}",
+                unknown_keys
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
         }
 
         command.execute(self, ArgumentManager::new(arguments)).await
