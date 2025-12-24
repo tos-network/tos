@@ -108,19 +108,6 @@ fn get_optional_arg(
     Ok(None)
 }
 
-/// Get confirmation from CLI (batch mode only)
-/// Auto-confirms (returns true) if --confirm not provided
-#[allow(dead_code)]
-fn get_confirmation(args: &mut ArgumentManager) -> Result<bool, CommandError> {
-    // If explicit --confirm flag provided, use its value
-    if args.has_argument("confirm") {
-        return Ok(args.get_value("confirm")?.to_bool()?);
-    }
-
-    // In batch mode: auto-confirm (executing command implies confirmation)
-    Ok(true)
-}
-
 /// Get password from config with priority: CLI > File > Env > Error (batch mode only)
 #[allow(dead_code)]
 async fn get_password(config: &Config, _prompt: &Prompt) -> Result<String> {
@@ -725,18 +712,11 @@ async fn setup_wallet_command_manager(
                 "Amount to transfer (in atomic units)",
             ),
         ],
-        vec![
-            Arg::new(
-                "fee_type",
-                ArgType::String,
-                "Fee payment type: 'tos' or 'energy'",
-            ),
-            Arg::new(
-                "confirm",
-                ArgType::String,
-                "Confirm action (yes/no, auto-confirms in command mode)",
-            ),
-        ],
+        vec![Arg::new(
+            "fee_type",
+            ArgType::String,
+            "Fee payment type: 'tos' or 'energy'",
+        )],
         CommandHandler::Async(async_handler!(transfer)),
     ))?;
     command_manager.add_command(Command::with_arguments(
@@ -746,21 +726,14 @@ async fn setup_wallet_command_manager(
             Arg::new("asset", ArgType::String, "Asset name or hash to transfer"),
             Arg::new("address", ArgType::String, "Recipient wallet address"),
         ],
-        vec![
-            Arg::new(
-                "fee_type",
-                ArgType::String,
-                "Fee payment type: 'tos' or 'energy'",
-            ),
-            Arg::new(
-                "confirm",
-                ArgType::String,
-                "Confirm action (yes/no, auto-confirms in command mode)",
-            ),
-        ],
+        vec![Arg::new(
+            "fee_type",
+            ArgType::String,
+            "Fee payment type: 'tos' or 'energy'",
+        )],
         CommandHandler::Async(async_handler!(transfer_all)),
     ))?;
-    command_manager.add_command(Command::with_arguments(
+    command_manager.add_command(Command::with_required_arguments(
         "burn",
         "Burn amount of asset",
         vec![
@@ -771,11 +744,6 @@ async fn setup_wallet_command_manager(
                 "Amount to burn (permanently destroyed)",
             ),
         ],
-        vec![Arg::new(
-            "confirm",
-            ArgType::String,
-            "Confirm action (yes/no, auto-confirms in command mode)",
-        )],
         CommandHandler::Async(async_handler!(burn)),
     ))?;
     command_manager.add_command(Command::new(
@@ -850,7 +818,7 @@ async fn setup_wallet_command_manager(
         )],
         CommandHandler::Async(async_handler!(export_transactions_csv)),
     ))?;
-    command_manager.add_command(Command::with_arguments(
+    command_manager.add_command(Command::with_required_arguments(
         "freeze_tos",
         "Freeze TOS to get energy with duration-based rewards (3/7/14 days)",
         vec![
@@ -861,25 +829,15 @@ async fn setup_wallet_command_manager(
                 "Freeze duration in days (3/7/14/30, longer = higher rewards)",
             ),
         ],
-        vec![Arg::new(
-            "confirm",
-            ArgType::String,
-            "Confirm action (yes/no, auto-confirms in command mode)",
-        )],
         CommandHandler::Async(async_handler!(freeze_tos)),
     ))?;
-    command_manager.add_command(Command::with_arguments(
+    command_manager.add_command(Command::with_required_arguments(
         "unfreeze_tos",
         "Unfreeze TOS (release frozen TOS after lock period)",
         vec![Arg::new(
             "amount",
             ArgType::String,
             "Amount of TOS to unfreeze",
-        )],
-        vec![Arg::new(
-            "confirm",
-            ArgType::String,
-            "Confirm action (yes/no, auto-confirms in command mode)",
         )],
         CommandHandler::Async(async_handler!(unfreeze_tos)),
     ))?;
@@ -989,7 +947,6 @@ async fn setup_wallet_command_manager(
                 ArgType::String,
                 "Comma-separated list of participant addresses",
             ),
-            Arg::new("confirm", ArgType::Bool, "Confirm multisig setup"),
         ],
         CommandHandler::Async(async_handler!(multisig_setup)),
     ))?;
@@ -1815,23 +1772,6 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         address
     ));
 
-    // Parse confirmation (batch mode: auto-confirm unless explicitly set to false)
-    let confirmed = if args.has_argument("confirm") {
-        let confirm_str = args.get_value("confirm")?.to_string_value()?;
-        match confirm_str.to_lowercase().as_str() {
-            "yes" | "y" | "true" => true,
-            "no" | "n" | "false" => false,
-            _ => true, // Unknown value = auto-confirm in batch mode
-        }
-    } else {
-        true // Auto-confirm in batch mode when no explicit confirmation parameter
-    };
-
-    if !confirmed {
-        manager.message("Transaction has been aborted");
-        return Ok(());
-    }
-
     manager.message("Building transaction...");
     let transfer = TransferBuilder {
         destination: address,
@@ -2064,23 +2004,6 @@ async fn transfer_all(
         fee_display
     ));
 
-    // Parse confirmation (batch mode: auto-confirm unless explicitly set to false)
-    let confirmed = if args.has_argument("confirm") {
-        let confirm_str = args.get_value("confirm")?.to_string_value()?;
-        match confirm_str.to_lowercase().as_str() {
-            "yes" | "y" | "true" => true,
-            "no" | "n" | "false" => false,
-            _ => true, // Unknown value = auto-confirm in batch mode
-        }
-    } else {
-        true // Auto-confirm in batch mode
-    };
-
-    if !confirmed {
-        manager.message("Transaction has been aborted");
-        return Ok(());
-    }
-
     manager.message("Building transaction...");
     let transfer = TransferBuilder {
         destination: address,
@@ -2237,23 +2160,6 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         asset_data.inner.get_name(),
         asset
     ));
-
-    // Parse confirmation (batch mode: auto-confirm unless explicitly set to false)
-    let confirmed = if args.has_argument("confirm") {
-        let confirm_str = args.get_value("confirm")?.to_string_value()?;
-        match confirm_str.to_lowercase().as_str() {
-            "yes" | "y" | "true" => true,
-            "no" | "n" | "false" => false,
-            _ => true, // Unknown value = auto-confirm in batch mode
-        }
-    } else {
-        true // Auto-confirm in batch mode
-    };
-
-    if !confirmed {
-        manager.message("Transaction has been aborted");
-        return Ok(());
-    }
 
     manager.message("Building transaction...");
     let payload = BurnPayload { amount, asset };
@@ -3659,7 +3565,7 @@ async fn add_xswd_relayer(
 }
 
 // Setup a multisig transaction
-// Batch mode: multisig_setup threshold=2 addresses=addr1,addr2,addr3 confirm=true
+// Batch mode: multisig_setup threshold=2 addresses=addr1,addr2,addr3
 async fn multisig_setup(
     manager: &CommandManager,
     mut args: ArgumentManager,
@@ -3730,12 +3636,6 @@ async fn multisig_setup(
                 ));
             }
         };
-
-        if !args.get_flag("confirm")? {
-            return Err(CommandError::MissingArgument(
-                "confirm=true required to delete multisig".to_string(),
-            ));
-        }
 
         manager.message("Deleting multisig...");
 
@@ -3823,13 +3723,6 @@ async fn multisig_setup(
     ));
     for key in keys.iter() {
         manager.message(format!("- {}", key));
-    }
-
-    // Require explicit confirmation in batch mode
-    if !args.get_flag("confirm")? {
-        return Err(CommandError::MissingArgument(
-            "confirm=true required to setup multisig".to_string(),
-        ));
     }
 
     manager.message("Building transaction...");
@@ -4000,7 +3893,7 @@ async fn freeze_tos(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // Get amount, duration, and confirm from arguments (batch mode only)
+    // Get amount and duration from arguments (batch mode only)
     let amount_str = if args.has_argument("amount") {
         args.get_value("amount")?.to_string_value()?
     } else {
@@ -4011,12 +3904,6 @@ async fn freeze_tos(
         args.get_value("duration")?.to_number()?
     } else {
         return Err(CommandError::MissingArgument("duration".to_string()));
-    };
-
-    let confirm_str = if args.has_argument("confirm") {
-        args.get_value("confirm")?.to_string_value()?
-    } else {
-        return Err(CommandError::MissingArgument("confirm".to_string()));
     };
 
     // Parse amount
@@ -4031,18 +3918,6 @@ async fn freeze_tos(
             "Duration must be between 3 and 90 days".to_string(),
         ));
     };
-
-    // Parse confirmation (batch mode: auto-confirm unless explicitly set to false)
-    let confirmed = match confirm_str.to_lowercase().as_str() {
-        "yes" | "y" | "true" => true,
-        "no" | "n" | "false" => false,
-        _ => true, // Unknown value = auto-confirm in batch mode
-    };
-
-    if !confirmed {
-        manager.message("Freeze operation cancelled");
-        return Ok(());
-    }
 
     // Create freeze transaction
     let _payload = tos_common::transaction::EnergyPayload::FreezeTos { amount, duration };
@@ -4098,32 +3973,14 @@ async fn unfreeze_tos(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // Get amount and confirm from arguments (batch mode only)
+    // Get amount from arguments (batch mode only)
     let amount_str = if args.has_argument("amount") {
         args.get_value("amount")?.to_string_value()?
     } else {
         return Err(CommandError::MissingArgument("amount".to_string()));
     };
 
-    let confirm_str = if args.has_argument("confirm") {
-        args.get_value("confirm")?.to_string_value()?
-    } else {
-        return Err(CommandError::MissingArgument("confirm".to_string()));
-    };
-
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
-
-    // Parse confirmation (batch mode: auto-confirm unless explicitly set to false)
-    let confirmed = match confirm_str.to_lowercase().as_str() {
-        "yes" | "y" | "true" => true,
-        "no" | "n" | "false" => false,
-        _ => true, // Unknown value = auto-confirm in batch mode
-    };
-
-    if !confirmed {
-        manager.message("Unfreeze operation cancelled");
-        return Ok(());
-    }
 
     // Create unfreeze transaction
     let _payload = tos_common::transaction::EnergyPayload::UnfreezeTos { amount };
