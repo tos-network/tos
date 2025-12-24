@@ -196,6 +196,13 @@ pub struct RPCConfig {
     #[clap(name = "ws-max-messages-per-second", long, default_value_t = default_ws_max_messages_per_second())]
     #[serde(default = "default_ws_max_messages_per_second")]
     pub ws_max_messages_per_second: u32,
+
+    /// Enable admin RPC methods (prune_chain, rewind_chain, clear_caches).
+    /// These are dangerous operations and should only be enabled for trusted operators.
+    /// When enabled, admin methods are only accessible via localhost connections.
+    #[clap(name = "enable-admin-rpc", long)]
+    #[serde(default)]
+    pub enable_admin_rpc: bool,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize, strum::Display)]

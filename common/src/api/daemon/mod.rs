@@ -21,7 +21,7 @@ use tos_kernel::ValueCell;
 
 pub use direction::*;
 
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BlockType {
     Sync,
     Side,
@@ -1565,4 +1565,180 @@ pub struct GetContractScheduledExecutionsAtTopoHeightParams {
     pub topoheight: TopoHeight,
     pub max: Option<usize>,
     pub skip: Option<usize>,
+}
+
+/// Parameters for get_contracts RPC method - lists all deployed contracts
+#[derive(Serialize, Deserialize)]
+pub struct GetContractsParams {
+    /// Number of contracts to skip (for pagination)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip: Option<usize>,
+    /// Maximum number of contracts to return
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum: Option<usize>,
+    /// Minimum topoheight filter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimum_topoheight: Option<TopoHeight>,
+    /// Maximum topoheight filter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_topoheight: Option<TopoHeight>,
+}
+
+/// Parameters for get_contract_data_entries RPC method - lists contract storage entries
+#[derive(Serialize, Deserialize)]
+pub struct GetContractDataEntriesParams {
+    /// Contract address to query
+    pub contract: Hash,
+    /// Maximum topoheight for version lookup
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_topoheight: Option<TopoHeight>,
+    /// Number of entries to skip (for pagination)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip: Option<usize>,
+    /// Maximum number of entries to return
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum: Option<usize>,
+}
+
+/// A single contract data entry (key-value pair)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractDataEntry {
+    /// Storage key
+    pub key: ValueCell,
+    /// Storage value
+    pub value: ValueCell,
+}
+
+/// Parameters for key_to_address RPC method - converts public key to address
+#[derive(Serialize, Deserialize)]
+pub struct KeyToAddressParams {
+    /// Public key in hex format
+    pub key: String,
+}
+
+/// Parameters for get_block_summary_at_topoheight RPC method - lightweight block info
+#[derive(Serialize, Deserialize)]
+pub struct GetBlockSummaryAtTopoHeightParams {
+    pub topoheight: TopoHeight,
+}
+
+/// Parameters for get_block_summary_by_hash RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetBlockSummaryByHashParams {
+    pub hash: Hash,
+}
+
+/// Lightweight block summary response (no full transaction data)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockSummary<'a> {
+    /// Block hash
+    pub hash: Cow<'a, Hash>,
+    /// Topological height
+    pub topoheight: Option<TopoHeight>,
+    /// Block height
+    pub height: u64,
+    /// Block timestamp
+    pub timestamp: TimestampMillis,
+    /// Block nonce
+    pub nonce: u64,
+    /// Block type (Sync, Side, Orphaned, Normal)
+    pub block_type: BlockType,
+    /// Miner address
+    pub miner: Cow<'a, Address>,
+    /// Block difficulty
+    pub difficulty: Cow<'a, Difficulty>,
+    /// Cumulative difficulty
+    pub cumulative_difficulty: Cow<'a, CumulativeDifficulty>,
+    /// Number of transactions in block
+    pub txs_count: usize,
+    /// Total size of block in bytes
+    pub total_size_in_bytes: usize,
+    /// Block reward (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reward: Option<u64>,
+    /// Total transaction fees
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_fees: Option<u64>,
+}
+
+/// Parameters for get_balances_at_maximum_topoheight RPC method
+/// Batch query multiple asset balances for an address
+#[derive(Serialize, Deserialize)]
+pub struct GetBalancesAtMaximumTopoHeightParams {
+    /// Address to query balances for
+    pub address: Address,
+    /// List of asset hashes to query
+    pub assets: Vec<Hash>,
+    /// Maximum topoheight for version lookup
+    pub maximum_topoheight: TopoHeight,
+}
+
+/// Parameters for get_block_difficulty_by_hash RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetBlockDifficultyByHashParams {
+    /// Block hash to query difficulty for
+    pub block_hash: Hash,
+}
+
+// Note: GetDifficultyResult is already defined above and reused for get_block_difficulty_by_hash
+
+// Note: get_block_base_fee_by_hash is not implemented in TOS
+// TOS uses a different fee model. For fee estimation, use get_estimated_fee_rates.
+
+/// Parameters for get_asset_supply_at_topoheight RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetAssetSupplyAtTopoHeightParams {
+    /// Asset hash to query supply for
+    pub asset: Hash,
+    /// Topoheight to query supply at
+    pub topoheight: TopoHeight,
+}
+
+// Note: get_estimated_fee_per_kb is not implemented in TOS
+// TOS uses get_estimated_fee_rates for fee estimation.
+
+/// Registered contract execution info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisteredExecution {
+    /// Hash of the caller for the registered execution
+    pub execution_hash: Hash,
+    /// Topoheight at which the execution is scheduled
+    pub execution_topoheight: TopoHeight,
+}
+
+// ============================================================================
+// Admin RPC Types (require --enable-admin-rpc flag)
+// ============================================================================
+
+/// Parameters for prune_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct PruneChainParams {
+    /// Topoheight to prune the chain to
+    pub topoheight: TopoHeight,
+}
+
+/// Result of prune_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct PruneChainResult {
+    /// New pruned topoheight
+    pub pruned_topoheight: TopoHeight,
+}
+
+/// Parameters for rewind_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct RewindChainParams {
+    /// Number of blocks to rewind
+    pub count: u64,
+    /// Should it stop at stable height
+    #[serde(default)]
+    pub until_stable_height: bool,
+}
+
+/// Result of rewind_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct RewindChainResult {
+    /// New topoheight after rewind
+    pub topoheight: TopoHeight,
+    /// All transactions that were removed from the chain
+    pub txs: Vec<Hash>,
 }
