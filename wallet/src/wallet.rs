@@ -868,12 +868,14 @@ impl Wallet {
     // You must handle "apply changes" to the storage
     // Warning: this is locking the network handler to access to the daemon api
     // Stateless wallet: Always queries daemon for nonce, reference, and balance
+    // Note: nonce parameter is respected if provided (for custom nonce scenarios),
+    // otherwise queries next available nonce from daemon including mempool pending txs
     pub async fn create_transaction_state_with_storage(
         &self,
         _storage: &EncryptedStorage,
         transaction_type: &TransactionTypeBuilder,
         fee: &FeeBuilder,
-        _nonce: Option<u64>,
+        nonce_override: Option<u64>,
     ) -> Result<TransactionBuilderState, WalletError> {
         trace!("create transaction with storage (stateless)");
 
@@ -881,10 +883,18 @@ impl Wallet {
         let light_api = self.get_light_api().await?;
         let address = self.get_address();
 
-        // Query nonce on-demand
-        let nonce = light_api.get_nonce(&address).await.map_err(|e| {
-            WalletError::Any(anyhow::anyhow!("Failed to query nonce from daemon: {}", e))
-        })?;
+        // Query next available nonce (considers mempool pending txs to avoid nonce reuse)
+        // If nonce_override is provided, use it; otherwise query daemon
+        let nonce = if let Some(custom_nonce) = nonce_override {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Using custom nonce: {}", custom_nonce);
+            }
+            custom_nonce
+        } else {
+            light_api.get_next_nonce(&address).await.map_err(|e| {
+                WalletError::Any(anyhow::anyhow!("Failed to query nonce from daemon: {}", e))
+            })?
+        };
 
         // Query reference on-demand
         let reference = light_api.get_reference_block().await.map_err(|e| {
@@ -1479,11 +1489,18 @@ impl Wallet {
     // REMOVED: rescan() - not needed in stateless wallet mode
     // All data is queried on-demand from daemon
 
-    // Check if the wallet is in online mode (has daemon connection)
-    // In stateless wallet, this checks if network_handler exists (not if sync loop is running)
+    // Check if the wallet is in online mode (has active daemon connection)
+    // In stateless wallet, this checks both:
+    // 1. Network handler exists
+    // 2. Daemon API WebSocket connection is actually alive
     pub async fn is_online(&self) -> bool {
-        // Stateless wallet: check if we have a network handler (daemon connection)
-        self.network_handler.lock().await.is_some()
+        // Stateless wallet: check if we have a network handler with active connection
+        if let Some(handler) = self.network_handler.lock().await.as_ref() {
+            // Check if the actual WebSocket connection is alive
+            handler.get_api().is_online()
+        } else {
+            false
+        }
     }
 
     // this function allow to user to get the network handler in case in want to stay in online mode

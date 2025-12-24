@@ -1,5 +1,6 @@
 use crate::daemon_api::DaemonAPI;
 use anyhow::{Context, Result};
+use log::debug;
 use std::sync::Arc;
 use tos_common::{
     api::daemon::{AccountHistoryEntry, GetInfoResult},
@@ -19,8 +20,10 @@ impl LightAPI {
         Self { daemon }
     }
 
-    /// Get current nonce for account (query on-demand from daemon)
+    /// Get current confirmed nonce for account (query on-demand from daemon)
     /// Returns 0 for fresh accounts that haven't made any transactions yet
+    /// NOTE: This only returns the confirmed nonce, not accounting for pending transactions.
+    /// Use get_next_nonce() for building new transactions to avoid nonce reuse.
     pub async fn get_nonce(&self, address: &Address) -> Result<u64> {
         match self.daemon.get_nonce(address).await {
             Ok(result) => Ok(result.version.get_nonce()),
@@ -35,6 +38,61 @@ impl LightAPI {
                         "Failed to get nonce from daemon for address {}",
                         address
                     ))
+                }
+            }
+        }
+    }
+
+    /// Get the next available nonce for building a new transaction
+    /// This accounts for both confirmed transactions (chain state) and pending transactions (mempool)
+    /// Returns max(confirmed_nonce, mempool_max_nonce + 1) to avoid nonce reuse in batch transactions
+    pub async fn get_next_nonce(&self, address: &Address) -> Result<u64> {
+        // Get confirmed nonce from chain state
+        let confirmed_nonce = self.get_nonce(address).await?;
+
+        // Get mempool cache to check for pending transactions
+        match self.daemon.get_mempool_cache(address).await {
+            Ok(cache) => {
+                // Mempool returns max nonce used in pending transactions
+                // Next nonce should be max + 1 if there are pending txs
+                let pending_max_nonce = cache.get_max_nonce();
+                let next_nonce = if pending_max_nonce >= confirmed_nonce {
+                    // There are pending transactions, use max + 1
+                    pending_max_nonce + 1
+                } else {
+                    // No pending transactions or confirmed is higher
+                    confirmed_nonce
+                };
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "get_next_nonce: confirmed={}, mempool_max={}, next={}",
+                        confirmed_nonce, pending_max_nonce, next_nonce
+                    );
+                }
+
+                Ok(next_nonce)
+            }
+            Err(e) => {
+                let error_msg = format!("{:#}", e);
+                // If mempool cache query fails (no pending txs), use confirmed nonce
+                if error_msg.contains("Data not found") || error_msg.contains("not found") {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "get_next_nonce: no mempool cache, using confirmed={}",
+                            confirmed_nonce
+                        );
+                    }
+                    Ok(confirmed_nonce)
+                } else {
+                    // Log warning but don't fail - fall back to confirmed nonce
+                    if log::log_enabled!(log::Level::Warn) {
+                        log::warn!(
+                            "Failed to query mempool cache: {}, using confirmed nonce",
+                            e
+                        );
+                    }
+                    Ok(confirmed_nonce)
                 }
             }
         }

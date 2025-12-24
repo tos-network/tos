@@ -1088,6 +1088,28 @@ pub struct GetMempoolCacheResult {
     balances: HashMap<Hash, u64>,
 }
 
+impl GetMempoolCacheResult {
+    /// Get the lowest nonce used in pending transactions
+    pub fn get_min_nonce(&self) -> Nonce {
+        self.min
+    }
+
+    /// Get the highest nonce used in pending transactions
+    pub fn get_max_nonce(&self) -> Nonce {
+        self.max
+    }
+
+    /// Get all transaction hashes in the mempool cache (ordered by nonce)
+    pub fn get_txs(&self) -> &[Hash] {
+        &self.txs
+    }
+
+    /// Get the cached balances for all assets
+    pub fn get_balances(&self) -> &HashMap<Hash, u64> {
+        &self.balances
+    }
+}
+
 // This struct is used to store the fee rate estimation for the following priority levels:
 // 1. Low
 // 2. Medium
