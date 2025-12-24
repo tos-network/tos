@@ -5,7 +5,9 @@ use tos_common::{
 };
 
 use super::hard_fork::get_block_time_target_for_version;
-use crate::config::{DEFAULT_MINIMUM_HASHRATE, MAINNET_MINIMUM_HASHRATE, MILLIS_PER_SECOND};
+use crate::config::{
+    DEVNET_MINIMUM_HASHRATE, MAINNET_MINIMUM_HASHRATE, MILLIS_PER_SECOND, TESTNET_MINIMUM_HASHRATE,
+};
 
 mod v1;
 mod v2;
@@ -96,12 +98,15 @@ pub const fn get_difficulty_with_target(hashrate: u64, block_time_target: u64) -
 }
 
 // Get minimum difficulty based on the network
-// Mainnet has a minimum difficulty to prevent spamming the network
-// Testnet has a lower difficulty to allow faster block generation
+// Each network has different minimum hashrate to balance security vs usability:
+// - Mainnet: 100 KH/s (difficulty 300,000) - prevents block spam at launch
+// - Testnet: 10 KH/s (difficulty 30,000) - balanced for multi-miner testing
+// - Devnet: 1 KH/s (difficulty 3,000) - low for single developer testing
 pub const fn get_minimum_difficulty(network: &Network, version: BlockVersion) -> Difficulty {
     let hashrate = match network {
         Network::Mainnet => MAINNET_MINIMUM_HASHRATE,
-        _ => DEFAULT_MINIMUM_HASHRATE,
+        Network::Testnet | Network::Stagenet => TESTNET_MINIMUM_HASHRATE,
+        Network::Devnet => DEVNET_MINIMUM_HASHRATE,
     };
 
     let block_time_target = get_block_time_target_for_version(version);
@@ -110,13 +115,15 @@ pub const fn get_minimum_difficulty(network: &Network, version: BlockVersion) ->
 
 // Get minimum difficulty at hard fork
 // Nobunaga is the only version, returns appropriate difficulty
+// Uses testnet hashrate for mainnet hard fork to allow gradual difficulty increase
 pub const fn get_difficulty_at_hard_fork(
     network: &Network,
     version: BlockVersion,
 ) -> Option<Difficulty> {
     let hashrate = match network {
         Network::Mainnet => match version {
-            BlockVersion::Nobunaga => DEFAULT_MINIMUM_HASHRATE,
+            // Use testnet hashrate for hard fork to allow gradual ramp-up
+            BlockVersion::Nobunaga => TESTNET_MINIMUM_HASHRATE,
             // Future versions would be added here
         },
         _ => return None,
@@ -136,14 +143,36 @@ mod tests {
     #[test]
     fn test_difficulty_at_hard_fork() {
         // Nobunaga uses 3s blocks
-        // 100 H/s for Nobunaga with 3s target = 100 * 3,000 / 1000 = 300
+        // Hard fork uses testnet hashrate (10 KH/s) for gradual ramp-up
+        // 10 KH/s * 3s = 10,000 * 3,000 / 1000 = 30,000
         assert_eq!(
             get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::Nobunaga).unwrap(),
-            Difficulty::from_u64(3 * DEFAULT_MINIMUM_HASHRATE)
+            Difficulty::from_u64(3 * TESTNET_MINIMUM_HASHRATE)
         );
 
         // testnet returns None for all versions
         assert!(get_difficulty_at_hard_fork(&Network::Testnet, BlockVersion::Nobunaga).is_none());
+    }
+
+    #[test]
+    fn test_minimum_difficulty_per_network() {
+        // Mainnet: 100 KH/s * 3s = 300,000
+        assert_eq!(
+            get_minimum_difficulty(&Network::Mainnet, BlockVersion::Nobunaga),
+            Difficulty::from_u64(300_000)
+        );
+
+        // Testnet: 10 KH/s * 3s = 30,000
+        assert_eq!(
+            get_minimum_difficulty(&Network::Testnet, BlockVersion::Nobunaga),
+            Difficulty::from_u64(30_000)
+        );
+
+        // Devnet: 1 KH/s * 3s = 3,000
+        assert_eq!(
+            get_minimum_difficulty(&Network::Devnet, BlockVersion::Nobunaga),
+            Difficulty::from_u64(3_000)
+        );
     }
 
     #[test]
