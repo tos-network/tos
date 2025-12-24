@@ -950,20 +950,52 @@ async fn setup_wallet_command_manager(
         ],
         CommandHandler::Async(async_handler!(multisig_setup)),
     ))?;
-    command_manager.add_command(Command::with_optional_arguments(
+    command_manager.add_command(Command::with_arguments(
         "multisig_sign",
-        "Sign a multisig transaction",
+        "Sign a multisig transaction and optionally submit with collected signatures",
         vec![Arg::new(
             "tx_hash",
             ArgType::Hash,
-            "Transaction hash to sign",
+            "Transaction hash to sign (use get_hash_for_multisig from unsigned TX)",
         )],
+        vec![
+            Arg::new(
+                "source",
+                ArgType::String,
+                "Source wallet address (multisig owner) - required for participant wallets",
+            ),
+            Arg::new(
+                "tx_data",
+                ArgType::String,
+                "Unsigned transaction hex data (required for submit)",
+            ),
+            Arg::new(
+                "signatures",
+                ArgType::String,
+                "Other signatures as 'id:sig_hex,id:sig_hex' format",
+            ),
+            Arg::new(
+                "submit",
+                ArgType::Bool,
+                "Submit transaction after adding all signatures",
+            ),
+        ],
         CommandHandler::Async(async_handler!(multisig_sign)),
     ))?;
     command_manager.add_command(Command::new(
         "multisig_show",
         "Show the current state of multisig",
         CommandHandler::Async(async_handler!(multisig_show)),
+    ))?;
+    command_manager.add_command(Command::with_required_arguments(
+        "multisig_create_tx",
+        "Create an unsigned transaction for multisig signing (outputs tx_hash and tx_data)",
+        vec![
+            Arg::new("asset", ArgType::String, "Asset to transfer (TOS or hash)"),
+            Arg::new("amount", ArgType::String, "Amount to transfer"),
+            Arg::new("address", ArgType::String, "Recipient address"),
+        ],
+        CommandHandler::Async(async_handler!(multisig_create_tx)),
     ))?;
 
     command_manager.add_command(Command::new(
@@ -3792,6 +3824,10 @@ async fn multisig_sign(
     manager: &CommandManager,
     mut args: ArgumentManager,
 ) -> Result<(), CommandError> {
+    use tos_common::api::daemon::MultisigState;
+    use tos_common::transaction::builder::UnsignedTransaction;
+    use tos_common::transaction::multisig::{MultiSig, SignatureId};
+
     manager.validate_batch_params("multisig_sign", &args)?;
 
     let context = manager.get_context().lock()?;
@@ -3804,8 +3840,190 @@ async fn multisig_sign(
         return Err(CommandError::MissingArgument("tx_hash".to_string()));
     };
 
-    let signature = wallet.sign_data(tx_hash.as_bytes());
-    manager.message(format!("Signature: {}", signature.to_hex()));
+    // Optional parameters
+    let source_address =
+        if args.has_argument("source") {
+            let source_str = args.get_value("source")?.to_string_value()?;
+            Some(Address::from_string(&source_str).map_err(|e| {
+                CommandError::InvalidArgument(format!("Invalid source address: {}", e))
+            })?)
+        } else {
+            None
+        };
+
+    let tx_data = if args.has_argument("tx_data") {
+        Some(args.get_value("tx_data")?.to_string_value()?)
+    } else {
+        None
+    };
+
+    let other_signatures = if args.has_argument("signatures") {
+        Some(args.get_value("signatures")?.to_string_value()?)
+    } else {
+        None
+    };
+
+    let should_submit = args.has_argument("submit") && args.get_flag("submit").unwrap_or(false);
+
+    // Query multisig state from daemon to get signer ID
+    // If source is provided, use that address (for participant wallets)
+    // Otherwise use the current wallet's address (for multisig owner)
+    let network_handler = wallet.get_network_handler().lock().await;
+    let (participants, threshold) = if let Some(handler) = network_handler.as_ref() {
+        let daemon_api = handler.get_api();
+        let multisig_owner = source_address
+            .clone()
+            .unwrap_or_else(|| wallet.get_address());
+
+        match daemon_api.get_multisig(&multisig_owner).await {
+            Ok(multisig) => match multisig.state {
+                MultisigState::Active {
+                    threshold,
+                    participants,
+                } => (participants, threshold),
+                MultisigState::Deleted => {
+                    return Err(CommandError::InvalidArgument(
+                        "Multisig has been deleted".to_string(),
+                    ));
+                }
+            },
+            Err(e) => {
+                let error_msg = format!("{:#}", e);
+                if error_msg.contains("not found") || error_msg.contains("No multisig") {
+                    return Err(CommandError::InvalidArgument(
+                        "No multisig configured for this wallet".to_string(),
+                    ));
+                }
+                return Err(CommandError::InvalidArgument(format!(
+                    "Could not query multisig state: {}",
+                    e
+                )));
+            }
+        }
+    } else {
+        return Err(CommandError::InvalidArgument(
+            "Not connected to daemon".to_string(),
+        ));
+    };
+    drop(network_handler);
+
+    // Check if wallet is a participant or the source (owner)
+    let wallet_address = wallet.get_address();
+    let is_source = source_address.is_none(); // If no source provided, this wallet is the source
+    let signer_id_opt = participants.iter().position(|p| p == &wallet_address);
+
+    // If submitting with all signatures provided, we don't need to be a participant
+    // The source wallet can submit on behalf of all participants
+    if should_submit && other_signatures.is_some() {
+        // Source wallet submitting with collected signatures
+        // We might not be a participant, but we can still submit if we're the source
+        if signer_id_opt.is_none() && !is_source {
+            return Err(CommandError::InvalidArgument(
+                "This wallet is not a participant in the multisig and not the source wallet"
+                    .to_string(),
+            ));
+        }
+    }
+
+    // Sign the transaction hash if we're a participant
+    let (signer_id, signature) = if let Some(id) = signer_id_opt {
+        let sig = wallet.sign_data(tx_hash.as_bytes());
+        (Some(id as u8), Some(sig))
+    } else {
+        (None, None)
+    };
+
+    manager.message(format!("Multisig threshold: {}", threshold));
+    if let (Some(id), Some(sig)) = (signer_id, &signature) {
+        manager.message(format!("Signer ID: {}", id));
+        manager.message(format!("Signature: {}", sig.to_hex()));
+        manager.message(format!("Combined format: {}:{}", id, sig.to_hex()));
+    } else {
+        manager.message(
+            "This wallet is the source (not a participant), submitting collected signatures...",
+        );
+    }
+
+    // If submit requested, build and submit the transaction
+    if should_submit {
+        let tx_data = tx_data.ok_or_else(|| {
+            CommandError::MissingArgument("tx_data is required when submit=true".to_string())
+        })?;
+
+        // Deserialize unsigned transaction
+        let mut unsigned = UnsignedTransaction::from_hex(&tx_data)
+            .map_err(|e| CommandError::InvalidArgument(format!("Invalid tx_data hex: {}", e)))?;
+
+        // Create multisig and add this wallet's signature (if participant)
+        let mut multisig = MultiSig::new();
+        if let (Some(id), Some(sig)) = (signer_id, signature.clone()) {
+            if !multisig.add_signature(SignatureId { id, signature: sig }) {
+                return Err(CommandError::InvalidArgument(
+                    "Failed to add signature".to_string(),
+                ));
+            }
+        }
+
+        // Parse and add other signatures if provided
+        if let Some(sigs_str) = other_signatures {
+            for sig_part in sigs_str.split(',') {
+                let parts: Vec<&str> = sig_part.trim().split(':').collect();
+                if parts.len() != 2 {
+                    return Err(CommandError::InvalidArgument(format!(
+                        "Invalid signature format '{}', expected 'id:signature_hex'",
+                        sig_part
+                    )));
+                }
+                let id: u8 = parts[0].parse().map_err(|_| {
+                    CommandError::InvalidArgument(format!("Invalid signer ID: {}", parts[0]))
+                })?;
+                let sig = Signature::from_hex(parts[1]).map_err(|e| {
+                    CommandError::InvalidArgument(format!("Invalid signature hex: {}", e))
+                })?;
+
+                if !multisig.add_signature(SignatureId { id, signature: sig }) {
+                    manager.warn(format!(
+                        "Duplicate signature for signer ID {}, skipping",
+                        id
+                    ));
+                }
+            }
+        }
+
+        // Check if we have enough signatures
+        let sig_count = multisig.len();
+        if sig_count < threshold as usize {
+            return Err(CommandError::InvalidArgument(format!(
+                "Not enough signatures: have {}, need {}",
+                sig_count, threshold
+            )));
+        }
+
+        // Set multisig on unsigned transaction and finalize
+        unsigned.set_multisig(multisig);
+        let tx = unsigned.finalize(wallet.get_keypair());
+
+        manager.message(format!("Transaction hash: {}", tx.hash()));
+        manager.message("Submitting transaction...");
+
+        // Submit to daemon
+        let network_handler = wallet.get_network_handler().lock().await;
+        if let Some(handler) = network_handler.as_ref() {
+            let daemon_api = handler.get_api();
+            match daemon_api.submit_transaction(&tx).await {
+                Ok(()) => {
+                    manager.message("Transaction submitted successfully!");
+                }
+                Err(e) => {
+                    manager.error(format!("Failed to submit transaction: {}", e));
+                }
+            }
+        } else {
+            return Err(CommandError::InvalidArgument(
+                "Not connected to daemon".to_string(),
+            ));
+        }
+    }
 
     Ok(())
 }
@@ -3857,6 +4075,107 @@ async fn multisig_show(manager: &CommandManager, _: ArgumentManager) -> Result<(
     } else {
         manager.error("Not connected to daemon. Use 'online_mode' to connect first.");
     }
+
+    Ok(())
+}
+
+// Create an unsigned transaction for multisig signing
+// Outputs tx_hash (for signing) and tx_data (for reconstruction)
+async fn multisig_create_tx(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    use tos_common::serializer::Serializer;
+    use tos_common::transaction::builder::TransferBuilder;
+
+    manager.validate_batch_params("multisig_create_tx", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Get parameters
+    let asset_str = args.get_value("asset")?.to_string_value()?;
+    let amount_str = args.get_value("amount")?.to_string_value()?;
+    let address_str = args.get_value("address")?.to_string_value()?;
+
+    // Parse asset
+    let asset = if asset_str.to_lowercase() == "tos" {
+        Hash::zero()
+    } else {
+        Hash::from_hex(&asset_str)
+            .map_err(|e| CommandError::InvalidArgument(format!("Invalid asset hash: {}", e)))?
+    };
+
+    // Parse amount
+    let amount = from_coin(&amount_str, 8)
+        .ok_or_else(|| CommandError::InvalidArgument(format!("Invalid amount: {}", amount_str)))?;
+
+    // Parse address
+    let address = Address::from_string(&address_str)
+        .map_err(|e| CommandError::InvalidArgument(format!("Invalid address: {}", e)))?;
+
+    // Build the transfer
+    let transfer = TransferBuilder {
+        destination: address.clone(),
+        amount,
+        asset: asset.clone(),
+        extra_data: None,
+    };
+    let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
+    // Use a higher fee multiplier to ensure the transaction has sufficient fees
+    // Default fee might be too low for multisig transactions
+    let fee = FeeBuilder::Multiplier(2.0);
+
+    // Create unsigned transaction
+    let storage = wallet.get_storage().write().await;
+    let mut state = wallet
+        .create_transaction_state_with_storage(&storage, &tx_type, &fee, None)
+        .await
+        .context("Error while creating transaction state")?;
+
+    let unsigned = wallet
+        .create_unsigned_transaction(
+            &mut state,
+            None, // No multisig threshold specified - will be set when signing
+            tx_type,
+            fee,
+            storage.get_tx_version().await?,
+        )
+        .context("Error while building unsigned transaction")?;
+
+    // Get the hash for multisig signing
+    let tx_hash = unsigned.get_hash_for_multisig();
+
+    // Serialize the unsigned transaction to hex
+    let tx_data = unsigned.to_hex();
+
+    let wallet_address = wallet.get_address();
+    manager.message("Unsigned transaction created for multisig signing:");
+    manager.message(format!("source: {}", wallet_address));
+    manager.message(format!("tx_hash: {}", tx_hash));
+    manager.message(format!("tx_data: {}", tx_data));
+    manager.message(format!("Recipient: {}", address));
+    manager.message(format!(
+        "Amount: {} {}",
+        format_coin(amount, 8),
+        if asset == Hash::zero() {
+            "TOS"
+        } else {
+            "asset"
+        }
+    ));
+    manager.message("");
+    manager.message("To sign with each participant wallet:");
+    manager.message(format!(
+        "  multisig_sign tx_hash={} source={}",
+        tx_hash, wallet_address
+    ));
+    manager.message("");
+    manager.message("To submit with all signatures collected:");
+    manager.message(format!(
+        "  multisig_sign tx_hash={} source={} tx_data={} signatures=<id:sig,...> submit=true",
+        tx_hash, wallet_address, tx_data
+    ));
 
     Ok(())
 }
