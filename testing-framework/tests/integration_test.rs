@@ -35,7 +35,7 @@ fn test_framework_version() {
     // Verify version constants are accessible
     use tos_testing_framework::{FRAMEWORK_VERSION, VERSION};
 
-    assert_eq!(VERSION, "0.1.4");
+    assert_eq!(VERSION, "0.1.5");
     assert_eq!(FRAMEWORK_VERSION, "TOS Testing Framework V3.0");
 }
 
