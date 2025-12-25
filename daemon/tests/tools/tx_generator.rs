@@ -411,7 +411,7 @@ impl TransactionGenerator {
             .build(&mut state, sender_keypair)
             .context(format!("Failed to build transaction {i}"))?;
 
-            if log::log_enabled!(log::Level::Trace) {
+            if log::log_enabled!(log::Level::Debug) {
                 debug!("Generated tx {}: hash={}, nonce={}", i, tx.hash(), nonce);
             }
 
