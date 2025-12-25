@@ -50,7 +50,11 @@ fn init_rustls_crypto_provider() {
 
             match install_result {
                 Ok(_) => debug!("Successfully installed rustls aws-lc-rs crypto provider"),
-                Err(e) => warn!("Failed to install rustls crypto provider: {:?}", e),
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Failed to install rustls crypto provider: {:?}", e);
+                    }
+                }
             }
         }
     });
@@ -80,7 +84,9 @@ impl<T: DeserializeOwned> EventReceiver<T> {
         while let Err(e) = res {
             match e {
                 broadcast::error::RecvError::Lagged(i) => {
-                    error!("EventReceiver lagged {i} behind, catching up...");
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("EventReceiver lagged {i} behind, catching up...");
+                    }
                     res = self.inner.recv().await;
                 }
                 e => return Err(e.into()),
@@ -204,7 +210,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             } else {
                 // Notify receivers
                 if let Err(e) = sender.send(()) {
-                    error!("Error sending event to the request: {:?}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error sending event to the request: {:?}", e);
+                    }
                 }
             }
         }
@@ -251,7 +259,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
     // Set if the client should try to reconnect to the server if the connection is lost
     pub async fn set_auto_reconnect_delay(&self, duration: Option<Duration>) {
-        debug!("Setting auto reconnect delay to {:?}", duration);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Setting auto reconnect delay to {:?}", duration);
+        }
         let mut reconnect = self.delay_auto_reconnect.lock().await;
         *reconnect = duration;
     }
@@ -271,7 +281,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
         spawn_task("resubscribe-events", async move {
             for (event, id) in events {
-                debug!("Resubscribing to event {:?} with id {}", event, id);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Resubscribing to event {:?} with id {}", event, id);
+                }
 
                 // Send it to the server
                 let res = match self
@@ -286,13 +298,17 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                 {
                     Ok(res) => res,
                     Err(e) => {
-                        error!("Error while resubscribing to event with id {}: {:?}", id, e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error while resubscribing to event with id {}: {:?}", id, e);
+                        }
                         false
                     }
                 };
 
                 if !res {
-                    error!("Error while resubscribing to event with id {}", id);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while resubscribing to event with id {}", id);
+                    }
                 }
             }
         });
@@ -307,15 +323,19 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             return Ok(());
         }
 
-        debug!("Disconnecting from the server '{}'", self.target);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Disconnecting from the server '{}'", self.target);
+        }
         self.set_online(false).await;
         {
             let sender = self.sender.lock().await;
             if let Err(e) = sender.send(InternalMessage::Close).await {
-                error!(
-                    "Error while sending close message to the background task: {:?}",
-                    e
-                );
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "Error while sending close message to the background task: {:?}",
+                        e
+                    );
+                }
             }
         }
 
@@ -324,10 +344,12 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             if let Some(task) = task {
                 if task.is_finished() {
                     if let Err(e) = task.await {
-                        error!(
-                            "Error while waiting for the background task to finish: {:?}",
-                            e
-                        );
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Error while waiting for the background task to finish: {:?}",
+                                e
+                            );
+                        }
                     }
                 } else {
                     task.abort();
@@ -344,7 +366,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
     // Set the online status
     async fn set_online(&self, online: bool) {
-        debug!("Setting online status to {}", online);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Setting online status to {}", online);
+        }
         let old = self.online.swap(online, Ordering::Relaxed);
         if old != online {
             if online {
@@ -357,18 +381,20 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
     // Reconnect by starting again the background task
     pub async fn reconnect(self: &Arc<Self>) -> Result<bool, Error> {
-        trace!("Reconnect requested: server '{}'", self.target);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Reconnect requested: server '{}'", self.target);
+        }
         if self.is_online() {
-            warn!("Already connected to the server");
             return Ok(false);
         }
 
-        trace!("Reconnecting to the server '{}'", self.target);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Reconnecting to the server '{}'", self.target);
+        }
         let ws = connect(&self.target).await?;
         {
             let mut lock = self.background_task.lock().await;
             if let Some(handle) = lock.take() {
-                trace!("Task was still set while reconnecting, aborting it...");
                 handle.abort();
             }
         }
@@ -378,15 +404,18 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             *lock = sender;
 
             let zelf = Arc::clone(self);
-            trace!("Starting background task after reconnecting");
             zelf.start_background_task(receiver, ws).await?;
         }
 
         if let Err(e) = Arc::clone(self).resubscribe_events().await {
-            error!("Error while resubscribing to events: {:?}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while resubscribing to events: {:?}", e);
+            }
         }
 
-        info!("Reconnected to the server '{}' successfully", self.target);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Reconnected to the server '{}' successfully", self.target);
+        }
 
         Ok(true)
     }
@@ -401,13 +430,11 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     // Clear all events
     // Because they are all channels, they will returns error to the caller
     async fn clear_events(&self) {
-        trace!("Clearing all events");
         {
             let mut events = self.events_to_id.lock().await;
             events.clear();
         }
         {
-            trace!("Clearing all events handlers");
             let mut handlers = self.handler_by_id.lock().await;
             handlers.clear();
         }
@@ -423,17 +450,16 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
         let zelf = Arc::clone(&self);
         let handle = spawn_task("ws-background-task", async move {
-            debug!("Starting WS background task");
-
             let mut ws = Some(ws);
             while let Some(websocket) = ws.take() {
-                debug!("Connected to the server '{}'", zelf.target);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Connected to the server '{}'", zelf.target);
+                }
 
                 match zelf.background_task(&mut receiver, websocket).await {
                     Ok(()) => {
                         // If we don't have the auto reconnect enabled, we stop here
                         if zelf.delay_auto_reconnect.lock().await.is_none() {
-                            debug!("Closing background task because no auto reconnect ");
                             zelf.set_online(false).await;
 
                             {
@@ -449,26 +475,30 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                         }
                     }
                     Err(e) => {
-                        error!("Error in the WebSocket client background task: {:?}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error in the WebSocket client background task: {:?}", e);
+                        }
                     }
                 }
 
-                debug!("Connection lost to the server '{}'", zelf.target);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Connection lost to the server '{}'", zelf.target);
+                }
                 zelf.set_online(false).await;
-                debug!("Connection status set to offline");
 
                 // Clear all pending requests
                 zelf.clear_requests().await;
-                debug!("Requests cleared");
 
                 // retry to connect until we are online or that it got disabled
                 while let Some(auto_reconnect) =
                     { zelf.delay_auto_reconnect.lock().await.as_ref().cloned() }
                 {
-                    debug!(
-                        "Reconnecting to the server in {} seconds...",
-                        auto_reconnect.as_secs()
-                    );
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Reconnecting to the server in {} seconds...",
+                            auto_reconnect.as_secs()
+                        );
+                    }
                     sleep(auto_reconnect).await;
 
                     // Notify that we are trying to reconnect
@@ -478,36 +508,41 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                     match connect(&zelf.target).await {
                         Ok(websocket) => {
                             zelf.set_online(true).await;
-                            info!("Reconnected to the server '{}'", zelf.target);
+                            if log::log_enabled!(log::Level::Info) {
+                                info!("Reconnected to the server '{}'", zelf.target);
+                            }
                             ws = Some(websocket);
 
                             // Register all events again
                             if let Err(e) = Arc::clone(&zelf).resubscribe_events().await {
-                                error!(
-                                    "Error while resubscribing to events due to reconnect: {:?}",
-                                    e
-                                );
-                            } else {
-                                info!("Resubscribed to all events");
+                                if log::log_enabled!(log::Level::Error) {
+                                    error!(
+                                        "Error while resubscribing to events due to reconnect: {:?}",
+                                        e
+                                    );
+                                }
                             }
 
                             break;
                         }
                         Err(e) => {
-                            debug!("Error while reconnecting to the server: {:?}", e);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Error while reconnecting to the server: {:?}", e);
+                            }
                         }
                     }
                 }
             }
 
             zelf.clear_events().await;
-            debug!("Events cleared, exiting background task");
         });
 
         {
             let mut lock = self.background_task.lock().await;
             if let Some(handle) = lock.take() {
-                warn!("Task was still set while starting a new one, aborting it...");
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Task was still set while starting a new one, aborting it...");
+                }
                 handle.abort();
             }
 
@@ -549,7 +584,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                                     let mut requests = self.requests.lock().await;
                                     if let Some(sender) = requests.remove(&id) {
                                         if let Err(e) = sender.send(response) {
-                                            debug!("Error sending response to the request: {:?}", e);
+                                            if log::log_enabled!(log::Level::Debug) {
+                                                debug!("Error sending response to the request: {:?}", e);
+                                            }
                                         }
                                         continue;
                                     }
@@ -561,18 +598,21 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                                     if let Some(sender) = handlers.get_mut(&id) {
                                         // Check that we still have someone who listen it
                                         if let Err(e) = sender.send(response.result.unwrap_or_default()) {
-                                            debug!("Error sending event to the request: {:?}", e);
+                                            if log::log_enabled!(log::Level::Debug) {
+                                                debug!("Error sending event to the request: {:?}", e);
+                                            }
                                         }
                                     }
                                 }
                             }
                         },
                         Message::Close(_) => {
-                            debug!("Received close message from the server");
                             break;
                         },
                         m => {
-                            debug!("Received unhandled message: {:?}", m);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Received unhandled message: {:?}", m);
+                            }
                         }
                     }
                 }
@@ -584,7 +624,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
     // Call a method without parameters
     pub async fn call<R: DeserializeOwned>(&self, method: &str) -> JsonRPCResult<R> {
-        trace!("Calling method '{}'", method);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Calling method '{}'", method);
+        }
         self.send(method, None, &Value::Null).await
     }
 
@@ -594,7 +636,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         method: &str,
         params: &P,
     ) -> JsonRPCResult<R> {
-        trace!("Calling method '{}' with params: {}", method, json!(params));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Calling method '{}' with params: {}", method, json!(params));
+        }
         self.send(method, None, params).await
     }
 
@@ -611,7 +655,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         event: E,
         capacity: usize,
     ) -> JsonRPCResult<EventReceiver<T>> {
-        trace!("Subscribing to event {:?}", event);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Subscribing to event {:?}", event);
+        }
         // Returns a Receiver for this event if already registered
         {
             let ids = self.events_to_id.lock().await;
@@ -654,7 +700,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
     // Unsubscribe from an event
     pub async fn unsubscribe_event(&self, event: &E) -> JsonRPCResult<()> {
-        trace!("Unsubscribing from event {:?}", event);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Unsubscribing from event {:?}", event);
+        }
         // Retrieve the id for this event
         let id = {
             let mut ids = self.events_to_id.lock().await;
@@ -715,10 +763,12 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
             Ok(res) => Ok(res),
             Err(e) => {
                 let mut requests = self.requests.lock().await;
-                debug!(
-                    "Removing request with id {} from the pending requests due to its fail",
-                    id
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Removing request with id {} from the pending requests due to its fail",
+                        id
+                    );
+                }
                 requests.remove(&id);
                 Err(e)
             }
@@ -764,14 +814,18 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
     // Send a request to the server without waiting for the response
     pub async fn notify_with<P: Serialize>(&self, method: &str, params: &P) -> JsonRPCResult<()> {
-        trace!("Notifying method '{}' with {}", method, json!(params));
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Notifying method '{}' with {}", method, json!(params));
+        }
         self.send_message_internal(None, method, params).await?;
         Ok(())
     }
 
     // Send a request to the server without waiting for the response
     pub async fn notify<P: Serialize>(&self, method: &str) -> JsonRPCResult<()> {
-        trace!("Notifying method '{}'", method);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Notifying method '{}'", method);
+        }
         self.notify_with(method, &Value::Null).await
     }
 }

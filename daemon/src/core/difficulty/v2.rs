@@ -26,13 +26,15 @@ pub fn calculate_difficulty(
     block_time_target: TimestampMillis,
 ) -> (Difficulty, VarUint) {
     let z = previous_difficulty * MILLIS_PER_SECOND / solve_time;
-    trace!(
-        "Calculating difficulty v2, solve time: {}, previous_difficulty: {}, z: {}, p: {}",
-        format_duration(Duration::from_millis(solve_time)),
-        format_difficulty(previous_difficulty),
-        z,
-        p
-    );
+    if log::log_enabled!(log::Level::Trace) {
+        trace!(
+            "Calculating difficulty v2, solve time: {}, previous_difficulty: {}, z: {}, p: {}",
+            format_duration(Duration::from_millis(solve_time)),
+            format_difficulty(previous_difficulty),
+            z,
+            p
+        );
+    }
     let (x_est_new, p_new) = kalman_filter(
         z,
         previous_difficulty * MILLIS_PER_SECOND / block_time_target,
@@ -41,7 +43,9 @@ pub fn calculate_difficulty(
         LEFT_SHIFT,
         PROCESS_NOISE_COVAR,
     );
-    trace!("x_est_new: {}, p_new: {}", x_est_new, p_new);
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("x_est_new: {}, p_new: {}", x_est_new, p_new);
+    }
 
     let difficulty = x_est_new * block_time_target / MILLIS_PER_SECOND;
     if difficulty < minimum_difficulty {

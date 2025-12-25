@@ -313,7 +313,9 @@ impl SledStorage {
         }
 
         if let Err(e) = storage.handle_migrations() {
-            error!("Error while migrating database: {}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while migrating database: {}", e);
+            }
         }
 
         storage.load_cache_from_disk();
@@ -337,7 +339,9 @@ impl SledStorage {
             PRUNED_TOPOHEIGHT,
             DiskContext::PrunedTopoHeight,
         ) {
-            debug!("Found pruned topoheight: {}", pruned_topoheight);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Found pruned topoheight: {}", pruned_topoheight);
+            }
             self.cache.pruned_topoheight = Some(pruned_topoheight);
         }
 
@@ -345,7 +349,9 @@ impl SledStorage {
         if let Ok(assets_count) =
             self.load_from_disk::<u64>(&self.extra, ASSETS_COUNT, DiskContext::AssetsCount)
         {
-            debug!("Found assets count: {}", assets_count);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Found assets count: {}", assets_count);
+            }
             self.cache.assets_count = assets_count;
         }
 
@@ -353,7 +359,9 @@ impl SledStorage {
         if let Ok(txs_count) =
             self.load_from_disk::<u64>(&self.extra, TXS_COUNT, DiskContext::TxsCount)
         {
-            debug!("Found txs count: {}", txs_count);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Found txs count: {}", txs_count);
+            }
             self.cache.transactions_count = txs_count;
         }
 
@@ -361,7 +369,9 @@ impl SledStorage {
         if let Ok(blocks_count) =
             self.load_from_disk::<u64>(&self.extra, BLOCKS_COUNT, DiskContext::BlocksCount)
         {
-            debug!("Found blocks count: {}", blocks_count);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Found blocks count: {}", blocks_count);
+            }
             self.cache.blocks_count = blocks_count;
         }
 
@@ -369,7 +379,9 @@ impl SledStorage {
         if let Ok(accounts_count) =
             self.load_from_disk::<u64>(&self.extra, ACCOUNTS_COUNT, DiskContext::AccountsCount)
         {
-            debug!("Found accounts count: {}", accounts_count);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Found accounts count: {}", accounts_count);
+            }
             self.cache.accounts_count = accounts_count;
         }
 
@@ -379,7 +391,9 @@ impl SledStorage {
             BLOCKS_EXECUTION_ORDER_COUNT,
             DiskContext::BlocksExecutionOrderCount,
         ) {
-            debug!("Found blocks execution count: {}", blocks_execution_count);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Found blocks execution count: {}", blocks_execution_count);
+            }
             self.cache.blocks_execution_count = blocks_execution_count;
         }
 
@@ -387,7 +401,9 @@ impl SledStorage {
         if let Ok(contracts_count) =
             self.load_from_disk::<u64>(&self.extra, CONTRACTS_COUNT, DiskContext::ContractsCount)
         {
-            debug!("Found contracts count: {}", contracts_count);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Found contracts count: {}", contracts_count);
+            }
             self.cache.contracts_count = contracts_count;
         }
     }
@@ -401,7 +417,9 @@ impl SledStorage {
         if let Some(snapshot) = snapshot {
             trace!("load from snapshot");
             if snapshot.contains_key(tree, key) {
-                trace!("load from snapshot key {:?} from db", key);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("load from snapshot key {:?} from db", key);
+                }
                 return snapshot.load_optional_from_disk(tree, key);
             }
         }
@@ -600,7 +618,9 @@ impl SledStorage {
         key: &K,
         context: DiskContext,
     ) -> Result<Immutable<V>, BlockchainError> {
-        trace!("get cacheable arc data {:?}", context);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get cacheable arc data {:?}", context);
+        }
         let key_bytes = key.to_bytes();
         let value = if let Some(cache) = cache.as_ref().filter(|_| {
             self.snapshot
@@ -683,7 +703,9 @@ impl SledStorage {
         key: &K,
         context: DiskContext,
     ) -> Result<V, BlockchainError> {
-        trace!("get cacheable data {:?}", context);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get cacheable data {:?}", context);
+        }
         self.get_optional_cacheable_data(tree, cache, key)
             .await?
             .ok_or_else(|| BlockchainError::NotFoundOnDisk(DiskContext::LoadData))
@@ -787,7 +809,9 @@ impl SledStorage {
 
     // Update the assets count and store it on disk
     pub(super) fn store_assets_count(&mut self, count: u64) -> Result<(), BlockchainError> {
-        trace!("store assets count {}", count);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("store assets count {}", count);
+        }
         if let Some(snapshot) = self.snapshot.as_mut() {
             snapshot.cache.assets_count = count;
         } else {
@@ -818,7 +842,9 @@ impl Storage for SledStorage {
         ),
         BlockchainError,
     > {
-        trace!("Delete block at topoheight {topoheight}");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Delete block at topoheight {topoheight}");
+        }
 
         // delete topoheight<->hash pointers
         let hash = Self::delete_cacheable_data(
@@ -836,7 +862,9 @@ impl Storage for SledStorage {
             hash.as_bytes(),
         )?;
 
-        trace!("Hash is {hash} at topo {topoheight}");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Hash is {hash} at topo {topoheight}");
+        }
 
         Self::delete_cacheable_data::<Hash, u64>(
             self.snapshot.as_mut(),
@@ -846,7 +874,9 @@ impl Storage for SledStorage {
         )
         .await?;
 
-        trace!("deleting block header {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("deleting block header {}", hash);
+        }
         let block = Self::delete_arc_cacheable_data(
             self.snapshot.as_mut(),
             &self.blocks,
@@ -860,7 +890,9 @@ impl Storage for SledStorage {
         let supply: u64 =
             Self::delete_cacheable_data(self.snapshot.as_mut(), &self.supply, None, &topoheight)
                 .await?;
-        trace!("Supply was {}", supply);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Supply was {}", supply);
+        }
 
         trace!("Deleting burned supply");
         let burned_supply: u64 = Self::delete_cacheable_data(
@@ -870,13 +902,17 @@ impl Storage for SledStorage {
             &topoheight,
         )
         .await?;
-        trace!("Burned supply was {}", burned_supply);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Burned supply was {}", burned_supply);
+        }
 
         trace!("Deleting rewards");
         let reward: u64 =
             Self::delete_cacheable_data(self.snapshot.as_mut(), &self.rewards, None, &topoheight)
                 .await?;
-        trace!("Reward for block {} was: {}", hash, reward);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Reward for block {} was: {}", hash, reward);
+        }
 
         trace!("Deleting difficulty");
         let _: Difficulty =
@@ -891,7 +927,9 @@ impl Storage for SledStorage {
             &hash,
         )
         .await?;
-        trace!("Cumulative difficulty deleted: {}", cumulative_difficulty);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Cumulative difficulty deleted: {}", cumulative_difficulty);
+        }
 
         let mut txs = Vec::new();
         for tx_hash in block.get_transactions() {
@@ -909,26 +947,32 @@ impl Storage for SledStorage {
                 blocks.remove(&hash);
                 should_delete = blocks.is_empty();
                 self.set_blocks_for_tx(tx_hash, &blocks)?;
-                trace!(
-                    "Tx was included in {}, blocks left: {}",
-                    blocks_len,
-                    blocks
-                        .into_iter()
-                        .map(|b| b.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Tx was included in {}, blocks left: {}",
+                        blocks_len,
+                        blocks
+                            .into_iter()
+                            .map(|b| b.to_string())
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    );
+                }
             }
 
             if self.is_tx_executed_in_block(tx_hash, &hash)? {
-                trace!("Tx {} was executed, deleting", tx_hash);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Tx {} was executed, deleting", tx_hash);
+                }
                 self.unmark_tx_from_executed(&tx_hash)?;
                 self.delete_contract_outputs_for_tx(&tx_hash).await?;
             }
 
             // Because the TX is not linked to any other block, we can safely delete that block
             if should_delete {
-                trace!("Deleting TX {} in block {}", tx_hash, hash);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Deleting TX {} in block {}", tx_hash, hash);
+                }
                 let tx: Immutable<Transaction> = Self::delete_arc_cacheable_data(
                     self.snapshot.as_mut(),
                     &self.transactions,
@@ -968,10 +1012,12 @@ impl Storage for SledStorage {
         let mut size = 0;
         for tree in self.db.tree_names() {
             let tree = self.db.open_tree(tree)?;
-            debug!(
-                "Estimating size for tree {}",
-                String::from_utf8_lossy(&tree.name())
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Estimating size for tree {}",
+                    String::from_utf8_lossy(&tree.name())
+                );
+            }
             for el in Self::iter(self.snapshot.as_ref(), &tree) {
                 let (key, value) = el?;
                 size += key.len() + value.len();
@@ -984,7 +1030,9 @@ impl Storage for SledStorage {
     async fn flush(&mut self) -> Result<(), BlockchainError> {
         trace!("flush sled");
         let n = self.db.flush_async().await?;
-        debug!("Flushed {} bytes", n);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Flushed {} bytes", n);
+        }
         Ok(())
     }
 }
@@ -996,10 +1044,12 @@ impl crate::core::storage::EnergyProvider for SledStorage {
         &self,
         account: &PublicKey,
     ) -> Result<Option<EnergyResource>, BlockchainError> {
-        trace!(
-            "get energy resource for account {}",
-            account.as_address(self.network.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get energy resource for account {}",
+                account.as_address(self.network.is_mainnet())
+            );
+        }
 
         // Get the latest topoheight for this account's energy resource
         let topoheight =
@@ -1017,18 +1067,22 @@ impl crate::core::storage::EnergyProvider for SledStorage {
                     &self.versioned_energy_resources,
                     key.as_bytes(),
                 )?;
-                trace!(
-                    "Found energy resource at topoheight {}: {:?}",
-                    topoheight,
-                    energy
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Found energy resource at topoheight {}: {:?}",
+                        topoheight,
+                        energy
+                    );
+                }
                 Ok(energy)
             }
             None => {
-                trace!(
-                    "No energy resource found for account {}",
-                    account.as_address(self.network.is_mainnet())
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "No energy resource found for account {}",
+                        account.as_address(self.network.is_mainnet())
+                    );
+                }
                 Ok(None)
             }
         }
@@ -1040,12 +1094,14 @@ impl crate::core::storage::EnergyProvider for SledStorage {
         topoheight: TopoHeight,
         energy: &EnergyResource,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "set energy resource for account {} at topoheight {}: {:?}",
-            account.as_address(self.network.is_mainnet()),
-            topoheight,
-            energy
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set energy resource for account {} at topoheight {}: {:?}",
+                account.as_address(self.network.is_mainnet()),
+                topoheight,
+                energy
+            );
+        }
 
         // Store the versioned energy resource
         let key = format!(
@@ -1089,11 +1145,13 @@ impl crate::core::storage::AIMiningProvider for SledStorage {
                     &self.versioned_ai_mining_states,
                     &topoheight.to_be_bytes(),
                 )?;
-                trace!(
-                    "Found AI mining state at topoheight {}: {:?}",
-                    topoheight,
-                    state.is_some()
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Found AI mining state at topoheight {}: {:?}",
+                        topoheight,
+                        state.is_some()
+                    );
+                }
                 Ok(state)
             }
             None => {
@@ -1108,7 +1166,9 @@ impl crate::core::storage::AIMiningProvider for SledStorage {
         topoheight: TopoHeight,
         state: &AIMiningState,
     ) -> Result<(), BlockchainError> {
-        trace!("set ai mining state at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set ai mining state at topoheight {}", topoheight);
+        }
 
         // Serialize the AI mining state
         let bytes = state.to_bytes();
@@ -1136,10 +1196,12 @@ impl crate::core::storage::AIMiningProvider for SledStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "check if AI mining state exists at topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "check if AI mining state exists at topoheight {}",
+                topoheight
+            );
+        }
         let exists = self
             .versioned_ai_mining_states
             .contains_key(topoheight.to_be_bytes())?;
@@ -1150,7 +1212,9 @@ impl crate::core::storage::AIMiningProvider for SledStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<Option<AIMiningState>, BlockchainError> {
-        trace!("get AI mining state at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get AI mining state at topoheight {}", topoheight);
+        }
         let state = self.load_optional_from_disk::<AIMiningState>(
             &self.versioned_ai_mining_states,
             &topoheight.to_be_bytes(),

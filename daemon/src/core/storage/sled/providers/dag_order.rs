@@ -13,7 +13,9 @@ impl DagOrderProvider for SledStorage {
         hash: &Hash,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("set topo height for {} at {}", hash, topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set topo height for {} at {}", hash, topoheight);
+        }
         Self::insert_into_disk(
             self.snapshot.as_mut(),
             &self.topo_by_hash,
@@ -42,11 +44,15 @@ impl DagOrderProvider for SledStorage {
     }
 
     async fn is_block_topological_ordered(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("is block topological ordered: {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is block topological ordered: {}", hash);
+        }
         let topoheight = match self.get_topo_height_for_hash(&hash).await {
             Ok(topoheight) => topoheight,
             Err(e) => {
-                trace!("Error while checking if block {} is ordered: {}", hash, e);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Error while checking if block {} is ordered: {}", hash, e);
+                }
                 return Ok(false);
             }
         };
@@ -54,11 +60,13 @@ impl DagOrderProvider for SledStorage {
         let hash_at_topo = match self.get_hash_at_topo_height(topoheight).await {
             Ok(hash_at_topo) => hash_at_topo,
             Err(e) => {
-                trace!(
-                    "Error while checking if a block hash is ordered at topo {}: {}",
-                    topoheight,
-                    e
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Error while checking if a block hash is ordered at topo {}: {}",
+                        topoheight,
+                        e
+                    );
+                }
                 return Ok(false);
             }
         };
@@ -66,7 +74,9 @@ impl DagOrderProvider for SledStorage {
     }
 
     async fn get_topo_height_for_hash(&self, hash: &Hash) -> Result<TopoHeight, BlockchainError> {
-        trace!("get topoheight for hash: {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get topoheight for hash: {}", hash);
+        }
         self.get_cacheable_data(
             &self.topo_by_hash,
             &self.topo_by_hash_cache,
@@ -80,7 +90,9 @@ impl DagOrderProvider for SledStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<Hash, BlockchainError> {
-        trace!("get hash at topoheight: {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get hash at topoheight: {}", topoheight);
+        }
         self.get_cacheable_data(
             &self.hash_at_topo,
             &self.hash_at_topo_cache,
@@ -94,7 +106,9 @@ impl DagOrderProvider for SledStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!("has hash at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has hash at topoheight {}", topoheight);
+        }
         self.contains_data_cached(&self.hash_at_topo, &self.hash_at_topo_cache, &topoheight)
             .await
     }

@@ -21,7 +21,9 @@ impl ContractDataProvider for SledStorage {
         topoheight: TopoHeight,
         data: &VersionedContractData,
     ) -> Result<(), BlockchainError> {
-        trace!("set last contract data to topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set last contract data to topoheight {}", topoheight);
+        }
         let versioned_key = self.get_versioned_contract_data_key(contract, key, topoheight);
         Self::insert_into_disk(
             self.snapshot.as_mut(),
@@ -57,7 +59,9 @@ impl ContractDataProvider for SledStorage {
         key: &ValueCell,
         topoheight: TopoHeight,
     ) -> Result<VersionedContractData, BlockchainError> {
-        trace!("get contract data at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get contract data at topoheight {}", topoheight);
+        }
         self.load_from_disk(
             &self.versioned_contracts_data,
             &self.get_versioned_contract_data_key(contract, key, topoheight),
@@ -71,10 +75,12 @@ impl ContractDataProvider for SledStorage {
         key: &ValueCell,
         maximum_topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedContractData)>, BlockchainError> {
-        trace!(
-            "get contract data at maximum topoheight {}",
-            maximum_topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get contract data at maximum topoheight {}",
+                maximum_topoheight
+            );
+        }
         match self
             .get_contract_data_topoheight_at_maximum_topoheight_for(
                 contract,
@@ -99,10 +105,12 @@ impl ContractDataProvider for SledStorage {
         key: &ValueCell,
         maximum_topoheight: TopoHeight,
     ) -> Result<Option<TopoHeight>, BlockchainError> {
-        trace!(
-            "get contract data topoheight at maximum topoheight {}",
-            maximum_topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get contract data topoheight at maximum topoheight {}",
+                maximum_topoheight
+            );
+        }
         let Some(pointer) = self
             .get_last_topoheight_for_contract_data(contract, key)
             .await?
@@ -122,10 +130,12 @@ impl ContractDataProvider for SledStorage {
         let mut previous_topo = Some(topo);
         while let Some(topoheight) = previous_topo {
             if topoheight <= maximum_topoheight {
-                trace!(
-                    "Contract data topoheight {} is at maximum topoheight",
-                    topoheight
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Contract data topoheight {} is at maximum topoheight",
+                        topoheight
+                    );
+                }
                 return Ok(Some(topoheight));
             }
 
@@ -145,7 +155,9 @@ impl ContractDataProvider for SledStorage {
         key: &ValueCell,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!("has contract data at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has contract data at topoheight {}", topoheight);
+        }
         self.get_contract_data_at_maximum_topoheight_for(contract, key, topoheight)
             .await
             .map(|res| res.map_or(false, |v| v.1.take().is_some()))
@@ -157,7 +169,9 @@ impl ContractDataProvider for SledStorage {
         key: &ValueCell,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!("has contract data at exact topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has contract data at exact topoheight {}", topoheight);
+        }
         self.contains_data(
             &self.versioned_contracts_data,
             &self.get_versioned_contract_data_key(contract, key, topoheight),

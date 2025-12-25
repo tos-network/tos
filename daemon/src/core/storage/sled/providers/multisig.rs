@@ -21,7 +21,9 @@ impl MultiSigProvider for SledStorage {
         account: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<VersionedMultiSig<'a>, BlockchainError> {
-        trace!("get multisig at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get multisig at topoheight {}", topoheight);
+        }
         self.load_from_disk(
             &self.versioned_multisigs,
             &self.get_versioned_multisig_key(account, topoheight),
@@ -47,7 +49,9 @@ impl MultiSigProvider for SledStorage {
         account: &PublicKey,
         maximum_topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedMultiSig<'a>)>, BlockchainError> {
-        trace!("get multisig at maximum topoheight {}", maximum_topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get multisig at maximum topoheight {}", maximum_topoheight);
+        }
         let mut previous_topoheight = if self
             .has_multisig_at_exact_topoheight(account, maximum_topoheight)
             .await?
@@ -92,7 +96,9 @@ impl MultiSigProvider for SledStorage {
         account: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!("has multisig at exact topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has multisig at exact topoheight {}", topoheight);
+        }
         self.contains_data(
             &self.versioned_multisigs,
             &self.get_versioned_multisig_key(account, topoheight),
@@ -105,7 +111,9 @@ impl MultiSigProvider for SledStorage {
         topoheight: TopoHeight,
         multisig: VersionedMultiSig<'a>,
     ) -> Result<(), BlockchainError> {
-        trace!("set last multisig to topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set last multisig to topoheight {}", topoheight);
+        }
         let key: [u8; 40] = self.get_versioned_multisig_key(account, topoheight);
         Self::insert_into_disk(
             self.snapshot.as_mut(),

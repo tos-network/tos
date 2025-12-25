@@ -12,10 +12,12 @@ impl VersionedContractDataProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned contract data at topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned contract data at topoheight {}",
+                topoheight
+            );
+        }
         self.delete_versioned_at_topoheight(
             Column::ContractsData,
             Column::VersionedContractsData,
@@ -27,10 +29,12 @@ impl VersionedContractDataProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned contract data above topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned contract data above topoheight {}",
+                topoheight
+            );
+        }
         self.delete_versioned_above_topoheight(
             Column::ContractsData,
             Column::VersionedContractsData,
@@ -43,10 +47,12 @@ impl VersionedContractDataProvider for RocksStorage {
         topoheight: TopoHeight,
         keep_last: bool,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned contract data below topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned contract data below topoheight {}",
+                topoheight
+            );
+        }
         self.delete_versioned_below_topoheight(
             Column::ContractsData,
             Column::VersionedContractsData,

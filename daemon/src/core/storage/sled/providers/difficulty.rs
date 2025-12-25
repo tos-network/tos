@@ -18,7 +18,9 @@ use tos_common::{
 impl DifficultyProvider for SledStorage {
     // TODO optimize all these functions to read only what is necessary
     async fn get_height_for_block_hash(&self, hash: &Hash) -> Result<u64, BlockchainError> {
-        trace!("get height for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get height for block hash {}", hash);
+        }
         let block = self.get_block_header_by_hash(hash).await?;
         Ok(block.get_height())
     }
@@ -27,7 +29,9 @@ impl DifficultyProvider for SledStorage {
         &self,
         hash: &Hash,
     ) -> Result<BlockVersion, BlockchainError> {
-        trace!("get version for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get version for block hash {}", hash);
+        }
         let block = self.get_block_header_by_hash(hash).await?;
         Ok(block.get_version())
     }
@@ -36,7 +40,9 @@ impl DifficultyProvider for SledStorage {
         &self,
         hash: &Hash,
     ) -> Result<TimestampMillis, BlockchainError> {
-        trace!("get timestamp for hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get timestamp for hash {}", hash);
+        }
         let block = self.get_block_header_by_hash(hash).await?;
         Ok(block.get_timestamp())
     }
@@ -45,7 +51,9 @@ impl DifficultyProvider for SledStorage {
         &self,
         hash: &Hash,
     ) -> Result<Difficulty, BlockchainError> {
-        trace!("get difficulty for hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get difficulty for hash {}", hash);
+        }
         self.load_from_disk(
             &self.difficulty,
             hash.as_bytes(),
@@ -57,7 +65,9 @@ impl DifficultyProvider for SledStorage {
         &self,
         hash: &Hash,
     ) -> Result<CumulativeDifficulty, BlockchainError> {
-        trace!("get cumulative difficulty for hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get cumulative difficulty for hash {}", hash);
+        }
         self.get_cacheable_data(
             &self.cumulative_difficulty,
             &self.cumulative_difficulty_cache,
@@ -71,7 +81,9 @@ impl DifficultyProvider for SledStorage {
         &self,
         hash: &Hash,
     ) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
-        trace!("get past blocks of {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get past blocks of {}", hash);
+        }
         let block = self.get_block_header_by_hash(hash).await?;
         Ok(block.get_immutable_tips().clone())
     }
@@ -80,7 +92,9 @@ impl DifficultyProvider for SledStorage {
         &self,
         hash: &Hash,
     ) -> Result<Immutable<BlockHeader>, BlockchainError> {
-        trace!("get block by hash: {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block by hash: {}", hash);
+        }
         self.get_cacheable_arc_data(
             &self.blocks,
             &self.blocks_cache,
@@ -94,7 +108,9 @@ impl DifficultyProvider for SledStorage {
         &self,
         hash: &Hash,
     ) -> Result<VarUint, BlockchainError> {
-        trace!("get p for hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get p for hash {}", hash);
+        }
         self.load_from_disk(
             &self.difficulty_covariance,
             hash.as_bytes(),

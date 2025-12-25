@@ -227,7 +227,9 @@ impl RocksStorage {
         column: Column,
         key: &K,
     ) -> Result<bool, BlockchainError> {
-        trace!("contains data {:?}", column);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("contains data {:?}", column);
+        }
 
         let key_bytes = key.as_ref();
         if let Some(snapshot) = self.snapshot.as_ref() {
@@ -246,7 +248,9 @@ impl RocksStorage {
 
     // Check if its empty by checking the snapshot cache first, and then the raw DB
     pub fn is_empty(&self, column: Column) -> Result<bool, BlockchainError> {
-        trace!("is empty {:?}", column);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is empty {:?}", column);
+        }
 
         let cf = cf_handle!(self.db, column);
         let mut iterator = self.db.iterator_cf(&cf, InternalIteratorMode::Start);
@@ -260,7 +264,9 @@ impl RocksStorage {
 
     // Count how many entries we have stored in a column
     pub fn count_entries(&self, column: Column) -> Result<usize, BlockchainError> {
-        trace!("count entries {:?}", column);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("count entries {:?}", column);
+        }
 
         let cf = cf_handle!(self.db, column);
         let iterator = self.db.iterator_cf(&cf, InternalIteratorMode::Start);
@@ -285,7 +291,9 @@ impl RocksStorage {
         column: Column,
         key: &K,
     ) -> Result<V, BlockchainError> {
-        trace!("load from disk internal {:?}", column);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("load from disk internal {:?}", column);
+        }
 
         self.load_optional_from_disk(column, key)?
             .ok_or(BlockchainError::NotFoundOnDisk(DiskContext::LoadData))
@@ -296,7 +304,9 @@ impl RocksStorage {
         column: Column,
         key: &K,
     ) -> Result<usize, BlockchainError> {
-        trace!("load from disk internal {:?}", column);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("load from disk internal {:?}", column);
+        }
 
         if let Some(v) = self
             .snapshot
@@ -328,7 +338,9 @@ impl RocksStorage {
         column: Column,
         key: &K,
     ) -> Result<Option<V>, BlockchainError> {
-        trace!("load optional {:?} from disk internal", column);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("load optional {:?} from disk internal", column);
+        }
 
         if let Some(v) = snapshot.and_then(|s| s.get(column, key.as_ref())) {
             match v {
@@ -354,7 +366,9 @@ impl RocksStorage {
         key: K,
         value: &V,
     ) -> Result<(), BlockchainError> {
-        trace!("insert into disk {:?}", column);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("insert into disk {:?}", column);
+        }
 
         match snapshot {
             Some(snapshot) => snapshot.put(column, key.as_ref().to_vec(), value.to_bytes()),
@@ -376,7 +390,9 @@ impl RocksStorage {
         column: Column,
         key: K,
     ) -> Result<(), BlockchainError> {
-        trace!("remove from disk {:?}", column);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("remove from disk {:?}", column);
+        }
 
         let bytes = key.as_ref();
         match snapshot {
@@ -402,7 +418,9 @@ impl RocksStorage {
         K: Serializer + 'a,
         V: Serializer + 'a,
     {
-        trace!("iter owned {:?}", column);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("iter owned {:?}", column);
+        }
 
         let cf = cf_handle!(db, column);
         let (m, opts) = mode.convert();
@@ -430,7 +448,9 @@ impl RocksStorage {
         K: Serializer + 'a,
         V: Serializer + 'a,
     {
-        trace!("iter {:?}", column);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("iter {:?}", column);
+        }
 
         let cf = cf_handle!(db, column);
         let (m, opts) = mode.convert();
@@ -457,7 +477,9 @@ impl RocksStorage {
     where
         K: Serializer + 'a,
     {
-        trace!("iter keys {:?}", column);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("iter keys {:?}", column);
+        }
 
         let cf = cf_handle!(db, column);
         let (m, opts) = mode.convert();
@@ -516,7 +538,9 @@ impl Storage for RocksStorage {
         ),
         BlockchainError,
     > {
-        trace!("Delete block at topoheight {topoheight}");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Delete block at topoheight {topoheight}");
+        }
 
         // delete topoheight<->hash pointers
         let hash: Hash = self.load_from_disk(Column::HashAtTopo, &topoheight.to_be_bytes())?;
@@ -528,7 +552,9 @@ impl Storage for RocksStorage {
         trace!("hash is {hash} at topo {topoheight}");
         self.remove_from_disk(Column::TopoByHash, &hash)?;
 
-        trace!("deleting block header {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("deleting block header {}", hash);
+        }
         let block: Immutable<BlockHeader> = self.load_from_disk(Column::Blocks, &hash)?;
         self.remove_from_disk(Column::Blocks, &hash)?;
         trace!("block header deleted successfully");
@@ -557,19 +583,23 @@ impl Storage for RocksStorage {
                     self.set_blocks_for_tx(tx_hash, &blocks)?;
                 }
 
-                trace!(
-                    "Tx was included in {} blocks, now: {}",
-                    blocks_len,
-                    blocks.len()
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Tx was included in {} blocks, now: {}",
+                        blocks_len,
+                        blocks.len()
+                    );
+                }
             }
 
             if self.is_tx_executed_in_block(tx_hash, &hash)? {
-                trace!(
-                    "Tx {} was executed in block {}, deleting",
-                    topoheight,
-                    tx_hash
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Tx {} was executed in block {}, deleting",
+                        topoheight,
+                        tx_hash
+                    );
+                }
                 self.unmark_tx_from_executed(&tx_hash)?;
                 self.delete_contract_outputs_for_tx(&tx_hash).await?;
             }
@@ -577,7 +607,9 @@ impl Storage for RocksStorage {
             // We have to check first as we may have already deleted it because of client protocol
             // which allow multiple time the same txs in differents blocks
             if should_delete && self.contains_data(Column::TransactionsExecuted, tx_hash)? {
-                trace!("Deleting TX {} in block {}", tx_hash, hash);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Deleting TX {} in block {}", tx_hash, hash);
+                }
                 let tx: Immutable<Transaction> =
                     self.load_from_disk(Column::Transactions, tx_hash)?;
                 self.remove_from_disk(Column::Transactions, tx_hash)?;
@@ -647,7 +679,9 @@ impl Storage for RocksStorage {
         // and simply await its result
         tokio::task::spawn_blocking(move || {
             for column in Column::iter() {
-                info!("compacting {:?}", column);
+                if log::log_enabled!(log::Level::Info) {
+                    info!("compacting {:?}", column);
+                }
                 let cf = cf_handle!(db, column);
                 db.compact_range_cf::<&[u8], &[u8]>(&cf, None, None);
             }
@@ -686,11 +720,13 @@ impl crate::core::storage::AIMiningProvider for RocksStorage {
                     Column::VersionedAIMiningStates,
                     &topoheight.to_be_bytes().to_vec(),
                 )?;
-                trace!(
-                    "Found AI mining state at topoheight {}: {:?}",
-                    topoheight,
-                    state.is_some()
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Found AI mining state at topoheight {}: {:?}",
+                        topoheight,
+                        state.is_some()
+                    );
+                }
                 Ok(state)
             }
             None => {
@@ -705,7 +741,9 @@ impl crate::core::storage::AIMiningProvider for RocksStorage {
         topoheight: TopoHeight,
         state: &AIMiningState,
     ) -> Result<(), BlockchainError> {
-        trace!("set ai mining state at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set ai mining state at topoheight {}", topoheight);
+        }
 
         // Store the versioned state
         self.insert_into_disk(
@@ -725,10 +763,12 @@ impl crate::core::storage::AIMiningProvider for RocksStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "check if AI mining state exists at topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "check if AI mining state exists at topoheight {}",
+                topoheight
+            );
+        }
         let cf = cf_handle!(self.db, Column::VersionedAIMiningStates);
         let exists = self
             .db
@@ -742,7 +782,9 @@ impl crate::core::storage::AIMiningProvider for RocksStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<Option<AIMiningState>, BlockchainError> {
-        trace!("get AI mining state at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get AI mining state at topoheight {}", topoheight);
+        }
         let state = self.load_optional_from_disk::<Vec<u8>, AIMiningState>(
             Column::VersionedAIMiningStates,
             &topoheight.to_be_bytes().to_vec(),

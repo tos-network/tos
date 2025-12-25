@@ -335,12 +335,14 @@ impl TakoExecutor {
         let bytecode_size = bytecode.len() as u64;
         let executable = Executable::load(bytecode, loader.clone()).map_err(|e| {
             // Log detailed ELF parsing error for debugging
-            error!(
-                "ELF parsing failed for contract {}: bytecode_size={}, error={:?}",
-                contract_hash,
-                bytecode.len(),
-                e
-            );
+            if log::log_enabled!(log::Level::Error) {
+                error!(
+                    "ELF parsing failed for contract {}: bytecode_size={}, error={:?}",
+                    contract_hash,
+                    bytecode.len(),
+                    e
+                );
+            }
             // Also log first 64 bytes of bytecode for debugging
             if log::log_enabled!(log::Level::Debug) {
                 let header_bytes: Vec<u8> = bytecode.iter().take(64).cloned().collect();
@@ -384,10 +386,12 @@ impl TakoExecutor {
         invoke_context
             .check_and_record_loaded_data(bytecode_size)
             .map_err(|e| {
-                error!(
-                    "Entry contract bytecode size {} exceeds loaded data limit: {:?}",
-                    bytecode_size, e
-                );
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "Entry contract bytecode size {} exceeds loaded data limit: {:?}",
+                        bytecode_size, e
+                    );
+                }
                 TakoExecutionError::LoadedDataLimitExceeded {
                     current_size: bytecode_size,
                     limit: invoke_context
@@ -443,7 +447,9 @@ impl TakoExecutor {
             invoke_context
                 .process_precompile(program_id, input_data, &instruction_data_refs)
                 .map_err(|e| {
-                    error!("Precompile verification failed: {:?}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Precompile verification failed: {:?}", e);
+                    }
                     TakoExecutionError::PrecompileVerificationFailed {
                         program_id: hex::encode(program_id),
                         error_details: format!("{:?}", e),
@@ -492,7 +498,9 @@ impl TakoExecutor {
             debug!("Validating ELF bytecode: size={} bytes", bytecode.len());
         }
         tos_common::contract::validate_contract_bytecode(bytecode).map_err(|e| {
-            error!("Bytecode validation failed: {:?}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Bytecode validation failed: {:?}", e);
+            }
             TakoExecutionError::invalid_bytecode("Invalid ELF format", Some(e))
         })?;
 
@@ -534,15 +542,19 @@ impl TakoExecutor {
         );
 
         // 9. Execute contract
-        debug!("Executing contract bytecode via TBPF VM");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Executing contract bytecode via TBPF VM");
+        }
         let (instruction_count, result) = vm.execute_program(&executable, true); // true = interpreter mode
 
         // 10. Calculate compute units used (before dropping invoke_context)
         let compute_units_used = compute_budget - invoke_context.get_remaining();
-        debug!(
-            "Execution complete: instructions={}, compute_units_used={}/{}",
-            instruction_count, compute_units_used, compute_budget
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Execution complete: instructions={}, compute_units_used={}/{}",
+                instruction_count, compute_units_used, compute_budget
+            );
+        }
 
         // 11. Extract log messages from contract execution
         let log_messages = invoke_context.extract_log_messages().unwrap_or_default();
@@ -605,14 +617,16 @@ impl TakoExecutor {
             ProgramResult::Err(err) => {
                 let execution_error =
                     TakoExecutionError::from_ebpf_error(err, instruction_count, compute_units_used);
-                error!(
-                    "TOS Kernel(TAKO) execution failed: category={}, error={}, log_count={}, stack_allocated={}KB, heap_allocated={}KB",
-                    execution_error.category(),
-                    execution_error.user_message(),
-                    log_messages.len(),
-                    STACK_SIZE / 1024,
-                    HEAP_SIZE / 1024
-                );
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "TOS Kernel(TAKO) execution failed: category={}, error={}, log_count={}, stack_allocated={}KB, heap_allocated={}KB",
+                        execution_error.category(),
+                        execution_error.user_message(),
+                        log_messages.len(),
+                        STACK_SIZE / 1024,
+                        HEAP_SIZE / 1024
+                    );
+                }
                 // Note: Log messages are lost on error for now
                 // Future: Could extend TakoExecutionError to include log_messages for debugging
                 Err(execution_error)

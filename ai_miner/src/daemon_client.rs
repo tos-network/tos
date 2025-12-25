@@ -118,10 +118,12 @@ impl DaemonClient {
 
         for attempt in 0..=self.config.max_retries {
             if attempt > 0 {
-                warn!(
-                    "Retrying request to {} (attempt {}/{})",
-                    url, attempt, self.config.max_retries
-                );
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "Retrying request to {} (attempt {}/{})",
+                        url, attempt, self.config.max_retries
+                    );
+                }
                 sleep(self.config.retry_delay).await;
             }
 
@@ -138,7 +140,9 @@ impl DaemonClient {
                             || err_msg.contains("unauthorized")
                             || err_msg.contains("forbidden")
                         {
-                            debug!("Not retrying due to non-retryable error: {}", err);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Not retrying due to non-retryable error: {}", err);
+                            }
                             break;
                         }
                     }
@@ -291,15 +295,19 @@ impl DaemonClient {
 
     /// Test connection to daemon (legacy method)
     pub async fn test_connection(&self) -> Result<()> {
-        info!("Testing connection to daemon at {}", self.base_url);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Testing connection to daemon at {}", self.base_url);
+        }
         let health = self.health_check().await?;
 
         if health.is_healthy {
-            info!(
-                "Successfully connected to daemon version: {}",
-                health.version.as_deref().unwrap_or("unknown")
-            );
-            info!("Daemon response time: {:?}", health.response_time);
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "Successfully connected to daemon version: {}",
+                    health.version.as_deref().unwrap_or("unknown")
+                );
+                info!("Daemon response time: {:?}", health.response_time);
+            }
         } else {
             return Err(anyhow!(
                 "Daemon health check failed: {}",

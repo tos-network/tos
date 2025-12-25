@@ -24,7 +24,9 @@ impl CommitPointProvider for SledStorage {
     }
 
     async fn end_commit_point(&mut self, apply: bool) -> Result<(), BlockchainError> {
-        trace!("end commit point");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("end commit point");
+        }
         let snapshot = self
             .snapshot
             .take()
@@ -34,7 +36,9 @@ impl CommitPointProvider for SledStorage {
             self.cache = snapshot.cache;
 
             for (tree, batch) in snapshot.trees {
-                trace!("Applying batch to tree {:?}", tree);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Applying batch to tree {:?}", tree);
+                }
                 match batch {
                     Some(batch) => {
                         let tree = self.db.open_tree(tree)?;
@@ -46,7 +50,9 @@ impl CommitPointProvider for SledStorage {
                         }
                     }
                     None => {
-                        trace!("Dropping tree {:?}", tree);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("Dropping tree {:?}", tree);
+                        }
                         self.db.drop_tree(tree)?;
                     }
                 };

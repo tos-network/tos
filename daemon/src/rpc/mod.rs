@@ -222,7 +222,9 @@ impl<S: Storage> DaemonRpcServer<S> {
 
     pub async fn notify_clients_with<V: serde::Serialize>(&self, event: &NotifyEvent, value: V) {
         if let Err(e) = self.notify_clients(event, json!(value)).await {
-            error!("Error while notifying event {:?}: {}", event, e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while notifying event {:?}: {}", event, e);
+            }
         }
     }
 

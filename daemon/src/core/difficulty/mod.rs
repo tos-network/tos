@@ -25,7 +25,9 @@ fn kalman_filter(
     left_shift: VarUint,
     process_noise_covar: VarUint,
 ) -> (VarUint, VarUint) {
-    trace!("z: {}, x_est_prev: {}, p_prev: {}", z, x_est_prev, p_prev);
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("z: {}, x_est_prev: {}, p_prev: {}", z, x_est_prev, p_prev);
+    }
     // Scale up
     let z = z * left_shift;
     let r = z * 2;
@@ -44,14 +46,16 @@ fn kalman_filter(
         x_est_prev - ((k * (x_est_prev - z)) >> shift)
     };
 
-    trace!(
-        "x_est_new: {}, p pred: {}, noise covar: {}, p_prev: {}, k: {}",
-        x_est_new,
-        p_pred,
-        process_noise_covar,
-        p_prev,
-        k
-    );
+    if log::log_enabled!(log::Level::Trace) {
+        trace!(
+            "x_est_new: {}, p pred: {}, noise covar: {}, p_prev: {}, k: {}",
+            x_est_new,
+            p_pred,
+            process_noise_covar,
+            p_prev,
+            k
+        );
+    }
     let p_new = ((left_shift - k) * p_pred) >> shift;
 
     // Scale down
