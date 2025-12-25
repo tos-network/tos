@@ -268,10 +268,12 @@ async fn main() -> Result<()> {
     let detected_threads = match thread::available_parallelism() {
         Ok(value) => value.get() as u16,
         Err(e) => {
-            warn!(
-                "Couldn't detect number of available threads: {}, fallback to 1 thread only",
-                e
-            );
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "Couldn't detect number of available threads: {}, fallback to 1 thread only",
+                    e
+                );
+            }
             1
         }
     };
@@ -281,16 +283,20 @@ async fn main() -> Result<()> {
         None => detected_threads,
     };
 
-    info!(
-        "Total threads to use: {} (detected: {})",
-        threads, detected_threads
-    );
+    if log::log_enabled!(log::Level::Info) {
+        info!(
+            "Total threads to use: {} (detected: {})",
+            threads, detected_threads
+        );
+    }
 
     if let Some(algorithm) = config.benchmark.benchmark {
-        info!(
-            "Benchmark mode enabled, miner will try up to {} threads",
-            threads
-        );
+        if log::log_enabled!(log::Level::Info) {
+            info!(
+                "Benchmark mode enabled, miner will try up to {} threads",
+                threads
+            );
+        }
         benchmark(threads as usize, config.benchmark.iterations, algorithm);
         info!("Benchmark finished");
         return Ok(());
@@ -299,8 +305,10 @@ async fn main() -> Result<()> {
     let address = config
         .miner_address
         .ok_or_else(|| Error::msg("No miner address specified"))?;
-    info!("Miner address: {}", address);
-    if threads != detected_threads {
+    if log::log_enabled!(log::Level::Info) {
+        info!("Miner address: {}", address);
+    }
+    if threads != detected_threads && log::log_enabled!(log::Level::Warn) {
         warn!(
             "Attention, the number of threads used may not be optimal, recommended is: {}",
             detected_threads
@@ -313,10 +321,16 @@ async fn main() -> Result<()> {
     let (block_sender, block_receiver) = mpsc::channel::<MinerWork>(threads as usize);
     let mut handles = Vec::with_capacity(threads as usize);
     for id in 0..threads {
-        debug!("Starting thread #{}", id);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Starting thread #{}", id);
+        }
         match start_thread(id, sender.subscribe(), block_sender.clone()) {
             Ok(handle) => handles.push(handle),
-            Err(e) => error!("Error while creating Mining Thread #{}: {}", id, e),
+            Err(e) => {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while creating Mining Thread #{}: {}", id, e);
+                }
+            }
         }
     }
 
@@ -346,7 +360,9 @@ async fn main() -> Result<()> {
     }
 
     if let Err(e) = run_prompt(prompt).await {
-        error!("Error on running prompt: {}", e);
+        if log::log_enabled!(log::Level::Error) {
+            error!("Error on running prompt: {}", e);
+        }
     }
 
     // send exit command to all threads to stop
@@ -366,11 +382,15 @@ async fn main() -> Result<()> {
         match handle.join() {
             Ok(result) => {
                 if let Err(e) = result {
-                    error!("Error on mining thread #{}: {}", index, e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error on mining thread #{}: {}", index, e);
+                    }
                 }
             }
             Err(e) => {
-                error!("Error while joining mining thread #{}: {:?}", index, e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Error while joining mining thread #{}: {:?}", index, e);
+                }
             }
         }
     }
@@ -417,10 +437,12 @@ async fn broadcast_stats_task(broadcast_address: String) -> Result<()> {
 // Benchmark the miner with the specified number of threads and iterations
 // It will output the total time, total iterations, time per PoW and hashrate for each number of threads
 fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
-    info!(
-        "{0: <10} | {1: <10} | {2: <16} | {3: <13} | {4: <13}",
-        "Threads", "Total Time", "Total Iterations", "Time/PoW (ms)", "Hashrate"
-    );
+    if log::log_enabled!(log::Level::Info) {
+        info!(
+            "{0: <10} | {1: <10} | {2: <16} | {3: <13} | {4: <13}",
+            "Threads", "Total Time", "Total Iterations", "Time/PoW (ms)", "Hashrate"
+        );
+    }
 
     for bench in 1..=threads {
         let start = Instant::now();
@@ -429,7 +451,9 @@ fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
             let job = MinerWork::new(Hash::zero(), get_current_time_in_millis());
             let mut worker = Worker::new();
             if let Err(e) = worker.set_work(job, algorithm) {
-                error!("Failed to set work in benchmark: {}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Failed to set work in benchmark: {}", e);
+                }
                 continue;
             }
 
@@ -449,7 +473,9 @@ fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
         for handle in handles {
             // wait on all threads
             if let Err(e) = handle.join() {
-                error!("Thread join failed: {:?}", e);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Thread join failed: {:?}", e);
+                }
             }
         }
         let duration = start.elapsed().as_millis();
@@ -479,18 +505,22 @@ async fn communication_task(
     info!("Starting communication task");
     let daemon_address = sanitize_ws_address(&daemon_address);
     'main: loop {
-        info!("Trying to connect to {}", daemon_address);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Trying to connect to {}", daemon_address);
+        }
         let client =
             match connect_async(format!("{}/getwork/{}/{}", daemon_address, address, worker)).await
             {
                 Ok((client, response)) => {
                     let status = response.status();
                     if status.is_server_error() || status.is_client_error() {
-                        error!(
-                            "Error while connecting to {}, got an unexpected response: {}",
-                            daemon_address,
-                            status.as_str()
-                        );
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Error while connecting to {}, got an unexpected response: {}",
+                                daemon_address,
+                                status.as_str()
+                            );
+                        }
                         warn!("Trying to connect to WebSocket again in 10 seconds...");
                         tokio::time::sleep(Duration::from_secs(10)).await;
                         continue 'main;
@@ -498,14 +528,16 @@ async fn communication_task(
                     client
                 }
                 Err(e) => {
-                    if let TungsteniteError::Http(e) = e {
-                        error!(
-                            "Error while connecting to {}, got an unexpected response: {}",
-                            daemon_address,
-                            e.status()
-                        );
-                    } else {
-                        error!("Error while connecting to {}: {}", daemon_address, e);
+                    if log::log_enabled!(log::Level::Error) {
+                        if let TungsteniteError::Http(e) = e {
+                            error!(
+                                "Error while connecting to {}, got an unexpected response: {}",
+                                daemon_address,
+                                e.status()
+                            );
+                        } else {
+                            error!("Error while connecting to {}: {}", daemon_address, e);
+                        }
                     }
 
                     warn!("Trying to connect to WebSocket again in 10 seconds...");
@@ -514,12 +546,16 @@ async fn communication_task(
                 }
             };
         WEBSOCKET_CONNECTED.store(true, Ordering::SeqCst);
-        info!("Connected successfully to {}", daemon_address);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Connected successfully to {}", daemon_address);
+        }
         let (mut write, mut read) = client.split();
         loop {
             select! {
                 Some(message) = read.next() => { // read all messages from daemon
-                    debug!("Received message from daemon: {:?}", message);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Received message from daemon: {:?}", message);
+                    }
                     match handle_websocket_message(message, &job_sender).await {
                         Ok(exit) => {
                             if exit {
@@ -528,7 +564,9 @@ async fn communication_task(
                             }
                         },
                         Err(e) => {
-                            error!("Error while handling message from WebSocket: {}", e);
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Error while handling message from WebSocket: {}", e);
+                            }
                             break;
                         }
                     }
@@ -537,7 +575,9 @@ async fn communication_task(
                     info!("submitting new block found...");
                     let submit = serde_json::json!(SubmitMinerWorkParams { miner_work: work.to_hex() }).to_string();
                     if let Err(e) = write.send(Message::Text(submit.into())).await {
-                        error!("Error while sending the block found to the daemon: {}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error while sending the block found to the daemon: {}", e);
+                        }
                         break;
                     }
                     debug!("Block found has been sent to daemon");
@@ -564,14 +604,18 @@ async fn handle_websocket_message(
 ) -> Result<bool, Error> {
     match message? {
         Message::Text(text) => {
-            debug!("new message from daemon: {}", text);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("new message from daemon: {}", text);
+            }
             match serde_json::from_slice::<SocketMessage>(text.as_bytes())? {
                 SocketMessage::NewJob(job) => {
-                    info!(
-                        "New job received: difficulty {} at height {}",
-                        format_difficulty(job.difficulty),
-                        job.height
-                    );
+                    if log::log_enabled!(log::Level::Info) {
+                        info!(
+                            "New job received: difficulty {} at height {}",
+                            format_difficulty(job.difficulty),
+                            job.height
+                        );
+                    }
                     let block = MinerWork::from_hex(&job.miner_work)
                         .context("Error while decoding new job received from daemon")?;
                     CURRENT_TOPO_HEIGHT.store(job.topoheight, Ordering::SeqCst);
@@ -585,16 +629,22 @@ async fn handle_websocket_message(
                         job.difficulty,
                         job.height,
                     )) {
-                        error!("Error while sending new job to threads: {}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error while sending new job to threads: {}", e);
+                        }
                     }
                 }
                 SocketMessage::BlockAccepted => {
                     BLOCKS_FOUND.fetch_add(1, Ordering::SeqCst);
-                    info!("Block submitted has been accepted by network !");
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Block submitted has been accepted by network !");
+                    }
                 }
                 SocketMessage::BlockRejected(err) => {
                     BLOCKS_REJECTED.fetch_add(1, Ordering::SeqCst);
-                    error!("Block submitted has been rejected by network: {}", err);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Block submitted has been rejected by network: {}", err);
+                    }
                 }
             }
         }
@@ -604,17 +654,21 @@ async fn handle_websocket_message(
             } else {
                 "No reason".into()
             };
-            warn!(
-                "Daemon has closed the WebSocket connection with us: {}",
-                reason
-            );
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "Daemon has closed the WebSocket connection with us: {}",
+                    reason
+                );
+            }
             return Ok(true);
         }
         Message::Ping(_) => {
             trace!("received ping");
         }
         msg => {
-            warn!("Unexpected message from WebSocket: {:?}", msg);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Unexpected message from WebSocket: {:?}", msg);
+            }
             return Ok(true);
         }
     };
@@ -632,12 +686,16 @@ fn start_thread(
         let mut worker = Worker::new();
         let mut hash: Hash;
 
-        info!("Mining Thread #{}: started", id);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Mining Thread #{}: started", id);
+        }
         'main: loop {
             let message = match job_receiver.blocking_recv() {
                 Ok(message) => message,
                 Err(e) => {
-                    error!("Error on thread #{} while waiting on new job: {}", id, e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error on thread #{} while waiting on new job: {}", id, e);
+                    }
                     // Channel is maybe lagging, try to empty it
                     while job_receiver.len() > 1 {
                         let _ = job_receiver.blocking_recv();
@@ -655,27 +713,35 @@ fn start_thread(
                     }
                 }
                 ThreadNotification::Exit => {
-                    info!("Exiting Mining Thread #{}...", id);
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Exiting Mining Thread #{}...", id);
+                    }
                     break 'main;
                 }
                 ThreadNotification::NewJob(algorithm, mut new_job, expected_difficulty, height) => {
-                    debug!("Mining Thread #{} received a new job", id);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Mining Thread #{} received a new job", id);
+                    }
                     // set thread id in extra nonce for more work spread between threads
                     // u16 support up to 65535 threads
                     new_job.set_thread_id_u16(id);
                     let initial_timestamp = new_job.get_timestamp();
                     if let Err(e) = worker.set_work(new_job, algorithm) {
-                        error!("Mining Thread #{}: failed to set work: {}", id, e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Mining Thread #{}: failed to set work: {}", id, e);
+                        }
                         continue 'main;
                     }
 
                     let difficulty_target = match compute_difficulty_target(&expected_difficulty) {
                         Ok(value) => value,
                         Err(e) => {
-                            error!(
-                                "Mining Thread #{}: error on difficulty target computation: {}",
-                                id, e
-                            );
+                            if log::log_enabled!(log::Level::Error) {
+                                error!(
+                                    "Mining Thread #{}: error on difficulty target computation: {}",
+                                    id, e
+                                );
+                            }
                             continue 'main;
                         }
                     };
@@ -684,14 +750,18 @@ fn start_thread(
                     hash = match worker.get_pow_hash() {
                         Ok(h) => h,
                         Err(e) => {
-                            error!("Mining Thread #{}: failed to get PoW hash: {}", id, e);
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Mining Thread #{}: failed to get PoW hash: {}", id, e);
+                            }
                             continue 'main;
                         }
                     };
                     let mut tries = 0;
                     while !check_difficulty_against_target(&hash, &difficulty_target) {
                         if let Err(e) = worker.increase_nonce() {
-                            error!("Mining Thread #{}: failed to increase nonce: {}", id, e);
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Mining Thread #{}: failed to increase nonce: {}", id, e);
+                            }
                             continue 'main;
                         }
                         // check if we have a new job pending
@@ -705,10 +775,12 @@ fn start_thread(
                                     if let Err(e) = worker.set_timestamp(
                                         initial_timestamp + instant.elapsed().as_millis() as u64,
                                     ) {
-                                        error!(
-                                            "Mining Thread #{}: failed to set timestamp: {}",
-                                            id, e
-                                        );
+                                        if log::log_enabled!(log::Level::Error) {
+                                            error!(
+                                                "Mining Thread #{}: failed to set timestamp: {}",
+                                                id, e
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -719,7 +791,9 @@ fn start_thread(
                         hash = match worker.get_pow_hash() {
                             Ok(h) => h,
                             Err(e) => {
-                                error!("Mining Thread #{}: failed to get PoW hash: {}", id, e);
+                                if log::log_enabled!(log::Level::Error) {
+                                    error!("Mining Thread #{}: failed to get PoW hash: {}", id, e);
+                                }
                                 continue 'main;
                             }
                         };
@@ -730,34 +804,44 @@ fn start_thread(
                     let block_hash = match worker.get_block_hash() {
                         Ok(h) => h,
                         Err(e) => {
-                            error!("Mining Thread #{}: failed to get block hash: {}", id, e);
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Mining Thread #{}: failed to get block hash: {}", id, e);
+                            }
                             continue 'main;
                         }
                     };
-                    info!(
-                        "Thread #{}: block {} found at height {} with difficulty {}",
-                        id,
-                        block_hash,
-                        height,
-                        format_difficulty(difficulty_from_hash(&hash))
-                    );
+                    if log::log_enabled!(log::Level::Info) {
+                        info!(
+                            "Thread #{}: block {} found at height {} with difficulty {}",
+                            id,
+                            block_hash,
+                            height,
+                            format_difficulty(difficulty_from_hash(&hash))
+                        );
+                    }
 
                     let Some(job) = worker.take_work() else {
-                        error!("Mining Thread #{}: failed to take work", id);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Mining Thread #{}: failed to take work", id);
+                        }
                         continue 'main;
                     };
                     if block_sender.blocking_send(job).is_err() {
-                        error!(
-                            "Mining Thread #{}: error while sending block found with hash {}",
-                            id, block_hash
-                        );
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Mining Thread #{}: error while sending block found with hash {}",
+                                id, block_hash
+                            );
+                        }
                         continue 'main;
                     }
                     debug!("Job sent to communication task");
                 }
             };
         }
-        info!("Mining Thread #{}: stopped", id);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Mining Thread #{}: stopped", id);
+        }
         Ok::<_, Error>(())
     })?;
 

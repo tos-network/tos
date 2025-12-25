@@ -44,7 +44,9 @@ pub trait VersionedProvider:
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        debug!("delete versioned data at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("delete versioned data at topoheight {}", topoheight);
+        }
         self.delete_versioned_balances_at_topoheight(topoheight)
             .await?;
         self.delete_versioned_nonces_at_topoheight(topoheight)
@@ -81,7 +83,9 @@ pub trait VersionedProvider:
         topoheight: TopoHeight,
         keep_last: bool,
     ) -> Result<(), BlockchainError> {
-        debug!("delete versioned data below topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("delete versioned data below topoheight {}", topoheight);
+        }
         self.delete_versioned_balances_below_topoheight(topoheight, keep_last)
             .await?;
         self.delete_versioned_nonces_below_topoheight(topoheight, keep_last)
@@ -113,7 +117,9 @@ pub trait VersionedProvider:
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        debug!("delete versioned data above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("delete versioned data above topoheight {}", topoheight);
+        }
         self.delete_versioned_balances_above_topoheight(topoheight)
             .await?;
         self.delete_versioned_nonces_above_topoheight(topoheight)

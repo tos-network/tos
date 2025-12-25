@@ -17,14 +17,18 @@ impl TransactionProvider for RocksStorage {
         &self,
         hash: &Hash,
     ) -> Result<Immutable<Transaction>, BlockchainError> {
-        trace!("get transaction {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get transaction {}", hash);
+        }
         let transaction = self.load_from_disk(Column::Transactions, hash)?;
         Ok(Immutable::Owned(transaction))
     }
 
     // Get the transaction size using its hash
     async fn get_transaction_size(&self, hash: &Hash) -> Result<usize, BlockchainError> {
-        trace!("get transaction size {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get transaction size {}", hash);
+        }
         self.get_size_from_disk(Column::Transactions, hash)
     }
 
@@ -57,7 +61,9 @@ impl TransactionProvider for RocksStorage {
 
     // Check if the transaction exists
     async fn has_transaction(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has transaction {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has transaction {}", hash);
+        }
         self.contains_data(Column::Transactions, hash)
     }
 
@@ -67,7 +73,9 @@ impl TransactionProvider for RocksStorage {
         hash: &Hash,
         transaction: &Transaction,
     ) -> Result<(), BlockchainError> {
-        trace!("add transaction {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("add transaction {}", hash);
+        }
         self.insert_into_disk(Column::Transactions, hash, transaction)
     }
 
@@ -76,7 +84,9 @@ impl TransactionProvider for RocksStorage {
         &mut self,
         hash: &Hash,
     ) -> Result<Immutable<Transaction>, BlockchainError> {
-        trace!("delete transaction {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete transaction {}", hash);
+        }
         let transaction = self.get_transaction(hash).await?;
         self.remove_from_disk(Column::Transactions, hash)?;
         Ok(transaction)

@@ -86,7 +86,9 @@ impl Simulator {
 
         loop {
             interval.tick().await;
-            info!("Adding new simulated block...");
+            if log::log_enabled!(log::Level::Info) {
+                info!("Adding new simulated block...");
+            }
             // Number of blocks to generate
             let blocks_count = match self {
                 Self::BlockDag => rng.gen_range(1..=TIPS_LIMIT),
@@ -107,7 +109,9 @@ impl Simulator {
                 {
                     Ok(_) => {}
                     Err(e) => {
-                        error!("Error while adding block: {}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error while adding block: {}", e);
+                        }
                     }
                 }
             }
@@ -129,7 +133,9 @@ impl Simulator {
         keys: &Vec<KeyPair>,
         blockchain: &Arc<Blockchain<impl Storage>>,
     ) -> Vec<Block> {
-        info!("Adding simulated blocks");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Adding simulated blocks");
+        }
         let n = rng.gen_range(1..=max_blocks);
         let mut blocks = Vec::with_capacity(n);
         for _ in 0..n {
@@ -139,7 +145,11 @@ impl Simulator {
                 Ok(block) => {
                     blocks.push(block);
                 }
-                Err(e) => error!("Error while mining block: {}", e),
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while mining block: {}", e);
+                    }
+                }
             }
         }
 

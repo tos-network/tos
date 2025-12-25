@@ -18,7 +18,9 @@ impl ContractBalanceProvider for RocksStorage {
         contract: &Hash,
         asset: &Hash,
     ) -> Result<bool, BlockchainError> {
-        trace!("has contract {} balance for {}", contract, asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has contract {} balance for {}", contract, asset);
+        }
         let Some(contract_id) = self.get_optional_contract_id(contract)? else {
             return Ok(false);
         };
@@ -39,12 +41,14 @@ impl ContractBalanceProvider for RocksStorage {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "has contract {} balance at exact topoheight {} for {}",
-            contract,
-            topoheight,
-            asset
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "has contract {} balance at exact topoheight {} for {}",
+                contract,
+                topoheight,
+                asset
+            );
+        }
         let contract_id = self.get_contract_id(contract)?;
         let asset_id = self.get_asset_id(asset)?;
 
@@ -61,12 +65,14 @@ impl ContractBalanceProvider for RocksStorage {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<VersionedContractBalance, BlockchainError> {
-        trace!(
-            "get contract {} balance at exact topoheight {} for {}",
-            contract,
-            topoheight,
-            asset
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get contract {} balance at exact topoheight {} for {}",
+                contract,
+                topoheight,
+                asset
+            );
+        }
         let contract_id = self.get_contract_id(contract)?;
         let asset_id = self.get_asset_id(asset)?;
 
@@ -83,12 +89,14 @@ impl ContractBalanceProvider for RocksStorage {
         asset: &Hash,
         maximum_topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedContractBalance)>, BlockchainError> {
-        trace!(
-            "get contract {} balance at maximum topoheight {} for {}",
-            contract,
-            maximum_topoheight,
-            asset
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get contract {} balance at maximum topoheight {} for {}",
+                contract,
+                maximum_topoheight,
+                asset
+            );
+        }
         let Some(contract_id) = self.get_optional_contract_id(contract)? else {
             return Ok(None);
         };
@@ -117,11 +125,13 @@ impl ContractBalanceProvider for RocksStorage {
         contract: &Hash,
         asset: &Hash,
     ) -> Result<Option<TopoHeight>, BlockchainError> {
-        trace!(
-            "get last topoheight for contract {} balance {}",
-            contract,
-            asset
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get last topoheight for contract {} balance {}",
+                contract,
+                asset
+            );
+        }
         let Some(contract_id) = self.get_optional_contract_id(contract)? else {
             return Ok(None);
         };
@@ -141,7 +151,9 @@ impl ContractBalanceProvider for RocksStorage {
         contract: &Hash,
         asset: &Hash,
     ) -> Result<(TopoHeight, VersionedContractBalance), BlockchainError> {
-        trace!("get last contract {} balance {}", contract, asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get last contract {} balance {}", contract, asset);
+        }
         let contract_id = self.get_contract_id(contract)?;
         let asset_id = self.get_asset_id(asset)?;
 
@@ -160,7 +172,9 @@ impl ContractBalanceProvider for RocksStorage {
         &'a self,
         contract: &'a Hash,
     ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
-        trace!("get contract {} assets", contract);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get contract {} assets", contract);
+        }
         self.iter_keys::<Skip<8, AssetId>>(
             Column::ContractsBalances,
             IteratorMode::WithPrefix(contract.as_bytes(), Direction::Forward),
@@ -181,12 +195,14 @@ impl ContractBalanceProvider for RocksStorage {
         topoheight: TopoHeight,
         balance: VersionedContractBalance,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "set last contract {} balance {} to {}",
-            contract,
-            asset,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set last contract {} balance {} to {}",
+                contract,
+                asset,
+                topoheight
+            );
+        }
         // Shouldn't throw any error because contract must be
         // sorted before any balance is linked
         let contract_id = self.get_contract_id(contract)?;

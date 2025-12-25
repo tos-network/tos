@@ -382,7 +382,9 @@ impl EncryptedStorage {
 
     // Set the TX Version
     pub async fn set_tx_version(&mut self, version: TxVersion) -> Result<()> {
-        trace!("set tx version to {:?}", version);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set tx version to {:?}", version);
+        }
         self.save_to_disk(&self.extra, TX_VERSION, &version.to_bytes())?;
         self.tx_version = version;
         Ok(())
@@ -419,7 +421,9 @@ impl EncryptedStorage {
     // Network methods
 
     fn set_network(&mut self, network: &Network) -> Result<()> {
-        debug!("Storing network {} in wallet", network);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Storing network {} in wallet", network);
+        }
         self.save_to_disk(&self.extra, NETWORK, &network.to_bytes())
     }
 

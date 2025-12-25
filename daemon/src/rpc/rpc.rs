@@ -1599,7 +1599,9 @@ fn get_range(
     let count = range_end - range_start;
     if count > maximum {
         // only retrieve max 20 blocks hash per request
-        debug!("get range requested count: {}", count);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("get range requested count: {}", count);
+        }
         return Err(InternalRpcError::InvalidJSONRequest).context(format!(
             "Invalid range count requested, received {} but maximum is {}",
             count, maximum
@@ -1699,7 +1701,9 @@ async fn get_transactions<S: Storage>(
         let tx = match get_transaction_response_for_hash(&*storage, &mempool, &hash).await {
             Ok(data) => Some(data),
             Err(e) => {
-                debug!("Error while retrieving tx {} from storage: {}", hash, e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while retrieving tx {} from storage: {}", hash, e);
+                }
                 None
             }
         };
@@ -1907,7 +1911,9 @@ async fn get_account_history<S: Storage>(
                 continue;
             }
 
-            trace!("Searching tx {} in block {}", tx_hash, hash);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Searching tx {} in block {}", tx_hash, hash);
+            }
             let tx = storage.get_transaction(tx_hash).await.context(format!(
                 "Error while retrieving transaction {tx_hash} from block {hash}"
             ))?;

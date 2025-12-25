@@ -166,13 +166,17 @@ impl<'a> Serializer for Packet<'a> {
             }
             PEER_DISCONNECTED_ID => Packet::PeerDisconnected(PacketPeerDisconnected::read(reader)?),
             id => {
-                debug!("invalid packet id received: {}", id);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("invalid packet id received: {}", id);
+                }
                 return Err(ReaderError::InvalidValue);
             }
         };
 
         if reader.total_read() != reader.total_size() {
-            debug!("Packet: {:?}", packet);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Packet: {:?}", packet);
+            }
         }
 
         Ok(packet)

@@ -22,7 +22,9 @@ impl ContractProvider for SledStorage {
         topoheight: TopoHeight,
         contract: &VersionedContract<'a>,
     ) -> Result<(), BlockchainError> {
-        trace!("Setting contract {} at topoheight {}", hash, topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Setting contract {} at topoheight {}", hash, topoheight);
+        }
         let key = self.get_versioned_contract_key(hash, topoheight);
         Self::insert_into_disk(
             self.snapshot.as_mut(),
@@ -48,7 +50,9 @@ impl ContractProvider for SledStorage {
         &self,
         hash: &Hash,
     ) -> Result<Option<TopoHeight>, BlockchainError> {
-        trace!("Getting last topoheight for contract {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Getting last topoheight for contract {}", hash);
+        }
         self.load_optional_from_disk(&self.contracts, hash.as_bytes())
     }
 
@@ -57,7 +61,9 @@ impl ContractProvider for SledStorage {
         hash: &Hash,
         topoheight: TopoHeight,
     ) -> Result<VersionedContract<'a>, BlockchainError> {
-        trace!("Getting contract {} at topoheight {}", hash, topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Getting contract {} at topoheight {}", hash, topoheight);
+        }
         let key = self.get_versioned_contract_key(hash, topoheight);
         self.load_from_disk(
             &self.versioned_contracts,
@@ -71,11 +77,13 @@ impl ContractProvider for SledStorage {
         hash: &Hash,
         maximum_topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedContract<'a>)>, BlockchainError> {
-        trace!(
-            "Getting contract {} at maximum topoheight {}",
-            hash,
-            maximum_topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Getting contract {} at maximum topoheight {}",
+                hash,
+                maximum_topoheight
+            );
+        }
         let Some(pointer) = self.get_last_topoheight_for_contract(hash).await? else {
             return Ok(None);
         };
@@ -95,7 +103,9 @@ impl ContractProvider for SledStorage {
                 let version = self
                     .get_contract_at_topoheight_for(hash, topoheight)
                     .await?;
-                trace!("Contract {} is at maximum topoheight", hash);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Contract {} is at maximum topoheight", hash);
+                }
                 return Ok(Some((topoheight, version)));
             }
 
@@ -114,11 +124,13 @@ impl ContractProvider for SledStorage {
         hash: &Hash,
         maximum_topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "has contract {} at maximum topoheight {}",
-            hash,
-            maximum_topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "has contract {} at maximum topoheight {}",
+                hash,
+                maximum_topoheight
+            );
+        }
         let Some(pointer) = self.get_last_topoheight_for_contract(hash).await? else {
             return Ok(false);
         };
@@ -152,11 +164,13 @@ impl ContractProvider for SledStorage {
         minimum_topoheight: TopoHeight,
         maximum_topoheight: TopoHeight,
     ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
-        trace!(
-            "Getting contracts, minimum_topoheight: {}, maximum_topoheight: {}",
-            minimum_topoheight,
-            maximum_topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Getting contracts, minimum_topoheight: {}, maximum_topoheight: {}",
+                minimum_topoheight,
+                maximum_topoheight
+            );
+        }
 
         Ok(Self::iter(self.snapshot.as_ref(), &self.contracts)
             .map(move |el| {
@@ -194,7 +208,9 @@ impl ContractProvider for SledStorage {
         &mut self,
         hash: &Hash,
     ) -> Result<(), BlockchainError> {
-        trace!("Deleting last topoheight for contract {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Deleting last topoheight for contract {}", hash);
+        }
         let prev = Self::remove_from_disk_without_reading(
             self.snapshot.as_mut(),
             &self.contracts,
@@ -207,12 +223,16 @@ impl ContractProvider for SledStorage {
     }
 
     async fn has_contract_pointer(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("Checking if contract {} exists", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Checking if contract {} exists", hash);
+        }
         self.contains_data(&self.contracts, hash.as_bytes())
     }
 
     async fn has_contract(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("Checking if contract {} exists", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Checking if contract {} exists", hash);
+        }
         let Some(pointer) = self.get_last_topoheight_for_contract(hash).await? else {
             return Ok(false);
         };
@@ -225,11 +245,13 @@ impl ContractProvider for SledStorage {
         hash: &Hash,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "Checking if contract module {} exists at topoheight {}",
-            hash,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Checking if contract module {} exists at topoheight {}",
+                hash,
+                topoheight
+            );
+        }
         let contract = self
             .get_contract_at_topoheight_for(hash, topoheight)
             .await?;
@@ -241,11 +263,13 @@ impl ContractProvider for SledStorage {
         hash: &Hash,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "Checking if contract {} exists at exact topoheight {}",
-            hash,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Checking if contract {} exists at exact topoheight {}",
+                hash,
+                topoheight
+            );
+        }
         let key = self.get_versioned_contract_key(hash, topoheight);
         self.contains_data(&self.versioned_contracts, &key)
     }
@@ -265,7 +289,9 @@ impl ContractProvider for SledStorage {
 impl SledStorage {
     // Update the contracts count and store it on disk
     pub fn store_contracts_count(&mut self, count: u64) -> Result<(), BlockchainError> {
-        trace!("Storing contracts count: {}", count);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Storing contracts count: {}", count);
+        }
         if let Some(snapshot) = self.snapshot.as_mut() {
             snapshot.cache.contracts_count = count;
         } else {

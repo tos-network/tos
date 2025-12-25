@@ -12,7 +12,9 @@ pub type VersionedSupply = Versioned<u64>;
 impl SupplyProvider for RocksStorage {
     // Verify if we have a supply already set for this asset
     async fn has_supply_for_asset(&self, asset: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has supply for asset {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has supply for asset {}", asset);
+        }
         let Some(asset) = self.get_optional_asset_type(asset)? else {
             return Ok(false);
         };
@@ -25,11 +27,13 @@ impl SupplyProvider for RocksStorage {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "has asset {} supply at exact topoheight {}",
-            asset,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "has asset {} supply at exact topoheight {}",
+                asset,
+                topoheight
+            );
+        }
         let asset_id = self.get_asset_id(asset)?;
         let key = Self::get_asset_versioned_key(asset_id, topoheight);
         self.contains_data(Column::VersionedAssetsSupply, &key)
@@ -41,11 +45,13 @@ impl SupplyProvider for RocksStorage {
         asset: &Hash,
         maximum_topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedSupply)>, BlockchainError> {
-        trace!(
-            "get asset {} supply at maximum topoheight {}",
-            asset,
-            maximum_topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get asset {} supply at maximum topoheight {}",
+                asset,
+                maximum_topoheight
+            );
+        }
         let Some(asset) = self.get_optional_asset_type(asset)? else {
             return Ok(None);
         };
@@ -82,11 +88,13 @@ impl SupplyProvider for RocksStorage {
         topoheight: TopoHeight,
         supply: &VersionedSupply,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "set last supply for asset {} at topoheight {}",
-            hash,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set last supply for asset {} at topoheight {}",
+                hash,
+                topoheight
+            );
+        }
         let mut asset = self.get_asset_type(hash)?;
         asset.supply_pointer = Some(topoheight);
 

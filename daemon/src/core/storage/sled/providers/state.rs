@@ -28,7 +28,9 @@ impl StateProvider for SledStorage {
     }
 
     async fn set_top_topoheight(&mut self, topoheight: TopoHeight) -> Result<(), BlockchainError> {
-        trace!("set new top topoheight at {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set new top topoheight at {}", topoheight);
+        }
         Self::insert_into_disk(
             self.snapshot.as_mut(),
             &self.extra,
@@ -44,7 +46,9 @@ impl StateProvider for SledStorage {
     }
 
     async fn set_top_height(&mut self, height: u64) -> Result<(), BlockchainError> {
-        trace!("set new top height at {}", height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set new top height at {}", height);
+        }
         Self::insert_into_disk(
             self.snapshot.as_mut(),
             &self.extra,

@@ -109,7 +109,9 @@ pub struct ContractEventTracker {
 
 // Build the environment for the contract
 pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
-    debug!("Building environment for contract");
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("Building environment for contract");
+    }
 
     let mut env = EnvironmentBuilder::default();
 

@@ -13,11 +13,13 @@ impl SupplyProvider for SledStorage {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedSupply)>, BlockchainError> {
-        trace!(
-            "get asset {} supply at maximum topoheight {}",
-            asset,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get asset {} supply at maximum topoheight {}",
+                asset,
+                topoheight
+            );
+        }
 
         let mut topo = if self
             .has_asset_supply_at_exact_topoheight(asset, topoheight)
@@ -56,11 +58,13 @@ impl SupplyProvider for SledStorage {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "has asset {} supply at exact topoheight {}",
-            asset,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "has asset {} supply at exact topoheight {}",
+                asset,
+                topoheight
+            );
+        }
         self.contains_data(
             &self.versioned_assets_supply,
             &Self::get_versioned_key(asset, topoheight),
@@ -68,7 +72,9 @@ impl SupplyProvider for SledStorage {
     }
 
     async fn has_supply_for_asset(&self, asset: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has supply for asset {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has supply for asset {}", asset);
+        }
         self.contains_data(&self.assets_supply, asset)
     }
 
@@ -78,11 +84,13 @@ impl SupplyProvider for SledStorage {
         topoheight: TopoHeight,
         supply: &VersionedSupply,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "set last supply for asset {} at topoheight {}",
-            asset,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set last supply for asset {} at topoheight {}",
+                asset,
+                topoheight
+            );
+        }
         Self::insert_into_disk(
             self.snapshot.as_mut(),
             &self.versioned_assets_supply,

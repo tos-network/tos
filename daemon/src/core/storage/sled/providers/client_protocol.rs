@@ -10,7 +10,9 @@ use tos_common::{crypto::Hash, serializer::Serializer};
 #[async_trait]
 impl ClientProtocolProvider for SledStorage {
     fn get_block_executor_for_tx(&self, tx: &Hash) -> Result<Hash, BlockchainError> {
-        trace!("get block executer for tx {}", tx);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block executer for tx {}", tx);
+        }
         self.load_from_disk(
             &self.txs_executed,
             tx.as_bytes(),
@@ -23,7 +25,9 @@ impl ClientProtocolProvider for SledStorage {
         tx: &Hash,
         block: &Hash,
     ) -> Result<(), BlockchainError> {
-        trace!("set tx {} executed in block {}", tx, block);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set tx {} executed in block {}", tx, block);
+        }
         Self::insert_into_disk(
             self.snapshot.as_mut(),
             &self.txs_executed,
@@ -34,7 +38,9 @@ impl ClientProtocolProvider for SledStorage {
     }
 
     fn unmark_tx_from_executed(&mut self, tx: &Hash) -> Result<(), BlockchainError> {
-        trace!("remove tx {} executed", tx);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("remove tx {} executed", tx);
+        }
         Self::remove_from_disk_without_reading(
             self.snapshot.as_mut(),
             &self.txs_executed,
@@ -45,12 +51,16 @@ impl ClientProtocolProvider for SledStorage {
     }
 
     fn is_tx_executed_in_a_block(&self, tx: &Hash) -> Result<bool, BlockchainError> {
-        trace!("is tx {} executed in a block", tx);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is tx {} executed in a block", tx);
+        }
         self.contains_data(&self.txs_executed, tx.as_bytes())
     }
 
     fn is_tx_executed_in_block(&self, tx: &Hash, block: &Hash) -> Result<bool, BlockchainError> {
-        trace!("is tx {} executed in block {}", tx, block);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is tx {} executed in block {}", tx, block);
+        }
         if let Ok(hash) = self.get_block_executor_for_tx(tx) {
             return Ok(hash == *block);
         }
@@ -58,12 +68,16 @@ impl ClientProtocolProvider for SledStorage {
     }
 
     fn has_tx_blocks(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has tx blocks {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has tx blocks {}", hash);
+        }
         self.contains_data(&self.tx_blocks, hash.as_bytes())
     }
 
     fn has_block_linked_to_tx(&self, tx: &Hash, block: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has block {} linked to tx {}", block, tx);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has block {} linked to tx {}", block, tx);
+        }
         Ok(self.has_tx_blocks(tx)? && self.get_blocks_for_tx(tx)?.contains(block))
     }
 
@@ -72,7 +86,9 @@ impl ClientProtocolProvider for SledStorage {
         tx: &Hash,
         block: &Hash,
     ) -> Result<bool, BlockchainError> {
-        trace!("add block {} linked to tx {} if not present", block, tx);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("add block {} linked to tx {} if not present", block, tx);
+        }
         let mut hashes: HashSet<Cow<'_, Hash>> = if self.has_tx_blocks(tx)? {
             self.load_from_disk(&self.tx_blocks, tx.as_bytes(), DiskContext::TxBlocks)?
         } else {
@@ -93,7 +109,9 @@ impl ClientProtocolProvider for SledStorage {
     }
 
     fn get_blocks_for_tx(&self, hash: &Hash) -> Result<Tips, BlockchainError> {
-        trace!("get blocks for tx {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get blocks for tx {}", hash);
+        }
         self.load_from_disk(&self.tx_blocks, hash.as_bytes(), DiskContext::TxBlocks)
     }
 

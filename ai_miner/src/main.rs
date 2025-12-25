@@ -48,18 +48,22 @@ async fn get_next_nonce(
     // Try to get the current nonce from daemon
     match daemon_client.get_nonce(&address_str).await {
         Ok(nonce) => {
-            log::debug!(
-                "Retrieved nonce {} from daemon for address {}",
-                nonce,
-                address
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "Retrieved nonce {} from daemon for address {}",
+                    nonce,
+                    address
+                );
+            }
             Ok(nonce + 1) // Next nonce is current + 1
         }
         Err(e) => {
-            log::warn!(
-                "Failed to get nonce from daemon: {}. Using fallback method.",
-                e
-            );
+            if log::log_enabled!(log::Level::Warn) {
+                log::warn!(
+                    "Failed to get nonce from daemon: {}. Using fallback method.",
+                    e
+                );
+            }
 
             // Fallback to timestamp + random for development
             let timestamp = std::time::SystemTime::now()
@@ -70,7 +74,9 @@ async fn get_next_nonce(
             let random_component = rand::random::<u16>() as u64;
             let nonce = timestamp + random_component;
 
-            log::debug!("Generated fallback nonce {} for address {}", nonce, address);
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!("Generated fallback nonce {} for address {}", nonce, address);
+            }
             Ok(nonce)
         }
     }
@@ -249,11 +255,17 @@ async fn main() -> Result<()> {
 
     // Remove init call since it returns ()
 
-    info!("TOS AI Miner v{} starting...", env!("CARGO_PKG_VERSION"));
-    info!("Daemon address: {}", config.daemon_address);
+    if log::log_enabled!(log::Level::Info) {
+        info!("TOS AI Miner v{} starting...", env!("CARGO_PKG_VERSION"));
+    }
+    if log::log_enabled!(log::Level::Info) {
+        info!("Daemon address: {}", config.daemon_address);
+    }
 
     if let Some(address) = &config.miner_address {
-        info!("Miner address: {}", address);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Miner address: {}", address);
+        }
     } else {
         warn!("No miner address specified. Some operations will require an address.");
     }
@@ -274,15 +286,19 @@ async fn main() -> Result<()> {
     // Initialize storage manager
     let storage_dir = PathBuf::from(&config.storage_path);
     let storage_manager = Arc::new(Mutex::new(StorageManager::new(storage_dir, network).await?));
-    info!("Storage initialized at: {}", config.storage_path);
+    if log::log_enabled!(log::Level::Info) {
+        info!("Storage initialized at: {}", config.storage_path);
+    }
 
     // Test connection to daemon
     info!("Testing connection to daemon...");
     if let Err(e) = daemon_client.test_connection().await {
-        warn!(
-            "Failed to connect to daemon: {}. AI mining commands may not work properly.",
-            e
-        );
+        if log::log_enabled!(log::Level::Warn) {
+            warn!(
+                "Failed to connect to daemon: {}. AI mining commands may not work properly.",
+                e
+            );
+        }
     }
 
     if !config.disable_interactive_mode {

@@ -10,10 +10,12 @@ use tos_common::{account::VersionedNonce, block::TopoHeight, crypto::PublicKey};
 impl NonceProvider for RocksStorage {
     // Check if the account has a nonce
     async fn has_nonce(&self, key: &PublicKey) -> Result<bool, BlockchainError> {
-        trace!(
-            "has nonce for account {}",
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "has nonce for account {}",
+                key.as_address(self.is_mainnet())
+            );
+        }
         self.get_optional_account_type(key)
             .map(|account| account.map_or(false, |account| account.nonce_pointer.is_some()))
     }
@@ -24,10 +26,12 @@ impl NonceProvider for RocksStorage {
         key: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "has nonce at exact topoheight for account {}",
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "has nonce at exact topoheight for account {}",
+                key.as_address(self.is_mainnet())
+            );
+        }
         let account_id = self.get_account_id(key)?;
         self.contains_data(
             Column::VersionedNonces,
@@ -40,10 +44,12 @@ impl NonceProvider for RocksStorage {
         &self,
         key: &PublicKey,
     ) -> Result<TopoHeight, BlockchainError> {
-        trace!(
-            "get last topoheight for nonce for account {}",
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get last topoheight for nonce for account {}",
+                key.as_address(self.is_mainnet())
+            );
+        }
         let account = self.get_account_type(key)?;
         account.nonce_pointer.ok_or(BlockchainError::UnknownAccount)
     }
@@ -53,10 +59,12 @@ impl NonceProvider for RocksStorage {
         &self,
         key: &PublicKey,
     ) -> Result<(TopoHeight, VersionedNonce), BlockchainError> {
-        trace!(
-            "get last nonce for account {}",
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get last nonce for account {}",
+                key.as_address(self.is_mainnet())
+            );
+        }
         let account = self.get_account_type(key)?;
         let topoheight = account
             .nonce_pointer
@@ -72,10 +80,12 @@ impl NonceProvider for RocksStorage {
         key: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<VersionedNonce, BlockchainError> {
-        trace!(
-            "get nonce at exact topoheight for account {}",
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get nonce at exact topoheight for account {}",
+                key.as_address(self.is_mainnet())
+            );
+        }
         let account_id = self.get_account_id(key)?;
         self.load_from_disk(
             Column::VersionedNonces,
@@ -89,16 +99,20 @@ impl NonceProvider for RocksStorage {
         key: &PublicKey,
         maximum_topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedNonce)>, BlockchainError> {
-        trace!(
-            "get nonce at maximum topoheight for account {}",
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get nonce at maximum topoheight for account {}",
+                key.as_address(self.is_mainnet())
+            );
+        }
         let account = self.get_account_type(key)?;
 
         // Check if the account has a nonce at the requested topoheight
         // otherwise, we will use the pointer to the last topoheight
         let Some(nonce_topoheight) = account.nonce_pointer else {
-            trace!("no nonce pointer found for account");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("no nonce pointer found for account");
+            }
             return Ok(None);
         };
 
@@ -107,13 +121,17 @@ impl NonceProvider for RocksStorage {
                 Column::VersionedNonces,
                 &Self::get_versioned_account_key(account.id, maximum_topoheight),
             )? {
-            trace!("using maximum topoheight as start topo");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("using maximum topoheight as start topo");
+            }
             Some(maximum_topoheight)
         } else {
-            trace!(
-                "using nonce pointer {:?} as start topo",
-                account.nonce_pointer
-            );
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "using nonce pointer {:?} as start topo",
+                    account.nonce_pointer
+                );
+            }
             account.nonce_pointer
         };
 
@@ -145,12 +163,14 @@ impl NonceProvider for RocksStorage {
         topoheight: TopoHeight,
         nonce: &VersionedNonce,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "set last nonce to {} for account {} at topoheight {}",
-            nonce.get_nonce(),
-            key.as_address(self.is_mainnet()),
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set last nonce to {} for account {} at topoheight {}",
+                nonce.get_nonce(),
+                key.as_address(self.is_mainnet()),
+                topoheight
+            );
+        }
         let mut account = self.get_or_create_account_type(key)?;
         account.nonce_pointer = Some(topoheight);
 

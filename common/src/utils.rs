@@ -101,7 +101,9 @@ pub fn detect_available_parallelism() -> usize {
     match std::thread::available_parallelism() {
         Ok(n) => n.get(),
         Err(e) => {
-            warn!("Error while detecting parallelism, default to 1: {}", e);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Error while detecting parallelism, default to 1: {}", e);
+            }
             1
         }
     }

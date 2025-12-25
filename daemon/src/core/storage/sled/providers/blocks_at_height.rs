@@ -12,12 +12,16 @@ use tos_common::{crypto::Hash, serializer::Serializer};
 #[async_trait]
 impl BlocksAtHeightProvider for SledStorage {
     async fn has_blocks_at_height(&self, height: u64) -> Result<bool, BlockchainError> {
-        trace!("get blocks at height {}", height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get blocks at height {}", height);
+        }
         self.contains_data(&self.blocks_at_height, &height.to_be_bytes())
     }
 
     async fn get_blocks_at_height(&self, height: u64) -> Result<IndexSet<Hash>, BlockchainError> {
-        trace!("get blocks at height {}", height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get blocks at height {}", height);
+        }
         let hashes = self
             .load_optional_from_disk::<OrderedHashes>(
                 &self.blocks_at_height,
@@ -49,7 +53,9 @@ impl BlocksAtHeightProvider for SledStorage {
         hash: &Hash,
         height: u64,
     ) -> Result<(), BlockchainError> {
-        trace!("add block {} at height {}", hash, height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("add block {} at height {}", hash, height);
+        }
         let mut tips = if self.has_blocks_at_height(height).await? {
             let hashes = self.get_blocks_at_height(height).await?;
             if log::log_enabled!(log::Level::Trace) {
@@ -57,7 +63,9 @@ impl BlocksAtHeightProvider for SledStorage {
             }
             hashes
         } else {
-            trace!("No blocks found at this height");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("No blocks found at this height");
+            }
             IndexSet::new()
         };
 
@@ -70,7 +78,9 @@ impl BlocksAtHeightProvider for SledStorage {
         hash: &Hash,
         height: u64,
     ) -> Result<(), BlockchainError> {
-        trace!("remove block {} at height {}", hash, height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("remove block {} at height {}", hash, height);
+        }
         let mut tips = self.get_blocks_at_height(height).await?;
         tips.shift_remove(hash);
 

@@ -12,10 +12,12 @@ impl VersionedContractDataProvider for SledStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned contracts data at topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned contracts data at topoheight {}",
+                topoheight
+            );
+        }
         Self::delete_versioned_tree_at_topoheight(
             &mut self.snapshot,
             &self.contracts_data,
@@ -28,10 +30,12 @@ impl VersionedContractDataProvider for SledStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned contracts data above topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned contracts data above topoheight {}",
+                topoheight
+            );
+        }
         Self::delete_versioned_tree_above_topoheight(
             &mut self.snapshot,
             &self.contracts_data,
@@ -46,10 +50,12 @@ impl VersionedContractDataProvider for SledStorage {
         topoheight: TopoHeight,
         keep_last: bool,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned contracts data below topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned contracts data below topoheight {}",
+                topoheight
+            );
+        }
         Self::delete_versioned_tree_below_topoheight(
             &mut self.snapshot,
             &self.contracts_data,

@@ -11,7 +11,7 @@ use crate::config::{
 use chacha20poly1305::aead::Buffer;
 use human_bytes::human_bytes;
 use humantime::format_duration;
-use log::{debug, error, log_enabled, trace, warn, Level};
+use log::{debug, error, trace, warn};
 use metrics::counter;
 use std::{
     borrow::Cow,
@@ -214,14 +214,20 @@ impl Connection {
             if expected_key != &peer_dh_key {
                 match action {
                     diffie_hellman::KeyVerificationAction::Warn => {
-                        warn!("Expected Diffie-Hellman key from {} is different from the received key, ignoring", self.addr);
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("Expected Diffie-Hellman key from {} is different from the received key, ignoring", self.addr);
+                        }
                     }
                     diffie_hellman::KeyVerificationAction::Reject => {
-                        error!("Expected Diffie-Hellman key from {} is different from the received key", self.addr);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Expected Diffie-Hellman key from {} is different from the received key", self.addr);
+                        }
                         return Err(P2pError::InvalidDHKey);
                     }
                     diffie_hellman::KeyVerificationAction::Ignore => {
-                        debug!("Expected Diffie-Hellman key from {} is different from the received key, ignoring", self.addr);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Expected Diffie-Hellman key from {} is different from the received key, ignoring", self.addr);
+                        }
                     }
                 }
             }
@@ -356,18 +362,20 @@ impl Connection {
         {
             Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => {
-                if log_enabled!(Level::Debug) {
+                if log::log_enabled!(log::Level::Debug) {
                     debug!("Failed to send bytes to {}: {}", self.get_address(), e);
                 }
                 self.closed.store(true, Ordering::SeqCst);
                 Err(e.into())
             }
             Err(e) => {
-                debug!(
-                    "Failed to send bytes in requested time to {}: {}",
-                    self.get_address(),
-                    e
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Failed to send bytes in requested time to {}: {}",
+                        self.get_address(),
+                        e
+                    );
+                }
                 self.closed.store(true, Ordering::SeqCst);
                 Err(e.into())
             }
@@ -401,10 +409,12 @@ impl Connection {
 
             // Rotate the key if necessary
             if sum >= ROTATE_EVERY_N_BYTES {
-                debug!(
-                    "Rotating our encryption key with peer {}",
-                    self.get_address()
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Rotating our encryption key with peer {}",
+                        self.get_address()
+                    );
+                }
                 let packet = self.rotate_key_packet().await?;
                 // Send the new key to the peer
                 self.send_packet_bytes_internal(&mut stream, &packet)
@@ -428,12 +438,14 @@ impl Connection {
         let size = self.read_packet_size(&mut stream, buf, max_size).await?;
         if size == 0 || size > max_size {
             if self.get_state() == State::Success {
-                warn!(
-                    "Received invalid packet size: {} bytes (max: {} bytes) from peer {}",
-                    size,
-                    max_size,
-                    self.get_address()
-                );
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "Received invalid packet size: {} bytes (max: {} bytes) from peer {}",
+                        size,
+                        max_size,
+                        self.get_address()
+                    );
+                }
             }
             return Err(P2pError::InvalidPacketSize);
         }
@@ -449,13 +461,15 @@ impl Connection {
         let mut reader = Reader::new(&bytes);
         let packet = Packet::read(&mut reader)?;
         if reader.total_read() != bytes.len() {
-            debug!(
-                "read {:?} only {}/{} on bytes available from {}",
-                packet,
-                reader.total_read(),
-                bytes.len(),
-                self
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "read {:?} only {}/{} on bytes available from {}",
+                    packet,
+                    reader.total_read(),
+                    bytes.len(),
+                    self
+                );
+            }
             return Err(P2pError::InvalidPacketNotFullRead);
         }
 
@@ -480,8 +494,10 @@ impl Connection {
         let read = self.read_bytes_from_stream(stream, &mut buf[0..4]).await?;
         if read != 4 {
             if self.get_state() == State::Success {
-                warn!("Received invalid packet size: expected to read 4 bytes but read only {} bytes from {}", read, self);
-                warn!("Read: {:?}", &buf[0..read]);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Received invalid packet size: expected to read 4 bytes but read only {} bytes from {}", read, self);
+                    warn!("Read: {:?}", &buf[0..read]);
+                }
             }
             return Err(P2pError::InvalidPacketSize);
         }
@@ -491,7 +507,9 @@ impl Connection {
         // Verify if the size is valid
         if size > max_usize {
             if self.get_state() == State::Success {
-                warn!("Received invalid packet size: {} bytes from {}", size, self);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Received invalid packet size: {} bytes from {}", size, self);
+                }
             }
             return Err(P2pError::InvalidPacketSize);
         }
@@ -565,7 +583,7 @@ impl Connection {
         match self.read_bytes_from_stream_internal(stream, buf).await {
             Ok(read) => Ok(read),
             Err(e) => {
-                if log_enabled!(Level::Debug) {
+                if log::log_enabled!(log::Level::Debug) {
                     debug!("Failed to read bytes from {}: {}", self.get_address(), e);
                 }
                 self.closed.store(true, Ordering::SeqCst);
@@ -581,7 +599,9 @@ impl Connection {
             trace!("Closing internal connection with {}", self.addr);
         }
         if self.closed.swap(true, Ordering::SeqCst) {
-            debug!("Connection with {} already closed", self.addr);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Connection with {} already closed", self.addr);
+            }
             return Ok(());
         }
 

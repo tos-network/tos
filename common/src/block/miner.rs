@@ -341,11 +341,13 @@ impl<'a> Serializer for MinerWork<'a> {
 
     fn read(reader: &mut Reader) -> Result<MinerWork<'a>, ReaderError> {
         if reader.total_size() != BLOCK_WORK_SIZE {
-            debug!(
-                "invalid block work size, expected {}, got {}",
-                BLOCK_WORK_SIZE,
-                reader.total_size()
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "invalid block work size, expected {}, got {}",
+                    BLOCK_WORK_SIZE,
+                    reader.total_size()
+                );
+            }
             return Err(ReaderError::InvalidSize);
         }
 

@@ -14,7 +14,9 @@ use tos_common::{
 #[async_trait]
 impl AssetProvider for SledStorage {
     async fn has_asset(&self, asset: &Hash) -> Result<bool, BlockchainError> {
-        trace!("asset exist {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("asset exist {}", asset);
+        }
         self.contains_data_cached(&self.assets, &self.assets_cache, asset)
             .await
     }
@@ -24,7 +26,9 @@ impl AssetProvider for SledStorage {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!("has asset {} at exact topoheight {}", asset, topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has asset {} at exact topoheight {}", asset, topoheight);
+        }
 
         if !self.has_asset(asset).await? {
             return Ok(false);
@@ -39,11 +43,13 @@ impl AssetProvider for SledStorage {
         hash: &Hash,
         maximum_topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "is asset {} registered at maximum topoheight {}",
-            hash,
-            maximum_topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "is asset {} registered at maximum topoheight {}",
+                hash,
+                maximum_topoheight
+            );
+        }
         let topoheight = self.get_asset_topoheight(hash).await?;
         match topoheight {
             Some(topo) if topo <= maximum_topoheight => Ok(true),
@@ -56,7 +62,9 @@ impl AssetProvider for SledStorage {
         hash: &Hash,
         topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedAssetData)>, BlockchainError> {
-        trace!("get asset {} at maximum topoheight {}", hash, topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get asset {} at maximum topoheight {}", hash, topoheight);
+        }
         let mut topo = if self.has_asset_at_exact_topoheight(hash, topoheight).await? {
             Some(topoheight)
         } else {
@@ -83,7 +91,9 @@ impl AssetProvider for SledStorage {
         &self,
         hash: &Hash,
     ) -> Result<(TopoHeight, VersionedAssetData), BlockchainError> {
-        trace!("get asset {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get asset {}", hash);
+        }
         let topoheight = self.get_asset_topoheight(hash).await?;
         match topoheight {
             Some(topoheight) => {
@@ -98,7 +108,9 @@ impl AssetProvider for SledStorage {
         &self,
         hash: &Hash,
     ) -> Result<Option<TopoHeight>, BlockchainError> {
-        trace!("get asset topoheight {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get asset topoheight {}", hash);
+        }
         self.get_optional_cacheable_data(&self.assets, &self.assets_cache, hash)
             .await
     }
@@ -108,7 +120,9 @@ impl AssetProvider for SledStorage {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<VersionedAssetData, BlockchainError> {
-        trace!("get asset registration topoheight {}", asset);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get asset registration topoheight {}", asset);
+        }
         let key = Self::get_asset_key(asset, topoheight);
         self.load_from_disk(
             &self.versioned_assets,
@@ -196,7 +210,9 @@ impl AssetProvider for SledStorage {
         topoheight: TopoHeight,
         data: VersionedAssetData,
     ) -> Result<(), BlockchainError> {
-        trace!("add asset {} at topoheight {}", asset, topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("add asset {} at topoheight {}", asset, topoheight);
+        }
         let prev1 = Self::insert_into_disk(
             self.snapshot.as_mut(),
             &self.assets,

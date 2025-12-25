@@ -498,12 +498,14 @@ impl<'a, S: Storage> ChainState<'a, S> {
         account: &'a PublicKey,
         new_nonce: Nonce,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "Updating nonce for {} to {} at topoheight {}",
-            account.as_address(self.storage.is_mainnet()),
-            new_nonce,
-            self.topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Updating nonce for {} to {} at topoheight {}",
+                account.as_address(self.storage.is_mainnet()),
+                new_nonce,
+                self.topoheight
+            );
+        }
         let account = self.get_internal_account(account).await?;
         account.nonce.set_nonce(new_nonce);
         Ok(())

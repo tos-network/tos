@@ -303,7 +303,9 @@ impl<'a> From<RPCContractOutput<'a>> for ContractOutput {
             RPCContractOutput::ReturnData { data } => ContractOutput::ReturnData {
                 // Hex-decode the string back to bytes; invalid hex is treated as empty
                 data: hex::decode(&data).unwrap_or_else(|e| {
-                    warn!("Invalid hex in RPCContractOutput::ReturnData: {e}");
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Invalid hex in RPCContractOutput::ReturnData: {e}");
+                    }
                     Vec::new()
                 }),
             },

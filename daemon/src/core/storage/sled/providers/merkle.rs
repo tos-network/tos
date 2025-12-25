@@ -12,7 +12,9 @@ impl MerkleHashProvider for SledStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<Hash, BlockchainError> {
-        trace!("get merkle hash at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get merkle hash at topoheight {}", topoheight);
+        }
         self.load_from_disk(
             &self.merkle_hashes,
             &topoheight.to_bytes(),
@@ -25,11 +27,13 @@ impl MerkleHashProvider for SledStorage {
         topoheight: TopoHeight,
         merkle_proof: &Hash,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "set merkle hash {} at topoheight {}",
-            merkle_proof,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set merkle hash {} at topoheight {}",
+                merkle_proof,
+                topoheight
+            );
+        }
         Self::insert_into_disk(
             self.snapshot.as_mut(),
             &self.merkle_hashes,

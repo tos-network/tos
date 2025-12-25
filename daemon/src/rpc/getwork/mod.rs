@@ -138,7 +138,9 @@ impl<S: Storage> GetWorkServer<S> {
             if self.is_job_dirty.load(Ordering::SeqCst) {
                 debug!("job is dirty, resending job to all miners");
                 if let Err(e) = self.notify_new_job().await {
-                    error!("Error while notifying new job to miners: {}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while notifying new job to miners: {}", e);
+                    }
                 }
             }
         }
@@ -346,7 +348,9 @@ impl<S: Storage> GetWorkServer<S> {
                 .for_each_concurrent(self.notify_job_concurrency, |(addr, miner)| {
                     let mut job = job.clone();
                     async move {
-                        debug!("Notifying {} for new job", miner);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Notifying {} for new job", miner);
+                        }
                         let addr = addr.clone();
 
                         job.set_miner(Cow::Borrowed(miner.get_public_key()));
@@ -363,7 +367,9 @@ impl<S: Storage> GetWorkServer<S> {
                             }))
                             .await
                         {
-                            warn!("Error while notifying {} about new job: {}", miner, e);
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("Error while notifying {} about new job: {}", miner, e);
+                            }
                         }
                     }
                 })
@@ -424,7 +430,9 @@ impl<S: Storage> GetWorkServer<S> {
             {
                 Ok(_) => BlockResult::Accepted(block_hash),
                 Err(e) => {
-                    debug!("Error while accepting miner block: {}", e);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Error while accepting miner block: {}", e);
+                    }
                     BlockResult::Rejected(e.into())
                 }
             },
@@ -444,12 +452,16 @@ impl<S: Storage> GetWorkServer<S> {
             Ok(job) => match self.accept_miner_job(job).await {
                 Ok(result) => result,
                 Err(e) => {
-                    debug!("Error while accepting miner job: {}", e);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Error while accepting miner job: {}", e);
+                    }
                     BlockResult::Rejected(e.into())
                 }
             },
             Err(e) => {
-                debug!("Error while decoding block miner: {}", e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while decoding block miner: {}", e);
+                }
                 BlockResult::Rejected(e.into())
             }
         };
@@ -464,13 +476,17 @@ impl<S: Storage> GetWorkServer<S> {
 
         match result {
             BlockResult::Accepted(hash) => {
-                debug!("Miner {} found block {}!", miner, hash);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Miner {} found block {}!", miner, hash);
+                }
                 miner.add_new_accepted_block(hash);
 
                 session.send_json(Response::BlockAccepted).await?;
             }
             BlockResult::Rejected(err) => {
-                debug!("Miner {} sent an invalid block", miner);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Miner {} sent an invalid block", miner);
+                }
                 miner.mark_rejected_block();
 
                 session
@@ -517,7 +533,9 @@ impl<S: Storage> WebSocketHandler for GetWorkServer<S> {
         let address: Address = match Address::from_string(&addr) {
             Ok(address) => address,
             Err(e) => {
-                debug!("Invalid miner address for getwork server: {}", e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Invalid miner address for getwork server: {}", e);
+                }
                 return Ok(Some(
                     HttpResponse::BadRequest().body("Invalid miner address for getwork server"),
                 ));

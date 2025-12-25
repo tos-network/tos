@@ -89,7 +89,9 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         debug!("retrieving expected chain cumulative difficulty");
         let (_, hash) = self.hash_at_topo.last()?;
 
-        debug!("looking for cumulative difficulty of {}", hash);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("looking for cumulative difficulty of {}", hash);
+        }
         self.blocks
             .get(hash)
             .map(|data| &data.cumulative_difficulty)
@@ -103,13 +105,17 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         header: BlockHeader,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        debug!(
-            "Inserting block {} into chain validator with expected topoheight {}",
-            hash, topoheight
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Inserting block {} into chain validator with expected topoheight {}",
+                hash, topoheight
+            );
+        }
 
         if self.blocks.contains_key(&hash) {
-            debug!("Block {} is already in validator chain!", hash);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Block {} is already in validator chain!", hash);
+            }
             return Err(BlockchainError::AlreadyInChain);
         }
 
@@ -117,7 +123,9 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         debug!("storage locked for chain validator insert block");
 
         if storage.has_block_with_hash(&hash).await? {
-            debug!("Block {} is already in blockchain!", hash);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Block {} is already in blockchain!", hash);
+            }
             return Err(BlockchainError::AlreadyInChain);
         }
 
@@ -129,12 +137,14 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         // Verify the block version
         let version = get_version_at_height(self.blockchain.get_network(), header.get_height());
         if version != header.get_version() {
-            debug!(
-                "Block {} has version {} while expected version is {}",
-                hash,
-                header.get_version(),
-                version
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has version {} while expected version is {}",
+                    hash,
+                    header.get_version(),
+                    version
+                );
+            }
             return Err(BlockchainError::InvalidBlockVersion);
         }
 
@@ -142,12 +152,14 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
         let height_at_tips =
             blockdag::calculate_height_at_tips(&provider, header.get_tips().iter()).await?;
         if height_at_tips != header.get_height() {
-            debug!(
-                "Block {} has height {} while expected height is {}",
-                hash,
-                header.get_height(),
-                height_at_tips
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} has height {} while expected height is {}",
+                    hash,
+                    header.get_height(),
+                    height_at_tips
+                );
+            }
             return Err(BlockchainError::InvalidBlockHeight(
                 height_at_tips,
                 header.get_height(),
@@ -159,22 +171,28 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
 
         // verify tips count
         if tips_count == 0 || tips_count > TIPS_LIMIT {
-            debug!(
-                "Block {} contains {} tips while only {} is accepted",
-                hash, tips_count, TIPS_LIMIT
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Block {} contains {} tips while only {} is accepted",
+                    hash, tips_count, TIPS_LIMIT
+                );
+            }
             return Err(BlockchainError::InvalidTipsCount(hash, tips_count));
         }
 
         // verify that we have already all its tips
         {
             for tip in tips {
-                trace!("Checking tip {} for block {}", tip, hash);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Checking tip {} for block {}", tip, hash);
+                }
                 if !self.blocks.contains_key(tip) && !provider.has_block_with_hash(tip).await? {
-                    debug!(
-                        "Block {} contains tip {} which is not present in chain validator",
-                        hash, tip
-                    );
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Block {} contains tip {} which is not present in chain validator",
+                            hash, tip
+                        );
+                    }
                     return Err(BlockchainError::InvalidTipsNotFound(hash, tip.clone()));
                 }
             }
@@ -185,12 +203,14 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             let height_by_tips =
                 blockdag::calculate_height_at_tips(&provider, header.get_tips().iter()).await?;
             if height_by_tips != header.get_height() {
-                debug!(
-                    "Block {} has height {} while expected height is {}",
-                    hash,
-                    header.get_height(),
-                    height_by_tips
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Block {} has height {} while expected height is {}",
+                        hash,
+                        header.get_height(),
+                        height_by_tips
+                    );
+                }
                 return Err(BlockchainError::InvalidBlockHeight(
                     height_by_tips,
                     header.get_height(),
@@ -200,7 +220,9 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
 
         let algorithm = get_pow_algorithm_for_version(version);
         let pow_hash = header.get_pow_hash(algorithm)?;
-        trace!("POW hash: {}", pow_hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("POW hash: {}", pow_hash);
+        }
         let (difficulty, p) = self
             .blockchain
             .verify_proof_of_work(&provider, &pow_hash, tips.iter())
@@ -212,12 +234,14 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
             .find_common_base(&provider, header.get_tips())
             .await?;
 
-        trace!(
-            "Common base: {} at height {} and hash {}",
-            base,
-            base_height,
-            hash
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Common base: {} at height {} and hash {}",
+                base,
+                base_height,
+                hash
+            );
+        }
 
         // Find the cumulative difficulty for this block
         let (_, cumulative_difficulty) = self
@@ -257,7 +281,9 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
     }
 
     pub fn get_block(&mut self, hash: &Hash) -> Option<Arc<BlockHeader>> {
-        debug!("retrieving block header for {}", hash);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("retrieving block header for {}", hash);
+        }
         self.blocks.get(hash).map(|v| v.header.clone())
     }
 }
@@ -265,7 +291,9 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
 #[async_trait]
 impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
     async fn get_height_for_block_hash(&self, hash: &Hash) -> Result<u64, BlockchainError> {
-        trace!("get height for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get height for block hash {}", hash);
+        }
         if let Some(data) = self.parent.blocks.get(hash) {
             return Ok(data.header.get_height());
         }
@@ -279,7 +307,9 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<BlockVersion, BlockchainError> {
-        trace!("get version for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get version for block hash {}", hash);
+        }
         if let Some(data) = self.parent.blocks.get(hash) {
             return Ok(data.header.get_version());
         }
@@ -292,7 +322,9 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<TimestampMillis, BlockchainError> {
-        trace!("get timestamp for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get timestamp for block hash {}", hash);
+        }
         if let Some(data) = self.parent.blocks.get(hash) {
             return Ok(data.header.get_timestamp());
         }
@@ -305,7 +337,9 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<Difficulty, BlockchainError> {
-        trace!("get difficulty for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get difficulty for block hash {}", hash);
+        }
         if let Some(data) = self.parent.blocks.get(hash) {
             return Ok(data.difficulty);
         }
@@ -318,7 +352,9 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<CumulativeDifficulty, BlockchainError> {
-        trace!("get cumulative difficulty for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get cumulative difficulty for block hash {}", hash);
+        }
         if let Some(data) = self.parent.blocks.get(hash) {
             return Ok(data.cumulative_difficulty);
         }
@@ -333,7 +369,9 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
-        trace!("get past blocks for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get past blocks for block hash {}", hash);
+        }
         if let Some(data) = self.parent.blocks.get(hash) {
             return Ok(Immutable::Owned(data.header.get_tips().clone()));
         }
@@ -346,7 +384,9 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<Immutable<BlockHeader>, BlockchainError> {
-        trace!("get block header by hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block header by hash {}", hash);
+        }
         if let Some(data) = self.parent.blocks.get(hash) {
             return Ok(Immutable::Arc(data.header.clone()));
         }
@@ -359,7 +399,9 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
         &self,
         hash: &Hash,
     ) -> Result<VarUint, BlockchainError> {
-        trace!("get estimated covariance for block hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get estimated covariance for block hash {}", hash);
+        }
         if let Some(data) = self.parent.blocks.get(hash) {
             return Ok(data.p.clone());
         }
@@ -374,7 +416,9 @@ impl<S: Storage> DifficultyProvider for ChainValidatorProvider<'_, S> {
 #[async_trait]
 impl<S: Storage> DagOrderProvider for ChainValidatorProvider<'_, S> {
     async fn get_topo_height_for_hash(&self, hash: &Hash) -> Result<TopoHeight, BlockchainError> {
-        trace!("get topo height for hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get topo height for hash {}", hash);
+        }
         if let Some(data) = self.parent.blocks.get(hash) {
             return Ok(data.topoheight);
         }
@@ -393,7 +437,9 @@ impl<S: Storage> DagOrderProvider for ChainValidatorProvider<'_, S> {
     }
 
     async fn is_block_topological_ordered(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("is block topological ordered {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is block topological ordered {}", hash);
+        }
         if self.parent.blocks.contains_key(hash) {
             return Ok(true);
         }
@@ -406,7 +452,9 @@ impl<S: Storage> DagOrderProvider for ChainValidatorProvider<'_, S> {
         &self,
         topoheight: TopoHeight,
     ) -> Result<Hash, BlockchainError> {
-        trace!("get hash at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get hash at topoheight {}", topoheight);
+        }
         if let Some(hash) = self.parent.hash_at_topo.get(&topoheight) {
             return Ok(hash.as_ref().clone());
         }
@@ -419,7 +467,9 @@ impl<S: Storage> DagOrderProvider for ChainValidatorProvider<'_, S> {
         &self,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!("has hash at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has hash at topoheight {}", topoheight);
+        }
         if self.parent.hash_at_topo.contains_key(&topoheight) {
             return Ok(true);
         }
@@ -440,7 +490,9 @@ impl<S: Storage> DagOrderProvider for ChainValidatorProvider<'_, S> {
 #[async_trait]
 impl<S: Storage> BlocksAtHeightProvider for ChainValidatorProvider<'_, S> {
     async fn has_blocks_at_height(&self, height: u64) -> Result<bool, BlockchainError> {
-        trace!("has block at height {}", height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has block at height {}", height);
+        }
         if self.parent.blocks_at_height.contains_key(&height) {
             return Ok(true);
         }
@@ -451,7 +503,9 @@ impl<S: Storage> BlocksAtHeightProvider for ChainValidatorProvider<'_, S> {
 
     // Retrieve the blocks hashes at a specific height
     async fn get_blocks_at_height(&self, height: u64) -> Result<IndexSet<Hash>, BlockchainError> {
-        trace!("get blocks at height {}", height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get blocks at height {}", height);
+        }
         if let Some(tips) = self.parent.blocks_at_height.get(&height) {
             // TODO
             return Ok(tips.iter().map(|v| v.as_ref().clone()).collect());

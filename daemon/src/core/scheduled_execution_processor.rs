@@ -130,7 +130,9 @@ where
         .filter_map(|r| match r {
             Ok(e) => Some(e),
             Err(e) => {
-                warn!("Error loading scheduled execution: {:?}", e);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Error loading scheduled execution: {:?}", e);
+                }
                 None
             }
         })
@@ -213,7 +215,9 @@ where
                     .delete_contract_scheduled_execution(&execution.contract, &execution)
                     .await
                 {
-                    error!("Failed to delete completed execution: {:?}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Failed to delete completed execution: {:?}", e);
+                    }
                 }
 
                 if log::log_enabled!(log::Level::Debug) {
@@ -255,7 +259,9 @@ where
                             .delete_contract_scheduled_execution(&execution.contract, &execution)
                             .await
                         {
-                            error!("Failed to delete expired execution: {:?}", e);
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Failed to delete expired execution: {:?}", e);
+                            }
                         }
                         results.failure_count = results.failure_count.saturating_add(1);
 
@@ -272,10 +278,12 @@ where
                             .delete_contract_scheduled_execution(&execution.contract, &execution)
                             .await
                         {
-                            error!(
-                                "Failed to delete deferred execution for re-insertion: {:?}",
-                                e
-                            );
+                            if log::log_enabled!(log::Level::Error) {
+                                error!(
+                                    "Failed to delete deferred execution for re-insertion: {:?}",
+                                    e
+                                );
+                            }
                         }
 
                         // Update execution to target next topoheight
@@ -295,7 +303,9 @@ where
                             )
                             .await
                         {
-                            error!("Failed to re-insert deferred execution: {:?}", e);
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Failed to re-insert deferred execution: {:?}", e);
+                            }
                             // Mark as failed if we can't reschedule
                             execution.status = ScheduledExecutionStatus::Failed;
                             results.failure_count = results.failure_count.saturating_add(1);
@@ -342,7 +352,9 @@ where
                         .delete_contract_scheduled_execution(&execution.contract, &execution)
                         .await
                     {
-                        error!("Failed to delete failed execution: {:?}", e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Failed to delete failed execution: {:?}", e);
+                        }
                     }
                     results.failure_count = results.failure_count.saturating_add(1);
 
