@@ -305,10 +305,8 @@ impl ConfigValidator {
             if let Err(e) = self.validate_miner_address(addr) {
                 if self.strict_mode {
                     return Err(anyhow!("Configuration validation failed: {}", e));
-                } else {
-                    if log::log_enabled!(log::Level::Warn) {
-                        warnings.push(format!("Warning: {}", e));
-                    }
+                } else if log::log_enabled!(log::Level::Warn) {
+                    warnings.push(format!("Warning: {}", e));
                 }
             }
         }
@@ -374,24 +372,20 @@ impl ConfigValidator {
         self.validate_and_create_paths(config, &mut warnings, &mut fixed_issues)?;
 
         // Report results
-        if !fixed_issues.is_empty() {
-            if log::log_enabled!(log::Level::Info) {
-                info!(
-                    "🔧 Auto-fixed {} configuration issue(s):",
-                    fixed_issues.len()
-                );
-                for fix in &fixed_issues {
-                    info!("  ✅ {}", fix);
-                }
+        if !fixed_issues.is_empty() && log::log_enabled!(log::Level::Info) {
+            info!(
+                "🔧 Auto-fixed {} configuration issue(s):",
+                fixed_issues.len()
+            );
+            for fix in &fixed_issues {
+                info!("  ✅ {}", fix);
             }
         }
 
-        if !warnings.is_empty() {
-            if log::log_enabled!(log::Level::Warn) {
-                warn!("⚠️  Configuration warnings:");
-                for warning in &warnings {
-                    warn!("  • {}", warning);
-                }
+        if !warnings.is_empty() && log::log_enabled!(log::Level::Warn) {
+            warn!("⚠️  Configuration warnings:");
+            for warning in &warnings {
+                warn!("  • {}", warning);
             }
         }
 
@@ -476,26 +470,24 @@ impl ConfigValidator {
 
         // Validate network-specific patterns
         if let Some(prefix) = expected_characteristics.prefix {
-            if !address_str.starts_with(prefix) {
-                if log::log_enabled!(log::Level::Warn) {
-                    warn!(
-                        "Address {} doesn't have expected network prefix '{}' for network type",
-                        address, prefix
-                    );
-                }
-                // Note: This is a warning, not an error, as address formats may vary
+            // Note: This is a warning, not an error, as address formats may vary
+            if !address_str.starts_with(prefix) && log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "Address {} doesn't have expected network prefix '{}' for network type",
+                    address, prefix
+                );
             }
         }
 
         // Check address format compatibility
         if let Some(expected_format) = expected_characteristics.format_hint {
-            if !self.matches_address_format(&address_str, expected_format) {
-                if log::log_enabled!(log::Level::Warn) {
-                    warn!(
-                        "Address {} may not be compatible with {} network format",
-                        address, expected_format
-                    );
-                }
+            if !self.matches_address_format(&address_str, expected_format)
+                && log::log_enabled!(log::Level::Warn)
+            {
+                warn!(
+                    "Address {} may not be compatible with {} network format",
+                    address, expected_format
+                );
             }
         }
 
@@ -516,11 +508,11 @@ impl ConfigValidator {
         let address_str = address.to_string();
 
         // Basic heuristics for address type validation
-        if address_str.starts_with("contract_") || address_str.contains("::") {
-            if log::log_enabled!(log::Level::Warn) {
-                warn!("Address {} appears to be a contract address, which may not be suitable for mining rewards",
-                      address);
-            }
+        if (address_str.starts_with("contract_") || address_str.contains("::"))
+            && log::log_enabled!(log::Level::Warn)
+        {
+            warn!("Address {} appears to be a contract address, which may not be suitable for mining rewards",
+                  address);
         }
 
         // Additional validation can be added based on TOS address specifications
@@ -709,13 +701,11 @@ impl ValidatedConfig {
         let validator = ConfigValidator::new(strict_mode, auto_fix);
         let messages = validator.validate(&mut config)?;
 
-        if !messages.is_empty() {
-            if log::log_enabled!(log::Level::Info) {
-                info!(
-                    "Configuration loaded with {} adjustments/warnings",
-                    messages.len()
-                );
-            }
+        if !messages.is_empty() && log::log_enabled!(log::Level::Info) {
+            info!(
+                "Configuration loaded with {} adjustments/warnings",
+                messages.len()
+            );
         }
 
         Ok(config)

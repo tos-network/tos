@@ -294,10 +294,8 @@ impl Prompt {
                         if log::log_enabled!(log::Level::Error) {
                             error!("Error received on CTRL+C: {e}");
                         }
-                    } else {
-                        if log::log_enabled!(log::Level::Info) {
-                            info!("CTRL+C received, exiting...");
-                        }
+                    } else if log::log_enabled!(log::Level::Info) {
+                        info!("CTRL+C received, exiting...");
                     }
                     break;
                 },
@@ -312,10 +310,8 @@ impl Prompt {
                             }
                             _ => {},
                         }
-                    } else {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("You said '{}'", input);
-                        }
+                    } else if log::log_enabled!(log::Level::Debug) {
+                        debug!("You said '{}'", input);
                     }
                 }
                 _ = interval.tick() => {

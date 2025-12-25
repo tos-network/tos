@@ -184,7 +184,8 @@ impl AccountProvider for SledStorage {
                             if log::log_enabled!(log::Level::Trace) {
                                 trace!(
                                     "skipping {} at {}: {:?} {:?}",
-                                    PublicKey::from_bytes(&key[8..40])?.as_address(self.is_mainnet()),
+                                    PublicKey::from_bytes(&key[8..40])?
+                                        .as_address(self.is_mainnet()),
                                     topo,
                                     minimum_topoheight,
                                     maximum_topoheight

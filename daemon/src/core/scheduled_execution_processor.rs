@@ -131,7 +131,7 @@ where
             Ok(e) => Some(e),
             Err(e) => {
                 if log::log_enabled!(log::Level::Warn) {
-                warn!("Error loading scheduled execution: {:?}", e);
+                    warn!("Error loading scheduled execution: {:?}", e);
                 }
                 None
             }
@@ -216,7 +216,7 @@ where
                     .await
                 {
                     if log::log_enabled!(log::Level::Error) {
-                    error!("Failed to delete completed execution: {:?}", e);
+                        error!("Failed to delete completed execution: {:?}", e);
                     }
                 }
 
@@ -260,7 +260,7 @@ where
                             .await
                         {
                             if log::log_enabled!(log::Level::Error) {
-                            error!("Failed to delete expired execution: {:?}", e);
+                                error!("Failed to delete expired execution: {:?}", e);
                             }
                         }
                         results.failure_count = results.failure_count.saturating_add(1);
@@ -304,7 +304,7 @@ where
                             .await
                         {
                             if log::log_enabled!(log::Level::Error) {
-                            error!("Failed to re-insert deferred execution: {:?}", e);
+                                error!("Failed to re-insert deferred execution: {:?}", e);
                             }
                             // Mark as failed if we can't reschedule
                             execution.status = ScheduledExecutionStatus::Failed;
@@ -353,7 +353,7 @@ where
                         .await
                     {
                         if log::log_enabled!(log::Level::Error) {
-                        error!("Failed to delete failed execution: {:?}", e);
+                            error!("Failed to delete failed execution: {:?}", e);
                         }
                     }
                     results.failure_count = results.failure_count.saturating_add(1);

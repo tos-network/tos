@@ -305,10 +305,8 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                     }
                 };
 
-                if !res {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!("Error while resubscribing to event with id {}", id);
-                    }
+                if !res && log::log_enabled!(log::Level::Error) {
+                    error!("Error while resubscribing to event with id {}", id);
                 }
             }
         });

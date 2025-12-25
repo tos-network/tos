@@ -245,10 +245,8 @@ impl StorageManager {
             if log::log_enabled!(log::Level::Info) {
                 info!("Updated task {} state", task_key);
             }
-        } else {
-            if log::log_enabled!(log::Level::Warn) {
-                warn!("Task not found: {}", task_key);
-            }
+        } else if log::log_enabled!(log::Level::Warn) {
+            warn!("Task not found: {}", task_key);
         }
 
         Ok(())

@@ -139,7 +139,7 @@ impl<S: Storage> GetWorkServer<S> {
                 debug!("job is dirty, resending job to all miners");
                 if let Err(e) = self.notify_new_job().await {
                     if log::log_enabled!(log::Level::Error) {
-                    error!("Error while notifying new job to miners: {}", e);
+                        error!("Error while notifying new job to miners: {}", e);
                     }
                 }
             }
@@ -368,7 +368,7 @@ impl<S: Storage> GetWorkServer<S> {
                             .await
                         {
                             if log::log_enabled!(log::Level::Warn) {
-                            warn!("Error while notifying {} about new job: {}", miner, e);
+                                warn!("Error while notifying {} about new job: {}", miner, e);
                             }
                         }
                     }
@@ -431,7 +431,7 @@ impl<S: Storage> GetWorkServer<S> {
                 Ok(_) => BlockResult::Accepted(block_hash),
                 Err(e) => {
                     if log::log_enabled!(log::Level::Debug) {
-                    debug!("Error while accepting miner block: {}", e);
+                        debug!("Error while accepting miner block: {}", e);
                     }
                     BlockResult::Rejected(e.into())
                 }
@@ -453,14 +453,14 @@ impl<S: Storage> GetWorkServer<S> {
                 Ok(result) => result,
                 Err(e) => {
                     if log::log_enabled!(log::Level::Debug) {
-                    debug!("Error while accepting miner job: {}", e);
+                        debug!("Error while accepting miner job: {}", e);
                     }
                     BlockResult::Rejected(e.into())
                 }
             },
             Err(e) => {
                 if log::log_enabled!(log::Level::Debug) {
-                debug!("Error while decoding block miner: {}", e);
+                    debug!("Error while decoding block miner: {}", e);
                 }
                 BlockResult::Rejected(e.into())
             }
@@ -477,7 +477,7 @@ impl<S: Storage> GetWorkServer<S> {
         match result {
             BlockResult::Accepted(hash) => {
                 if log::log_enabled!(log::Level::Debug) {
-                debug!("Miner {} found block {}!", miner, hash);
+                    debug!("Miner {} found block {}!", miner, hash);
                 }
                 miner.add_new_accepted_block(hash);
 
@@ -485,7 +485,7 @@ impl<S: Storage> GetWorkServer<S> {
             }
             BlockResult::Rejected(err) => {
                 if log::log_enabled!(log::Level::Debug) {
-                debug!("Miner {} sent an invalid block", miner);
+                    debug!("Miner {} sent an invalid block", miner);
                 }
                 miner.mark_rejected_block();
 
@@ -534,7 +534,7 @@ impl<S: Storage> WebSocketHandler for GetWorkServer<S> {
             Ok(address) => address,
             Err(e) => {
                 if log::log_enabled!(log::Level::Debug) {
-                debug!("Invalid miner address for getwork server: {}", e);
+                    debug!("Invalid miner address for getwork server: {}", e);
                 }
                 return Ok(Some(
                     HttpResponse::BadRequest().body("Invalid miner address for getwork server"),

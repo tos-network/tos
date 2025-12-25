@@ -308,13 +308,11 @@ async fn main() -> Result<()> {
     if log::log_enabled!(log::Level::Info) {
         info!("Miner address: {}", address);
     }
-    if threads != detected_threads {
-        if log::log_enabled!(log::Level::Warn) {
-            warn!(
-                "Attention, the number of threads used may not be optimal, recommended is: {}",
-                detected_threads
-            );
-        }
+    if threads != detected_threads && log::log_enabled!(log::Level::Warn) {
+        warn!(
+            "Attention, the number of threads used may not be optimal, recommended is: {}",
+            detected_threads
+        );
     }
 
     // broadcast channel to send new jobs / exit command to all threads
@@ -538,9 +536,7 @@ async fn communication_task(
                                 e.status()
                             );
                         } else {
-                            if log::log_enabled!(log::Level::Error) {
-                                error!("Error while connecting to {}: {}", daemon_address, e);
-                            }
+                            error!("Error while connecting to {}: {}", daemon_address, e);
                         }
                     }
 

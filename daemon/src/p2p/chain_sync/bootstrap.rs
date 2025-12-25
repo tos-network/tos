@@ -1223,7 +1223,9 @@ impl<S: Storage> P2pServer<S> {
             else {
                 // shouldn't happen
                 if log::log_enabled!(log::Level::Error) {
-                    error!("Received an invalid StepResponse (how ?) while fetching contract balances");
+                    error!(
+                        "Received an invalid StepResponse (how ?) while fetching contract balances"
+                    );
                 }
                 return Err(P2pError::InvalidPacket.into());
             };
@@ -1268,7 +1270,9 @@ impl<S: Storage> P2pServer<S> {
             else {
                 // shouldn't happen
                 if log::log_enabled!(log::Level::Error) {
-                    error!("Received an invalid StepResponse (how ?) while fetching contract stores");
+                    error!(
+                        "Received an invalid StepResponse (how ?) while fetching contract stores"
+                    );
                 }
                 return Err(P2pError::InvalidPacket.into());
             };
