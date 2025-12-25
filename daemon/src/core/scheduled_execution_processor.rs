@@ -278,10 +278,12 @@ where
                             .delete_contract_scheduled_execution(&execution.contract, &execution)
                             .await
                         {
-                            error!(
-                                "Failed to delete deferred execution for re-insertion: {:?}",
-                                e
-                            );
+                            if log::log_enabled!(log::Level::Error) {
+                                error!(
+                                    "Failed to delete deferred execution for re-insertion: {:?}",
+                                    e
+                                );
+                            }
                         }
 
                         // Update execution to target next topoheight

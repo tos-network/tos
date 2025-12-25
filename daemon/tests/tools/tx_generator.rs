@@ -301,23 +301,31 @@ struct TransactionGenerator {
 
 impl TransactionGenerator {
     fn new(is_mainnet: bool, num_senders: usize) -> Self {
-        info!("Generating {num_senders} sender keypairs...");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Generating {num_senders} sender keypairs...");
+        }
         let sender_keypairs: Vec<KeyPair> = (0..num_senders).map(|_| KeyPair::new()).collect();
 
         let receiver_keypair = KeyPair::new();
 
-        info!("Sender addresses:");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Sender addresses:");
+        }
         for (i, kp) in sender_keypairs.iter().enumerate() {
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "  Sender {}: {}",
+                    i,
+                    kp.get_public_key().to_address(is_mainnet)
+                );
+            }
+        }
+        if log::log_enabled!(log::Level::Info) {
             info!(
-                "  Sender {}: {}",
-                i,
-                kp.get_public_key().to_address(is_mainnet)
+                "Receiver address: {}",
+                receiver_keypair.get_public_key().to_address(is_mainnet)
             );
         }
-        info!(
-            "Receiver address: {}",
-            receiver_keypair.get_public_key().to_address(is_mainnet)
-        );
 
         Self {
             is_mainnet,
@@ -348,7 +356,9 @@ impl TransactionGenerator {
         fee: u64,
         different_senders: bool,
     ) -> Result<Vec<Transaction>> {
-        info!("Generating {count} transactions (different_senders: {different_senders})...");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Generating {count} transactions (different_senders: {different_senders})...");
+        }
 
         let mut transactions = Vec::with_capacity(count);
         let initial_balance = 1_000_000_000_000u64; // 1M TOS = 1e15 nanoTOS
@@ -408,7 +418,9 @@ impl TransactionGenerator {
             transactions.push(tx);
         }
 
-        info!("Successfully generated {count} transactions");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Successfully generated {count} transactions");
+        }
         Ok(transactions)
     }
 }
@@ -431,11 +443,13 @@ impl TransactionSubmitter {
         transactions: &[Transaction],
         batch_name: &str,
     ) -> Result<Duration> {
-        info!(
-            "Submitting batch '{}' with {} transactions...",
-            batch_name,
-            transactions.len()
-        );
+        if log::log_enabled!(log::Level::Info) {
+            info!(
+                "Submitting batch '{}' with {} transactions...",
+                batch_name,
+                transactions.len()
+            );
+        }
 
         let start = Instant::now();
         let mut submitted = 0;
@@ -461,12 +475,14 @@ impl TransactionSubmitter {
                 }
                 Err(e) => {
                     errors += 1;
-                    warn!(
-                        "  TX {}/{}: submission failed: {}",
-                        i + 1,
-                        transactions.len(),
-                        e
-                    );
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "  TX {}/{}: submission failed: {}",
+                            i + 1,
+                            transactions.len(),
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -474,15 +490,17 @@ impl TransactionSubmitter {
         let elapsed = start.elapsed();
         let tps = submitted as f64 / elapsed.as_secs_f64();
 
-        info!(
-            "Batch '{}' complete: {}/{} submitted, {} errors, {:.2} TPS, {:?} elapsed",
-            batch_name,
-            submitted,
-            transactions.len(),
-            errors,
-            tps,
-            elapsed
-        );
+        if log::log_enabled!(log::Level::Info) {
+            info!(
+                "Batch '{}' complete: {}/{} submitted, {} errors, {:.2} TPS, {:?} elapsed",
+                batch_name,
+                submitted,
+                transactions.len(),
+                errors,
+                tps,
+                elapsed
+            );
+        }
 
         Ok(elapsed)
     }
@@ -541,9 +559,11 @@ impl PerformanceTracker {
                 self.batch_durations.iter().sum::<Duration>() / self.batch_durations.len() as u32;
             let min_batch = self.batch_durations.iter().min().unwrap();
             let max_batch = self.batch_durations.iter().max().unwrap();
-            println!(
-                "Batch durations:              min={min_batch:?}, avg={avg_batch:?}, max={max_batch:?}"
-            );
+            if log::log_enabled!(log::Level::Info) {
+                println!(
+                    "Batch durations:              min={min_batch:?}, avg={avg_batch:?}, max={max_batch:?}"
+                );
+            }
         }
         println!("{}", "=".repeat(70));
     }
@@ -569,18 +589,32 @@ async fn main() -> Result<()> {
         .format_timestamp_millis()
         .init();
 
-    info!("TOS Transaction Generator");
-    info!("========================");
-    info!("Configuration:");
-    info!("  Transaction count: {}", args.count);
-    info!("  Daemon URL:        {}", args.daemon);
-    info!("  Batch size:        {}", args.batch_size);
-    info!("  Delay between batches: {}ms", args.delay_ms);
-    info!("  Different senders: {}", args.different_senders);
-    info!("  Amount per tx:     {} nanoTOS", args.amount);
-    info!("  Fee per tx:        {} nanoTOS", args.fee);
-    info!("  Network:           {}", args.network);
-    info!("");
+    if log::log_enabled!(log::Level::Info) {
+        info!("TOS Transaction Generator");
+        info!("========================");
+        info!("Configuration:");
+    }
+    if log::log_enabled!(log::Level::Info) {
+        info!("  Transaction count: {}", args.count);
+        info!("  Daemon URL:        {}", args.daemon);
+        info!("  Batch size:        {}", args.batch_size);
+    }
+    if log::log_enabled!(log::Level::Info) {
+        info!("  Delay between batches: {}ms", args.delay_ms);
+    }
+    if log::log_enabled!(log::Level::Info) {
+        info!("  Different senders: {}", args.different_senders);
+    }
+    if log::log_enabled!(log::Level::Info) {
+        info!("  Amount per tx:     {} nanoTOS", args.amount);
+    }
+    if log::log_enabled!(log::Level::Info) {
+        info!("  Fee per tx:        {} nanoTOS", args.fee);
+    }
+    if log::log_enabled!(log::Level::Info) {
+        info!("  Network:           {}", args.network);
+        info!("");
+    }
 
     // Determine network type
     let is_mainnet = args.network.to_lowercase() == "mainnet";
@@ -589,7 +623,9 @@ async fn main() -> Result<()> {
         "testnet" => Network::Testnet,
         "mainnet" => Network::Mainnet,
         _ => {
-            error!("Invalid network: {}", args.network);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Invalid network: {}", args.network);
+            }
             std::process::exit(1);
         }
     };
@@ -598,17 +634,23 @@ async fn main() -> Result<()> {
     let rpc_client = Arc::new(RpcClient::new(args.daemon.clone()));
 
     // Get chain info
-    info!("Fetching chain info from daemon...");
+    if log::log_enabled!(log::Level::Info) {
+        info!("Fetching chain info from daemon...");
+    }
     let chain_info = rpc_client
         .get_info()
         .await
         .context("Failed to get chain info. Is the daemon running?")?;
 
-    info!("Chain info:");
-    info!("  Topoheight:    {}", chain_info.topoheight);
-    info!("  Stable score:  {}", chain_info.stable_topoheight);
-    info!("  Top block:     {}", chain_info.top_block_hash);
-    info!("");
+    if log::log_enabled!(log::Level::Info) {
+        info!("Chain info:");
+    }
+    if log::log_enabled!(log::Level::Info) {
+        info!("  Topoheight:    {}", chain_info.topoheight);
+        info!("  Stable score:  {}", chain_info.stable_topoheight);
+        info!("  Top block:     {}", chain_info.top_block_hash);
+        info!("");
+    }
 
     // Create reference from chain info
     let reference = Reference {
@@ -641,11 +683,13 @@ async fn main() -> Result<()> {
 
     // Submit transactions in batches
     let num_batches = args.count.div_ceil(args.batch_size);
-    info!(
-        "Submitting {} transactions in {} batches...",
-        args.count, num_batches
-    );
-    info!("");
+    if log::log_enabled!(log::Level::Info) {
+        info!(
+            "Submitting {} transactions in {} batches...",
+            args.count, num_batches
+        );
+        info!("");
+    }
 
     for (batch_idx, batch) in all_transactions.chunks(args.batch_size).enumerate() {
         let batch_name = format!("Batch {}/{}", batch_idx + 1, num_batches);
@@ -655,7 +699,9 @@ async fn main() -> Result<()> {
                 perf_tracker.record_batch(batch.len(), batch.len(), duration);
             }
             Err(e) => {
-                error!("Batch submission failed: {e}");
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Batch submission failed: {e}");
+                }
                 perf_tracker.record_batch(batch.len(), 0, Duration::ZERO);
             }
         }
@@ -672,13 +718,15 @@ async fn main() -> Result<()> {
     // Print performance summary
     perf_tracker.print_summary();
 
-    info!("");
-    info!("Transaction generation complete!");
-    info!("Check daemon logs for parallel execution activity.");
-    info!(
-        "Look for blocks with {}+ transactions to trigger parallel path.",
-        20
-    ); // MIN_TXS_FOR_PARALLEL
+    if log::log_enabled!(log::Level::Info) {
+        info!("");
+        info!("Transaction generation complete!");
+        info!("Check daemon logs for parallel execution activity.");
+        info!(
+            "Look for blocks with {}+ transactions to trigger parallel path.",
+            20
+        ); // MIN_TXS_FOR_PARALLEL
+    }
 
     Ok(())
 }

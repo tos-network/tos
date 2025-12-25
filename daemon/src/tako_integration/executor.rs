@@ -288,10 +288,12 @@ impl TakoExecutor {
         // 1. Validate compute budget
         let compute_budget = compute_budget.unwrap_or(DEFAULT_COMPUTE_BUDGET);
         if compute_budget > MAX_COMPUTE_BUDGET {
-            warn!(
-                "Compute budget validation failed: requested={}, maximum={}",
-                compute_budget, MAX_COMPUTE_BUDGET
-            );
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "Compute budget validation failed: requested={}, maximum={}",
+                    compute_budget, MAX_COMPUTE_BUDGET
+                );
+            }
             return Err(TakoExecutionError::ComputeBudgetExceeded {
                 requested: compute_budget,
                 maximum: MAX_COMPUTE_BUDGET,

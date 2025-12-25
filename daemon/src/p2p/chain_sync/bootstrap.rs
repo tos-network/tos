@@ -867,7 +867,9 @@ impl<S: Storage> P2pServer<S> {
             .await?
         else {
             // shouldn't happen
-            error!("Received an invalid StepResponse (how ?) while fetching nonces");
+            if log::log_enabled!(log::Level::Error) {
+                error!("Received an invalid StepResponse (how ?) while fetching nonces");
+            }
             return Err(P2pError::InvalidPacket.into());
         };
 

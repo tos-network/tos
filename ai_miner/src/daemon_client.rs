@@ -112,7 +112,9 @@ impl DaemonClient {
         };
 
         let url = self.base_url.join("json_rpc")?;
-        debug!("Making JSON-RPC request to {}: {}", url, method);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Making JSON-RPC request to {}: {}", url, method);
+        }
 
         let mut last_error = None;
 
@@ -306,7 +308,9 @@ impl DaemonClient {
                     "Successfully connected to daemon version: {}",
                     health.version.as_deref().unwrap_or("unknown")
                 );
-                info!("Daemon response time: {:?}", health.response_time);
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Daemon response time: {:?}", health.response_time);
+                }
             }
         } else {
             return Err(anyhow!(

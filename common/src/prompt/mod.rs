@@ -284,7 +284,9 @@ impl Prompt {
         loop {
             tokio::select! {
                 _ = &mut exit_receiver => {
-                    info!("Received exit signal, exiting...");
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Received exit signal, exiting...");
+                    }
                     break;
                 },
                 res = tokio::signal::ctrl_c() => {
@@ -293,7 +295,9 @@ impl Prompt {
                             error!("Error received on CTRL+C: {e}");
                         }
                     } else {
-                        info!("CTRL+C received, exiting...");
+                        if log::log_enabled!(log::Level::Info) {
+                            info!("CTRL+C received, exiting...");
+                        }
                     }
                     break;
                 },
@@ -308,8 +312,10 @@ impl Prompt {
                             }
                             _ => {},
                         }
-                    } else if log::log_enabled!(log::Level::Debug) {
-                        debug!("You said '{}'", input);
+                    } else {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("You said '{}'", input);
+                        }
                     }
                 }
                 _ = interval.tick() => {

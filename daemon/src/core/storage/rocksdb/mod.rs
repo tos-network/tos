@@ -549,7 +549,9 @@ impl Storage for RocksStorage {
         trace!("deleting block execution order");
         self.remove_from_disk(Column::BlocksExecutionOrder, hash.as_bytes())?;
 
-        trace!("hash is {hash} at topo {topoheight}");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("hash is {hash} at topo {topoheight}");
+        }
         self.remove_from_disk(Column::TopoByHash, &hash)?;
 
         if log::log_enabled!(log::Level::Trace) {

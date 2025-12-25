@@ -241,13 +241,19 @@ impl<S: Storage> DaemonRpcServer<S> {
     }
 
     pub async fn stop(&self) {
-        info!("Stopping RPC Server...");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Stopping RPC Server...");
+        }
         let mut handle = self.handle.lock().await;
         if let Some(handle) = handle.take() {
             handle.stop(false).await;
-            info!("RPC Server is now stopped!");
+            if log::log_enabled!(log::Level::Info) {
+                info!("RPC Server is now stopped!");
+            }
         } else {
-            warn!("RPC Server is not running!");
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("RPC Server is not running!");
+            }
         }
     }
 

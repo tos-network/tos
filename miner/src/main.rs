@@ -439,10 +439,12 @@ async fn broadcast_stats_task(broadcast_address: String) -> Result<()> {
 // Benchmark the miner with the specified number of threads and iterations
 // It will output the total time, total iterations, time per PoW and hashrate for each number of threads
 fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
-    info!(
-        "{0: <10} | {1: <10} | {2: <16} | {3: <13} | {4: <13}",
-        "Threads", "Total Time", "Total Iterations", "Time/PoW (ms)", "Hashrate"
-    );
+    if log::log_enabled!(log::Level::Info) {
+        info!(
+            "{0: <10} | {1: <10} | {2: <16} | {3: <13} | {4: <13}",
+            "Threads", "Total Time", "Total Iterations", "Time/PoW (ms)", "Hashrate"
+        );
+    }
 
     for bench in 1..=threads {
         let start = Instant::now();
@@ -536,7 +538,9 @@ async fn communication_task(
                                 e.status()
                             );
                         } else {
-                            error!("Error while connecting to {}: {}", daemon_address, e);
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Error while connecting to {}: {}", daemon_address, e);
+                            }
                         }
                     }
 
@@ -636,7 +640,9 @@ async fn handle_websocket_message(
                 }
                 SocketMessage::BlockAccepted => {
                     BLOCKS_FOUND.fetch_add(1, Ordering::SeqCst);
-                    info!("Block submitted has been accepted by network !");
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Block submitted has been accepted by network !");
+                    }
                 }
                 SocketMessage::BlockRejected(err) => {
                     BLOCKS_REJECTED.fetch_add(1, Ordering::SeqCst);

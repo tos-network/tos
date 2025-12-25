@@ -110,7 +110,9 @@ impl NonceProvider for RocksStorage {
         // Check if the account has a nonce at the requested topoheight
         // otherwise, we will use the pointer to the last topoheight
         let Some(nonce_topoheight) = account.nonce_pointer else {
-            trace!("no nonce pointer found for account");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("no nonce pointer found for account");
+            }
             return Ok(None);
         };
 
@@ -119,13 +121,17 @@ impl NonceProvider for RocksStorage {
                 Column::VersionedNonces,
                 &Self::get_versioned_account_key(account.id, maximum_topoheight),
             )? {
-            trace!("using maximum topoheight as start topo");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("using maximum topoheight as start topo");
+            }
             Some(maximum_topoheight)
         } else {
-            trace!(
-                "using nonce pointer {:?} as start topo",
-                account.nonce_pointer
-            );
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "using nonce pointer {:?} as start topo",
+                    account.nonce_pointer
+                );
+            }
             account.nonce_pointer
         };
 
