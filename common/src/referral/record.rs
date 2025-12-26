@@ -226,6 +226,88 @@ pub struct RewardDistribution {
     pub level: u8,
 }
 
+/// Team volume record for tracking per-asset sales/transaction volumes
+/// Stored with key: {user_pubkey (32 bytes)}{asset_hash (32 bytes)}
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TeamVolumeRecord {
+    /// Volume from direct referrals (immediate downlines only)
+    pub direct_volume: u64,
+
+    /// Total team volume (all descendants in the referral tree)
+    pub team_volume: u64,
+
+    /// Last update block height (for tracking freshness)
+    pub last_update_topoheight: TopoHeight,
+}
+
+impl TeamVolumeRecord {
+    /// Create a new team volume record
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add to direct volume (called for immediate referrer)
+    pub fn add_direct_volume(&mut self, amount: u64) {
+        self.direct_volume = self.direct_volume.saturating_add(amount);
+    }
+
+    /// Add to team volume (called for all uplines)
+    pub fn add_team_volume(&mut self, amount: u64) {
+        self.team_volume = self.team_volume.saturating_add(amount);
+    }
+
+    /// Update the last update topoheight
+    pub fn set_last_update(&mut self, topoheight: TopoHeight) {
+        self.last_update_topoheight = topoheight;
+    }
+}
+
+impl Serializer for TeamVolumeRecord {
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let direct_volume = u64::read(reader)?;
+        let team_volume = u64::read(reader)?;
+        let last_update_topoheight = TopoHeight::read(reader)?;
+
+        Ok(Self {
+            direct_volume,
+            team_volume,
+            last_update_topoheight,
+        })
+    }
+
+    fn write(&self, writer: &mut Writer) {
+        self.direct_volume.write(writer);
+        self.team_volume.write(writer);
+        self.last_update_topoheight.write(writer);
+    }
+
+    fn size(&self) -> usize {
+        self.direct_volume.size() + self.team_volume.size() + self.last_update_topoheight.size()
+    }
+}
+
+/// Result of zone volumes query (each direct referral's team volume)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZoneVolumesResult {
+    /// List of (direct_referral_address, team_volume) pairs
+    pub zones: Vec<(PublicKey, u64)>,
+
+    /// Total count of direct referrals
+    pub total_count: u32,
+}
+
+impl ZoneVolumesResult {
+    /// Create a new zone volumes result
+    pub fn new(zones: Vec<(PublicKey, u64)>, total_count: u32) -> Self {
+        Self { zones, total_count }
+    }
+
+    /// Check if empty
+    pub fn is_empty(&self) -> bool {
+        self.zones.is_empty()
+    }
+}
+
 /// Result of batch reward distribution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DistributionResult {

@@ -1338,4 +1338,55 @@ impl crate::core::storage::ReferralProvider for SledStorage {
     ) -> Result<(), BlockchainError> {
         Ok(())
     }
+
+    // ===== Team Volume Operations (not supported in SledStorage) =====
+
+    async fn add_team_volume(
+        &mut self,
+        _user: &PublicKey,
+        _asset: &Hash,
+        _amount: u64,
+        _propagate_levels: u8,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(())
+    }
+
+    async fn get_team_volume(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(0)
+    }
+
+    async fn get_direct_volume(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(0)
+    }
+
+    async fn get_zone_volumes(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+        _limit: u32,
+    ) -> Result<tos_common::referral::ZoneVolumesResult, BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(tos_common::referral::ZoneVolumesResult::new(vec![], 0))
+    }
+
+    async fn get_team_volume_record(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+    ) -> Result<Option<tos_common::referral::TeamVolumeRecord>, BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(None)
+    }
 }

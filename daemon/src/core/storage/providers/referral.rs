@@ -4,10 +4,10 @@ use crate::core::error::BlockchainError;
 use async_trait::async_trait;
 use tos_common::{
     block::TopoHeight,
-    crypto::PublicKey,
+    crypto::{Hash, PublicKey},
     referral::{
         DirectReferralsResult, DistributionResult, ReferralRecord, ReferralRewardRatios,
-        UplineResult,
+        TeamVolumeRecord, UplineResult, ZoneVolumesResult,
     },
 };
 
@@ -120,6 +120,63 @@ pub trait ReferralProvider {
         user: &PublicKey,
         size: u64,
     ) -> Result<(), BlockchainError>;
+
+    // ===== Team Volume Operations =====
+
+    /// Add volume to user's upline chain
+    ///
+    /// This propagates the volume up the referral tree:
+    /// - Level 1 (immediate referrer): direct_volume += amount, team_volume += amount
+    /// - Levels 2+: team_volume += amount only
+    ///
+    /// # Arguments
+    /// * `user` - The user whose action generated the volume (purchaser)
+    /// * `asset` - The asset hash for which volume is recorded
+    /// * `amount` - Volume amount to add
+    /// * `propagate_levels` - Number of upline levels to propagate (max 20)
+    /// * `topoheight` - Current block height
+    async fn add_team_volume(
+        &mut self,
+        user: &PublicKey,
+        asset: &Hash,
+        amount: u64,
+        propagate_levels: u8,
+        topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError>;
+
+    /// Get team volume for a user-asset pair
+    async fn get_team_volume(&self, user: &PublicKey, asset: &Hash)
+        -> Result<u64, BlockchainError>;
+
+    /// Get direct volume for a user-asset pair (volume from direct referrals only)
+    async fn get_direct_volume(
+        &self,
+        user: &PublicKey,
+        asset: &Hash,
+    ) -> Result<u64, BlockchainError>;
+
+    /// Get zone volumes (each direct referral's team volume)
+    ///
+    /// # Arguments
+    /// * `user` - The user to query zones for
+    /// * `asset` - The asset hash
+    /// * `limit` - Maximum number of zones to return
+    ///
+    /// # Returns
+    /// Vector of (direct_referral_address, team_volume) pairs
+    async fn get_zone_volumes(
+        &self,
+        user: &PublicKey,
+        asset: &Hash,
+        limit: u32,
+    ) -> Result<ZoneVolumesResult, BlockchainError>;
+
+    /// Get the full team volume record for a user-asset pair
+    async fn get_team_volume_record(
+        &self,
+        user: &PublicKey,
+        asset: &Hash,
+    ) -> Result<Option<TeamVolumeRecord>, BlockchainError>;
 
     // ===== Reward Distribution =====
 

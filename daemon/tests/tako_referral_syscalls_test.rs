@@ -24,7 +24,7 @@ use tos_common::{
     crypto::{Hash, PublicKey},
     referral::{
         DirectReferralsResult, DistributionResult, ReferralRecord, ReferralRewardRatios,
-        UplineResult,
+        TeamVolumeRecord, UplineResult, ZoneVolumesResult,
     },
     serializer::Serializer,
 };
@@ -349,6 +349,50 @@ impl ReferralProvider for MockReferralProvider {
     ) -> Result<(), BlockchainError> {
         Ok(())
     }
+
+    async fn add_team_volume(
+        &mut self,
+        _user: &PublicKey,
+        _asset: &Hash,
+        _amount: u64,
+        _propagate_levels: u8,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        Ok(())
+    }
+
+    async fn get_team_volume(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn get_direct_volume(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn get_zone_volumes(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+        _limit: u32,
+    ) -> Result<ZoneVolumesResult, BlockchainError> {
+        Ok(ZoneVolumesResult::new(vec![], 0))
+    }
+
+    async fn get_team_volume_record(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+    ) -> Result<Option<TeamVolumeRecord>, BlockchainError> {
+        Ok(None)
+    }
 }
 
 // ===================================================================
@@ -448,7 +492,7 @@ fn test_referral_execution_with_provider() {
     println!("Contract size: {} bytes", bytecode.len());
 
     let mut provider = MockProvider::new();
-    let referral_provider = MockReferralProvider::new();
+    let mut referral_provider = MockReferralProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -473,7 +517,7 @@ fn test_referral_execution_with_provider() {
         &tx_sender,
         input_data,
         compute_budget,
-        &referral_provider,
+        &mut referral_provider,
     );
 
     match result {

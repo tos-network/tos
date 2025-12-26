@@ -228,7 +228,7 @@ impl TakoExecutor {
         tx_sender: &Hash,
         input_data: &[u8],
         compute_budget: Option<u64>,
-        referral_provider: &(dyn ReferralProvider + Send + Sync),
+        referral_provider: &mut (dyn ReferralProvider + Send + Sync),
     ) -> Result<ExecutionResult, TakoExecutionError> {
         Self::execute_with_features_and_referral(
             bytecode,
@@ -368,7 +368,7 @@ impl TakoExecutor {
         input_data: &[u8], // Contract input parameters (entry point, user data)
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
-        referral_provider: Option<&(dyn ReferralProvider + Send + Sync)>,
+        referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
     ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
 
@@ -412,7 +412,8 @@ impl TakoExecutor {
 
         // 3a. Create referral adapter (if provider is available)
         // Created before InvokeContext to ensure proper lifetime (adapter must outlive InvokeContext)
-        let referral_adapter = referral_provider.map(TosReferralAdapter::new);
+        let mut referral_adapter =
+            referral_provider.map(|p| TosReferralAdapter::new(p, topoheight));
 
         // 4. Create TBPF loader with syscalls (needed for InvokeContext creation)
         // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml
@@ -486,7 +487,7 @@ impl TakoExecutor {
 
         // 7a. Wire referral provider (if available)
         // Enables contracts to access native referral system via tos_get_uplines, etc.
-        if let Some(ref adapter) = referral_adapter {
+        if let Some(ref mut adapter) = referral_adapter {
             invoke_context.set_referral_provider(adapter);
             if log::log_enabled!(log::Level::Debug) {
                 debug!("Referral provider wired to InvokeContext");

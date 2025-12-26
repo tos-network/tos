@@ -15,7 +15,7 @@ use tos_common::{
     crypto::{Hash, PublicKey},
     referral::{
         DirectReferralsResult, DistributionResult, ReferralRecord, ReferralRewardRatios,
-        UplineResult, MAX_UPLINE_LEVELS,
+        TeamVolumeRecord, UplineResult, ZoneVolumesResult, MAX_UPLINE_LEVELS,
     },
 };
 
@@ -463,6 +463,139 @@ impl ReferralProvider for RocksStorage {
 
         Ok(())
     }
+
+    // ===== Team Volume Operations =====
+
+    async fn add_team_volume(
+        &mut self,
+        user: &PublicKey,
+        asset: &Hash,
+        amount: u64,
+        propagate_levels: u8,
+        topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "adding team volume {} for user {} asset {} to {} levels",
+                amount,
+                user.as_address(self.is_mainnet()),
+                asset,
+                propagate_levels
+            );
+        }
+
+        let levels = propagate_levels.min(MAX_UPLINE_LEVELS);
+        let uplines = self.get_uplines(user, levels).await?;
+
+        // First upline (immediate referrer): add to both direct_volume and team_volume
+        if let Some(first) = uplines.uplines.first() {
+            let key = Self::make_team_volume_key(first, asset);
+            let mut record: TeamVolumeRecord = self
+                .load_optional_from_disk(Column::TeamVolumes, &key)?
+                .unwrap_or_default();
+            record.add_direct_volume(amount);
+            record.add_team_volume(amount);
+            record.set_last_update(topoheight);
+            self.insert_into_disk(Column::TeamVolumes, &key, &record)?;
+        }
+
+        // Remaining uplines (levels 2+): add to team_volume only
+        for upline in uplines.uplines.iter().skip(1) {
+            let key = Self::make_team_volume_key(upline, asset);
+            let mut record: TeamVolumeRecord = self
+                .load_optional_from_disk(Column::TeamVolumes, &key)?
+                .unwrap_or_default();
+            record.add_team_volume(amount);
+            record.set_last_update(topoheight);
+            self.insert_into_disk(Column::TeamVolumes, &key, &record)?;
+        }
+
+        Ok(())
+    }
+
+    async fn get_team_volume(
+        &self,
+        user: &PublicKey,
+        asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "getting team volume for user {} asset {}",
+                user.as_address(self.is_mainnet()),
+                asset
+            );
+        }
+
+        let key = Self::make_team_volume_key(user, asset);
+        let record: Option<TeamVolumeRecord> =
+            self.load_optional_from_disk(Column::TeamVolumes, &key)?;
+        Ok(record.map(|r| r.team_volume).unwrap_or(0))
+    }
+
+    async fn get_direct_volume(
+        &self,
+        user: &PublicKey,
+        asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "getting direct volume for user {} asset {}",
+                user.as_address(self.is_mainnet()),
+                asset
+            );
+        }
+
+        let key = Self::make_team_volume_key(user, asset);
+        let record: Option<TeamVolumeRecord> =
+            self.load_optional_from_disk(Column::TeamVolumes, &key)?;
+        Ok(record.map(|r| r.direct_volume).unwrap_or(0))
+    }
+
+    async fn get_zone_volumes(
+        &self,
+        user: &PublicKey,
+        asset: &Hash,
+        limit: u32,
+    ) -> Result<ZoneVolumesResult, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "getting zone volumes for user {} asset {} limit {}",
+                user.as_address(self.is_mainnet()),
+                asset,
+                limit
+            );
+        }
+
+        // Get direct referrals
+        let direct_result = self.get_direct_referrals(user, 0, limit).await?;
+        let total_count = direct_result.total_count;
+
+        // For each direct referral, get their team volume
+        let mut zones = Vec::with_capacity(direct_result.referrals.len());
+        for referral in direct_result.referrals {
+            let team_vol = self.get_team_volume(&referral, asset).await?;
+            zones.push((referral, team_vol));
+        }
+
+        Ok(ZoneVolumesResult::new(zones, total_count))
+    }
+
+    async fn get_team_volume_record(
+        &self,
+        user: &PublicKey,
+        asset: &Hash,
+    ) -> Result<Option<TeamVolumeRecord>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "getting team volume record for user {} asset {}",
+                user.as_address(self.is_mainnet()),
+                asset
+            );
+        }
+
+        let key = Self::make_team_volume_key(user, asset);
+        self.load_optional_from_disk(Column::TeamVolumes, &key)
+    }
 }
 
 impl RocksStorage {
@@ -471,6 +604,14 @@ impl RocksStorage {
         let mut key = Vec::with_capacity(36); // 32 bytes pubkey + 4 bytes page
         key.extend_from_slice(referrer.as_bytes());
         key.extend_from_slice(&page.to_be_bytes());
+        key
+    }
+
+    /// Create team volume storage key: {user_pubkey (32 bytes)}{asset_hash (32 bytes)}
+    fn make_team_volume_key(user: &PublicKey, asset: &Hash) -> Vec<u8> {
+        let mut key = Vec::with_capacity(64);
+        key.extend_from_slice(user.as_bytes());
+        key.extend_from_slice(asset.as_bytes());
         key
     }
 

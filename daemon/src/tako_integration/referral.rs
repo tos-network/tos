@@ -7,7 +7,9 @@
 // Uses `try_block_on()` pattern for async/sync conversion, following the
 // established pattern in scheduled_execution.rs and storage providers.
 
-use tos_common::{crypto::PublicKey, serializer::Serializer, tokio::try_block_on};
+use tos_common::{
+    block::TopoHeight, crypto::Hash, crypto::PublicKey, serializer::Serializer, tokio::try_block_on,
+};
 // TAKO's ReferralProvider trait (aliased to avoid conflict with TOS's ReferralProvider)
 use tos_program_runtime::storage::ReferralProvider as TakoReferralProvider;
 use tos_tbpf::error::EbpfError;
@@ -37,8 +39,10 @@ use crate::core::storage::ReferralProvider;
 /// - Falls back to `futures::executor::block_on` in single-thread context
 /// - Proven pattern used in contract storage providers
 pub struct TosReferralAdapter<'a, P: ReferralProvider + Send + Sync + ?Sized> {
-    /// TOS referral storage provider
-    provider: &'a P,
+    /// TOS referral storage provider (mutable for team volume write operations)
+    provider: &'a mut P,
+    /// Current topoheight for volume update timestamps
+    topoheight: TopoHeight,
 }
 
 impl<'a, P: ReferralProvider + Send + Sync + ?Sized> TosReferralAdapter<'a, P> {
@@ -47,8 +51,17 @@ impl<'a, P: ReferralProvider + Send + Sync + ?Sized> TosReferralAdapter<'a, P> {
     /// # Arguments
     ///
     /// * `provider` - TOS referral storage provider implementing ReferralProvider trait
-    pub fn new(provider: &'a P) -> Self {
-        Self { provider }
+    /// * `topoheight` - Current block topoheight for volume update timestamps
+    pub fn new(provider: &'a mut P, topoheight: TopoHeight) -> Self {
+        Self {
+            provider,
+            topoheight,
+        }
+    }
+
+    /// Convert [u8; 32] bytes to TOS Hash (for asset)
+    fn bytes_to_hash(bytes: &[u8; 32]) -> Hash {
+        Hash::new(*bytes)
     }
 
     /// Convert [u8; 32] bytes to TOS PublicKey
@@ -159,6 +172,79 @@ impl<'a, P: ReferralProvider + Send + Sync + ?Sized> TakoReferralProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
     }
+
+    // ===== Team Volume Operations =====
+
+    /// Add volume to user's upline chain
+    fn add_team_volume(
+        &mut self,
+        user: &[u8; 32],
+        asset: &[u8; 32],
+        amount: u64,
+        levels: u8,
+    ) -> Result<(), EbpfError> {
+        let user_pk = Self::bytes_to_pubkey(user)?;
+        let asset_hash = Self::bytes_to_hash(asset);
+        let topoheight = self.topoheight;
+
+        try_block_on(self.provider.add_team_volume(
+            &user_pk,
+            &asset_hash,
+            amount,
+            levels,
+            topoheight,
+        ))
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
+    }
+
+    /// Get team volume for a user-asset pair
+    fn get_team_volume(&self, user: &[u8; 32], asset: &[u8; 32]) -> Result<u64, EbpfError> {
+        let user_pk = Self::bytes_to_pubkey(user)?;
+        let asset_hash = Self::bytes_to_hash(asset);
+
+        try_block_on(self.provider.get_team_volume(&user_pk, &asset_hash))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)
+    }
+
+    /// Get direct volume for a user-asset pair
+    fn get_direct_volume(&self, user: &[u8; 32], asset: &[u8; 32]) -> Result<u64, EbpfError> {
+        let user_pk = Self::bytes_to_pubkey(user)?;
+        let asset_hash = Self::bytes_to_hash(asset);
+
+        try_block_on(self.provider.get_direct_volume(&user_pk, &asset_hash))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)
+    }
+
+    /// Get zone volumes (each direct referral's team volume)
+    fn get_zone_volumes(
+        &self,
+        user: &[u8; 32],
+        asset: &[u8; 32],
+        limit: u8,
+    ) -> Result<(Vec<([u8; 32], u64)>, u32), EbpfError> {
+        let user_pk = Self::bytes_to_pubkey(user)?;
+        let asset_hash = Self::bytes_to_hash(asset);
+
+        let result = try_block_on(self.provider.get_zone_volumes(
+            &user_pk,
+            &asset_hash,
+            limit as u32,
+        ))
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // Convert Vec<(PublicKey, u64)> to Vec<([u8; 32], u64)>
+        let zones: Vec<([u8; 32], u64)> = result
+            .zones
+            .iter()
+            .map(|(pk, vol)| (Self::pubkey_to_bytes(pk), *vol))
+            .collect();
+
+        Ok((zones, result.total_count))
+    }
 }
 
 #[cfg(test)]
@@ -169,7 +255,7 @@ mod tests {
     use tos_common::crypto::Hash;
     use tos_common::referral::{
         DirectReferralsResult, DistributionResult, ReferralRecord, ReferralRewardRatios,
-        UplineResult,
+        TeamVolumeRecord, UplineResult, ZoneVolumesResult,
     };
 
     /// Mock referral provider for testing
@@ -313,15 +399,59 @@ mod tests {
         ) -> Result<(), BlockchainError> {
             Ok(())
         }
+
+        async fn add_team_volume(
+            &mut self,
+            _user: &PublicKey,
+            _asset: &Hash,
+            _amount: u64,
+            _propagate_levels: u8,
+            _topoheight: TopoHeight,
+        ) -> Result<(), BlockchainError> {
+            Ok(())
+        }
+
+        async fn get_team_volume(
+            &self,
+            _user: &PublicKey,
+            _asset: &Hash,
+        ) -> Result<u64, BlockchainError> {
+            Ok(0)
+        }
+
+        async fn get_direct_volume(
+            &self,
+            _user: &PublicKey,
+            _asset: &Hash,
+        ) -> Result<u64, BlockchainError> {
+            Ok(0)
+        }
+
+        async fn get_zone_volumes(
+            &self,
+            _user: &PublicKey,
+            _asset: &Hash,
+            _limit: u32,
+        ) -> Result<ZoneVolumesResult, BlockchainError> {
+            Ok(ZoneVolumesResult::new(vec![], 0))
+        }
+
+        async fn get_team_volume_record(
+            &self,
+            _user: &PublicKey,
+            _asset: &Hash,
+        ) -> Result<Option<TeamVolumeRecord>, BlockchainError> {
+            Ok(None)
+        }
     }
 
     #[test]
     fn test_has_referrer() {
-        let provider = MockReferralProvider {
+        let mut provider = MockReferralProvider {
             has_referrer_result: true,
             ..Default::default()
         };
-        let adapter = TosReferralAdapter::new(&provider);
+        let adapter = TosReferralAdapter::new(&mut provider, 0);
 
         let user = [1u8; 32];
         let result = adapter.has_referrer(&user);
@@ -332,8 +462,8 @@ mod tests {
 
     #[test]
     fn test_get_referrer_none() {
-        let provider = MockReferralProvider::default();
-        let adapter = TosReferralAdapter::new(&provider);
+        let mut provider = MockReferralProvider::default();
+        let adapter = TosReferralAdapter::new(&mut provider, 0);
 
         let user = [1u8; 32];
         let result = adapter.get_referrer(&user);
@@ -345,11 +475,11 @@ mod tests {
     #[test]
     fn test_get_referrer_some() {
         let referrer_pk = PublicKey::from_bytes(&[2u8; 32]).unwrap();
-        let provider = MockReferralProvider {
+        let mut provider = MockReferralProvider {
             referrer: Some(referrer_pk.clone()),
             ..Default::default()
         };
-        let adapter = TosReferralAdapter::new(&provider);
+        let adapter = TosReferralAdapter::new(&mut provider, 0);
 
         let user = [1u8; 32];
         let result = adapter.get_referrer(&user);
@@ -364,11 +494,11 @@ mod tests {
     fn test_get_uplines() {
         let upline1 = PublicKey::from_bytes(&[2u8; 32]).unwrap();
         let upline2 = PublicKey::from_bytes(&[3u8; 32]).unwrap();
-        let provider = MockReferralProvider {
+        let mut provider = MockReferralProvider {
             uplines: vec![upline1.clone(), upline2.clone()],
             ..Default::default()
         };
-        let adapter = TosReferralAdapter::new(&provider);
+        let adapter = TosReferralAdapter::new(&mut provider, 0);
 
         let user = [1u8; 32];
         let result = adapter.get_uplines(&user, 3);
@@ -383,11 +513,11 @@ mod tests {
 
     #[test]
     fn test_get_direct_referrals_count() {
-        let provider = MockReferralProvider {
+        let mut provider = MockReferralProvider {
             direct_count: 42,
             ..Default::default()
         };
-        let adapter = TosReferralAdapter::new(&provider);
+        let adapter = TosReferralAdapter::new(&mut provider, 0);
 
         let user = [1u8; 32];
         let result = adapter.get_direct_referrals_count(&user);
@@ -398,11 +528,11 @@ mod tests {
 
     #[test]
     fn test_get_team_size() {
-        let provider = MockReferralProvider {
+        let mut provider = MockReferralProvider {
             team_size: 1000,
             ..Default::default()
         };
-        let adapter = TosReferralAdapter::new(&provider);
+        let adapter = TosReferralAdapter::new(&mut provider, 0);
 
         let user = [1u8; 32];
         let result = adapter.get_team_size(&user);
@@ -413,11 +543,11 @@ mod tests {
 
     #[test]
     fn test_get_level() {
-        let provider = MockReferralProvider {
+        let mut provider = MockReferralProvider {
             level: 5,
             ..Default::default()
         };
-        let adapter = TosReferralAdapter::new(&provider);
+        let adapter = TosReferralAdapter::new(&mut provider, 0);
 
         let user = [1u8; 32];
         let result = adapter.get_level(&user);
@@ -428,11 +558,11 @@ mod tests {
 
     #[test]
     fn test_is_downline() {
-        let provider = MockReferralProvider {
+        let mut provider = MockReferralProvider {
             is_downline_result: true,
             ..Default::default()
         };
-        let adapter = TosReferralAdapter::new(&provider);
+        let adapter = TosReferralAdapter::new(&mut provider, 0);
 
         let ancestor = [1u8; 32];
         let descendant = [2u8; 32];
