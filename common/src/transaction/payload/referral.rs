@@ -148,8 +148,8 @@ impl BatchReferralRewardPayload {
             return false;
         }
 
-        // Check that levels is reasonable (max 100)
-        if self.levels > 100 {
+        // Check that levels is reasonable (max 20)
+        if self.levels > 20 {
             return false;
         }
 
@@ -190,7 +190,7 @@ impl Serializer for BatchReferralRewardPayload {
 
         // Read ratios
         let ratios_len = u8::read(reader)? as usize;
-        if ratios_len > 100 {
+        if ratios_len > 20 {
             return Err(ReaderError::InvalidSize);
         }
         let mut ratios = Vec::with_capacity(ratios_len);

@@ -60,7 +60,7 @@ pub trait ReferralProvider {
     ///
     /// # Arguments
     /// * `user` - The user to query uplines for
-    /// * `levels` - Number of levels to return (max 100)
+    /// * `levels` - Number of levels to return (max 20)
     ///
     /// # Returns
     /// Vector of upline public keys, ordered from immediate referrer to higher levels.

@@ -3,7 +3,7 @@
 //
 // Key Features:
 // - One-time referrer binding (immutable after binding)
-// - Efficient upline queries (up to 100 levels)
+// - Efficient upline queries (up to 20 levels)
 // - Direct referral list with pagination
 // - Team size caching for performance
 // - Batch reward distribution to uplines
@@ -17,7 +17,7 @@ pub use record::*;
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of upline levels that can be queried
-pub const MAX_UPLINE_LEVELS: u8 = 100;
+pub const MAX_UPLINE_LEVELS: u8 = 20;
 
 /// Maximum number of direct referrals returned per page
 pub const MAX_DIRECT_REFERRALS_PER_PAGE: u32 = 1000;

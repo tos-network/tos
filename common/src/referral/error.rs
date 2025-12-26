@@ -83,10 +83,10 @@ mod tests {
         assert_eq!(err.to_string(), "User has already bound a referrer");
 
         let err = ReferralError::LevelsTooDeep {
-            max: 100,
-            requested: 150,
+            max: 20,
+            requested: 25,
         };
-        assert_eq!(err.to_string(), "Requested 150 levels exceeds maximum 100");
+        assert_eq!(err.to_string(), "Requested 25 levels exceeds maximum 20");
 
         let err = ReferralError::RatiosTooHigh { total: 12000 };
         assert_eq!(
