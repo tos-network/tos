@@ -48,6 +48,7 @@ pub trait Storage:
     + StateProvider
     + EnergyProvider
     + AIMiningProvider
+    + ReferralProvider
     + Sync
     + Send
     + 'static

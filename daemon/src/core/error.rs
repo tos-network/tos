@@ -407,6 +407,10 @@ pub enum BlockchainError {
     ReferralRatiosTooHigh,
     #[error("Referrer not found")]
     ReferralReferrerNotFound,
+    #[error("Referral record not found")]
+    ReferralRecordNotFound,
+    #[error("Feature not implemented")]
+    NotImplemented,
 }
 
 impl BlockchainError {

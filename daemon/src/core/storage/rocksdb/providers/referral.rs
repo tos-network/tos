@@ -26,14 +26,20 @@ const DIRECT_REFERRALS_PAGE_SIZE: u32 = 1000;
 impl ReferralProvider for RocksStorage {
     async fn has_referrer(&self, user: &PublicKey) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("checking if user {} has referrer", user.as_address(self.is_mainnet()));
+            trace!(
+                "checking if user {} has referrer",
+                user.as_address(self.is_mainnet())
+            );
         }
         self.contains_data(Column::Referrals, user.as_bytes())
     }
 
     async fn get_referrer(&self, user: &PublicKey) -> Result<Option<PublicKey>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("getting referrer for user {}", user.as_address(self.is_mainnet()));
+            trace!(
+                "getting referrer for user {}",
+                user.as_address(self.is_mainnet())
+            );
         }
         let record: Option<ReferralRecord> =
             self.load_optional_from_disk(Column::Referrals, user.as_bytes())?;
@@ -103,7 +109,10 @@ impl ReferralProvider for RocksStorage {
         user: &PublicKey,
     ) -> Result<Option<ReferralRecord>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("getting referral record for user {}", user.as_address(self.is_mainnet()));
+            trace!(
+                "getting referral record for user {}",
+                user.as_address(self.is_mainnet())
+            );
         }
         self.load_optional_from_disk(Column::Referrals, user.as_bytes())
     }
@@ -140,7 +149,10 @@ impl ReferralProvider for RocksStorage {
 
     async fn get_level(&self, user: &PublicKey) -> Result<u8, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("getting level for user {}", user.as_address(self.is_mainnet()));
+            trace!(
+                "getting level for user {}",
+                user.as_address(self.is_mainnet())
+            );
         }
 
         let mut level = 0u8;
@@ -355,7 +367,10 @@ impl ReferralProvider for RocksStorage {
 
     async fn delete_referral_record(&mut self, user: &PublicKey) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("deleting referral record for user {}", user.as_address(self.is_mainnet()));
+            trace!(
+                "deleting referral record for user {}",
+                user.as_address(self.is_mainnet())
+            );
         }
 
         // Get the record first to update referrer's count
@@ -372,7 +387,11 @@ impl ReferralProvider for RocksStorage {
                     )?
                 {
                     referrer_record.decrement_direct_count();
-                    self.insert_into_disk(Column::Referrals, referrer.as_bytes(), &referrer_record)?;
+                    self.insert_into_disk(
+                        Column::Referrals,
+                        referrer.as_bytes(),
+                        &referrer_record,
+                    )?;
                 }
             }
         }

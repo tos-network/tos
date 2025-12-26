@@ -662,6 +662,24 @@ pub fn register_methods<S: Storage>(
         async_handler!(get_ai_mining_active_tasks::<S>),
     );
 
+    // Referral system
+    handler.register_method("has_referrer", async_handler!(has_referrer::<S>));
+    handler.register_method("get_referrer", async_handler!(get_referrer::<S>));
+    handler.register_method("get_uplines", async_handler!(get_uplines::<S>));
+    handler.register_method(
+        "get_direct_referrals",
+        async_handler!(get_direct_referrals::<S>),
+    );
+    handler.register_method(
+        "get_referral_record",
+        async_handler!(get_referral_record::<S>),
+    );
+    handler.register_method("get_team_size", async_handler!(get_team_size::<S>));
+    handler.register_method(
+        "get_referral_level",
+        async_handler!(get_referral_level::<S>),
+    );
+
     if allow_mining_methods {
         handler.register_method(
             "get_block_template",
@@ -3652,4 +3670,224 @@ async fn clear_caches<S: Storage>(
         .context("Error while clearing caches")?;
 
     Ok(json!({}))
+}
+
+// ============================================================================
+// Referral System RPC Handlers
+// ============================================================================
+
+/// Check if a user has bound a referrer
+async fn has_referrer<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: HasReferrerParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let has_referrer = storage
+        .has_referrer(params.address.get_public_key())
+        .await
+        .context("Error while checking if user has referrer")?;
+
+    Ok(json!(HasReferrerResult { has_referrer }))
+}
+
+/// Get the referrer for a user
+async fn get_referrer<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetReferrerParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let network = blockchain.get_network();
+
+    if params.address.is_mainnet() != network.is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let referrer_key = storage
+        .get_referrer(params.address.get_public_key())
+        .await
+        .context("Error while retrieving referrer")?;
+
+    let referrer = referrer_key.map(|key| key.to_address(network.is_mainnet()));
+
+    Ok(json!(GetReferrerResult { referrer }))
+}
+
+/// Get N levels of uplines for a user
+async fn get_uplines<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetUplinesParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let network = blockchain.get_network();
+
+    if params.address.is_mainnet() != network.is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    // Cap levels to MAX_UPLINE_LEVELS (20)
+    let levels = params.levels.min(tos_common::referral::MAX_UPLINE_LEVELS);
+
+    let storage = blockchain.get_storage().read().await;
+    let result = storage
+        .get_uplines(params.address.get_public_key(), levels)
+        .await
+        .context("Error while retrieving uplines")?;
+
+    let uplines: Vec<Address> = result
+        .uplines
+        .iter()
+        .map(|key| key.to_address(network.is_mainnet()))
+        .collect();
+
+    Ok(json!(GetUplinesResult {
+        uplines,
+        levels_returned: result.levels_returned,
+    }))
+}
+
+/// Get direct referrals with pagination
+async fn get_direct_referrals<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetDirectReferralsParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let network = blockchain.get_network();
+
+    if params.address.is_mainnet() != network.is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    // Cap limit to MAX_DIRECT_REFERRALS_PER_PAGE (1000)
+    let limit = params
+        .limit
+        .min(tos_common::referral::MAX_DIRECT_REFERRALS_PER_PAGE);
+
+    let storage = blockchain.get_storage().read().await;
+    let result = storage
+        .get_direct_referrals(params.address.get_public_key(), params.offset, limit)
+        .await
+        .context("Error while retrieving direct referrals")?;
+
+    let referrals: Vec<Address> = result
+        .referrals
+        .iter()
+        .map(|key| key.to_address(network.is_mainnet()))
+        .collect();
+
+    Ok(json!(GetDirectReferralsResult {
+        referrals,
+        total_count: result.total_count,
+        offset: result.offset,
+        has_more: result.has_more,
+    }))
+}
+
+/// Get the full referral record for a user
+async fn get_referral_record<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetReferralRecordParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let network = blockchain.get_network();
+
+    if params.address.is_mainnet() != network.is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let record = storage
+        .get_referral_record(params.address.get_public_key())
+        .await
+        .context("Error while retrieving referral record")?;
+
+    match record {
+        Some(rec) => {
+            let user = rec.user.to_address(network.is_mainnet());
+            let referrer = rec.referrer.map(|r| r.to_address(network.is_mainnet()));
+
+            Ok(json!(GetReferralRecordResult {
+                user,
+                referrer,
+                bound_at_topoheight: rec.bound_at_topoheight,
+                bound_tx_hash: rec.bound_tx_hash,
+                bound_timestamp: rec.bound_timestamp,
+                direct_referrals_count: rec.direct_referrals_count,
+                team_size: rec.team_size,
+            }))
+        }
+        None => Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::ReferralRecordNotFound.into(),
+        )),
+    }
+}
+
+/// Get the total team size for a user
+async fn get_team_size<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetTeamSizeParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let team_size = storage
+        .get_team_size(params.address.get_public_key(), params.use_cache)
+        .await
+        .context("Error while retrieving team size")?;
+
+    Ok(json!(GetTeamSizeResult {
+        team_size,
+        from_cache: params.use_cache,
+    }))
+}
+
+/// Get the level (depth) of a user in the referral tree
+async fn get_referral_level<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetReferralLevelParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let level = storage
+        .get_level(params.address.get_public_key())
+        .await
+        .context("Error while retrieving referral level")?;
+
+    Ok(json!(GetReferralLevelResult { level }))
 }
