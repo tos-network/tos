@@ -674,4 +674,124 @@ impl DaemonAPI {
             .await?;
         Ok(assets)
     }
+
+    // ========== Referral System API ==========
+
+    /// Check if a user has bound a referrer
+    pub async fn has_referrer(&self, address: &Address) -> Result<bool> {
+        trace!("has_referrer");
+        let result: HasReferrerResult = self
+            .client
+            .call_with(
+                "has_referrer",
+                &HasReferrerParams {
+                    address: Cow::Borrowed(address),
+                },
+            )
+            .await?;
+        Ok(result.has_referrer)
+    }
+
+    /// Get the referrer for a user
+    pub async fn get_referrer(&self, address: &Address) -> Result<Option<Address>> {
+        trace!("get_referrer");
+        let result: GetReferrerResult = self
+            .client
+            .call_with(
+                "get_referrer",
+                &GetReferrerParams {
+                    address: Cow::Borrowed(address),
+                },
+            )
+            .await?;
+        Ok(result.referrer)
+    }
+
+    /// Get N levels of uplines for a user
+    pub async fn get_uplines(&self, address: &Address, levels: u8) -> Result<GetUplinesResult> {
+        trace!("get_uplines");
+        let result: GetUplinesResult = self
+            .client
+            .call_with(
+                "get_uplines",
+                &GetUplinesParams {
+                    address: Cow::Borrowed(address),
+                    levels,
+                },
+            )
+            .await?;
+        Ok(result)
+    }
+
+    /// Get direct referrals with pagination
+    pub async fn get_direct_referrals(
+        &self,
+        address: &Address,
+        offset: u32,
+        limit: u32,
+    ) -> Result<GetDirectReferralsResult> {
+        trace!("get_direct_referrals");
+        let result: GetDirectReferralsResult = self
+            .client
+            .call_with(
+                "get_direct_referrals",
+                &GetDirectReferralsParams {
+                    address: Cow::Borrowed(address),
+                    offset,
+                    limit,
+                },
+            )
+            .await?;
+        Ok(result)
+    }
+
+    /// Get the full referral record for a user
+    pub async fn get_referral_record(&self, address: &Address) -> Result<GetReferralRecordResult> {
+        trace!("get_referral_record");
+        let result: GetReferralRecordResult = self
+            .client
+            .call_with(
+                "get_referral_record",
+                &GetReferralRecordParams {
+                    address: Cow::Borrowed(address),
+                },
+            )
+            .await?;
+        Ok(result)
+    }
+
+    /// Get the total team size for a user
+    pub async fn get_team_size(
+        &self,
+        address: &Address,
+        use_cache: bool,
+    ) -> Result<GetTeamSizeResult> {
+        trace!("get_team_size");
+        let result: GetTeamSizeResult = self
+            .client
+            .call_with(
+                "get_team_size",
+                &GetTeamSizeParams {
+                    address: Cow::Borrowed(address),
+                    use_cache,
+                },
+            )
+            .await?;
+        Ok(result)
+    }
+
+    /// Get the level (depth) of a user in the referral tree
+    pub async fn get_referral_level(&self, address: &Address) -> Result<u8> {
+        trace!("get_referral_level");
+        let result: GetReferralLevelResult = self
+            .client
+            .call_with(
+                "get_referral_level",
+                &GetReferralLevelParams {
+                    address: Cow::Borrowed(address),
+                },
+            )
+            .await?;
+        Ok(result.level)
+    }
 }
