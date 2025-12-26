@@ -824,7 +824,9 @@ impl Transaction {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
                         "BatchReferralReward verification - levels: {}, total_amount: {}, fee: {}",
-                        payload.get_levels(), payload.get_total_amount(), self.fee
+                        payload.get_levels(),
+                        payload.get_total_amount(),
+                        self.fee
                     );
                 }
             }

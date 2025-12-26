@@ -75,7 +75,9 @@ impl<'a, P: ReferralProvider + Send + Sync + ?Sized> TosReferralAdapter<'a, P> {
     }
 }
 
-impl<'a, P: ReferralProvider + Send + Sync + ?Sized> TakoReferralProvider for TosReferralAdapter<'a, P> {
+impl<'a, P: ReferralProvider + Send + Sync + ?Sized> TakoReferralProvider
+    for TosReferralAdapter<'a, P>
+{
     /// Check if a user has already bound a referrer
     fn has_referrer(&self, user: &[u8; 32]) -> Result<bool, EbpfError> {
         let pubkey = Self::bytes_to_pubkey(user)?;
@@ -107,11 +109,7 @@ impl<'a, P: ReferralProvider + Send + Sync + ?Sized> TakoReferralProvider for To
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
-        let uplines: Vec<[u8; 32]> = result
-            .uplines
-            .iter()
-            .map(Self::pubkey_to_bytes)
-            .collect();
+        let uplines: Vec<[u8; 32]> = result.uplines.iter().map(Self::pubkey_to_bytes).collect();
 
         Ok((uplines, result.levels_returned))
     }
@@ -154,17 +152,20 @@ impl<'a, P: ReferralProvider + Send + Sync + ?Sized> TakoReferralProvider for To
         let ancestor_pk = Self::bytes_to_pubkey(ancestor)?;
         let descendant_pk = Self::bytes_to_pubkey(descendant)?;
 
-        try_block_on(self.provider.is_downline(&ancestor_pk, &descendant_pk, max_depth))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)
+        try_block_on(
+            self.provider
+                .is_downline(&ancestor_pk, &descendant_pk, max_depth),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::core::error::BlockchainError;
+    use async_trait::async_trait;
     use tos_common::crypto::Hash;
     use tos_common::referral::{
         DirectReferralsResult, DistributionResult, ReferralRecord, ReferralRewardRatios,
@@ -254,7 +255,7 @@ mod tests {
             _offset: u32,
             _limit: u32,
         ) -> Result<DirectReferralsResult, BlockchainError> {
-            Ok(DirectReferralsResult::empty())
+            Ok(DirectReferralsResult::new(vec![], 0, 0))
         }
 
         async fn get_direct_referrals_count(
@@ -287,7 +288,7 @@ mod tests {
             _total_amount: u64,
             _ratios: &ReferralRewardRatios,
         ) -> Result<DistributionResult, BlockchainError> {
-            Ok(DistributionResult::empty())
+            Ok(DistributionResult::new(vec![]))
         }
 
         async fn delete_referral_record(

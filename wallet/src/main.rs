@@ -2596,6 +2596,12 @@ async fn transaction(
                         .as_address(wallet.get_network().is_mainnet())
                 ));
             }
+            TransactionType::BatchReferralReward(payload) => {
+                manager.message("Type: BatchReferralReward".to_string());
+                manager.message(format!("  Asset: {}", payload.get_asset()));
+                manager.message(format!("  Total Amount: {}", payload.get_total_amount()));
+                manager.message(format!("  Levels: {}", payload.get_levels()));
+            }
         }
     }
 

@@ -16,7 +16,8 @@ use super::{
     BatchReferralRewardPayload, BindReferrerPayload, BurnPayload, ContractDeposit,
     DeployContractPayload, EnergyPayload, FeeType, InvokeConstructorPayload, InvokeContractPayload,
     MultiSigPayload, Transaction, TransactionType, TransferPayload, TxVersion,
-    EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS, MAX_TRANSFER_COUNT,
+    EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
+    MAX_TRANSFER_COUNT,
 };
 use crate::ai_mining::AIMiningPayload;
 use crate::{

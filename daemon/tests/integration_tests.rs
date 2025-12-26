@@ -1182,6 +1182,8 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
         (TransactionType::AIMining(_), FeeType::Energy) => false,
         (TransactionType::BindReferrer(_), FeeType::TOS) => true,
         (TransactionType::BindReferrer(_), FeeType::Energy) => false,
+        (TransactionType::BatchReferralReward(_), FeeType::TOS) => true,
+        (TransactionType::BatchReferralReward(_), FeeType::Energy) => false,
     }
 }
 

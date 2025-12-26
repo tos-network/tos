@@ -22,7 +22,10 @@ use tos_common::{
     block::TopoHeight,
     contract::{ContractProvider, ContractStorage},
     crypto::{Hash, PublicKey},
-    referral::{DirectReferralsResult, DistributionResult, ReferralRecord, ReferralRewardRatios, UplineResult},
+    referral::{
+        DirectReferralsResult, DistributionResult, ReferralRecord, ReferralRewardRatios,
+        UplineResult,
+    },
     serializer::Serializer,
 };
 use tos_daemon::core::error::BlockchainError;
@@ -215,8 +218,8 @@ impl ReferralProvider for MockReferralProvider {
     async fn get_referrer(&self, user: &PublicKey) -> Result<Option<PublicKey>, BlockchainError> {
         match self.referrers.get(user.as_bytes()) {
             Some(referrer_bytes) => {
-                let pk = PublicKey::from_bytes(referrer_bytes)
-                    .map_err(|_| BlockchainError::Unknown)?;
+                let pk =
+                    PublicKey::from_bytes(referrer_bytes).map_err(|_| BlockchainError::Unknown)?;
                 Ok(Some(pk))
             }
             None => Ok(None),
@@ -247,12 +250,11 @@ impl ReferralProvider for MockReferralProvider {
         levels: u8,
     ) -> Result<UplineResult, BlockchainError> {
         let mut uplines = Vec::new();
-        let mut current = user.as_bytes().clone();
+        let mut current = *user.as_bytes();
 
         for _ in 0..levels {
             if let Some(referrer) = self.referrers.get(&current) {
-                let pk = PublicKey::from_bytes(referrer)
-                    .map_err(|_| BlockchainError::Unknown)?;
+                let pk = PublicKey::from_bytes(referrer).map_err(|_| BlockchainError::Unknown)?;
                 uplines.push(pk);
                 current = *referrer;
             } else {
@@ -273,7 +275,7 @@ impl ReferralProvider for MockReferralProvider {
         descendant: &PublicKey,
         max_depth: u8,
     ) -> Result<bool, BlockchainError> {
-        let mut current = descendant.as_bytes().clone();
+        let mut current = *descendant.as_bytes();
 
         for _ in 0..max_depth {
             if let Some(referrer) = self.referrers.get(&current) {
@@ -302,7 +304,11 @@ impl ReferralProvider for MockReferralProvider {
         Ok(*self.direct_counts.get(user.as_bytes()).unwrap_or(&0))
     }
 
-    async fn get_team_size(&self, user: &PublicKey, _use_cache: bool) -> Result<u64, BlockchainError> {
+    async fn get_team_size(
+        &self,
+        user: &PublicKey,
+        _use_cache: bool,
+    ) -> Result<u64, BlockchainError> {
         Ok(*self.team_sizes.get(user.as_bytes()).unwrap_or(&0))
     }
 
@@ -386,8 +392,7 @@ fn test_referral_contract_loads() {
 #[ignore = "TAKO SDK build issue - contract execution fails due to TBPF interpreter compatibility"]
 fn test_referral_execution_no_provider() {
     let contract_path = "tests/fixtures/test_referral.so";
-    let bytecode = std::fs::read(contract_path)
-        .expect("Failed to read test_referral.so");
+    let bytecode = std::fs::read(contract_path).expect("Failed to read test_referral.so");
 
     println!("\n=== Referral Syscalls Execution Test (No Provider) ===");
     println!("Contract size: {} bytes", bytecode.len());
@@ -404,7 +409,10 @@ fn test_referral_execution_no_provider() {
         Ok(exec_result) => {
             println!("Execution completed");
             println!("  Return value: {}", exec_result.return_value);
-            println!("  Instructions executed: {}", exec_result.instructions_executed);
+            println!(
+                "  Instructions executed: {}",
+                exec_result.instructions_executed
+            );
             println!("  Compute units used: {}", exec_result.compute_units_used);
 
             // Without a referral provider, syscalls will return error code 1
@@ -434,8 +442,7 @@ fn test_referral_execution_no_provider() {
 #[ignore = "TAKO SDK build issue - contract execution fails due to TBPF interpreter compatibility"]
 fn test_referral_execution_with_provider() {
     let contract_path = "tests/fixtures/test_referral.so";
-    let bytecode = std::fs::read(contract_path)
-        .expect("Failed to read test_referral.so");
+    let bytecode = std::fs::read(contract_path).expect("Failed to read test_referral.so");
 
     println!("\n=== Referral Syscalls Execution Test (With Provider) ===");
     println!("Contract size: {} bytes", bytecode.len());
@@ -473,7 +480,10 @@ fn test_referral_execution_with_provider() {
         Ok(exec_result) => {
             println!("✅ Referral syscall tests succeeded!");
             println!("  Return value: {}", exec_result.return_value);
-            println!("  Instructions executed: {}", exec_result.instructions_executed);
+            println!(
+                "  Instructions executed: {}",
+                exec_result.instructions_executed
+            );
             println!("  Compute units used: {}", exec_result.compute_units_used);
 
             assert_eq!(
