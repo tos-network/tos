@@ -13,9 +13,9 @@ pub use unsigned::UnsignedTransaction;
 
 use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
-    BurnPayload, ContractDeposit, DeployContractPayload, EnergyPayload, FeeType,
-    InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, Transaction, TransactionType,
-    TransferPayload, TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE,
+    BindReferrerPayload, BurnPayload, ContractDeposit, DeployContractPayload, EnergyPayload,
+    FeeType, InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, Transaction,
+    TransactionType, TransferPayload, TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE,
     MAX_MULTISIG_PARTICIPANTS, MAX_TRANSFER_COUNT,
 };
 use crate::ai_mining::AIMiningPayload;
@@ -93,6 +93,7 @@ pub enum TransactionTypeBuilder {
     DeployContract(DeployContractBuilder),
     Energy(EnergyBuilder),
     AIMining(AIMiningPayload),
+    BindReferrer(BindReferrerPayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -253,6 +254,10 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::AIMining(payload) => {
                 // AI Mining payload size
+                size += payload.size();
+            }
+            TransactionTypeBuilder::BindReferrer(payload) => {
+                // BindReferrer payload size
                 size += payload.size();
             }
         };
@@ -429,6 +434,8 @@ impl TransactionBuilder {
                     }
                 }
             }
+            // BindReferrer has no asset cost, only gas fee
+            TransactionTypeBuilder::BindReferrer(_) => {}
         }
 
         cost
@@ -700,6 +707,9 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::AIMining(ref payload) => {
                 TransactionType::AIMining(payload.clone())
+            }
+            TransactionTypeBuilder::BindReferrer(ref payload) => {
+                TransactionType::BindReferrer(payload.clone())
             }
         };
 

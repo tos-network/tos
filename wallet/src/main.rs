@@ -873,6 +873,16 @@ async fn setup_wallet_command_manager(
         CommandHandler::Async(async_handler!(energy_info)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
+        "bind_referrer",
+        "Bind a referrer to your account (one-time, immutable)",
+        vec![Arg::new(
+            "referrer",
+            ArgType::String,
+            "Referrer's wallet address",
+        )],
+        CommandHandler::Async(async_handler!(bind_referrer)),
+    ))?;
+    command_manager.add_command(Command::with_required_arguments(
         "set_asset_name",
         "Set the name of an asset",
         vec![
@@ -4505,6 +4515,73 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
             }
         }
     }
+
+    Ok(())
+}
+
+/// Bind a referrer to the sender account (one-time, immutable)
+async fn bind_referrer(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    manager.validate_batch_params("bind_referrer", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Get referrer address from arguments
+    let referrer_str = if args.has_argument("referrer") {
+        args.get_value("referrer")?.to_string_value()?
+    } else {
+        return Err(CommandError::MissingArgument("referrer".to_string()));
+    };
+
+    // Parse the referrer address
+    let referrer_address: tos_common::crypto::Address = referrer_str
+        .parse()
+        .map_err(|e| CommandError::InvalidArgument(format!("Invalid referrer address: {}", e)))?;
+
+    // Validate network matches
+    if referrer_address.is_mainnet() != wallet.get_network().is_mainnet() {
+        return Err(CommandError::InvalidArgument(
+            "Referrer address network does not match wallet network".to_string(),
+        ));
+    }
+
+    // Cannot set self as referrer
+    if referrer_address == wallet.get_address() {
+        return Err(CommandError::InvalidArgument(
+            "Cannot set yourself as referrer".to_string(),
+        ));
+    }
+
+    manager.message(format!("Binding referrer: {}", referrer_address));
+
+    // Create BindReferrer payload
+    let payload = tos_common::transaction::BindReferrerPayload::new(
+        referrer_address.get_public_key().clone(),
+        None, // No extra data for now
+    );
+
+    let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::BindReferrer(payload);
+    let fee = tos_common::transaction::builder::FeeBuilder::default();
+
+    manager.message("Building transaction...");
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    let hash = tx.hash();
+    manager.message(format!("Bind referrer transaction created: {}", hash));
+    manager.message(format!("Referrer: {}", referrer_address));
+    manager.message("Note: This is a one-time operation. Once bound, it cannot be changed.");
+
+    // Broadcast the transaction
+    broadcast_tx(wallet, manager, tx).await;
 
     Ok(())
 }
