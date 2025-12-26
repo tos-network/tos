@@ -6,10 +6,11 @@ use tos_common::{
     crypto::elgamal::CompressedPublicKey,
     crypto::Hashable,
     crypto::KeyPair,
+    referral::MAX_UPLINE_LEVELS,
     serializer::Serializer,
     transaction::{
         builder::{FeeBuilder, TransactionBuilder, TransactionTypeBuilder, TransferBuilder},
-        BurnPayload, FeeType, Transaction, TransactionType, TxVersion,
+        BindReferrerPayload, BurnPayload, FeeType, Transaction, TransactionType, TxVersion,
     },
 };
 
@@ -2640,4 +2641,607 @@ fn test_energy_fee_transfer_insufficient_tos_for_account_creation() {
     );
     println!("4. Total TOS requirement = Transfer amount + Account creation fee (if new address)");
     println!("5. Energy is only consumed for the transfer fee, not for account creation");
+}
+
+// ============================================================================
+// REFERRAL SYSTEM INTEGRATION TESTS
+// ============================================================================
+
+/// Helper function to create a bind_referrer transaction
+fn create_bind_referrer_transaction(
+    sender: &KeyPair,
+    referrer: &CompressedPublicKey,
+    fee: u64,
+    nonce: u64,
+) -> Result<Transaction, Box<dyn std::error::Error>> {
+    let payload = BindReferrerPayload::new(referrer.clone(), None);
+    let tx_type = TransactionTypeBuilder::BindReferrer(payload);
+    let fee_builder = FeeBuilder::Value(fee);
+
+    let builder = TransactionBuilder::new(
+        TxVersion::T0,
+        sender.get_public_key().compress(),
+        None,
+        tx_type,
+        fee_builder,
+    )
+    .with_fee_type(FeeType::TOS);
+
+    let mut state = MockAccountState::new();
+    state.set_balance(TOS_ASSET, 1000 * COIN_VALUE);
+    state.nonce = nonce;
+
+    let tx = builder.build(&mut state, sender)?;
+    Ok(tx)
+}
+
+/// Mock referral state for testing referral relationships
+struct MockReferralState {
+    // Maps user -> referrer
+    referrers: HashMap<CompressedPublicKey, CompressedPublicKey>,
+    // Maps referrer -> list of direct referrals
+    direct_referrals: HashMap<CompressedPublicKey, Vec<CompressedPublicKey>>,
+}
+
+impl MockReferralState {
+    fn new() -> Self {
+        Self {
+            referrers: HashMap::new(),
+            direct_referrals: HashMap::new(),
+        }
+    }
+
+    fn has_referrer(&self, user: &CompressedPublicKey) -> bool {
+        self.referrers.contains_key(user)
+    }
+
+    fn get_referrer(&self, user: &CompressedPublicKey) -> Option<&CompressedPublicKey> {
+        self.referrers.get(user)
+    }
+
+    fn bind_referrer(
+        &mut self,
+        user: CompressedPublicKey,
+        referrer: CompressedPublicKey,
+    ) -> Result<(), &'static str> {
+        // Check if already bound
+        if self.has_referrer(&user) {
+            return Err("User already has a referrer");
+        }
+
+        // Check for self-referral
+        if user == referrer {
+            return Err("Cannot refer yourself");
+        }
+
+        // Check for circular reference: would adding user -> referrer create a cycle?
+        // Check if user is already in the upline chain of referrer
+        if self.is_downline(&user, &referrer, MAX_UPLINE_LEVELS) {
+            return Err("Circular reference detected");
+        }
+
+        // Bind the referrer
+        self.referrers.insert(user.clone(), referrer.clone());
+
+        // Add to direct referrals list
+        self.direct_referrals
+            .entry(referrer)
+            .or_default()
+            .push(user);
+
+        Ok(())
+    }
+
+    fn is_downline(
+        &self,
+        ancestor: &CompressedPublicKey,
+        descendant: &CompressedPublicKey,
+        max_depth: u8,
+    ) -> bool {
+        let mut current = descendant.clone();
+        for _ in 0..max_depth {
+            match self.get_referrer(&current) {
+                Some(referrer) => {
+                    if referrer == ancestor {
+                        return true;
+                    }
+                    current = referrer.clone();
+                }
+                None => break,
+            }
+        }
+        false
+    }
+
+    fn get_uplines(&self, user: &CompressedPublicKey, levels: u8) -> Vec<CompressedPublicKey> {
+        let mut uplines = Vec::new();
+        let mut current = user.clone();
+        let max_levels = levels.min(MAX_UPLINE_LEVELS);
+
+        for _ in 0..max_levels {
+            match self.get_referrer(&current) {
+                Some(referrer) => {
+                    uplines.push(referrer.clone());
+                    current = referrer.clone();
+                }
+                None => break,
+            }
+        }
+        uplines
+    }
+
+    fn get_direct_referrals(&self, referrer: &CompressedPublicKey) -> Vec<CompressedPublicKey> {
+        self.direct_referrals
+            .get(referrer)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn get_level(&self, user: &CompressedPublicKey) -> u8 {
+        let mut level = 0u8;
+        let mut current = user.clone();
+
+        while level < MAX_UPLINE_LEVELS {
+            match self.get_referrer(&current) {
+                Some(referrer) => {
+                    level += 1;
+                    current = referrer.clone();
+                }
+                None => break,
+            }
+        }
+        level
+    }
+}
+
+#[test]
+fn test_bind_referrer_transaction_creation() {
+    println!("Testing bind referrer transaction creation...");
+
+    let alice = KeyPair::new();
+    let bob = KeyPair::new();
+
+    let bob_pubkey = bob.get_public_key().compress();
+
+    // Create bind referrer transaction
+    let tx = create_bind_referrer_transaction(&alice, &bob_pubkey, 10000, 0).unwrap();
+
+    // Verify transaction properties
+    assert_eq!(tx.get_fee_type(), &FeeType::TOS);
+    assert_eq!(tx.get_fee(), 10000);
+    assert_eq!(tx.get_nonce(), 0);
+    assert!(matches!(tx.get_data(), TransactionType::BindReferrer(_)));
+
+    // Verify the referrer in the payload
+    if let TransactionType::BindReferrer(payload) = tx.get_data() {
+        assert_eq!(payload.get_referrer(), &bob_pubkey);
+    } else {
+        panic!("Expected BindReferrer transaction type");
+    }
+
+    println!("✓ Bind referrer transaction created successfully");
+    println!("✓ Fee type: TOS");
+    println!("✓ Fee amount: 10000");
+    println!("✓ Referrer correctly set in payload");
+}
+
+#[test]
+fn test_referral_binding_basic() {
+    println!("Testing basic referral binding...");
+
+    let mut referral_state = MockReferralState::new();
+
+    let alice = KeyPair::new();
+    let bob = KeyPair::new();
+    let charlie = KeyPair::new();
+
+    let alice_pubkey = alice.get_public_key().compress();
+    let bob_pubkey = bob.get_public_key().compress();
+    let charlie_pubkey = charlie.get_public_key().compress();
+
+    // Bob refers Alice (Alice's referrer is Bob)
+    let result = referral_state.bind_referrer(alice_pubkey.clone(), bob_pubkey.clone());
+    assert!(result.is_ok());
+
+    // Verify binding
+    assert!(referral_state.has_referrer(&alice_pubkey));
+    assert_eq!(
+        referral_state.get_referrer(&alice_pubkey),
+        Some(&bob_pubkey)
+    );
+
+    // Charlie refers Bob (Bob's referrer is Charlie)
+    let result = referral_state.bind_referrer(bob_pubkey.clone(), charlie_pubkey.clone());
+    assert!(result.is_ok());
+
+    // Verify binding
+    assert!(referral_state.has_referrer(&bob_pubkey));
+    assert_eq!(
+        referral_state.get_referrer(&bob_pubkey),
+        Some(&charlie_pubkey)
+    );
+
+    // Verify Alice's upline chain: Alice -> Bob -> Charlie
+    let uplines = referral_state.get_uplines(&alice_pubkey, 5);
+    assert_eq!(uplines.len(), 2);
+    assert_eq!(uplines[0], bob_pubkey);
+    assert_eq!(uplines[1], charlie_pubkey);
+
+    println!("✓ Basic referral binding works correctly");
+    println!("✓ Upline chain: Alice -> Bob -> Charlie");
+}
+
+#[test]
+fn test_referral_self_referral_prevention() {
+    println!("Testing self-referral prevention...");
+
+    let mut referral_state = MockReferralState::new();
+
+    let alice = KeyPair::new();
+    let alice_pubkey = alice.get_public_key().compress();
+
+    // Try to self-refer
+    let result = referral_state.bind_referrer(alice_pubkey.clone(), alice_pubkey.clone());
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Cannot refer yourself");
+
+    // Verify no binding occurred
+    assert!(!referral_state.has_referrer(&alice_pubkey));
+
+    println!("✓ Self-referral correctly prevented");
+}
+
+#[test]
+fn test_referral_already_bound_error() {
+    println!("Testing already bound error...");
+
+    let mut referral_state = MockReferralState::new();
+
+    let alice = KeyPair::new();
+    let bob = KeyPair::new();
+    let charlie = KeyPair::new();
+
+    let alice_pubkey = alice.get_public_key().compress();
+    let bob_pubkey = bob.get_public_key().compress();
+    let charlie_pubkey = charlie.get_public_key().compress();
+
+    // First binding: Alice's referrer is Bob
+    let result = referral_state.bind_referrer(alice_pubkey.clone(), bob_pubkey.clone());
+    assert!(result.is_ok());
+
+    // Try to change referrer to Charlie (should fail)
+    let result = referral_state.bind_referrer(alice_pubkey.clone(), charlie_pubkey.clone());
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "User already has a referrer");
+
+    // Verify original binding is preserved
+    assert_eq!(
+        referral_state.get_referrer(&alice_pubkey),
+        Some(&bob_pubkey)
+    );
+
+    println!("✓ Already bound error correctly raised");
+    println!("✓ Original referrer preserved after failed rebinding attempt");
+}
+
+#[test]
+fn test_referral_circular_reference_prevention() {
+    println!("Testing circular reference prevention...");
+
+    let mut referral_state = MockReferralState::new();
+
+    let alice = KeyPair::new();
+    let bob = KeyPair::new();
+    let charlie = KeyPair::new();
+
+    let alice_pubkey = alice.get_public_key().compress();
+    let bob_pubkey = bob.get_public_key().compress();
+    let charlie_pubkey = charlie.get_public_key().compress();
+
+    // Build chain: Alice -> Bob -> Charlie
+    referral_state
+        .bind_referrer(alice_pubkey.clone(), bob_pubkey.clone())
+        .unwrap();
+    referral_state
+        .bind_referrer(bob_pubkey.clone(), charlie_pubkey.clone())
+        .unwrap();
+
+    // Try to create circular: Charlie -> Alice (should fail)
+    let result = referral_state.bind_referrer(charlie_pubkey.clone(), alice_pubkey.clone());
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Circular reference detected");
+
+    // Verify Charlie has no referrer
+    assert!(!referral_state.has_referrer(&charlie_pubkey));
+
+    println!("✓ Circular reference prevention works");
+    println!("✓ Chain: Alice -> Bob -> Charlie (no circular)");
+}
+
+#[test]
+fn test_referral_upline_query() {
+    println!("Testing upline query with multi-level chain...");
+
+    let mut referral_state = MockReferralState::new();
+
+    // Create 10 accounts
+    let accounts: Vec<KeyPair> = (0..10).map(|_| KeyPair::new()).collect();
+    let pubkeys: Vec<CompressedPublicKey> = accounts
+        .iter()
+        .map(|k| k.get_public_key().compress())
+        .collect();
+
+    // Build a chain: account[0] -> account[1] -> ... -> account[9]
+    for i in 0..9 {
+        referral_state
+            .bind_referrer(pubkeys[i].clone(), pubkeys[i + 1].clone())
+            .unwrap();
+    }
+
+    // Query uplines from account[0]
+    let uplines = referral_state.get_uplines(&pubkeys[0], 20);
+    assert_eq!(uplines.len(), 9);
+
+    // Verify upline order
+    for i in 0..9 {
+        assert_eq!(uplines[i], pubkeys[i + 1]);
+    }
+
+    // Query with limit
+    let limited_uplines = referral_state.get_uplines(&pubkeys[0], 3);
+    assert_eq!(limited_uplines.len(), 3);
+    assert_eq!(limited_uplines[0], pubkeys[1]);
+    assert_eq!(limited_uplines[1], pubkeys[2]);
+    assert_eq!(limited_uplines[2], pubkeys[3]);
+
+    // Query from middle of chain
+    let mid_uplines = referral_state.get_uplines(&pubkeys[4], 20);
+    assert_eq!(mid_uplines.len(), 5);
+
+    println!("✓ Upline query works correctly");
+    println!("✓ Chain length: 10 accounts");
+    println!("✓ Query from start returns 9 uplines");
+    println!("✓ Query from middle returns correct remaining uplines");
+}
+
+#[test]
+fn test_referral_direct_referrals() {
+    println!("Testing direct referrals tracking...");
+
+    let mut referral_state = MockReferralState::new();
+
+    let referrer = KeyPair::new();
+    let referrer_pubkey = referrer.get_public_key().compress();
+
+    // Create 5 direct referrals
+    let referrals: Vec<KeyPair> = (0..5).map(|_| KeyPair::new()).collect();
+    let referral_pubkeys: Vec<CompressedPublicKey> = referrals
+        .iter()
+        .map(|k| k.get_public_key().compress())
+        .collect();
+
+    for pubkey in &referral_pubkeys {
+        referral_state
+            .bind_referrer(pubkey.clone(), referrer_pubkey.clone())
+            .unwrap();
+    }
+
+    // Query direct referrals
+    let direct = referral_state.get_direct_referrals(&referrer_pubkey);
+    assert_eq!(direct.len(), 5);
+
+    // Verify all referrals are present
+    for pubkey in &referral_pubkeys {
+        assert!(direct.contains(pubkey));
+    }
+
+    println!("✓ Direct referrals tracking works");
+    println!("✓ Referrer has 5 direct referrals");
+}
+
+#[test]
+fn test_referral_level_calculation() {
+    println!("Testing referral level calculation...");
+
+    let mut referral_state = MockReferralState::new();
+
+    // Create 5 accounts in a chain
+    let accounts: Vec<KeyPair> = (0..5).map(|_| KeyPair::new()).collect();
+    let pubkeys: Vec<CompressedPublicKey> = accounts
+        .iter()
+        .map(|k| k.get_public_key().compress())
+        .collect();
+
+    // Build chain: account[0] -> account[1] -> account[2] -> account[3] -> account[4]
+    for i in 0..4 {
+        referral_state
+            .bind_referrer(pubkeys[i].clone(), pubkeys[i + 1].clone())
+            .unwrap();
+    }
+
+    // Check levels
+    assert_eq!(referral_state.get_level(&pubkeys[0]), 4); // 4 levels up to root
+    assert_eq!(referral_state.get_level(&pubkeys[1]), 3); // 3 levels up
+    assert_eq!(referral_state.get_level(&pubkeys[2]), 2); // 2 levels up
+    assert_eq!(referral_state.get_level(&pubkeys[3]), 1); // 1 level up
+    assert_eq!(referral_state.get_level(&pubkeys[4]), 0); // Root, no referrer
+
+    println!("✓ Referral level calculation works correctly");
+    println!("✓ account[0] level: 4 (deepest in chain)");
+    println!("✓ account[4] level: 0 (root, no referrer)");
+}
+
+#[test]
+fn test_referral_max_upline_levels() {
+    println!(
+        "Testing MAX_UPLINE_LEVELS limit ({} levels)...",
+        MAX_UPLINE_LEVELS
+    );
+
+    let mut referral_state = MockReferralState::new();
+
+    // Create chain longer than MAX_UPLINE_LEVELS
+    let chain_length = (MAX_UPLINE_LEVELS + 5) as usize;
+    let accounts: Vec<KeyPair> = (0..chain_length).map(|_| KeyPair::new()).collect();
+    let pubkeys: Vec<CompressedPublicKey> = accounts
+        .iter()
+        .map(|k| k.get_public_key().compress())
+        .collect();
+
+    // Build the chain
+    for i in 0..(chain_length - 1) {
+        referral_state
+            .bind_referrer(pubkeys[i].clone(), pubkeys[i + 1].clone())
+            .unwrap();
+    }
+
+    // Query uplines - should be limited to MAX_UPLINE_LEVELS
+    let uplines = referral_state.get_uplines(&pubkeys[0], MAX_UPLINE_LEVELS);
+    assert_eq!(uplines.len(), MAX_UPLINE_LEVELS as usize);
+
+    // Level calculation should also be limited
+    let level = referral_state.get_level(&pubkeys[0]);
+    assert_eq!(level, MAX_UPLINE_LEVELS);
+
+    println!("✓ MAX_UPLINE_LEVELS limit respected");
+    println!("✓ Chain length: {}", chain_length - 1);
+    println!("✓ Returned uplines: {} (max)", MAX_UPLINE_LEVELS);
+    println!("✓ Calculated level: {} (max)", MAX_UPLINE_LEVELS);
+}
+
+#[test]
+fn test_bind_referrer_fee_type_validation() {
+    println!("Testing bind referrer fee type validation...");
+
+    // BindReferrer should only accept TOS fees, not Energy fees
+    let bind_referrer_type = TransactionType::BindReferrer(BindReferrerPayload::new(
+        KeyPair::new().get_public_key().compress(),
+        None,
+    ));
+
+    // TOS fee should be valid
+    assert!(is_valid_fee_type_combination(
+        &bind_referrer_type,
+        &FeeType::TOS
+    ));
+
+    // Energy fee should be invalid
+    assert!(!is_valid_fee_type_combination(
+        &bind_referrer_type,
+        &FeeType::Energy
+    ));
+
+    println!("✓ BindReferrer + TOS fee: valid");
+    println!("✓ BindReferrer + Energy fee: invalid (as expected)");
+}
+
+#[test]
+fn test_referral_transaction_serialization() {
+    println!("Testing bind referrer transaction serialization...");
+
+    let alice = KeyPair::new();
+    let bob = KeyPair::new();
+    let bob_pubkey = bob.get_public_key().compress();
+
+    // Create transaction
+    let tx = create_bind_referrer_transaction(&alice, &bob_pubkey, 10000, 0).unwrap();
+
+    // Serialize
+    let serialized = tx.to_bytes();
+
+    // Deserialize
+    let mut reader = tos_common::serializer::Reader::new(&serialized);
+    let deserialized = Transaction::read(&mut reader).unwrap();
+
+    // Verify
+    assert_eq!(tx.hash(), deserialized.hash());
+    assert_eq!(tx.get_fee(), deserialized.get_fee());
+    assert_eq!(tx.get_fee_type(), deserialized.get_fee_type());
+    assert_eq!(tx.get_nonce(), deserialized.get_nonce());
+
+    // Verify payload
+    if let TransactionType::BindReferrer(payload) = deserialized.get_data() {
+        assert_eq!(payload.get_referrer(), &bob_pubkey);
+    } else {
+        panic!("Expected BindReferrer transaction type after deserialization");
+    }
+
+    println!("✓ Transaction serialization works correctly");
+    println!("✓ Hash preserved: {}", tx.hash());
+    println!("✓ Payload preserved after round-trip");
+}
+
+#[test]
+fn test_referral_complex_tree_structure() {
+    println!("Testing complex referral tree structure...");
+
+    let mut referral_state = MockReferralState::new();
+
+    // Create a tree structure:
+    //         root
+    //        /    \
+    //       a1     a2
+    //      / \      |
+    //     b1  b2    b3
+    //     |
+    //     c1
+
+    let root = KeyPair::new().get_public_key().compress();
+    let a1 = KeyPair::new().get_public_key().compress();
+    let a2 = KeyPair::new().get_public_key().compress();
+    let b1 = KeyPair::new().get_public_key().compress();
+    let b2 = KeyPair::new().get_public_key().compress();
+    let b3 = KeyPair::new().get_public_key().compress();
+    let c1 = KeyPair::new().get_public_key().compress();
+
+    // Build the tree
+    referral_state
+        .bind_referrer(a1.clone(), root.clone())
+        .unwrap();
+    referral_state
+        .bind_referrer(a2.clone(), root.clone())
+        .unwrap();
+    referral_state
+        .bind_referrer(b1.clone(), a1.clone())
+        .unwrap();
+    referral_state
+        .bind_referrer(b2.clone(), a1.clone())
+        .unwrap();
+    referral_state
+        .bind_referrer(b3.clone(), a2.clone())
+        .unwrap();
+    referral_state
+        .bind_referrer(c1.clone(), b1.clone())
+        .unwrap();
+
+    // Verify structure
+    // Root's direct referrals: a1, a2
+    let root_directs = referral_state.get_direct_referrals(&root);
+    assert_eq!(root_directs.len(), 2);
+
+    // a1's direct referrals: b1, b2
+    let a1_directs = referral_state.get_direct_referrals(&a1);
+    assert_eq!(a1_directs.len(), 2);
+
+    // c1's uplines: b1 -> a1 -> root
+    let c1_uplines = referral_state.get_uplines(&c1, 10);
+    assert_eq!(c1_uplines.len(), 3);
+    assert_eq!(c1_uplines[0], b1);
+    assert_eq!(c1_uplines[1], a1);
+    assert_eq!(c1_uplines[2], root);
+
+    // c1's level should be 3
+    assert_eq!(referral_state.get_level(&c1), 3);
+
+    // b3's uplines: a2 -> root
+    let b3_uplines = referral_state.get_uplines(&b3, 10);
+    assert_eq!(b3_uplines.len(), 2);
+    assert_eq!(b3_uplines[0], a2);
+    assert_eq!(b3_uplines[1], root);
+
+    println!("✓ Complex tree structure verified");
+    println!("✓ Root has 2 direct referrals (a1, a2)");
+    println!("✓ a1 has 2 direct referrals (b1, b2)");
+    println!("✓ c1 upline chain: c1 -> b1 -> a1 -> root (3 levels)");
+    println!("✓ b3 upline chain: b3 -> a2 -> root (2 levels)");
 }
