@@ -2,6 +2,7 @@
 
 use crate::block::TopoHeight;
 use crate::crypto::{Hash, PublicKey};
+use crate::serializer::{Reader, ReaderError, Serializer, Writer};
 use serde::{Deserialize, Serialize};
 
 /// A referral relationship record stored on chain
@@ -73,6 +74,48 @@ impl ReferralRecord {
     /// Increment team size
     pub fn increment_team_size(&mut self, delta: u64) {
         self.team_size = self.team_size.saturating_add(delta);
+    }
+}
+
+impl Serializer for ReferralRecord {
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let user = PublicKey::read(reader)?;
+        let referrer = Option::<PublicKey>::read(reader)?;
+        let bound_at_topoheight = TopoHeight::read(reader)?;
+        let bound_tx_hash = Hash::read(reader)?;
+        let bound_timestamp = u64::read(reader)?;
+        let direct_referrals_count = u32::read(reader)?;
+        let team_size = u64::read(reader)?;
+
+        Ok(Self {
+            user,
+            referrer,
+            bound_at_topoheight,
+            bound_tx_hash,
+            bound_timestamp,
+            direct_referrals_count,
+            team_size,
+        })
+    }
+
+    fn write(&self, writer: &mut Writer) {
+        self.user.write(writer);
+        self.referrer.write(writer);
+        self.bound_at_topoheight.write(writer);
+        self.bound_tx_hash.write(writer);
+        self.bound_timestamp.write(writer);
+        self.direct_referrals_count.write(writer);
+        self.team_size.write(writer);
+    }
+
+    fn size(&self) -> usize {
+        self.user.size()
+            + self.referrer.size()
+            + self.bound_at_topoheight.size()
+            + self.bound_tx_hash.size()
+            + self.bound_timestamp.size()
+            + self.direct_referrals_count.size()
+            + self.team_size.size()
     }
 }
 
@@ -224,8 +267,8 @@ mod tests {
         let referrer_kp = generate_keypair();
 
         let record = ReferralRecord::new(
-            user_kp.get_public_key().clone(),
-            Some(referrer_kp.get_public_key().clone()),
+            user_kp.get_public_key().compress(),
+            Some(referrer_kp.get_public_key().compress()),
             100,
             Hash::zero(),
             1234567890,
@@ -241,7 +284,7 @@ mod tests {
         let user_kp = generate_keypair();
 
         let record = ReferralRecord::new(
-            user_kp.get_public_key().clone(),
+            user_kp.get_public_key().compress(),
             None,
             100,
             Hash::zero(),
@@ -267,7 +310,7 @@ mod tests {
         assert_eq!(result.levels_returned, 0);
 
         let kp = generate_keypair();
-        let result = UplineResult::new(vec![kp.get_public_key().clone()]);
+        let result = UplineResult::new(vec![kp.get_public_key().compress()]);
         assert!(!result.is_empty());
         assert_eq!(result.levels_returned, 1);
     }

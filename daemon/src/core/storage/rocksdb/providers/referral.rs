@@ -1,0 +1,485 @@
+// ReferralProvider implementation for RocksDB storage
+
+use crate::core::{
+    error::BlockchainError,
+    storage::{
+        providers::NetworkProvider,
+        rocksdb::{Column, RocksStorage},
+        ReferralProvider,
+    },
+};
+use async_trait::async_trait;
+use log::trace;
+use tos_common::{
+    block::TopoHeight,
+    crypto::{Hash, PublicKey},
+    referral::{
+        DirectReferralsResult, DistributionResult, ReferralRecord, ReferralRewardRatios,
+        UplineResult, MAX_UPLINE_LEVELS,
+    },
+};
+
+/// Page size for storing direct referrals
+const DIRECT_REFERRALS_PAGE_SIZE: u32 = 1000;
+
+#[async_trait]
+impl ReferralProvider for RocksStorage {
+    async fn has_referrer(&self, user: &PublicKey) -> Result<bool, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("checking if user {} has referrer", user.as_address(self.is_mainnet()));
+        }
+        self.contains_data(Column::Referrals, user.as_bytes())
+    }
+
+    async fn get_referrer(&self, user: &PublicKey) -> Result<Option<PublicKey>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("getting referrer for user {}", user.as_address(self.is_mainnet()));
+        }
+        let record: Option<ReferralRecord> =
+            self.load_optional_from_disk(Column::Referrals, user.as_bytes())?;
+        Ok(record.and_then(|r| r.referrer))
+    }
+
+    async fn bind_referrer(
+        &mut self,
+        user: &PublicKey,
+        referrer: &PublicKey,
+        topoheight: TopoHeight,
+        tx_hash: Hash,
+        timestamp: u64,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "binding referrer {} for user {} at topoheight {}",
+                referrer.as_address(self.is_mainnet()),
+                user.as_address(self.is_mainnet()),
+                topoheight
+            );
+        }
+
+        // Check if user already has a referrer
+        if self.has_referrer(user).await? {
+            return Err(BlockchainError::ReferralAlreadyBound);
+        }
+
+        // Prevent self-referral
+        if user == referrer {
+            return Err(BlockchainError::ReferralSelfReferral);
+        }
+
+        // Check for circular reference
+        if self.is_downline(referrer, user, MAX_UPLINE_LEVELS).await? {
+            return Err(BlockchainError::ReferralCircularReference);
+        }
+
+        // Create the referral record
+        let record = ReferralRecord::new(
+            user.clone(),
+            Some(referrer.clone()),
+            topoheight,
+            tx_hash,
+            timestamp,
+        );
+
+        // Store the record
+        self.insert_into_disk(Column::Referrals, user.as_bytes(), &record)?;
+
+        // Add to referrer's direct referrals list
+        self.add_to_direct_referrals(referrer, user).await?;
+
+        // Update referrer's direct count
+        if let Some(mut referrer_record) = self
+            .load_optional_from_disk::<_, ReferralRecord>(Column::Referrals, referrer.as_bytes())?
+        {
+            referrer_record.increment_direct_count();
+            self.insert_into_disk(Column::Referrals, referrer.as_bytes(), &referrer_record)?;
+        }
+
+        Ok(())
+    }
+
+    async fn get_referral_record(
+        &self,
+        user: &PublicKey,
+    ) -> Result<Option<ReferralRecord>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("getting referral record for user {}", user.as_address(self.is_mainnet()));
+        }
+        self.load_optional_from_disk(Column::Referrals, user.as_bytes())
+    }
+
+    async fn get_uplines(
+        &self,
+        user: &PublicKey,
+        levels: u8,
+    ) -> Result<UplineResult, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "getting {} uplines for user {}",
+                levels,
+                user.as_address(self.is_mainnet())
+            );
+        }
+
+        let levels = levels.min(MAX_UPLINE_LEVELS);
+        let mut uplines = Vec::with_capacity(levels as usize);
+        let mut current = user.clone();
+
+        for _ in 0..levels {
+            match self.get_referrer(&current).await? {
+                Some(referrer) => {
+                    uplines.push(referrer.clone());
+                    current = referrer;
+                }
+                None => break,
+            }
+        }
+
+        Ok(UplineResult::new(uplines))
+    }
+
+    async fn get_level(&self, user: &PublicKey) -> Result<u8, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("getting level for user {}", user.as_address(self.is_mainnet()));
+        }
+
+        let mut level = 0u8;
+        let mut current = user.clone();
+
+        while level < MAX_UPLINE_LEVELS {
+            match self.get_referrer(&current).await? {
+                Some(referrer) => {
+                    level = level.saturating_add(1);
+                    current = referrer;
+                }
+                None => break,
+            }
+        }
+
+        Ok(level)
+    }
+
+    async fn is_downline(
+        &self,
+        ancestor: &PublicKey,
+        descendant: &PublicKey,
+        max_depth: u8,
+    ) -> Result<bool, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "checking if {} is downline of {} (max_depth: {})",
+                descendant.as_address(self.is_mainnet()),
+                ancestor.as_address(self.is_mainnet()),
+                max_depth
+            );
+        }
+
+        let mut current = descendant.clone();
+        let max_depth = max_depth.min(MAX_UPLINE_LEVELS);
+
+        for _ in 0..max_depth {
+            match self.get_referrer(&current).await? {
+                Some(referrer) => {
+                    if &referrer == ancestor {
+                        return Ok(true);
+                    }
+                    current = referrer;
+                }
+                None => break,
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn get_direct_referrals(
+        &self,
+        user: &PublicKey,
+        offset: u32,
+        limit: u32,
+    ) -> Result<DirectReferralsResult, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "getting direct referrals for user {} (offset: {}, limit: {})",
+                user.as_address(self.is_mainnet()),
+                offset,
+                limit
+            );
+        }
+
+        let total_count = self.get_direct_referrals_count(user).await?;
+
+        if offset >= total_count {
+            return Ok(DirectReferralsResult::new(vec![], total_count, offset));
+        }
+
+        let mut referrals = Vec::new();
+        let start_page = offset / DIRECT_REFERRALS_PAGE_SIZE;
+        let mut collected = 0u32;
+        let mut skipped = 0u32;
+
+        // Iterate through pages
+        for page in start_page.. {
+            let key = Self::get_direct_referrals_page_key(user, page);
+            let page_data: Option<Vec<PublicKey>> =
+                self.load_optional_from_disk(Column::ReferralDirects, &key)?;
+
+            match page_data {
+                Some(keys) => {
+                    for key in keys {
+                        if skipped < (offset % DIRECT_REFERRALS_PAGE_SIZE) {
+                            skipped += 1;
+                            continue;
+                        }
+
+                        referrals.push(key);
+                        collected += 1;
+
+                        if collected >= limit {
+                            break;
+                        }
+                    }
+
+                    if collected >= limit {
+                        break;
+                    }
+                }
+                None => break,
+            }
+        }
+
+        Ok(DirectReferralsResult::new(referrals, total_count, offset))
+    }
+
+    async fn get_direct_referrals_count(&self, user: &PublicKey) -> Result<u32, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "getting direct referrals count for user {}",
+                user.as_address(self.is_mainnet())
+            );
+        }
+
+        match self.get_referral_record(user).await? {
+            Some(record) => Ok(record.direct_referrals_count),
+            None => Ok(0),
+        }
+    }
+
+    async fn get_team_size(
+        &self,
+        user: &PublicKey,
+        use_cache: bool,
+    ) -> Result<u64, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "getting team size for user {} (use_cache: {})",
+                user.as_address(self.is_mainnet()),
+                use_cache
+            );
+        }
+
+        if use_cache {
+            match self.get_referral_record(user).await? {
+                Some(record) => Ok(record.team_size),
+                None => Ok(0),
+            }
+        } else {
+            // Real-time calculation - recursively count all descendants
+            self.calculate_team_size(user).await
+        }
+    }
+
+    async fn update_team_size_cache(
+        &mut self,
+        user: &PublicKey,
+        size: u64,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "updating team size cache for user {} to {}",
+                user.as_address(self.is_mainnet()),
+                size
+            );
+        }
+
+        if let Some(mut record) =
+            self.load_optional_from_disk::<_, ReferralRecord>(Column::Referrals, user.as_bytes())?
+        {
+            record.set_team_size(size);
+            self.insert_into_disk(Column::Referrals, user.as_bytes(), &record)?;
+        }
+
+        Ok(())
+    }
+
+    async fn distribute_to_uplines(
+        &mut self,
+        from_user: &PublicKey,
+        _asset: Hash,
+        total_amount: u64,
+        ratios: &ReferralRewardRatios,
+    ) -> Result<DistributionResult, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "distributing {} to uplines of user {}",
+                total_amount,
+                from_user.as_address(self.is_mainnet())
+            );
+        }
+
+        // Validate ratios
+        if !ratios.is_valid() {
+            return Err(BlockchainError::ReferralRatiosTooHigh);
+        }
+
+        let levels = ratios.levels();
+        let uplines = self.get_uplines(from_user, levels).await?;
+
+        let mut distributions = Vec::new();
+
+        for (i, upline) in uplines.uplines.iter().enumerate() {
+            if let Some(ratio) = ratios.get_ratio(i) {
+                let amount = (total_amount as u128 * ratio as u128 / 10000) as u64;
+                if amount > 0 {
+                    distributions.push(tos_common::referral::RewardDistribution {
+                        recipient: upline.clone(),
+                        amount,
+                        level: (i + 1) as u8,
+                    });
+                }
+            }
+        }
+
+        Ok(DistributionResult::new(distributions))
+    }
+
+    async fn delete_referral_record(&mut self, user: &PublicKey) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("deleting referral record for user {}", user.as_address(self.is_mainnet()));
+        }
+
+        // Get the record first to update referrer's count
+        if let Some(record) = self.get_referral_record(user).await? {
+            if let Some(referrer) = &record.referrer {
+                // Remove from referrer's direct referrals
+                self.remove_from_direct_referrals(referrer, user).await?;
+
+                // Decrement referrer's direct count
+                if let Some(mut referrer_record) = self
+                    .load_optional_from_disk::<_, ReferralRecord>(
+                        Column::Referrals,
+                        referrer.as_bytes(),
+                    )?
+                {
+                    referrer_record.decrement_direct_count();
+                    self.insert_into_disk(Column::Referrals, referrer.as_bytes(), &referrer_record)?;
+                }
+            }
+        }
+
+        self.remove_from_disk(Column::Referrals, user.as_bytes())
+    }
+
+    async fn add_to_direct_referrals(
+        &mut self,
+        referrer: &PublicKey,
+        user: &PublicKey,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "adding {} to direct referrals of {}",
+                user.as_address(self.is_mainnet()),
+                referrer.as_address(self.is_mainnet())
+            );
+        }
+
+        // Get current count to determine page
+        let count = self.get_direct_referrals_count(referrer).await?;
+        let page = count / DIRECT_REFERRALS_PAGE_SIZE;
+        let key = Self::get_direct_referrals_page_key(referrer, page);
+
+        // Load existing page or create new
+        let mut page_data: Vec<PublicKey> = self
+            .load_optional_from_disk(Column::ReferralDirects, &key)?
+            .unwrap_or_default();
+
+        page_data.push(user.clone());
+        self.insert_into_disk(Column::ReferralDirects, &key, &page_data)
+    }
+
+    async fn remove_from_direct_referrals(
+        &mut self,
+        referrer: &PublicKey,
+        user: &PublicKey,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "removing {} from direct referrals of {}",
+                user.as_address(self.is_mainnet()),
+                referrer.as_address(self.is_mainnet())
+            );
+        }
+
+        // Search through pages to find and remove the user
+        for page in 0.. {
+            let key = Self::get_direct_referrals_page_key(referrer, page);
+            let page_data: Option<Vec<PublicKey>> =
+                self.load_optional_from_disk(Column::ReferralDirects, &key)?;
+
+            match page_data {
+                Some(mut keys) => {
+                    if let Some(pos) = keys.iter().position(|k| k == user) {
+                        keys.remove(pos);
+                        if keys.is_empty() {
+                            self.remove_from_disk(Column::ReferralDirects, &key)?;
+                        } else {
+                            self.insert_into_disk(Column::ReferralDirects, &key, &keys)?;
+                        }
+                        return Ok(());
+                    }
+                }
+                None => break,
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl RocksStorage {
+    /// Get the key for a direct referrals page
+    fn get_direct_referrals_page_key(referrer: &PublicKey, page: u32) -> Vec<u8> {
+        let mut key = Vec::with_capacity(36); // 32 bytes pubkey + 4 bytes page
+        key.extend_from_slice(referrer.as_bytes());
+        key.extend_from_slice(&page.to_be_bytes());
+        key
+    }
+
+    /// Calculate team size recursively (real-time, expensive)
+    async fn calculate_team_size(&self, user: &PublicKey) -> Result<u64, BlockchainError> {
+        let mut total = 0u64;
+        let mut stack = vec![user.clone()];
+
+        while let Some(current) = stack.pop() {
+            // Get direct referrals for current user
+            let mut offset = 0;
+            loop {
+                let result = self
+                    .get_direct_referrals(&current, offset, DIRECT_REFERRALS_PAGE_SIZE)
+                    .await?;
+
+                for referral in &result.referrals {
+                    total = total.saturating_add(1);
+                    stack.push(referral.clone());
+                }
+
+                if !result.has_more {
+                    break;
+                }
+                offset += DIRECT_REFERRALS_PAGE_SIZE;
+            }
+        }
+
+        Ok(total)
+    }
+}

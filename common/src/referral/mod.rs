@@ -77,7 +77,8 @@ mod tests {
         assert_eq!(ratios.levels(), 10);
         assert_eq!(ratios.get_ratio(0), Some(1000)); // 10%
         assert_eq!(ratios.get_ratio(1), Some(500)); // 5%
-        assert_eq!(ratios.total_ratio(), 2500); // 25%
+        // 1000 + 500 + 300 + 200 + 100*6 = 2600 basis points = 26%
+        assert_eq!(ratios.total_ratio(), 2600); // 26%
         assert!(ratios.is_valid());
     }
 

@@ -53,7 +53,8 @@ impl Transaction {
                     | TransactionType::InvokeContract(_)
                     | TransactionType::DeployContract(_)
                     | TransactionType::Energy(_)
-                    | TransactionType::AIMining(_) => true,
+                    | TransactionType::AIMining(_)
+                    | TransactionType::BindReferrer(_) => true,
                 }
             }
         }
@@ -284,6 +285,9 @@ impl Transaction {
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
+            TransactionType::BindReferrer(_) => {
+                // BindReferrer validation is handled by the referral provider
+            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
@@ -363,7 +367,9 @@ impl Transaction {
                     }
                 }
             }
-            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+            TransactionType::MultiSig(_)
+            | TransactionType::AIMining(_)
+            | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
             }
         };
@@ -633,6 +639,9 @@ impl Transaction {
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
+            TransactionType::BindReferrer(_) => {
+                // BindReferrer transactions are validated by the referral provider at execution time
+            }
         };
 
         let source_decompressed = self
@@ -779,6 +788,14 @@ impl Transaction {
                     );
                 }
             }
+            TransactionType::BindReferrer(payload) => {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "BindReferrer transaction verification - referrer: {:?}, fee: {}, nonce: {}",
+                        payload.get_referrer(), self.fee, self.nonce
+                    );
+                }
+            }
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs
@@ -859,7 +876,9 @@ impl Transaction {
                     }
                 }
             }
-            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+            TransactionType::MultiSig(_)
+            | TransactionType::AIMining(_)
+            | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
             }
         };
@@ -1070,7 +1089,9 @@ impl Transaction {
                     }
                 }
             }
-            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+            TransactionType::MultiSig(_)
+            | TransactionType::AIMining(_)
+            | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
             }
         };
@@ -1371,6 +1392,16 @@ impl Transaction {
                            payload, result.total_miners, result.active_tasks, result.completed_tasks);
                 }
             }
+            TransactionType::BindReferrer(payload) => {
+                // BindReferrer transactions are processed by the ReferralProvider in the daemon layer
+                // The referral binding is handled there with full validation
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "BindReferrer transaction applied - referrer: {:?}",
+                        payload.get_referrer()
+                    );
+                }
+            }
         }
 
         Ok(())
@@ -1480,7 +1511,9 @@ impl Transaction {
                     }
                 }
             }
-            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+            TransactionType::MultiSig(_)
+            | TransactionType::AIMining(_)
+            | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
             }
         };

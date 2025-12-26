@@ -135,6 +135,15 @@ pub enum Column {
     // - reg_topo: registration topoheight (8 bytes, FIFO for equal offers)
     // - contract_id: contract ID (8 bytes, deterministic tiebreaker)
     DelayedExecutionPriority,
+
+    // ===== Referral System =====
+
+    // Referral records: user -> referral data
+    // {user_public_key} => {ReferralRecord}
+    Referrals,
+    // Direct referrals index: referrer -> list of direct referrals
+    // {referrer_public_key}{page_number} => {Vec<PublicKey>}
+    ReferralDirects,
 }
 
 impl Column {
@@ -169,6 +178,9 @@ impl Column {
             DelayedExecutionRegistrations => Some(PREFIX_TOPOHEIGHT_LEN),
             // Priority index: prefix by exec_topoheight (8 bytes)
             DelayedExecutionPriority => Some(PREFIX_TOPOHEIGHT_LEN),
+
+            // Referral directs: prefix by referrer public key (32 bytes)
+            ReferralDirects => Some(32),
 
             _ => None,
         }

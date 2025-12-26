@@ -477,6 +477,9 @@ pub enum AccountHistoryType {
     UnfreezeTos {
         amount: u64,
     },
+    BindReferrer {
+        referrer: Address,
+    },
 }
 
 #[derive(Serialize, Deserialize)]

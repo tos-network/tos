@@ -1179,6 +1179,8 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
         (TransactionType::Energy(_), FeeType::Energy) => false,
         (TransactionType::AIMining(_), FeeType::TOS) => true,
         (TransactionType::AIMining(_), FeeType::Energy) => false,
+        (TransactionType::BindReferrer(_), FeeType::TOS) => true,
+        (TransactionType::BindReferrer(_), FeeType::Energy) => false,
     }
 }
 

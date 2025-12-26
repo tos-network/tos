@@ -2440,6 +2440,9 @@ async fn history(
                 AccountHistoryType::UnfreezeTos { amount } => {
                     format!("Unfreeze: {} TOS", format_tos(*amount))
                 }
+                AccountHistoryType::BindReferrer { referrer } => {
+                    format!("Bind referrer: {}", referrer)
+                }
             };
 
             manager.message(format!(
@@ -2546,6 +2549,15 @@ async fn transaction(
                 manager.message("Type: AIMining".to_string());
                 manager.message(format!("  Payload: {:?}", payload));
             }
+            TransactionType::BindReferrer(payload) => {
+                manager.message("Type: BindReferrer".to_string());
+                manager.message(format!(
+                    "  Referrer: {}",
+                    payload
+                        .get_referrer()
+                        .as_address(wallet.get_network().is_mainnet())
+                ));
+            }
         }
     }
 
@@ -2627,6 +2639,9 @@ async fn export_transactions_csv(
                 }
                 AccountHistoryType::UnfreezeTos { amount } => {
                     format!("UnfreezeTos,amount:{}", amount)
+                }
+                AccountHistoryType::BindReferrer { referrer } => {
+                    format!("BindReferrer,referrer:{}", referrer)
                 }
             };
 

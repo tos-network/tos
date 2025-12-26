@@ -2039,6 +2039,20 @@ async fn get_account_history<S: Storage>(
                     // AI Mining transactions don't affect account history for now
                     // This could be extended to track AI mining activities
                 }
+                TransactionType::BindReferrer(payload) => {
+                    if is_sender {
+                        history.push(AccountHistoryEntry {
+                            topoheight: topo,
+                            hash: tx_hash.clone(),
+                            history_type: AccountHistoryType::BindReferrer {
+                                referrer: payload
+                                    .get_referrer()
+                                    .as_address(blockchain.get_network().is_mainnet()),
+                            },
+                            block_timestamp: block_header.get_timestamp(),
+                        });
+                    }
+                }
             }
         }
 

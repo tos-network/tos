@@ -229,17 +229,17 @@ mod tests {
     #[test]
     fn test_bind_referrer_payload_serialization() {
         let referrer_kp = generate_keypair();
-        let referrer = CompressedPublicKey::from(referrer_kp.get_public_key());
+        let referrer = referrer_kp.get_public_key().compress();
 
         let payload = BindReferrerPayload::new(referrer.clone(), None);
 
         // Serialize
-        let mut writer = Writer::new();
+        let mut buffer = Vec::new();
+        let mut writer = Writer::new(&mut buffer);
         payload.write(&mut writer);
-        let bytes = writer.bytes();
 
         // Deserialize
-        let mut reader = Reader::new(&bytes);
+        let mut reader = Reader::new(&buffer);
         let deserialized = BindReferrerPayload::read(&mut reader).unwrap();
 
         assert_eq!(payload.get_referrer(), deserialized.get_referrer());
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn test_batch_referral_reward_payload() {
         let from_user_kp = generate_keypair();
-        let from_user = CompressedPublicKey::from(from_user_kp.get_public_key());
+        let from_user = from_user_kp.get_public_key().compress();
 
         let payload = BatchReferralRewardPayload::new(
             Hash::zero(),
@@ -261,12 +261,12 @@ mod tests {
         assert!(payload.validate());
 
         // Serialize
-        let mut writer = Writer::new();
+        let mut buffer = Vec::new();
+        let mut writer = Writer::new(&mut buffer);
         payload.write(&mut writer);
-        let bytes = writer.bytes();
 
         // Deserialize
-        let mut reader = Reader::new(&bytes);
+        let mut reader = Reader::new(&buffer);
         let deserialized = BatchReferralRewardPayload::read(&mut reader).unwrap();
 
         assert_eq!(payload.get_levels(), deserialized.get_levels());
@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn test_invalid_ratios() {
         let from_user_kp = generate_keypair();
-        let from_user = CompressedPublicKey::from(from_user_kp.get_public_key());
+        let from_user = from_user_kp.get_public_key().compress();
 
         // Total ratio exceeds 100%
         let payload = BatchReferralRewardPayload::new(

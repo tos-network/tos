@@ -396,6 +396,17 @@ pub enum BlockchainError {
     UnknownAccount,
     #[error(transparent)]
     SemaphoreError(#[from] AcquireError),
+    // Referral system errors
+    #[error("User has already bound a referrer")]
+    ReferralAlreadyBound,
+    #[error("Cannot set self as referrer")]
+    ReferralSelfReferral,
+    #[error("Circular reference detected in referral chain")]
+    ReferralCircularReference,
+    #[error("Total reward ratio exceeds 100%")]
+    ReferralRatiosTooHigh,
+    #[error("Referrer not found")]
+    ReferralReferrerNotFound,
 }
 
 impl BlockchainError {
