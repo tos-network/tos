@@ -1441,23 +1441,53 @@ impl Transaction {
                 }
             }
             TransactionType::BindReferrer(payload) => {
-                // BindReferrer transactions are processed by the ReferralProvider in the daemon layer
-                // The referral binding is handled there with full validation
+                // Bind referrer to user via the ReferralProvider
+                state
+                    .bind_referrer(self.get_source(), payload.get_referrer(), tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "BindReferrer transaction applied - referrer: {:?}",
+                        "BindReferrer transaction applied - user: {:?}, referrer: {:?}",
+                        self.get_source(),
                         payload.get_referrer()
                     );
                 }
             }
             TransactionType::BatchReferralReward(payload) => {
-                // BatchReferralReward transactions are processed by the ReferralProvider in the daemon layer
-                // The reward distribution is handled there with upline lookups
+                // Distribute rewards to uplines via the ReferralProvider
+                let distribution_result = state
+                    .distribute_referral_rewards(
+                        payload.get_from_user(),
+                        payload.get_asset(),
+                        payload.get_total_amount(),
+                        payload.get_ratios(),
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                // Credit rewards to each upline's balance
+                // Note: distribution.recipient is already a CompressedPublicKey (aka crypto::PublicKey)
+                for distribution in &distribution_result.distributions {
+                    let balance = state
+                        .get_receiver_balance(
+                            std::borrow::Cow::Owned(distribution.recipient.clone()),
+                            std::borrow::Cow::Borrowed(payload.get_asset()),
+                        )
+                        .await
+                        .map_err(VerificationError::State)?;
+                    *balance = balance
+                        .checked_add(distribution.amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "BatchReferralReward transaction applied - levels: {}, total_amount: {}",
+                        "BatchReferralReward transaction applied - levels: {}, total_amount: {}, distributed: {}",
                         payload.get_levels(),
-                        payload.get_total_amount()
+                        payload.get_total_amount(),
+                        distribution_result.total_distributed
                     );
                 }
             }

@@ -73,8 +73,8 @@ impl ReferralProvider for RocksStorage {
             return Err(BlockchainError::ReferralSelfReferral);
         }
 
-        // Check for circular reference
-        if self.is_downline(referrer, user, MAX_UPLINE_LEVELS).await? {
+        // Check for circular reference: referrer cannot be in user's downline
+        if self.is_downline(user, referrer, MAX_UPLINE_LEVELS).await? {
             return Err(BlockchainError::ReferralCircularReference);
         }
 

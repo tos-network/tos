@@ -204,4 +204,43 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         contract: &Hash,
         tx_hash: &'a Hash,
     ) -> Result<(), E>;
+
+    // ===== Referral System Operations =====
+
+    /// Bind a referrer to a user
+    /// This operation is one-time only - once bound, cannot be changed
+    ///
+    /// # Arguments
+    /// * `user` - The user binding the referrer
+    /// * `referrer` - The referrer's public key
+    /// * `tx_hash` - The transaction hash
+    ///
+    /// # Errors
+    /// * `AlreadyBound` - User already has a referrer
+    /// * `SelfReferral` - Cannot set self as referrer
+    /// * `CircularReference` - Would create a circular reference chain
+    async fn bind_referrer(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        referrer: &'a CompressedPublicKey,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    /// Distribute referral rewards to uplines
+    ///
+    /// # Arguments
+    /// * `from_user` - The user whose uplines will receive rewards
+    /// * `asset` - The asset to distribute
+    /// * `total_amount` - Total amount to distribute
+    /// * `ratios` - Reward ratios for each level (basis points, 100 = 1%)
+    ///
+    /// # Returns
+    /// * Distribution result with details of each transfer made
+    async fn distribute_referral_rewards(
+        &mut self,
+        from_user: &'a CompressedPublicKey,
+        asset: &'a Hash,
+        total_amount: u64,
+        ratios: &[u16],
+    ) -> Result<crate::referral::DistributionResult, E>;
 }

@@ -373,6 +373,49 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         self.executor.clone()
     }
 
+    async fn bind_referrer(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        referrer: &'a CompressedPublicKey,
+        tx_hash: &'a Hash,
+    ) -> Result<(), BlockchainError> {
+        // Note: PublicKey is an alias for CompressedPublicKey, so no conversion needed
+        // Get current timestamp from block
+        let timestamp = self.block.get_timestamp() / 1000; // Convert ms to seconds
+
+        // Call the ReferralProvider implementation
+        self.inner
+            .storage
+            .bind_referrer(
+                user,
+                referrer,
+                self.inner.topoheight,
+                tx_hash.clone(),
+                timestamp,
+            )
+            .await
+    }
+
+    async fn distribute_referral_rewards(
+        &mut self,
+        from_user: &'a CompressedPublicKey,
+        asset: &'a Hash,
+        total_amount: u64,
+        ratios: &[u16],
+    ) -> Result<tos_common::referral::DistributionResult, BlockchainError> {
+        // Note: PublicKey is an alias for CompressedPublicKey, so no conversion needed
+        // Build ReferralRewardRatios from the slice
+        let reward_ratios = tos_common::referral::ReferralRewardRatios {
+            ratios: ratios.to_vec(),
+        };
+
+        // Call the ReferralProvider implementation
+        self.inner
+            .storage
+            .distribute_to_uplines(from_user, asset.clone(), total_amount, &reward_ratios)
+            .await
+    }
+
     async fn add_contract_events(
         &mut self,
         events: Vec<tos_common::contract::ContractEvent>,
