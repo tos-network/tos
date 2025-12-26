@@ -54,7 +54,8 @@ impl Transaction {
                     | TransactionType::DeployContract(_)
                     | TransactionType::Energy(_)
                     | TransactionType::AIMining(_)
-                    | TransactionType::BindReferrer(_) => true,
+                    | TransactionType::BindReferrer(_)
+                    | TransactionType::BatchReferralReward(_) => true,
                 }
             }
         }
@@ -288,6 +289,14 @@ impl Transaction {
             TransactionType::BindReferrer(_) => {
                 // BindReferrer validation is handled by the referral provider
             }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward validation
+                if !payload.validate() {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Invalid batch referral reward payload"
+                    )));
+                }
+            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
@@ -371,6 +380,13 @@ impl Transaction {
             | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward spends total_amount of the specified asset
+                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_total_amount())
+                    .ok_or(VerificationError::Overflow)?;
             }
         };
 
@@ -642,6 +658,14 @@ impl Transaction {
             TransactionType::BindReferrer(_) => {
                 // BindReferrer transactions are validated by the referral provider at execution time
             }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward validation - check payload is valid
+                if !payload.validate() {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Invalid batch referral reward payload"
+                    )));
+                }
+            }
         };
 
         let source_decompressed = self
@@ -796,6 +820,14 @@ impl Transaction {
                     );
                 }
             }
+            TransactionType::BatchReferralReward(payload) => {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "BatchReferralReward verification - levels: {}, total_amount: {}, fee: {}",
+                        payload.get_levels(), payload.get_total_amount(), self.fee
+                    );
+                }
+            }
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs
@@ -880,6 +912,13 @@ impl Transaction {
             | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward spends total_amount of the specified asset
+                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_total_amount())
+                    .ok_or(VerificationError::Overflow)?;
             }
         };
 
@@ -1093,6 +1132,13 @@ impl Transaction {
             | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward spends total_amount of the specified asset
+                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_total_amount())
+                    .ok_or(VerificationError::Overflow)?;
             }
         };
 
@@ -1402,6 +1448,17 @@ impl Transaction {
                     );
                 }
             }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward transactions are processed by the ReferralProvider in the daemon layer
+                // The reward distribution is handled there with upline lookups
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "BatchReferralReward transaction applied - levels: {}, total_amount: {}",
+                        payload.get_levels(),
+                        payload.get_total_amount()
+                    );
+                }
+            }
         }
 
         Ok(())
@@ -1515,6 +1572,13 @@ impl Transaction {
             | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward spends total_amount of the specified asset
+                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_total_amount())
+                    .ok_or(VerificationError::Overflow)?;
             }
         };
 

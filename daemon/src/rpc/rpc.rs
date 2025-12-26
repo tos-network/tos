@@ -2071,6 +2071,11 @@ async fn get_account_history<S: Storage>(
                         });
                     }
                 }
+                TransactionType::BatchReferralReward(_) => {
+                    // BatchReferralReward transactions are tracked by the referral system
+                    // History entries for individual upline rewards would require additional storage
+                    // For now, similar to AIMining, we don't add to account history
+                }
             }
         }
 
