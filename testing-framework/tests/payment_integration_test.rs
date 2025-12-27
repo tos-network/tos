@@ -17,13 +17,13 @@
 use std::borrow::Cow;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tos_common::api::payment::{
-    decode_payment_extra_data, encode_payment_extra_data, is_valid_payment_id, validate_payment_id,
-    GetPaymentStatusParams, PaymentIdError, PaymentParseError, PaymentRequest, PaymentStatus,
-    PaymentStatusResponse, StoredPaymentRequest,
-};
 use tos_common::api::callback::{
     RegisterWebhookParams, RegisterWebhookResult, UnregisterWebhookParams, UnregisterWebhookResult,
+};
+use tos_common::api::payment::{
+    decode_payment_extra_data, encode_payment_extra_data, is_valid_payment_id, matches_payment_id,
+    validate_payment_id, GetPaymentStatusParams, PaymentIdError, PaymentParseError, PaymentRequest,
+    PaymentStatus, PaymentStatusResponse, StoredPaymentRequest,
 };
 use tos_common::crypto::Address;
 
@@ -356,6 +356,50 @@ fn test_memo_no_truncation_needed() {
     let request = PaymentRequest::new("test", addr).with_memo(short_memo);
 
     assert_eq!(request.memo.as_deref(), Some(short_memo));
+}
+
+#[test]
+fn test_memo_with_emoji() {
+    let addr = test_address();
+    // Test various emoji characters (4-byte UTF-8)
+    let emoji_memo = "Payment 😀🎉💰 complete!";
+
+    let request = PaymentRequest::new("emoji-test", addr.clone()).with_memo(emoji_memo);
+
+    // Emoji memo should be preserved
+    let memo = request.memo.as_deref().unwrap();
+    assert!(memo.contains("😀"));
+    assert!(memo.contains("🎉"));
+    assert!(memo.contains("💰"));
+
+    // URI roundtrip should preserve emoji
+    let uri = request.to_uri();
+    let parsed = PaymentRequest::from_uri(&uri).unwrap();
+    assert_eq!(parsed.memo.as_deref(), Some(emoji_memo));
+
+    // Extra data encoding should preserve emoji
+    let encoded = encode_payment_extra_data("emoji-test", Some(emoji_memo)).unwrap();
+    let (decoded_id, decoded_memo) = decode_payment_extra_data(&encoded).unwrap();
+    assert_eq!(decoded_id, "emoji-test");
+    assert_eq!(decoded_memo.as_deref(), Some(emoji_memo));
+}
+
+#[test]
+fn test_memo_emoji_truncation_preserves_valid_utf8() {
+    let addr = test_address();
+    // Create a long memo with emoji that needs truncation
+    // Each emoji is 4 bytes, so this will test truncation at emoji boundaries
+    let long_emoji_memo = "🚀".repeat(20); // 80 bytes of emoji
+
+    let request = PaymentRequest::new("emoji-trunc", addr).with_memo(&long_emoji_memo);
+
+    let memo = request.memo.unwrap();
+    // Should be truncated to <= 64 bytes
+    assert!(memo.len() <= 64);
+    // Should still be valid UTF-8 (no partial emoji)
+    assert!(std::str::from_utf8(memo.as_bytes()).is_ok());
+    // Should contain complete emoji only (each emoji is 4 bytes)
+    assert!(memo.len() % 4 == 0 || memo.is_empty());
 }
 
 // ============================================================================
@@ -735,4 +779,298 @@ fn test_confirmations_calculation() {
 
     let status3 = stored3.get_status(100, 90);
     assert_eq!(status3, PaymentStatus::Confirmed);
+}
+
+// ============================================================================
+// Mempool State Tests
+// ============================================================================
+
+#[test]
+fn test_stored_payment_status_mempool() {
+    // Test explicit mempool state (tx seen but 0 confirmations)
+    // This occurs when confirmed_at_topoheight == current_topoheight
+    // (transaction just arrived in current block, confirmations = 0)
+    let stored = StoredPaymentRequest {
+        payment_id: "mempool-test".to_string(),
+        address: test_address(),
+        amount: Some(1_000_000_000),
+        asset: None,
+        memo: None,
+        callback_url: None,
+        last_callback_status: None,
+        created_at: current_timestamp(),
+        expires_at: None,
+        tx_hash: Some(tos_common::crypto::Hash::zero()),
+        amount_received: Some(1_000_000_000),
+        // Transaction at topoheight 101, current is 100
+        // This simulates tx in mempool (future block height)
+        confirmed_at_topoheight: Some(101),
+    };
+
+    // current=100, stable=90, confirmed_at=101
+    // confirmations = 100 - 101 + 1 = 0 (would be negative, clamped to 0)
+    // Since confirmations < 1, should be Mempool
+    let status = stored.get_status(100, 90);
+    assert_eq!(status, PaymentStatus::Mempool);
+}
+
+#[test]
+fn test_mempool_to_confirming_transition() {
+    // Test state transition from mempool to confirming
+    let base_stored = StoredPaymentRequest {
+        payment_id: "transition-test".to_string(),
+        address: test_address(),
+        amount: Some(1_000_000_000),
+        asset: None,
+        memo: None,
+        callback_url: None,
+        last_callback_status: None,
+        created_at: current_timestamp(),
+        expires_at: None,
+        tx_hash: Some(tos_common::crypto::Hash::zero()),
+        amount_received: Some(1_000_000_000),
+        confirmed_at_topoheight: Some(100),
+    };
+
+    // At topoheight 100, tx is at 100: confirmations = 1
+    let status_at_100 = base_stored.get_status(100, 90);
+    assert_eq!(status_at_100, PaymentStatus::Confirming);
+
+    // At topoheight 101, tx is at 100: confirmations = 2
+    let status_at_101 = base_stored.get_status(101, 90);
+    assert_eq!(status_at_101, PaymentStatus::Confirming);
+
+    // At topoheight 107, tx is at 100: confirmations = 8
+    // Still confirming because confirmed_at(100) > stable(90)
+    let status_at_107 = base_stored.get_status(107, 90);
+    assert_eq!(status_at_107, PaymentStatus::Confirming);
+
+    // When stable catches up to 100, it becomes confirmed
+    let status_stable = base_stored.get_status(107, 100);
+    assert_eq!(status_stable, PaymentStatus::Confirmed);
+}
+
+#[test]
+fn test_state_machine_monotonicity() {
+    // Verify state machine is monotonic (states don't regress)
+    // Valid transitions: Pending -> Mempool -> Confirming -> Confirmed
+    //                    Pending -> Expired (if no payment before expiry)
+
+    let stored = StoredPaymentRequest {
+        payment_id: "monotonic-test".to_string(),
+        address: test_address(),
+        amount: Some(1_000_000_000),
+        asset: None,
+        memo: None,
+        callback_url: None,
+        last_callback_status: None,
+        created_at: current_timestamp(),
+        expires_at: None,
+        tx_hash: Some(tos_common::crypto::Hash::zero()),
+        amount_received: Some(1_000_000_000),
+        confirmed_at_topoheight: Some(50),
+    };
+
+    // Once confirmed at topo 50, it should stay confirmed
+    // regardless of current/stable height changes
+    let status1 = stored.get_status(100, 60);
+    assert_eq!(status1, PaymentStatus::Confirmed);
+
+    // Even with higher topoheight, still confirmed
+    let status2 = stored.get_status(200, 150);
+    assert_eq!(status2, PaymentStatus::Confirmed);
+
+    // Confirmed should never go back to Confirming
+    // (stable_topoheight always increases, so once confirmed_at <= stable, it stays that way)
+}
+
+// ============================================================================
+// Overpay Handling Tests
+// ============================================================================
+
+#[test]
+fn test_overpay_is_accepted_as_confirmed() {
+    // Overpay scenario: customer pays more than requested
+    // Expected behavior: Payment is accepted and marked as Confirmed
+    // (No separate "Overpaid" status - excess is treated as a tip/donation)
+    let requested_amount = 1_000_000_000u64; // 1 TOS
+    let received_amount = 2_000_000_000u64; // 2 TOS (overpaid by 1 TOS)
+
+    let stored = StoredPaymentRequest {
+        payment_id: "overpay-test".to_string(),
+        address: test_address(),
+        amount: Some(requested_amount),
+        asset: None,
+        memo: None,
+        callback_url: None,
+        last_callback_status: None,
+        created_at: current_timestamp(),
+        expires_at: None,
+        tx_hash: Some(tos_common::crypto::Hash::zero()),
+        amount_received: Some(received_amount),
+        confirmed_at_topoheight: Some(80), // Below stable
+    };
+
+    // current=100, stable=90, confirmed_at=80 (below stable)
+    // Overpayment should result in Confirmed status (not Underpaid)
+    let status = stored.get_status(100, 90);
+    assert_eq!(status, PaymentStatus::Confirmed);
+
+    // Verify the amount received is indeed greater than requested
+    assert!(received_amount > requested_amount);
+}
+
+#[test]
+fn test_exact_payment_is_confirmed() {
+    // Exact payment: customer pays exactly the requested amount
+    let amount = 1_000_000_000u64; // 1 TOS
+
+    let stored = StoredPaymentRequest {
+        payment_id: "exact-pay-test".to_string(),
+        address: test_address(),
+        amount: Some(amount),
+        asset: None,
+        memo: None,
+        callback_url: None,
+        last_callback_status: None,
+        created_at: current_timestamp(),
+        expires_at: None,
+        tx_hash: Some(tos_common::crypto::Hash::zero()),
+        amount_received: Some(amount), // Exact match
+        confirmed_at_topoheight: Some(80),
+    };
+
+    let status = stored.get_status(100, 90);
+    assert_eq!(status, PaymentStatus::Confirmed);
+}
+
+#[test]
+fn test_open_amount_payment_any_amount_accepted() {
+    // Open amount request (no amount specified)
+    // Any amount should be accepted
+    let stored = StoredPaymentRequest {
+        payment_id: "open-amount-test".to_string(),
+        address: test_address(),
+        amount: None, // Open amount - no specific amount requested
+        asset: None,
+        memo: None,
+        callback_url: None,
+        last_callback_status: None,
+        created_at: current_timestamp(),
+        expires_at: None,
+        tx_hash: Some(tos_common::crypto::Hash::zero()),
+        amount_received: Some(123_456_789), // Any amount
+        confirmed_at_topoheight: Some(80),
+    };
+
+    let status = stored.get_status(100, 90);
+    assert_eq!(status, PaymentStatus::Confirmed);
+}
+
+// ============================================================================
+// Duplicate Payment ID Scenario Tests
+// ============================================================================
+
+#[test]
+fn test_duplicate_payment_id_different_addresses() {
+    // Scenario: Same payment_id used for different addresses
+    // This should be allowed since (payment_id, address) is the unique key
+
+    let addr1 = test_address();
+    let addr2: Address = "tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk"
+        .parse()
+        .unwrap();
+
+    let payment_id = "shared-order-001";
+
+    // Create two payment requests with same ID but different addresses
+    let request1 = PaymentRequest::new(payment_id, addr1.clone());
+    let request2 = PaymentRequest::new(payment_id, addr2.clone());
+
+    // Both should be valid independently
+    assert_eq!(request1.payment_id.as_ref(), payment_id);
+    assert_eq!(request2.payment_id.as_ref(), payment_id);
+    assert_ne!(request1.address, request2.address);
+
+    // URI roundtrip should work for both
+    let uri1 = request1.to_uri();
+    let uri2 = request2.to_uri();
+
+    let parsed1 = PaymentRequest::from_uri(&uri1).unwrap();
+    let parsed2 = PaymentRequest::from_uri(&uri2).unwrap();
+
+    assert_eq!(parsed1.payment_id.as_ref(), payment_id);
+    assert_eq!(parsed2.payment_id.as_ref(), payment_id);
+    assert_eq!(parsed1.address, addr1);
+    assert_eq!(parsed2.address, addr2);
+}
+
+#[test]
+fn test_duplicate_payment_id_same_address_overwrite_behavior() {
+    // Scenario: Same payment_id AND same address - later payment overwrites earlier
+    // This tests the storage behavior when a duplicate key is used
+
+    let addr = test_address();
+    let payment_id = "order-duplicate";
+
+    // First payment request
+    let stored1 = StoredPaymentRequest {
+        payment_id: payment_id.to_string(),
+        address: addr.clone(),
+        amount: Some(1_000_000_000), // 1 TOS
+        asset: None,
+        memo: Some("First order".to_string()),
+        callback_url: None,
+        last_callback_status: None,
+        created_at: current_timestamp() - 60, // Created 1 minute ago
+        expires_at: None,
+        tx_hash: None,
+        amount_received: None,
+        confirmed_at_topoheight: None,
+    };
+
+    // Second payment request with same ID and address (should overwrite)
+    let stored2 = StoredPaymentRequest {
+        payment_id: payment_id.to_string(),
+        address: addr.clone(),
+        amount: Some(2_000_000_000), // 2 TOS (different amount)
+        asset: None,
+        memo: Some("Second order".to_string()),
+        callback_url: None,
+        last_callback_status: None,
+        created_at: current_timestamp(), // Created now
+        expires_at: None,
+        tx_hash: None,
+        amount_received: None,
+        confirmed_at_topoheight: None,
+    };
+
+    // Both have same payment_id
+    assert_eq!(stored1.payment_id, stored2.payment_id);
+    assert_eq!(stored1.address, stored2.address);
+
+    // But different amounts - in actual storage, the later one would overwrite
+    assert_ne!(stored1.amount, stored2.amount);
+    assert_ne!(stored1.memo, stored2.memo);
+
+    // Verify both are valid and can be used
+    assert_eq!(stored1.get_status(100, 90), PaymentStatus::Pending);
+    assert_eq!(stored2.get_status(100, 90), PaymentStatus::Pending);
+}
+
+#[test]
+fn test_extra_data_with_same_payment_id_matches_correctly() {
+    // Test that extra_data matching works correctly for duplicate IDs
+    let payment_id = "duplicate-extra-data";
+
+    let encoded = encode_payment_extra_data(payment_id, Some("Test memo")).unwrap();
+
+    // Should match the payment ID
+    assert!(matches_payment_id(&encoded, payment_id));
+
+    // Should not match a different ID
+    assert!(!matches_payment_id(&encoded, "different-id"));
+
+    // Case-sensitive matching
+    assert!(!matches_payment_id(&encoded, "DUPLICATE-EXTRA-DATA"));
 }

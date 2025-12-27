@@ -29,9 +29,9 @@ use tokio::sync::RwLock;
 // For production, consider persisting to database for durability.
 // ============================================================================
 
+use crate::rpc::callback::{send_payment_callback, send_payment_expired_callback, CallbackService};
 use once_cell::sync::Lazy;
 use tos_common::api::payment::StoredPaymentRequest;
-use crate::rpc::callback::{send_payment_callback, send_payment_expired_callback, CallbackService};
 
 /// Maximum number of payment requests to store (prevents memory exhaustion)
 const MAX_PAYMENT_REQUESTS: usize = 10000;
@@ -3563,9 +3563,8 @@ async fn register_payment_webhook<S: Storage>(
         ));
     }
 
-    let secret = hex::decode(&params.secret_hex).map_err(|_| {
-        invalid_params_data("invalid_secret", "Webhook secret must be hex")
-    })?;
+    let secret = hex::decode(&params.secret_hex)
+        .map_err(|_| invalid_params_data("invalid_secret", "Webhook secret must be hex"))?;
 
     if secret.is_empty() {
         return Err(invalid_params_data(
@@ -3574,9 +3573,7 @@ async fn register_payment_webhook<S: Storage>(
         ));
     }
 
-    CALLBACK_SERVICE
-        .register_webhook(params.url, secret)
-        .await;
+    CALLBACK_SERVICE.register_webhook(params.url, secret).await;
 
     Ok(json!(RegisterWebhookResult { success: true }))
 }

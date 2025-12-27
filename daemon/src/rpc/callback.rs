@@ -312,7 +312,9 @@ mod tests {
         let secret_b = b"secret_b".to_vec();
 
         service.register_webhook(url.clone(), secret_a).await;
-        service.register_webhook(url.clone(), secret_b.clone()).await;
+        service
+            .register_webhook(url.clone(), secret_b.clone())
+            .await;
 
         let retrieved = service.get_webhook_secret(&url).await;
         assert_eq!(retrieved, Some(secret_b));

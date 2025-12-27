@@ -176,12 +176,7 @@ pub fn callback_idempotency_key(payload: &CallbackPayload) -> String {
     let amount = payload.amount.unwrap_or(0);
     let data = format!(
         "{}|{}|{}|{}|{}|{}",
-        event,
-        payload.payment_id,
-        tx_hash,
-        amount,
-        payload.confirmations,
-        payload.timestamp
+        event, payload.payment_id, tx_hash, amount, payload.confirmations, payload.timestamp
     );
     let digest = Sha256::digest(data.as_bytes());
     hex::encode(digest)
@@ -374,5 +369,149 @@ mod tests {
         assert!(!constant_time_compare(b"hello", b"world"));
         assert!(!constant_time_compare(b"hello", b"hell"));
         assert!(!constant_time_compare(b"hello", b"helloo"));
+    }
+
+    #[test]
+    fn test_idempotency_key_generation() {
+        let payload = CallbackPayload::payment_received(
+            "pr_abc123".to_string(),
+            Hash::zero(),
+            1_000_000_000,
+            1,
+        );
+
+        let key = callback_idempotency_key(&payload);
+
+        // Idempotency key should be 64 hex characters (SHA256 hash)
+        assert_eq!(key.len(), 64);
+        assert!(key.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_idempotency_key_deterministic() {
+        // Same payload should produce same idempotency key
+        let payload1 = CallbackPayload {
+            event: CallbackEventType::PaymentReceived,
+            payment_id: "pr_test123".to_string(),
+            tx_hash: Some(Hash::zero()),
+            amount: Some(500_000_000),
+            confirmations: 3,
+            timestamp: 1734567890,
+        };
+
+        let payload2 = CallbackPayload {
+            event: CallbackEventType::PaymentReceived,
+            payment_id: "pr_test123".to_string(),
+            tx_hash: Some(Hash::zero()),
+            amount: Some(500_000_000),
+            confirmations: 3,
+            timestamp: 1734567890,
+        };
+
+        let key1 = callback_idempotency_key(&payload1);
+        let key2 = callback_idempotency_key(&payload2);
+
+        // Same payload = same key (idempotent)
+        assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn test_idempotency_key_unique_per_event() {
+        let base_timestamp = 1734567890u64;
+
+        // Same payment but different events should have different keys
+        let received = CallbackPayload {
+            event: CallbackEventType::PaymentReceived,
+            payment_id: "pr_unique_test".to_string(),
+            tx_hash: Some(Hash::zero()),
+            amount: Some(1_000_000_000),
+            confirmations: 1,
+            timestamp: base_timestamp,
+        };
+
+        let confirmed = CallbackPayload {
+            event: CallbackEventType::PaymentConfirmed,
+            payment_id: "pr_unique_test".to_string(),
+            tx_hash: Some(Hash::zero()),
+            amount: Some(1_000_000_000),
+            confirmations: 8,
+            timestamp: base_timestamp + 60, // Different timestamp
+        };
+
+        let expired = CallbackPayload {
+            event: CallbackEventType::PaymentExpired,
+            payment_id: "pr_unique_test".to_string(),
+            tx_hash: None,
+            amount: None,
+            confirmations: 0,
+            timestamp: base_timestamp + 300,
+        };
+
+        let key_received = callback_idempotency_key(&received);
+        let key_confirmed = callback_idempotency_key(&confirmed);
+        let key_expired = callback_idempotency_key(&expired);
+
+        // All three should be different
+        assert_ne!(key_received, key_confirmed);
+        assert_ne!(key_received, key_expired);
+        assert_ne!(key_confirmed, key_expired);
+    }
+
+    #[test]
+    fn test_idempotency_key_different_payments() {
+        let timestamp = 1734567890u64;
+
+        let payment1 = CallbackPayload {
+            event: CallbackEventType::PaymentReceived,
+            payment_id: "order_001".to_string(),
+            tx_hash: Some(Hash::zero()),
+            amount: Some(1_000_000_000),
+            confirmations: 1,
+            timestamp,
+        };
+
+        let payment2 = CallbackPayload {
+            event: CallbackEventType::PaymentReceived,
+            payment_id: "order_002".to_string(), // Different payment ID
+            tx_hash: Some(Hash::zero()),
+            amount: Some(1_000_000_000),
+            confirmations: 1,
+            timestamp,
+        };
+
+        let key1 = callback_idempotency_key(&payment1);
+        let key2 = callback_idempotency_key(&payment2);
+
+        // Different payment IDs = different keys
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_idempotency_key_different_amounts() {
+        let timestamp = 1734567890u64;
+
+        let payment1 = CallbackPayload {
+            event: CallbackEventType::PaymentReceived,
+            payment_id: "order_amount_test".to_string(),
+            tx_hash: Some(Hash::zero()),
+            amount: Some(1_000_000_000), // 1 TOS
+            confirmations: 1,
+            timestamp,
+        };
+
+        let payment2 = CallbackPayload {
+            event: CallbackEventType::PaymentReceived,
+            payment_id: "order_amount_test".to_string(),
+            tx_hash: Some(Hash::zero()),
+            amount: Some(2_000_000_000), // 2 TOS - different amount
+            confirmations: 1,
+            timestamp,
+        };
+
+        let key1 = callback_idempotency_key(&payment1);
+        let key2 = callback_idempotency_key(&payment2);
+
+        // Different amounts = different keys
+        assert_ne!(key1, key2);
     }
 }
