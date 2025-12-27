@@ -15,9 +15,10 @@ use crate::{
     crypto::{Address, Hash, Signature},
     serializer::Serializer,
     transaction::{
-        extra_data::UnknownExtraDataFormat, multisig::MultiSig, BurnPayload, DeployContractPayload,
-        EnergyPayload, FeeType, InvokeContractPayload, MultiSigPayload, Reference, Transaction,
-        TransactionType, TransferPayload, TxVersion,
+        extra_data::UnknownExtraDataFormat, multisig::MultiSig, BatchReferralRewardPayload,
+        BindReferrerPayload, BurnPayload, DeployContractPayload, EnergyPayload, FeeType,
+        InvokeContractPayload, MultiSigPayload, Reference, Transaction, TransactionType,
+        TransferPayload, TxVersion,
     },
 };
 pub use data::*;
@@ -70,6 +71,8 @@ pub enum RPCTransactionType<'a> {
     DeployContract(Cow<'a, DeployContractPayload>),
     Energy(Cow<'a, EnergyPayload>),
     AIMining(Cow<'a, crate::ai_mining::AIMiningPayload>),
+    BindReferrer(Cow<'a, BindReferrerPayload>),
+    BatchReferralReward(Cow<'a, BatchReferralRewardPayload>),
 }
 
 impl<'a> RPCTransactionType<'a> {
@@ -97,6 +100,10 @@ impl<'a> RPCTransactionType<'a> {
             }
             TransactionType::Energy(payload) => Self::Energy(Cow::Borrowed(payload)),
             TransactionType::AIMining(payload) => Self::AIMining(Cow::Borrowed(payload)),
+            TransactionType::BindReferrer(payload) => Self::BindReferrer(Cow::Borrowed(payload)),
+            TransactionType::BatchReferralReward(payload) => {
+                Self::BatchReferralReward(Cow::Borrowed(payload))
+            }
         }
     }
 }
@@ -123,6 +130,12 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             RPCTransactionType::Energy(payload) => TransactionType::Energy(payload.into_owned()),
             RPCTransactionType::AIMining(payload) => {
                 TransactionType::AIMining(payload.into_owned())
+            }
+            RPCTransactionType::BindReferrer(payload) => {
+                TransactionType::BindReferrer(payload.into_owned())
+            }
+            RPCTransactionType::BatchReferralReward(payload) => {
+                TransactionType::BatchReferralReward(payload.into_owned())
             }
         }
     }

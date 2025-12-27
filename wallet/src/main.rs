@@ -873,6 +873,44 @@ async fn setup_wallet_command_manager(
         CommandHandler::Async(async_handler!(energy_info)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
+        "bind_referrer",
+        "Bind a referrer to your account (one-time, immutable)",
+        vec![Arg::new(
+            "referrer",
+            ArgType::String,
+            "Referrer's wallet address",
+        )],
+        CommandHandler::Async(async_handler!(bind_referrer)),
+    ))?;
+    command_manager.add_command(Command::new(
+        "referral_info",
+        "Show your referral information",
+        CommandHandler::Async(async_handler!(referral_info)),
+    ))?;
+    command_manager.add_command(Command::with_optional_arguments(
+        "get_uplines",
+        "Get upline chain (referrer's referrer's ...)",
+        vec![Arg::new(
+            "levels",
+            ArgType::Number,
+            "Number of upline levels to query (default: 10, max: 20)",
+        )],
+        CommandHandler::Async(async_handler!(get_uplines)),
+    ))?;
+    command_manager.add_command(Command::with_optional_arguments(
+        "get_direct_referrals",
+        "List users who have you as their referrer",
+        vec![
+            Arg::new("offset", ArgType::Number, "Pagination offset (default: 0)"),
+            Arg::new(
+                "limit",
+                ArgType::Number,
+                "Maximum results per page (default: 20, max: 100)",
+            ),
+        ],
+        CommandHandler::Async(async_handler!(get_direct_referrals)),
+    ))?;
+    command_manager.add_command(Command::with_required_arguments(
         "set_asset_name",
         "Set the name of an asset",
         vec![
@@ -2440,6 +2478,9 @@ async fn history(
                 AccountHistoryType::UnfreezeTos { amount } => {
                     format!("Unfreeze: {} TOS", format_tos(*amount))
                 }
+                AccountHistoryType::BindReferrer { referrer } => {
+                    format!("Bind referrer: {}", referrer)
+                }
             };
 
             manager.message(format!(
@@ -2546,6 +2587,21 @@ async fn transaction(
                 manager.message("Type: AIMining".to_string());
                 manager.message(format!("  Payload: {:?}", payload));
             }
+            TransactionType::BindReferrer(payload) => {
+                manager.message("Type: BindReferrer".to_string());
+                manager.message(format!(
+                    "  Referrer: {}",
+                    payload
+                        .get_referrer()
+                        .as_address(wallet.get_network().is_mainnet())
+                ));
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                manager.message("Type: BatchReferralReward".to_string());
+                manager.message(format!("  Asset: {}", payload.get_asset()));
+                manager.message(format!("  Total Amount: {}", payload.get_total_amount()));
+                manager.message(format!("  Levels: {}", payload.get_levels()));
+            }
         }
     }
 
@@ -2627,6 +2683,9 @@ async fn export_transactions_csv(
                 }
                 AccountHistoryType::UnfreezeTos { amount } => {
                     format!("UnfreezeTos,amount:{}", amount)
+                }
+                AccountHistoryType::BindReferrer { referrer } => {
+                    format!("BindReferrer,referrer:{}", referrer)
                 }
             };
 
@@ -4488,6 +4547,292 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
             Err(e) => {
                 manager.error(format!("Failed to get energy information: {}", e));
             }
+        }
+    }
+
+    Ok(())
+}
+
+/// Bind a referrer to the sender account (one-time, immutable)
+async fn bind_referrer(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    manager.validate_batch_params("bind_referrer", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Get referrer address from arguments
+    let referrer_str = if args.has_argument("referrer") {
+        args.get_value("referrer")?.to_string_value()?
+    } else {
+        return Err(CommandError::MissingArgument("referrer".to_string()));
+    };
+
+    // Parse the referrer address
+    let referrer_address: tos_common::crypto::Address = referrer_str
+        .parse()
+        .map_err(|e| CommandError::InvalidArgument(format!("Invalid referrer address: {}", e)))?;
+
+    // Validate network matches
+    if referrer_address.is_mainnet() != wallet.get_network().is_mainnet() {
+        return Err(CommandError::InvalidArgument(
+            "Referrer address network does not match wallet network".to_string(),
+        ));
+    }
+
+    // Cannot set self as referrer
+    if referrer_address == wallet.get_address() {
+        return Err(CommandError::InvalidArgument(
+            "Cannot set yourself as referrer".to_string(),
+        ));
+    }
+
+    manager.message(format!("Binding referrer: {}", referrer_address));
+
+    // Create BindReferrer payload
+    let payload = tos_common::transaction::BindReferrerPayload::new(
+        referrer_address.get_public_key().clone(),
+        None, // No extra data for now
+    );
+
+    let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::BindReferrer(payload);
+    let fee = tos_common::transaction::builder::FeeBuilder::default();
+
+    manager.message("Building transaction...");
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    let hash = tx.hash();
+    manager.message(format!("Bind referrer transaction created: {}", hash));
+    manager.message(format!("Referrer: {}", referrer_address));
+    manager.message("Note: This is a one-time operation. Once bound, it cannot be changed.");
+
+    // Broadcast the transaction
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
+/// Show referral information for current wallet
+async fn referral_info(
+    manager: &CommandManager,
+    _args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let network_handler = wallet.get_network_handler().lock().await;
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+
+    let daemon_api = handler.get_api();
+    let address = wallet.get_address();
+
+    manager.message(format!("Referral Information for {}:", address));
+    manager.message("");
+
+    // Check if user has a referrer
+    match daemon_api.has_referrer(&address).await {
+        Ok(has_referrer) => {
+            if has_referrer {
+                // Get referrer details
+                match daemon_api.get_referrer(&address).await {
+                    Ok(Some(referrer)) => {
+                        manager.message(format!("  Referrer: {}", referrer));
+                    }
+                    Ok(None) => {
+                        manager.message("  Referrer: None");
+                    }
+                    Err(e) => {
+                        manager.error(format!("  Failed to get referrer: {}", e));
+                    }
+                }
+
+                // Get referral record for more details
+                match daemon_api.get_referral_record(&address).await {
+                    Ok(record) => {
+                        manager.message(format!(
+                            "  Bound at topoheight: {}",
+                            record.bound_at_topoheight
+                        ));
+                        manager.message(format!("  Bound tx: {}", record.bound_tx_hash));
+                        manager.message(format!(
+                            "  Direct referrals count: {}",
+                            record.direct_referrals_count
+                        ));
+                        manager.message(format!("  Team size: {}", record.team_size));
+                    }
+                    Err(e) => {
+                        manager.error(format!("  Failed to get referral record: {}", e));
+                    }
+                }
+            } else {
+                manager.message("  Referrer: Not bound");
+                manager.message("  Use 'bind_referrer <address>' to bind a referrer.");
+            }
+        }
+        Err(e) => {
+            manager.error(format!("Failed to check referrer status: {}", e));
+        }
+    }
+
+    // Get referral level
+    match daemon_api.get_referral_level(&address).await {
+        Ok(level) => {
+            manager.message(format!("  Referral level: {}", level));
+        }
+        Err(_) => {
+            // Silently ignore - may not have a referrer
+        }
+    }
+
+    // Get team size
+    match daemon_api.get_team_size(&address, true).await {
+        Ok(result) => {
+            manager.message(format!(
+                "  Team size: {} (from cache: {})",
+                result.team_size, result.from_cache
+            ));
+        }
+        Err(_) => {
+            // Silently ignore
+        }
+    }
+
+    // Get direct referrals count
+    match daemon_api.get_direct_referrals(&address, 0, 1).await {
+        Ok(result) => {
+            manager.message(format!("  Direct referrals: {}", result.total_count));
+        }
+        Err(_) => {
+            // Silently ignore
+        }
+    }
+
+    Ok(())
+}
+
+/// Get upline chain for current wallet
+async fn get_uplines(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Get levels from arguments (default 10)
+    let levels = if args.has_argument("levels") {
+        let n = args.get_value("levels")?.to_number()?;
+        if n > 20 {
+            return Err(CommandError::InvalidArgument(
+                "Maximum levels is 20".to_string(),
+            ));
+        }
+        n as u8
+    } else {
+        10
+    };
+
+    let network_handler = wallet.get_network_handler().lock().await;
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+
+    let daemon_api = handler.get_api();
+    let address = wallet.get_address();
+
+    match daemon_api.get_uplines(&address, levels).await {
+        Ok(result) => {
+            if result.uplines.is_empty() {
+                manager.message("No uplines found. You may not have bound a referrer yet.");
+            } else {
+                manager.message(format!("Upline chain ({} levels):", result.levels_returned));
+                for (i, upline) in result.uplines.iter().enumerate() {
+                    manager.message(format!("  Level {}: {}", i + 1, upline));
+                }
+            }
+        }
+        Err(e) => {
+            manager.error(format!("Failed to get uplines: {}", e));
+        }
+    }
+
+    Ok(())
+}
+
+/// Get direct referrals for current wallet
+async fn get_direct_referrals(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Get pagination parameters
+    let offset = if args.has_argument("offset") {
+        args.get_value("offset")?.to_number()? as u32
+    } else {
+        0
+    };
+
+    let limit = if args.has_argument("limit") {
+        let n = args.get_value("limit")?.to_number()?;
+        if n > 100 {
+            return Err(CommandError::InvalidArgument(
+                "Maximum limit is 100".to_string(),
+            ));
+        }
+        n as u32
+    } else {
+        20
+    };
+
+    let network_handler = wallet.get_network_handler().lock().await;
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+
+    let daemon_api = handler.get_api();
+    let address = wallet.get_address();
+
+    match daemon_api
+        .get_direct_referrals(&address, offset, limit)
+        .await
+    {
+        Ok(result) => {
+            manager.message(format!(
+                "Direct referrals: {} total (showing {}-{})",
+                result.total_count,
+                offset + 1,
+                offset + result.referrals.len() as u32
+            ));
+
+            if result.referrals.is_empty() {
+                manager.message("  No direct referrals found.");
+            } else {
+                for (i, referral) in result.referrals.iter().enumerate() {
+                    manager.message(format!("  {}. {}", offset + i as u32 + 1, referral));
+                }
+            }
+
+            if result.has_more {
+                manager.message(format!(
+                    "\nMore results available. Use 'get_direct_referrals {} {}' to see next page.",
+                    offset + limit,
+                    limit
+                ));
+            }
+        }
+        Err(e) => {
+            manager.error(format!("Failed to get direct referrals: {}", e));
         }
     }
 

@@ -17,6 +17,7 @@ mod multisig;
 mod network;
 mod nonce;
 mod pruned_topoheight;
+mod referral;
 mod state;
 mod tips;
 mod transaction;

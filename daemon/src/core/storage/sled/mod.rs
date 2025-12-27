@@ -1222,3 +1222,171 @@ impl crate::core::storage::AIMiningProvider for SledStorage {
         Ok(state)
     }
 }
+
+// ReferralProvider implementation for SledStorage
+// Note: SledStorage is deprecated in favor of RocksDB. This is a stub implementation.
+#[async_trait]
+impl crate::core::storage::ReferralProvider for SledStorage {
+    async fn has_referrer(&self, _user: &PublicKey) -> Result<bool, BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(false)
+    }
+
+    async fn get_referrer(&self, _user: &PublicKey) -> Result<Option<PublicKey>, BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(None)
+    }
+
+    async fn bind_referrer(
+        &mut self,
+        _user: &PublicKey,
+        _referrer: &PublicKey,
+        _topoheight: TopoHeight,
+        _tx_hash: Hash,
+        _timestamp: u64,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn get_referral_record(
+        &self,
+        _user: &PublicKey,
+    ) -> Result<Option<tos_common::referral::ReferralRecord>, BlockchainError> {
+        Ok(None)
+    }
+
+    async fn get_uplines(
+        &self,
+        _user: &PublicKey,
+        _levels: u8,
+    ) -> Result<tos_common::referral::UplineResult, BlockchainError> {
+        Ok(tos_common::referral::UplineResult::new(vec![]))
+    }
+
+    async fn get_level(&self, _user: &PublicKey) -> Result<u8, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn is_downline(
+        &self,
+        _ancestor: &PublicKey,
+        _descendant: &PublicKey,
+        _max_depth: u8,
+    ) -> Result<bool, BlockchainError> {
+        Ok(false)
+    }
+
+    async fn get_direct_referrals(
+        &self,
+        _user: &PublicKey,
+        offset: u32,
+        _limit: u32,
+    ) -> Result<tos_common::referral::DirectReferralsResult, BlockchainError> {
+        Ok(tos_common::referral::DirectReferralsResult::new(
+            vec![],
+            0,
+            offset,
+        ))
+    }
+
+    async fn get_direct_referrals_count(&self, _user: &PublicKey) -> Result<u32, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn get_team_size(
+        &self,
+        _user: &PublicKey,
+        _use_cache: bool,
+    ) -> Result<u64, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn update_team_size_cache(
+        &mut self,
+        _user: &PublicKey,
+        _size: u64,
+    ) -> Result<(), BlockchainError> {
+        Ok(())
+    }
+
+    async fn distribute_to_uplines(
+        &mut self,
+        _from_user: &PublicKey,
+        _asset: Hash,
+        _total_amount: u64,
+        _ratios: &tos_common::referral::ReferralRewardRatios,
+    ) -> Result<tos_common::referral::DistributionResult, BlockchainError> {
+        Ok(tos_common::referral::DistributionResult::new(vec![]))
+    }
+
+    async fn delete_referral_record(&mut self, _user: &PublicKey) -> Result<(), BlockchainError> {
+        Ok(())
+    }
+
+    async fn add_to_direct_referrals(
+        &mut self,
+        _referrer: &PublicKey,
+        _user: &PublicKey,
+    ) -> Result<(), BlockchainError> {
+        Ok(())
+    }
+
+    async fn remove_from_direct_referrals(
+        &mut self,
+        _referrer: &PublicKey,
+        _user: &PublicKey,
+    ) -> Result<(), BlockchainError> {
+        Ok(())
+    }
+
+    // ===== Team Volume Operations (not supported in SledStorage) =====
+
+    async fn add_team_volume(
+        &mut self,
+        _user: &PublicKey,
+        _asset: &Hash,
+        _amount: u64,
+        _propagate_levels: u8,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(())
+    }
+
+    async fn get_team_volume(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(0)
+    }
+
+    async fn get_direct_volume(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(0)
+    }
+
+    async fn get_zone_volumes(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+        _limit: u32,
+    ) -> Result<tos_common::referral::ZoneVolumesResult, BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(tos_common::referral::ZoneVolumesResult::new(vec![], 0))
+    }
+
+    async fn get_team_volume_record(
+        &self,
+        _user: &PublicKey,
+        _asset: &Hash,
+    ) -> Result<Option<tos_common::referral::TeamVolumeRecord>, BlockchainError> {
+        // SledStorage does not support referral system
+        Ok(None)
+    }
+}

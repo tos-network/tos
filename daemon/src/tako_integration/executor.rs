@@ -36,8 +36,9 @@ use tos_tbpf::{
 
 use super::{
     SVMFeatureSet, TakoExecutionError, TosAccountAdapter, TosContractLoaderAdapter,
-    TosStorageAdapter,
+    TosReferralAdapter, TosStorageAdapter,
 };
+use crate::core::storage::ReferralProvider;
 
 /// Default compute budget for contract execution (200,000 compute units)
 ///
@@ -199,6 +200,53 @@ impl TakoExecutor {
         )
     }
 
+    /// Execute a TOS Kernel(TAKO) contract with referral system access
+    ///
+    /// This method is similar to `execute()` but provides access to the native
+    /// referral system via syscalls. Use this when executing contracts that need
+    /// to query referral relationships, team sizes, or upline information.
+    ///
+    /// # Referral Syscalls Enabled
+    ///
+    /// - `tos_has_referrer` - Check if user has referrer (500 CU)
+    /// - `tos_get_referrer` - Get user's referrer address (500 CU)
+    /// - `tos_get_uplines` - Get N levels of uplines (500 + 200*N CU)
+    /// - `tos_get_direct_referrals_count` - Count of direct referrals (500 CU)
+    /// - `tos_get_team_size` - Team size from cache (500 CU)
+    /// - `tos_get_level` - User's level in referral tree (500 CU)
+    /// - `tos_is_downline` - Check downline relationship (500 + 100*depth CU)
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_with_referral(
+        bytecode: &[u8],
+        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        topoheight: TopoHeight,
+        contract_hash: &Hash,
+        block_hash: &Hash,
+        block_height: u64,
+        block_timestamp: u64,
+        tx_hash: &Hash,
+        tx_sender: &Hash,
+        input_data: &[u8],
+        compute_budget: Option<u64>,
+        referral_provider: &mut (dyn ReferralProvider + Send + Sync),
+    ) -> Result<ExecutionResult, TakoExecutionError> {
+        Self::execute_with_features_and_referral(
+            bytecode,
+            provider,
+            topoheight,
+            contract_hash,
+            block_hash,
+            block_height,
+            block_timestamp,
+            tx_hash,
+            tx_sender,
+            input_data,
+            compute_budget,
+            &SVMFeatureSet::production(),
+            Some(referral_provider),
+        )
+    }
+
     /// Execute a TOS Kernel(TAKO) contract with custom feature set
     ///
     /// This method allows specifying which TBPF versions are enabled,
@@ -272,6 +320,56 @@ impl TakoExecutor {
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
     ) -> Result<ExecutionResult, TakoExecutionError> {
+        // Execute without referral provider (backward compatibility)
+        Self::execute_with_features_and_referral(
+            bytecode,
+            provider,
+            topoheight,
+            contract_hash,
+            block_hash,
+            block_height,
+            block_timestamp,
+            tx_hash,
+            tx_sender,
+            input_data,
+            compute_budget,
+            feature_set,
+            None,
+        )
+    }
+
+    /// Execute a TOS Kernel(TAKO) contract with custom feature set and referral provider
+    ///
+    /// This method allows specifying which TBPF versions are enabled and provides
+    /// access to the native referral system via syscalls.
+    ///
+    /// # Referral System Access
+    ///
+    /// When `referral_provider` is provided, contracts can access the native referral
+    /// system via these syscalls:
+    /// - `tos_has_referrer` - Check if user has referrer
+    /// - `tos_get_referrer` - Get user's referrer address
+    /// - `tos_get_uplines` - Get N levels of uplines
+    /// - `tos_get_direct_referrals_count` - Count of direct referrals
+    /// - `tos_get_team_size` - Team size (cached)
+    /// - `tos_get_level` - User's level in referral tree
+    /// - `tos_is_downline` - Check if user is in another's downline
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_with_features_and_referral(
+        bytecode: &[u8],
+        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        topoheight: TopoHeight,
+        contract_hash: &Hash,
+        block_hash: &Hash,
+        block_height: u64,
+        block_timestamp: u64,
+        tx_hash: &Hash,
+        tx_sender: &Hash,  // Using Hash type for sender (32 bytes)
+        input_data: &[u8], // Contract input parameters (entry point, user data)
+        compute_budget: Option<u64>,
+        feature_set: &SVMFeatureSet,
+        referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
+    ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
 
         if log::log_enabled!(log::Level::Info) {
@@ -311,6 +409,11 @@ impl TakoExecutor {
         let mut storage = TosStorageAdapter::new(provider, contract_hash, &mut cache, topoheight);
         let mut accounts = TosAccountAdapter::new(provider, topoheight);
         let loader_adapter = TosContractLoaderAdapter::new(provider, topoheight);
+
+        // 3a. Create referral adapter (if provider is available)
+        // Created before InvokeContext to ensure proper lifetime (adapter must outlive InvokeContext)
+        let mut referral_adapter =
+            referral_provider.map(|p| TosReferralAdapter::new(p, topoheight));
 
         // 4. Create TBPF loader with syscalls (needed for InvokeContext creation)
         // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml
@@ -381,6 +484,15 @@ impl TakoExecutor {
             block_timestamp,
             tx_hash.as_bytes(),
         ));
+
+        // 7a. Wire referral provider (if available)
+        // Enables contracts to access native referral system via tos_get_uplines, etc.
+        if let Some(ref mut adapter) = referral_adapter {
+            invoke_context.set_referral_provider(adapter);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Referral provider wired to InvokeContext");
+            }
+        }
 
         // Account for entry contract bytecode in loaded data size tracking
         // This is done AFTER creating InvokeContext (post-load accounting pattern)

@@ -1,6 +1,6 @@
 [package]
 name = "tos_common"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 authors = ["TOS Network Team <info@tos.network>"]
 license = "BSD-3-Clause"
@@ -14,7 +14,7 @@ build = "build.rs"
 [dependencies]
 tos-hash = { git = "https://github.com/tos-network/tos-hash", rev = "b661e5a" }
 # TOS Kernel - Simplified re-export crate in TAKO
-tos-kernel = { git = "https://github.com/tos-network/tako", rev = "7c011af" }
+tos-kernel = { git = "https://github.com/tos-network/tako", rev = "1379a04" }
 # TOS Crypto - Extracted cryptographic primitives to avoid circular dependencies
 # Pinned to specific rev for reproducible builds
 tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "e487d8d" }

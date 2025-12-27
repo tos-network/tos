@@ -477,6 +477,9 @@ pub enum AccountHistoryType {
     UnfreezeTos {
         amount: u64,
     },
+    BindReferrer {
+        referrer: Address,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1704,6 +1707,142 @@ pub struct RegisteredExecution {
     pub execution_hash: Hash,
     /// Topoheight at which the execution is scheduled
     pub execution_topoheight: TopoHeight,
+}
+
+// ============================================================================
+// Referral System RPC Types
+// ============================================================================
+
+/// Parameters for has_referrer RPC method
+#[derive(Serialize, Deserialize)]
+pub struct HasReferrerParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of has_referrer RPC method
+#[derive(Serialize, Deserialize)]
+pub struct HasReferrerResult {
+    pub has_referrer: bool,
+}
+
+/// Parameters for get_referrer RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferrerParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of get_referrer RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferrerResult {
+    /// The referrer's address (None if no referrer)
+    pub referrer: Option<Address>,
+}
+
+/// Parameters for get_uplines RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetUplinesParams<'a> {
+    pub address: Cow<'a, Address>,
+    /// Number of upline levels to retrieve (max 20)
+    #[serde(default = "default_upline_levels")]
+    pub levels: u8,
+}
+
+fn default_upline_levels() -> u8 {
+    10
+}
+
+/// Result of get_uplines RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetUplinesResult {
+    /// List of upline addresses (ordered from immediate referrer to higher levels)
+    pub uplines: Vec<Address>,
+    /// Number of levels actually returned
+    pub levels_returned: u8,
+}
+
+/// Parameters for get_direct_referrals RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetDirectReferralsParams<'a> {
+    pub address: Cow<'a, Address>,
+    /// Offset for pagination
+    #[serde(default)]
+    pub offset: u32,
+    /// Maximum number of referrals to return (default 100, max 1000)
+    #[serde(default = "default_direct_referrals_limit")]
+    pub limit: u32,
+}
+
+fn default_direct_referrals_limit() -> u32 {
+    100
+}
+
+/// Result of get_direct_referrals RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetDirectReferralsResult {
+    /// List of direct referral addresses
+    pub referrals: Vec<Address>,
+    /// Total count of direct referrals
+    pub total_count: u32,
+    /// Current offset
+    pub offset: u32,
+    /// Whether there are more results
+    pub has_more: bool,
+}
+
+/// Parameters for get_referral_record RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferralRecordParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of get_referral_record RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferralRecordResult {
+    /// User's address
+    pub user: Address,
+    /// Referrer's address (None if no referrer)
+    pub referrer: Option<Address>,
+    /// Block topoheight when referrer was bound
+    pub bound_at_topoheight: TopoHeight,
+    /// Transaction hash of the binding transaction
+    pub bound_tx_hash: Hash,
+    /// Timestamp when the binding occurred
+    pub bound_timestamp: u64,
+    /// Number of direct referrals
+    pub direct_referrals_count: u32,
+    /// Cached team size
+    pub team_size: u64,
+}
+
+/// Parameters for get_team_size RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetTeamSizeParams<'a> {
+    pub address: Cow<'a, Address>,
+    /// Use cached value (faster) or calculate real-time (slower but accurate)
+    #[serde(default = "default_true_value")]
+    pub use_cache: bool,
+}
+
+/// Result of get_team_size RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetTeamSizeResult {
+    /// Total team size (all descendants in the referral tree)
+    pub team_size: u64,
+    /// Whether the value is from cache
+    pub from_cache: bool,
+}
+
+/// Parameters for get_referral_level RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferralLevelParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of get_referral_level RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferralLevelResult {
+    /// Level in the referral tree (0 = root, 1 = has referrer, etc.)
+    pub level: u8,
 }
 
 // ============================================================================
