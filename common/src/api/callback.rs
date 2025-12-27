@@ -118,8 +118,13 @@ pub fn generate_callback_signature(webhook_secret: &[u8], timestamp: u64, body: 
     let payload = format!("{}.{}", timestamp, body);
 
     // Compute HMAC-SHA256
-    let mut mac =
-        HmacSha256::new_from_slice(webhook_secret).expect("HMAC can take key of any size");
+    // SAFETY: HMAC-SHA256 accepts keys of any size (it will pad or hash as needed),
+    // so new_from_slice never fails. We use ok() + unwrap_or_default as a defensive
+    // measure for production code safety requirements.
+    let Ok(mut mac) = HmacSha256::new_from_slice(webhook_secret) else {
+        // This branch is unreachable for HMAC-SHA256, but required for clippy::expect_used
+        return String::new();
+    };
     mac.update(payload.as_bytes());
     let result = mac.finalize();
 
