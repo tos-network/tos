@@ -46,11 +46,12 @@ use std::{
 use tos_common::{
     api::{
         daemon::{
-            BlockOrderedEvent, BlockOrphanedEvent, BlockType, ContractEvent, ContractTransferEvent,
-            InvokeContractEvent, MempoolTransactionSummary, NewAssetEvent, NewContractEvent,
-            NotifyEvent, StableHeightChangedEvent, StableTopoHeightChangedEvent,
+            AddressPaymentEvent, BlockOrderedEvent, BlockOrphanedEvent, BlockType, ContractEvent,
+            ContractTransferEvent, InvokeContractEvent, MempoolTransactionSummary, NewAssetEvent,
+            NewContractEvent, NotifyEvent, StableHeightChangedEvent, StableTopoHeightChangedEvent,
             TransactionExecutedEvent, TransactionResponse,
         },
+        payment::decode_payment_extra_data,
         RPCContractOutput, RPCTransaction,
     },
     asset::{AssetData, VersionedAssetData},
@@ -3849,6 +3850,44 @@ impl<S: Storage> Blockchain<S> {
                                         .entry(NotifyEvent::DeployContract)
                                         .or_insert_with(Vec::new)
                                         .push(value);
+                                }
+                            }
+                            TransactionType::Transfers(transfers) => {
+                                // Emit WatchAddressPayments events for each transfer
+                                // This is used for QR code payment monitoring (TIP-QR-PAYMENT)
+                                let is_mainnet = self.network.is_mainnet();
+                                for transfer in transfers {
+                                    let dest_addr =
+                                        transfer.get_destination().as_address(is_mainnet);
+                                    let event = NotifyEvent::WatchAddressPayments {
+                                        address: dest_addr.clone(),
+                                    };
+
+                                    if should_track_events.contains(&event) {
+                                        // Extract payment_id and memo from extra_data if present
+                                        let (payment_id, memo) = transfer
+                                            .get_extra_data()
+                                            .as_ref()
+                                            .and_then(|data| decode_payment_extra_data(&data.0))
+                                            .map(|(id, m)| {
+                                                (Some(Cow::Owned(id)), m.map(Cow::Owned))
+                                            })
+                                            .unwrap_or((None, None));
+
+                                        let value = json!(AddressPaymentEvent {
+                                            address: dest_addr,
+                                            tx_hash: Cow::Borrowed(&tx_hash),
+                                            amount: transfer.get_amount(),
+                                            asset: Cow::Borrowed(transfer.get_asset()),
+                                            block_hash: Cow::Borrowed(&hash),
+                                            topoheight: highest_topo,
+                                            payment_id,
+                                            memo,
+                                            confirmations: 1,
+                                        });
+
+                                        events.entry(event).or_insert_with(Vec::new).push(value);
+                                    }
                                 }
                             }
                             _ => {}

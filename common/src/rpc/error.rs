@@ -29,6 +29,8 @@ pub enum InternalRpcError {
     InvalidParams(&'static str),
     #[error("Invalid params: {:#}", _0)]
     InvalidParamsAny(AnyError),
+    #[error("Invalid params: {}", message)]
+    InvalidParamsData { message: String, data: Value },
     #[error("Expected parameters for this method but was not present")]
     ExpectedParams,
     #[error("Unexpected parameters for this method")]
@@ -73,6 +75,7 @@ impl InternalRpcError {
             Self::InvalidJSONParams(_)
             | Self::InvalidParams(_)
             | Self::InvalidParamsAny(_)
+            | Self::InvalidParamsData { .. }
             | Self::UnexpectedParams
             | Self::ExpectedParams => -32602,
             // Internal errors
@@ -88,6 +91,13 @@ impl InternalRpcError {
             Self::EventAlreadySubscribed => -2,
             // Custom errors
             Self::Custom(code, _) | Self::CustomStr(code, _) | Self::CustomAny(code, _) => *code,
+        }
+    }
+
+    pub fn get_data(&self) -> Option<&Value> {
+        match self {
+            Self::InvalidParamsData { data, .. } => Some(data),
+            _ => None,
         }
     }
 }
@@ -114,14 +124,22 @@ impl RpcResponseError {
     }
 
     pub fn to_json(&self) -> Value {
-        json!({
+        let mut error = json!({
             "jsonrpc": JSON_RPC_VERSION,
             "id": self.get_id(),
             "error": {
                 "code": self.error.get_code(),
                 "message": format!("{:#}", self.error)
             }
-        })
+        });
+
+        if let Some(data) = self.error.get_data() {
+            if let Some(obj) = error.get_mut("error") {
+                obj["data"] = data.clone();
+            }
+        }
+
+        error
     }
 }
 

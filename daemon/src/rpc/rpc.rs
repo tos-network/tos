@@ -19,6 +19,165 @@ use human_bytes::human_bytes;
 use log::{debug, info, trace};
 use serde_json::{json, Value};
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use tokio::sync::RwLock;
+
+// ============================================================================
+// Payment Request Storage (In-Memory)
+// ============================================================================
+// Payment requests are stored in-memory for quick access.
+// They are automatically cleaned up when they expire.
+// For production, consider persisting to database for durability.
+// ============================================================================
+
+use crate::rpc::callback::{send_payment_callback, send_payment_expired_callback, CallbackService};
+use once_cell::sync::Lazy;
+use tos_common::api::payment::StoredPaymentRequest;
+
+/// Maximum number of payment requests to store (prevents memory exhaustion)
+const MAX_PAYMENT_REQUESTS: usize = 10000;
+
+/// In-memory payment request storage
+/// Key: payment_id, Value: StoredPaymentRequest
+static PAYMENT_REQUESTS: Lazy<RwLock<HashMap<String, StoredPaymentRequest>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+static CALLBACK_SERVICE: Lazy<Arc<CallbackService>> =
+    Lazy::new(|| Arc::new(CallbackService::new()));
+
+/// Store a new payment request
+async fn store_payment_request(request: StoredPaymentRequest) -> Result<(), InternalRpcError> {
+    let mut store = PAYMENT_REQUESTS.write().await;
+
+    // Check capacity limit
+    if store.len() >= MAX_PAYMENT_REQUESTS {
+        // Clean up expired entries first
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        store.retain(|_, req| {
+            if let Some(exp) = req.expires_at {
+                now <= exp || req.is_paid()
+            } else {
+                true
+            }
+        });
+
+        // If still over limit, reject
+        if store.len() >= MAX_PAYMENT_REQUESTS {
+            return Err(InternalRpcError::InvalidRequestStr(
+                "Payment request storage is full, please try again later",
+            ));
+        }
+    }
+
+    store.insert(request.payment_id.clone(), request);
+    Ok(())
+}
+
+/// Get a payment request by ID
+async fn get_payment_request(payment_id: &str) -> Option<StoredPaymentRequest> {
+    let store = PAYMENT_REQUESTS.read().await;
+    store.get(payment_id).cloned()
+}
+
+/// Update a payment request with transaction info
+/// Note: Currently unused as get_payment_status uses blockchain scanning,
+/// but kept for potential future caching/optimization
+#[allow(dead_code)]
+async fn update_payment_with_tx(
+    payment_id: &str,
+    tx_hash: tos_common::crypto::Hash,
+    amount_received: u64,
+    confirmed_at_topoheight: u64,
+) {
+    let mut store = PAYMENT_REQUESTS.write().await;
+    if let Some(req) = store.get_mut(payment_id) {
+        req.tx_hash = Some(tx_hash);
+        req.amount_received = Some(amount_received);
+        req.confirmed_at_topoheight = Some(confirmed_at_topoheight);
+    }
+}
+
+async fn update_payment_callback_status(payment_id: &str, status: PaymentStatus) {
+    let mut store = PAYMENT_REQUESTS.write().await;
+    if let Some(req) = store.get_mut(payment_id) {
+        req.last_callback_status = Some(status);
+    }
+}
+
+async fn maybe_send_callback(
+    payment_id: &str,
+    status: PaymentStatus,
+    tx_hash: Option<Hash>,
+    amount: Option<u64>,
+    confirmations: u64,
+) {
+    let stored = match get_payment_request(payment_id).await {
+        Some(req) => req,
+        None => return,
+    };
+
+    let callback_url = match stored.callback_url {
+        Some(url) => url,
+        None => return,
+    };
+
+    let secret = match CALLBACK_SERVICE.get_webhook_secret(&callback_url).await {
+        Some(secret) => secret,
+        None => return,
+    };
+
+    match status {
+        PaymentStatus::Confirmed => {
+            if stored.last_callback_status == Some(PaymentStatus::Confirmed) {
+                return;
+            }
+            if let (Some(tx_hash), Some(amount)) = (tx_hash, amount) {
+                send_payment_callback(
+                    Arc::clone(&CALLBACK_SERVICE),
+                    callback_url,
+                    secret,
+                    payment_id.to_string(),
+                    tx_hash,
+                    amount,
+                    confirmations,
+                );
+                update_payment_callback_status(payment_id, PaymentStatus::Confirmed).await;
+            }
+        }
+        PaymentStatus::Expired => {
+            if stored.last_callback_status == Some(PaymentStatus::Expired) {
+                return;
+            }
+            send_payment_expired_callback(
+                Arc::clone(&CALLBACK_SERVICE),
+                callback_url,
+                secret,
+                payment_id.to_string(),
+            );
+            update_payment_callback_status(payment_id, PaymentStatus::Expired).await;
+        }
+        PaymentStatus::Mempool | PaymentStatus::Confirming | PaymentStatus::Underpaid => {
+            if stored.last_callback_status.is_some() {
+                return;
+            }
+            if let (Some(tx_hash), Some(amount)) = (tx_hash, amount) {
+                send_payment_callback(
+                    Arc::clone(&CALLBACK_SERVICE),
+                    callback_url,
+                    secret,
+                    payment_id.to_string(),
+                    tx_hash,
+                    amount,
+                    confirmations,
+                );
+                update_payment_callback_status(payment_id, status).await;
+            }
+        }
+        PaymentStatus::Pending => {}
+    }
+}
 use tos_common::{
     ai_mining::{AIMiningStatistics, AIMiningTask, TaskStatus},
     api::{daemon::*, RPCContractOutput, RPCTransaction, SplitAddressParams, SplitAddressResult},
@@ -660,6 +819,32 @@ pub fn register_methods<S: Storage>(
     handler.register_method(
         "get_ai_mining_active_tasks",
         async_handler!(get_ai_mining_active_tasks::<S>),
+    );
+
+    // QR Code Payment methods
+    handler.register_method(
+        "create_payment_request",
+        async_handler!(create_payment_request::<S>),
+    );
+    handler.register_method(
+        "parse_payment_request",
+        async_handler!(parse_payment_request::<S>),
+    );
+    handler.register_method(
+        "get_payment_status",
+        async_handler!(get_payment_status::<S>),
+    );
+    handler.register_method(
+        "get_address_payments",
+        async_handler!(get_address_payments::<S>),
+    );
+    handler.register_method(
+        "register_payment_webhook",
+        async_handler!(register_payment_webhook::<S>),
+    );
+    handler.register_method(
+        "unregister_payment_webhook",
+        async_handler!(unregister_payment_webhook::<S>),
     );
 
     // Referral system
@@ -3118,6 +3303,500 @@ async fn get_contract_events<S: Storage>(
     }
 
     Ok(json!(events))
+}
+
+// ============================================================================
+// QR Code Payment RPC Methods
+// ============================================================================
+
+use tos_common::api::{
+    callback::{
+        RegisterWebhookParams, RegisterWebhookResult, UnregisterWebhookParams,
+        UnregisterWebhookResult,
+    },
+    payment::{
+        decode_payment_extra_data, is_valid_payment_id, validate_payment_id,
+        CreatePaymentRequestParams, CreatePaymentRequestResult, GetPaymentStatusParams,
+        ParsePaymentRequestParams, ParsePaymentRequestResult, PaymentParseError, PaymentRequest,
+        PaymentStatus, PaymentStatusResponse,
+    },
+};
+
+/// Maximum expiration time for payment requests (1 hour)
+const MAX_PAYMENT_EXPIRATION_SECS: u64 = 3600;
+
+/// Default expiration time for payment requests (5 minutes)
+const DEFAULT_PAYMENT_EXPIRATION_SECS: u64 = 300;
+
+/// Default number of blocks to scan when searching for payments (~10 min at 3s/block)
+const DEFAULT_SCAN_BLOCKS: u64 = 200;
+
+/// Number of confirmations required for a payment to be considered stable
+const STABLE_CONFIRMATIONS: u64 = 8;
+
+/// Create a payment request and return the QR code URI
+async fn create_payment_request<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: CreatePaymentRequestParams = parse_params(body)?;
+    let _blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Validate the address
+    if !params.address.is_normal() {
+        return Err(invalid_params_data(
+            "invalid_address",
+            "Address must be in normal format (not integrated)",
+        ));
+    }
+
+    // Validate and cap expiration time
+    let expires_in = params
+        .expires_in_seconds
+        .unwrap_or(DEFAULT_PAYMENT_EXPIRATION_SECS)
+        .min(MAX_PAYMENT_EXPIRATION_SECS);
+
+    // Generate a unique payment ID
+    let payment_id = generate_payment_id();
+    if !is_valid_payment_id(&payment_id) {
+        return Err(invalid_params_data(
+            "invalid_payment_id",
+            "Generated payment ID is invalid",
+        ));
+    }
+
+    // Build the payment request
+    let mut request = PaymentRequest::new(payment_id.clone(), params.address.clone());
+
+    if let Some(amount) = params.amount {
+        request = request.with_amount(amount);
+    }
+
+    if let Some(asset) = params.asset.clone() {
+        request = request.with_asset(asset);
+    }
+
+    if let Some(ref memo) = params.memo {
+        // Validate memo length
+        if memo.len() > PaymentRequest::MAX_MEMO_LENGTH {
+            return Err(invalid_params_data(
+                "memo_too_long",
+                "Memo exceeds maximum length of 64 bytes",
+            ));
+        }
+        request = request.with_memo(memo.clone());
+    }
+
+    if let Some(ref callback) = params.callback {
+        if !callback.starts_with("https://") {
+            return Err(invalid_params_data(
+                "invalid_callback",
+                "Callback URL must use HTTPS",
+            ));
+        }
+        request = request.with_callback(callback.clone());
+    }
+
+    request = request.with_expires_in(expires_in);
+    let expires_at = request.expires_at;
+
+    // Store the payment request for later status checks
+    let stored = StoredPaymentRequest::from_request(&request);
+    store_payment_request(stored).await?;
+
+    let uri = request.to_uri();
+
+    if log::log_enabled!(log::Level::Debug) {
+        debug!(
+            "Created payment request {} for {} (expires in {}s)",
+            payment_id, params.address, expires_in
+        );
+    }
+
+    Ok(json!(CreatePaymentRequestResult {
+        payment_id,
+        uri: uri.clone(),
+        qr_data: uri,
+        expires_at,
+    }))
+}
+
+/// Parse a payment URI without executing payment
+async fn parse_payment_request<S: Storage>(
+    _context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: ParsePaymentRequestParams = parse_params(body)?;
+
+    let request = match PaymentRequest::from_uri(&params.uri) {
+        Ok(request) => request,
+        Err(err) => return Err(map_payment_parse_error(err)),
+    };
+
+    let is_expired = request.is_expired();
+
+    Ok(json!(ParsePaymentRequestResult {
+        address: request.address,
+        amount: request.amount,
+        asset: request.asset.map(|a| a.into_owned()),
+        memo: request.memo.map(|m| m.into_owned()),
+        payment_id: Some(request.payment_id.into_owned()),
+        expires_at: request.expires_at,
+        is_expired,
+    }))
+}
+
+/// Get payment status by scanning the blockchain for matching transactions
+///
+/// This endpoint scans the blockchain (mempool + blocks) to find payments matching
+/// the given payment_id and address. This allows ANY node to verify payment status
+/// without requiring local storage synchronization.
+///
+/// Status values:
+/// - pending: No matching transaction found
+/// - mempool: Transaction found in mempool (0 confirmations)
+/// - confirming: Transaction in block but < STABLE_CONFIRMATIONS (8) confirmations
+/// - confirmed: Transaction has >= STABLE_CONFIRMATIONS (8) confirmations (stable)
+/// - expired: Payment request has expired (only if `exp` provided)
+/// - underpaid: Amount received < expected_amount (only if `expected_amount` provided)
+async fn get_payment_status<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetPaymentStatusParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Step 1: Validate payment_id
+    if let Err(reason) = validate_payment_id(&params.payment_id) {
+        return Err(invalid_params_data(
+            "invalid_payment_id",
+            &reason.to_string(),
+        ));
+    }
+
+    // Step 2: Check expiration (if exp provided)
+    if params.exp.map(|exp| now > exp).unwrap_or(false) {
+        maybe_send_callback(&params.payment_id, PaymentStatus::Expired, None, None, 0).await;
+        return Ok(json!(PaymentStatusResponse {
+            payment_id: Cow::Owned(params.payment_id),
+            status: PaymentStatus::Expired,
+            tx_hash: None,
+            amount_received: None,
+            confirmations: None,
+            confirmed_at: None,
+        }));
+    }
+
+    // Get current blockchain state
+    let current_topoheight = blockchain.get_topo_height();
+    let target_key = params.address.to_public_key();
+
+    // Step 3: Scan mempool first (0-conf transactions)
+    {
+        let mempool = blockchain.get_mempool().read().await;
+        for (tx_hash, sorted_tx) in mempool.get_txs() {
+            let tx = sorted_tx.get_tx();
+            if let TransactionType::Transfers(transfers) = tx.get_data() {
+                for transfer in transfers {
+                    if transfer.get_destination() == &target_key {
+                        if let Some(extra_data) = transfer.get_extra_data() {
+                            if let Some((found_id, _)) = decode_payment_extra_data(&extra_data.0) {
+                                if found_id == params.payment_id {
+                                    let amount = transfer.get_amount();
+                                    let status = if params
+                                        .expected_amount
+                                        .map(|exp| amount < exp)
+                                        .unwrap_or(false)
+                                    {
+                                        PaymentStatus::Underpaid
+                                    } else {
+                                        PaymentStatus::Mempool
+                                    };
+
+                                    maybe_send_callback(
+                                        &params.payment_id,
+                                        status,
+                                        Some((**tx_hash).clone()),
+                                        Some(amount),
+                                        0,
+                                    )
+                                    .await;
+
+                                    return Ok(json!(PaymentStatusResponse {
+                                        payment_id: Cow::Owned(params.payment_id),
+                                        status,
+                                        tx_hash: Some(Cow::Owned((**tx_hash).clone())),
+                                        amount_received: Some(amount),
+                                        confirmations: Some(0),
+                                        confirmed_at: None,
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 4: Scan blockchain history
+    // Determine scan range
+    let start_topoheight = params
+        .min_topoheight
+        .unwrap_or_else(|| current_topoheight.saturating_sub(DEFAULT_SCAN_BLOCKS));
+
+    // Track best match (highest topoheight)
+    let mut best_match: Option<(Hash, u64, u64, u64)> = None; // (tx_hash, amount, topo, timestamp)
+
+    let storage = blockchain.get_storage().read().await;
+
+    // Scan blocks from start_topoheight to current
+    for topo in start_topoheight..=current_topoheight {
+        let block_result = storage.get_block_header_at_topoheight(topo).await;
+        let (block_hash, block_header) = match block_result {
+            Ok(result) => result,
+            Err(_) => continue, // Skip if block not found (pruned)
+        };
+
+        // Check each transaction in the block
+        for tx_hash in block_header.get_transactions() {
+            // Skip unexecuted transactions
+            if !storage
+                .is_tx_executed_in_block(tx_hash, &block_hash)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
+            let tx = match storage.get_transaction(tx_hash).await {
+                Ok(tx) => tx,
+                Err(_) => continue,
+            };
+
+            if let TransactionType::Transfers(transfers) = tx.get_data() {
+                for transfer in transfers {
+                    if transfer.get_destination() == &target_key {
+                        if let Some(extra_data) = transfer.get_extra_data() {
+                            if let Some((found_id, _)) = decode_payment_extra_data(&extra_data.0) {
+                                if found_id == params.payment_id {
+                                    let amount = transfer.get_amount();
+                                    let timestamp = block_header.get_timestamp();
+
+                                    // Keep the highest topoheight match
+                                    if best_match
+                                        .as_ref()
+                                        .map(|(_, _, best_topo, _)| topo > *best_topo)
+                                        .unwrap_or(true)
+                                    {
+                                        best_match =
+                                            Some((tx_hash.clone(), amount, topo, timestamp));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 5: Return result based on best match
+    if let Some((tx_hash, amount, confirmed_topo, timestamp)) = best_match {
+        // Calculate confirmations: current_topoheight - block_topoheight + 1
+        let confirmations = if current_topoheight >= confirmed_topo {
+            current_topoheight - confirmed_topo + 1
+        } else {
+            0
+        };
+
+        // Determine status
+        let status = if params
+            .expected_amount
+            .map(|exp| amount < exp)
+            .unwrap_or(false)
+        {
+            PaymentStatus::Underpaid
+        } else if confirmations >= STABLE_CONFIRMATIONS {
+            PaymentStatus::Confirmed
+        } else {
+            PaymentStatus::Confirming
+        };
+
+        let confirmed_at = if status == PaymentStatus::Confirmed {
+            Some(timestamp / 1000) // Convert ms to seconds
+        } else {
+            None
+        };
+
+        maybe_send_callback(
+            &params.payment_id,
+            status,
+            Some(tx_hash.clone()),
+            Some(amount),
+            confirmations,
+        )
+        .await;
+
+        return Ok(json!(PaymentStatusResponse {
+            payment_id: Cow::Owned(params.payment_id),
+            status,
+            tx_hash: Some(Cow::Owned(tx_hash)),
+            amount_received: Some(amount),
+            confirmations: Some(confirmations),
+            confirmed_at,
+        }));
+    }
+
+    // Step 6: No match found - return pending
+    Ok(json!(PaymentStatusResponse {
+        payment_id: Cow::Owned(params.payment_id),
+        status: PaymentStatus::Pending,
+        tx_hash: None,
+        amount_received: None,
+        confirmations: None,
+        confirmed_at: None,
+    }))
+}
+
+/// Register a webhook secret for payment callbacks
+async fn register_payment_webhook<S: Storage>(
+    _context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: RegisterWebhookParams = parse_params(body)?;
+
+    if !params.url.starts_with("https://") {
+        return Err(invalid_params_data(
+            "invalid_callback",
+            "Callback URL must use HTTPS",
+        ));
+    }
+
+    let secret = hex::decode(&params.secret_hex)
+        .map_err(|_| invalid_params_data("invalid_secret", "Webhook secret must be hex"))?;
+
+    if secret.is_empty() {
+        return Err(invalid_params_data(
+            "invalid_secret",
+            "Webhook secret must not be empty",
+        ));
+    }
+
+    CALLBACK_SERVICE.register_webhook(params.url, secret).await;
+
+    Ok(json!(RegisterWebhookResult { success: true }))
+}
+
+/// Unregister a webhook secret
+async fn unregister_payment_webhook<S: Storage>(
+    _context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: UnregisterWebhookParams = parse_params(body)?;
+
+    CALLBACK_SERVICE.unregister_webhook(&params.url).await;
+
+    Ok(json!(UnregisterWebhookResult { success: true }))
+}
+
+fn map_payment_parse_error(err: PaymentParseError) -> InternalRpcError {
+    match err {
+        PaymentParseError::InvalidPaymentId(reason) => {
+            invalid_params_data("invalid_payment_id", &reason.to_string())
+        }
+        other => InternalRpcError::InvalidParamsAny(other.into()),
+    }
+}
+
+fn invalid_params_data(code: &str, reason: &str) -> InternalRpcError {
+    InternalRpcError::InvalidParamsData {
+        message: code.to_string(),
+        data: json!({ "code": code, "reason": reason }),
+    }
+}
+
+/// Watch for incoming payments to an address
+/// Returns account balance and recent transaction info
+///
+/// Note: For full transaction history, use wallet sync or subscribe to events.
+/// This endpoint provides a quick balance check for payment verification.
+async fn get_address_payments<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetAddressPaymentsParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    // Validate address
+    let address = params.address;
+    if !address.is_normal() {
+        return Err(InternalRpcError::InvalidParams(
+            "Address must be in normal format",
+        ));
+    }
+
+    let key = address.clone().to_public_key();
+
+    // Get stable topoheight for confirmation info
+    let stable_topoheight = blockchain.get_stable_topoheight();
+    let current_topoheight = blockchain.get_topo_height();
+
+    // Check if account exists and get balance
+    let (balance, last_topoheight) = if storage.has_balance_for(&key, &TOS_ASSET).await? {
+        match storage.get_last_balance(&key, &TOS_ASSET).await {
+            Ok((topo, versioned_balance)) => {
+                // Get the actual balance value from VersionedBalance
+                (Some(versioned_balance.get_balance()), Some(topo))
+            }
+            Err(_) => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+
+    // Calculate confirmations if we have balance update info
+    let confirmations = last_topoheight.map(|topo| {
+        if topo <= stable_topoheight {
+            stable_topoheight - topo + 1
+        } else {
+            current_topoheight - topo
+        }
+    });
+
+    let status = match confirmations {
+        Some(c) if c >= 8 => PaymentStatus::Confirmed,
+        Some(c) if c >= 1 => PaymentStatus::Confirming,
+        Some(_) => PaymentStatus::Mempool,
+        None => PaymentStatus::Pending,
+    };
+
+    Ok(json!({
+        "address": address,
+        "balance": balance,
+        "last_topoheight": last_topoheight,
+        "stable_topoheight": stable_topoheight,
+        "current_topoheight": current_topoheight,
+        "confirmations": confirmations,
+        "status": status,
+    }))
+}
+
+/// Generate a unique payment ID
+fn generate_payment_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let random: u32 = rand::random();
+    format!("pr_{:x}_{:08x}", timestamp, random)
 }
 
 /// Maximum number of scheduled executions to return in a single RPC call

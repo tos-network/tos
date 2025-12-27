@@ -1,3 +1,4 @@
+pub mod callback;
 pub mod getwork;
 pub mod rpc;
 pub mod ws_security;

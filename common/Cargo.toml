@@ -28,6 +28,9 @@ blake3 = "1.5.1"
 # merlin = "3.0.0"
 zeroize = { version = "1.7.0", features = ["derive"] }
 sha3 = "0.10.8"
+# HMAC-SHA256 for callback signature (TIP-QR-PAYMENT)
+hmac = "0.12"
+sha2 = "0.10"
 subtle = "2.5"
 fern = { version = "0.7.1", features = ["colored", "date-based"] }
 
@@ -67,6 +70,8 @@ metrics = { workspace = true, optional = true }
 
 # Query system
 regex = "1"
+# URL encoding for payment URIs
+urlencoding = "2.1"
 # Query system
 serde_regex = "1.1.0"
 # Used for U256
