@@ -1,8 +1,5 @@
-use crate::{
-    error::WalletError,
-    storage::{Balance, EncryptedStorage, TxCache},
-};
-use log::{debug, trace};
+use crate::{error::WalletError, storage::EncryptedStorage};
+use log::trace;
 use std::collections::{HashMap, HashSet};
 use tos_common::{
     crypto::{Hash, Hashable, PublicKey},
@@ -11,6 +8,19 @@ use tos_common::{
         Reference, Transaction,
     },
 };
+
+// Simple balance container for transaction building
+// Holds the amount available for a given asset
+#[derive(Debug, Clone)]
+pub struct Balance {
+    pub amount: u64,
+}
+
+impl Balance {
+    pub fn new(amount: u64) -> Self {
+        Self { amount }
+    }
+}
 
 // State used to estimate fees for a transaction
 // Because fees can be higher if a destination account is not registered
@@ -94,6 +104,10 @@ impl TransactionBuilderState {
         self.balances.contains_key(asset)
     }
 
+    // Create state from an existing transaction
+    // Stateless wallet: We don't track balances locally, so this just captures
+    // the transaction reference and nonce for apply_changes (which is a no-op)
+    #[allow(unused_variables)]
     pub async fn from_tx(
         storage: &EncryptedStorage,
         transaction: &Transaction,
@@ -104,19 +118,9 @@ impl TransactionBuilderState {
             transaction.get_reference().clone(),
             transaction.get_nonce(),
         );
-        let amounts = transaction
-            .get_expected_sender_outputs()
-            .map_err(|e| WalletError::Any(e.into()))?;
 
-        for (asset, amount) in amounts {
-            let (mut balance, _) = storage.get_unconfirmed_balance_for(asset).await?;
-            balance.amount = balance
-                .amount
-                .checked_sub(amount)
-                .ok_or_else(|| WalletError::Any(anyhow::anyhow!("Balance underflow")))?;
-            state.add_balance(asset.clone(), balance);
-        }
-
+        // Stateless wallet: Don't track balances locally
+        // Balances are queried fresh from daemon before each transaction
         state.set_tx_hash_built(transaction.hash());
 
         Ok(state)
@@ -149,40 +153,20 @@ impl TransactionBuilderState {
     }
 
     // Apply the changes to the storage
+    // Stateless wallet: This is a no-op since we don't cache balances or nonces locally
+    // All state is queried fresh from daemon before each transaction
+    #[allow(unused_variables)]
     pub async fn apply_changes(
         &mut self,
         storage: &mut EncryptedStorage,
     ) -> Result<(), WalletError> {
-        trace!("Applying changes to storage");
-
-        for (asset, balance) in self.balances.drain() {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("Setting balance for asset {} to {}", asset, balance.amount);
-            }
-            storage.set_unconfirmed_balance_for(asset, balance).await?;
+        // Stateless wallet: No local cache to update
+        // - Balances are queried from daemon before each TX
+        // - Nonces are queried from daemon before each TX
+        // - No tx_cache needed since we don't track pending transactions locally
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Stateless wallet: apply_changes is no-op");
         }
-
-        storage.set_tx_cache(TxCache {
-            reference: self.reference.clone(),
-            // Increment nonce for the next transaction to support batch mode
-            // When multiple transactions are built rapidly, each needs a unique nonce
-            // The confirmed nonce in storage is updated when TX is on-chain
-            // (see network_handler.rs process_block around line 806-814)
-            // If a TX fails, user should rescan or set_nonce to reset
-            nonce: self.nonce + 1,
-            last_tx_hash_created: self.tx_hash_built.take(),
-        });
-
-        // Lets verify if the last coinbase reward topoheight is still valid
-        if let Some(stable_topoheight) = self.stable_topoheight {
-            if storage
-                .get_last_coinbase_reward_topoheight()
-                .is_some_and(|h| h < stable_topoheight)
-            {
-                storage.set_last_coinbase_reward_topoheight(None)?;
-            }
-        }
-
         Ok(())
     }
 }

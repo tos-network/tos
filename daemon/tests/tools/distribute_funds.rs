@@ -10,7 +10,7 @@
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use log::info;
+use log::{info, log_enabled};
 use serde::Deserialize;
 use serde_json::json;
 use std::fs;
@@ -75,7 +75,7 @@ struct TestAccounts {
 struct GetInfoResult {
     topoheight: u64,
     #[allow(dead_code)]
-    stable_blue_score: u64,
+    stable_topoheight: u64,
     top_block_hash: String,
 }
 
@@ -300,20 +300,26 @@ async fn main() -> Result<()> {
     let keypair_a = KeyPair::from_private_key(private_key)
         .map_err(|_| anyhow::anyhow!("Failed to create keypair from private key"))?;
 
-    info!("Sender: {} ({})", account_a.name, account_a.address);
+    if log::log_enabled!(log::Level::Info) {
+        info!("Sender: {} ({})", account_a.name, account_a.address);
+    }
 
     // Connect to daemon
     let rpc = RpcClient::new(args.daemon.clone());
     let chain_info = rpc.get_info().await?;
-    info!(
-        "Connected to daemon at topoheight {}",
-        chain_info.topoheight
-    );
+    if log::log_enabled!(log::Level::Info) {
+        info!(
+            "Connected to daemon at topoheight {}",
+            chain_info.topoheight
+        );
+    }
 
     // Check account A balance
     let balance_a = rpc.get_balance(&account_a.address).await?;
     let balance_tos = balance_a as f64 / 1_000_000_000_000.0;
-    info!("Account A balance: {balance_tos:.6} TOS ({balance_a} nanoTOS)");
+    if log::log_enabled!(log::Level::Info) {
+        info!("Account A balance: {balance_tos:.6} TOS ({balance_a} nanoTOS)");
+    }
 
     // Calculate total needed
     let recipients = &test_accounts.accounts[1..5]; // B, C, D, E
@@ -322,15 +328,17 @@ async fn main() -> Result<()> {
 
     info!("");
     info!("Distribution plan:");
-    info!(
-        "  Amount per recipient: {:.6} TOS",
-        args.amount as f64 / 1_000_000_000_000.0
-    );
-    info!(
-        "  Fee per transaction: {:.6} TOS",
-        args.fee as f64 / 1_000_000_000_000.0
-    );
-    info!("  Total needed: {total_tos:.6} TOS");
+    if log::log_enabled!(log::Level::Info) {
+        info!(
+            "  Amount per recipient: {:.6} TOS",
+            args.amount as f64 / 1_000_000_000_000.0
+        );
+        info!(
+            "  Fee per transaction: {:.6} TOS",
+            args.fee as f64 / 1_000_000_000_000.0
+        );
+        info!("  Total needed: {total_tos:.6} TOS");
+    }
     info!("");
 
     if balance_a < total_needed {
@@ -346,12 +354,14 @@ async fn main() -> Result<()> {
     // Send transactions
     let mut nonce = 0u64;
     for (i, recipient) in recipients.iter().enumerate() {
-        info!(
-            "Sending {:.6} TOS to {} ({})...",
-            args.amount as f64 / 1_000_000_000_000.0,
-            recipient.name,
-            recipient.address
-        );
+        if log::log_enabled!(log::Level::Info) {
+            info!(
+                "Sending {:.6} TOS to {} ({})...",
+                args.amount as f64 / 1_000_000_000_000.0,
+                recipient.name,
+                recipient.address
+            );
+        }
 
         let mut state = TestAccountState::new(balance_a, nonce, is_mainnet, reference.clone());
 
@@ -373,7 +383,9 @@ async fn main() -> Result<()> {
         .build(&mut state, &keypair_a)?;
 
         let tx_hash = rpc.submit_transaction(&tx).await?;
-        info!("  ✓ Transaction submitted: {tx_hash}");
+        if log::log_enabled!(log::Level::Info) {
+            info!("  ✓ Transaction submitted: {tx_hash}");
+        }
 
         nonce += 1;
 

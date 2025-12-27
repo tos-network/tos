@@ -110,7 +110,11 @@ impl<S: Storage> DaemonRpcServer<S> {
 
         // create the RPC Handler which will register and contains all available methods
         let mut rpc_handler = RPCHandler::new(blockchain);
-        rpc::register_methods(&mut rpc_handler, !config.getwork.disable);
+        rpc::register_methods(
+            &mut rpc_handler,
+            !config.getwork.disable,
+            config.enable_admin_rpc,
+        );
 
         // create the default websocket server (support event & rpc methods)
         let ws = WebSocketServer::new(EventWebSocketHandler::new(
@@ -219,7 +223,9 @@ impl<S: Storage> DaemonRpcServer<S> {
 
     pub async fn notify_clients_with<V: serde::Serialize>(&self, event: &NotifyEvent, value: V) {
         if let Err(e) = self.notify_clients(event, json!(value)).await {
-            error!("Error while notifying event {:?}: {}", event, e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while notifying event {:?}: {}", event, e);
+            }
         }
     }
 
@@ -236,13 +242,19 @@ impl<S: Storage> DaemonRpcServer<S> {
     }
 
     pub async fn stop(&self) {
-        info!("Stopping RPC Server...");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Stopping RPC Server...");
+        }
         let mut handle = self.handle.lock().await;
         if let Some(handle) = handle.take() {
             handle.stop(false).await;
-            info!("RPC Server is now stopped!");
+            if log::log_enabled!(log::Level::Info) {
+                info!("RPC Server is now stopped!");
+            }
         } else {
-            warn!("RPC Server is not running!");
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("RPC Server is not running!");
+            }
         }
     }
 

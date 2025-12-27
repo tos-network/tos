@@ -10,7 +10,9 @@ use tos_common::{contract::ContractOutput, crypto::Hash};
 impl ContractOutputsProvider for RocksStorage {
     // Verify if the contract outputs for a transaction exist
     async fn has_contract_outputs_for_tx(&self, tx_hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has contract outputs for tx {}", tx_hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has contract outputs for tx {}", tx_hash);
+        }
         self.contains_data(Column::TransactionsOutputs, tx_hash)
     }
 
@@ -19,7 +21,9 @@ impl ContractOutputsProvider for RocksStorage {
         &self,
         tx_hash: &Hash,
     ) -> Result<Vec<ContractOutput>, BlockchainError> {
-        trace!("get contract outputs for tx {}", tx_hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get contract outputs for tx {}", tx_hash);
+        }
         self.load_from_disk(Column::TransactionsOutputs, tx_hash)
     }
 
@@ -29,7 +33,9 @@ impl ContractOutputsProvider for RocksStorage {
         tx_hash: &Hash,
         contract_output: &Vec<ContractOutput>,
     ) -> Result<(), BlockchainError> {
-        trace!("set contract outputs for tx {}", tx_hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set contract outputs for tx {}", tx_hash);
+        }
         self.insert_into_disk(Column::TransactionsOutputs, tx_hash, contract_output)
     }
 
@@ -38,7 +44,9 @@ impl ContractOutputsProvider for RocksStorage {
         &mut self,
         tx_hash: &Hash,
     ) -> Result<(), BlockchainError> {
-        trace!("delete contract outputs for tx {}", tx_hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete contract outputs for tx {}", tx_hash);
+        }
         self.remove_from_disk(Column::TransactionsOutputs, tx_hash)
     }
 }

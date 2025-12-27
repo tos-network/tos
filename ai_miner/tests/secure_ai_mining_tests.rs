@@ -6,7 +6,7 @@ use tos_common::{
         AccountReputation, AntiSybilDetector, DifficultyLevel, ADVANCED_TASK_BASE_REWARD,
         BASIC_TASK_BASE_REWARD, EXPERT_TASK_BASE_REWARD, INTERMEDIATE_TASK_BASE_REWARD,
         LONG_CONTENT_GAS_RATE, MEDIUM_CONTENT_GAS_RATE, MEDIUM_CONTENT_THRESHOLD,
-        MIN_REPUTATION_FOR_BASIC, MIN_TRANSACTION_COST, SHORT_CONTENT_GAS_RATE,
+        MIN_REPUTATION_FOR_BASIC, MIN_TRANSACTION_COST, SCALE, SHORT_CONTENT_GAS_RATE,
         SHORT_CONTENT_THRESHOLD,
     },
     crypto::{elgamal::CompressedPublicKey, Hash},
@@ -102,11 +102,14 @@ fn test_reputation_system() {
     // Full age score(1.0 * 0.3) + full transaction score(1.0 * 0.4) + full stake score(1.0 * 0.3) = 1.0
     // Validation accuracy bonus: (0.9 - 0.8) * 1.0 = 0.1
     // Long-term participation bonus: 0.1
-    // Total: 1.0 + 0.1 + 0.1 = 1.2, but capped at 1.0
-    assert_eq!(score, 1.0);
-    assert_eq!(reputation.reputation_score, 1.0);
+    // Total: 1.0 + 0.1 + 0.1 = 1.2, but capped at 1.0 (SCALE = 10000)
+    assert_eq!(score, SCALE);
+    assert_eq!(reputation.reputation_score, SCALE);
 
-    println!("✓ High reputation account score: {:.2}", score);
+    println!(
+        "✓ High reputation account score: {} (scaled, 1.0 = {})",
+        score, SCALE
+    );
 
     // Test permission checks
     assert!(reputation.can_participate_in_difficulty(&DifficultyLevel::Beginner));
@@ -126,7 +129,7 @@ fn test_reputation_system() {
     assert!(!new_reputation.can_participate_in_difficulty(&DifficultyLevel::Beginner));
 
     println!(
-        "✓ New account correctly restricted: score = {:.3}",
+        "✓ New account correctly restricted: score = {} (scaled)",
         new_score
     );
 

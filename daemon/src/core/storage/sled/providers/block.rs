@@ -54,7 +54,6 @@ impl BlockProvider for SledStorage {
     }
 
     async fn decrease_blocks_count(&mut self, amount: u64) -> Result<(), BlockchainError> {
-        trace!("count blocks");
         if let Some(snapshot) = self.snapshot.as_mut() {
             snapshot.cache.blocks_count -= amount;
         } else {
@@ -65,7 +64,9 @@ impl BlockProvider for SledStorage {
     }
 
     async fn has_block_with_hash(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has block {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has block {}", hash);
+        }
         self.contains_data_cached(&self.blocks, &self.blocks_cache, hash)
             .await
     }
@@ -79,13 +80,15 @@ impl BlockProvider for SledStorage {
         p: VarUint,
         hash: Immutable<Hash>,
     ) -> Result<(), BlockchainError> {
-        debug!(
-            "Storing new {} with hash: {}, difficulty: {}, snapshot mode: {}",
-            block,
-            hash,
-            difficulty,
-            self.snapshot.is_some()
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Storing new {} with hash: {}, difficulty: {}, snapshot mode: {}",
+                block,
+                hash,
+                difficulty,
+                self.snapshot.is_some()
+            );
+        }
 
         // Store transactions
         let mut txs_count = 0;
@@ -150,7 +153,9 @@ impl BlockProvider for SledStorage {
     }
 
     async fn get_block_by_hash(&self, hash: &Hash) -> Result<Block, BlockchainError> {
-        trace!("get block by hash {}", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block by hash {}", hash);
+        }
         let header = self.get_block_header_by_hash(hash).await?;
         let mut transactions = Vec::with_capacity(header.get_txs_count());
         for tx in header.get_transactions() {
@@ -163,7 +168,9 @@ impl BlockProvider for SledStorage {
     }
 
     async fn delete_block_with_hash(&mut self, hash: &Hash) -> Result<Block, BlockchainError> {
-        debug!("Deleting block with hash: {}", hash);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Deleting block with hash: {}", hash);
+        }
 
         // Delete block header
         let header = Self::delete_arc_cacheable_data(

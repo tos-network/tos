@@ -64,16 +64,28 @@ pub const TERA_HASH: u64 = GIGA_HASH * 1000;
 // Minimum difficulty is calculated the following (each difficulty point is in H/s)
 // BLOCK TIME in millis * N = minimum hashrate
 // This is to prevent spamming the network with low difficulty blocks
-// and is only active on mainnet
-// Currently set to 100 H/s (same as testnet for easier solo mining)
-pub const MAINNET_MINIMUM_HASHRATE: u64 = 100 * HASH;
-// Testnet & Devnet minimum hashrate
-// Currently set to 100 H/s (reduced from 2 KH/s for easier development)
-pub const DEFAULT_MINIMUM_HASHRATE: u64 = 100 * HASH;
+// Formula: MINIMUM_HASHRATE * BLOCK_TIME_TARGET / MILLIS_PER_SECOND
+//
+// Mainnet minimum hashrate: 100 KH/s
+// This provides initial difficulty of 300,000 (100,000 * 3000 / 1000)
+// Prevents block spam at chain launch while allowing difficulty to adjust down if needed
+pub const MAINNET_MINIMUM_HASHRATE: u64 = 100 * KILO_HASH;
 
-// This is also used as testnet and devnet minimum difficulty
-// Reduced from 1 H/s to 0.1 H/s for easier development
-pub const GENESIS_BLOCK_DIFFICULTY: Difficulty = Difficulty::from_u64(1);
+// Testnet minimum hashrate: 10 KH/s
+// This provides initial difficulty of 30,000 (10,000 * 3000 / 1000)
+// Balanced for testing with multiple miners
+pub const TESTNET_MINIMUM_HASHRATE: u64 = 10 * KILO_HASH;
+
+// Devnet minimum hashrate: 1 KH/s
+// This provides initial difficulty of 3,000 (1,000 * 3000 / 1000)
+// Low enough for single developer testing
+pub const DEVNET_MINIMUM_HASHRATE: u64 = 1 * KILO_HASH;
+
+// Genesis block difficulty - used for cumulative difficulty initialization
+// Set to mainnet minimum difficulty for consistency
+// Formula: MAINNET_MINIMUM_HASHRATE * BLOCK_TIME_TARGET / MILLIS_PER_SECOND
+// Current: 100 KH/s * 3000ms / 1000 = 300,000
+pub const GENESIS_BLOCK_DIFFICULTY: Difficulty = Difficulty::from_u64(300_000);
 
 // 2 seconds maximum in future (prevent any attack on reducing difficulty but keep margin for unsynced devices)
 pub const TIMESTAMP_IN_FUTURE_LIMIT: TimestampSeconds = 2 * MILLIS_PER_SECOND;

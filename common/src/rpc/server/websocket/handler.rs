@@ -7,7 +7,10 @@ use super::{WebSocketHandler, WebSocketSessionShared};
 use crate::{
     api::{EventResult, SubscribeParams},
     context::Context,
-    rpc::{Id, InternalRpcError, RPCHandler, RpcRequest, RpcResponse, RpcResponseError},
+    rpc::{
+        server::ClientAddr, Id, InternalRpcError, RPCHandler, RpcRequest, RpcResponse,
+        RpcResponseError,
+    },
     tokio::sync::RwLock,
 };
 use async_trait::async_trait;
@@ -238,6 +241,10 @@ where
         let mut context = Context::default();
         context.store(session.clone());
         context.store(self.handler.get_data().clone());
+
+        // Inject client address for security checks (e.g., localhost-only admin methods)
+        let client_addr = ClientAddr(session.get_peer_addr().map(|addr| addr.ip()));
+        context.store(client_addr);
 
         match request {
             e @ Value::Object(_) => self

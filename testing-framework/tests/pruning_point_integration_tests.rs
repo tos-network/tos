@@ -1,7 +1,7 @@
 //! Pruning Point Integration Tests
 //!
 //! Tests for pruning point calculation and validation using the testing framework.
-//! These tests verify the GHOSTDAG pruning point implementation.
+//! These tests verify the BlockDAG pruning point implementation.
 
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
@@ -42,7 +42,7 @@ async fn test_pruning_point_validation_new_block() -> Result<()> {
     let height = blockchain.get_tip_height().await?;
     let block = blockchain.get_block_at_height(height).await?.unwrap();
 
-    // Pruning point should NOT be genesis for blocks with blue_score >= PRUNING_DEPTH
+    // Pruning point should NOT be genesis for blocks with topoheight >= PRUNING_DEPTH
     let genesis_hash = blockchain.get_genesis_hash();
     assert_ne!(
         block.pruning_point, *genesis_hash,
@@ -74,19 +74,19 @@ async fn test_pruning_point_genesis() -> Result<()> {
 
     let genesis_hash = blockchain.get_genesis_hash().clone();
 
-    // Mine blocks 1-199 (all with blue_score < PRUNING_DEPTH)
+    // Mine blocks 1-199 (all with topoheight < PRUNING_DEPTH)
     for i in 1..PRUNING_DEPTH {
         let block = blockchain.mine_block().await?;
 
         // All blocks before PRUNING_DEPTH should have genesis as pruning_point
         assert_eq!(
             block.pruning_point, genesis_hash,
-            "Block {} (blue_score={}) should have genesis as pruning_point",
-            i, block.blue_score
+            "Block {} (topoheight={}) should have genesis as pruning_point",
+            i, block.topoheight
         );
 
-        // Verify blue_score matches height in linear chain
-        assert_eq!(block.blue_score, i, "Blue score should match block number");
+        // Verify topoheight matches height in linear chain
+        assert_eq!(block.topoheight, i, "Topoheight should match block number");
     }
 
     Ok(())
@@ -177,7 +177,7 @@ async fn test_invalid_pruning_point_rejection() -> Result<()> {
     let invalid_block_zero = TestBlock {
         hash: create_test_pubkey(100),
         height: last_block.height + 1,
-        blue_score: last_block.blue_score + 1,
+        topoheight: last_block.topoheight + 1,
         transactions: vec![],
         reward: 50_000_000_000,
         pruning_point: Hash::zero(), // Invalid!
@@ -198,7 +198,7 @@ async fn test_invalid_pruning_point_rejection() -> Result<()> {
     let invalid_block_random = TestBlock {
         hash: create_test_pubkey(101),
         height: last_block.height + 1,
-        blue_score: last_block.blue_score + 1,
+        topoheight: last_block.topoheight + 1,
         transactions: vec![],
         reward: 50_000_000_000,
         pruning_point: create_test_pubkey(255), // Invalid random hash!
@@ -216,7 +216,7 @@ async fn test_invalid_pruning_point_rejection() -> Result<()> {
     let invalid_block_genesis = TestBlock {
         hash: create_test_pubkey(102),
         height: last_block.height + 1,
-        blue_score: last_block.blue_score + 1,
+        topoheight: last_block.topoheight + 1,
         transactions: vec![],
         reward: 50_000_000_000,
         pruning_point: genesis_hash, // Should not be genesis at this height!
@@ -319,7 +319,7 @@ async fn test_pruning_point_long_chain() -> Result<()> {
 
     // Verify final state
     assert_eq!(blockchain.get_tip_height().await?, 500);
-    assert_eq!(blockchain.get_blue_score().await?, 500);
+    assert_eq!(blockchain.get_topoheight().await?, 500);
 
     Ok(())
 }
@@ -367,7 +367,7 @@ async fn test_miner_block_pruning_point() -> Result<()> {
     let bad_miner_block = TestBlock {
         hash: create_test_pubkey(200),
         height: last_block.height + 1,
-        blue_score: last_block.blue_score + 1,
+        topoheight: last_block.topoheight + 1,
         transactions: vec![],
         reward: 50_000_000_000,
         pruning_point: create_test_pubkey(199), // Wrong pruning_point!
@@ -425,9 +425,9 @@ async fn test_p2p_block_pruning_point() -> Result<()> {
     );
 
     assert_eq!(
-        node_a.get_blue_score().await?,
-        node_b.get_blue_score().await?,
-        "Both nodes should have same blue_score"
+        node_a.get_topoheight().await?,
+        node_b.get_topoheight().await?,
+        "Both nodes should have same topoheight"
     );
 
     // Verify pruning_point matches on both nodes
@@ -454,7 +454,7 @@ async fn test_p2p_block_pruning_point() -> Result<()> {
     let invalid_block = TestBlock {
         hash: create_test_pubkey(250),
         height: last_block.height + 1,
-        blue_score: last_block.blue_score + 1,
+        topoheight: last_block.topoheight + 1,
         transactions: vec![],
         reward: 50_000_000_000,
         pruning_point: Hash::zero(), // Invalid!

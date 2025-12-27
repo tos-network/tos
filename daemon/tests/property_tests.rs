@@ -8,7 +8,7 @@
 //!
 //! Properties tested:
 //! - Balance invariants (never negative, conservation)
-//! - GHOSTDAG invariants (blue score monotonicity)
+//! - BlockDAG invariants (topoheight monotonicity)
 //! - Nonce invariants (sequential, no duplicates)
 //! - Arithmetic safety (no overflows in consensus code)
 
@@ -180,23 +180,23 @@ proptest! {
     }
 }
 
-// Property 7: Blue score monotonicity in GHOSTDAG
+// Property 7: Topoheight monotonicity in BlockDAG
 proptest! {
     #[test]
-    fn test_blue_score_monotonic(
+    fn test_topoheight_monotonic(
         initial_score in 0u64..1_000_000u64,
         increments in prop::collection::vec(1u64..1000u64, 1..100),
     ) {
-        let mut blue_score = initial_score;
-        let mut scores = vec![blue_score];
+        let mut topoheight = initial_score;
+        let mut scores = vec![topoheight];
 
         for increment in increments {
-            // Blue score should always increase
-            blue_score = blue_score.checked_add(increment).unwrap();
-            scores.push(blue_score);
+            // Topoheight should always increase
+            topoheight = topoheight.checked_add(increment).unwrap();
+            scores.push(topoheight);
         }
 
-        // INVARIANT: Blue scores are strictly increasing
+        // INVARIANT: Topoheights are strictly increasing
         for window in scores.windows(2) {
             prop_assert!(window[1] > window[0]);
         }

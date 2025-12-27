@@ -17,6 +17,9 @@ pub mod transaction;
 // AI Mining module
 pub mod ai_mining;
 
+// Native Referral System module
+pub mod referral;
+
 pub mod asset;
 pub mod config;
 pub mod context;

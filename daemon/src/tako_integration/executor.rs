@@ -36,8 +36,9 @@ use tos_tbpf::{
 
 use super::{
     SVMFeatureSet, TakoExecutionError, TosAccountAdapter, TosContractLoaderAdapter,
-    TosStorageAdapter,
+    TosReferralAdapter, TosStorageAdapter,
 };
+use crate::core::storage::ReferralProvider;
 
 /// Default compute budget for contract execution (200,000 compute units)
 ///
@@ -199,6 +200,53 @@ impl TakoExecutor {
         )
     }
 
+    /// Execute a TOS Kernel(TAKO) contract with referral system access
+    ///
+    /// This method is similar to `execute()` but provides access to the native
+    /// referral system via syscalls. Use this when executing contracts that need
+    /// to query referral relationships, team sizes, or upline information.
+    ///
+    /// # Referral Syscalls Enabled
+    ///
+    /// - `tos_has_referrer` - Check if user has referrer (500 CU)
+    /// - `tos_get_referrer` - Get user's referrer address (500 CU)
+    /// - `tos_get_uplines` - Get N levels of uplines (500 + 200*N CU)
+    /// - `tos_get_direct_referrals_count` - Count of direct referrals (500 CU)
+    /// - `tos_get_team_size` - Team size from cache (500 CU)
+    /// - `tos_get_level` - User's level in referral tree (500 CU)
+    /// - `tos_is_downline` - Check downline relationship (500 + 100*depth CU)
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_with_referral(
+        bytecode: &[u8],
+        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        topoheight: TopoHeight,
+        contract_hash: &Hash,
+        block_hash: &Hash,
+        block_height: u64,
+        block_timestamp: u64,
+        tx_hash: &Hash,
+        tx_sender: &Hash,
+        input_data: &[u8],
+        compute_budget: Option<u64>,
+        referral_provider: &mut (dyn ReferralProvider + Send + Sync),
+    ) -> Result<ExecutionResult, TakoExecutionError> {
+        Self::execute_with_features_and_referral(
+            bytecode,
+            provider,
+            topoheight,
+            contract_hash,
+            block_hash,
+            block_height,
+            block_timestamp,
+            tx_hash,
+            tx_sender,
+            input_data,
+            compute_budget,
+            &SVMFeatureSet::production(),
+            Some(referral_provider),
+        )
+    }
+
     /// Execute a TOS Kernel(TAKO) contract with custom feature set
     ///
     /// This method allows specifying which TBPF versions are enabled,
@@ -272,6 +320,56 @@ impl TakoExecutor {
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
     ) -> Result<ExecutionResult, TakoExecutionError> {
+        // Execute without referral provider (backward compatibility)
+        Self::execute_with_features_and_referral(
+            bytecode,
+            provider,
+            topoheight,
+            contract_hash,
+            block_hash,
+            block_height,
+            block_timestamp,
+            tx_hash,
+            tx_sender,
+            input_data,
+            compute_budget,
+            feature_set,
+            None,
+        )
+    }
+
+    /// Execute a TOS Kernel(TAKO) contract with custom feature set and referral provider
+    ///
+    /// This method allows specifying which TBPF versions are enabled and provides
+    /// access to the native referral system via syscalls.
+    ///
+    /// # Referral System Access
+    ///
+    /// When `referral_provider` is provided, contracts can access the native referral
+    /// system via these syscalls:
+    /// - `tos_has_referrer` - Check if user has referrer
+    /// - `tos_get_referrer` - Get user's referrer address
+    /// - `tos_get_uplines` - Get N levels of uplines
+    /// - `tos_get_direct_referrals_count` - Count of direct referrals
+    /// - `tos_get_team_size` - Team size (cached)
+    /// - `tos_get_level` - User's level in referral tree
+    /// - `tos_is_downline` - Check if user is in another's downline
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_with_features_and_referral(
+        bytecode: &[u8],
+        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        topoheight: TopoHeight,
+        contract_hash: &Hash,
+        block_hash: &Hash,
+        block_height: u64,
+        block_timestamp: u64,
+        tx_hash: &Hash,
+        tx_sender: &Hash,  // Using Hash type for sender (32 bytes)
+        input_data: &[u8], // Contract input parameters (entry point, user data)
+        compute_budget: Option<u64>,
+        feature_set: &SVMFeatureSet,
+        referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
+    ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
 
         if log::log_enabled!(log::Level::Info) {
@@ -288,10 +386,12 @@ impl TakoExecutor {
         // 1. Validate compute budget
         let compute_budget = compute_budget.unwrap_or(DEFAULT_COMPUTE_BUDGET);
         if compute_budget > MAX_COMPUTE_BUDGET {
-            warn!(
-                "Compute budget validation failed: requested={}, maximum={}",
-                compute_budget, MAX_COMPUTE_BUDGET
-            );
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "Compute budget validation failed: requested={}, maximum={}",
+                    compute_budget, MAX_COMPUTE_BUDGET
+                );
+            }
             return Err(TakoExecutionError::ComputeBudgetExceeded {
                 requested: compute_budget,
                 maximum: MAX_COMPUTE_BUDGET,
@@ -309,6 +409,11 @@ impl TakoExecutor {
         let mut storage = TosStorageAdapter::new(provider, contract_hash, &mut cache, topoheight);
         let mut accounts = TosAccountAdapter::new(provider, topoheight);
         let loader_adapter = TosContractLoaderAdapter::new(provider, topoheight);
+
+        // 3a. Create referral adapter (if provider is available)
+        // Created before InvokeContext to ensure proper lifetime (adapter must outlive InvokeContext)
+        let mut referral_adapter =
+            referral_provider.map(|p| TosReferralAdapter::new(p, topoheight));
 
         // 4. Create TBPF loader with syscalls (needed for InvokeContext creation)
         // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml
@@ -335,12 +440,14 @@ impl TakoExecutor {
         let bytecode_size = bytecode.len() as u64;
         let executable = Executable::load(bytecode, loader.clone()).map_err(|e| {
             // Log detailed ELF parsing error for debugging
-            error!(
-                "ELF parsing failed for contract {}: bytecode_size={}, error={:?}",
-                contract_hash,
-                bytecode.len(),
-                e
-            );
+            if log::log_enabled!(log::Level::Error) {
+                error!(
+                    "ELF parsing failed for contract {}: bytecode_size={}, error={:?}",
+                    contract_hash,
+                    bytecode.len(),
+                    e
+                );
+            }
             // Also log first 64 bytes of bytecode for debugging
             if log::log_enabled!(log::Level::Debug) {
                 let header_bytes: Vec<u8> = bytecode.iter().take(64).cloned().collect();
@@ -378,16 +485,27 @@ impl TakoExecutor {
             tx_hash.as_bytes(),
         ));
 
+        // 7a. Wire referral provider (if available)
+        // Enables contracts to access native referral system via tos_get_uplines, etc.
+        if let Some(ref mut adapter) = referral_adapter {
+            invoke_context.set_referral_provider(adapter);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Referral provider wired to InvokeContext");
+            }
+        }
+
         // Account for entry contract bytecode in loaded data size tracking
         // This is done AFTER creating InvokeContext (post-load accounting pattern)
         // because the bytecode is loaded before InvokeContext exists
         invoke_context
             .check_and_record_loaded_data(bytecode_size)
             .map_err(|e| {
-                error!(
-                    "Entry contract bytecode size {} exceeds loaded data limit: {:?}",
-                    bytecode_size, e
-                );
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "Entry contract bytecode size {} exceeds loaded data limit: {:?}",
+                        bytecode_size, e
+                    );
+                }
                 TakoExecutionError::LoadedDataLimitExceeded {
                     current_size: bytecode_size,
                     limit: invoke_context
@@ -443,7 +561,9 @@ impl TakoExecutor {
             invoke_context
                 .process_precompile(program_id, input_data, &instruction_data_refs)
                 .map_err(|e| {
-                    error!("Precompile verification failed: {:?}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Precompile verification failed: {:?}", e);
+                    }
                     TakoExecutionError::PrecompileVerificationFailed {
                         program_id: hex::encode(program_id),
                         error_details: format!("{:?}", e),
@@ -492,7 +612,9 @@ impl TakoExecutor {
             debug!("Validating ELF bytecode: size={} bytes", bytecode.len());
         }
         tos_common::contract::validate_contract_bytecode(bytecode).map_err(|e| {
-            error!("Bytecode validation failed: {:?}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Bytecode validation failed: {:?}", e);
+            }
             TakoExecutionError::invalid_bytecode("Invalid ELF format", Some(e))
         })?;
 
@@ -534,15 +656,19 @@ impl TakoExecutor {
         );
 
         // 9. Execute contract
-        debug!("Executing contract bytecode via TBPF VM");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Executing contract bytecode via TBPF VM");
+        }
         let (instruction_count, result) = vm.execute_program(&executable, true); // true = interpreter mode
 
         // 10. Calculate compute units used (before dropping invoke_context)
         let compute_units_used = compute_budget - invoke_context.get_remaining();
-        debug!(
-            "Execution complete: instructions={}, compute_units_used={}/{}",
-            instruction_count, compute_units_used, compute_budget
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Execution complete: instructions={}, compute_units_used={}/{}",
+                instruction_count, compute_units_used, compute_budget
+            );
+        }
 
         // 11. Extract log messages from contract execution
         let log_messages = invoke_context.extract_log_messages().unwrap_or_default();
@@ -605,14 +731,16 @@ impl TakoExecutor {
             ProgramResult::Err(err) => {
                 let execution_error =
                     TakoExecutionError::from_ebpf_error(err, instruction_count, compute_units_used);
-                error!(
-                    "TOS Kernel(TAKO) execution failed: category={}, error={}, log_count={}, stack_allocated={}KB, heap_allocated={}KB",
-                    execution_error.category(),
-                    execution_error.user_message(),
-                    log_messages.len(),
-                    STACK_SIZE / 1024,
-                    HEAP_SIZE / 1024
-                );
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "TOS Kernel(TAKO) execution failed: category={}, error={}, log_count={}, stack_allocated={}KB, heap_allocated={}KB",
+                        execution_error.category(),
+                        execution_error.user_message(),
+                        log_messages.len(),
+                        STACK_SIZE / 1024,
+                        HEAP_SIZE / 1024
+                    );
+                }
                 // Note: Log messages are lost on error for now
                 // Future: Could extend TakoExecutionError to include log_messages for debugging
                 Err(execution_error)
@@ -648,14 +776,14 @@ impl TakoExecutor {
     /// Generate instant randomness for randomness syscalls
     ///
     /// Uses multi-layer entropy from TOS blockchain state:
-    /// - Block hash: GHOSTDAG + POW entropy
+    /// - Block hash: BlockDAG + POW entropy
     /// - Block height: Temporal entropy
     /// - Block timestamp: Additional temporal entropy
     /// - Transaction hash: Per-transaction entropy
     ///
     /// This implements TOS's instant randomness model which is:
     /// - Unpredictable: No advance knowledge due to POW randomness
-    /// - Unbiasable: Cannot skip blocks in GHOSTDAG (all blocks count)
+    /// - Unbiasable: Cannot skip blocks in BlockDAG (all blocks count)
     /// - Deterministic: Same inputs produce same randomness
     /// - 0-delay: Available immediately
     ///
@@ -667,7 +795,7 @@ impl TakoExecutor {
     ///
     /// # Arguments
     ///
-    /// * `block_hash` - 32-byte block hash from GHOSTDAG
+    /// * `block_hash` - 32-byte block hash from BlockDAG
     /// * `block_height` - Block height in the chain
     /// * `block_timestamp` - Unix timestamp of the block
     /// * `tx_hash` - 32-byte transaction hash
@@ -686,7 +814,7 @@ impl TakoExecutor {
         // Combine multiple entropy sources using Keccak256
         let mut hasher = Keccak256::new();
 
-        // Entropy source 1: Block hash (GHOSTDAG + POW entropy)
+        // Entropy source 1: Block hash (BlockDAG + POW entropy)
         hasher.update(b"INSTANT_RANDOM_V1");
         hasher.update(block_hash);
 

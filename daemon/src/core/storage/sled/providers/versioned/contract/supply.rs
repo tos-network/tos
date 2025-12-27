@@ -12,10 +12,12 @@ impl VersionedAssetsSupplyProvider for SledStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned assets supply at topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned assets supply at topoheight {}",
+                topoheight
+            );
+        }
         Self::delete_versioned_tree_at_topoheight(
             &mut self.snapshot,
             &self.assets_supply,
@@ -28,10 +30,12 @@ impl VersionedAssetsSupplyProvider for SledStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned assets supply above topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned assets supply above topoheight {}",
+                topoheight
+            );
+        }
         Self::delete_versioned_tree_above_topoheight(
             &mut self.snapshot,
             &self.assets_supply,
@@ -46,10 +50,12 @@ impl VersionedAssetsSupplyProvider for SledStorage {
         topoheight: TopoHeight,
         keep_last: bool,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned assets supply below topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned assets supply below topoheight {}",
+                topoheight
+            );
+        }
         Self::delete_versioned_tree_below_topoheight(
             &mut self.snapshot,
             &self.assets_supply,

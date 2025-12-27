@@ -27,11 +27,13 @@ impl SledStorage {
 
     // Versioned key is a 40 bytes key with topoheight as first bytes and the key as last bytes
     pub fn get_versioned_nonce_key(&self, key: &PublicKey, topoheight: TopoHeight) -> [u8; 40] {
-        trace!(
-            "get versioned balance key at {} for {}",
-            topoheight,
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get versioned balance key at {} for {}",
+                topoheight,
+                key.as_address(self.is_mainnet())
+            );
+        }
         let mut bytes = [0; 40];
         bytes[0..8].copy_from_slice(&topoheight.to_be_bytes());
         bytes[8..40].copy_from_slice(key.as_bytes());
@@ -48,12 +50,14 @@ impl NonceProvider for SledStorage {
         topoheight: TopoHeight,
         version: &VersionedNonce,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "set last nonce {} for {} at topoheight {}",
-            version.get_nonce(),
-            key.as_address(self.is_mainnet()),
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set last nonce {} for {} at topoheight {}",
+                version.get_nonce(),
+                key.as_address(self.is_mainnet()),
+                topoheight
+            );
+        }
 
         let disk_key = self.get_versioned_nonce_key(key, topoheight);
         Self::insert_into_disk(
@@ -81,10 +85,12 @@ impl NonceProvider for SledStorage {
         &self,
         key: &PublicKey,
     ) -> Result<TopoHeight, BlockchainError> {
-        trace!(
-            "get last topoheight for nonce {}",
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get last topoheight for nonce {}",
+                key.as_address(self.is_mainnet())
+            );
+        }
         self.load_from_disk(
             &self.nonces,
             key.as_bytes(),
@@ -105,11 +111,13 @@ impl NonceProvider for SledStorage {
         key: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "has nonce {} at topoheight {}",
-            key.as_address(self.is_mainnet()),
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "has nonce {} at topoheight {}",
+                key.as_address(self.is_mainnet()),
+                topoheight
+            );
+        }
         let key = self.get_versioned_nonce_key(key, topoheight);
         self.contains_data(&self.versioned_nonces, &key)
     }
@@ -138,11 +146,13 @@ impl NonceProvider for SledStorage {
         key: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<VersionedNonce, BlockchainError> {
-        trace!(
-            "get nonce at topoheight {} for {}",
-            topoheight,
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get nonce at topoheight {} for {}",
+                topoheight,
+                key.as_address(self.is_mainnet())
+            );
+        }
 
         let key = self.get_versioned_nonce_key(key, topoheight);
         self.load_from_disk(
@@ -158,11 +168,13 @@ impl NonceProvider for SledStorage {
         key: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedNonce)>, BlockchainError> {
-        trace!(
-            "get nonce at maximum topoheight {} for {}",
-            topoheight,
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get nonce at maximum topoheight {} for {}",
+                topoheight,
+                key.as_address(self.is_mainnet())
+            );
+        }
         // check first that this address has nonce, if no returns None
         if !self.has_nonce(key).await? {
             return Ok(None);
@@ -178,13 +190,17 @@ impl NonceProvider for SledStorage {
         // otherwise, we have to go through the whole chain
         let mut topo = Some(topo);
         while let Some(previous) = topo {
-            trace!("previous nonce version is at {}", previous);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("previous nonce version is at {}", previous);
+            }
             if previous <= topoheight {
-                trace!(
-                    "Highest version nonce found at {} (maximum topoheight = {})",
-                    previous,
-                    topoheight
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Highest version nonce found at {} (maximum topoheight = {})",
+                        previous,
+                        topoheight
+                    );
+                }
                 let version = self.get_nonce_at_exact_topoheight(key, previous).await?;
                 return Ok(Some((previous, version)));
             }

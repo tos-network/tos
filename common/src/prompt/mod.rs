@@ -284,7 +284,9 @@ impl Prompt {
         loop {
             tokio::select! {
                 _ = &mut exit_receiver => {
-                    info!("Received exit signal, exiting...");
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Received exit signal, exiting...");
+                    }
                     break;
                 },
                 res = tokio::signal::ctrl_c() => {
@@ -292,7 +294,7 @@ impl Prompt {
                         if log::log_enabled!(log::Level::Error) {
                             error!("Error received on CTRL+C: {e}");
                         }
-                    } else {
+                    } else if log::log_enabled!(log::Level::Info) {
                         info!("CTRL+C received, exiting...");
                     }
                     break;
@@ -303,13 +305,13 @@ impl Prompt {
                             Err(CommandError::Exit) => break,
                             Err(e) => {
                                 if log::log_enabled!(log::Level::Error) {
-                                    error!("Error while executing command: {e:#}");
+                                    error!("Error while executing command: {:#}", e);
                                 }
                             }
                             _ => {},
                         }
                     } else if log::log_enabled!(log::Level::Debug) {
-                        debug!("You said '{input}'");
+                        debug!("You said '{}'", input);
                     }
                 }
                 _ = interval.tick() => {
@@ -327,7 +329,7 @@ impl Prompt {
                         }
                         Err(e) => {
                             if log::log_enabled!(log::Level::Warn) {
-                                warn!("Couldn't update prompt message: {e}");
+                                warn!("Couldn't update prompt message: {}", e);
                             }
                         }
                     };
@@ -338,7 +340,7 @@ impl Prompt {
         if !self.state.exit().swap(true, Ordering::SeqCst) && self.state.is_interactive() {
             if let Err(e) = terminal::disable_raw_mode() {
                 if log::log_enabled!(log::Level::Error) {
-                    error!("Error while disabling raw mode: {e}");
+                    error!("Error while disabling raw mode: {}", e);
                 }
             }
         }

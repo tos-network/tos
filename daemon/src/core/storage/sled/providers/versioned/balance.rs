@@ -12,7 +12,9 @@ impl VersionedBalanceProvider for SledStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned balances at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned balances at topoheight {}", topoheight);
+        }
         Self::delete_versioned_tree_at_topoheight(
             &mut self.snapshot,
             &self.balances,
@@ -26,7 +28,9 @@ impl VersionedBalanceProvider for SledStorage {
         &mut self,
         topoheight: u64,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned balances above topoheight {}!", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned balances above topoheight {}!", topoheight);
+        }
         Self::delete_versioned_tree_above_topoheight(
             &mut self.snapshot,
             &self.balances,
@@ -41,11 +45,13 @@ impl VersionedBalanceProvider for SledStorage {
         topoheight: u64,
         keep_last: bool,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned balances (keep last: {}) below topoheight {}!",
-            keep_last,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned balances (keep last: {}) below topoheight {}!",
+                keep_last,
+                topoheight
+            );
+        }
         if !keep_last {
             Self::delete_versioned_tree_below_topoheight(
                 &mut self.snapshot,

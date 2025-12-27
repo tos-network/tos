@@ -20,7 +20,9 @@ impl BlockDagProvider for RocksStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<(Hash, Immutable<BlockHeader>), BlockchainError> {
-        trace!("get block header at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block header at topoheight {}", topoheight);
+        }
         let hash = self.get_hash_at_topo_height(topoheight).await?;
         let header = self.get_block_header_by_hash(&hash).await?;
         Ok((hash, header))
@@ -31,7 +33,9 @@ impl BlockDagProvider for RocksStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<u64, BlockchainError> {
-        trace!("get block reward at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block reward at topoheight {}", topoheight);
+        }
         self.get_metadata_at_topoheight(topoheight)
             .map(|metadata| metadata.rewards)
     }
@@ -41,7 +45,9 @@ impl BlockDagProvider for RocksStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<u64, BlockchainError> {
-        trace!("get supply at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get supply at topoheight {}", topoheight);
+        }
         self.get_metadata_at_topoheight(topoheight)
             .map(|metadata| metadata.emitted_supply)
     }
@@ -51,7 +57,9 @@ impl BlockDagProvider for RocksStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<u64, BlockchainError> {
-        trace!("get burned supply at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get burned supply at topoheight {}", topoheight);
+        }
         self.get_metadata_at_topoheight(topoheight)
             .map(|metadata| metadata.burned_supply)
     }
@@ -64,7 +72,9 @@ impl BlockDagProvider for RocksStorage {
         emitted_supply: u64,
         burned_supply: u64,
     ) -> Result<(), BlockchainError> {
-        trace!("set topoheight metadata {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set topoheight metadata {}", topoheight);
+        }
         let metadata = TopoHeightMetadata {
             rewards,
             emitted_supply,
@@ -84,7 +94,9 @@ impl RocksStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<TopoHeightMetadata, BlockchainError> {
-        trace!("get metadata at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get metadata at topoheight {}", topoheight);
+        }
         // TODO: cache
         self.load_from_disk(Column::TopoHeightMetadata, &topoheight.to_be_bytes())
     }

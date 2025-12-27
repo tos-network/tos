@@ -18,7 +18,7 @@ use tokio::time::{sleep, timeout, Duration};
 ///
 /// This function polls all nodes every 500ms to check if their tip sets
 /// are identical, indicating consensus convergence. This is critical for
-/// GHOSTDAG-based blockchains where multiple tips can temporarily exist.
+/// BlockDAG-based blockchains where multiple tips can temporarily exist.
 ///
 /// # Arguments
 ///
@@ -62,7 +62,7 @@ use tokio::time::{sleep, timeout, Duration};
 ///
 /// # Consensus Convergence
 ///
-/// In GHOSTDAG, nodes may temporarily have different tip sets due to:
+/// In BlockDAG, nodes may temporarily have different tip sets due to:
 /// - Network latency and block propagation delays
 /// - Concurrent block mining
 /// - Network partitions being healed

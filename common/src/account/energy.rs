@@ -50,8 +50,16 @@ impl FreezeDuration {
     }
 
     /// Get the duration in blocks (assuming 1 block per second)
+    /// Note: For network-specific duration, use `duration_in_blocks_for_network`
     pub fn duration_in_blocks(&self) -> u64 {
         self.days as u64 * 24 * 60 * 60 // days * 24 hours * 60 minutes * 60 seconds
+    }
+
+    /// Get the duration in blocks for a specific network
+    /// - Mainnet/Testnet: 1 day = 86400 blocks
+    /// - Devnet: 1 day = 10 blocks (accelerated for testing)
+    pub fn duration_in_blocks_for_network(&self, network: &crate::network::Network) -> u64 {
+        self.days as u64 * network.freeze_duration_multiplier()
     }
 
     /// Get the duration name for display
@@ -119,10 +127,38 @@ pub struct FreezeRecord {
 }
 
 impl FreezeRecord {
-    /// Create a new freeze record
+    /// Create a new freeze record (uses default mainnet timing)
     /// Ensures TOS amount is a whole number (multiple of COIN_VALUE)
     pub fn new(amount: u64, duration: FreezeDuration, freeze_topoheight: TopoHeight) -> Self {
         let unlock_topoheight = freeze_topoheight + duration.duration_in_blocks();
+
+        // Ensure amount is a whole number of TOS (multiple of COIN_VALUE)
+        let whole_tos_amount = (amount / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
+
+        // Calculate energy gained using integer arithmetic
+        let energy_gained =
+            (whole_tos_amount / crate::config::COIN_VALUE) * duration.reward_multiplier();
+
+        Self {
+            amount: whole_tos_amount,
+            duration,
+            freeze_topoheight,
+            unlock_topoheight,
+            energy_gained,
+        }
+    }
+
+    /// Create a new freeze record with network-specific timing
+    /// - Mainnet/Testnet: Uses standard day-to-block conversion
+    /// - Devnet: Uses accelerated timing for testing (1 day = 10 blocks)
+    pub fn new_for_network(
+        amount: u64,
+        duration: FreezeDuration,
+        freeze_topoheight: TopoHeight,
+        network: &crate::network::Network,
+    ) -> Self {
+        let unlock_topoheight =
+            freeze_topoheight + duration.duration_in_blocks_for_network(network);
 
         // Ensure amount is a whole number of TOS (multiple of COIN_VALUE)
         let whole_tos_amount = (amount / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
@@ -246,6 +282,25 @@ impl EnergyResource {
         duration: FreezeDuration,
         topoheight: TopoHeight,
     ) -> u64 {
+        // Use default mainnet timing
+        self.freeze_tos_for_energy_with_network(
+            tos_amount,
+            duration,
+            topoheight,
+            &crate::network::Network::Mainnet,
+        )
+    }
+
+    /// Freeze TOS to get energy with network-specific timing
+    /// - Mainnet/Testnet: Uses standard day-to-block conversion
+    /// - Devnet: Uses accelerated timing for testing (1 day = 10 blocks)
+    pub fn freeze_tos_for_energy_with_network(
+        &mut self,
+        tos_amount: u64,
+        duration: FreezeDuration,
+        topoheight: TopoHeight,
+        network: &crate::network::Network,
+    ) -> u64 {
         if tos_amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
             return 0;
         }
@@ -254,8 +309,9 @@ impl EnergyResource {
             return 0;
         }
 
-        // Create a new freeze record (this will ensure whole number TOS)
-        let freeze_record = FreezeRecord::new(tos_amount, duration, topoheight);
+        // Create a new freeze record with network-specific timing
+        let freeze_record =
+            FreezeRecord::new_for_network(tos_amount, duration, topoheight, network);
         let energy_gained = freeze_record.energy_gained;
         let actual_tos_frozen = freeze_record.amount;
 

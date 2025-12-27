@@ -16,10 +16,12 @@ impl MultiSigProvider for RocksStorage {
         &self,
         key: &PublicKey,
     ) -> Result<Option<TopoHeight>, BlockchainError> {
-        trace!(
-            "get last topoheight for multisig for {}",
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get last topoheight for multisig for {}",
+                key.as_address(self.is_mainnet())
+            );
+        }
         self.get_account_type(key)
             .map(|account| account.multisig_pointer)
     }
@@ -30,10 +32,12 @@ impl MultiSigProvider for RocksStorage {
         key: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<VersionedMultiSig<'a>, BlockchainError> {
-        trace!(
-            "get multisig at topoheight for {}",
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get multisig at topoheight for {}",
+                key.as_address(self.is_mainnet())
+            );
+        }
         let account_id = self.get_account_id(key)?;
         let key = Self::get_versioned_multisig_key(account_id, topoheight);
 
@@ -45,10 +49,12 @@ impl MultiSigProvider for RocksStorage {
         &mut self,
         key: &PublicKey,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete last topoheight for multisig for {}",
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete last topoheight for multisig for {}",
+                key.as_address(self.is_mainnet())
+            );
+        }
         let mut account = self.get_account_type(key)?;
         account.multisig_pointer = None;
 
@@ -61,10 +67,12 @@ impl MultiSigProvider for RocksStorage {
         account: &PublicKey,
         maximum_topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedMultiSig<'a>)>, BlockchainError> {
-        trace!(
-            "get multisig at maximum topoheight for {}",
-            account.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get multisig at maximum topoheight for {}",
+                account.as_address(self.is_mainnet())
+            );
+        }
         let account = self.get_account_type(account)?;
         let Some(topoheight_pointer) = account.multisig_pointer else {
             return Ok(None);
@@ -110,10 +118,12 @@ impl MultiSigProvider for RocksStorage {
         account: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
-        trace!(
-            "has multisig at exact topoheight for account {}",
-            account.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "has multisig at exact topoheight for account {}",
+                account.as_address(self.is_mainnet())
+            );
+        }
         let account_id = self.get_account_id(account)?;
         let versioned_key = Self::get_versioned_multisig_key(account_id, topoheight);
 
@@ -125,10 +135,12 @@ impl MultiSigProvider for RocksStorage {
         &'a self,
         account: &PublicKey,
     ) -> Result<(TopoHeight, VersionedMultiSig<'a>), BlockchainError> {
-        trace!(
-            "get last multisig for {}",
-            account.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get last multisig for {}",
+                account.as_address(self.is_mainnet())
+            );
+        }
         let account = self.get_account_type(account)?;
         let topoheight = account
             .multisig_pointer
@@ -146,11 +158,13 @@ impl MultiSigProvider for RocksStorage {
         topoheight: TopoHeight,
         multisig: VersionedMultiSig<'a>,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "set last multisig to {} for {}",
-            topoheight,
-            key.as_address(self.is_mainnet())
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set last multisig to {} for {}",
+                topoheight,
+                key.as_address(self.is_mainnet())
+            );
+        }
         let mut account = self.get_account_type(key)?;
         account.multisig_pointer = Some(topoheight);
 

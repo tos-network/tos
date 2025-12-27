@@ -12,10 +12,12 @@ impl VersionedRegistrationsProvider for SledStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned registrations at topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned registrations at topoheight {}",
+                topoheight
+            );
+        }
         for el in Self::scan_prefix(
             self.snapshot.as_ref(),
             &self.registrations_prefixed,
@@ -36,10 +38,12 @@ impl VersionedRegistrationsProvider for SledStorage {
             )?;
         }
 
-        trace!(
-            "delete versioned registrations at topoheight {} done!",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned registrations at topoheight {} done!",
+                topoheight
+            );
+        }
         Ok(())
     }
 
@@ -47,10 +51,12 @@ impl VersionedRegistrationsProvider for SledStorage {
         &mut self,
         topoheight: u64,
     ) -> Result<(), BlockchainError> {
-        trace!(
-            "delete versioned registrations above topoheight {}",
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete versioned registrations above topoheight {}",
+                topoheight
+            );
+        }
         for el in Self::iter_keys(self.snapshot.as_ref(), &self.registrations_prefixed) {
             let key = el?;
             let topo = u64::from_bytes(&key[0..8])?;

@@ -313,7 +313,9 @@ impl<S: Storage> P2pServer<S> {
                     )
                     .await
                 {
-                    error!("Unexpected error on P2p module: {}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Unexpected error on P2p module: {}", e);
+                    }
                 }
             });
         }
@@ -330,7 +332,9 @@ impl<S: Storage> P2pServer<S> {
         self.peer_list.close_all().await;
 
         if let Err(e) = self.exit_sender.send(()) {
-            error!("Error while sending Exit message to stop all tasks: {}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while sending Exit message to stop all tasks: {}", e);
+            }
         }
         info!("P2p Server is now stopped!");
     }
@@ -353,15 +357,19 @@ impl<S: Storage> P2pServer<S> {
     ) -> Result<(), P2pError> {
         let listener = TcpListener::bind(self.get_bind_address()).await?;
         if log_enabled!(Level::Info) {
-            info!("P2p Server will listen on: {}", self.get_bind_address());
+            if log::log_enabled!(log::Level::Info) {
+                info!("P2p Server will listen on: {}", self.get_bind_address());
+            }
         }
         if let Some((proxy, addr, auth)) = self.proxy.as_ref() {
-            info!(
-                "Proxy to use: {} ({} with auth = {})",
-                addr,
-                proxy,
-                auth.is_some()
-            );
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "Proxy to use: {} ({} with auth = {})",
+                    addr,
+                    proxy,
+                    auth.is_some()
+                );
+            }
         }
 
         // start a new task for chain sync
@@ -414,9 +422,13 @@ impl<S: Storage> P2pServer<S> {
                         match self.handle_new_peer(&peer, rx).await {
                             Ok(_) => {},
                             Err(e) => {
-                                error!("Error while handling new connection: {}", e);
+                                if log::log_enabled!(log::Level::Error) {
+                                    error!("Error while handling new connection: {}", e);
+                                }
                                 if let Err(e) = peer.get_connection().close().await {
-                                    debug!("Error while closing unhandled connection: {}", e);
+                                    if log::log_enabled!(log::Level::Debug) {
+                                        debug!("Error while closing unhandled connection: {}", e);
+                                    }
                                 }
                             }
                         }
@@ -453,7 +465,9 @@ impl<S: Storage> P2pServer<S> {
 
         // Reject connection
         if reject {
-            debug!("Rejecting connection from {}", addr);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Rejecting connection from {}", addr);
+            }
             stream.shutdown().await?;
             return Ok(());
         }
@@ -465,13 +479,19 @@ impl<S: Storage> P2pServer<S> {
             match zelf.create_verified_peer(&mut buffer, connection, false).await {
                 Ok((peer, rx)) => {
                     if let Err(e) = zelf.peer_sender.send((peer, rx)).await {
+                        if log::log_enabled!(log::Level::Error) {
                         error!("Error while sending new connection to listener: {}", e);
+                        }
                     }
                 },
                 Err(e) => {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Error while handling incoming connection {}: {}", addr, e);
+                    }
                     if let Err(e) = zelf.peer_list.increase_fail_count_for_peerlist_entry(&addr.ip(), true).await {
+                        if log::log_enabled!(log::Level::Error) {
                         error!("Error while increasing fail count for incoming peer {} while verifying it: {}", addr, e);
+                        }
                     }
                 }
             };
@@ -499,7 +519,9 @@ impl<S: Storage> P2pServer<S> {
                 }
                 res = listener.accept() => {
                     if log_enabled!(Level::Trace) {
+                        if log::log_enabled!(log::Level::Trace) {
                         trace!("New listener result received (is err: {})", res.is_err());
+                        }
                     }
                     counter!("tos_p2p_incoming_connections_total").increment(1u64);
 
@@ -508,7 +530,9 @@ impl<S: Storage> P2pServer<S> {
                     }
 
                     self.handle_incoming_connection(res, &thread_pool).await.unwrap_or_else(|e| {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Error while handling incoming connection: {}", e);
+                        }
                     });
                 }
             }
@@ -528,11 +552,13 @@ impl<S: Storage> P2pServer<S> {
         handshake: &mut Handshake<'_>,
     ) -> Result<(), P2pError> {
         if handshake.get_network() != self.blockchain.get_network() {
-            trace!(
-                "{} has an invalid network: {}",
-                connection,
-                handshake.get_network()
-            );
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "{} has an invalid network: {}",
+                    connection,
+                    handshake.get_network()
+                );
+            }
             return Err(P2pError::InvalidNetwork);
         }
 
@@ -560,20 +586,24 @@ impl<S: Storage> P2pServer<S> {
         };
 
         if *handshake.get_block_genesis_hash() != *genesis_hash {
-            debug!(
-                "Invalid genesis block hash {}",
-                handshake.get_block_genesis_hash()
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Invalid genesis block hash {}",
+                    handshake.get_block_genesis_hash()
+                );
+            }
             return Err(P2pError::InvalidHandshake);
         }
 
         if let Some(pruned_topoheight) = handshake.get_pruned_topoheight() {
             let topoheight = handshake.get_topoheight();
             if *pruned_topoheight > topoheight {
-                debug!(
-                    "Peer {} has a pruned topoheight {} higher than its topoheight {}",
-                    connection, pruned_topoheight, topoheight
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Peer {} has a pruned topoheight {} higher than its topoheight {}",
+                        connection, pruned_topoheight, topoheight
+                    );
+                }
                 return Err(P2pError::InvalidHandshake);
             }
         }
@@ -641,10 +671,12 @@ impl<S: Storage> P2pServer<S> {
         let handshake = match self.verify_connection(buf, &mut connection).await {
             Ok(handshake) => handshake,
             Err(e) => {
-                debug!(
-                    "Error while verifying connection with {}: {}",
-                    connection, e
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Error while verifying connection with {}: {}",
+                        connection, e
+                    );
+                }
                 connection.close().await?;
                 return Err(e);
             }
@@ -671,7 +703,9 @@ impl<S: Storage> P2pServer<S> {
         buf: &mut [u8],
         connection: &mut Connection,
     ) -> Result<Handshake<'_>, P2pError> {
-        trace!("New connection: {}", connection);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("New connection: {}", connection);
+        }
 
         // Exchange encryption keys
         let expected_key = self
@@ -710,7 +744,9 @@ impl<S: Storage> P2pServer<S> {
         // if it's a outgoing connection, don't send the handshake back
         // because we have already sent it
         if !connection.is_out() {
-            trace!("Sending handshake back to {}", connection);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Sending handshake back to {}", connection);
+            }
             self.send_handshake(&connection).await?;
         }
 
@@ -761,15 +797,19 @@ impl<S: Storage> P2pServer<S> {
         addr: SocketAddr,
         priority: bool,
     ) -> Result<(), P2pError> {
-        debug!(
-            "try to connect to peer addr {}, priority: {}",
-            addr, priority
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "try to connect to peer addr {}, priority: {}",
+                addr, priority
+            );
+        }
         counter!("tos_p2p_outgoing_connections_total").increment(1u64);
         let connection = match self.connect_to_peer(addr).await {
             Ok(connection) => connection,
             Err(e) => {
-                debug!("Error while connecting to address {}: {}", addr, e);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error while connecting to address {}: {}", addr, e);
+                }
 
                 if !priority {
                     if let Err(e) = self
@@ -777,7 +817,9 @@ impl<S: Storage> P2pServer<S> {
                         .increase_fail_count_for_peerlist_entry(&addr.ip(), false)
                         .await
                     {
-                        error!("Error while increasing fail count for peer {} while connecting to it: {}", addr, e);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Error while increasing fail count for peer {} while connecting to it: {}", addr, e);
+                        }
                     }
                 }
                 return Err(e);
@@ -791,20 +833,24 @@ impl<S: Storage> P2pServer<S> {
         {
             Ok(handshake) => handshake,
             Err(e) => {
-                debug!(
-                    "Error while verifying connection to address {}: {}",
-                    addr, e
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Error while verifying connection to address {}: {}",
+                        addr, e
+                    );
+                }
                 if !priority {
                     if let Err(e) = self
                         .peer_list
                         .increase_fail_count_for_peerlist_entry(&addr.ip(), false)
                         .await
                     {
-                        error!(
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
                             "Error while increasing fail count for peer {} while verifying it: {}",
                             addr, e
                         );
+                        }
                     }
                 }
 
@@ -825,22 +871,32 @@ impl<S: Storage> P2pServer<S> {
     // Connect to a new peer using its socket address
     // Then we send him a handshake
     async fn connect_to_peer(&self, addr: SocketAddr) -> Result<Connection, P2pError> {
-        trace!("Trying to connect to {}", addr);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Trying to connect to {}", addr);
+        }
 
         if !self.is_compatible_with_exclusive_nodes(&addr) {
-            debug!("Not in exclusive node list: {}, skipping", addr);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Not in exclusive node list: {}, skipping", addr);
+            }
             return Err(P2pError::ExclusiveNode);
         }
 
         {
-            trace!("peer list locked for trying to connect to peer {}", addr);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("peer list locked for trying to connect to peer {}", addr);
+            }
             if self.is_connected_to_addr(&addr).await {
-                debug!("Already connected to peer: {}, skipping", addr);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Already connected to peer: {}, skipping", addr);
+                }
                 return Err(P2pError::PeerAlreadyConnected(addr));
             }
 
             if !self.peer_list.is_allowed(&addr.ip()).await? {
-                debug!("{} is not allowed, we can't connect to it", addr);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("{} is not allowed, we can't connect to it", addr);
+                }
                 return Err(P2pError::NotAllowed);
             }
         }
@@ -875,7 +931,9 @@ impl<S: Storage> P2pServer<S> {
     // Send a handshake to a connection (this is used to determine if its a potential peer)
     // Handsake is sent only once, when we connect to a new peer, and we get it back from connection to make it a peer
     async fn send_handshake(&self, connection: &Connection) -> Result<(), P2pError> {
-        trace!("Sending handshake to {}", connection);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Sending handshake to {}", connection);
+        }
         let mut handshake = self.build_handshake().await?;
         connection.send_bytes(&mut handshake).await
     }
@@ -956,7 +1014,9 @@ impl<S: Storage> P2pServer<S> {
         // and that are pruned but before our height so we can sync correctly
         let available_peers = self.peer_list.get_cloned_peers().await;
         if log_enabled!(Level::Debug) {
-            debug!("{} peers available for selection", available_peers.len());
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("{} peers available for selection", available_peers.len());
+            }
         }
 
         let mut peers = stream::iter(available_peers)
@@ -964,7 +1024,9 @@ impl<S: Storage> P2pServer<S> {
                 // Don't select peers that are on a bad chain
                 if p.has_sync_chain_failed() {
                     if log_enabled!(Level::Debug) {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("{} has failed chain sync before, skipping...", p);
+                        }
                     }
                     return None;
                 }
@@ -974,7 +1036,9 @@ impl<S: Storage> P2pServer<S> {
                     let cumulative_difficulty = p.get_cumulative_difficulty().lock().await;
                     if *cumulative_difficulty <= our_cumulative_difficulty {
                         if log_enabled!(Level::Debug) {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("{} has a lower cumulative difficulty than us, skipping...", p);
+                            }
                         }
                         return None;
                     }
@@ -985,7 +1049,9 @@ impl<S: Storage> P2pServer<S> {
                     // Fast sync with nodes that are >=1.17.0 only
                     if !hard_fork::is_version_matching_requirement(p.get_version(), "1.17.0").unwrap_or(false) {
                         if log_enabled!(Level::Debug) {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("{} is not matching the version requirement (1.17.0), skipping...", p);
+                            }
                         }
                         return None;
                     }
@@ -993,7 +1059,9 @@ impl<S: Storage> P2pServer<S> {
                     // Check if peer supports fast sync
                     if !p.supports_fast_sync() {
                         if log_enabled!(Level::Debug) {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("{} does not support fast sync, skipping...", p);
+                            }
                         }
                         return None;
                     }
@@ -1002,7 +1070,9 @@ impl<S: Storage> P2pServer<S> {
                     // for this we check that the peer topoheight is not less than the prune safety limit
                     if peer_topoheight < PRUNE_SAFETY_LIMIT || our_topoheight + PRUNE_SAFETY_LIMIT > peer_topoheight {
                         if log_enabled!(Level::Debug) {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("{} has a topoheight less than the prune safety limit, skipping...", p);
+                            }
                         }
                         return None;
                     }
@@ -1011,7 +1081,9 @@ impl<S: Storage> P2pServer<S> {
                         // But we may never know if a peer is not following the protocol strictly
                         if peer_topoheight - pruned_topoheight < PRUNE_SAFETY_LIMIT {
                             if log_enabled!(Level::Debug) {
+                                if log::log_enabled!(log::Level::Debug) {
                                 debug!("{} has a pruned topoheight {} less than the prune safety limit, skipping...", p, pruned_topoheight);
+                                }
                             }
                             return None;
                         }
@@ -1022,7 +1094,9 @@ impl<S: Storage> P2pServer<S> {
                     if let Some(pruned_topoheight) = p.get_pruned_topoheight() {
                         if pruned_topoheight > our_topoheight {
                             if log_enabled!(Level::Debug) {
+                                if log::log_enabled!(log::Level::Debug) {
                                 debug!("{} has a pruned topoheight {} higher than our topoheight {}, skipping...", p, pruned_topoheight, our_topoheight);
+                                }
                             }
                             return None;
                         }
@@ -1037,7 +1111,9 @@ impl<S: Storage> P2pServer<S> {
                     }
                     Some(p)
                 } else {
+                    if log::log_enabled!(log::Level::Trace) {
                     trace!("{} is not ahead of us, skipping it", p);
+                    }
                     None
                 }
             })
@@ -1051,10 +1127,12 @@ impl<S: Storage> P2pServer<S> {
             // If we had an error with previous peer and it was not a priority node
             // and that we have still another peer for syncing, remove previous peer
             if peers.len() > 1 && (err && !priority) {
-                debug!(
-                    "removing previous peer {} from random selection, err: {}, priority: {}",
-                    previous_peer, err, priority
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "removing previous peer {} from random selection, err: {}, priority: {}",
+                        previous_peer, err, priority
+                    );
+                }
                 // We don't need to preserve the order
                 if let Some(position) = peers.iter().position(|p| p.get_id() == previous_peer) {
                     peers.swap_remove_index(position);
@@ -1063,7 +1141,9 @@ impl<S: Storage> P2pServer<S> {
         }
 
         let count = peers.len();
-        debug!("filtered peers available for random selection: {}", count);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("filtered peers available for random selection: {}", count);
+        }
         if count == 0 {
             return Ok(None);
         }
@@ -1127,7 +1207,9 @@ impl<S: Storage> P2pServer<S> {
             let diff = current - last_chain_sync;
             if diff < CHAIN_SYNC_DELAY * MILLIS_PER_SECOND {
                 let wait = CHAIN_SYNC_DELAY * MILLIS_PER_SECOND - diff;
-                debug!("Waiting {} ms for chain sync delay...", wait);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Waiting {} ms for chain sync delay...", wait);
+                }
                 sleep(Duration::from_millis(wait)).await;
             }
             last_chain_sync = current;
@@ -1163,10 +1245,12 @@ impl<S: Storage> P2pServer<S> {
                 match self.select_random_best_peer(fast_sync, previous_peer).await {
                     Ok(peer) => peer,
                     Err(e) => {
-                        error!(
-                            "Error while selecting random best peer for chain sync: {}",
-                            e
-                        );
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Error while selecting random best peer for chain sync: {}",
+                                e
+                            );
+                        }
                         None
                     }
                 };
@@ -1177,17 +1261,21 @@ impl<S: Storage> P2pServer<S> {
                 peer_selected = match self.select_random_best_peer(false, previous_peer).await {
                     Ok(peer) => peer,
                     Err(e) => {
-                        error!(
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
                             "Error while trying to re-select random best peer for chain sync: {}",
                             e
                         );
+                        }
                         None
                     }
                 };
             }
 
             if let Some(peer) = peer_selected {
-                debug!("Selected for chain sync is {}", peer);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Selected for chain sync is {}", peer);
+                }
                 counter!("tos_p2p_chain_sync_total").increment(1u64);
 
                 // We are syncing the chain
@@ -1199,7 +1287,9 @@ impl<S: Storage> P2pServer<S> {
                 let err = if fast_sync {
                     if let Err(e) = self.bootstrap_chain(&peer).await {
                         peer.clear_bootstrap_requests().await;
-                        warn!("Error occured while fast syncing with {}: {}", peer, e);
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("Error occured while fast syncing with {}: {}", peer, e);
+                        }
                         true
                     } else {
                         false
@@ -1211,7 +1301,9 @@ impl<S: Storage> P2pServer<S> {
                         .await
                     {
                         peer.clear_objects_requested().await;
-                        warn!("Error occured on chain sync with {}: {}", peer, e);
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("Error occured on chain sync with {}: {}", peer, e);
+                        }
                         true
                     } else {
                         false
@@ -1243,10 +1335,12 @@ impl<S: Storage> P2pServer<S> {
 
                     if !has_peer {
                         warned = true;
-                        warn!(
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!(
                             "No compatible peer found to sync the chain from our topoheight {}!",
                             our_topoheight
                         );
+                        }
                     }
                 }
                 trace!("No peer found for chain sync, waiting before next check");
@@ -1260,7 +1354,9 @@ impl<S: Storage> P2pServer<S> {
     pub async fn ping_peers(&self) {
         debug!("Sending ping signal to all peers");
         if let Err(e) = self.notify_ping_loop.send(()).await {
-            error!("Error while sending ping signal: {}", e);
+            if log::log_enabled!(log::Level::Error) {
+                error!("Error while sending ping signal: {}", e);
+            }
         }
     }
 
@@ -1300,7 +1396,9 @@ impl<S: Storage> P2pServer<S> {
             let ping = match self.build_generic_ping_packet().await {
                 Ok(ping) => ping,
                 Err(e) => {
-                    error!("Error while building generic ping packet: {}", e);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while building generic ping packet: {}", e);
+                    }
                     // We will retry later
                     continue;
                 }
@@ -1323,7 +1421,9 @@ impl<S: Storage> P2pServer<S> {
                         let all_peers = &all_peers;
                         async move {
                             if peer.get_connection().is_closed() {
-                                debug!("{} is closed, skipping ping packet", peer);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("{} is closed, skipping ping packet", peer);
+                                }
                                 return;
                             }
 
@@ -1349,10 +1449,12 @@ impl<S: Storage> P2pServer<S> {
                                 if (is_local_address(addr) && !is_local_peer)
                                     || !is_valid_address(addr)
                                 {
-                                    debug!(
-                                        "{} is a local address but peer is external, skipping",
-                                        addr
-                                    );
+                                    if log::log_enabled!(log::Level::Debug) {
+                                        debug!(
+                                            "{} is a local address but peer is external, skipping",
+                                            addr
+                                        );
+                                    }
                                     continue;
                                 }
 
@@ -1371,11 +1473,13 @@ impl<S: Storage> P2pServer<S> {
                                 if send {
                                     // add it in our side to not re send it again
                                     if log_enabled!(Level::Trace) {
-                                        trace!(
-                                            "{} didn't received {} yet...",
-                                            peer.get_outgoing_address(),
-                                            addr
-                                        );
+                                        if log::log_enabled!(log::Level::Trace) {
+                                            trace!(
+                                                "{} didn't received {} yet...",
+                                                peer.get_outgoing_address(),
+                                                addr
+                                            );
+                                        }
                                     }
 
                                     // add it to new list to send it
@@ -1388,17 +1492,21 @@ impl<S: Storage> P2pServer<S> {
 
                             // update the ping packet with the new peers
                             if log_enabled!(Level::Debug) {
-                                debug!(
-                                    "Set peers: {:?}, going to {}",
-                                    ping.get_peers(),
-                                    peer.get_outgoing_address()
-                                );
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!(
+                                        "Set peers: {:?}, going to {}",
+                                        ping.get_peers(),
+                                        peer.get_outgoing_address()
+                                    );
+                                }
                             }
                             // send the ping packet to the peer
                             if let Err(e) =
                                 peer.send_packet(Packet::Ping(Cow::Borrowed(&ping))).await
                             {
-                                debug!("Error sending specific ping packet to {}: {}", peer, e);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("Error sending specific ping packet to {}: {}", peer, e);
+                                }
                             } else {
                                 peer.set_last_ping_sent(current_time);
                             }
@@ -1424,17 +1532,23 @@ impl<S: Storage> P2pServer<S> {
                             if current_time - peer.get_last_ping_sent() > P2P_PING_DELAY
                                 && !peer.get_connection().is_closed()
                             {
-                                trace!("broadcast generic ping packet to {}", peer);
+                                if log::log_enabled!(log::Level::Trace) {
+                                    trace!("broadcast generic ping packet to {}", peer);
+                                }
                                 if let Err(e) = peer.send_bytes(bytes.clone()).await {
-                                    error!(
-                                        "Error while trying to send ping packet to {}: {}",
-                                        peer, e
-                                    );
+                                    if log::log_enabled!(log::Level::Error) {
+                                        error!(
+                                            "Error while trying to send ping packet to {}: {}",
+                                            peer, e
+                                        );
+                                    }
                                 } else {
                                     peer.set_last_ping_sent(current_time);
                                 }
                             } else {
-                                trace!("we already sent a ping packet to {}, skipping", peer);
+                                if log::log_enabled!(log::Level::Trace) {
+                                    trace!("we already sent a ping packet to {}, skipping", peer);
+                                }
                             }
                         }
                     })
@@ -1497,7 +1611,9 @@ impl<S: Storage> P2pServer<S> {
                                 }
                             },
                             Err(e) => {
-                                error!("Error while finding peer to connect: {}", e);
+                                if log::log_enabled!(log::Level::Error) {
+                                    error!("Error while finding peer to connect: {}", e);
+                                }
                                 None
                             }
                         }
@@ -1506,9 +1622,13 @@ impl<S: Storage> P2pServer<S> {
 
                 trace!("End locking peer list write mode (peerlist loop)");
                 if let Some((addr, priority)) = peer {
-                    debug!("Found peer {}", addr);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Found peer {}", addr);
+                    }
                     if let Err(e) = self.try_to_connect_to_peer(addr, priority).await {
-                        debug!("Error while trying to connect to peer: {}", e);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Error while trying to connect to peer: {}", e);
+                        }
                     }
                     should_wait = false;
                 } else {
@@ -1572,13 +1692,17 @@ impl<S: Storage> P2pServer<S> {
         for hash in header.get_txs_hashes().iter().cloned() {
             let future = async {
                 if let Ok(tx) = self.blockchain.get_tx(&hash).await {
-                    debug!("tx {} found in chain", hash);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("tx {} found in chain", hash);
+                    }
                     Ok(tx.into_arc())
                 } else {
-                    debug!(
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
                         "Cache missed for TX {} in block propagation {}, will request it from peer",
                         hash, block_hash
                     );
+                    }
 
                     // request it from peer
                     // TODO: rework object tracker
@@ -1643,7 +1767,9 @@ impl<S: Storage> P2pServer<S> {
 
                     // prevent any duplicated block
                     if !pending_requests.insert(block_hash.clone()) {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Block {} is already being processed, skipping it", block_hash);
+                        }
                         continue;
                     }
 
@@ -1668,21 +1794,29 @@ impl<S: Storage> P2pServer<S> {
                             let zelf = &self;
                             let future = async move {
                                 {
+                                    if log::log_enabled!(log::Level::Debug) {
                                     debug!("Locking blocks propagation queue to mark the execution timestamp for {}", block_hash);
+                                    }
                                     let mut blocks_propagation_queue = zelf.blocks_propagation_queue.write().await;
                                     match blocks_propagation_queue.peek_mut(&block_hash) {
                                         Some(v) => {
                                             *v = Some(get_current_time_in_millis());
                                         },
                                         None => {
+                                            if log::log_enabled!(log::Level::Warn) {
                                             warn!("Block propagation {} not found in queue, are we overloaded?", block_hash);
+                                            }
                                         }
                                     }
                                 }
 
+                                if log::log_enabled!(log::Level::Debug) {
                                 debug!("Adding received block {} from {} to chain", block_hash, peer);
+                                }
                                 if let Err(e) = zelf.blockchain.add_new_block(block, Some(Immutable::Arc(block_hash.clone())), BroadcastOption::All, false).await {
+                                    if log::log_enabled!(log::Level::Warn) {
                                     warn!("Error while adding new block {} from {}: {}", block_hash, peer, e);
+                                    }
                                     peer.increment_fail_count();
                                 } else {
                                     peer.set_sync_chain_failed(false);
@@ -1696,7 +1830,9 @@ impl<S: Storage> P2pServer<S> {
                         },
                         Err(e) => {
                             pending_requests.remove(&block_hash);
+                            if log::log_enabled!(log::Level::Warn) {
                             warn!("Error on blocks processing task: {}", e);
+                            }
                         }
                     }
                 }
@@ -1711,19 +1847,25 @@ impl<S: Storage> P2pServer<S> {
         peer: &Arc<Peer>,
         hash: Arc<Hash>,
     ) -> Result<Option<Arc<Transaction>>, BlockchainError> {
-        debug!("Requesting TX {} from {}", hash, peer);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Requesting TX {} from {}", hash, peer);
+        }
 
         // First, re-check that we don't already have it somewhere
         if self.blockchain.has_tx(&hash).await? {
-            debug!(
-                "TX {} was found in chain, retrieve it instead of requesting {}",
-                hash, peer
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "TX {} was found in chain, retrieve it instead of requesting {}",
+                    hash, peer
+                );
+            }
             let tx = self.blockchain.get_tx(&hash).await?;
             return Ok::<_, BlockchainError>(Some(tx.into_arc()));
         }
 
-        debug!("Requesting TX object {}", hash);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Requesting TX object {}", hash);
+        }
         counter!("tos_p2p_txs_requested_total").increment(1u64);
 
         let (tx, _) = peer
@@ -1757,12 +1899,16 @@ impl<S: Storage> P2pServer<S> {
                 },
                 Some(res) = txs_executor.next() => {
                     if let Err(e) = res {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Error while processing TX: {}", e);
+                        }
                     }
                 },
                 Some((peer, hash)) = receiver.recv() => {
                     if !pending_requests.insert(hash.clone()) {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("TX {} is already requested, skipping it", hash);
+                        }
                         continue;
                     }
 
@@ -1773,14 +1919,18 @@ impl<S: Storage> P2pServer<S> {
 
                     let future = async move {
                         if peer.get_connection().is_closed() {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("{} is closed, skipping TX {} request", peer, hash);
+                            }
                             return (Ok(None), hash)
                         }
 
                         select! {
                             biased;
                             _ = peer_exit.recv() => {
+                                if log::log_enabled!(log::Level::Debug) {
                                 debug!("{} has disconnected, skipping TX {} request", peer, hash);
+                                }
                                 (Ok(None), hash)
                             },
                             res = zelf.request_transaction(&peer, Arc::clone(&hash)) => (res, hash)
@@ -1790,7 +1940,9 @@ impl<S: Storage> P2pServer<S> {
                     futures.push_back(future);
                 },
                 Some((res, hash)) = futures.next() => {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("removing TX {} from pending requests", hash);
+                    }
                     pending_requests.remove(&hash);
 
                     match res {
@@ -1798,13 +1950,17 @@ impl<S: Storage> P2pServer<S> {
                         Ok(Some(transaction)) => {
                             let zelf = &self;
                             let future = async move {
+                                if log::log_enabled!(log::Level::Debug) {
                                 debug!("Adding TX to mempool from processing TX task: {}", hash);
+                                }
                                 // Double check because we may had a race condition here when we're under heavy load
                                 // This can happen if a block got prioritized with the TX inside
                                 if !zelf.blockchain.is_tx_included(&hash).await? {
                                     zelf.blockchain.add_tx_to_mempool_with_hash(transaction, Immutable::Arc(hash.clone()), true).await?;
                                 } else {
+                                    if log::log_enabled!(log::Level::Debug) {
                                     debug!("Propagated Tx {} got front-runned, skipping it...", hash);
+                                    }
                                 }
 
                                 Ok::<_, BlockchainError>(())
@@ -1813,7 +1969,9 @@ impl<S: Storage> P2pServer<S> {
                             txs_executor.push_back(future);
                         },
                         Err(e) => {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("Error in txs processing task for TX {}: {} ", hash, e);
+                            }
                         }
                     };
                 }
@@ -1850,7 +2008,9 @@ impl<S: Storage> P2pServer<S> {
                     break;
                 },
                 _ = peer_exit.recv() => {
+                    if log::log_enabled!(log::Level::Debug) {
                     debug!("Peer {} has exited, stopping...", peer);
+                    }
                     break;
                 },
                 _ = interval.tick() => {
@@ -1860,7 +2020,9 @@ impl<S: Storage> P2pServer<S> {
                     // Last time we got a ping packet from him
                     let last_ping = peer.get_last_ping();
                     if last_ping != 0 && get_current_time_in_seconds() - last_ping > P2P_PING_TIMEOUT {
-                        debug!("{} has not sent a ping packet for {} seconds, closing connection...", peer, P2P_PING_TIMEOUT);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("{} has not sent a ping packet for {} seconds, closing connection...", peer, P2P_PING_TIMEOUT);
+                        }
                         break;
                     }
                 },
@@ -1928,13 +2090,19 @@ impl<S: Storage> P2pServer<S> {
                 }
             },
             _ = peer_exit.recv() => {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("Peer {} has exited, stopping...", peer);
+                }
             },
             _ = write_task => {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("write task for {} has finished, stopping...", peer);
+                }
             },
             res = read_packet => {
+                if log::log_enabled!(log::Level::Debug) {
                 debug!("read packet task for {} has  finished", peer);
+                }
                 res.context("Error while joining read packet task")??;
             },
             res = self.listen_connection(&peer, receiver) => {
@@ -1953,7 +2121,9 @@ impl<S: Storage> P2pServer<S> {
         peer: Arc<Peer>,
         mut rx: Rx,
     ) -> Result<(), P2pError> {
-        trace!("handle connection of {}", peer);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("handle connection of {}", peer);
+        }
         // task for writing to peer
 
         let (write_tx, write_rx) = oneshot::channel();
@@ -1966,15 +2136,19 @@ impl<S: Storage> P2pServer<S> {
                     peer.set_write_task_state(TaskState::Active).await;
 
                     let addr = *peer.get_connection().get_address();
-                    trace!(
-                        "Handle connection write side task for {} has been started",
-                        addr
-                    );
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!(
+                            "Handle connection write side task for {} has been started",
+                            addr
+                        );
+                    }
                     if let Err(e) = zelf
                         .handle_connection_write_side(&peer, &mut rx, write_rx)
                         .await
                     {
-                        debug!("Error while writing to {}: {}", peer, e);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Error while writing to {}: {}", peer, e);
+                        }
                     }
 
                     peer.set_write_task_state(TaskState::Exiting).await;
@@ -1982,19 +2156,25 @@ impl<S: Storage> P2pServer<S> {
                     // clean shutdown
                     rx.close();
 
-                    debug!("Closing {} from write task", peer);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Closing {} from write task", peer);
+                    }
                     if let Err(e) = peer.close().await {
-                        debug!(
-                            "Error while closing connection for {} from write task: {}",
-                            peer, e
-                        );
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "Error while closing connection for {} from write task: {}",
+                                peer, e
+                            );
+                        }
                     }
 
                     peer.set_write_task_state(TaskState::Finished).await;
-                    debug!(
-                        "Handle connection write side task for {} has been finished",
-                        addr
-                    );
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Handle connection write side task for {} has been finished",
+                            addr
+                        );
+                    }
                 },
             )
         };
@@ -2008,31 +2188,39 @@ impl<S: Storage> P2pServer<S> {
                 async move {
                     peer.set_read_task_state(TaskState::Active).await;
                     let addr = *peer.get_connection().get_address();
-                    trace!(
-                        "Handle connection read side task for {} has been started",
-                        addr
-                    );
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!(
+                            "Handle connection read side task for {} has been started",
+                            addr
+                        );
+                    }
                     if let Err(e) = zelf.handle_connection_read_side(&peer, write_task).await {
-                        debug!("Error while running read part from {}: {}", peer, e);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Error while running read part from {}: {}", peer, e);
+                        }
 
                         peer.set_read_task_state(TaskState::Exiting).await;
 
                         // Verify that the connection is closed
                         // Write task should be responsible for closing the connection
                         if write_tx.send(()).is_err() {
-                            debug!(
-                                "Write task has already exited, closing connection for {}",
-                                peer
-                            );
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!(
+                                    "Write task has already exited, closing connection for {}",
+                                    peer
+                                );
+                            }
                         }
                     }
 
                     peer.set_read_task_state(TaskState::Finished).await;
 
-                    debug!(
-                        "Handle connection read side task for {} has been finished",
-                        addr
-                    );
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Handle connection read side task for {} has been finished",
+                            addr
+                        );
+                    }
                 },
             );
         }
@@ -2042,7 +2230,9 @@ impl<S: Storage> P2pServer<S> {
         let peer_height = peer.get_height();
         if our_height == peer_height {
             if let Err(e) = self.request_inventory_of(&peer).await {
-                warn!("Error while requesting inventory of {}: {}", peer, e);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("Error while requesting inventory of {}: {}", peer, e);
+                }
             }
         }
 
@@ -2060,7 +2250,9 @@ impl<S: Storage> P2pServer<S> {
         &'a self,
         peer: &'a Arc<Peer>,
     ) -> impl Stream<Item = Arc<Peer>> + 'a {
-        debug!("get common peers for {}", peer);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("get common peers for {}", peer);
+        }
         trace!("locked peer_list, locking peers received (common peers)");
         let peer_peers = {
             let lock = peer.get_peers().lock().await;
@@ -2095,17 +2287,23 @@ impl<S: Storage> P2pServer<S> {
     ) -> Result<(), P2pError> {
         match packet {
             Packet::Handshake(_) => {
-                error!("{} sent us handshake packet (not valid!)", peer);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("{} sent us handshake packet (not valid!)", peer);
+                }
                 peer.close().await?;
                 return Err(P2pError::InvalidPacket);
             }
             Packet::KeyExchange(key) => {
-                trace!("{}: Rotate key packet", peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("{}: Rotate key packet", peer);
+                }
                 let key = key.into_owned();
                 peer.get_connection().rotate_peer_key(key).await?;
             }
             Packet::TransactionPropagation(packet_wrapper) => {
-                trace!("{}: Transaction Propagation packet", peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("{}: Transaction Propagation packet", peer);
+                }
                 let (hash, ping) = packet_wrapper.consume();
                 let hash = Arc::new(hash.into_owned());
 
@@ -2114,13 +2312,17 @@ impl<S: Storage> P2pServer<S> {
                     .await?;
 
                 // peer should not send us twice the same transaction
-                debug!(
-                    "Received tx hash {} from {}",
-                    hash,
-                    peer.get_outgoing_address()
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Received tx hash {} from {}",
+                        hash,
+                        peer.get_outgoing_address()
+                    );
+                }
                 if self.disable_fetching_txs_propagated {
-                    debug!("skipping TX {} due to fetching disabled", hash);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("skipping TX {} due to fetching disabled", hash);
+                    }
                     return Ok(());
                 }
 
@@ -2129,10 +2331,12 @@ impl<S: Storage> P2pServer<S> {
 
                     if let Some((direction, is_common)) = txs_cache.get_mut(&hash) {
                         if !direction.update(Direction::In) && !*is_common {
-                            warn!(
-                                "{} send us a transaction ({}) already tracked by him ({:?})",
-                                peer, hash, direction
-                            );
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!(
+                                    "{} send us a transaction ({}) already tracked by him ({:?})",
+                                    peer, hash, direction
+                                );
+                            }
                             // return Err(P2pError::AlreadyTrackedTx(hash.as_ref().clone(), *direction))
                             return Ok(());
                         }
@@ -2149,15 +2353,19 @@ impl<S: Storage> P2pServer<S> {
                     .for_each_concurrent(self.stream_concurrency, |common_peer| {
                         let hash = &hash;
                         async move {
-                            trace!(
-                                "{} is a common peer with {}, adding TX {} to its cache",
-                                common_peer,
-                                peer,
-                                hash
-                            );
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!(
+                                    "{} is a common peer with {}, adding TX {} to its cache",
+                                    common_peer,
+                                    peer,
+                                    hash
+                                );
+                            }
                             let mut txs_cache = common_peer.get_txs_cache().lock().await;
                             if !txs_cache.contains(hash) {
-                                debug!("Adding TX {} to common {} cache", hash, common_peer);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("Adding TX {} to common {} cache", hash, common_peer);
+                                }
                                 // Set it as Out so we don't send it anymore but we can get it one time in case of bad common peer prediction
                                 txs_cache.put(hash.clone(), (Direction::In, true));
                             }
@@ -2166,44 +2374,62 @@ impl<S: Storage> P2pServer<S> {
                     .await;
 
                 // Check that the tx is not in mempool or on disk already
-                debug!("checking if TX {} is already in chain", hash);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("checking if TX {} is already in chain", hash);
+                }
                 if self.blockchain.is_tx_included(&hash).await? {
-                    debug!("TX {} propagated is already in chain", hash);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("TX {} propagated is already in chain", hash);
+                    }
                     return Ok(());
                 }
 
                 // Check that we are not already waiting on it
                 {
-                    debug!("checking TX {} in propagation queue", hash);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("checking TX {} in propagation queue", hash);
+                    }
                     let txs_propagation_queue = self.txs_propagation_queue.read().await;
                     if txs_propagation_queue.contains(&hash) {
-                        debug!(
-                            "TX {} propagated is already in processing from another peer",
-                            hash
-                        );
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "TX {} propagated is already in processing from another peer",
+                                hash
+                            );
+                        }
                         return Ok(());
                     }
                 }
 
                 {
-                    debug!("adding TX {} in propagation queue", hash);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("adding TX {} in propagation queue", hash);
+                    }
                     let mut txs_propagation_queue = self.txs_propagation_queue.write().await;
                     txs_propagation_queue.put(hash.clone(), get_current_time_in_millis());
                 }
 
                 let peer = Arc::clone(peer);
                 // This will block the task if the bounded channel is full
-                debug!("Pushing TX {} in txs processor channel", hash);
-                if let Err(e) = self.txs_processor.send((peer, hash.clone())).await {
-                    error!(
-                        "Error while sending block propagated to blocks processor task: {}",
-                        e
-                    );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Pushing TX {} in txs processor channel", hash);
                 }
-                debug!("TX {} has been pushed to txs processor", hash);
+                if let Err(e) = self.txs_processor.send((peer, hash.clone())).await {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!(
+                            "Error while sending block propagated to blocks processor task: {}",
+                            e
+                        );
+                    }
+                }
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("TX {} has been pushed to txs processor", hash);
+                }
             }
             Packet::BlockPropagation(packet_wrapper) => {
-                trace!("Received a block propagation packet from {}", peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Received a block propagation packet from {}", peer);
+                }
                 let (header, ping) = packet_wrapper.consume();
                 ping.into_owned()
                     .update_peer(peer, &self.blockchain)
@@ -2213,7 +2439,9 @@ impl<S: Storage> P2pServer<S> {
                 let header = header.into_owned();
                 let block_hash = Arc::new(header.hash());
 
-                trace!("Received block {}", block_hash);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Received block {}", block_hash);
+                }
 
                 // verify that this block wasn't already sent by him
                 let direction = TimedDirection::In {
@@ -2224,10 +2452,12 @@ impl<S: Storage> P2pServer<S> {
                     let mut blocks_propagation = peer.get_blocks_propagation().lock().await;
                     if let Some((origin, is_common)) = blocks_propagation.get_mut(&block_hash) {
                         if !origin.update(direction) && !*is_common {
-                            warn!(
-                                "{} send us a block ({}) already tracked by him ({:?} {})",
-                                peer, block_hash, origin, is_common
-                            );
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!(
+                                    "{} send us a block ({}) already tracked by him ({:?} {})",
+                                    peer, block_hash, origin, is_common
+                                );
+                            }
                             // Don't return an error because of the following edge case:
                             // We have peer B as a common peer with our peer A
                             // But the peer A isn't aware of it yet
@@ -2241,14 +2471,18 @@ impl<S: Storage> P2pServer<S> {
                         }
 
                         if *is_common {
-                            debug!("{} was marked as common for block {}", peer, block_hash);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("{} was marked as common for block {}", peer, block_hash);
+                            }
                             *is_common = false;
                         }
                     } else {
-                        debug!(
-                            "Saving {} in blocks propagation cache for {}",
-                            block_hash, peer
-                        );
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "Saving {} in blocks propagation cache for {}",
+                                block_hash, peer
+                            );
+                        }
                         blocks_propagation.put(block_hash.clone(), (direction, false));
                     }
                 }
@@ -2260,17 +2494,21 @@ impl<S: Storage> P2pServer<S> {
                     .for_each_concurrent(self.stream_concurrency, |common_peer| {
                         let block_hash = &block_hash;
                         async move {
-                            debug!(
-                                "{} is a common peer with {}, adding block {} to its cache",
-                                common_peer, peer, block_hash
-                            );
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!(
+                                    "{} is a common peer with {}, adding block {} to its cache",
+                                    common_peer, peer, block_hash
+                                );
+                            }
                             let mut blocks_propagation =
                                 common_peer.get_blocks_propagation().lock().await;
                             if !blocks_propagation.contains(block_hash) {
-                                debug!(
-                                    "Adding block {} to common {} cache",
-                                    block_hash, common_peer
-                                );
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!(
+                                        "Adding block {} to common {} cache",
+                                        block_hash, common_peer
+                                    );
+                                }
                                 // Out allow to get "In" again, because it's a prediction, don't block it completely
                                 blocks_propagation.put(block_hash.clone(), (direction, true));
                             }
@@ -2280,45 +2518,59 @@ impl<S: Storage> P2pServer<S> {
 
                 // check that we don't have this block in our chain
                 {
-                    debug!("locking storage for block propagation {}", block_hash);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("locking storage for block propagation {}", block_hash);
+                    }
                     let storage = self.blockchain.get_storage().read().await;
                     debug!("storage read acquired for block propagation");
                     if storage.has_block_with_hash(&block_hash).await? {
-                        debug!(
-                            "{}: {} with hash {} is already in our chain. Skipping",
-                            peer, header, block_hash
-                        );
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "{}: {} with hash {} is already in our chain. Skipping",
+                                peer, header, block_hash
+                            );
+                        }
                         return Ok(());
                     }
                 }
 
                 // Check that we are not already waiting on it
                 {
-                    debug!("checking block {} in propagation queue", block_hash);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("checking block {} in propagation queue", block_hash);
+                    }
                     let blocks_propagation_queue = self.blocks_propagation_queue.read().await;
                     if blocks_propagation_queue.contains(&block_hash) {
-                        debug!(
-                            "Block {} propagated is already in processing from another peer",
-                            block_hash
-                        );
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "Block {} propagated is already in processing from another peer",
+                                block_hash
+                            );
+                        }
                         return Ok(());
                     }
                 }
 
                 // Add it in queue
                 {
-                    debug!("adding block {} in propagation queue", block_hash);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("adding block {} in propagation queue", block_hash);
+                    }
                     let mut blocks_propagation_queue = self.blocks_propagation_queue.write().await;
                     blocks_propagation_queue.put(block_hash.clone(), None);
                 }
 
-                debug!(
-                    "Received block at height {} from {}",
-                    header.get_height(),
-                    peer
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Received block at height {} from {}",
+                        header.get_height(),
+                        peer
+                    );
+                }
                 if self.allow_priority_blocks && peer.is_priority() {
-                    debug!("fast propagating block {} from {}", block_hash, peer);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("fast propagating block {} from {}", block_hash, peer);
+                    }
 
                     let zelf = Arc::clone(self);
                     let block_hash = block_hash.clone();
@@ -2331,10 +2583,12 @@ impl<S: Storage> P2pServer<S> {
                                 // We provide the highest height available
                                 ping.set_height(header.get_height().max(ping.get_height()));
 
-                                debug!(
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!(
                                     "broadcasting priority block {} with ping packet to all peers",
                                     block_hash
                                 );
+                                }
                                 zelf.broadcast_block_with_ping(
                                     &header,
                                     ping,
@@ -2345,10 +2599,12 @@ impl<S: Storage> P2pServer<S> {
                                 .await;
                             }
                             Err(e) => {
-                                error!(
-                                    "Error while trying to broadcast priority block {}: {}",
-                                    block_hash, e
-                                );
+                                if log::log_enabled!(log::Level::Error) {
+                                    error!(
+                                        "Error while trying to broadcast priority block {}: {}",
+                                        block_hash, e
+                                    );
+                                }
                             }
                         }
                     });
@@ -2358,14 +2614,18 @@ impl<S: Storage> P2pServer<S> {
 
                 // This will block the task if the bounded channel is full
                 if let Err(e) = self.blocks_processor.send((peer, header, block_hash)).await {
-                    error!(
-                        "Error while sending block propagated to blocks processor task: {}",
-                        e
-                    );
+                    if log::log_enabled!(log::Level::Error) {
+                        error!(
+                            "Error while sending block propagated to blocks processor task: {}",
+                            e
+                        );
+                    }
                 }
             }
             Packet::ChainRequest(packet_wrapper) => {
-                trace!("Received a chain request from {}", peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Received a chain request from {}", peer);
+                }
                 let (request, ping) = packet_wrapper.consume();
                 ping.into_owned()
                     .update_peer(peer, &self.blockchain)
@@ -2376,7 +2636,9 @@ impl<S: Storage> P2pServer<S> {
                 // Node is trying to ask too fast our chain
                 // Don't allow faster than 1/3 of the delay
                 if last_request + (CHAIN_SYNC_DELAY * 2 / 3) > time {
-                    debug!("{} requested sync chain too fast!", peer);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("{} requested sync chain too fast!", peer);
+                    }
                     return Err(P2pError::RequestSyncChainTooFast);
                 }
                 peer.set_last_chain_sync(time);
@@ -2385,10 +2647,12 @@ impl<S: Storage> P2pServer<S> {
                 let request_size = request.size();
                 if request_size == 0 || request_size > CHAIN_SYNC_REQUEST_MAX_BLOCKS {
                     // allows maximum 64 blocks id (2560 bytes max)
-                    warn!(
-                        "{} sent us a malformed chain request ({} blocks)!",
-                        peer, request_size
-                    );
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "{} sent us a malformed chain request ({} blocks)!",
+                            peer, request_size
+                        );
+                    }
                     return Err(P2pError::MalformedChainRequest(request_size));
                 }
 
@@ -2405,7 +2669,9 @@ impl<S: Storage> P2pServer<S> {
                     .await?;
             }
             Packet::ChainResponse(response) => {
-                trace!("Received a chain response from {}", peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Received a chain response from {}", peer);
+                }
                 let sender = peer
                     .get_sync_chain_channel()
                     .lock()
@@ -2414,11 +2680,15 @@ impl<S: Storage> P2pServer<S> {
                     .ok_or(P2pError::UnrequestedChainResponse)?;
 
                 if sender.send(response).is_err() {
-                    error!("Error while sending chain response to channel of {}", peer);
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while sending chain response to channel of {}", peer);
+                    }
                 }
             }
             Packet::Ping(ping) => {
-                trace!("Received a ping packet from {}", peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Received a ping packet from {}", peer);
+                }
                 let current_time = get_current_time_in_seconds();
                 let empty_peer_list = ping.get_peers().is_empty();
 
@@ -2427,11 +2697,13 @@ impl<S: Storage> P2pServer<S> {
 
                 // we verify the respect of the countdown of peer list updates to prevent any spam
                 if !empty_peer_list {
-                    trace!(
-                        "received peer list from {}: {}",
-                        peer,
-                        ping.get_peers().len()
-                    );
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!(
+                            "received peer list from {}: {}",
+                            peer,
+                            ping.get_peers().len()
+                        );
+                    }
                     let last_peer_list = peer.get_last_peer_list();
                     let diff = current_time - last_peer_list;
                     // Don't allow faster than 1/3 of the delay (because of connection latency / packets being queued)
@@ -2445,16 +2717,20 @@ impl<S: Storage> P2pServer<S> {
                     let is_local_peer = is_local_address(peer.get_connection().get_address());
                     for addr in ping.get_peers() {
                         if (is_local_address(addr) && !is_local_peer) || !is_valid_address(addr) {
-                            error!(
-                                "{} is a local address from {} but peer is external",
-                                addr, peer
-                            );
+                            if log::log_enabled!(log::Level::Error) {
+                                error!(
+                                    "{} is a local address from {} but peer is external",
+                                    addr, peer
+                                );
+                            }
                             return Err(P2pError::InvalidPeerlist);
                         }
 
                         if !self.is_connected_to_addr(addr).await {
                             if !self.peer_list.store_peer_address(*addr).await? {
-                                debug!("{} already stored in peer list", addr);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("{} already stored in peer list", addr);
+                                }
                             }
                         }
                     }
@@ -2465,11 +2741,15 @@ impl<S: Storage> P2pServer<S> {
                     .await?;
             }
             Packet::ObjectRequest(request) => {
-                trace!("Received a object request from {}", peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Received a object request from {}", peer);
+                }
                 let request = request.into_owned();
                 match &request {
                     ObjectRequest::Block(hash) => {
-                        debug!("{} asked full block {}", peer, hash);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("{} asked full block {}", peer, hash);
+                        }
                         let block = {
                             let storage = self.blockchain.get_storage().read().await;
                             debug!("storage read acquired for full block request");
@@ -2478,17 +2758,21 @@ impl<S: Storage> P2pServer<S> {
 
                         match block {
                             Ok(block) => {
-                                debug!("block {} found, sending it", hash);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("block {} found, sending it", hash);
+                                }
                                 peer.send_packet(Packet::ObjectResponse(ObjectResponse::Block(
                                     Cow::Borrowed(&block),
                                 )))
                                 .await?;
                             }
                             Err(e) => {
-                                debug!(
-                                    "{} asked block '{}' but not present in our chain: {}",
-                                    peer, hash, e
-                                );
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!(
+                                        "{} asked block '{}' but not present in our chain: {}",
+                                        peer, hash, e
+                                    );
+                                }
                                 peer.send_packet(Packet::ObjectResponse(ObjectResponse::NotFound(
                                     request,
                                 )))
@@ -2497,7 +2781,9 @@ impl<S: Storage> P2pServer<S> {
                         };
                     }
                     ObjectRequest::BlockHeader(hash) => {
-                        debug!("{} asked block header {}", peer, hash);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("{} asked block header {}", peer, hash);
+                        }
                         let block = {
                             let storage = self.blockchain.get_storage().read().await;
                             debug!("storage read acquired for block header request");
@@ -2506,17 +2792,21 @@ impl<S: Storage> P2pServer<S> {
 
                         match block {
                             Ok(block) => {
-                                debug!("block header {} found, sending it", hash);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("block header {} found, sending it", hash);
+                                }
                                 peer.send_packet(Packet::ObjectResponse(
                                     ObjectResponse::BlockHeader(Cow::Borrowed(&block)),
                                 ))
                                 .await?;
                             }
                             Err(e) => {
-                                debug!(
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!(
                                     "{} asked block header '{}' but not present in our chain: {}",
                                     peer, hash, e
                                 );
+                                }
                                 peer.send_packet(Packet::ObjectResponse(ObjectResponse::NotFound(
                                     request,
                                 )))
@@ -2525,20 +2815,26 @@ impl<S: Storage> P2pServer<S> {
                         };
                     }
                     ObjectRequest::Transaction(hash) => {
-                        debug!("{} asked tx {}", peer, hash);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("{} asked tx {}", peer, hash);
+                        }
                         match self.blockchain.get_tx(hash).await {
                             Ok(tx) => {
-                                debug!("tx {} found, sending it", hash);
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("tx {} found, sending it", hash);
+                                }
                                 peer.send_packet(Packet::ObjectResponse(
                                     ObjectResponse::Transaction(Cow::Borrowed(&tx)),
                                 ))
                                 .await?;
                             }
                             Err(e) => {
-                                debug!(
-                                    "{} asked tx '{}' but not present in our chain: {}",
-                                    peer, hash, e
-                                );
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!(
+                                        "{} asked tx '{}' but not present in our chain: {}",
+                                        peer, hash, e
+                                    );
+                                }
                                 peer.send_packet(Packet::ObjectResponse(ObjectResponse::NotFound(
                                     request,
                                 )))
@@ -2549,10 +2845,14 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
             Packet::ObjectResponse(response) => {
-                trace!("Received a object response from {}", peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Received a object response from {}", peer);
+                }
                 let response = response.to_owned();
                 if log_enabled!(Level::Trace) {
-                    trace!("Object response received is {}", response.get_hash());
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Object response received is {}", response.get_hash());
+                    }
                 }
 
                 // check if we requested it from this peer directly
@@ -2568,7 +2868,9 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
             Packet::NotifyInventoryRequest(packet_wrapper) => {
-                trace!("Received a inventory request from {}", peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Received a inventory request from {}", peer);
+                }
                 let (request, ping) = packet_wrapper.consume();
                 ping.into_owned()
                     .update_peer(peer, &self.blockchain)
@@ -2611,33 +2913,43 @@ impl<S: Storage> P2pServer<S> {
                     (is_last, packet)
                 };
 
-                trace!("Sending inventory response to {}", peer);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Sending inventory response to {}", peer);
+                }
                 peer.send_bytes(Bytes::from(packet)).await?;
 
                 // Last inventory response has been sent
                 // Mark it as ready for propagation
                 if is_last {
-                    debug!(
-                        "{} requested last inventory, marking it as ready for TXs propagation",
-                        peer
-                    );
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "{} requested last inventory, marking it as ready for TXs propagation",
+                            peer
+                        );
+                    }
                     peer.set_ready_to_propagate_txs(true);
                 } else if peer.is_ready_for_txs_propagation() && page.is_none() {
-                    debug!("{} requested first page of inventory, unmarking it from being ready for TXs propagation", peer);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("{} requested first page of inventory, unmarking it from being ready for TXs propagation", peer);
+                    }
                     peer.set_ready_to_propagate_txs(false);
                 }
             }
             Packet::NotifyInventoryResponse(inventory) => {
-                debug!(
-                    "Received a notify inventory from {}: {} txs",
-                    peer,
-                    inventory.len()
-                );
-                if !peer.has_requested_inventory() {
-                    warn!(
-                        "Received a notify inventory from {} but we didn't request it",
-                        peer
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Received a notify inventory from {}: {} txs",
+                        peer,
+                        inventory.len()
                     );
+                }
+                if !peer.has_requested_inventory() {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "Received a notify inventory from {} but we didn't request it",
+                            peer
+                        );
+                    }
                     return Err(P2pError::InvalidPacket);
                 }
 
@@ -2652,7 +2964,9 @@ impl<S: Storage> P2pServer<S> {
                 // check that the response was really full if he send us another "page"
                 if next_page.is_some() {
                     if total_count != NOTIFY_MAX_LEN {
-                        error!("Received only {} while maximum is {} elements, and tell us that there is another page", total_count, NOTIFY_MAX_LEN);
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Received only {} while maximum is {} elements, and tell us that there is another page", total_count, NOTIFY_MAX_LEN);
+                        }
                         return Err(P2pError::InvalidInventoryPagination);
                     }
                 }
@@ -2662,7 +2976,9 @@ impl<S: Storage> P2pServer<S> {
                     if !self.blockchain.is_tx_included(&tx).await? {
                         let tx = Arc::new(tx.into_owned());
                         if let Err(e) = self.txs_processor.send((Arc::clone(peer), tx)).await {
-                            error!("Error while sending to TXs processor task from inventory response of {}: {}", peer, e);
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Error while sending to TXs processor task from inventory response of {}: {}", peer, e);
+                            }
                             peer.increment_fail_count();
                             return Ok(());
                         }
@@ -2671,7 +2987,9 @@ impl<S: Storage> P2pServer<S> {
 
                 // request the next page
                 if next_page.is_some() {
-                    trace!("Requesting next page of inventory from {}", peer);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Requesting next page of inventory from {}", peer);
+                    }
                     let packet = Cow::Owned(NotifyInventoryRequest::new(next_page));
                     let ping = Cow::Owned(self.build_generic_ping_packet().await?);
                     peer.set_requested_inventory(true);
@@ -2682,7 +3000,9 @@ impl<S: Storage> P2pServer<S> {
                 } else {
                     // Last inventory response has been processed,
                     // we can know send back any TX in case we have any
-                    debug!("Marked {} as ready for txs propagation", peer);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Marked {} as ready for txs propagation", peer);
+                    }
                     peer.set_ready_to_propagate_txs(true);
                 }
             }
@@ -2690,44 +3010,56 @@ impl<S: Storage> P2pServer<S> {
                 self.handle_bootstrap_chain_request(peer, request).await?;
             }
             Packet::BootstrapChainResponse(response) => {
-                debug!(
-                    "Received a bootstrap chain response ({:?}) from {}",
-                    response.kind(),
-                    peer
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Received a bootstrap chain response ({:?}) from {}",
+                        response.kind(),
+                        peer
+                    );
+                }
                 if let Some(sender) = peer.get_bootstrap_request_with_id(response.id()).await {
                     if log_enabled!(Level::Trace) {
-                        trace!("Sending bootstrap chain response ({:?})", response.kind());
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("Sending bootstrap chain response ({:?})", response.kind());
+                        }
                     }
                     let response = response.response();
                     if let Err(e) = sender.send(response) {
-                        error!(
-                            "Error while sending bootstrap response to channel: {:?}",
-                            e.kind()
-                        );
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Error while sending bootstrap response to channel: {:?}",
+                                e.kind()
+                            );
+                        }
                     }
                 } else {
-                    debug!(
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
                         "{} send us a bootstrap chain response of step {:?} but we didn't asked it",
                         peer,
                         response.kind()
                     );
+                    }
                     return Err(P2pError::UnrequestedBootstrapChainResponse);
                 }
             }
             Packet::PeerDisconnected(packet) => {
                 // This packet is used to keep sync between peers being shared
                 let addr = packet.to_addr();
-                debug!("{} disconnected from {}", addr, peer);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("{} disconnected from {}", addr, peer);
+                }
                 {
                     let mut shared_peers = peer.get_peers().lock().await;
                     if shared_peers.pop(&addr).is_none() {
                         if log_enabled!(Level::Debug) {
-                            debug!(
-                                "{} disconnected from {} but...",
-                                addr,
-                                peer.get_outgoing_address()
-                            );
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!(
+                                    "{} disconnected from {} but...",
+                                    addr,
+                                    peer.get_outgoing_address()
+                                );
+                            }
                         }
                         return Ok(());
                     }
@@ -2773,16 +3105,24 @@ impl<S: Storage> P2pServer<S> {
                     let peer = Arc::clone(peer);
                     let future = async move {
                         let packet_id = packet.get_id();
+                        if log::log_enabled!(log::Level::Trace) {
                         trace!("handling received packet #{} from {}", packet_id, peer);
+                        }
                         if let Err(e) = zelf.handle_incoming_packet(&peer, packet).await {
+                            if log::log_enabled!(log::Level::Error) {
                             error!("Error while handling packet #{} from {}: {}", packet_id, peer, e);
+                            }
                             // check that we don't have too many fails
                             // otherwise disconnect peer
                             // Priority nodes are not disconnected
                             if peer.get_fail_count() >= zelf.fail_count_limit && !peer.is_priority() {
+                                if log::log_enabled!(log::Level::Warn) {
                                 warn!("High fail count detected for {}! Closing connection...", peer);
+                                }
                                 if let Err(e) = peer.close_and_temp_ban(zelf.temp_ban_time).await {
+                                    if log::log_enabled!(log::Level::Error) {
                                     error!("Error while trying to close connection with {} due to high fail count: {}", peer, e);
+                                    }
                                 }
 
                                 return true
@@ -2842,11 +3182,13 @@ impl<S: Storage> P2pServer<S> {
             if *genesis_id.get_hash() != our_genesis_hash
                 || genesis_id.get_topoheight() > start_topoheight
             {
-                warn!(
-                    "Block id list has incorrect block genesis hash! Got {} at {}",
-                    genesis_id.get_hash(),
-                    genesis_id.get_topoheight()
-                );
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "Block id list has incorrect block genesis hash! Got {} at {}",
+                        genesis_id.get_hash(),
+                        genesis_id.get_topoheight()
+                    );
+                }
                 return Err(P2pError::InvalidBlockIdList);
             }
         }
@@ -2862,36 +3204,44 @@ impl<S: Storage> P2pServer<S> {
                 || (i < CHAIN_SYNC_REQUEST_EXPONENTIAL_INDEX_START
                     && expected_topoheight - 1 != block_id.get_topoheight())
             {
-                warn!(
-                    "Block id list has not a good order at index {}, current topo {}, next: {}",
-                    i,
-                    expected_topoheight,
-                    block_id.get_topoheight()
-                );
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "Block id list has not a good order at index {}, current topo {}, next: {}",
+                        i,
+                        expected_topoheight,
+                        block_id.get_topoheight()
+                    );
+                }
                 return Err(P2pError::InvalidBlockIdList);
             }
             expected_topoheight -= 1;
 
-            debug!(
-                "Searching common point for block {} at topoheight {}",
-                block_id.get_hash(),
-                block_id.get_topoheight()
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Searching common point for block {} at topoheight {}",
+                    block_id.get_hash(),
+                    block_id.get_topoheight()
+                );
+            }
             if storage.has_block_with_hash(block_id.get_hash()).await? {
                 let (hash, topoheight) = block_id.consume();
-                debug!(
-                    "Block {} is common, expected topoheight: {}",
-                    hash, topoheight
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Block {} is common, expected topoheight: {}",
+                        hash, topoheight
+                    );
+                }
                 // check that the block is ordered like us
                 if storage.is_block_topological_ordered(&hash).await?
                     && storage.get_topo_height_for_hash(&hash).await? == topoheight
                 {
                     // common point
-                    debug!(
-                        "common point found at block {} with same topoheight at {}",
-                        hash, topoheight
-                    );
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "common point found at block {} with same topoheight at {}",
+                            hash, topoheight
+                        );
+                    }
                     return Ok(Some(CommonPoint::new(hash, topoheight)));
                 }
             }
@@ -2996,16 +3346,20 @@ impl<S: Storage> P2pServer<S> {
     // This is used so we don't overload the network during spam or high transactions count
     // We simply share its hash to nodes and others nodes can check if they have it already or not
     pub async fn broadcast_tx_hash(&self, tx: Arc<Hash>) {
-        debug!("Broadcasting tx hash {}", tx);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Broadcasting tx hash {}", tx);
+        }
         counter!("tos_p2p_broadcast_tx").increment(1u64);
 
         let ping = match self.build_generic_ping_packet().await {
             Ok(ping) => ping,
             Err(e) => {
-                error!(
-                    "Error while building generic ping packet for tx broadcast: {}",
-                    e
-                );
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "Error while building generic ping packet for tx broadcast: {}",
+                        e
+                    );
+                }
                 return;
             }
         };
@@ -3037,46 +3391,66 @@ impl<S: Storage> P2pServer<S> {
                             || (current_topoheight >= peer_topoheight
                                 && current_topoheight - peer_topoheight < STABLE_LIMIT))
                     {
-                        trace!(
-                            "Peer {} is not too far from us, checking cache for tx hash {}",
-                            peer,
-                            tx
-                        );
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!(
+                                "Peer {} is not too far from us, checking cache for tx hash {}",
+                                peer,
+                                tx
+                            );
+                        }
 
                         // Do not keep the txs cache lock while sending the packet
                         let send = {
                             let mut txs_cache = peer.get_txs_cache().lock().await;
-                            trace!("Cache locked for tx hash {}", tx);
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("Cache locked for tx hash {}", tx);
+                            }
                             let send = !txs_cache.contains(tx);
                             // check that we didn't already send this tx to this peer or that he don't already have it
                             if send {
-                                trace!("Adding tx hash {} to cache for {}", tx, peer);
+                                if log::log_enabled!(log::Level::Trace) {
+                                    trace!("Adding tx hash {} to cache for {}", tx, peer);
+                                }
                                 // Set it as outgoing
                                 txs_cache.put(tx.clone(), (Direction::Out, false));
                             } else {
-                                trace!("Peer {} already has tx hash {}, don't send it", peer, tx);
+                                if log::log_enabled!(log::Level::Trace) {
+                                    trace!(
+                                        "Peer {} already has tx hash {}, don't send it",
+                                        peer,
+                                        tx
+                                    );
+                                }
                             }
 
                             send
                         };
 
                         if send {
-                            trace!("Broadcasting tx hash {} to {}", tx, peer);
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("Broadcasting tx hash {} to {}", tx, peer);
+                            }
                             if let Err(e) = peer.send_bytes(bytes.clone()).await {
-                                error!(
-                                    "Error while broadcasting tx hash {} to {}: {}",
-                                    tx, peer, e
-                                );
+                                if log::log_enabled!(log::Level::Error) {
+                                    error!(
+                                        "Error while broadcasting tx hash {} to {}: {}",
+                                        tx, peer, e
+                                    );
+                                }
                             }
                         }
                     } else {
-                        trace!("{} is too far for TX {} broadcast", peer, tx);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("{} is too far for TX {} broadcast", peer, tx);
+                        }
                     }
                 }
             })
             .await;
 
-        debug!("broadcast tx {} done", tx);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("broadcast tx {} done", tx);
+        }
     }
 
     // broadcast block to all peers that can accept directly this new block
@@ -3090,7 +3464,9 @@ impl<S: Storage> P2pServer<S> {
         hash: Arc<Hash>,
         is_from_mining: bool,
     ) {
-        debug!("Building the ping packet for broadcast block {}", hash);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Building the ping packet for broadcast block {}", hash);
+        }
         // we build the ping packet ourself this time (we have enough data for it)
         // because this function can be call from Blockchain, which would lead to a deadlock
         let ping = Ping::new(
@@ -3114,11 +3490,13 @@ impl<S: Storage> P2pServer<S> {
         is_from_mining: bool,
         send_ping: bool,
     ) {
-        debug!(
-            "Broadcasting block {} at height {}",
-            hash,
-            block.get_height()
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Broadcasting block {} at height {}",
+                hash,
+                block.get_height()
+            );
+        }
         counter!("tos_p2p_broadcast_block").increment(1u64);
 
         // Build the block propagation packet
@@ -3131,12 +3509,16 @@ impl<S: Storage> P2pServer<S> {
 
         // Lock the block from being handled again as we are broadcasting it
         if is_from_mining {
-            debug!("Locking block propagation {}", hash);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Locking block propagation {}", hash);
+            }
             let mut blocks_propagation_queue = self.blocks_propagation_queue.write().await;
             blocks_propagation_queue.put(hash.clone(), Some(get_current_time_in_millis()));
         }
 
-        trace!("start broadcasting block {} to all peers", hash);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("start broadcasting block {} to all peers", hash);
+        }
         // Move the reference only which is copy
         let packet_block_bytes = &packet_block_bytes;
         let packet_ping_bytes = &packet_ping_bytes;
@@ -3156,9 +3538,13 @@ impl<S: Storage> P2pServer<S> {
                 if (peer_height >= block.get_height() && peer_height - block.get_height() <= STABLE_LIMIT) || (peer_height <= block.get_height() && block.get_height() - peer_height <= 1) {
                     // Don't lock the blocks propagation while sending the packet
                     let send_block = {
+                        if log::log_enabled!(log::Level::Trace) {
                         trace!("locking blocks propagation for peer {}", peer);
+                        }
                         let mut blocks_propagation = peer.get_blocks_propagation().lock().await;
+                        if log::log_enabled!(log::Level::Trace) {
                         trace!("end locking blocks propagation for peer {}", peer);
+                        }
 
                         // If the peer is marked as common, lets send him anyway for better propagation
                         let send = is_from_mining || blocks_propagation.peek(hash)
@@ -3194,16 +3580,24 @@ impl<S: Storage> P2pServer<S> {
                         peer.set_height(block.get_height().max(peer.get_height()));
 
                         if let Err(e) = peer.send_bytes(packet_block_bytes.clone()).await {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("Error on broadcast block {} to {}: {}", hash, peer, e);
+                            }
                         }
+                        if log::log_enabled!(log::Level::Trace) {
                         trace!("{} has been broadcasted to {}", hash, peer);
+                        }
                     } else if send_ping {
                         log!(self.block_propagation_log_level, "{} contains {}, don't broadcast block to him", peer, hash);
                         // But we can notify him with a ping packet that we got the block
                         if let Err(e) = peer.send_bytes(packet_ping_bytes.clone()).await {
+                            if log::log_enabled!(log::Level::Debug) {
                             debug!("Error on sending ping for notifying that we accepted the block {} to {}: {}", hash, peer, e);
+                            }
                         } else {
+                            if log::log_enabled!(log::Level::Trace) {
                             trace!("{} has been notified that we have the block {}", peer, hash);
+                            }
                             peer.set_last_ping_sent(get_current_time_in_seconds());
                         }
                     }
@@ -3211,9 +3605,13 @@ impl<S: Storage> P2pServer<S> {
                     // Peer is above us, send him a ping packet to inform him we got a block propagated
                     log!(self.block_propagation_log_level, "send ping (block {}) for propagation to {}", hash, peer);
                     if let Err(e) = peer.send_bytes(packet_ping_bytes.clone()).await {
+                        if log::log_enabled!(log::Level::Debug) {
                         debug!("Error on sending ping to peer for notifying that we got the block {} to {}: {}", hash, peer, e);
+                        }
                     } else {
+                        if log::log_enabled!(log::Level::Trace) {
                         trace!("{} has been notified that we received the block {}", peer, hash);
+                        }
                         peer.set_last_ping_sent(get_current_time_in_seconds());
                     }
                 } else {
@@ -3222,7 +3620,9 @@ impl<S: Storage> P2pServer<S> {
                 }
         }).await;
 
-        debug!("broadcasting block {} is done", hash);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("broadcasting block {} is done", hash);
+        }
     }
 
     // Build a block id list to share our DAG order and chain state
@@ -3238,20 +3638,24 @@ impl<S: Storage> P2pServer<S> {
         let mut i = 0;
 
         // we add 1 for the genesis block added below
-        trace!(
-            "Building list of blocks id for {} blocks, pruned topo: {}",
-            topoheight,
-            pruned_topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Building list of blocks id for {} blocks, pruned topo: {}",
+                topoheight,
+                pruned_topoheight
+            );
+        }
         while i < topoheight
             && topoheight - i > pruned_topoheight
             && blocks.len() + 1 < CHAIN_SYNC_REQUEST_MAX_BLOCKS
         {
             let current_topo = topoheight - i;
-            trace!(
-                "Requesting hash at topo {} for building list of blocks id",
-                current_topo
-            );
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "Requesting hash at topo {} for building list of blocks id",
+                    current_topo
+                );
+            }
             let hash = storage.get_hash_at_topo_height(current_topo).await?;
             blocks.insert(BlockId::new(hash, current_topo));
             // This parameter can be tuned based on the chain size

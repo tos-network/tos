@@ -55,7 +55,7 @@ pub trait NodeRpc: Send + Sync {
     /// # Returns
     ///
     /// A vector of block hashes representing the current tips.
-    /// In GHOSTDAG, there can be multiple tips in the DAG frontier.
+    /// In BlockDAG, there can be multiple tips in the DAG frontier.
     ///
     /// # Errors
     ///

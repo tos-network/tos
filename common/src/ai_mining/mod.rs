@@ -64,23 +64,27 @@ pub const EXPERT_TASK_BASE_REWARD: u64 = 1_000_000_000;
 
 // ====== Reputation and anti-Sybil constants ======
 
-/// Minimum reputation requirement for basic tasks
-pub const MIN_REPUTATION_FOR_BASIC: f64 = 0.1;
+/// Scale factor for fixed-point arithmetic (10000 = 4 decimal places)
+/// Used to represent decimal values as integers for deterministic consensus calculations
+pub const SCALE: u64 = 10_000;
 
-/// Minimum reputation requirement for intermediate tasks
-pub const MIN_REPUTATION_FOR_INTERMEDIATE: f64 = 0.3;
+/// Minimum reputation requirement for basic tasks (0.1 = 1000/SCALE)
+pub const MIN_REPUTATION_FOR_BASIC: u64 = 1_000;
 
-/// Minimum reputation requirement for advanced tasks
-pub const MIN_REPUTATION_FOR_ADVANCED: f64 = 0.5;
+/// Minimum reputation requirement for intermediate tasks (0.3 = 3000/SCALE)
+pub const MIN_REPUTATION_FOR_INTERMEDIATE: u64 = 3_000;
 
-/// Minimum reputation requirement for expert tasks
-pub const MIN_REPUTATION_FOR_EXPERT: f64 = 0.7;
+/// Minimum reputation requirement for advanced tasks (0.5 = 5000/SCALE)
+pub const MIN_REPUTATION_FOR_ADVANCED: u64 = 5_000;
 
-/// Fee increase multiplier for low-stake users
-pub const LOW_STAKE_PENALTY_MULTIPLIER: f64 = 5.0;
+/// Minimum reputation requirement for expert tasks (0.7 = 7000/SCALE)
+pub const MIN_REPUTATION_FOR_EXPERT: u64 = 7_000;
 
-/// Fee increase multiplier for medium-stake users
-pub const MEDIUM_STAKE_PENALTY_MULTIPLIER: f64 = 2.0;
+/// Fee increase multiplier for low-stake users (5.0 = 50000/SCALE)
+pub const LOW_STAKE_PENALTY_MULTIPLIER: u64 = 50_000;
+
+/// Fee increase multiplier for medium-stake users (2.0 = 20000/SCALE)
+pub const MEDIUM_STAKE_PENALTY_MULTIPLIER: u64 = 20_000;
 
 /// Low stake threshold (0.00001 TOS)
 pub const LOW_STAKE_THRESHOLD: u64 = 10_000;
@@ -88,31 +92,31 @@ pub const LOW_STAKE_THRESHOLD: u64 = 10_000;
 /// Medium stake threshold (0.0001 TOS)
 pub const MEDIUM_STAKE_THRESHOLD: u64 = 100_000;
 
-/// Fee discount for high reputation users (50% discount)
-pub const HIGH_REPUTATION_DISCOUNT: f64 = 0.5;
+/// Fee discount for high reputation users (0.5 = 5000/SCALE, i.e., 50% of original)
+pub const HIGH_REPUTATION_DISCOUNT: u64 = 5_000;
 
-/// Fee discount for medium reputation users (30% discount)
-pub const MEDIUM_REPUTATION_DISCOUNT: f64 = 0.7;
+/// Fee discount for medium reputation users (0.7 = 7000/SCALE, i.e., 70% of original)
+pub const MEDIUM_REPUTATION_DISCOUNT: u64 = 7_000;
 
-/// Fee increase multiplier for low reputation users
-pub const LOW_REPUTATION_PENALTY: f64 = 2.0;
+/// Fee increase multiplier for low reputation users (2.0 = 20000/SCALE)
+pub const LOW_REPUTATION_PENALTY: u64 = 20_000;
 
-/// High reputation threshold
-pub const HIGH_REPUTATION_THRESHOLD: f64 = 0.9;
+/// High reputation threshold (0.9 = 9000/SCALE)
+pub const HIGH_REPUTATION_THRESHOLD: u64 = 9_000;
 
-/// Medium reputation threshold
-pub const MEDIUM_REPUTATION_THRESHOLD: f64 = 0.7;
+/// Medium reputation threshold (0.7 = 7000/SCALE)
+pub const MEDIUM_REPUTATION_THRESHOLD: u64 = 7_000;
 
-/// Low reputation threshold
-pub const LOW_REPUTATION_THRESHOLD: f64 = 0.3;
+/// Low reputation threshold (0.3 = 3000/SCALE)
+pub const LOW_REPUTATION_THRESHOLD: u64 = 3_000;
 
 // ====== Quality reward coefficients ======
 
-/// High quality answer scarcity bonus (90%+ score)
-pub const HIGH_QUALITY_SCARCITY_BONUS: f64 = 1.5;
+/// High quality answer scarcity bonus (1.5 = 15000/SCALE)
+pub const HIGH_QUALITY_SCARCITY_BONUS: u64 = 15_000;
 
-/// Medium quality answer scarcity bonus (80%+ score)
-pub const MEDIUM_QUALITY_SCARCITY_BONUS: f64 = 1.2;
+/// Medium quality answer scarcity bonus (1.2 = 12000/SCALE)
+pub const MEDIUM_QUALITY_SCARCITY_BONUS: u64 = 12_000;
 
 /// High quality score threshold
 pub const HIGH_QUALITY_SCORE_THRESHOLD: u8 = 90;

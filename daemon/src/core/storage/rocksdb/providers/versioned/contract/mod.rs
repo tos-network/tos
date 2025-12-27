@@ -25,7 +25,9 @@ impl VersionedContractProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned contracts at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned contracts at topoheight {}", topoheight);
+        }
         let prefix = topoheight.to_be_bytes();
         for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(
             &self.db,
@@ -73,7 +75,9 @@ impl VersionedContractProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned contracts above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned contracts above topoheight {}", topoheight);
+        }
         let start = (topoheight + 1).to_be_bytes();
         for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(
             &self.db,
@@ -126,7 +130,9 @@ impl VersionedContractProvider for RocksStorage {
         topoheight: TopoHeight,
         keep_last: bool,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned contracts below topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned contracts below topoheight {}", topoheight);
+        }
         let start = topoheight.to_be_bytes();
         if keep_last {
             for res in Self::iter_owned_internal::<(), Contract>(
@@ -157,7 +163,9 @@ impl VersionedContractProvider for RocksStorage {
                             )?;
                         } else {
                             if prev_version.is_some_and(|v| v < topoheight) {
-                                trace!("Patching versioned data at topoheight {}", topoheight);
+                                if log::log_enabled!(log::Level::Trace) {
+                                    trace!("Patching versioned data at topoheight {}", topoheight);
+                                }
                                 patched = true;
                                 let mut data: Versioned<RawBytes> =
                                     self.load_from_disk(Column::VersionedContracts, &key)?;

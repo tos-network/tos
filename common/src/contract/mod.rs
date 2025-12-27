@@ -5,6 +5,8 @@ mod opaque;
 mod output;
 mod provider;
 mod random;
+pub mod scheduled_execution;
+mod source;
 
 use crate::{
     block::{Block, TopoHeight},
@@ -43,6 +45,8 @@ pub use contract_type::*;
 pub use executor::*;
 pub use opaque::*;
 pub use provider::*;
+pub use scheduled_execution::*;
+pub use source::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferOutput {
@@ -105,7 +109,9 @@ pub struct ContractEventTracker {
 
 // Build the environment for the contract
 pub fn build_environment<P: ContractProvider>() -> EnvironmentBuilder<'static> {
-    debug!("Building environment for contract");
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("Building environment for contract");
+    }
 
     let mut env = EnvironmentBuilder::default();
 

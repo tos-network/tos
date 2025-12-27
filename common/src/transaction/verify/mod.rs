@@ -53,7 +53,9 @@ impl Transaction {
                     | TransactionType::InvokeContract(_)
                     | TransactionType::DeployContract(_)
                     | TransactionType::Energy(_)
-                    | TransactionType::AIMining(_) => true,
+                    | TransactionType::AIMining(_)
+                    | TransactionType::BindReferrer(_)
+                    | TransactionType::BatchReferralReward(_) => true,
                 }
             }
         }
@@ -284,6 +286,17 @@ impl Transaction {
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
+            TransactionType::BindReferrer(_) => {
+                // BindReferrer validation is handled by the referral provider
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward validation
+                if !payload.validate() {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Invalid batch referral reward payload"
+                    )));
+                }
+            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
@@ -363,8 +376,17 @@ impl Transaction {
                     }
                 }
             }
-            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+            TransactionType::MultiSig(_)
+            | TransactionType::AIMining(_)
+            | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward spends total_amount of the specified asset
+                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_total_amount())
+                    .ok_or(VerificationError::Overflow)?;
             }
         };
 
@@ -633,6 +655,23 @@ impl Transaction {
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
+            TransactionType::BindReferrer(_) => {
+                // BindReferrer transactions are validated by the referral provider at execution time
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward validation - check payload is valid
+                if !payload.validate() {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Invalid batch referral reward payload"
+                    )));
+                }
+                // Authorization: sender must be the from_user (prevents abuse)
+                if self.get_source() != payload.get_from_user() {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "BatchReferralReward sender must be the from_user"
+                    )));
+                }
+            }
         };
 
         let source_decompressed = self
@@ -779,6 +818,24 @@ impl Transaction {
                     );
                 }
             }
+            TransactionType::BindReferrer(payload) => {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "BindReferrer transaction verification - referrer: {:?}, fee: {}, nonce: {}",
+                        payload.get_referrer(), self.fee, self.nonce
+                    );
+                }
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "BatchReferralReward verification - levels: {}, total_amount: {}, fee: {}",
+                        payload.get_levels(),
+                        payload.get_total_amount(),
+                        self.fee
+                    );
+                }
+            }
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs
@@ -859,8 +916,17 @@ impl Transaction {
                     }
                 }
             }
-            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+            TransactionType::MultiSig(_)
+            | TransactionType::AIMining(_)
+            | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward spends total_amount of the specified asset
+                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_total_amount())
+                    .ok_or(VerificationError::Overflow)?;
             }
         };
 
@@ -1070,8 +1136,17 @@ impl Transaction {
                     }
                 }
             }
-            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+            TransactionType::MultiSig(_)
+            | TransactionType::AIMining(_)
+            | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward spends total_amount of the specified asset
+                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_total_amount())
+                    .ok_or(VerificationError::Overflow)?;
             }
         };
 
@@ -1264,7 +1339,11 @@ impl Transaction {
 
                         // Freeze TOS for energy - get topoheight from the blockchain state
                         let topoheight = state.get_block().get_height(); // BlockDAG uses height
-                        energy_resource.freeze_tos_for_energy(*amount, *duration, topoheight);
+                                                                         // Use network-aware freeze duration (Devnet uses accelerated timing)
+                        let network = state.get_network();
+                        energy_resource.freeze_tos_for_energy_with_network(
+                            *amount, *duration, topoheight, &network,
+                        );
 
                         // Update energy resource in state
                         state
@@ -1365,6 +1444,75 @@ impl Transaction {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("AI Mining operation processed - payload: {:?}, miners: {}, active_tasks: {}, completed_tasks: {}",
                            payload, result.total_miners, result.active_tasks, result.completed_tasks);
+                }
+            }
+            TransactionType::BindReferrer(payload) => {
+                // Bind referrer to user via the ReferralProvider
+                state
+                    .bind_referrer(self.get_source(), payload.get_referrer(), tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "BindReferrer transaction applied - user: {:?}, referrer: {:?}",
+                        self.get_source(),
+                        payload.get_referrer()
+                    );
+                }
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                // Distribute rewards to uplines via the ReferralProvider
+                let distribution_result = state
+                    .distribute_referral_rewards(
+                        payload.get_from_user(),
+                        payload.get_asset(),
+                        payload.get_total_amount(),
+                        payload.get_ratios(),
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                // Credit rewards to each upline's balance
+                // Note: distribution.recipient is already a CompressedPublicKey (aka crypto::PublicKey)
+                for distribution in &distribution_result.distributions {
+                    let balance = state
+                        .get_receiver_balance(
+                            std::borrow::Cow::Owned(distribution.recipient.clone()),
+                            std::borrow::Cow::Borrowed(payload.get_asset()),
+                        )
+                        .await
+                        .map_err(VerificationError::State)?;
+                    *balance = balance
+                        .checked_add(distribution.amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+
+                // Refund remainder to sender (prevents burning undistributed funds)
+                let remainder = payload
+                    .get_total_amount()
+                    .saturating_sub(distribution_result.total_distributed);
+                if remainder > 0 {
+                    let sender_balance = state
+                        .get_receiver_balance(
+                            std::borrow::Cow::Borrowed(self.get_source()),
+                            std::borrow::Cow::Borrowed(payload.get_asset()),
+                        )
+                        .await
+                        .map_err(VerificationError::State)?;
+                    *sender_balance = sender_balance
+                        .checked_add(remainder)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "BatchReferralReward transaction applied - levels: {}, total_amount: {}, distributed: {}, refunded: {}",
+                        payload.get_levels(),
+                        payload.get_total_amount(),
+                        distribution_result.total_distributed,
+                        remainder
+                    );
                 }
             }
         }
@@ -1476,8 +1624,17 @@ impl Transaction {
                     }
                 }
             }
-            TransactionType::MultiSig(_) | TransactionType::AIMining(_) => {
+            TransactionType::MultiSig(_)
+            | TransactionType::AIMining(_)
+            | TransactionType::BindReferrer(_) => {
                 // No asset spending for these types
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                // BatchReferralReward spends total_amount of the specified asset
+                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_total_amount())
+                    .ok_or(VerificationError::Overflow)?;
             }
         };
 

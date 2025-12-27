@@ -163,13 +163,15 @@ impl Mempool {
         // update the cache for this owner
         if let Some(cache) = self.caches.get_mut(tx.get_source()) {
             // delete the TX if its in the range of already tracked nonces
-            debug!(
-                "Cache found for owner {} with nonce range {}-{}, nonce = {}",
-                tx.get_source().as_address(self.mainnet),
-                cache.get_min(),
-                cache.get_max(),
-                nonce
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Cache found for owner {} with nonce range {}-{}, nonce = {}",
+                    tx.get_source().as_address(self.mainnet),
+                    cache.get_min(),
+                    cache.get_max(),
+                    nonce
+                );
+            }
             cache.update(nonce, hash.clone());
 
             // Update re-computed balances
@@ -218,10 +220,14 @@ impl Mempool {
         if let Some(cache) = self.caches.get_mut(key) {
             // Shift remove is O(n) on average, but we need to preserve the order
             if !cache.txs.shift_remove(hash) {
-                warn!("TX {} not found in mempool while deleting", hash);
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("TX {} not found in mempool while deleting", hash);
+                }
             }
 
-            trace!("TX {} removed from cache", hash);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("TX {} removed from cache", hash);
+            }
             if !delete {
                 trace!("Updating cache bounds");
                 let mut max: Option<u64> = None;
@@ -246,7 +252,9 @@ impl Mempool {
                 }
 
                 if let (Some(min), Some(max)) = (min, max) {
-                    trace!("Updating cache bounds to {}-{}", min, max);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Updating cache bounds to {}-{}", min, max);
+                    }
                     cache.min = min;
                     cache.max = max;
                 } else {
@@ -254,18 +262,22 @@ impl Mempool {
                 }
             }
         } else {
-            warn!(
-                "No cache found for owner {} while deleting TX {}",
-                tx.get_tx().get_source().as_address(self.mainnet),
-                hash
-            );
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "No cache found for owner {} while deleting TX {}",
+                    tx.get_tx().get_source().as_address(self.mainnet),
+                    hash
+                );
+            }
         }
 
         if delete {
-            trace!(
-                "Removing empty nonce cache for owner {}",
-                key.as_address(self.mainnet)
-            );
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "Removing empty nonce cache for owner {}",
+                    key.as_address(self.mainnet)
+                );
+            }
             self.caches.remove(key);
         }
 
@@ -373,10 +385,12 @@ impl Mempool {
         std::mem::swap(&mut caches, &mut self.caches);
 
         for (key, mut cache) in caches {
-            debug!(
-                "Cleaning up mempool for owner {}",
-                key.as_address(self.mainnet)
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Cleaning up mempool for owner {}",
+                    key.as_address(self.mainnet)
+                );
+            }
             let nonce = match storage.get_last_nonce(&key).await {
                 Ok((_, version)) => version.get_nonce(),
                 Err(e) => {
@@ -392,23 +406,27 @@ impl Mempool {
                         if let Some(sorted_tx) = self.txs.remove(&tx) {
                             deleted_transactions.push((tx, sorted_tx));
                         } else {
-                            warn!(
-                                "TX {} not found in mempool while deleting due to nonce error",
-                                tx
-                            );
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!(
+                                    "TX {} not found in mempool while deleting due to nonce error",
+                                    tx
+                                );
+                            }
                         }
                     }
 
                     continue;
                 }
             };
-            debug!(
-                "Owner {} has nonce {}, cache min: {}, max: {}",
-                key.as_address(self.mainnet),
-                nonce,
-                cache.get_min(),
-                cache.get_max()
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Owner {} has nonce {}, cache min: {}, max: {}",
+                    key.as_address(self.mainnet),
+                    nonce,
+                    cache.get_min(),
+                    cache.get_max()
+                );
+            }
 
             let mut delete_cache = false;
             // Check if the account nonce is below cache lowest nonce, that means
@@ -423,18 +441,22 @@ impl Mempool {
                 // Don't let ghost TXs in mempool
                 for tx in cache.txs.drain(..) {
                     if let Some(sorted_tx) = self.txs.remove(&tx) {
-                        debug!(
-                            "Deleting ghost TX {} with {} and nonce {}",
-                            tx,
-                            sorted_tx.get_tx().get_reference(),
-                            sorted_tx.get_tx().get_nonce()
-                        );
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "Deleting ghost TX {} with {} and nonce {}",
+                                tx,
+                                sorted_tx.get_tx().get_reference(),
+                                sorted_tx.get_tx().get_nonce()
+                            );
+                        }
                         deleted_transactions.push((tx, sorted_tx));
                     } else {
-                        warn!(
-                            "Ghost TX {} not found in mempool (orphaned due to nonce)",
-                            tx
-                        );
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!(
+                                "Ghost TX {} not found in mempool (orphaned due to nonce)",
+                                tx
+                            );
+                        }
                     }
                 }
 
@@ -442,11 +464,13 @@ impl Mempool {
             } else if nonce > cache.get_min() {
                 // Account nonce is above our min, which means some TXs are processed
                 // We must check the next ones
-                debug!(
-                    "Verifying TXs for owner {} with nonce < {}",
-                    key.as_address(self.mainnet),
-                    nonce
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Verifying TXs for owner {} with nonce < {}",
+                        key.as_address(self.mainnet),
+                        nonce
+                    );
+                }
                 // txs hashes to delete
                 let mut deleted_txs_hashes = IndexSet::with_capacity(cache.txs.len());
 
@@ -485,11 +509,12 @@ impl Mempool {
 
                 // Update cache bounds
                 if let (Some(min), Some(max)) = (min, max) {
-                    debug!("Update cache bounds: [{}-{}]", min, max);
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Update cache bounds: [{}-{}]", min, max);
+                    }
                     cache.min = min;
                     cache.max = max;
                 } else {
-                    debug!("no min/max found, deleting cache");
                     delete_cache = true;
                 }
 
@@ -527,20 +552,18 @@ impl Mempool {
                             Transaction::verify(next_tx.get_tx(), &tx_hash, &mut state, &tx_cache)
                                 .await
                         {
-                            warn!(
-                                "Error while verifying TXs for source {}: {}",
-                                key.as_address(self.mainnet),
-                                e
-                            );
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!(
+                                    "Error while verifying TXs for source {}: {}",
+                                    key.as_address(self.mainnet),
+                                    e
+                                );
+                            }
 
                             // We may have only one TX invalid, but because they are all linked to each others we delete the whole cache
                             delete_cache = true;
                         }
                     } else {
-                        debug!(
-                            "no next TX for {}, deleting cache",
-                            key.as_address(self.mainnet)
-                        );
                         delete_cache = true;
                     }
                 }
@@ -555,31 +578,39 @@ impl Mempool {
 
                 // now delete all necessary txs
                 for hash in deleted_txs_hashes {
-                    debug!(
-                        "Deleting TX {} for source {}",
-                        hash,
-                        key.as_address(self.mainnet)
-                    );
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Deleting TX {} for source {}",
+                            hash,
+                            key.as_address(self.mainnet)
+                        );
+                    }
                     if let Some(sorted_tx) = self.txs.remove(&hash) {
                         deleted_transactions.push((hash, sorted_tx));
                     } else {
                         // This should never happen, but better to put a warning here
                         // in case of a lurking bug
-                        warn!("TX {} not found in mempool while deleting", hash);
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("TX {} not found in mempool while deleting", hash);
+                        }
                     }
                 }
             } else {
-                debug!(
-                    "{} hasn't changed, skipping it",
-                    key.as_address(self.mainnet)
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "{} hasn't changed, skipping it",
+                        key.as_address(self.mainnet)
+                    );
+                }
             }
 
             if !delete_cache {
-                debug!(
-                    "Re-injecting nonce cache for owner {}",
-                    key.as_address(self.mainnet)
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Re-injecting nonce cache for owner {}",
+                        key.as_address(self.mainnet)
+                    );
+                }
                 self.caches.insert(key, cache);
             }
         }
@@ -692,13 +723,15 @@ impl AccountCache {
             return None;
         }
 
-        trace!(
-            "has tx with same nonce: {}, max: {}, min: {}, size: {}",
-            nonce,
-            self.max,
-            self.min,
-            self.txs.len()
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "has tx with same nonce: {}, max: {}, min: {}, size: {}",
+                nonce,
+                self.max,
+                self.min,
+                self.txs.len()
+            );
+        }
         let index = ((nonce - self.min) % (self.max + 1 - self.min)) as usize;
         self.txs.get_index(index)
     }

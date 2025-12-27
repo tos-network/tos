@@ -50,6 +50,8 @@ pub enum TransactionType {
     DeployContract(DeployContractPayload),
     Energy(EnergyPayload),
     AIMining(AIMiningPayload),
+    BindReferrer(BindReferrerPayload),
+    BatchReferralReward(BatchReferralRewardPayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -349,6 +351,14 @@ impl Serializer for TransactionType {
                 writer.write_u8(6);
                 payload.write(writer);
             }
+            TransactionType::BindReferrer(payload) => {
+                writer.write_u8(7);
+                payload.write(writer);
+            }
+            TransactionType::BatchReferralReward(payload) => {
+                writer.write_u8(8);
+                payload.write(writer);
+            }
         };
     }
 
@@ -375,6 +385,8 @@ impl Serializer for TransactionType {
             4 => TransactionType::DeployContract(DeployContractPayload::read(reader)?),
             5 => TransactionType::Energy(EnergyPayload::read(reader)?),
             6 => TransactionType::AIMining(AIMiningPayload::read(reader)?),
+            7 => TransactionType::BindReferrer(BindReferrerPayload::read(reader)?),
+            8 => TransactionType::BatchReferralReward(BatchReferralRewardPayload::read(reader)?),
             _ => return Err(ReaderError::InvalidValue),
         })
     }
@@ -398,6 +410,8 @@ impl Serializer for TransactionType {
             TransactionType::DeployContract(module) => module.size(),
             TransactionType::Energy(payload) => payload.size(),
             TransactionType::AIMining(payload) => payload.size(),
+            TransactionType::BindReferrer(payload) => payload.size(),
+            TransactionType::BatchReferralReward(payload) => payload.size(),
         }
     }
 }

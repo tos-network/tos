@@ -37,7 +37,9 @@ pub fn random_fn(_: FnInstance, _: FnParams, context: &mut Context) -> FnReturnT
     let state: &mut ChainState = context.get_mut().context("chain state not found")?;
 
     if state.random.is_none() {
-        debug!("initializing deterministic random for {}", state.tx_hash);
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("initializing deterministic random for {}", state.tx_hash);
+        }
         state.random = Some(DeterministicRandom::new(
             state.contract,
             state.block_hash,

@@ -13,13 +13,17 @@ use tos_common::crypto::Hash;
 impl BlocksAtHeightProvider for RocksStorage {
     // Check if there are blocks at a specific height
     async fn has_blocks_at_height(&self, height: u64) -> Result<bool, BlockchainError> {
-        trace!("has blocks at height {}", height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has blocks at height {}", height);
+        }
         self.contains_data(Column::BlocksAtHeight, &height.to_be_bytes())
     }
 
     // Retrieve the blocks hashes at a specific height
     async fn get_blocks_at_height(&self, height: u64) -> Result<IndexSet<Hash>, BlockchainError> {
-        trace!("get blocks at height {}", height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get blocks at height {}", height);
+        }
         self.load_optional_from_disk(Column::BlocksAtHeight, &height.to_be_bytes())
             .map(|v| v.unwrap_or_default())
     }
@@ -30,7 +34,9 @@ impl BlocksAtHeightProvider for RocksStorage {
         tips: &IndexSet<Hash>,
         height: u64,
     ) -> Result<(), BlockchainError> {
-        trace!("set blocks at height {}", height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set blocks at height {}", height);
+        }
         self.insert_into_disk(Column::BlocksAtHeight, height.to_be_bytes(), tips)
     }
 
@@ -40,13 +46,17 @@ impl BlocksAtHeightProvider for RocksStorage {
         hash: &Hash,
         height: u64,
     ) -> Result<(), BlockchainError> {
-        trace!("add block hash at height {}", height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("add block hash at height {}", height);
+        }
         let mut blocks: IndexSet<Cow<'_, Hash>> = self
             .load_optional_from_disk(Column::BlocksAtHeight, &height.to_be_bytes())?
             .unwrap_or_default();
 
         if blocks.insert(Cow::Borrowed(hash)) {
-            trace!("inserted block hash at height {}", height);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("inserted block hash at height {}", height);
+            }
             self.insert_into_disk(Column::BlocksAtHeight, height.to_be_bytes(), &blocks)?;
         }
 
@@ -59,7 +69,9 @@ impl BlocksAtHeightProvider for RocksStorage {
         hash: &Hash,
         height: u64,
     ) -> Result<(), BlockchainError> {
-        trace!("remove block hash at height {}", height);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("remove block hash at height {}", height);
+        }
         let Some(mut blocks): Option<IndexSet<Cow<'_, Hash>>> =
             self.load_optional_from_disk(Column::BlocksAtHeight, &height.to_be_bytes())?
         else {
@@ -67,7 +79,9 @@ impl BlocksAtHeightProvider for RocksStorage {
         };
 
         if blocks.shift_remove(&Cow::Borrowed(hash)) {
-            trace!("removed block hash at height {}", height);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("removed block hash at height {}", height);
+            }
             self.insert_into_disk(Column::BlocksAtHeight, height.to_be_bytes(), &blocks)?;
         }
 

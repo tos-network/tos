@@ -10,7 +10,6 @@ use parking_lot::RwLock;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tos_common::block::TopoHeight;
 use tos_common::crypto::Hash;
 
 /// Account state for testing
@@ -67,13 +66,13 @@ pub struct TestBlock {
     pub hash: Hash,
     /// Block height
     pub height: u64,
-    /// Blue score (DAG depth position, equals height in linear chain)
-    pub blue_score: u64,
+    /// Topological height (DAG ordering position, equals height in linear chain)
+    pub topoheight: u64,
     /// Transactions in this block
     pub transactions: Vec<TestTransaction>,
     /// Miner reward
     pub reward: u64,
-    /// Pruning point hash (GHOSTDAG commitment field)
+    /// Pruning point hash (BlockDAG commitment field)
     pub pruning_point: Hash,
     /// Selected parent hash (for pruning point calculation)
     pub selected_parent: Hash,
@@ -123,8 +122,8 @@ pub struct TestBlockchain {
     /// Current tip height
     tip_height: AtomicU64,
 
-    /// Current blue score (same as height in linear chain)
-    blue_score: AtomicU64,
+    /// Current topoheight (same as height in linear chain)
+    topoheight: AtomicU64,
 
     /// DAG tips (hashes of current chain tips)
     tips: Arc<RwLock<Vec<Hash>>>,
@@ -180,7 +179,7 @@ impl TestBlockchain {
         let genesis_block = TestBlock {
             hash: genesis_hash.clone(),
             height: 0,
-            blue_score: 0,
+            topoheight: 0,
             transactions: vec![],
             reward: 0,
             pruning_point: genesis_hash.clone(),
@@ -193,7 +192,7 @@ impl TestBlockchain {
             accounts: Arc::new(RwLock::new(accounts)),
             counters: Arc::new(RwLock::new(counters)),
             tip_height: AtomicU64::new(0),
-            blue_score: AtomicU64::new(0),
+            topoheight: AtomicU64::new(0),
             tips: Arc::new(RwLock::new(vec![genesis_hash.clone()])),
             state_root: Arc::new(RwLock::new(state_root)),
             mempool: Arc::new(RwLock::new(Vec::new())),
@@ -355,7 +354,7 @@ impl TestBlockchain {
 
         // Create new block
         let new_height = self.tip_height.load(Ordering::SeqCst) + 1;
-        let new_blue_score = self.blue_score.load(Ordering::SeqCst) + 1;
+        let new_topoheight = self.topoheight.load(Ordering::SeqCst) + 1;
         let block_hash = Self::compute_block_hash(new_height, &transactions);
 
         // Get selected parent (previous tip)
@@ -365,13 +364,13 @@ impl TestBlockchain {
             self.genesis_hash.clone()
         };
 
-        // Calculate pruning point using GHOSTDAG algorithm
-        let pruning_point = self.calc_pruning_point(&blocks, &selected_parent, new_blue_score);
+        // Calculate pruning point using BlockDAG algorithm
+        let pruning_point = self.calc_pruning_point(&blocks, &selected_parent, new_topoheight);
 
         let block = TestBlock {
             hash: block_hash.clone(),
             height: new_height,
-            blue_score: new_blue_score,
+            topoheight: new_topoheight,
             transactions: transactions.clone(),
             reward: BLOCK_REWARD,
             pruning_point,
@@ -381,7 +380,7 @@ impl TestBlockchain {
         // Update blockchain state
         blocks.push(block.clone());
         self.tip_height.store(new_height, Ordering::SeqCst);
-        self.blue_score.store(new_blue_score, Ordering::SeqCst);
+        self.topoheight.store(new_topoheight, Ordering::SeqCst);
         *self.tips.write() = vec![block_hash.clone()];
 
         // Recompute state root
@@ -389,10 +388,10 @@ impl TestBlockchain {
 
         if log::log_enabled!(log::Level::Info) {
             log::info!(
-                "Mined block {} at height {} (blue_score={}) with {} transactions, pruning_point={}",
+                "Mined block {} at height {} (topoheight={}) with {} transactions, pruning_point={}",
                 block_hash,
                 new_height,
-                new_blue_score,
+                new_topoheight,
                 transactions.len(),
                 block.pruning_point
             );
@@ -403,17 +402,17 @@ impl TestBlockchain {
 
     /// Calculate pruning point for a new block
     ///
-    /// This implements the GHOSTDAG pruning point calculation:
-    /// - If blue_score < PRUNING_DEPTH, return genesis
+    /// This implements the BlockDAG pruning point calculation:
+    /// - If topoheight < PRUNING_DEPTH, return genesis
     /// - Otherwise, walk back PRUNING_DEPTH steps along selected_parent chain
     fn calc_pruning_point(
         &self,
         blocks: &[TestBlock],
         selected_parent: &Hash,
-        blue_score: u64,
+        topoheight: u64,
     ) -> Hash {
-        // If blue_score < PRUNING_DEPTH, pruning point is genesis
-        if blue_score < PRUNING_DEPTH {
+        // If topoheight < PRUNING_DEPTH, pruning point is genesis
+        if topoheight < PRUNING_DEPTH {
             return self.genesis_hash.clone();
         }
 
@@ -480,7 +479,7 @@ impl TestBlockchain {
 
         // Validate pruning point
         let expected_pruning_point =
-            self.calc_pruning_point(&blocks, &block.selected_parent, block.blue_score);
+            self.calc_pruning_point(&blocks, &block.selected_parent, block.topoheight);
         if block.pruning_point != expected_pruning_point {
             anyhow::bail!(
                 "Invalid pruning_point: expected {}, got {}",
@@ -524,7 +523,7 @@ impl TestBlockchain {
         // Update blockchain state
         blocks.push(block.clone());
         self.tip_height.store(block.height, Ordering::SeqCst);
-        self.blue_score.store(block.blue_score, Ordering::SeqCst);
+        self.topoheight.store(block.topoheight, Ordering::SeqCst);
         *self.tips.write() = vec![block.hash.clone()];
 
         // Recompute state root
@@ -636,9 +635,9 @@ impl TestBlockchain {
         self.clock.clone()
     }
 
-    /// Get current blue score
-    pub async fn get_blue_score(&self) -> Result<u64> {
-        Ok(self.blue_score.load(Ordering::SeqCst))
+    /// Get current topoheight
+    pub async fn get_topoheight(&self) -> Result<u64> {
+        Ok(self.topoheight.load(Ordering::SeqCst))
     }
 
     /// Get genesis hash
@@ -664,13 +663,8 @@ impl TestBlockchain {
     /// Ok(true) if pruning point is valid, Ok(false) if invalid
     pub async fn validate_pruning_point(&self, block: &TestBlock) -> Result<bool> {
         let blocks = self.blocks.read();
-        let expected = self.calc_pruning_point(&blocks, &block.selected_parent, block.blue_score);
+        let expected = self.calc_pruning_point(&blocks, &block.selected_parent, block.topoheight);
         Ok(block.pruning_point == expected)
-    }
-
-    /// Get current topoheight (same as tip_height in linear chain)
-    pub async fn get_topoheight(&self) -> Result<TopoHeight> {
-        Ok(self.tip_height.load(Ordering::SeqCst))
     }
 }
 
@@ -1190,7 +1184,7 @@ mod tests {
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
-            blue_score: 1,
+            topoheight: 1,
             transactions: vec![tx],
             reward: 50_000,
             pruning_point: genesis_hash.clone(),
@@ -1211,7 +1205,7 @@ mod tests {
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 5, // Invalid - should be 1
-            blue_score: 5,
+            topoheight: 5,
             transactions: vec![],
             reward: 50_000,
             pruning_point: genesis_hash.clone(),
@@ -1233,7 +1227,7 @@ mod tests {
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
-            blue_score: 1,
+            topoheight: 1,
             transactions: vec![],
             reward: 50_000,
             pruning_point: genesis_hash.clone(),
@@ -2378,7 +2372,7 @@ mod tests {
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
-            blue_score: 1,
+            topoheight: 1,
             transactions: vec![tx],
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
@@ -2420,7 +2414,7 @@ mod tests {
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
-            blue_score: 1,
+            topoheight: 1,
             transactions: vec![tx],
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
@@ -2628,7 +2622,7 @@ mod tests {
         let received_block = TestBlock {
             hash: mined_block.hash.clone(),
             height: 1,
-            blue_score: 1,
+            topoheight: 1,
             transactions: vec![tx],
             reward: mined_block.reward,
             pruning_point: genesis_hash.clone(),
@@ -2810,7 +2804,7 @@ mod tests {
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 10, // Should be 1
-            blue_score: 10,
+            topoheight: 10,
             transactions: vec![],
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
@@ -2833,7 +2827,7 @@ mod tests {
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
-            blue_score: 1,
+            topoheight: 1,
             transactions: vec![],
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
@@ -3026,7 +3020,7 @@ mod tests {
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 3,
-            blue_score: 3,
+            topoheight: 3,
             transactions: vec![],
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
@@ -3097,7 +3091,7 @@ mod tests {
         let block = TestBlock {
             hash: create_test_pubkey(50),
             height: 1,
-            blue_score: 1,
+            topoheight: 1,
             transactions: vec![tx],
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),

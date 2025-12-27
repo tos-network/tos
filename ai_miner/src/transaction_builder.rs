@@ -38,10 +38,12 @@ impl AIMiningTransactionBuilder {
         nonce: u64,
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
-        debug!(
-            "Building register miner transaction metadata with nonce: {}",
-            nonce
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Building register miner transaction metadata with nonce: {}",
+                nonce
+            );
+        }
 
         let payload = AIMiningPayload::RegisterMiner {
             miner_address,
@@ -55,10 +57,12 @@ impl AIMiningTransactionBuilder {
             self.estimate_fee_with_payload_type(estimated_size, Some(&payload))
         };
 
-        info!(
-            "Built register miner transaction metadata - Fee: {} nanoTOS, Nonce: {}, Network: {:?}",
-            estimated_fee, nonce, self.network
-        );
+        if log::log_enabled!(log::Level::Info) {
+            info!(
+                "Built register miner transaction metadata - Fee: {} nanoTOS, Nonce: {}, Network: {:?}",
+                estimated_fee, nonce, self.network
+            );
+        }
         Ok(AIMiningTransactionMetadata {
             payload,
             estimated_fee,
@@ -80,10 +84,12 @@ impl AIMiningTransactionBuilder {
         nonce: u64,
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
-        debug!(
-            "Building publish task transaction metadata with nonce: {}",
-            nonce
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Building publish task transaction metadata with nonce: {}",
+                nonce
+            );
+        }
 
         let payload = AIMiningPayload::PublishTask {
             task_id: task_id.clone(),
@@ -100,8 +106,10 @@ impl AIMiningTransactionBuilder {
             self.estimate_fee_with_payload_type(estimated_size, Some(&payload))
         };
 
-        info!("Built publish task transaction metadata - Task: {}, Fee: {} nanoTOS, Nonce: {}, Network: {:?}",
-              hex::encode(task_id.as_bytes()), estimated_fee, nonce, self.network);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Built publish task transaction metadata - Task: {}, Fee: {} nanoTOS, Nonce: {}, Network: {:?}",
+                  hex::encode(task_id.as_bytes()), estimated_fee, nonce, self.network);
+        }
         Ok(AIMiningTransactionMetadata {
             payload,
             estimated_fee,
@@ -121,10 +129,12 @@ impl AIMiningTransactionBuilder {
         nonce: u64,
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
-        debug!(
-            "Building submit answer transaction metadata with nonce: {}",
-            nonce
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Building submit answer transaction metadata with nonce: {}",
+                nonce
+            );
+        }
 
         let payload = AIMiningPayload::SubmitAnswer {
             task_id: task_id.clone(),
@@ -140,8 +150,10 @@ impl AIMiningTransactionBuilder {
             self.estimate_fee_with_payload_type(estimated_size, Some(&payload))
         };
 
-        info!("Built submit answer transaction metadata - Task: {}, Fee: {} nanoTOS, Nonce: {}, Network: {:?}",
-              hex::encode(task_id.as_bytes()), estimated_fee, nonce, self.network);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Built submit answer transaction metadata - Task: {}, Fee: {} nanoTOS, Nonce: {}, Network: {:?}",
+                  hex::encode(task_id.as_bytes()), estimated_fee, nonce, self.network);
+        }
         Ok(AIMiningTransactionMetadata {
             payload,
             estimated_fee,
@@ -160,10 +172,12 @@ impl AIMiningTransactionBuilder {
         nonce: u64,
         fee: u64,
     ) -> Result<AIMiningTransactionMetadata> {
-        debug!(
-            "Building validate answer transaction metadata with nonce: {}",
-            nonce
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Building validate answer transaction metadata with nonce: {}",
+                nonce
+            );
+        }
 
         let payload = AIMiningPayload::ValidateAnswer {
             task_id: task_id.clone(),
@@ -178,8 +192,10 @@ impl AIMiningTransactionBuilder {
             self.estimate_fee_with_payload_type(estimated_size, Some(&payload))
         };
 
-        info!("Built validate answer transaction metadata - Task: {}, Fee: {} nanoTOS, Nonce: {}, Network: {:?}",
-              hex::encode(task_id.as_bytes()), estimated_fee, nonce, self.network);
+        if log::log_enabled!(log::Level::Info) {
+            info!("Built validate answer transaction metadata - Task: {}, Fee: {} nanoTOS, Nonce: {}, Network: {:?}",
+                  hex::encode(task_id.as_bytes()), estimated_fee, nonce, self.network);
+        }
         Ok(AIMiningTransactionMetadata {
             payload,
             estimated_fee,
@@ -224,10 +240,12 @@ impl AIMiningTransactionBuilder {
         let total_fee =
             (base_fee + size_fee) as f64 * network_multiplier * payload_complexity_multiplier;
 
-        debug!(
-            "Fee calculation - Network: {:?}, Base: {}, Size: {} bytes, Per-byte: {}, Total: {}",
-            self.network, base_fee, tx_size_bytes, per_byte_fee, total_fee as u64
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Fee calculation - Network: {:?}, Base: {}, Size: {} bytes, Per-byte: {}, Total: {}",
+                self.network, base_fee, tx_size_bytes, per_byte_fee, total_fee as u64
+            );
+        }
 
         // Ensure minimum fee
         std::cmp::max(total_fee as u64, base_fee)
@@ -260,17 +278,21 @@ impl AIMiningTransactionBuilder {
         match serde_json::to_vec(payload) {
             Ok(serialized) => {
                 let json_size = serialized.len();
-                debug!("Payload JSON serialization size: {} bytes", json_size);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Payload JSON serialization size: {} bytes", json_size);
+                }
 
                 // Account for binary serialization overhead (typically more compact than JSON)
                 // Estimate binary serialization as ~70% of JSON size plus fixed overhead
                 let estimated_binary_size =
                     ((json_size as f64 * 0.7) as usize) + self.get_serialization_overhead(payload);
 
-                debug!(
-                    "Estimated binary payload size: {} bytes (from JSON: {} bytes)",
-                    estimated_binary_size, json_size
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Estimated binary payload size: {} bytes (from JSON: {} bytes)",
+                        estimated_binary_size, json_size
+                    );
+                }
                 estimated_binary_size
             }
             Err(_) => {

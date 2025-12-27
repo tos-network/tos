@@ -12,7 +12,9 @@ impl VersionedNonceProvider for SledStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned nonces at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned nonces at topoheight {}", topoheight);
+        }
         Self::delete_versioned_tree_at_topoheight(
             &mut self.snapshot,
             &self.nonces,
@@ -25,7 +27,9 @@ impl VersionedNonceProvider for SledStorage {
         &mut self,
         topoheight: u64,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned nonces above topoheight {}!", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned nonces above topoheight {}!", topoheight);
+        }
         Self::delete_versioned_tree_above_topoheight(
             &mut self.snapshot,
             &self.nonces,
@@ -40,7 +44,9 @@ impl VersionedNonceProvider for SledStorage {
         topoheight: u64,
         keep_last: bool,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned nonces below topoheight {}!", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned nonces below topoheight {}!", topoheight);
+        }
         Self::delete_versioned_tree_below_topoheight(
             &mut self.snapshot,
             &self.nonces,

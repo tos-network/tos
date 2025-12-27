@@ -19,12 +19,14 @@ impl ContractStorage for SledStorage {
         key: &ValueCell,
         topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, Option<ValueCell>)>, anyhow::Error> {
-        trace!(
-            "load contract {} key {} data at topoheight {}",
-            contract,
-            key,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "load contract {} key {} data at topoheight {}",
+                contract,
+                key,
+                topoheight
+            );
+        }
         let res = try_block_on(
             self.get_contract_data_at_maximum_topoheight_for(contract, &key, topoheight),
         )??;
@@ -44,12 +46,14 @@ impl ContractStorage for SledStorage {
         key: &ValueCell,
         topoheight: TopoHeight,
     ) -> Result<bool, anyhow::Error> {
-        trace!(
-            "check if contract {} key {} data exists at topoheight {}",
-            contract,
-            key,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "check if contract {} key {} data exists at topoheight {}",
+                contract,
+                key,
+                topoheight
+            );
+        }
         let contains = try_block_on(
             self.has_contract_data_at_maximum_topoheight(contract, &key, topoheight),
         )??;
@@ -62,12 +66,14 @@ impl ContractStorage for SledStorage {
         key: &ValueCell,
         topoheight: TopoHeight,
     ) -> Result<Option<TopoHeight>, anyhow::Error> {
-        trace!(
-            "load data latest topoheight for contract {} key {} at topoheight {}",
-            contract,
-            key,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "load data latest topoheight for contract {} key {} at topoheight {}",
+                contract,
+                key,
+                topoheight
+            );
+        }
         let res = try_block_on(
             self.get_contract_data_topoheight_at_maximum_topoheight_for(contract, &key, topoheight),
         )??;
@@ -75,7 +81,9 @@ impl ContractStorage for SledStorage {
     }
 
     fn has_contract(&self, contract: &Hash, topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
-        trace!("has contract {} at topoheight {}", contract, topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has contract {} at topoheight {}", contract, topoheight);
+        }
         let res = try_block_on(self.has_contract_at_maximum_topoheight(contract, topoheight))??;
         Ok(res)
     }
@@ -88,11 +96,13 @@ impl ContractProvider for SledStorage {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
-        trace!(
-            "get contract balance for contract {} asset {}",
-            contract,
-            asset
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get contract balance for contract {} asset {}",
+                contract,
+                asset
+            );
+        }
         let res = try_block_on(
             self.get_contract_balance_at_maximum_topoheight(contract, asset, topoheight),
         )??;
@@ -100,11 +110,13 @@ impl ContractProvider for SledStorage {
     }
 
     fn asset_exists(&self, asset: &Hash, topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
-        trace!(
-            "check if asset {} exists at topoheight {}",
-            asset,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "check if asset {} exists at topoheight {}",
+                asset,
+                topoheight
+            );
+        }
         let contains =
             try_block_on(self.is_asset_registered_at_maximum_topoheight(asset, topoheight))??;
         Ok(contains)
@@ -115,11 +127,13 @@ impl ContractProvider for SledStorage {
         key: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<bool, anyhow::Error> {
-        trace!(
-            "check if account {} exists at topoheight {}",
-            key.as_address(self.is_mainnet()),
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "check if account {} exists at topoheight {}",
+                key.as_address(self.is_mainnet()),
+                topoheight
+            );
+        }
 
         let contains = try_block_on(self.is_account_registered_for_topoheight(key, topoheight))??;
         Ok(contains)
@@ -131,11 +145,13 @@ impl ContractProvider for SledStorage {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, AssetData)>, anyhow::Error> {
-        trace!(
-            "load asset data for asset {} at topoheight {}",
-            asset,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "load asset data for asset {} at topoheight {}",
+                asset,
+                topoheight
+            );
+        }
         let res = try_block_on(self.get_asset_at_maximum_topoheight(asset, topoheight))??;
         Ok(res.map(|(topo, v)| (topo, v.take())))
     }
@@ -145,11 +161,13 @@ impl ContractProvider for SledStorage {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
-        trace!(
-            "load asset supply for asset {} at topoheight {}",
-            asset,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "load asset supply for asset {} at topoheight {}",
+                asset,
+                topoheight
+            );
+        }
         let res = try_block_on(self.get_asset_supply_at_maximum_topoheight(asset, topoheight))??;
         Ok(res.map(|(topoheight, supply)| (topoheight, supply.take())))
     }
@@ -160,12 +178,14 @@ impl ContractProvider for SledStorage {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
-        trace!(
-            "get account {} balance for asset {} at topoheight {}",
-            key.as_address(self.is_mainnet()),
-            asset,
-            topoheight
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get account {} balance for asset {} at topoheight {}",
+                key.as_address(self.is_mainnet()),
+                asset,
+                topoheight
+            );
+        }
         let res = try_block_on(self.get_balance_at_maximum_topoheight(key, asset, topoheight))??;
         Ok(res.map(|(topoheight, balance)| (topoheight, balance.take_balance())))
     }

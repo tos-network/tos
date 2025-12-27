@@ -254,4 +254,68 @@ impl Snapshot {
             _ => Either::Right(tree.iter().keys()),
         }
     }
+
+    pub fn scan_prefix_kv(
+        &self,
+        tree: &Tree,
+        prefix: &[u8],
+    ) -> impl Iterator<Item = Result<(IVec, IVec), BlockchainError>> {
+        match self.trees.get(&tree.name()) {
+            Some(Some(entries)) => {
+                let original = tree.scan_prefix(prefix).filter_map_ok(|(k, v)| {
+                    if !entries.writes.contains_key(&k) {
+                        Some((k, v))
+                    } else {
+                        None
+                    }
+                });
+
+                let changes = entries
+                    .writes
+                    .iter()
+                    .filter(|(k, v)| v.is_some() && k.starts_with(prefix))
+                    .filter_map(|(k, v)| v.clone().map(|v| Ok((k.clone(), v))))
+                    .chain(original.map(|r| r.map_err(BlockchainError::from)))
+                    .collect::<Vec<_>>()
+                    .into_iter();
+
+                Either::Left(changes)
+            }
+            _ => Either::Right(
+                tree.scan_prefix(prefix)
+                    .map(|r| r.map_err(BlockchainError::from)),
+            ),
+        }
+    }
+
+    pub fn iter_from(
+        &self,
+        tree: &Tree,
+        from: &[u8],
+    ) -> impl Iterator<Item = Result<(IVec, IVec), BlockchainError>> {
+        match self.trees.get(&tree.name()) {
+            Some(Some(entries)) => {
+                let from_ivec: IVec = from.into();
+                let original = tree.range(from..).filter_map_ok(|(k, v)| {
+                    if !entries.writes.contains_key(&k) {
+                        Some((k, v))
+                    } else {
+                        None
+                    }
+                });
+
+                let changes = entries
+                    .writes
+                    .iter()
+                    .filter(move |(k, v)| v.is_some() && **k >= from_ivec)
+                    .filter_map(|(k, v)| v.clone().map(|v| Ok((k.clone(), v))))
+                    .chain(original.map(|r| r.map_err(BlockchainError::from)))
+                    .collect::<Vec<_>>()
+                    .into_iter();
+
+                Either::Left(changes)
+            }
+            _ => Either::Right(tree.range(from..).map(|r| r.map_err(BlockchainError::from))),
+        }
+    }
 }

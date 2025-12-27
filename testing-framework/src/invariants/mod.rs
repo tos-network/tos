@@ -4,7 +4,7 @@
 //! - Balance conservation (parameterized EconPolicy)
 //! - Nonce monotonicity (confirmed tx count)
 //! - State equivalence (keyed comparison + state_root)
-//! - GHOSTDAG properties
+//! - BlockDAG properties
 //! - Fee deduction
 
 use anyhow::Result;
@@ -12,7 +12,7 @@ use anyhow::Result;
 // TODO(Agent 1): Implement balance_conservation checker
 // TODO(Agent 1): Implement nonce_monotonicity checker
 // TODO(Agent 1): Implement state_equivalence checker
-// TODO(Agent 1): Implement ghostdag_properties checker
+// TODO(Agent 1): Implement blockdag_properties checker
 // TODO(Agent 1): Implement fee_deduction checker
 
 /// Check balance conservation

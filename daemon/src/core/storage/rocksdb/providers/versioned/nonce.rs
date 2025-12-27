@@ -21,7 +21,9 @@ impl VersionedNonceProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned nonces at {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned nonces at {}", topoheight);
+        }
         let prefix = topoheight.to_be_bytes();
         for res in Self::iter_owned_internal::<RawBytes, Option<TopoHeight>>(
             &self.db,
@@ -49,11 +51,13 @@ impl VersionedNonceProvider for RocksStorage {
             {
                 account.nonce_pointer = prev_topo;
 
-                trace!(
-                    "updating account {} with nonce set to {:?}",
-                    account_key.as_address(self.is_mainnet()),
-                    account.nonce_pointer
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "updating account {} with nonce set to {:?}",
+                        account_key.as_address(self.is_mainnet()),
+                        account.nonce_pointer
+                    );
+                }
                 Self::insert_into_disk_internal(
                     &self.db,
                     self.snapshot.as_mut(),
@@ -154,7 +158,9 @@ impl VersionedNonceProvider for RocksStorage {
                             )?;
                         } else {
                             if prev_version.is_some_and(|v| v < topoheight) {
-                                trace!("Patching versioned data at topoheight {}", topoheight);
+                                if log::log_enabled!(log::Level::Trace) {
+                                    trace!("Patching versioned data at topoheight {}", topoheight);
+                                }
                                 patched = true;
                                 let mut data: Versioned<RawBytes> =
                                     self.load_from_disk(Column::VersionedNonces, &key)?;

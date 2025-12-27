@@ -173,8 +173,7 @@ pub async fn setup_account_rocksdb(
 /// Create RocksDB test storage with funded accounts
 ///
 /// This helper avoids mining 300+ blocks in tests by creating storage
-/// with pre-funded accounts at genesis (topoheight 0), similar to how
-/// Kaspa initializes genesis UTXO balances.
+/// with pre-funded accounts at genesis (topoheight 0).
 ///
 /// # Arguments
 ///

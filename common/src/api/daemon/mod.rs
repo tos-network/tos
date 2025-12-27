@@ -21,7 +21,7 @@ use tos_kernel::ValueCell;
 
 pub use direction::*;
 
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BlockType {
     Sync,
     Side,
@@ -477,6 +477,9 @@ pub enum AccountHistoryType {
     UnfreezeTos {
         amount: u64,
     },
+    BindReferrer {
+        referrer: Address,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -486,6 +489,160 @@ pub struct AccountHistoryEntry {
     #[serde(flatten)]
     pub history_type: AccountHistoryType,
     pub block_timestamp: TimestampMillis,
+}
+
+// ============================================================================
+// AI Mining History API
+// ============================================================================
+
+/// Filter by AI Mining transaction type
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AIMiningTransactionType {
+    /// User published a task
+    PublishTask,
+    /// User submitted an answer to a task
+    SubmitAnswer,
+    /// User validated an answer
+    ValidateAnswer,
+    /// User registered as a miner
+    RegisterMiner,
+}
+
+/// Request parameters for get_ai_mining_history RPC
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetAIMiningHistoryParams {
+    /// The miner/participant address to query
+    pub address: Address,
+
+    /// Filter by task difficulty level (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub difficulty: Option<crate::ai_mining::DifficultyLevel>,
+
+    /// Filter by transaction type (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_type: Option<AIMiningTransactionType>,
+
+    /// Filter by specific task_id (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Hash>,
+
+    /// Minimum topoheight (block height)
+    pub minimum_topoheight: Option<TopoHeight>,
+
+    /// Maximum topoheight (block height)
+    pub maximum_topoheight: Option<TopoHeight>,
+
+    /// Include published tasks (default: true)
+    #[serde(default = "default_true_value")]
+    pub include_published_tasks: bool,
+
+    /// Include submitted answers (default: true)
+    #[serde(default = "default_true_value")]
+    pub include_submitted_answers: bool,
+
+    /// Include validations performed (default: true)
+    #[serde(default = "default_true_value")]
+    pub include_validations: bool,
+
+    /// Pagination: skip N entries
+    pub skip: Option<usize>,
+
+    /// Pagination: maximum entries to return (default 100, max 1000)
+    pub maximum: Option<usize>,
+}
+
+/// AI Mining transaction history entry
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AIMiningHistoryEntry {
+    /// Block topoheight when transaction occurred
+    pub topoheight: TopoHeight,
+
+    /// Transaction hash
+    pub tx_hash: Hash,
+
+    /// Block hash containing the transaction
+    pub block_hash: Hash,
+
+    /// Timestamp when block was mined (milliseconds)
+    pub block_timestamp: TimestampMillis,
+
+    /// The specific transaction details
+    #[serde(flatten)]
+    pub transaction: AIMiningHistoryType,
+}
+
+/// Union type for all AI Mining transaction variants in history
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AIMiningHistoryType {
+    /// Task published by this address
+    PublishTask {
+        task_id: Hash,
+        reward_amount: u64,
+        difficulty: crate::ai_mining::DifficultyLevel,
+        deadline: u64,
+        description: String,
+    },
+
+    /// Answer submitted by this address
+    SubmitAnswer {
+        task_id: Hash,
+        answer_id: Hash,
+        stake_amount: u64,
+        answer_hash: Hash,
+    },
+
+    /// Validation performed by this address
+    ValidateAnswer {
+        task_id: Hash,
+        answer_id: Hash,
+        validation_score: u8,
+    },
+
+    /// Miner registration by this address
+    RegisterMiner { registration_fee: u64 },
+}
+
+/// Summary statistics for AI Mining participant
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct AIMiningUserSummary {
+    /// Total tasks published by this address
+    pub total_tasks_published: u32,
+
+    /// Total answers submitted
+    pub total_answers_submitted: u32,
+
+    /// Total validations performed
+    pub total_validations_performed: u32,
+
+    /// Current reputation score (0-10000)
+    pub reputation_score: u64,
+
+    /// Total rewards earned (nanoTOS)
+    pub total_rewards_earned: u64,
+
+    /// Total stake in system (nanoTOS)
+    pub total_stake: u64,
+
+    /// Miner registration status
+    pub is_registered_miner: bool,
+
+    /// Block height when registered (if applicable)
+    pub registered_at: Option<u64>,
+}
+
+/// Response for get_ai_mining_history RPC
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetAIMiningHistoryResult {
+    /// List of AI Mining transactions for this address
+    pub transactions: Vec<AIMiningHistoryEntry>,
+
+    /// Total number of AI Mining transactions available (before pagination)
+    pub total: usize,
+
+    /// Summary statistics for this address
+    pub summary: AIMiningUserSummary,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -932,6 +1089,28 @@ pub struct GetMempoolCacheResult {
     txs: Vec<Hash>,
     // All "final" cached balances used
     balances: HashMap<Hash, u64>,
+}
+
+impl GetMempoolCacheResult {
+    /// Get the lowest nonce used in pending transactions
+    pub fn get_min_nonce(&self) -> Nonce {
+        self.min
+    }
+
+    /// Get the highest nonce used in pending transactions
+    pub fn get_max_nonce(&self) -> Nonce {
+        self.max
+    }
+
+    /// Get all transaction hashes in the mempool cache (ordered by nonce)
+    pub fn get_txs(&self) -> &[Hash] {
+        &self.txs
+    }
+
+    /// Get the cached balances for all assets
+    pub fn get_balances(&self) -> &HashMap<Hash, u64> {
+        &self.balances
+    }
 }
 
 // This struct is used to store the fee rate estimation for the following priority levels:
@@ -1430,4 +1609,323 @@ pub struct GetAddressPaymentsParams {
     /// Maximum number of payments to return
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<usize>,
+}
+/// Parameters for get_contract_scheduled_executions_at_topoheight RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetContractScheduledExecutionsAtTopoHeightParams {
+    pub topoheight: TopoHeight,
+    pub max: Option<usize>,
+    pub skip: Option<usize>,
+}
+
+/// Parameters for get_contracts RPC method - lists all deployed contracts
+#[derive(Serialize, Deserialize)]
+pub struct GetContractsParams {
+    /// Number of contracts to skip (for pagination)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip: Option<usize>,
+    /// Maximum number of contracts to return
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum: Option<usize>,
+    /// Minimum topoheight filter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimum_topoheight: Option<TopoHeight>,
+    /// Maximum topoheight filter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_topoheight: Option<TopoHeight>,
+}
+
+/// Parameters for get_contract_data_entries RPC method - lists contract storage entries
+#[derive(Serialize, Deserialize)]
+pub struct GetContractDataEntriesParams {
+    /// Contract address to query
+    pub contract: Hash,
+    /// Maximum topoheight for version lookup
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_topoheight: Option<TopoHeight>,
+    /// Number of entries to skip (for pagination)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip: Option<usize>,
+    /// Maximum number of entries to return
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum: Option<usize>,
+}
+
+/// A single contract data entry (key-value pair)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractDataEntry {
+    /// Storage key
+    pub key: ValueCell,
+    /// Storage value
+    pub value: ValueCell,
+}
+
+/// Parameters for key_to_address RPC method - converts public key to address
+#[derive(Serialize, Deserialize)]
+pub struct KeyToAddressParams {
+    /// Public key in hex format
+    pub key: String,
+}
+
+/// Parameters for get_block_summary_at_topoheight RPC method - lightweight block info
+#[derive(Serialize, Deserialize)]
+pub struct GetBlockSummaryAtTopoHeightParams {
+    pub topoheight: TopoHeight,
+}
+
+/// Parameters for get_block_summary_by_hash RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetBlockSummaryByHashParams {
+    pub hash: Hash,
+}
+
+/// Lightweight block summary response (no full transaction data)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockSummary<'a> {
+    /// Block hash
+    pub hash: Cow<'a, Hash>,
+    /// Topological height
+    pub topoheight: Option<TopoHeight>,
+    /// Block height
+    pub height: u64,
+    /// Block timestamp
+    pub timestamp: TimestampMillis,
+    /// Block nonce
+    pub nonce: u64,
+    /// Block type (Sync, Side, Orphaned, Normal)
+    pub block_type: BlockType,
+    /// Miner address
+    pub miner: Cow<'a, Address>,
+    /// Block difficulty
+    pub difficulty: Cow<'a, Difficulty>,
+    /// Cumulative difficulty
+    pub cumulative_difficulty: Cow<'a, CumulativeDifficulty>,
+    /// Number of transactions in block
+    pub txs_count: usize,
+    /// Total size of block in bytes
+    pub total_size_in_bytes: usize,
+    /// Block reward (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reward: Option<u64>,
+    /// Total transaction fees
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_fees: Option<u64>,
+}
+
+/// Parameters for get_balances_at_maximum_topoheight RPC method
+/// Batch query multiple asset balances for an address
+#[derive(Serialize, Deserialize)]
+pub struct GetBalancesAtMaximumTopoHeightParams {
+    /// Address to query balances for
+    pub address: Address,
+    /// List of asset hashes to query
+    pub assets: Vec<Hash>,
+    /// Maximum topoheight for version lookup
+    pub maximum_topoheight: TopoHeight,
+}
+
+/// Parameters for get_block_difficulty_by_hash RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetBlockDifficultyByHashParams {
+    /// Block hash to query difficulty for
+    pub block_hash: Hash,
+}
+
+// Note: GetDifficultyResult is already defined above and reused for get_block_difficulty_by_hash
+
+// Note: get_block_base_fee_by_hash is not implemented in TOS
+// TOS uses a different fee model. For fee estimation, use get_estimated_fee_rates.
+
+/// Parameters for get_asset_supply_at_topoheight RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetAssetSupplyAtTopoHeightParams {
+    /// Asset hash to query supply for
+    pub asset: Hash,
+    /// Topoheight to query supply at
+    pub topoheight: TopoHeight,
+}
+
+// Note: get_estimated_fee_per_kb is not implemented in TOS
+// TOS uses get_estimated_fee_rates for fee estimation.
+
+/// Registered contract execution info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisteredExecution {
+    /// Hash of the caller for the registered execution
+    pub execution_hash: Hash,
+    /// Topoheight at which the execution is scheduled
+    pub execution_topoheight: TopoHeight,
+}
+
+// ============================================================================
+// Referral System RPC Types
+// ============================================================================
+
+/// Parameters for has_referrer RPC method
+#[derive(Serialize, Deserialize)]
+pub struct HasReferrerParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of has_referrer RPC method
+#[derive(Serialize, Deserialize)]
+pub struct HasReferrerResult {
+    pub has_referrer: bool,
+}
+
+/// Parameters for get_referrer RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferrerParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of get_referrer RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferrerResult {
+    /// The referrer's address (None if no referrer)
+    pub referrer: Option<Address>,
+}
+
+/// Parameters for get_uplines RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetUplinesParams<'a> {
+    pub address: Cow<'a, Address>,
+    /// Number of upline levels to retrieve (max 20)
+    #[serde(default = "default_upline_levels")]
+    pub levels: u8,
+}
+
+fn default_upline_levels() -> u8 {
+    10
+}
+
+/// Result of get_uplines RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetUplinesResult {
+    /// List of upline addresses (ordered from immediate referrer to higher levels)
+    pub uplines: Vec<Address>,
+    /// Number of levels actually returned
+    pub levels_returned: u8,
+}
+
+/// Parameters for get_direct_referrals RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetDirectReferralsParams<'a> {
+    pub address: Cow<'a, Address>,
+    /// Offset for pagination
+    #[serde(default)]
+    pub offset: u32,
+    /// Maximum number of referrals to return (default 100, max 1000)
+    #[serde(default = "default_direct_referrals_limit")]
+    pub limit: u32,
+}
+
+fn default_direct_referrals_limit() -> u32 {
+    100
+}
+
+/// Result of get_direct_referrals RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetDirectReferralsResult {
+    /// List of direct referral addresses
+    pub referrals: Vec<Address>,
+    /// Total count of direct referrals
+    pub total_count: u32,
+    /// Current offset
+    pub offset: u32,
+    /// Whether there are more results
+    pub has_more: bool,
+}
+
+/// Parameters for get_referral_record RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferralRecordParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of get_referral_record RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferralRecordResult {
+    /// User's address
+    pub user: Address,
+    /// Referrer's address (None if no referrer)
+    pub referrer: Option<Address>,
+    /// Block topoheight when referrer was bound
+    pub bound_at_topoheight: TopoHeight,
+    /// Transaction hash of the binding transaction
+    pub bound_tx_hash: Hash,
+    /// Timestamp when the binding occurred
+    pub bound_timestamp: u64,
+    /// Number of direct referrals
+    pub direct_referrals_count: u32,
+    /// Cached team size
+    pub team_size: u64,
+}
+
+/// Parameters for get_team_size RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetTeamSizeParams<'a> {
+    pub address: Cow<'a, Address>,
+    /// Use cached value (faster) or calculate real-time (slower but accurate)
+    #[serde(default = "default_true_value")]
+    pub use_cache: bool,
+}
+
+/// Result of get_team_size RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetTeamSizeResult {
+    /// Total team size (all descendants in the referral tree)
+    pub team_size: u64,
+    /// Whether the value is from cache
+    pub from_cache: bool,
+}
+
+/// Parameters for get_referral_level RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferralLevelParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of get_referral_level RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetReferralLevelResult {
+    /// Level in the referral tree (0 = root, 1 = has referrer, etc.)
+    pub level: u8,
+}
+
+// ============================================================================
+// Admin RPC Types (require --enable-admin-rpc flag)
+// ============================================================================
+
+/// Parameters for prune_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct PruneChainParams {
+    /// Topoheight to prune the chain to
+    pub topoheight: TopoHeight,
+}
+
+/// Result of prune_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct PruneChainResult {
+    /// New pruned topoheight
+    pub pruned_topoheight: TopoHeight,
+}
+
+/// Parameters for rewind_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct RewindChainParams {
+    /// Number of blocks to rewind
+    pub count: u64,
+    /// Should it stop at stable height
+    #[serde(default)]
+    pub until_stable_height: bool,
+}
+
+/// Result of rewind_chain RPC method
+#[derive(Serialize, Deserialize)]
+pub struct RewindChainResult {
+    /// New topoheight after rewind
+    pub topoheight: TopoHeight,
+    /// All transactions that were removed from the chain
+    pub txs: Vec<Hash>,
 }

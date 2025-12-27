@@ -80,7 +80,9 @@ impl Serializer for VarUint {
         let len = reader.read_u8()? as usize;
 
         if len > MAX_VARUINT_SIZE {
-            debug!("VarUint size is too big: {}", len);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("VarUint size is too big: {}", len);
+            }
             return Err(ReaderError::InvalidSize);
         }
 

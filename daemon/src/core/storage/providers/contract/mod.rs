@@ -2,6 +2,7 @@ mod balance;
 mod data;
 mod event;
 mod output;
+mod scheduled_execution;
 mod supply;
 
 use std::borrow::Cow;
@@ -15,6 +16,7 @@ pub use balance::*;
 pub use data::*;
 pub use event::*;
 pub use output::*;
+pub use scheduled_execution::*;
 pub use supply::*;
 
 // A versioned contract is a contract that can be updated or deleted

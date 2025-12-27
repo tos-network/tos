@@ -22,7 +22,7 @@ async fn stress_high_block_rate() {
     // 3. Submit blocks at BLOCKS_PER_SECOND rate
     // 4. Measure processing time for each block
     // 5. Verify no blocks are dropped
-    // 6. Verify GHOSTDAG calculations complete correctly
+    // 6. Verify BlockDAG calculations complete correctly
     // 7. Verify memory usage stays reasonable
     // 8. Verify CPU usage is manageable
 
@@ -52,14 +52,14 @@ async fn stress_large_dag_depth() {
     // 2. Include branching and merging
     // 3. Measure time to add each block
     // 4. Track memory usage
-    // 5. Verify GHOSTDAG performance doesn't degrade
+    // 5. Verify BlockDAG performance doesn't degrade
     // 6. Test queries on deep blocks
     // 7. Verify reachability queries are fast
 
     // Expected Results:
     // - Block addition time should remain constant (< 100ms)
     // - Memory usage should scale linearly with block count
-    // - GHOSTDAG calculations complete in < 1 second
+    // - BlockDAG calculations complete in < 1 second
     // - Ancestry queries complete in < 10ms
 
     println!("Would test DAG with {} blocks and branching factor {}",
@@ -81,13 +81,13 @@ async fn stress_high_parent_count() {
     // 1. Create NUM_BLOCKS parallel branches
     // 2. Create blocks that merge up to MAX_PARENTS branches
     // 3. Repeat for NUM_BLOCKS iterations
-    // 4. Measure GHOSTDAG performance
+    // 4. Measure BlockDAG performance
     // 5. Verify blue/red classification is correct
     // 6. Measure memory usage
     // 7. Verify no performance degradation
 
     // Expected Results:
-    // - GHOSTDAG completes for 32-parent blocks in < 1 second
+    // - BlockDAG completes for 32-parent blocks in < 1 second
     // - Blue/red classification is correct
     // - Memory usage is reasonable
     // - Performance is stable across all blocks
@@ -112,7 +112,7 @@ async fn stress_concurrent_block_processing() {
     // 2. Process each batch concurrently
     // 3. Verify all blocks are processed correctly
     // 4. Verify no race conditions
-    // 5. Verify consistency of GHOSTDAG data
+    // 5. Verify consistency of BlockDAG data
     // 6. Measure throughput
     // 7. Verify no deadlocks
 

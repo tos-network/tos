@@ -53,10 +53,12 @@ impl Serializer for OrderedHashes<'_> {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let total_size = reader.total_size();
         if total_size % HASH_SIZE != 0 {
-            error!(
-                "Invalid size: {}, expected a multiple of 32 for hashes",
-                total_size
-            );
+            if log::log_enabled!(log::Level::Error) {
+                error!(
+                    "Invalid size: {}, expected a multiple of 32 for hashes",
+                    total_size
+                );
+            }
             return Err(ReaderError::InvalidSize);
         }
 
@@ -67,11 +69,13 @@ impl Serializer for OrderedHashes<'_> {
         }
 
         if hashes.len() != count {
-            error!(
-                "Invalid size: received {} elements while sending {}",
-                hashes.len(),
-                count
-            );
+            if log::log_enabled!(log::Level::Error) {
+                error!(
+                    "Invalid size: received {} elements while sending {}",
+                    hashes.len(),
+                    count
+                );
+            }
             return Err(ReaderError::InvalidSize);
         }
 
