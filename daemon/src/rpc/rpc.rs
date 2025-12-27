@@ -73,12 +73,18 @@ async fn store_payment_request(request: StoredPaymentRequest) -> Result<(), Inte
 }
 
 /// Get a payment request by ID
+/// Note: Currently unused as get_payment_status uses blockchain scanning,
+/// but kept for potential future caching/optimization
+#[allow(dead_code)]
 async fn get_payment_request(payment_id: &str) -> Option<StoredPaymentRequest> {
     let store = PAYMENT_REQUESTS.read().await;
     store.get(payment_id).cloned()
 }
 
 /// Update a payment request with transaction info
+/// Note: Currently unused as get_payment_status uses blockchain scanning,
+/// but kept for potential future caching/optimization
+#[allow(dead_code)]
 async fn update_payment_with_tx(
     payment_id: &str,
     tx_hash: tos_common::crypto::Hash,
@@ -3115,6 +3121,12 @@ const MAX_PAYMENT_EXPIRATION_SECS: u64 = 3600;
 /// Default expiration time for payment requests (5 minutes)
 const DEFAULT_PAYMENT_EXPIRATION_SECS: u64 = 300;
 
+/// Default number of blocks to scan when searching for payments (~1 hour at 3s/block)
+const DEFAULT_SCAN_BLOCKS: u64 = 1200;
+
+/// Number of confirmations required for a payment to be considered stable
+const STABLE_CONFIRMATIONS: u64 = 8;
+
 /// Create a payment request and return the QR code URI
 async fn create_payment_request<S: Storage>(
     context: &Context,
@@ -3217,15 +3229,19 @@ async fn parse_payment_request<S: Storage>(
     }))
 }
 
-/// Get payment status by checking the stored payment request
+/// Get payment status by scanning the blockchain for matching transactions
 ///
-/// This endpoint returns the current status of a payment request:
-/// - pending: Waiting for payment
+/// This endpoint scans the blockchain (mempool + blocks) to find payments matching
+/// the given payment_id and address. This allows ANY node to verify payment status
+/// without requiring local storage synchronization.
+///
+/// Status values:
+/// - pending: No matching transaction found
 /// - mempool: Transaction found in mempool (0 confirmations)
-/// - confirming: Transaction in block but < 8 confirmations
-/// - confirmed: Transaction has >= 8 confirmations (stable)
-/// - expired: Payment request expired without payment
-/// - underpaid: Amount received is less than requested
+/// - confirming: Transaction in block but < STABLE_CONFIRMATIONS (8) confirmations
+/// - confirmed: Transaction has >= STABLE_CONFIRMATIONS (8) confirmations (stable)
+/// - expired: Payment request has expired (only if `exp` provided)
+/// - underpaid: Amount received < expected_amount (only if `expected_amount` provided)
 async fn get_payment_status<S: Storage>(
     context: &Context,
     body: Value,
@@ -3237,6 +3253,7 @@ async fn get_payment_status<S: Storage>(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
+    // Step 1: Validate payment_id
     if let Err(reason) = validate_payment_id(&params.payment_id) {
         return Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
             "Invalid payment_id: {}",
@@ -3244,6 +3261,7 @@ async fn get_payment_status<S: Storage>(
         )));
     }
 
+    // Step 2: Check expiration (if exp provided)
     if params.exp.map(|exp| now > exp).unwrap_or(false) {
         return Ok(json!(PaymentStatusResponse {
             payment_id: Cow::Owned(params.payment_id),
@@ -3255,123 +3273,41 @@ async fn get_payment_status<S: Storage>(
         }));
     }
 
-    // Look up the stored payment request
-    let stored = match get_payment_request(&params.payment_id).await {
-        Some(req) => req,
-        None => {
-            // Payment request not found - return pending status
-            // This could be a payment request created on another node
-            return Ok(json!(PaymentStatusResponse {
-                payment_id: Cow::Owned(params.payment_id),
-                status: PaymentStatus::Pending,
-                tx_hash: None,
-                amount_received: None,
-                confirmations: None,
-                confirmed_at: None,
-            }));
-        }
-    };
-
-    // Get current blockchain state for confirmation calculation
+    // Get current blockchain state
     let current_topoheight = blockchain.get_topo_height();
-    let stable_topoheight = blockchain.get_stable_topoheight();
+    let target_key = params.address.to_public_key();
 
-    // If payment was already found, return its status
-    if let Some(ref tx_hash) = stored.tx_hash {
-        let status = stored.get_status(current_topoheight, stable_topoheight);
-        let confirmations = stored
-            .confirmed_at_topoheight
-            .map(|topo| current_topoheight.saturating_sub(topo));
-
-        let confirmed_at = if status == PaymentStatus::Confirmed {
-            // Get the block timestamp for confirmation time
-            let storage = blockchain.get_storage().read().await;
-            if let Some(topo) = stored.confirmed_at_topoheight {
-                storage
-                    .get_hash_at_topo_height(topo)
-                    .await
-                    .ok()
-                    .and_then(|hash| {
-                        // Get block header for timestamp
-                        futures::executor::block_on(async {
-                            storage
-                                .get_block_header_by_hash(&hash)
-                                .await
-                                .ok()
-                                .map(|h| h.get_timestamp())
-                        })
-                    })
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        return Ok(json!(PaymentStatusResponse {
-            payment_id: Cow::Owned(params.payment_id),
-            status,
-            tx_hash: Some(Cow::Owned(tx_hash.clone())),
-            amount_received: stored.amount_received,
-            confirmations,
-            confirmed_at,
-        }));
-    }
-
-    // Payment not yet received - check if expired
-    if stored.is_expired() {
-        return Ok(json!(PaymentStatusResponse {
-            payment_id: Cow::Owned(params.payment_id),
-            status: PaymentStatus::Expired,
-            tx_hash: None,
-            amount_received: None,
-            confirmations: None,
-            confirmed_at: None,
-        }));
-    }
-
-    // Check mempool for pending transactions to this address
-    let mempool = blockchain.get_mempool().read().await;
-    let target_key = stored.address.to_public_key();
-
-    for (tx_hash, sorted_tx) in mempool.get_txs() {
-        let tx = sorted_tx.get_tx();
-        if let TransactionType::Transfers(transfers) = tx.get_data() {
-            for transfer in transfers {
-                // Check if this transfer is to our address
-                if transfer.get_destination() == &target_key {
-                    // Check extra_data for payment ID match
-                    if let Some(extra_data) = transfer.get_extra_data() {
-                        // UnknownExtraDataFormat wraps Vec<u8> in .0
-                        if let Some((found_id, _)) = decode_payment_extra_data(&extra_data.0) {
-                            if found_id == params.payment_id {
-                                // Found matching transaction in mempool!
-                                let amount = transfer.get_amount();
-
-                                // Update stored request
-                                update_payment_with_tx(
-                                    &params.payment_id,
-                                    (**tx_hash).clone(),
-                                    amount,
-                                    current_topoheight, // Will be updated when confirmed
-                                )
-                                .await;
-
-                                let status =
-                                    if stored.amount.map(|req| amount < req).unwrap_or(false) {
+    // Step 3: Scan mempool first (0-conf transactions)
+    {
+        let mempool = blockchain.get_mempool().read().await;
+        for (tx_hash, sorted_tx) in mempool.get_txs() {
+            let tx = sorted_tx.get_tx();
+            if let TransactionType::Transfers(transfers) = tx.get_data() {
+                for transfer in transfers {
+                    if transfer.get_destination() == &target_key {
+                        if let Some(extra_data) = transfer.get_extra_data() {
+                            if let Some((found_id, _)) = decode_payment_extra_data(&extra_data.0) {
+                                if found_id == params.payment_id {
+                                    let amount = transfer.get_amount();
+                                    let status = if params
+                                        .expected_amount
+                                        .map(|exp| amount < exp)
+                                        .unwrap_or(false)
+                                    {
                                         PaymentStatus::Underpaid
                                     } else {
                                         PaymentStatus::Mempool
                                     };
 
-                                return Ok(json!(PaymentStatusResponse {
-                                    payment_id: Cow::Owned(params.payment_id),
-                                    status,
-                                    tx_hash: Some(Cow::Owned((**tx_hash).clone())),
-                                    amount_received: Some(amount),
-                                    confirmations: Some(0),
-                                    confirmed_at: None,
-                                }));
+                                    return Ok(json!(PaymentStatusResponse {
+                                        payment_id: Cow::Owned(params.payment_id),
+                                        status,
+                                        tx_hash: Some(Cow::Owned((**tx_hash).clone())),
+                                        amount_received: Some(amount),
+                                        confirmations: Some(0),
+                                        confirmed_at: None,
+                                    }));
+                                }
                             }
                         }
                     }
@@ -3380,7 +3316,106 @@ async fn get_payment_status<S: Storage>(
         }
     }
 
-    // No matching transaction found yet
+    // Step 4: Scan blockchain history
+    // Determine scan range
+    let start_topoheight = params
+        .min_topoheight
+        .unwrap_or_else(|| current_topoheight.saturating_sub(DEFAULT_SCAN_BLOCKS));
+
+    // Track best match (highest topoheight)
+    let mut best_match: Option<(Hash, u64, u64, u64)> = None; // (tx_hash, amount, topo, timestamp)
+
+    let storage = blockchain.get_storage().read().await;
+
+    // Scan blocks from start_topoheight to current
+    for topo in start_topoheight..=current_topoheight {
+        let block_result = storage.get_block_header_at_topoheight(topo).await;
+        let (block_hash, block_header) = match block_result {
+            Ok(result) => result,
+            Err(_) => continue, // Skip if block not found (pruned)
+        };
+
+        // Check each transaction in the block
+        for tx_hash in block_header.get_transactions() {
+            // Skip unexecuted transactions
+            if !storage
+                .is_tx_executed_in_block(tx_hash, &block_hash)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
+            let tx = match storage.get_transaction(tx_hash).await {
+                Ok(tx) => tx,
+                Err(_) => continue,
+            };
+
+            if let TransactionType::Transfers(transfers) = tx.get_data() {
+                for transfer in transfers {
+                    if transfer.get_destination() == &target_key {
+                        if let Some(extra_data) = transfer.get_extra_data() {
+                            if let Some((found_id, _)) = decode_payment_extra_data(&extra_data.0) {
+                                if found_id == params.payment_id {
+                                    let amount = transfer.get_amount();
+                                    let timestamp = block_header.get_timestamp();
+
+                                    // Keep the highest topoheight match
+                                    if best_match
+                                        .as_ref()
+                                        .map(|(_, _, best_topo, _)| topo > *best_topo)
+                                        .unwrap_or(true)
+                                    {
+                                        best_match =
+                                            Some((tx_hash.clone(), amount, topo, timestamp));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 5: Return result based on best match
+    if let Some((tx_hash, amount, confirmed_topo, timestamp)) = best_match {
+        // Calculate confirmations: current_topoheight - block_topoheight + 1
+        let confirmations = if current_topoheight >= confirmed_topo {
+            current_topoheight - confirmed_topo + 1
+        } else {
+            0
+        };
+
+        // Determine status
+        let status = if params
+            .expected_amount
+            .map(|exp| amount < exp)
+            .unwrap_or(false)
+        {
+            PaymentStatus::Underpaid
+        } else if confirmations >= STABLE_CONFIRMATIONS {
+            PaymentStatus::Confirmed
+        } else {
+            PaymentStatus::Confirming
+        };
+
+        let confirmed_at = if status == PaymentStatus::Confirmed {
+            Some(timestamp / 1000) // Convert ms to seconds
+        } else {
+            None
+        };
+
+        return Ok(json!(PaymentStatusResponse {
+            payment_id: Cow::Owned(params.payment_id),
+            status,
+            tx_hash: Some(Cow::Owned(tx_hash)),
+            amount_received: Some(amount),
+            confirmations: Some(confirmations),
+            confirmed_at,
+        }));
+    }
+
+    // Step 6: No match found - return pending
     Ok(json!(PaymentStatusResponse {
         payment_id: Cow::Owned(params.payment_id),
         status: PaymentStatus::Pending,

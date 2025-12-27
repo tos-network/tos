@@ -2,7 +2,7 @@
 
 **Last Updated:** 2025-12-27
 **TIP Version:** 1.0
-**Implementation Progress:** ~70%
+**Implementation Progress:** ~85%
 
 ## Overview
 
@@ -13,9 +13,9 @@ This document tracks the implementation status of [TIP-QR-PAYMENT.md](./TIP-QR-P
 | Category | Status | Progress |
 |----------|--------|----------|
 | Core Types & Parsing | Complete | 100% |
-| Daemon RPC APIs | Partial | 80% |
+| Daemon RPC APIs | Complete | 100% |
 | Wallet RPC APIs | Complete | 100% |
-| Blockchain Scanning | Partial | 50% |
+| Blockchain Scanning | Complete | 100% |
 | WebSocket Subscription | Not Started | 0% |
 | Callback Security | Not Started | 0% |
 | Unit Tests | Complete | 100% |
@@ -45,28 +45,31 @@ This document tracks the implementation status of [TIP-QR-PAYMENT.md](./TIP-QR-P
 
 ### 2. Daemon RPC APIs
 
-**Status:** ⚠️ Partial (80%)
+**Status:** ✅ Complete (100%)
 
 | Method | File | Status | Notes |
 |--------|------|--------|-------|
-| `create_payment_request` | `daemon/src/rpc/rpc.rs:3104` | ✅ Complete | Generates payment request with URI |
-| `get_payment_status` | `daemon/src/rpc/rpc.rs:3229` | ⚠️ Partial | See limitations below |
+| `create_payment_request` | `daemon/src/rpc/rpc.rs:3124` | ✅ Complete | Generates payment request with URI |
+| `get_payment_status` | `daemon/src/rpc/rpc.rs:3239` | ✅ Complete | Full blockchain scanning |
 | `parse_payment_request` | `daemon/src/rpc/rpc.rs` | ✅ Complete | Parses URI without payment |
-| `get_address_payments` | `daemon/src/rpc/rpc.rs:3415` | ✅ Complete | Balance check helper |
+| `get_address_payments` | `daemon/src/rpc/rpc.rs:3444` | ✅ Complete | Balance check helper |
 
-#### `get_payment_status` Limitations
+#### `get_payment_status` Features
 
 | Feature | TIP Spec | Implementation | Status |
 |---------|----------|----------------|--------|
 | Check expiration (`exp`) | Required | ✅ Implemented | ✅ |
 | Payment ID validation | Required | ✅ Implemented | ✅ |
 | Mempool scanning | Required | ✅ Implemented | ✅ |
-| Local storage lookup | Required | ✅ Implemented | ✅ |
-| Block history scanning | Required | ❌ Not implemented | ❌ |
-| `min_topoheight` parameter | Required | ❌ Ignored | ❌ |
+| Block history scanning | Required | ✅ Implemented | ✅ |
+| `min_topoheight` parameter | Required | ✅ Implemented | ✅ |
 | `expected_amount` underpaid check | Required | ✅ Implemented | ✅ |
+| Confirmations calculation | Required | ✅ `current - block + 1` | ✅ |
+| Highest topoheight match | Required | ✅ Implemented | ✅ |
 
-**Missing:** Full blockchain scanning from `min_topoheight` to current height. Currently only checks mempool and locally stored payment requests.
+**Constants:**
+- `DEFAULT_SCAN_BLOCKS = 1200` (~1 hour at 3s/block)
+- `STABLE_CONFIRMATIONS = 8` (for confirmed status)
 
 ### 3. Wallet RPC APIs
 
@@ -158,10 +161,11 @@ This document tracks the implementation status of [TIP-QR-PAYMENT.md](./TIP-QR-P
 
 ### High Priority
 
-- [ ] Implement blockchain history scanning in `get_payment_status`
-  - Scan blocks from `min_topoheight` to current height
-  - Match transactions by address + payment_id in extra_data
-  - Return highest topoheight match
+- [x] ~~Implement blockchain history scanning in `get_payment_status`~~
+  - ~~Scan blocks from `min_topoheight` to current height~~
+  - ~~Match transactions by address + payment_id in extra_data~~
+  - ~~Return highest topoheight match~~
+  - **Completed:** 2025-12-27
 
 - [ ] Add integration tests for payment flow
   - `testing-framework/tests/payment_integration_test.rs`
@@ -185,6 +189,7 @@ This document tracks the implementation status of [TIP-QR-PAYMENT.md](./TIP-QR-P
 
 | Date | Version | Changes |
 |------|---------|---------|
+| 2025-12-27 | 1.1 | Implemented blockchain history scanning in `get_payment_status` |
 | 2025-12-27 | 1.0 | Initial implementation status document |
 
 ---
