@@ -17,9 +17,14 @@ use tos_common::{
     network::Network,
     referral::{DistributionResult, ReferralRewardRatios, RewardDistribution},
     transaction::{
-        builder::{AccountState, FeeBuilder, FeeHelper, TransactionBuilder, TransactionTypeBuilder},
-        verify::{BlockchainApplyState, BlockchainVerificationState, ContractEnvironment, NoZKPCache},
-        BatchReferralRewardPayload, ContractDeposit, MultiSigPayload, Reference, Transaction, TxVersion,
+        builder::{
+            AccountState, FeeBuilder, FeeHelper, TransactionBuilder, TransactionTypeBuilder,
+        },
+        verify::{
+            BlockchainApplyState, BlockchainVerificationState, ContractEnvironment, NoZKPCache,
+        },
+        BatchReferralRewardPayload, ContractDeposit, MultiSigPayload, Reference, Transaction,
+        TxVersion,
     },
 };
 use tos_daemon::tako_integration::TakoContractExecutor;
@@ -156,7 +161,10 @@ impl TestAccountState {
 impl FeeHelper for TestAccountState {
     type Error = Box<dyn std::error::Error>;
 
-    fn account_exists(&self, _account: &tos_common::crypto::elgamal::CompressedPublicKey) -> Result<bool, Self::Error> {
+    fn account_exists(
+        &self,
+        _account: &tos_common::crypto::elgamal::CompressedPublicKey,
+    ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 }
@@ -177,7 +185,11 @@ impl AccountState for TestAccountState {
         }
     }
 
-    fn update_account_balance(&mut self, asset: &Hash, new_balance: u64) -> Result<(), Self::Error> {
+    fn update_account_balance(
+        &mut self,
+        asset: &Hash,
+        new_balance: u64,
+    ) -> Result<(), Self::Error> {
         self.balances.insert(asset.clone(), new_balance);
         Ok(())
     }
@@ -236,7 +248,7 @@ impl TestChainState {
             burned: 0,
             gas_fee: 0,
             executor: Arc::new(TakoContractExecutor::new()),
-            _contract_provider: DummyContractProvider::default(),
+            _contract_provider: DummyContractProvider,
         }
     }
 
@@ -367,7 +379,11 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
         Ok(&self.environment)
     }
 
-    async fn set_contract_module(&mut self, _hash: &Hash, _module: &'a Module) -> Result<(), TestError> {
+    async fn set_contract_module(
+        &mut self,
+        _hash: &Hash,
+        _module: &'a Module,
+    ) -> Result<(), TestError> {
         Err(TestError::Unsupported)
     }
 
@@ -424,7 +440,13 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         _contract: &'b Hash,
         _deposits: &'b IndexMap<Hash, ContractDeposit>,
         _tx_hash: &'b Hash,
-    ) -> Result<(ContractEnvironment<'b, DummyContractProvider>, ContractChainState<'b>), TestError> {
+    ) -> Result<
+        (
+            ContractEnvironment<'b, DummyContractProvider>,
+            ContractChainState<'b>,
+        ),
+        TestError,
+    > {
         Err(TestError::Unsupported)
     }
 
@@ -457,7 +479,9 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         Ok(())
     }
 
-    async fn get_ai_mining_state(&mut self) -> Result<Option<tos_common::ai_mining::AIMiningState>, TestError> {
+    async fn get_ai_mining_state(
+        &mut self,
+    ) -> Result<Option<tos_common::ai_mining::AIMiningState>, TestError> {
         Ok(None)
     }
 
@@ -573,22 +597,12 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
     let bob_pk = bob.get_public_key().compress();
     let charlie_pk = charlie.get_public_key().compress();
 
-    let payload = BatchReferralRewardPayload::new(
-        TOS_ASSET,
-        alice_pk.clone(),
-        1000,
-        2,
-        vec![2500, 1500],
-    );
+    let payload =
+        BatchReferralRewardPayload::new(TOS_ASSET, alice_pk.clone(), 1000, 2, vec![2500, 1500]);
     let tx_type = TransactionTypeBuilder::BatchReferralReward(payload);
     let fee_builder = FeeBuilder::Value(0);
-    let builder = TransactionBuilder::new(
-        TxVersion::T0,
-        alice_pk.clone(),
-        None,
-        tx_type,
-        fee_builder,
-    );
+    let builder =
+        TransactionBuilder::new(TxVersion::T0, alice_pk.clone(), None, tx_type, fee_builder);
 
     let mut account_state = TestAccountState::new();
     account_state.set_balance(TOS_ASSET, 10_000);

@@ -53,11 +53,7 @@ fn test_rocksdb_config() -> RocksDBConfig {
 /// Create a test RocksStorage instance
 fn create_test_storage(temp_dir: &TempDir) -> RocksStorage {
     let config = test_rocksdb_config();
-    RocksStorage::new(
-        temp_dir.path().to_str().unwrap(),
-        Network::Devnet,
-        &config,
-    )
+    RocksStorage::new(temp_dir.path().to_str().unwrap(), Network::Devnet, &config)
 }
 
 /// Generate a random public key for testing
@@ -122,7 +118,11 @@ async fn test_stub_record_does_not_block_binding() {
 
     // Verify Bob's referrer is Charlie
     let bob_referrer = storage.get_referrer(&bob).await.unwrap();
-    assert_eq!(bob_referrer, Some(charlie), "Bob's referrer should be Charlie");
+    assert_eq!(
+        bob_referrer,
+        Some(charlie),
+        "Bob's referrer should be Charlie"
+    );
 
     println!("Test A.1 passed: Stub record does not block binding");
 }
@@ -157,7 +157,10 @@ async fn test_binding_preserves_direct_referrals_count() {
 
     // Verify Bob has 5 direct referrals
     let count_before = storage.get_direct_referrals_count(&bob).await.unwrap();
-    assert_eq!(count_before, 5, "Bob should have 5 direct referrals before binding");
+    assert_eq!(
+        count_before, 5,
+        "Bob should have 5 direct referrals before binding"
+    );
 
     // Step 2: Bob binds Charlie as his referrer
     storage
@@ -174,7 +177,11 @@ async fn test_binding_preserves_direct_referrals_count() {
 
     // Also verify Bob's referrer is correctly set
     let bob_referrer = storage.get_referrer(&bob).await.unwrap();
-    assert_eq!(bob_referrer, Some(charlie), "Bob's referrer should be Charlie");
+    assert_eq!(
+        bob_referrer,
+        Some(charlie),
+        "Bob's referrer should be Charlie"
+    );
 
     println!("Test A.2 passed: Preserve direct_referrals_count when binding");
 }
@@ -327,7 +334,10 @@ async fn test_order_dependent_state_transition() {
     // - Bob still has 2 direct referrals
     // - David has 1 direct referral (Bob)
     assert!(storage.has_referrer(&bob).await.unwrap());
-    assert_eq!(storage.get_referrer(&bob).await.unwrap(), Some(david.clone()));
+    assert_eq!(
+        storage.get_referrer(&bob).await.unwrap(),
+        Some(david.clone())
+    );
     assert_eq!(storage.get_direct_referrals_count(&bob).await.unwrap(), 2);
     assert_eq!(storage.get_direct_referrals_count(&david).await.unwrap(), 1);
 
@@ -455,16 +465,30 @@ async fn test_list_vs_count_pagination_consistency() {
     }
 
     let count = storage.get_direct_referrals_count(&bob).await.unwrap();
-    assert_eq!(count, total_users as u32, "Count should match total referrals");
+    assert_eq!(
+        count, total_users as u32,
+        "Count should match total referrals"
+    );
 
     // Page 1: first 1000
     let page1 = storage.get_direct_referrals(&bob, 0, 1000).await.unwrap();
-    assert_eq!(page1.referrals.len(), 1000, "First page should have 1000 referrals");
+    assert_eq!(
+        page1.referrals.len(),
+        1000,
+        "First page should have 1000 referrals"
+    );
     assert_eq!(page1.total_count, total_users as u32);
 
     // Page 2: remaining 1
-    let page2 = storage.get_direct_referrals(&bob, 1000, 1000).await.unwrap();
-    assert_eq!(page2.referrals.len(), 1, "Second page should have 1 referral");
+    let page2 = storage
+        .get_direct_referrals(&bob, 1000, 1000)
+        .await
+        .unwrap();
+    assert_eq!(
+        page2.referrals.len(),
+        1,
+        "Second page should have 1 referral"
+    );
     assert_eq!(page2.total_count, total_users as u32);
 
     // Verify the last bound user appears in page 2
@@ -493,7 +517,13 @@ async fn test_upline_chain_consistency() {
 
     for i in 0..4 {
         storage
-            .bind_referrer(&users[i], &users[i + 1], height + i as u64, Hash::zero(), timestamp + i as u64)
+            .bind_referrer(
+                &users[i],
+                &users[i + 1],
+                height + i as u64,
+                Hash::zero(),
+                timestamp + i as u64,
+            )
             .await
             .unwrap();
     }
@@ -585,12 +615,23 @@ async fn test_distribution_calculation() {
     let height = 100;
     let timestamp = 1000;
 
-    storage.bind_referrer(&alice, &bob, height, Hash::zero(), timestamp).await.unwrap();
-    storage.bind_referrer(&bob, &charlie, height + 1, Hash::zero(), timestamp + 1).await.unwrap();
-    storage.bind_referrer(&charlie, &david, height + 2, Hash::zero(), timestamp + 2).await.unwrap();
+    storage
+        .bind_referrer(&alice, &bob, height, Hash::zero(), timestamp)
+        .await
+        .unwrap();
+    storage
+        .bind_referrer(&bob, &charlie, height + 1, Hash::zero(), timestamp + 1)
+        .await
+        .unwrap();
+    storage
+        .bind_referrer(&charlie, &david, height + 2, Hash::zero(), timestamp + 2)
+        .await
+        .unwrap();
 
     // Distribute 10000 with ratios: [3000, 2000, 1000] (30%, 20%, 10%)
-    let ratios = ReferralRewardRatios { ratios: vec![3000, 2000, 1000] };
+    let ratios = ReferralRewardRatios {
+        ratios: vec![3000, 2000, 1000],
+    };
     let result = storage
         .distribute_to_uplines(&alice, TOS_ASSET, 10000, &ratios)
         .await
@@ -630,12 +671,20 @@ async fn test_distribution_balance_conservation() {
     let height = 100;
     let timestamp = 1000;
 
-    storage.bind_referrer(&alice, &bob, height, Hash::zero(), timestamp).await.unwrap();
-    storage.bind_referrer(&bob, &charlie, height + 1, Hash::zero(), timestamp + 1).await.unwrap();
+    storage
+        .bind_referrer(&alice, &bob, height, Hash::zero(), timestamp)
+        .await
+        .unwrap();
+    storage
+        .bind_referrer(&bob, &charlie, height + 1, Hash::zero(), timestamp + 1)
+        .await
+        .unwrap();
 
     // Distribute 1000 with ratios: [2500, 1500] (25%, 15% = 40% total)
     let total_amount = 1000u64;
-    let ratios = ReferralRewardRatios { ratios: vec![2500, 1500] };
+    let ratios = ReferralRewardRatios {
+        ratios: vec![2500, 1500],
+    };
     let result = storage
         .distribute_to_uplines(&alice, TOS_ASSET, total_amount, &ratios)
         .await
@@ -646,7 +695,10 @@ async fn test_distribution_balance_conservation() {
 
     // Calculate remainder (what should be refunded to sender)
     let remainder = total_amount.saturating_sub(result.total_distributed);
-    assert_eq!(remainder, 600, "Remainder should be 600 (60% not distributed)");
+    assert_eq!(
+        remainder, 600,
+        "Remainder should be 600 (60% not distributed)"
+    );
 
     // Verify balance conservation
     assert_eq!(
@@ -677,18 +729,30 @@ async fn test_distribution_partial_uplines() {
     let height = 100;
     let timestamp = 1000;
 
-    storage.bind_referrer(&alice, &bob, height, Hash::zero(), timestamp).await.unwrap();
-    storage.bind_referrer(&bob, &charlie, height + 1, Hash::zero(), timestamp + 1).await.unwrap();
+    storage
+        .bind_referrer(&alice, &bob, height, Hash::zero(), timestamp)
+        .await
+        .unwrap();
+    storage
+        .bind_referrer(&bob, &charlie, height + 1, Hash::zero(), timestamp + 1)
+        .await
+        .unwrap();
 
     // Request 5 levels but only 2 uplines exist
-    let ratios = ReferralRewardRatios { ratios: vec![2000, 1500, 1000, 500, 200] };
+    let ratios = ReferralRewardRatios {
+        ratios: vec![2000, 1500, 1000, 500, 200],
+    };
     let result = storage
         .distribute_to_uplines(&alice, TOS_ASSET, 10000, &ratios)
         .await
         .unwrap();
 
     // Should only distribute to 2 uplines (bob and charlie)
-    assert_eq!(result.distributions.len(), 2, "Should only have 2 distributions");
+    assert_eq!(
+        result.distributions.len(),
+        2,
+        "Should only have 2 distributions"
+    );
     assert_eq!(result.levels_rewarded, 2);
 
     // Verify amounts: only first 2 ratios used
@@ -713,7 +777,9 @@ async fn test_distribution_zero_uplines() {
     // Alice has no referrer
     let alice = random_pubkey();
 
-    let ratios = ReferralRewardRatios { ratios: vec![3000, 2000, 1000] };
+    let ratios = ReferralRewardRatios {
+        ratios: vec![3000, 2000, 1000],
+    };
     let result = storage
         .distribute_to_uplines(&alice, TOS_ASSET, 10000, &ratios)
         .await
@@ -748,10 +814,15 @@ async fn test_distribution_invalid_ratios() {
     let height = 100;
     let timestamp = 1000;
 
-    storage.bind_referrer(&alice, &bob, height, Hash::zero(), timestamp).await.unwrap();
+    storage
+        .bind_referrer(&alice, &bob, height, Hash::zero(), timestamp)
+        .await
+        .unwrap();
 
     // Ratios sum to 150% (should be rejected)
-    let ratios = ReferralRewardRatios { ratios: vec![8000, 7000] }; // 80% + 70% = 150%
+    let ratios = ReferralRewardRatios {
+        ratios: vec![8000, 7000],
+    }; // 80% + 70% = 150%
     let result = storage
         .distribute_to_uplines(&alice, TOS_ASSET, 10000, &ratios)
         .await;
