@@ -245,6 +245,57 @@ Check the status of a payment by scanning the blockchain for matching transactio
 
 Subscribe to payment notifications for an address via WebSocket.
 
+#### `register_payment_webhook`
+
+Register a webhook secret for callback delivery.
+
+**Request:**
+```json
+{
+    "jsonrpc": "2.0",
+    "method": "register_payment_webhook",
+    "params": {
+        "url": "https://merchant.example.com/webhook",
+        "secret_hex": "0123abcd..."
+    }
+}
+```
+
+**Response:**
+```json
+{
+    "jsonrpc": "2.0",
+    "result": {
+        "success": true
+    }
+}
+```
+
+#### `unregister_payment_webhook`
+
+Remove a webhook secret.
+
+**Request:**
+```json
+{
+    "jsonrpc": "2.0",
+    "method": "unregister_payment_webhook",
+    "params": {
+        "url": "https://merchant.example.com/webhook"
+    }
+}
+```
+
+**Response:**
+```json
+{
+    "jsonrpc": "2.0",
+    "result": {
+        "success": true
+    }
+}
+```
+
 ### Wallet RPC
 
 #### `pay_request`
@@ -535,6 +586,7 @@ POST {callback_url}
 Content-Type: application/json
 X-TOS-Signature: {hmac_signature}
 X-TOS-Timestamp: {unix_timestamp}
+X-TOS-Idempotency: {idempotency_key}
 
 {
   "event": "payment_received",
@@ -560,6 +612,14 @@ Merchants MUST verify the callback signature:
 6. Compare with X-TOS-Signature (constant-time comparison)
 ```
 
+#### Idempotency
+
+Merchants SHOULD treat callbacks as idempotent by using `X-TOS-Idempotency`:
+
+- Deterministic key, stable across retries
+- SHA-256 over `{event}|{payment_id}|{tx_hash}|{amount}|{confirmations}|{timestamp}` (hex)
+- If a duplicate key is received, merchants SHOULD ignore or de-duplicate safely
+
 **Signature Example (pseudo):**
 ```text
 timestamp = "1734567890"
@@ -582,7 +642,7 @@ signature = hex_lowercase(hmac)
 
 #### Webhook Secret Registration
 
-Merchants register webhook secrets via out-of-band mechanism (not part of this TIP). The secret is used for HMAC signature generation.
+Merchants register webhook secrets via `register_payment_webhook` (daemon RPC). The secret is used for HMAC signature generation.
 
 **Note:** If callback security is not required, merchants SHOULD poll `get_payment_status` instead of using callbacks.
 
