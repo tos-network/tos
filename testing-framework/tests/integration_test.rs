@@ -36,7 +36,10 @@ fn test_framework_version() {
     use tos_testing_framework::{FRAMEWORK_VERSION, VERSION};
 
     assert!(!VERSION.is_empty(), "VERSION should not be empty");
-    assert!(!FRAMEWORK_VERSION.is_empty(), "FRAMEWORK_VERSION should not be empty");
+    assert!(
+        !FRAMEWORK_VERSION.is_empty(),
+        "FRAMEWORK_VERSION should not be empty"
+    );
 }
 
 #[tokio::test]
