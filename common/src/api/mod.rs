@@ -1,3 +1,4 @@
+pub mod callback;
 pub mod daemon;
 mod data;
 pub mod payment;
