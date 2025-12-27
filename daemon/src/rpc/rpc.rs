@@ -3103,8 +3103,9 @@ async fn get_contract_events<S: Storage>(
 // ============================================================================
 
 use tos_common::api::payment::{
-    decode_payment_extra_data, CreatePaymentRequestParams, CreatePaymentRequestResult,
-    GetPaymentStatusParams, ParsePaymentRequestParams, ParsePaymentRequestResult, PaymentRequest,
+    decode_payment_extra_data, is_valid_payment_id, validate_payment_id,
+    CreatePaymentRequestParams, CreatePaymentRequestResult, GetPaymentStatusParams,
+    ParsePaymentRequestParams, ParsePaymentRequestResult, PaymentParseError, PaymentRequest,
     PaymentStatus, PaymentStatusResponse,
 };
 
@@ -3124,7 +3125,8 @@ async fn create_payment_request<S: Storage>(
 
     // Validate the address
     if !params.address.is_normal() {
-        return Err(InternalRpcError::InvalidParams(
+        return Err(invalid_params_data(
+            "invalid_address",
             "Address must be in normal format (not integrated)",
         ));
     }
@@ -3137,6 +3139,12 @@ async fn create_payment_request<S: Storage>(
 
     // Generate a unique payment ID
     let payment_id = generate_payment_id();
+    if !is_valid_payment_id(&payment_id) {
+        return Err(invalid_params_data(
+            "invalid_payment_id",
+            "Generated payment ID is invalid",
+        ));
+    }
 
     // Build the payment request
     let mut request = PaymentRequest::new(payment_id.clone(), params.address.clone());
@@ -3152,8 +3160,9 @@ async fn create_payment_request<S: Storage>(
     if let Some(ref memo) = params.memo {
         // Validate memo length
         if memo.len() > PaymentRequest::MAX_MEMO_LENGTH {
-            return Err(InternalRpcError::InvalidParams(
-                "Memo exceeds maximum length of 64 characters",
+            return Err(invalid_params_data(
+                "memo_too_long",
+                "Memo exceeds maximum length of 64 bytes",
             ));
         }
         request = request.with_memo(memo.clone());
@@ -3190,8 +3199,10 @@ async fn parse_payment_request<S: Storage>(
 ) -> Result<Value, InternalRpcError> {
     let params: ParsePaymentRequestParams = parse_params(body)?;
 
-    let request = PaymentRequest::from_uri(&params.uri)
-        .map_err(|e| InternalRpcError::InvalidParamsAny(e.into()))?;
+    let request = match PaymentRequest::from_uri(&params.uri) {
+        Ok(request) => request,
+        Err(err) => return Err(map_payment_parse_error(err)),
+    };
 
     let is_expired = request.is_expired();
 
@@ -3221,12 +3232,27 @@ async fn get_payment_status<S: Storage>(
 ) -> Result<Value, InternalRpcError> {
     let params: GetPaymentStatusParams = parse_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
 
-    // Validate payment_id length
-    if params.payment_id.len() > 64 {
-        return Err(InternalRpcError::InvalidParams(
-            "Payment ID exceeds maximum length",
-        ));
+    if let Err(reason) = validate_payment_id(&params.payment_id) {
+        return Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
+            "Invalid payment_id: {}",
+            reason
+        )));
+    }
+
+    if params.exp.map(|exp| now > exp).unwrap_or(false) {
+        return Ok(json!(PaymentStatusResponse {
+            payment_id: Cow::Owned(params.payment_id),
+            status: PaymentStatus::Expired,
+            tx_hash: None,
+            amount_received: None,
+            confirmations: None,
+            confirmed_at: None,
+        }));
     }
 
     // Look up the stored payment request
@@ -3365,6 +3391,22 @@ async fn get_payment_status<S: Storage>(
     }))
 }
 
+fn map_payment_parse_error(err: PaymentParseError) -> InternalRpcError {
+    match err {
+        PaymentParseError::InvalidPaymentId(reason) => {
+            invalid_params_data("invalid_payment_id", &reason.to_string())
+        }
+        other => InternalRpcError::InvalidParamsAny(other.into()),
+    }
+}
+
+fn invalid_params_data(code: &str, reason: &str) -> InternalRpcError {
+    InternalRpcError::InvalidParamsData {
+        message: code.to_string(),
+        data: json!({ "code": code, "reason": reason }),
+    }
+}
+
 /// Watch for incoming payments to an address
 /// Returns account balance and recent transaction info
 ///
@@ -3438,9 +3480,9 @@ fn generate_payment_id() -> String {
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
+        .map(|d| d.as_secs())
         .unwrap_or(0);
 
     let random: u32 = rand::random();
-    format!("pr_{}_{:08x}", timestamp, random)
+    format!("pr_{:x}_{:08x}", timestamp, random)
 }

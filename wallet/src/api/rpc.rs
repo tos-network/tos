@@ -946,7 +946,7 @@ use tos_common::{
     api::{
         payment::{
             encode_payment_extra_data, ParsePaymentRequestParams, ParsePaymentRequestResult,
-            PayRequestParams, PayRequestResult, PaymentRequest,
+            PayRequestParams, PayRequestResult, PaymentParseError, PaymentRequest,
         },
         DataValue,
     },
@@ -957,8 +957,10 @@ use tos_common::{
 async fn parse_payment_request(_: &Context, body: Value) -> Result<Value, InternalRpcError> {
     let params: ParsePaymentRequestParams = parse_params(body)?;
 
-    let request = PaymentRequest::from_uri(&params.uri)
-        .map_err(|e| InternalRpcError::InvalidParamsAny(e.into()))?;
+    let request = match PaymentRequest::from_uri(&params.uri) {
+        Ok(request) => request,
+        Err(err) => return Err(map_payment_parse_error(err)),
+    };
 
     let is_expired = request.is_expired();
 
@@ -984,19 +986,25 @@ async fn pay_request(context: &Context, body: Value) -> Result<Value, InternalRp
     }
 
     // Parse the payment URI
-    let request = PaymentRequest::from_uri(&params.uri)
-        .map_err(|e| InternalRpcError::InvalidParamsAny(e.into()))?;
+    let request = match PaymentRequest::from_uri(&params.uri) {
+        Ok(request) => request,
+        Err(err) => return Err(map_payment_parse_error(err)),
+    };
 
     // Check if expired
     if request.is_expired() {
-        return Err(InternalRpcError::InvalidParams(
+        return Err(invalid_params_data(
+            "expired",
             "Payment request has expired",
         ));
     }
 
     // Determine amount (use override if provided, otherwise use request amount)
     let amount = params.amount.or(request.amount).ok_or_else(|| {
-        InternalRpcError::InvalidParams("No amount specified in payment request or override")
+        invalid_params_data(
+            "amount_required",
+            "No amount specified in payment request or override",
+        )
     })?;
 
     // Get asset (default to TOS)
@@ -1083,4 +1091,20 @@ async fn pay_request(context: &Context, body: Value) -> Result<Value, InternalRp
         fee: tx_fee,
         payment_id: Some(request.payment_id.into_owned()),
     }))
+}
+
+fn map_payment_parse_error(err: PaymentParseError) -> InternalRpcError {
+    match err {
+        PaymentParseError::InvalidPaymentId(reason) => {
+            invalid_params_data("invalid_payment_id", &reason.to_string())
+        }
+        other => InternalRpcError::InvalidParamsAny(other.into()),
+    }
+}
+
+fn invalid_params_data(code: &str, reason: &str) -> InternalRpcError {
+    InternalRpcError::InvalidParamsData {
+        message: code.to_string(),
+        data: json!({ "code": code, "reason": reason }),
+    }
 }

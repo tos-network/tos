@@ -37,7 +37,7 @@ pub struct PaymentRequest<'a> {
     /// Asset hash (None = native TOS)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub asset: Option<Cow<'a, Hash>>,
-    /// Payment memo/description (max 64 chars)
+    /// Payment memo/description (max 64 bytes)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memo: Option<Cow<'a, str>>,
     /// Expiration timestamp (Unix seconds)
@@ -49,7 +49,7 @@ pub struct PaymentRequest<'a> {
 }
 
 impl<'a> PaymentRequest<'a> {
-    /// Maximum memo length in characters
+    /// Maximum memo length in bytes
     pub const MAX_MEMO_LENGTH: usize = 64;
 
     /// Maximum payment ID length
@@ -81,11 +81,14 @@ impl<'a> PaymentRequest<'a> {
     }
 
     /// Set the payment memo
+    /// Truncates to MAX_MEMO_LENGTH bytes at a valid UTF-8 boundary
     pub fn with_memo(mut self, memo: impl Into<Cow<'a, str>>) -> Self {
         let memo: Cow<'a, str> = memo.into();
-        // Truncate to max length
+        // Truncate to max length (bytes), respecting UTF-8 boundaries
         if memo.len() > Self::MAX_MEMO_LENGTH {
-            self.memo = Some(Cow::Owned(memo[..Self::MAX_MEMO_LENGTH].to_string()));
+            // Find the last valid UTF-8 char boundary within limit
+            let truncated = truncate_to_byte_boundary(&memo, Self::MAX_MEMO_LENGTH);
+            self.memo = Some(Cow::Owned(truncated.to_string()));
         } else {
             self.memo = Some(memo);
         }
@@ -206,6 +209,7 @@ impl<'a> PaymentRequest<'a> {
                     );
                 }
                 "id" => {
+                    validate_payment_id(value).map_err(PaymentParseError::InvalidPaymentId)?;
                     payment_id = Some(value.to_string());
                 }
                 "exp" => {
@@ -258,6 +262,8 @@ pub enum PaymentParseError {
     InvalidAmount,
     #[error("Invalid asset hash")]
     InvalidAsset,
+    #[error("Invalid payment ID: {0}")]
+    InvalidPaymentId(PaymentIdError),
     #[error("Invalid memo encoding")]
     InvalidMemo,
     #[error("Invalid expiration value")]
@@ -325,8 +331,19 @@ pub struct CreatePaymentRequestResult {
 /// Request to get payment status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetPaymentStatusParams {
-    /// Payment request ID
+    /// Payment request ID to search for
     pub payment_id: String,
+    /// Receiving address to filter transactions
+    pub address: Address,
+    /// Expected payment amount (for underpaid detection)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_amount: Option<u64>,
+    /// Expiration timestamp (Unix seconds) for request; enables `expired` status
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exp: Option<u64>,
+    /// Minimum topoheight to start searching from (optional, default: current - 1200)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_topoheight: Option<u64>,
 }
 
 /// Request to parse a payment URI
@@ -390,12 +407,26 @@ fn generate_payment_id() -> String {
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
+        .map(|d| d.as_secs())
         .unwrap_or(0);
 
     // Simple ID: pr_<timestamp>_<random>
     let random: u32 = rand::random();
-    format!("pr_{}_{:08x}", timestamp, random)
+    format!("pr_{:x}_{:08x}", timestamp, random)
+}
+
+/// Truncate a string to a maximum number of bytes, respecting UTF-8 boundaries
+fn truncate_to_byte_boundary(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+
+    // Find the last valid char boundary at or before max_bytes
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }
 
 // ============================================================================
@@ -403,7 +434,7 @@ fn generate_payment_id() -> String {
 // ============================================================================
 // Extra data format for embedding payment metadata in transactions:
 // - Byte 0:     Type (0x01 = payment)
-// - Bytes 1-32: Payment ID (32 bytes, zero-padded or truncated)
+// - Bytes 1-32: Payment ID (32 bytes, zero-padded)
 // - Bytes 33+:  Memo (UTF-8, remaining bytes up to MAX_EXTRA_DATA)
 // ============================================================================
 
@@ -425,12 +456,15 @@ pub const MAX_PAYMENT_ID_BYTES: usize = 32;
 ///
 /// Returns None if the data would exceed MAX_EXTRA_DATA_SIZE
 pub fn encode_payment_extra_data(payment_id: &str, memo: Option<&str>) -> Option<Vec<u8>> {
+    if !is_valid_payment_id(payment_id) {
+        return None;
+    }
     let mut data = Vec::with_capacity(MAX_EXTRA_DATA_SIZE);
 
     // Type byte
     data.push(PAYMENT_EXTRA_DATA_TYPE);
 
-    // Payment ID (32 bytes, zero-padded or truncated)
+    // Payment ID (32 bytes, zero-padded)
     let id_bytes = payment_id.as_bytes();
     let id_len = id_bytes.len().min(MAX_PAYMENT_ID_BYTES);
     data.extend_from_slice(&id_bytes[..id_len]);
@@ -478,6 +512,9 @@ pub fn decode_payment_extra_data(data: &[u8]) -> Option<(String, Option<String>)
         .unwrap_or(0);
 
     let payment_id = String::from_utf8(id_bytes[..actual_len].to_vec()).ok()?;
+    if !is_valid_payment_id(&payment_id) {
+        return None;
+    }
 
     // Extract memo if present
     let memo = if data.len() > 1 + MAX_PAYMENT_ID_BYTES {
@@ -497,6 +534,36 @@ pub fn matches_payment_id(extra_data: &[u8], target_id: &str) -> bool {
     } else {
         false
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PaymentIdError {
+    #[error("empty")]
+    Empty,
+    #[error("length exceeds 32 bytes")]
+    TooLong,
+    #[error("contains invalid characters (allowed: A-Z a-z 0-9 - _)")]
+    InvalidChars,
+}
+
+pub fn validate_payment_id(payment_id: &str) -> Result<(), PaymentIdError> {
+    if payment_id.is_empty() {
+        return Err(PaymentIdError::Empty);
+    }
+    if payment_id.len() > MAX_PAYMENT_ID_BYTES {
+        return Err(PaymentIdError::TooLong);
+    }
+    if !payment_id
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err(PaymentIdError::InvalidChars);
+    }
+    Ok(())
+}
+
+pub fn is_valid_payment_id(payment_id: &str) -> bool {
+    validate_payment_id(payment_id).is_ok()
 }
 
 // ============================================================================
@@ -575,7 +642,11 @@ impl StoredPaymentRequest {
         }
 
         if let Some(confirmed_topo) = self.confirmed_at_topoheight {
-            let confirmations = current_topoheight.saturating_sub(confirmed_topo);
+            let confirmations = if current_topoheight >= confirmed_topo {
+                current_topoheight - confirmed_topo + 1
+            } else {
+                0
+            };
 
             // Check for underpayment
             if let (Some(requested), Some(received)) = (self.amount, self.amount_received) {
@@ -670,6 +741,16 @@ mod tests {
         assert!(PaymentRequest::from_uri("invalid").is_err());
         assert!(PaymentRequest::from_uri("tos://pay?amount=100").is_err()); // missing address
         assert!(PaymentRequest::from_uri("http://example.com").is_err());
+
+        let long_id = "a".repeat(MAX_PAYMENT_ID_BYTES + 1);
+        let uri = format!(
+            "tos://pay?to=tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u&id={}",
+            long_id
+        );
+        assert!(matches!(
+            PaymentRequest::from_uri(&uri),
+            Err(PaymentParseError::InvalidPaymentId(_))
+        ));
     }
 
     #[test]
@@ -721,14 +802,11 @@ mod tests {
     }
 
     #[test]
-    fn test_long_payment_id_truncation() {
-        // Payment ID longer than MAX_PAYMENT_ID_BYTES should be truncated
+    fn test_long_payment_id_rejected() {
+        // Payment ID longer than MAX_PAYMENT_ID_BYTES should be rejected
         let long_id = "a".repeat(50);
-        let encoded = encode_payment_extra_data(&long_id, None).unwrap();
-
-        let (decoded_id, _) = decode_payment_extra_data(&encoded).unwrap();
-        assert_eq!(decoded_id.len(), MAX_PAYMENT_ID_BYTES);
-        assert_eq!(decoded_id, "a".repeat(MAX_PAYMENT_ID_BYTES));
+        let encoded = encode_payment_extra_data(&long_id, None);
+        assert!(encoded.is_none());
     }
 
     #[test]
