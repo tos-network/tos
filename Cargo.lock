@@ -5416,6 +5416,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "num_cpus",
+ "once_cell",
  "primitive-types 0.12.2",
  "proptest",
  "rand 0.8.5",

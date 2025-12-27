@@ -945,8 +945,8 @@ async fn query_db(context: &Context, body: Value) -> Result<Value, InternalRpcEr
 use tos_common::{
     api::{
         payment::{
-            ParsePaymentRequestParams, ParsePaymentRequestResult, PayRequestParams,
-            PayRequestResult, PaymentRequest,
+            encode_payment_extra_data, ParsePaymentRequestParams, ParsePaymentRequestResult,
+            PayRequestParams, PayRequestResult, PaymentRequest,
         },
         DataValue,
     },
@@ -1002,20 +1002,36 @@ async fn pay_request(context: &Context, body: Value) -> Result<Value, InternalRp
     // Get asset (default to TOS)
     let asset = request.asset.map(|a| a.into_owned()).unwrap_or(TOS_ASSET);
 
-    // Build extra_data with payment_id if available
+    // Build extra_data with payment_id using the standard payment encoding format
+    // Format: type_byte (0x01) + payment_id (32 bytes) + optional memo
     let extra_data: Option<DataElement> =
         if !request.payment_id.is_empty() || request.memo.is_some() {
-            // Combine payment_id and memo into extra_data
-            let data = match (&*request.payment_id, request.memo.as_deref()) {
-                (id, Some(memo)) if !id.is_empty() => format!("{}:{}", id, memo),
-                (id, None) if !id.is_empty() => id.to_string(),
-                (_, Some(memo)) => memo.to_string(),
-                _ => String::new(),
-            };
-            if data.is_empty() {
-                None
+            let payment_id = if request.payment_id.is_empty() {
+                ""
             } else {
-                Some(DataElement::Value(DataValue::String(data)))
+                &request.payment_id
+            };
+            let memo = request.memo.as_deref();
+
+            // Use the standard encoding format for payment extra_data
+            if let Some(encoded_bytes) = encode_payment_extra_data(payment_id, memo) {
+                // Convert bytes to hex string for DataElement
+                Some(DataElement::Value(DataValue::String(hex::encode(
+                    &encoded_bytes,
+                ))))
+            } else {
+                // Fall back to simple string if encoding fails
+                let data = match (payment_id, memo) {
+                    (id, Some(m)) if !id.is_empty() => format!("{}:{}", id, m),
+                    (id, None) if !id.is_empty() => id.to_string(),
+                    (_, Some(m)) => m.to_string(),
+                    _ => String::new(),
+                };
+                if data.is_empty() {
+                    None
+                } else {
+                    Some(DataElement::Value(DataValue::String(data)))
+                }
             }
         } else {
             None

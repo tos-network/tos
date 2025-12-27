@@ -229,7 +229,7 @@ impl<'a> PaymentRequest<'a> {
         }
 
         let address = address.ok_or(PaymentParseError::MissingAddress)?;
-        let payment_id = payment_id.unwrap_or_else(|| generate_payment_id());
+        let payment_id = payment_id.unwrap_or_else(generate_payment_id);
 
         Ok(PaymentRequest {
             payment_id: Cow::Owned(payment_id),
@@ -398,6 +398,205 @@ fn generate_payment_id() -> String {
     format!("pr_{}_{:08x}", timestamp, random)
 }
 
+// ============================================================================
+// Payment Extra Data Format
+// ============================================================================
+// Extra data format for embedding payment metadata in transactions:
+// - Byte 0:     Type (0x01 = payment)
+// - Bytes 1-32: Payment ID (32 bytes, zero-padded or truncated)
+// - Bytes 33+:  Memo (UTF-8, remaining bytes up to MAX_EXTRA_DATA)
+// ============================================================================
+
+/// Payment extra data type identifier
+pub const PAYMENT_EXTRA_DATA_TYPE: u8 = 0x01;
+
+/// Maximum size of extra data in a transfer (matches protocol limit)
+pub const MAX_EXTRA_DATA_SIZE: usize = 128;
+
+/// Maximum payment ID size in extra data (allows room for memo)
+pub const MAX_PAYMENT_ID_BYTES: usize = 32;
+
+/// Encode payment metadata into extra_data bytes for a transaction
+///
+/// Format:
+/// - Byte 0: Type (0x01 = payment)
+/// - Bytes 1-32: Payment ID (32 bytes, zero-padded)
+/// - Bytes 33+: Memo (UTF-8, optional)
+///
+/// Returns None if the data would exceed MAX_EXTRA_DATA_SIZE
+pub fn encode_payment_extra_data(payment_id: &str, memo: Option<&str>) -> Option<Vec<u8>> {
+    let mut data = Vec::with_capacity(MAX_EXTRA_DATA_SIZE);
+
+    // Type byte
+    data.push(PAYMENT_EXTRA_DATA_TYPE);
+
+    // Payment ID (32 bytes, zero-padded or truncated)
+    let id_bytes = payment_id.as_bytes();
+    let id_len = id_bytes.len().min(MAX_PAYMENT_ID_BYTES);
+    data.extend_from_slice(&id_bytes[..id_len]);
+    // Zero-pad to 32 bytes
+    data.resize(1 + MAX_PAYMENT_ID_BYTES, 0);
+
+    // Memo (optional, remaining bytes)
+    if let Some(m) = memo {
+        let memo_bytes = m.as_bytes();
+        let available_space = MAX_EXTRA_DATA_SIZE - data.len();
+        let memo_len = memo_bytes.len().min(available_space);
+        data.extend_from_slice(&memo_bytes[..memo_len]);
+    }
+
+    if data.len() > MAX_EXTRA_DATA_SIZE {
+        None
+    } else {
+        Some(data)
+    }
+}
+
+/// Decode payment metadata from extra_data bytes
+///
+/// Returns (payment_id, memo) if the data is valid payment extra data
+pub fn decode_payment_extra_data(data: &[u8]) -> Option<(String, Option<String>)> {
+    // Minimum size: type byte + at least 1 byte of payment ID
+    if data.len() < 2 {
+        return None;
+    }
+
+    // Check type byte
+    if data[0] != PAYMENT_EXTRA_DATA_TYPE {
+        return None;
+    }
+
+    // Extract payment ID (bytes 1-32, trimmed of trailing zeros)
+    let id_end = (1 + MAX_PAYMENT_ID_BYTES).min(data.len());
+    let id_bytes = &data[1..id_end];
+
+    // Find actual end (before trailing zeros)
+    let actual_len = id_bytes
+        .iter()
+        .rposition(|&b| b != 0)
+        .map(|pos| pos + 1)
+        .unwrap_or(0);
+
+    let payment_id = String::from_utf8(id_bytes[..actual_len].to_vec()).ok()?;
+
+    // Extract memo if present
+    let memo = if data.len() > 1 + MAX_PAYMENT_ID_BYTES {
+        let memo_bytes = &data[1 + MAX_PAYMENT_ID_BYTES..];
+        String::from_utf8(memo_bytes.to_vec()).ok()
+    } else {
+        None
+    };
+
+    Some((payment_id, memo))
+}
+
+/// Check if extra_data contains a payment with the given ID
+pub fn matches_payment_id(extra_data: &[u8], target_id: &str) -> bool {
+    if let Some((id, _)) = decode_payment_extra_data(extra_data) {
+        id == target_id
+    } else {
+        false
+    }
+}
+
+// ============================================================================
+// Stored Payment Request (for daemon storage)
+// ============================================================================
+
+/// A stored payment request for tracking
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredPaymentRequest {
+    /// Payment ID
+    pub payment_id: String,
+    /// Receiving address
+    pub address: Address,
+    /// Requested amount (optional)
+    pub amount: Option<u64>,
+    /// Asset hash (None = TOS)
+    pub asset: Option<Hash>,
+    /// Memo
+    pub memo: Option<String>,
+    /// Creation timestamp
+    pub created_at: u64,
+    /// Expiration timestamp
+    pub expires_at: Option<u64>,
+    /// Associated transaction hash (if paid)
+    pub tx_hash: Option<Hash>,
+    /// Amount received
+    pub amount_received: Option<u64>,
+    /// Block topoheight where payment was confirmed
+    pub confirmed_at_topoheight: Option<u64>,
+}
+
+impl StoredPaymentRequest {
+    /// Create from a PaymentRequest
+    pub fn from_request(request: &PaymentRequest<'_>) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        Self {
+            payment_id: request.payment_id.to_string(),
+            address: request.address.clone(),
+            amount: request.amount,
+            asset: request.asset.as_ref().map(|a| a.as_ref().clone()),
+            memo: request.memo.as_ref().map(|m| m.to_string()),
+            created_at: now,
+            expires_at: request.expires_at,
+            tx_hash: None,
+            amount_received: None,
+            confirmed_at_topoheight: None,
+        }
+    }
+
+    /// Check if this payment request has expired
+    pub fn is_expired(&self) -> bool {
+        if let Some(expires_at) = self.expires_at {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            now > expires_at
+        } else {
+            false
+        }
+    }
+
+    /// Check if this payment has been fulfilled
+    pub fn is_paid(&self) -> bool {
+        self.tx_hash.is_some()
+    }
+
+    /// Get the current status
+    pub fn get_status(&self, current_topoheight: u64, stable_topoheight: u64) -> PaymentStatus {
+        if self.is_expired() && !self.is_paid() {
+            return PaymentStatus::Expired;
+        }
+
+        if let Some(confirmed_topo) = self.confirmed_at_topoheight {
+            let confirmations = current_topoheight.saturating_sub(confirmed_topo);
+
+            // Check for underpayment
+            if let (Some(requested), Some(received)) = (self.amount, self.amount_received) {
+                if received < requested {
+                    return PaymentStatus::Underpaid;
+                }
+            }
+
+            if confirmed_topo <= stable_topoheight {
+                return PaymentStatus::Confirmed;
+            } else if confirmations >= 1 {
+                return PaymentStatus::Confirming;
+            } else {
+                return PaymentStatus::Mempool;
+            }
+        }
+
+        PaymentStatus::Pending
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,5 +670,75 @@ mod tests {
         assert!(PaymentRequest::from_uri("invalid").is_err());
         assert!(PaymentRequest::from_uri("tos://pay?amount=100").is_err()); // missing address
         assert!(PaymentRequest::from_uri("http://example.com").is_err());
+    }
+
+    #[test]
+    fn test_encode_decode_payment_extra_data() {
+        let payment_id = "pr_123456_abcdef";
+        let memo = Some("Coffee order");
+
+        let encoded = encode_payment_extra_data(payment_id, memo).unwrap();
+
+        // Check type byte
+        assert_eq!(encoded[0], PAYMENT_EXTRA_DATA_TYPE);
+
+        // Decode and verify
+        let (decoded_id, decoded_memo) = decode_payment_extra_data(&encoded).unwrap();
+        assert_eq!(decoded_id, payment_id);
+        assert_eq!(decoded_memo.as_deref(), memo);
+    }
+
+    #[test]
+    fn test_encode_decode_without_memo() {
+        let payment_id = "order-789";
+
+        let encoded = encode_payment_extra_data(payment_id, None).unwrap();
+        let (decoded_id, decoded_memo) = decode_payment_extra_data(&encoded).unwrap();
+
+        assert_eq!(decoded_id, payment_id);
+        assert!(decoded_memo.is_none());
+    }
+
+    #[test]
+    fn test_matches_payment_id() {
+        let payment_id = "test-payment-001";
+        let encoded = encode_payment_extra_data(payment_id, Some("memo")).unwrap();
+
+        assert!(matches_payment_id(&encoded, "test-payment-001"));
+        assert!(!matches_payment_id(&encoded, "wrong-id"));
+    }
+
+    #[test]
+    fn test_decode_invalid_extra_data() {
+        // Empty data
+        assert!(decode_payment_extra_data(&[]).is_none());
+
+        // Wrong type byte
+        assert!(decode_payment_extra_data(&[0x02, 0x01, 0x02]).is_none());
+
+        // Too short
+        assert!(decode_payment_extra_data(&[PAYMENT_EXTRA_DATA_TYPE]).is_none());
+    }
+
+    #[test]
+    fn test_long_payment_id_truncation() {
+        // Payment ID longer than MAX_PAYMENT_ID_BYTES should be truncated
+        let long_id = "a".repeat(50);
+        let encoded = encode_payment_extra_data(&long_id, None).unwrap();
+
+        let (decoded_id, _) = decode_payment_extra_data(&encoded).unwrap();
+        assert_eq!(decoded_id.len(), MAX_PAYMENT_ID_BYTES);
+        assert_eq!(decoded_id, "a".repeat(MAX_PAYMENT_ID_BYTES));
+    }
+
+    #[test]
+    fn test_extra_data_size_limit() {
+        let payment_id = "test";
+        // Very long memo that would exceed limit
+        let long_memo = "x".repeat(200);
+
+        let encoded = encode_payment_extra_data(payment_id, Some(&long_memo)).unwrap();
+        // Should be truncated to MAX_EXTRA_DATA_SIZE
+        assert!(encoded.len() <= MAX_EXTRA_DATA_SIZE);
     }
 }
