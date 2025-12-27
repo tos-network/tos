@@ -81,14 +81,20 @@ impl ReferralProvider for RocksStorage {
             return Err(BlockchainError::ReferralCircularReference);
         }
 
-        // Create the referral record
-        let record = ReferralRecord::new(
+        // Create the referral record (preserve cached counts if a stub exists)
+        let mut record = ReferralRecord::new(
             user.clone(),
             Some(referrer.clone()),
             topoheight,
             tx_hash,
             timestamp,
         );
+        if let Some(existing) =
+            self.load_optional_from_disk::<_, ReferralRecord>(Column::Referrals, user.as_bytes())?
+        {
+            record.direct_referrals_count = existing.direct_referrals_count;
+            record.team_size = existing.team_size;
+        }
 
         // Store the record
         self.insert_into_disk(Column::Referrals, user.as_bytes(), &record)?;
