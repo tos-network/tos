@@ -22,6 +22,9 @@ use tos_common::api::payment::{
     GetPaymentStatusParams, PaymentIdError, PaymentParseError, PaymentRequest, PaymentStatus,
     PaymentStatusResponse, StoredPaymentRequest,
 };
+use tos_common::api::callback::{
+    RegisterWebhookParams, RegisterWebhookResult, UnregisterWebhookParams, UnregisterWebhookResult,
+};
 use tos_common::crypto::Address;
 
 // ============================================================================
@@ -367,6 +370,8 @@ fn test_stored_payment_status_pending() {
         amount: Some(1_000_000_000),
         asset: None,
         memo: None,
+        callback_url: None,
+        last_callback_status: None,
         created_at: current_timestamp(),
         expires_at: Some(current_timestamp() + 300),
         tx_hash: None,
@@ -386,6 +391,8 @@ fn test_stored_payment_status_expired() {
         amount: Some(1_000_000_000),
         asset: None,
         memo: None,
+        callback_url: None,
+        last_callback_status: None,
         created_at: current_timestamp() - 600,
         expires_at: Some(current_timestamp() - 300), // Expired
         tx_hash: None,
@@ -405,6 +412,8 @@ fn test_stored_payment_status_confirming() {
         amount: Some(1_000_000_000),
         asset: None,
         memo: None,
+        callback_url: None,
+        last_callback_status: None,
         created_at: current_timestamp(),
         expires_at: None,
         tx_hash: Some(tos_common::crypto::Hash::zero()),
@@ -426,6 +435,8 @@ fn test_stored_payment_status_confirmed() {
         amount: Some(1_000_000_000),
         asset: None,
         memo: None,
+        callback_url: None,
+        last_callback_status: None,
         created_at: current_timestamp(),
         expires_at: None,
         tx_hash: Some(tos_common::crypto::Hash::zero()),
@@ -446,6 +457,8 @@ fn test_stored_payment_status_underpaid() {
         amount: Some(1_000_000_000), // Expected 1 TOS
         asset: None,
         memo: None,
+        callback_url: None,
+        last_callback_status: None,
         created_at: current_timestamp(),
         expires_at: None,
         tx_hash: Some(tos_common::crypto::Hash::zero()),
@@ -528,6 +541,46 @@ fn test_payment_status_response_confirmed() {
 }
 
 // ============================================================================
+// Webhook Registration RPC Types Tests
+// ============================================================================
+
+#[test]
+fn test_register_webhook_params_serialization() {
+    let params = RegisterWebhookParams {
+        url: "https://merchant.example.com/webhook".to_string(),
+        secret_hex: "0123abcd".to_string(),
+    };
+
+    let json = serde_json::to_string(&params).unwrap();
+    assert!(json.contains("https://merchant.example.com/webhook"));
+    assert!(json.contains("secret_hex"));
+}
+
+#[test]
+fn test_register_webhook_result_serialization() {
+    let result = RegisterWebhookResult { success: true };
+    let json = serde_json::to_string(&result).unwrap();
+    assert!(json.contains("true"));
+}
+
+#[test]
+fn test_unregister_webhook_params_serialization() {
+    let params = UnregisterWebhookParams {
+        url: "https://merchant.example.com/webhook".to_string(),
+    };
+
+    let json = serde_json::to_string(&params).unwrap();
+    assert!(json.contains("https://merchant.example.com/webhook"));
+}
+
+#[test]
+fn test_unregister_webhook_result_serialization() {
+    let result = UnregisterWebhookResult { success: true };
+    let json = serde_json::to_string(&result).unwrap();
+    assert!(json.contains("true"));
+}
+
+// ============================================================================
 // End-to-End Flow Simulation Tests
 // ============================================================================
 
@@ -572,6 +625,8 @@ fn test_e2e_payment_flow_simulation() {
         amount: Some(amount),
         asset: None,
         memo: request.memo.map(|m| m.into_owned()),
+        callback_url: None,
+        last_callback_status: None,
         created_at: current_timestamp(),
         expires_at: Some(expires_at),
         tx_hash: Some(tos_common::crypto::Hash::zero()),
@@ -596,6 +651,8 @@ fn test_e2e_underpaid_flow() {
         amount: Some(expected_amount),
         asset: None,
         memo: None,
+        callback_url: None,
+        last_callback_status: None,
         created_at: current_timestamp(),
         expires_at: None,
         tx_hash: Some(tos_common::crypto::Hash::zero()),
@@ -617,6 +674,8 @@ fn test_e2e_expired_before_payment() {
         amount: Some(1_000_000_000),
         asset: None,
         memo: None,
+        callback_url: None,
+        last_callback_status: None,
         created_at: current_timestamp() - 600,
         expires_at: Some(current_timestamp() - 300), // Expired
         tx_hash: None,                               // No payment received
@@ -643,6 +702,8 @@ fn test_confirmations_calculation() {
         amount: None,
         asset: None,
         memo: None,
+        callback_url: None,
+        last_callback_status: None,
         created_at: current_timestamp(),
         expires_at: None,
         tx_hash: Some(tos_common::crypto::Hash::zero()),

@@ -309,6 +309,9 @@ pub struct CreatePaymentRequestParams {
     /// Payment memo
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memo: Option<String>,
+    /// Callback URL for payment notification
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub callback: Option<String>,
     /// Expiration in seconds from now
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_in_seconds: Option<u64>,
@@ -583,6 +586,8 @@ pub struct StoredPaymentRequest {
     pub asset: Option<Hash>,
     /// Memo
     pub memo: Option<String>,
+    /// Callback URL for payment notification
+    pub callback_url: Option<String>,
     /// Creation timestamp
     pub created_at: u64,
     /// Expiration timestamp
@@ -593,6 +598,8 @@ pub struct StoredPaymentRequest {
     pub amount_received: Option<u64>,
     /// Block topoheight where payment was confirmed
     pub confirmed_at_topoheight: Option<u64>,
+    /// Last callback status sent (to avoid duplicates)
+    pub last_callback_status: Option<PaymentStatus>,
 }
 
 impl StoredPaymentRequest {
@@ -609,11 +616,13 @@ impl StoredPaymentRequest {
             amount: request.amount,
             asset: request.asset.as_ref().map(|a| a.as_ref().clone()),
             memo: request.memo.as_ref().map(|m| m.to_string()),
+            callback_url: request.callback.as_ref().map(|c| c.to_string()),
             created_at: now,
             expires_at: request.expires_at,
             tx_hash: None,
             amount_received: None,
             confirmed_at_topoheight: None,
+            last_callback_status: None,
         }
     }
 

@@ -3,7 +3,7 @@
 
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 use crate::crypto::Hash;
 use crate::time::get_current_time_in_seconds;
@@ -159,6 +159,34 @@ pub fn verify_callback_signature(
     constant_time_compare(expected.as_bytes(), signature.as_bytes())
 }
 
+/// Compute a deterministic idempotency key for a callback payload
+///
+/// This key is stable across retries and unique per event payload.
+pub fn callback_idempotency_key(payload: &CallbackPayload) -> String {
+    let event = match payload.event {
+        CallbackEventType::PaymentReceived => "payment_received",
+        CallbackEventType::PaymentConfirmed => "payment_confirmed",
+        CallbackEventType::PaymentExpired => "payment_expired",
+    };
+    let tx_hash = payload
+        .tx_hash
+        .as_ref()
+        .map(|h| h.to_hex())
+        .unwrap_or_default();
+    let amount = payload.amount.unwrap_or(0);
+    let data = format!(
+        "{}|{}|{}|{}|{}|{}",
+        event,
+        payload.payment_id,
+        tx_hash,
+        amount,
+        payload.confirmations,
+        payload.timestamp
+    );
+    let digest = Sha256::digest(data.as_bytes());
+    hex::encode(digest)
+}
+
 /// Constant-time comparison to prevent timing attacks
 fn constant_time_compare(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
@@ -197,6 +225,34 @@ pub struct CallbackConfig {
     pub max_retries: u32,
     /// Request timeout in seconds (default: 10)
     pub timeout_seconds: u64,
+}
+
+/// Register a webhook secret for callback delivery
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterWebhookParams {
+    /// Webhook URL (HTTPS)
+    pub url: String,
+    /// Webhook secret in hex
+    pub secret_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterWebhookResult {
+    /// Whether registration succeeded
+    pub success: bool,
+}
+
+/// Unregister a webhook secret
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnregisterWebhookParams {
+    /// Webhook URL
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnregisterWebhookResult {
+    /// Whether removal succeeded
+    pub success: bool,
 }
 
 impl CallbackConfig {

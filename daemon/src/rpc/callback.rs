@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tos_common::{
     api::callback::{
-        generate_callback_signature, CallbackConfig, CallbackPayload, CallbackResult,
-        CALLBACK_RETRY_DELAYS_MS, CALLBACK_TIMEOUT_SECONDS,
+        callback_idempotency_key, generate_callback_signature, CallbackConfig, CallbackPayload,
+        CallbackResult, CALLBACK_RETRY_DELAYS_MS, CALLBACK_TIMEOUT_SECONDS,
     },
     crypto::Hash,
     time::get_current_time_in_seconds,
@@ -23,7 +23,14 @@ pub struct CallbackService {
     /// Registered webhook secrets by URL
     /// In production, this would be backed by persistent storage
     webhook_secrets: RwLock<HashMap<String, Vec<u8>>>,
+    /// Idempotency keys that were successfully delivered
+    delivered_keys: RwLock<HashMap<String, u64>>,
 }
+
+/// Idempotency key retention window (1 hour)
+const CALLBACK_IDEMPOTENCY_TTL_SECONDS: u64 = 3600;
+/// Maximum number of idempotency keys to keep before pruning
+const CALLBACK_IDEMPOTENCY_MAX_KEYS: usize = 10000;
 
 impl CallbackService {
     /// Create a new callback service
@@ -36,6 +43,7 @@ impl CallbackService {
         Self {
             client,
             webhook_secrets: RwLock::new(HashMap::new()),
+            delivered_keys: RwLock::new(HashMap::new()),
         }
     }
 
@@ -57,10 +65,8 @@ impl CallbackService {
 
     /// Get the webhook secret for a URL
     ///
-    /// Note: Currently unused as callbacks use config-provided secrets,
-    /// but kept for potential future webhook management API.
-    #[allow(dead_code)]
-    async fn get_webhook_secret(&self, url: &str) -> Option<Vec<u8>> {
+    /// Note: This enables out-of-band webhook registration to be used by callback delivery.
+    pub async fn get_webhook_secret(&self, url: &str) -> Option<Vec<u8>> {
         let secrets = self.webhook_secrets.read().await;
         secrets.get(url).cloned()
     }
@@ -97,7 +103,27 @@ impl CallbackService {
         config: &CallbackConfig,
         payload: &CallbackPayload,
     ) -> CallbackResult {
-        let body = match serde_json::to_string(payload) {
+        let now = get_current_time_in_seconds();
+        let payload_for_send = if payload.timestamp == 0 {
+            let mut updated = payload.clone();
+            updated.timestamp = now;
+            updated
+        } else {
+            payload.clone()
+        };
+        let idempotency_key = callback_idempotency_key(&payload_for_send);
+        {
+            let delivered = self.delivered_keys.read().await;
+            if delivered
+                .get(&idempotency_key)
+                .map(|ts| now.saturating_sub(*ts) <= CALLBACK_IDEMPOTENCY_TTL_SECONDS)
+                .unwrap_or(false)
+            {
+                return CallbackResult::Success;
+            }
+        }
+
+        let body = match serde_json::to_string(&payload_for_send) {
             Ok(b) => b,
             Err(e) => {
                 return CallbackResult::Failed {
@@ -107,7 +133,7 @@ impl CallbackService {
             }
         };
 
-        let timestamp = get_current_time_in_seconds();
+        let timestamp = payload_for_send.timestamp;
         let signature = generate_callback_signature(&config.secret, timestamp, &body);
 
         for (attempt, delay_ms) in CALLBACK_RETRY_DELAYS_MS.iter().enumerate() {
@@ -124,10 +150,19 @@ impl CallbackService {
             }
 
             match self
-                .send_callback(&config.url, &body, timestamp, &signature)
+                .send_callback(&config.url, &body, timestamp, &signature, &idempotency_key)
                 .await
             {
-                Ok(()) => return CallbackResult::Success,
+                Ok(()) => {
+                    let mut delivered = self.delivered_keys.write().await;
+                    delivered.insert(idempotency_key.clone(), now);
+                    if delivered.len() > CALLBACK_IDEMPOTENCY_MAX_KEYS {
+                        delivered.retain(|_, ts| {
+                            now.saturating_sub(*ts) <= CALLBACK_IDEMPOTENCY_TTL_SECONDS
+                        });
+                    }
+                    return CallbackResult::Success;
+                }
                 Err(e) => {
                     warn!(
                         "Callback attempt {} to {} failed: {}",
@@ -153,6 +188,7 @@ impl CallbackService {
         body: &str,
         timestamp: u64,
         signature: &str,
+        idempotency_key: &str,
     ) -> Result<(), String> {
         // Validate URL is HTTPS (security requirement)
         if !url.starts_with("https://") {
@@ -165,6 +201,7 @@ impl CallbackService {
             .header("Content-Type", "application/json")
             .header("X-TOS-Signature", signature)
             .header("X-TOS-Timestamp", timestamp.to_string())
+            .header("X-TOS-Idempotency", idempotency_key)
             .body(body.to_string())
             .send()
             .await
@@ -220,6 +257,18 @@ pub fn send_payment_callback(
     service.deliver_callback(config, payload);
 }
 
+/// Send a payment expired callback
+pub fn send_payment_expired_callback(
+    service: Arc<CallbackService>,
+    callback_url: String,
+    webhook_secret: Vec<u8>,
+    payment_id: String,
+) {
+    let config = create_callback_config(callback_url, webhook_secret);
+    let payload = CallbackPayload::payment_expired(payment_id);
+    service.deliver_callback(config, payload);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,6 +298,31 @@ mod tests {
         let secret = b"test_secret".to_vec();
 
         service.register_webhook(url.clone(), secret).await;
+        service.unregister_webhook(&url).await;
+
+        let retrieved = service.get_webhook_secret(&url).await;
+        assert_eq!(retrieved, None);
+    }
+
+    #[tokio::test]
+    async fn test_register_webhook_overwrite() {
+        let service = CallbackService::new();
+        let url = "https://example.com/webhook".to_string();
+        let secret_a = b"secret_a".to_vec();
+        let secret_b = b"secret_b".to_vec();
+
+        service.register_webhook(url.clone(), secret_a).await;
+        service.register_webhook(url.clone(), secret_b.clone()).await;
+
+        let retrieved = service.get_webhook_secret(&url).await;
+        assert_eq!(retrieved, Some(secret_b));
+    }
+
+    #[tokio::test]
+    async fn test_unregister_webhook_missing() {
+        let service = CallbackService::new();
+        let url = "https://example.com/webhook".to_string();
+
         service.unregister_webhook(&url).await;
 
         let retrieved = service.get_webhook_secret(&url).await;

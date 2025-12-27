@@ -31,6 +31,7 @@ use tokio::sync::RwLock;
 
 use once_cell::sync::Lazy;
 use tos_common::api::payment::StoredPaymentRequest;
+use crate::rpc::callback::{send_payment_callback, send_payment_expired_callback, CallbackService};
 
 /// Maximum number of payment requests to store (prevents memory exhaustion)
 const MAX_PAYMENT_REQUESTS: usize = 10000;
@@ -39,6 +40,8 @@ const MAX_PAYMENT_REQUESTS: usize = 10000;
 /// Key: payment_id, Value: StoredPaymentRequest
 static PAYMENT_REQUESTS: Lazy<RwLock<HashMap<String, StoredPaymentRequest>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static CALLBACK_SERVICE: Lazy<Arc<CallbackService>> =
+    Lazy::new(|| Arc::new(CallbackService::new()));
 
 /// Store a new payment request
 async fn store_payment_request(request: StoredPaymentRequest) -> Result<(), InternalRpcError> {
@@ -73,9 +76,6 @@ async fn store_payment_request(request: StoredPaymentRequest) -> Result<(), Inte
 }
 
 /// Get a payment request by ID
-/// Note: Currently unused as get_payment_status uses blockchain scanning,
-/// but kept for potential future caching/optimization
-#[allow(dead_code)]
 async fn get_payment_request(payment_id: &str) -> Option<StoredPaymentRequest> {
     let store = PAYMENT_REQUESTS.read().await;
     store.get(payment_id).cloned()
@@ -96,6 +96,86 @@ async fn update_payment_with_tx(
         req.tx_hash = Some(tx_hash);
         req.amount_received = Some(amount_received);
         req.confirmed_at_topoheight = Some(confirmed_at_topoheight);
+    }
+}
+
+async fn update_payment_callback_status(payment_id: &str, status: PaymentStatus) {
+    let mut store = PAYMENT_REQUESTS.write().await;
+    if let Some(req) = store.get_mut(payment_id) {
+        req.last_callback_status = Some(status);
+    }
+}
+
+async fn maybe_send_callback(
+    payment_id: &str,
+    status: PaymentStatus,
+    tx_hash: Option<Hash>,
+    amount: Option<u64>,
+    confirmations: u64,
+) {
+    let stored = match get_payment_request(payment_id).await {
+        Some(req) => req,
+        None => return,
+    };
+
+    let callback_url = match stored.callback_url {
+        Some(url) => url,
+        None => return,
+    };
+
+    let secret = match CALLBACK_SERVICE.get_webhook_secret(&callback_url).await {
+        Some(secret) => secret,
+        None => return,
+    };
+
+    match status {
+        PaymentStatus::Confirmed => {
+            if stored.last_callback_status == Some(PaymentStatus::Confirmed) {
+                return;
+            }
+            if let (Some(tx_hash), Some(amount)) = (tx_hash, amount) {
+                send_payment_callback(
+                    Arc::clone(&CALLBACK_SERVICE),
+                    callback_url,
+                    secret,
+                    payment_id.to_string(),
+                    tx_hash,
+                    amount,
+                    confirmations,
+                );
+                update_payment_callback_status(payment_id, PaymentStatus::Confirmed).await;
+            }
+        }
+        PaymentStatus::Expired => {
+            if stored.last_callback_status == Some(PaymentStatus::Expired) {
+                return;
+            }
+            send_payment_expired_callback(
+                Arc::clone(&CALLBACK_SERVICE),
+                callback_url,
+                secret,
+                payment_id.to_string(),
+            );
+            update_payment_callback_status(payment_id, PaymentStatus::Expired).await;
+        }
+        PaymentStatus::Mempool | PaymentStatus::Confirming | PaymentStatus::Underpaid => {
+            if stored.last_callback_status.is_some() {
+                return;
+            }
+            if let (Some(tx_hash), Some(amount)) = (tx_hash, amount) {
+                send_payment_callback(
+                    Arc::clone(&CALLBACK_SERVICE),
+                    callback_url,
+                    secret,
+                    payment_id.to_string(),
+                    tx_hash,
+                    amount,
+                    confirmations,
+                );
+                update_payment_callback_status(payment_id, status).await;
+            }
+        }
+        PaymentStatus::Pending => {}
     }
 }
 use tos_common::{
@@ -709,6 +789,14 @@ pub fn register_methods<S: Storage>(
     handler.register_method(
         "get_address_payments",
         async_handler!(get_address_payments::<S>),
+    );
+    handler.register_method(
+        "register_payment_webhook",
+        async_handler!(register_payment_webhook::<S>),
+    );
+    handler.register_method(
+        "unregister_payment_webhook",
+        async_handler!(unregister_payment_webhook::<S>),
     );
 
     if allow_mining_methods {
@@ -3108,11 +3196,17 @@ async fn get_contract_events<S: Storage>(
 // QR Code Payment RPC Methods
 // ============================================================================
 
-use tos_common::api::payment::{
-    decode_payment_extra_data, is_valid_payment_id, validate_payment_id,
-    CreatePaymentRequestParams, CreatePaymentRequestResult, GetPaymentStatusParams,
-    ParsePaymentRequestParams, ParsePaymentRequestResult, PaymentParseError, PaymentRequest,
-    PaymentStatus, PaymentStatusResponse,
+use tos_common::api::{
+    callback::{
+        RegisterWebhookParams, RegisterWebhookResult, UnregisterWebhookParams,
+        UnregisterWebhookResult,
+    },
+    payment::{
+        decode_payment_extra_data, is_valid_payment_id, validate_payment_id,
+        CreatePaymentRequestParams, CreatePaymentRequestResult, GetPaymentStatusParams,
+        ParsePaymentRequestParams, ParsePaymentRequestResult, PaymentParseError, PaymentRequest,
+        PaymentStatus, PaymentStatusResponse,
+    },
 };
 
 /// Maximum expiration time for payment requests (1 hour)
@@ -3178,6 +3272,16 @@ async fn create_payment_request<S: Storage>(
             ));
         }
         request = request.with_memo(memo.clone());
+    }
+
+    if let Some(ref callback) = params.callback {
+        if !callback.starts_with("https://") {
+            return Err(invalid_params_data(
+                "invalid_callback",
+                "Callback URL must use HTTPS",
+            ));
+        }
+        request = request.with_callback(callback.clone());
     }
 
     request = request.with_expires_in(expires_in);
@@ -3255,14 +3359,15 @@ async fn get_payment_status<S: Storage>(
 
     // Step 1: Validate payment_id
     if let Err(reason) = validate_payment_id(&params.payment_id) {
-        return Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
-            "Invalid payment_id: {}",
-            reason
-        )));
+        return Err(invalid_params_data(
+            "invalid_payment_id",
+            &reason.to_string(),
+        ));
     }
 
     // Step 2: Check expiration (if exp provided)
     if params.exp.map(|exp| now > exp).unwrap_or(false) {
+        maybe_send_callback(&params.payment_id, PaymentStatus::Expired, None, None, 0).await;
         return Ok(json!(PaymentStatusResponse {
             payment_id: Cow::Owned(params.payment_id),
             status: PaymentStatus::Expired,
@@ -3298,6 +3403,15 @@ async fn get_payment_status<S: Storage>(
                                     } else {
                                         PaymentStatus::Mempool
                                     };
+
+                                    maybe_send_callback(
+                                        &params.payment_id,
+                                        status,
+                                        Some((**tx_hash).clone()),
+                                        Some(amount),
+                                        0,
+                                    )
+                                    .await;
 
                                     return Ok(json!(PaymentStatusResponse {
                                         payment_id: Cow::Owned(params.payment_id),
@@ -3405,6 +3519,15 @@ async fn get_payment_status<S: Storage>(
             None
         };
 
+        maybe_send_callback(
+            &params.payment_id,
+            status,
+            Some(tx_hash.clone()),
+            Some(amount),
+            confirmations,
+        )
+        .await;
+
         return Ok(json!(PaymentStatusResponse {
             payment_id: Cow::Owned(params.payment_id),
             status,
@@ -3424,6 +3547,50 @@ async fn get_payment_status<S: Storage>(
         confirmations: None,
         confirmed_at: None,
     }))
+}
+
+/// Register a webhook secret for payment callbacks
+async fn register_payment_webhook<S: Storage>(
+    _context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: RegisterWebhookParams = parse_params(body)?;
+
+    if !params.url.starts_with("https://") {
+        return Err(invalid_params_data(
+            "invalid_callback",
+            "Callback URL must use HTTPS",
+        ));
+    }
+
+    let secret = hex::decode(&params.secret_hex).map_err(|_| {
+        invalid_params_data("invalid_secret", "Webhook secret must be hex")
+    })?;
+
+    if secret.is_empty() {
+        return Err(invalid_params_data(
+            "invalid_secret",
+            "Webhook secret must not be empty",
+        ));
+    }
+
+    CALLBACK_SERVICE
+        .register_webhook(params.url, secret)
+        .await;
+
+    Ok(json!(RegisterWebhookResult { success: true }))
+}
+
+/// Unregister a webhook secret
+async fn unregister_payment_webhook<S: Storage>(
+    _context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: UnregisterWebhookParams = parse_params(body)?;
+
+    CALLBACK_SERVICE.unregister_webhook(&params.url).await;
+
+    Ok(json!(UnregisterWebhookResult { success: true }))
 }
 
 fn map_payment_parse_error(err: PaymentParseError) -> InternalRpcError {
