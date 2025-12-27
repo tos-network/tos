@@ -3121,8 +3121,8 @@ const MAX_PAYMENT_EXPIRATION_SECS: u64 = 3600;
 /// Default expiration time for payment requests (5 minutes)
 const DEFAULT_PAYMENT_EXPIRATION_SECS: u64 = 300;
 
-/// Default number of blocks to scan when searching for payments (~1 hour at 3s/block)
-const DEFAULT_SCAN_BLOCKS: u64 = 1200;
+/// Default number of blocks to scan when searching for payments (~10 min at 3s/block)
+const DEFAULT_SCAN_BLOCKS: u64 = 200;
 
 /// Number of confirmations required for a payment to be considered stable
 const STABLE_CONFIRMATIONS: u64 = 8;

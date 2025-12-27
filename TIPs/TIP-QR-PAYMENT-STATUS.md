@@ -68,7 +68,7 @@ This document tracks the implementation status of [TIP-QR-PAYMENT.md](./TIP-QR-P
 | Highest topoheight match | Required | ✅ Implemented | ✅ |
 
 **Constants:**
-- `DEFAULT_SCAN_BLOCKS = 1200` (~1 hour at 3s/block)
+- `DEFAULT_SCAN_BLOCKS = 200` (~10 min at 3s/block)
 - `STABLE_CONFIRMATIONS = 8` (for confirmed status)
 
 ### 3. Wallet RPC APIs
