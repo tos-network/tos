@@ -35,10 +35,11 @@ const CALLBACK_IDEMPOTENCY_MAX_KEYS: usize = 10000;
 impl CallbackService {
     /// Create a new callback service
     pub fn new() -> Self {
+        // Build HTTP client with timeout, fallback to default if builder fails
         let client = Client::builder()
             .timeout(Duration::from_secs(CALLBACK_TIMEOUT_SECONDS))
             .build()
-            .expect("Failed to create HTTP client");
+            .unwrap_or_else(|_| Client::new());
 
         Self {
             client,
