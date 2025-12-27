@@ -562,6 +562,206 @@ async fn test_is_downline_consistency() {
 }
 
 // ============================================================================
+// D. Distribution tests (BatchReferralReward logic)
+// ============================================================================
+
+/// Test D.1: Distribution calculation correctness
+///
+/// Verify distribute_to_uplines calculates amounts correctly
+#[tokio::test]
+async fn test_distribution_calculation() {
+    use tos_common::config::TOS_ASSET;
+    use tos_common::referral::ReferralRewardRatios;
+
+    let temp_dir = TempDir::new("referral_test").unwrap();
+    let mut storage = create_test_storage(&temp_dir);
+
+    // Build chain: alice → bob → charlie → david
+    let alice = random_pubkey();
+    let bob = random_pubkey();
+    let charlie = random_pubkey();
+    let david = random_pubkey();
+
+    let height = 100;
+    let timestamp = 1000;
+
+    storage.bind_referrer(&alice, &bob, height, Hash::zero(), timestamp).await.unwrap();
+    storage.bind_referrer(&bob, &charlie, height + 1, Hash::zero(), timestamp + 1).await.unwrap();
+    storage.bind_referrer(&charlie, &david, height + 2, Hash::zero(), timestamp + 2).await.unwrap();
+
+    // Distribute 10000 with ratios: [3000, 2000, 1000] (30%, 20%, 10%)
+    let ratios = ReferralRewardRatios { ratios: vec![3000, 2000, 1000] };
+    let result = storage
+        .distribute_to_uplines(&alice, TOS_ASSET, 10000, &ratios)
+        .await
+        .unwrap();
+
+    // Verify distributions
+    assert_eq!(result.distributions.len(), 3, "Should have 3 distributions");
+    assert_eq!(result.distributions[0].recipient, bob);
+    assert_eq!(result.distributions[0].amount, 3000); // 30% of 10000
+    assert_eq!(result.distributions[1].recipient, charlie);
+    assert_eq!(result.distributions[1].amount, 2000); // 20% of 10000
+    assert_eq!(result.distributions[2].recipient, david);
+    assert_eq!(result.distributions[2].amount, 1000); // 10% of 10000
+
+    // Verify total distributed
+    assert_eq!(result.total_distributed, 6000); // 30% + 20% + 10% = 60%
+
+    println!("Test D.1 passed: Distribution calculation correctness");
+}
+
+/// Test D.2: Balance conservation (remainder calculation)
+///
+/// Verify total_amount = total_distributed + remainder
+#[tokio::test]
+async fn test_distribution_balance_conservation() {
+    use tos_common::config::TOS_ASSET;
+    use tos_common::referral::ReferralRewardRatios;
+
+    let temp_dir = TempDir::new("referral_test").unwrap();
+    let mut storage = create_test_storage(&temp_dir);
+
+    // Build chain: alice → bob → charlie
+    let alice = random_pubkey();
+    let bob = random_pubkey();
+    let charlie = random_pubkey();
+
+    let height = 100;
+    let timestamp = 1000;
+
+    storage.bind_referrer(&alice, &bob, height, Hash::zero(), timestamp).await.unwrap();
+    storage.bind_referrer(&bob, &charlie, height + 1, Hash::zero(), timestamp + 1).await.unwrap();
+
+    // Distribute 1000 with ratios: [2500, 1500] (25%, 15% = 40% total)
+    let total_amount = 1000u64;
+    let ratios = ReferralRewardRatios { ratios: vec![2500, 1500] };
+    let result = storage
+        .distribute_to_uplines(&alice, TOS_ASSET, total_amount, &ratios)
+        .await
+        .unwrap();
+
+    // Verify: 25% of 1000 = 250, 15% of 1000 = 150
+    assert_eq!(result.total_distributed, 400);
+
+    // Calculate remainder (what should be refunded to sender)
+    let remainder = total_amount.saturating_sub(result.total_distributed);
+    assert_eq!(remainder, 600, "Remainder should be 600 (60% not distributed)");
+
+    // Verify balance conservation
+    assert_eq!(
+        result.total_distributed + remainder,
+        total_amount,
+        "total_distributed + remainder should equal total_amount"
+    );
+
+    println!("Test D.2 passed: Balance conservation");
+}
+
+/// Test D.3: Partial upline availability
+///
+/// When fewer uplines exist than levels in ratios, only available uplines get rewards
+#[tokio::test]
+async fn test_distribution_partial_uplines() {
+    use tos_common::config::TOS_ASSET;
+    use tos_common::referral::ReferralRewardRatios;
+
+    let temp_dir = TempDir::new("referral_test").unwrap();
+    let mut storage = create_test_storage(&temp_dir);
+
+    // Build chain with only 2 uplines: alice → bob → charlie
+    let alice = random_pubkey();
+    let bob = random_pubkey();
+    let charlie = random_pubkey();
+
+    let height = 100;
+    let timestamp = 1000;
+
+    storage.bind_referrer(&alice, &bob, height, Hash::zero(), timestamp).await.unwrap();
+    storage.bind_referrer(&bob, &charlie, height + 1, Hash::zero(), timestamp + 1).await.unwrap();
+
+    // Request 5 levels but only 2 uplines exist
+    let ratios = ReferralRewardRatios { ratios: vec![2000, 1500, 1000, 500, 200] };
+    let result = storage
+        .distribute_to_uplines(&alice, TOS_ASSET, 10000, &ratios)
+        .await
+        .unwrap();
+
+    // Should only distribute to 2 uplines (bob and charlie)
+    assert_eq!(result.distributions.len(), 2, "Should only have 2 distributions");
+    assert_eq!(result.levels_rewarded, 2);
+
+    // Verify amounts: only first 2 ratios used
+    assert_eq!(result.distributions[0].amount, 2000); // 20%
+    assert_eq!(result.distributions[1].amount, 1500); // 15%
+    assert_eq!(result.total_distributed, 3500);
+
+    println!("Test D.3 passed: Partial upline availability");
+}
+
+/// Test D.4: Zero uplines (no referrer chain)
+///
+/// When user has no referrer, distribution returns empty result
+#[tokio::test]
+async fn test_distribution_zero_uplines() {
+    use tos_common::config::TOS_ASSET;
+    use tos_common::referral::ReferralRewardRatios;
+
+    let temp_dir = TempDir::new("referral_test").unwrap();
+    let mut storage = create_test_storage(&temp_dir);
+
+    // Alice has no referrer
+    let alice = random_pubkey();
+
+    let ratios = ReferralRewardRatios { ratios: vec![3000, 2000, 1000] };
+    let result = storage
+        .distribute_to_uplines(&alice, TOS_ASSET, 10000, &ratios)
+        .await
+        .unwrap();
+
+    // No uplines = no distributions
+    assert_eq!(result.distributions.len(), 0, "Should have 0 distributions");
+    assert_eq!(result.total_distributed, 0);
+    assert_eq!(result.levels_rewarded, 0);
+
+    // Entire amount should be remainder (refunded to sender)
+    let remainder = 10000u64.saturating_sub(result.total_distributed);
+    assert_eq!(remainder, 10000, "Entire amount should be remainder");
+
+    println!("Test D.4 passed: Zero uplines");
+}
+
+/// Test D.5: Invalid ratios rejection
+///
+/// Ratios that exceed 100% (10000 basis points) should be rejected
+#[tokio::test]
+async fn test_distribution_invalid_ratios() {
+    use tos_common::config::TOS_ASSET;
+    use tos_common::referral::ReferralRewardRatios;
+
+    let temp_dir = TempDir::new("referral_test").unwrap();
+    let mut storage = create_test_storage(&temp_dir);
+
+    let alice = random_pubkey();
+    let bob = random_pubkey();
+
+    let height = 100;
+    let timestamp = 1000;
+
+    storage.bind_referrer(&alice, &bob, height, Hash::zero(), timestamp).await.unwrap();
+
+    // Ratios sum to 150% (should be rejected)
+    let ratios = ReferralRewardRatios { ratios: vec![8000, 7000] }; // 80% + 70% = 150%
+    let result = storage
+        .distribute_to_uplines(&alice, TOS_ASSET, 10000, &ratios)
+        .await;
+
+    assert!(result.is_err(), "Should reject ratios exceeding 100%");
+
+    println!("Test D.5 passed: Invalid ratios rejection");
+}
+
+// ============================================================================
 // Summary test
 // ============================================================================
 
@@ -584,11 +784,20 @@ fn test_referral_rocksdb_test_summary() {
     println!();
     println!("C. Consistency assertions:");
     println!("   C.1 test_list_vs_count_consistency");
+    println!("   C.1b test_list_vs_count_pagination_consistency");
     println!("   C.2 test_upline_chain_consistency");
     println!("   C.3 test_is_downline_consistency");
+    println!();
+    println!("D. Distribution tests (BatchReferralReward logic):");
+    println!("   D.1 test_distribution_calculation");
+    println!("   D.2 test_distribution_balance_conservation");
+    println!("   D.3 test_distribution_partial_uplines");
+    println!("   D.4 test_distribution_zero_uplines");
+    println!("   D.5 test_distribution_invalid_ratios");
     println!();
     println!("These tests verify fixes for bugs found during PR #25 code review:");
     println!("- Stub record blocking future binding (HIGH)");
     println!("- Binding overwrites direct_referrals_count (HIGH)");
+    println!("- Balance conservation in distribution (MEDIUM)");
     println!("========================================\n");
 }
