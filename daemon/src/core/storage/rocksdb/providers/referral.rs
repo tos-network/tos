@@ -31,7 +31,10 @@ impl ReferralProvider for RocksStorage {
                 user.as_address(self.is_mainnet())
             );
         }
-        self.contains_data(Column::Referrals, user.as_bytes())
+        // Check if user has actually bound a referrer (not just has a stub record)
+        let record: Option<ReferralRecord> =
+            self.load_optional_from_disk(Column::Referrals, user.as_bytes())?;
+        Ok(record.map(|r| r.referrer.is_some()).unwrap_or(false))
     }
 
     async fn get_referrer(&self, user: &PublicKey) -> Result<Option<PublicKey>, BlockchainError> {
@@ -93,13 +96,22 @@ impl ReferralProvider for RocksStorage {
         // Add to referrer's direct referrals list
         self.add_to_direct_referrals(referrer, user).await?;
 
-        // Update referrer's direct count
-        if let Some(mut referrer_record) = self
+        // Update referrer's direct count (create stub record if referrer doesn't have one)
+        let mut referrer_record = self
             .load_optional_from_disk::<_, ReferralRecord>(Column::Referrals, referrer.as_bytes())?
-        {
-            referrer_record.increment_direct_count();
-            self.insert_into_disk(Column::Referrals, referrer.as_bytes(), &referrer_record)?;
-        }
+            .unwrap_or_else(|| {
+                // Create stub record for referrer (no referrer of their own)
+                // Use zeros for tx_hash since the referrer didn't actually bind
+                ReferralRecord::new(
+                    referrer.clone(),
+                    None, // Unknown referrer
+                    topoheight,
+                    Hash::zero(),
+                    timestamp,
+                )
+            });
+        referrer_record.increment_direct_count();
+        self.insert_into_disk(Column::Referrals, referrer.as_bytes(), &referrer_record)?;
 
         Ok(())
     }

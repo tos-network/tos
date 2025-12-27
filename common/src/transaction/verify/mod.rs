@@ -665,6 +665,12 @@ impl Transaction {
                         "Invalid batch referral reward payload"
                     )));
                 }
+                // Authorization: sender must be the from_user (prevents abuse)
+                if self.get_source() != payload.get_from_user() {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "BatchReferralReward sender must be the from_user"
+                    )));
+                }
             }
         };
 
@@ -1482,12 +1488,30 @@ impl Transaction {
                         .ok_or(VerificationError::Overflow)?;
                 }
 
+                // Refund remainder to sender (prevents burning undistributed funds)
+                let remainder = payload
+                    .get_total_amount()
+                    .saturating_sub(distribution_result.total_distributed);
+                if remainder > 0 {
+                    let sender_balance = state
+                        .get_receiver_balance(
+                            std::borrow::Cow::Borrowed(self.get_source()),
+                            std::borrow::Cow::Borrowed(payload.get_asset()),
+                        )
+                        .await
+                        .map_err(VerificationError::State)?;
+                    *sender_balance = sender_balance
+                        .checked_add(remainder)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "BatchReferralReward transaction applied - levels: {}, total_amount: {}, distributed: {}",
+                        "BatchReferralReward transaction applied - levels: {}, total_amount: {}, distributed: {}, refunded: {}",
                         payload.get_levels(),
                         payload.get_total_amount(),
-                        distribution_result.total_distributed
+                        distribution_result.total_distributed,
+                        remainder
                     );
                 }
             }
