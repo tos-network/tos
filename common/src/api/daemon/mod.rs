@@ -1894,6 +1894,167 @@ pub struct GetReferralLevelResult {
 }
 
 // ============================================================================
+// KYC System RPC Types
+// ============================================================================
+
+/// Parameters for has_kyc RPC method
+#[derive(Serialize, Deserialize)]
+pub struct HasKycParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of has_kyc RPC method
+#[derive(Serialize, Deserialize)]
+pub struct HasKycResult {
+    pub has_kyc: bool,
+}
+
+/// Parameters for get_kyc RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetKycParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// KYC data returned by RPC
+#[derive(Serialize, Deserialize)]
+pub struct KycRpcData {
+    /// KYC level bitmask
+    pub level: u16,
+    /// KYC tier (0-8)
+    pub tier: u8,
+    /// KYC status (Active, Expired, Revoked, Suspended)
+    pub status: String,
+    /// Verification timestamp
+    pub verified_at: u64,
+    /// Expiration timestamp (0 = no expiration)
+    pub expires_at: u64,
+    /// Days until expiration (None if no expiration)
+    pub days_until_expiry: Option<u64>,
+    /// Whether the KYC is currently valid
+    pub is_valid: bool,
+}
+
+/// Result of get_kyc RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetKycResult {
+    /// KYC data (None if user has no KYC)
+    pub kyc: Option<KycRpcData>,
+}
+
+/// Parameters for get_kyc_tier RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetKycTierParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of get_kyc_tier RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetKycTierResult {
+    /// Effective KYC tier (0 if invalid/expired)
+    pub tier: u8,
+    /// Effective KYC level (0 if invalid/expired)
+    pub level: u16,
+    /// Whether the KYC is currently valid
+    pub is_valid: bool,
+}
+
+/// Parameters for is_kyc_valid RPC method
+#[derive(Serialize, Deserialize)]
+pub struct IsKycValidParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of is_kyc_valid RPC method
+#[derive(Serialize, Deserialize)]
+pub struct IsKycValidResult {
+    pub is_valid: bool,
+}
+
+/// Parameters for meets_kyc_level RPC method
+#[derive(Serialize, Deserialize)]
+pub struct MeetsKycLevelParams<'a> {
+    pub address: Cow<'a, Address>,
+    pub required_level: u16,
+}
+
+/// Result of meets_kyc_level RPC method
+#[derive(Serialize, Deserialize)]
+pub struct MeetsKycLevelResult {
+    pub meets_level: bool,
+}
+
+/// Parameters for get_committee RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetCommitteeParams<'a> {
+    pub committee_id: Cow<'a, Hash>,
+}
+
+/// Committee member data for RPC
+#[derive(Serialize, Deserialize)]
+pub struct CommitteeMemberRpc {
+    pub public_key: Address,
+    pub name: Option<String>,
+    pub role: String,
+    pub status: String,
+    pub joined_at: u64,
+    pub last_active_at: u64,
+}
+
+/// Committee data for RPC
+#[derive(Serialize, Deserialize)]
+pub struct CommitteeRpc {
+    pub id: Hash,
+    pub region: String,
+    pub name: String,
+    pub members: Vec<CommitteeMemberRpc>,
+    pub threshold: u8,
+    pub kyc_threshold: u8,
+    pub max_kyc_level: u16,
+    pub max_kyc_tier: u8,
+    pub status: String,
+    pub parent_id: Option<Hash>,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Result of get_committee RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetCommitteeResult {
+    pub committee: Option<CommitteeRpc>,
+}
+
+/// Result of get_global_committee RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetGlobalCommitteeResult {
+    pub committee: Option<CommitteeRpc>,
+    pub is_bootstrapped: bool,
+}
+
+/// Parameters for get_committees_by_region RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetCommitteesByRegionParams {
+    pub region: String,
+}
+
+/// Result of get_committees_by_region RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetCommitteesByRegionResult {
+    pub committees: Vec<CommitteeRpc>,
+}
+
+/// Parameters for get_verifying_committee RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetVerifyingCommitteeParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of get_verifying_committee RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetVerifyingCommitteeResult {
+    pub committee_id: Option<Hash>,
+}
+
+// ============================================================================
 // Admin RPC Types (require --enable-admin-rpc flag)
 // ============================================================================
 

@@ -2602,6 +2602,59 @@ async fn transaction(
                 manager.message(format!("  Total Amount: {}", payload.get_total_amount()));
                 manager.message(format!("  Levels: {}", payload.get_levels()));
             }
+            TransactionType::SetKyc(payload) => {
+                manager.message("Type: SetKyc".to_string());
+                manager.message(format!(
+                    "  Account: {}",
+                    payload
+                        .get_account()
+                        .as_address(wallet.get_network().is_mainnet())
+                ));
+                manager.message(format!("  Level: {}", payload.get_level()));
+            }
+            TransactionType::RevokeKyc(payload) => {
+                manager.message("Type: RevokeKyc".to_string());
+                manager.message(format!(
+                    "  Account: {}",
+                    payload
+                        .get_account()
+                        .as_address(wallet.get_network().is_mainnet())
+                ));
+                manager.message(format!("  Reason Hash: {}", payload.get_reason_hash()));
+            }
+            TransactionType::RenewKyc(payload) => {
+                manager.message("Type: RenewKyc".to_string());
+                manager.message(format!(
+                    "  Account: {}",
+                    payload
+                        .get_account()
+                        .as_address(wallet.get_network().is_mainnet())
+                ));
+            }
+            TransactionType::BootstrapCommittee(payload) => {
+                manager.message("Type: BootstrapCommittee".to_string());
+                manager.message(format!("  Name: {}", payload.get_name()));
+                manager.message(format!("  Members: {}", payload.get_members().len()));
+            }
+            TransactionType::RegisterCommittee(payload) => {
+                manager.message("Type: RegisterCommittee".to_string());
+                manager.message(format!("  Region: {}", payload.get_region()));
+                manager.message(format!("  Name: {}", payload.get_name()));
+            }
+            TransactionType::UpdateCommittee(payload) => {
+                manager.message("Type: UpdateCommittee".to_string());
+                manager.message(format!("  Committee: {}", payload.get_committee_id()));
+            }
+            TransactionType::EmergencySuspend(payload) => {
+                manager.message("Type: EmergencySuspend".to_string());
+                manager.message(format!(
+                    "  Account: {}",
+                    payload
+                        .get_account()
+                        .as_address(wallet.get_network().is_mainnet())
+                ));
+                manager.message(format!("  Reason Hash: {}", payload.get_reason_hash()));
+            }
         }
     }
 

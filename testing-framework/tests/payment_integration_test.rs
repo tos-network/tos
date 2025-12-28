@@ -399,7 +399,7 @@ fn test_memo_emoji_truncation_preserves_valid_utf8() {
     // Should still be valid UTF-8 (no partial emoji)
     assert!(std::str::from_utf8(memo.as_bytes()).is_ok());
     // Should contain complete emoji only (each emoji is 4 bytes)
-    assert!(memo.len() % 4 == 0 || memo.is_empty());
+    assert!(memo.len().is_multiple_of(4) || memo.is_empty());
 }
 
 // ============================================================================

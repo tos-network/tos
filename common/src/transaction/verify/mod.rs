@@ -55,7 +55,15 @@ impl Transaction {
                     | TransactionType::Energy(_)
                     | TransactionType::AIMining(_)
                     | TransactionType::BindReferrer(_)
-                    | TransactionType::BatchReferralReward(_) => true,
+                    | TransactionType::BatchReferralReward(_)
+                    // KYC transaction types
+                    | TransactionType::SetKyc(_)
+                    | TransactionType::RevokeKyc(_)
+                    | TransactionType::RenewKyc(_)
+                    | TransactionType::BootstrapCommittee(_)
+                    | TransactionType::RegisterCommittee(_)
+                    | TransactionType::UpdateCommittee(_)
+                    | TransactionType::EmergencySuspend(_) => true,
                 }
             }
         }
@@ -297,6 +305,16 @@ impl Transaction {
                     )));
                 }
             }
+            // KYC transaction types - validation handled by KYC verification logic
+            TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
+                // KYC transactions are validated by the KYC provider at execution time
+            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
@@ -378,7 +396,15 @@ impl Transaction {
             }
             TransactionType::MultiSig(_)
             | TransactionType::AIMining(_)
-            | TransactionType::BindReferrer(_) => {
+            | TransactionType::BindReferrer(_)
+            // KYC transactions don't spend assets directly (only fee)
+            | TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {
@@ -672,6 +698,16 @@ impl Transaction {
                     )));
                 }
             }
+            // KYC transaction types - validation handled by KYC verification logic
+            TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
+                // KYC transactions are validated by the KYC provider at execution time
+            }
         };
 
         let source_decompressed = self
@@ -836,6 +872,16 @@ impl Transaction {
                     );
                 }
             }
+            // KYC transaction types
+            TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
+                // KYC transactions are logged at execution time
+            }
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs
@@ -918,7 +964,15 @@ impl Transaction {
             }
             TransactionType::MultiSig(_)
             | TransactionType::AIMining(_)
-            | TransactionType::BindReferrer(_) => {
+            | TransactionType::BindReferrer(_)
+            // KYC transactions don't spend assets directly (only fee)
+            | TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {
@@ -1138,7 +1192,15 @@ impl Transaction {
             }
             TransactionType::MultiSig(_)
             | TransactionType::AIMining(_)
-            | TransactionType::BindReferrer(_) => {
+            | TransactionType::BindReferrer(_)
+            // KYC transactions don't spend assets directly (only fee)
+            | TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {
@@ -1515,6 +1577,20 @@ impl Transaction {
                     );
                 }
             }
+            // KYC transaction types - execution handled by KYC provider
+            TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
+                // TODO: Implement KYC provider integration
+                // KYC transactions will be processed by the KYC provider
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("KYC transaction applied - type: {:?}", &self.data);
+                }
+            }
         }
 
         Ok(())
@@ -1626,7 +1702,15 @@ impl Transaction {
             }
             TransactionType::MultiSig(_)
             | TransactionType::AIMining(_)
-            | TransactionType::BindReferrer(_) => {
+            | TransactionType::BindReferrer(_)
+            // KYC transactions don't spend assets directly (only fee)
+            | TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {

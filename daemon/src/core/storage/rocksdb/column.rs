@@ -147,6 +147,36 @@ pub enum Column {
     // Team volume records: per-user per-asset volume tracking
     // {user_public_key (32 bytes)}{asset_hash (32 bytes)} => {TeamVolumeRecord}
     TeamVolumes,
+
+    // ===== KYC System =====
+
+    // KYC data: user -> KycData (43 bytes)
+    // {user_public_key} => {KycData}
+    KycData,
+    // KYC metadata: user -> (committee_id, topoheight, tx_hash)
+    // {user_public_key} => {KycMetadata}
+    KycMetadata,
+    // Emergency suspension data
+    // {user_public_key} => {(reason_hash, expires_at)}
+    KycEmergencySuspension,
+
+    // ===== Security Committee System =====
+
+    // Committee data: committee_id -> SecurityCommittee
+    // {committee_id (32 bytes)} => {SecurityCommittee}
+    Committees,
+    // Global committee ID pointer
+    // GLOBAL_COMMITTEE_KEY => {committee_id}
+    GlobalCommittee,
+    // Committee by region index
+    // {region (u8)}{committee_id (32 bytes)} => {}
+    CommitteesByRegion,
+    // Member to committees index: member -> list of committee IDs
+    // {member_public_key (32 bytes)} => {Vec<Hash>}
+    MemberCommittees,
+    // Child committees index: parent_id -> list of child IDs
+    // {parent_committee_id (32 bytes)} => {Vec<Hash>}
+    ChildCommittees,
 }
 
 impl Column {
@@ -186,6 +216,11 @@ impl Column {
             ReferralDirects => Some(32),
             // Team volumes: prefix by user public key (32 bytes)
             TeamVolumes => Some(32),
+
+            // Committee by region: prefix by region (1 byte)
+            CommitteesByRegion => Some(1),
+            // Child committees: prefix by parent committee ID (32 bytes)
+            ChildCommittees => Some(32),
 
             _ => None,
         }

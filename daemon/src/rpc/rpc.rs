@@ -865,6 +865,22 @@ pub fn register_methods<S: Storage>(
         async_handler!(get_referral_level::<S>),
     );
 
+    // KYC system
+    handler.register_method("has_kyc", async_handler!(has_kyc::<S>));
+    handler.register_method("get_kyc", async_handler!(get_kyc::<S>));
+    handler.register_method("get_kyc_tier", async_handler!(get_kyc_tier::<S>));
+    handler.register_method("is_kyc_valid", async_handler!(is_kyc_valid::<S>));
+    handler.register_method("meets_kyc_level", async_handler!(meets_kyc_level::<S>));
+    handler.register_method(
+        "get_verifying_committee",
+        async_handler!(get_verifying_committee::<S>),
+    );
+    handler.register_method("get_committee", async_handler!(get_committee::<S>));
+    handler.register_method(
+        "get_global_committee",
+        async_handler!(get_global_committee::<S>),
+    );
+
     if allow_mining_methods {
         handler.register_method(
             "get_block_template",
@@ -2260,6 +2276,17 @@ async fn get_account_history<S: Storage>(
                     // BatchReferralReward transactions are tracked by the referral system
                     // History entries for individual upline rewards would require additional storage
                     // For now, similar to AIMining, we don't add to account history
+                }
+                // KYC transaction types
+                TransactionType::SetKyc(_)
+                | TransactionType::RevokeKyc(_)
+                | TransactionType::RenewKyc(_)
+                | TransactionType::BootstrapCommittee(_)
+                | TransactionType::RegisterCommittee(_)
+                | TransactionType::UpdateCommittee(_)
+                | TransactionType::EmergencySuspend(_) => {
+                    // KYC transactions don't affect account history for now
+                    // This could be extended to track KYC activities
                 }
             }
         }
@@ -4574,4 +4601,286 @@ async fn get_referral_level<S: Storage>(
         .context("Error while retrieving referral level")?;
 
     Ok(json!(GetReferralLevelResult { level }))
+}
+
+// ============================================================================
+// KYC System RPC Handlers
+// ============================================================================
+
+/// Check if a user has KYC verification
+async fn has_kyc<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+    let params: HasKycParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let has_kyc = storage
+        .has_kyc(params.address.get_public_key())
+        .await
+        .context("Error while checking if user has KYC")?;
+
+    Ok(json!(HasKycResult { has_kyc }))
+}
+
+/// Get KYC data for a user
+async fn get_kyc<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+    let params: GetKycParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let kyc_data = storage
+        .get_kyc(params.address.get_public_key())
+        .await
+        .context("Error while retrieving KYC data")?;
+
+    let kyc = kyc_data.map(|data| {
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let days_until_expiry = {
+            let days = data.days_until_expiry(current_time);
+            if days == u64::MAX {
+                None // No expiration
+            } else {
+                Some(days)
+            }
+        };
+
+        KycRpcData {
+            level: data.level,
+            tier: data.get_tier(),
+            status: data.status.as_str().to_string(),
+            verified_at: data.verified_at,
+            expires_at: data.get_expires_at(),
+            days_until_expiry,
+            is_valid: data.is_valid(current_time),
+        }
+    });
+
+    Ok(json!(GetKycResult { kyc }))
+}
+
+/// Get effective KYC tier for a user
+async fn get_kyc_tier<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetKycTierParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let storage = blockchain.get_storage().read().await;
+    let tier = storage
+        .get_effective_tier(params.address.get_public_key(), current_time)
+        .await
+        .context("Error while retrieving KYC tier")?;
+
+    let level = storage
+        .get_effective_level(params.address.get_public_key(), current_time)
+        .await
+        .context("Error while retrieving KYC level")?;
+
+    let is_valid = storage
+        .is_kyc_valid(params.address.get_public_key(), current_time)
+        .await
+        .context("Error while checking KYC validity")?;
+
+    Ok(json!(GetKycTierResult {
+        tier,
+        level,
+        is_valid,
+    }))
+}
+
+/// Check if a user's KYC is currently valid
+async fn is_kyc_valid<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: IsKycValidParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let storage = blockchain.get_storage().read().await;
+    let is_valid = storage
+        .is_kyc_valid(params.address.get_public_key(), current_time)
+        .await
+        .context("Error while checking KYC validity")?;
+
+    Ok(json!(IsKycValidResult { is_valid }))
+}
+
+/// Check if a user meets a required KYC level
+async fn meets_kyc_level<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: MeetsKycLevelParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let storage = blockchain.get_storage().read().await;
+    let meets_level = storage
+        .meets_kyc_level(
+            params.address.get_public_key(),
+            params.required_level,
+            current_time,
+        )
+        .await
+        .context("Error while checking KYC level")?;
+
+    Ok(json!(MeetsKycLevelResult { meets_level }))
+}
+
+/// Get the verifying committee for a user's KYC
+async fn get_verifying_committee<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetVerifyingCommitteeParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let committee_id = storage
+        .get_verifying_committee(params.address.get_public_key())
+        .await
+        .context("Error while retrieving verifying committee")?;
+
+    Ok(json!(GetVerifyingCommitteeResult { committee_id }))
+}
+
+/// Get committee information by ID
+async fn get_committee<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetCommitteeParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let network = blockchain.get_network();
+
+    let storage = blockchain.get_storage().read().await;
+    let committee_opt = storage
+        .get_committee(&params.committee_id)
+        .await
+        .context("Error while retrieving committee")?;
+
+    let committee = committee_opt.map(|c| convert_committee_to_rpc(&c, network.is_mainnet()));
+
+    Ok(json!(GetCommitteeResult { committee }))
+}
+
+/// Get the global committee
+async fn get_global_committee<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    require_no_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let network = blockchain.get_network();
+
+    let storage = blockchain.get_storage().read().await;
+    let is_bootstrapped = storage
+        .is_global_committee_bootstrapped()
+        .await
+        .context("Error while checking global committee status")?;
+
+    let committee = if is_bootstrapped {
+        storage
+            .get_global_committee()
+            .await
+            .context("Error while retrieving global committee")?
+            .map(|c| convert_committee_to_rpc(&c, network.is_mainnet()))
+    } else {
+        None
+    };
+
+    Ok(json!(GetGlobalCommitteeResult {
+        committee,
+        is_bootstrapped,
+    }))
+}
+
+/// Convert SecurityCommittee to RPC-friendly format
+fn convert_committee_to_rpc(
+    committee: &tos_common::kyc::SecurityCommittee,
+    is_mainnet: bool,
+) -> CommitteeRpc {
+    use tos_common::kyc::level_to_tier;
+
+    let members: Vec<CommitteeMemberRpc> = committee
+        .members
+        .iter()
+        .map(|m| CommitteeMemberRpc {
+            public_key: m.public_key.to_address(is_mainnet),
+            name: m.name.clone(),
+            role: m.role.as_str().to_string(),
+            status: m.status.as_str().to_string(),
+            joined_at: m.joined_at,
+            last_active_at: m.last_active_at,
+        })
+        .collect();
+
+    CommitteeRpc {
+        id: committee.id.clone(),
+        region: committee.region.as_str().to_string(),
+        name: committee.name.clone(),
+        members,
+        threshold: committee.threshold,
+        kyc_threshold: committee.kyc_threshold,
+        max_kyc_level: committee.max_kyc_level,
+        max_kyc_tier: level_to_tier(committee.max_kyc_level),
+        status: committee.status.as_str().to_string(),
+        parent_id: committee.parent_id.clone(),
+        created_at: committee.created_at,
+        updated_at: committee.updated_at,
+    }
 }

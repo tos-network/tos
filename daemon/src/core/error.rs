@@ -411,6 +411,48 @@ pub enum BlockchainError {
     ReferralRecordNotFound,
     #[error("Feature not implemented")]
     NotImplemented,
+
+    // KYC system errors
+    #[error("KYC record not found")]
+    KycNotFound,
+    #[error("KYC already set for this user")]
+    KycAlreadySet,
+    #[error("KYC level is invalid")]
+    InvalidKycLevel,
+    #[error("KYC has expired")]
+    KycExpired,
+    #[error("KYC is revoked")]
+    KycRevoked,
+    #[error("KYC is suspended")]
+    KycSuspended,
+    #[error("Insufficient KYC level: required {0}, got {1}")]
+    InsufficientKycLevel(u16, u16),
+
+    // Committee system errors
+    #[error("Committee not found")]
+    CommitteeNotFound,
+    #[error("Committee already exists")]
+    CommitteeAlreadyExists,
+    #[error("Global Committee already exists")]
+    GlobalCommitteeAlreadyExists,
+    #[error("Global Committee not bootstrapped")]
+    GlobalCommitteeNotBootstrapped,
+    #[error("Parent committee not found")]
+    ParentCommitteeNotFound,
+    #[error("Invalid max KYC level for committee")]
+    InvalidMaxKycLevel,
+    #[error("Member not found in committee")]
+    MemberNotFound,
+    #[error("Member already exists in committee")]
+    MemberAlreadyExists,
+    #[error("Cannot remove last member from committee")]
+    CannotRemoveLastMember,
+    #[error("Insufficient approvals for operation")]
+    InsufficientApprovals,
+    #[error("Committee is not active")]
+    CommitteeNotActive,
+    #[error("Invalid committee threshold")]
+    InvalidCommitteeThreshold,
 }
 
 impl BlockchainError {

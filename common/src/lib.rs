@@ -20,6 +20,9 @@ pub mod ai_mining;
 // Native Referral System module
 pub mod referral;
 
+// Native KYC Level System module
+pub mod kyc;
+
 pub mod asset;
 pub mod config;
 pub mod context;

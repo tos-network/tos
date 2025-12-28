@@ -49,6 +49,8 @@ pub trait Storage:
     + EnergyProvider
     + AIMiningProvider
     + ReferralProvider
+    + KycProvider
+    + CommitteeProvider
     + Sync
     + Send
     + 'static

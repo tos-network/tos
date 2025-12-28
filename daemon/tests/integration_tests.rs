@@ -1184,6 +1184,21 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
         (TransactionType::BindReferrer(_), FeeType::Energy) => false,
         (TransactionType::BatchReferralReward(_), FeeType::TOS) => true,
         (TransactionType::BatchReferralReward(_), FeeType::Energy) => false,
+        // KYC transaction types - all use TOS fee type only
+        (TransactionType::SetKyc(_), FeeType::TOS) => true,
+        (TransactionType::SetKyc(_), FeeType::Energy) => false,
+        (TransactionType::RevokeKyc(_), FeeType::TOS) => true,
+        (TransactionType::RevokeKyc(_), FeeType::Energy) => false,
+        (TransactionType::RenewKyc(_), FeeType::TOS) => true,
+        (TransactionType::RenewKyc(_), FeeType::Energy) => false,
+        (TransactionType::BootstrapCommittee(_), FeeType::TOS) => true,
+        (TransactionType::BootstrapCommittee(_), FeeType::Energy) => false,
+        (TransactionType::RegisterCommittee(_), FeeType::TOS) => true,
+        (TransactionType::RegisterCommittee(_), FeeType::Energy) => false,
+        (TransactionType::UpdateCommittee(_), FeeType::TOS) => true,
+        (TransactionType::UpdateCommittee(_), FeeType::Energy) => false,
+        (TransactionType::EmergencySuspend(_), FeeType::TOS) => true,
+        (TransactionType::EmergencySuspend(_), FeeType::Energy) => false,
     }
 }
 

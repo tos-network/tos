@@ -1390,3 +1390,407 @@ impl crate::core::storage::ReferralProvider for SledStorage {
         Ok(None)
     }
 }
+
+// KycProvider implementation for SledStorage
+// Note: SledStorage is deprecated in favor of RocksDB. This is a stub implementation.
+#[async_trait]
+impl crate::core::storage::KycProvider for SledStorage {
+    async fn has_kyc(&self, _user: &PublicKey) -> Result<bool, BlockchainError> {
+        Ok(false)
+    }
+
+    async fn get_kyc(
+        &self,
+        _user: &PublicKey,
+    ) -> Result<Option<tos_common::kyc::KycData>, BlockchainError> {
+        Ok(None)
+    }
+
+    async fn set_kyc(
+        &mut self,
+        _user: &PublicKey,
+        _kyc_data: tos_common::kyc::KycData,
+        _committee_id: &Hash,
+        _topoheight: TopoHeight,
+        _tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn update_kyc_status(
+        &mut self,
+        _user: &PublicKey,
+        _status: tos_common::kyc::KycStatus,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn renew_kyc(
+        &mut self,
+        _user: &PublicKey,
+        _new_verified_at: u64,
+        _new_data_hash: Hash,
+        _topoheight: TopoHeight,
+        _tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn revoke_kyc(
+        &mut self,
+        _user: &PublicKey,
+        _reason_hash: &Hash,
+        _topoheight: TopoHeight,
+        _tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn get_effective_level(
+        &self,
+        _user: &PublicKey,
+        _current_time: u64,
+    ) -> Result<u16, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn get_effective_tier(
+        &self,
+        _user: &PublicKey,
+        _current_time: u64,
+    ) -> Result<u8, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn meets_kyc_level(
+        &self,
+        _user: &PublicKey,
+        _required_level: u16,
+        _current_time: u64,
+    ) -> Result<bool, BlockchainError> {
+        Ok(false)
+    }
+
+    async fn is_kyc_valid(
+        &self,
+        _user: &PublicKey,
+        _current_time: u64,
+    ) -> Result<bool, BlockchainError> {
+        Ok(false)
+    }
+
+    async fn get_verifying_committee(
+        &self,
+        _user: &PublicKey,
+    ) -> Result<Option<Hash>, BlockchainError> {
+        Ok(None)
+    }
+
+    async fn get_kyc_topoheight(
+        &self,
+        _user: &PublicKey,
+    ) -> Result<Option<TopoHeight>, BlockchainError> {
+        Ok(None)
+    }
+
+    async fn get_kyc_batch(
+        &self,
+        users: &[PublicKey],
+    ) -> Result<Vec<(PublicKey, Option<tos_common::kyc::KycData>)>, BlockchainError> {
+        Ok(users.iter().map(|u| (u.clone(), None)).collect())
+    }
+
+    async fn check_kyc_batch(
+        &self,
+        users: &[PublicKey],
+        _required_level: u16,
+        _current_time: u64,
+    ) -> Result<Vec<(PublicKey, bool)>, BlockchainError> {
+        Ok(users.iter().map(|u| (u.clone(), false)).collect())
+    }
+
+    async fn emergency_suspend(
+        &mut self,
+        _user: &PublicKey,
+        _reason_hash: &Hash,
+        _expires_at: u64,
+        _topoheight: TopoHeight,
+        _tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn get_emergency_suspension(
+        &self,
+        _user: &PublicKey,
+    ) -> Result<Option<(Hash, u64)>, BlockchainError> {
+        Ok(None)
+    }
+
+    async fn lift_emergency_suspension(
+        &mut self,
+        _user: &PublicKey,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn delete_kyc_record(&mut self, _user: &PublicKey) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn count_users_at_level(
+        &self,
+        _min_level: u16,
+        _current_time: u64,
+    ) -> Result<u64, BlockchainError> {
+        Ok(0)
+    }
+}
+
+// CommitteeProvider implementation for SledStorage
+// Note: SledStorage is deprecated in favor of RocksDB. This is a stub implementation.
+#[async_trait]
+impl crate::core::storage::CommitteeProvider for SledStorage {
+    async fn committee_exists(&self, _committee_id: &Hash) -> Result<bool, BlockchainError> {
+        Ok(false)
+    }
+
+    async fn get_committee(
+        &self,
+        _committee_id: &Hash,
+    ) -> Result<Option<tos_common::kyc::SecurityCommittee>, BlockchainError> {
+        Ok(None)
+    }
+
+    async fn get_global_committee(
+        &self,
+    ) -> Result<Option<tos_common::kyc::SecurityCommittee>, BlockchainError> {
+        Ok(None)
+    }
+
+    async fn get_global_committee_id(&self) -> Result<Option<Hash>, BlockchainError> {
+        Ok(None)
+    }
+
+    async fn is_global_committee_bootstrapped(&self) -> Result<bool, BlockchainError> {
+        Ok(false)
+    }
+
+    async fn bootstrap_global_committee(
+        &mut self,
+        _committee: tos_common::kyc::SecurityCommittee,
+        _topoheight: TopoHeight,
+        _tx_hash: &Hash,
+    ) -> Result<Hash, BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn register_committee(
+        &mut self,
+        _committee: tos_common::kyc::SecurityCommittee,
+        _parent_id: &Hash,
+        _topoheight: TopoHeight,
+        _tx_hash: &Hash,
+    ) -> Result<Hash, BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn update_committee_status(
+        &mut self,
+        _committee_id: &Hash,
+        _status: tos_common::kyc::CommitteeStatus,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn update_committee_threshold(
+        &mut self,
+        _committee_id: &Hash,
+        _threshold: u8,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn update_committee_kyc_threshold(
+        &mut self,
+        _committee_id: &Hash,
+        _kyc_threshold: u8,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn update_committee_name(
+        &mut self,
+        _committee_id: &Hash,
+        _name: String,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn add_committee_member(
+        &mut self,
+        _committee_id: &Hash,
+        _member_pubkey: &PublicKey,
+        _name: Option<String>,
+        _role: tos_common::kyc::MemberRole,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn remove_committee_member(
+        &mut self,
+        _committee_id: &Hash,
+        _member_pubkey: &PublicKey,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn update_member_role(
+        &mut self,
+        _committee_id: &Hash,
+        _member_pubkey: &PublicKey,
+        _new_role: tos_common::kyc::MemberRole,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn update_member_status(
+        &mut self,
+        _committee_id: &Hash,
+        _member_pubkey: &PublicKey,
+        _new_status: tos_common::kyc::MemberStatus,
+        _topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn is_committee_member(
+        &self,
+        _committee_id: &Hash,
+        _member_pubkey: &PublicKey,
+    ) -> Result<bool, BlockchainError> {
+        Ok(false)
+    }
+
+    async fn is_member_active(
+        &self,
+        _committee_id: &Hash,
+        _member_pubkey: &PublicKey,
+    ) -> Result<bool, BlockchainError> {
+        Ok(false)
+    }
+
+    async fn get_member_committees(
+        &self,
+        _member_pubkey: &PublicKey,
+    ) -> Result<Vec<Hash>, BlockchainError> {
+        Ok(vec![])
+    }
+
+    async fn get_committee_member_count(
+        &self,
+        _committee_id: &Hash,
+    ) -> Result<usize, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn get_active_member_count(
+        &self,
+        _committee_id: &Hash,
+    ) -> Result<usize, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn get_committees_by_region(
+        &self,
+        _region: tos_common::kyc::KycRegion,
+    ) -> Result<Vec<tos_common::kyc::SecurityCommittee>, BlockchainError> {
+        Ok(vec![])
+    }
+
+    async fn get_active_committees(
+        &self,
+    ) -> Result<Vec<tos_common::kyc::SecurityCommittee>, BlockchainError> {
+        Ok(vec![])
+    }
+
+    async fn get_child_committees(
+        &self,
+        _parent_id: &Hash,
+    ) -> Result<Vec<tos_common::kyc::SecurityCommittee>, BlockchainError> {
+        Ok(vec![])
+    }
+
+    async fn get_parent_committee(
+        &self,
+        _committee_id: &Hash,
+    ) -> Result<Option<tos_common::kyc::SecurityCommittee>, BlockchainError> {
+        Ok(None)
+    }
+
+    async fn get_threshold(&self, _committee_id: &Hash) -> Result<u8, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn get_kyc_threshold(&self, _committee_id: &Hash) -> Result<u8, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn get_max_kyc_level(&self, _committee_id: &Hash) -> Result<u16, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn can_approve_level(
+        &self,
+        _committee_id: &Hash,
+        _level: u16,
+    ) -> Result<bool, BlockchainError> {
+        Ok(false)
+    }
+
+    async fn count_valid_approvals(
+        &self,
+        _committee_id: &Hash,
+        _approver_pubkeys: &[PublicKey],
+    ) -> Result<usize, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn meets_governance_threshold(
+        &self,
+        _committee_id: &Hash,
+        _approver_pubkeys: &[PublicKey],
+    ) -> Result<bool, BlockchainError> {
+        Ok(false)
+    }
+
+    async fn meets_kyc_threshold(
+        &self,
+        _committee_id: &Hash,
+        _approver_pubkeys: &[PublicKey],
+        _kyc_level: u16,
+    ) -> Result<bool, BlockchainError> {
+        Ok(false)
+    }
+
+    async fn delete_committee(&mut self, _committee_id: &Hash) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn get_committee_count(&self) -> Result<usize, BlockchainError> {
+        Ok(0)
+    }
+
+    async fn get_all_committee_ids(&self) -> Result<Vec<Hash>, BlockchainError> {
+        Ok(vec![])
+    }
+}
