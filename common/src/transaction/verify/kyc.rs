@@ -37,7 +37,14 @@ pub const MAX_MEMBER_NAME_LEN: usize = 64;
 pub const EMERGENCY_SUSPEND_TIMEOUT: u64 = 24 * 60 * 60;
 
 /// Verify SetKyc transaction payload
-pub fn verify_set_kyc<E>(payload: &SetKycPayload) -> Result<(), VerificationError<E>> {
+///
+/// # Arguments
+/// * `payload` - The SetKyc payload to verify
+/// * `current_time` - Current timestamp (block timestamp for deterministic validation)
+pub fn verify_set_kyc<E>(
+    payload: &SetKycPayload,
+    current_time: u64,
+) -> Result<(), VerificationError<E>> {
     // Validate KYC level
     if !is_valid_kyc_level(payload.get_level()) {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -47,14 +54,18 @@ pub fn verify_set_kyc<E>(payload: &SetKycPayload) -> Result<(), VerificationErro
     }
 
     // Validate approvals
-    verify_approvals(payload.get_approvals())?;
+    verify_approvals(payload.get_approvals(), current_time)?;
+
+    // All KYC operations require at least 1 approval
+    if payload.get_approvals().is_empty() {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "SetKyc requires at least 1 approval"
+        )));
+    }
 
     // Validate verified_at is reasonable (not in far future)
     // Allow up to 1 hour in the future for clock skew
-    let max_future = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() + 3600)
-        .unwrap_or(u64::MAX);
+    let max_future = current_time + 3600;
 
     if payload.get_verified_at() > max_future {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -62,8 +73,7 @@ pub fn verify_set_kyc<E>(payload: &SetKycPayload) -> Result<(), VerificationErro
         )));
     }
 
-    // Tier 5+ requires additional approvals (handled at execution time)
-    // Just validate we have at least 1 approval
+    // Tier 5+ requires additional approvals
     let tier = level_to_tier(payload.get_level());
     if tier >= 5 && payload.get_approvals().len() < 2 {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -77,9 +87,16 @@ pub fn verify_set_kyc<E>(payload: &SetKycPayload) -> Result<(), VerificationErro
 }
 
 /// Verify RevokeKyc transaction payload
-pub fn verify_revoke_kyc<E>(payload: &RevokeKycPayload) -> Result<(), VerificationError<E>> {
+///
+/// # Arguments
+/// * `payload` - The RevokeKyc payload to verify
+/// * `current_time` - Current timestamp (block timestamp for deterministic validation)
+pub fn verify_revoke_kyc<E>(
+    payload: &RevokeKycPayload,
+    current_time: u64,
+) -> Result<(), VerificationError<E>> {
     // Validate approvals
-    verify_approvals(payload.get_approvals())?;
+    verify_approvals(payload.get_approvals(), current_time)?;
 
     // Must have at least 1 approval
     if payload.get_approvals().is_empty() {
@@ -92,9 +109,16 @@ pub fn verify_revoke_kyc<E>(payload: &RevokeKycPayload) -> Result<(), Verificati
 }
 
 /// Verify RenewKyc transaction payload
-pub fn verify_renew_kyc<E>(payload: &RenewKycPayload) -> Result<(), VerificationError<E>> {
+///
+/// # Arguments
+/// * `payload` - The RenewKyc payload to verify
+/// * `current_time` - Current timestamp (block timestamp for deterministic validation)
+pub fn verify_renew_kyc<E>(
+    payload: &RenewKycPayload,
+    current_time: u64,
+) -> Result<(), VerificationError<E>> {
     // Validate approvals
-    verify_approvals(payload.get_approvals())?;
+    verify_approvals(payload.get_approvals(), current_time)?;
 
     // Must have at least 1 approval
     if payload.get_approvals().is_empty() {
@@ -104,10 +128,7 @@ pub fn verify_renew_kyc<E>(payload: &RenewKycPayload) -> Result<(), Verification
     }
 
     // Validate verified_at is reasonable
-    let max_future = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() + 3600)
-        .unwrap_or(u64::MAX);
+    let max_future = current_time + 3600;
 
     if payload.get_verified_at() > max_future {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -315,16 +336,6 @@ pub fn verify_register_committee<E>(
         )));
     }
 
-    // Validate parent approvals
-    verify_approvals(payload.get_approvals())?;
-
-    // Must have at least 1 parent approval
-    if payload.get_approvals().is_empty() {
-        return Err(VerificationError::AnyError(anyhow::anyhow!(
-            "RegisterCommittee requires parent committee approval"
-        )));
-    }
-
     // Check for duplicate member public keys
     let mut seen_keys = std::collections::HashSet::new();
     for member in payload.get_members() {
@@ -339,11 +350,16 @@ pub fn verify_register_committee<E>(
 }
 
 /// Verify UpdateCommittee transaction payload
+///
+/// # Arguments
+/// * `payload` - The UpdateCommittee payload to verify
+/// * `current_time` - Current timestamp (block timestamp for deterministic validation)
 pub fn verify_update_committee<E>(
     payload: &UpdateCommitteePayload,
+    current_time: u64,
 ) -> Result<(), VerificationError<E>> {
     // Validate approvals
-    verify_approvals(payload.get_approvals())?;
+    verify_approvals(payload.get_approvals(), current_time)?;
 
     // Must have at least 1 approval
     if payload.get_approvals().is_empty() {
@@ -405,11 +421,16 @@ pub fn verify_update_committee<E>(
 }
 
 /// Verify EmergencySuspend transaction payload
+///
+/// # Arguments
+/// * `payload` - The EmergencySuspend payload to verify
+/// * `current_time` - Current timestamp (block timestamp for deterministic validation)
 pub fn verify_emergency_suspend<E>(
     payload: &EmergencySuspendPayload,
+    current_time: u64,
 ) -> Result<(), VerificationError<E>> {
     // Validate approvals
-    verify_approvals(payload.get_approvals())?;
+    verify_approvals(payload.get_approvals(), current_time)?;
 
     // Emergency suspend requires at least 2 approvals
     if payload.get_approvals().len() < EMERGENCY_SUSPEND_MIN_APPROVALS {
@@ -421,14 +442,9 @@ pub fn verify_emergency_suspend<E>(
     }
 
     // Validate expires_at is reasonable (24 hours from now, with some tolerance)
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
     // expires_at should be approximately 24 hours from now (allow 1 hour tolerance)
-    let min_expires = now + EMERGENCY_SUSPEND_TIMEOUT - 3600;
-    let max_expires = now + EMERGENCY_SUSPEND_TIMEOUT + 3600;
+    let min_expires = current_time + EMERGENCY_SUSPEND_TIMEOUT - 3600;
+    let max_expires = current_time + EMERGENCY_SUSPEND_TIMEOUT + 3600;
 
     if payload.get_expires_at() < min_expires || payload.get_expires_at() > max_expires {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -440,7 +456,14 @@ pub fn verify_emergency_suspend<E>(
 }
 
 /// Validate a list of committee approvals
-fn verify_approvals<E>(approvals: &[CommitteeApproval]) -> Result<(), VerificationError<E>> {
+///
+/// # Arguments
+/// * `approvals` - List of committee approvals to validate
+/// * `current_time` - Current timestamp (block timestamp for deterministic validation)
+fn verify_approvals<E>(
+    approvals: &[CommitteeApproval],
+    current_time: u64,
+) -> Result<(), VerificationError<E>> {
     // Check max approvals
     if approvals.len() > MAX_APPROVALS {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -461,10 +484,7 @@ fn verify_approvals<E>(approvals: &[CommitteeApproval]) -> Result<(), Verificati
     }
 
     // Validate approval timestamps are reasonable (not in far future)
-    let max_future = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() + 3600)
-        .unwrap_or(u64::MAX);
+    let max_future = current_time + 3600;
 
     for approval in approvals {
         if approval.timestamp > max_future {
@@ -530,7 +550,7 @@ mod tests {
             vec![create_test_approval(1)],
         );
 
-        let result: Result<(), VerificationError<()>> = verify_set_kyc(&payload);
+        let result: Result<(), VerificationError<()>> = verify_set_kyc(&payload, now);
         assert!(result.is_ok());
     }
 
@@ -550,7 +570,7 @@ mod tests {
             vec![create_test_approval(1)],
         );
 
-        let result: Result<(), VerificationError<()>> = verify_set_kyc(&payload);
+        let result: Result<(), VerificationError<()>> = verify_set_kyc(&payload, now);
         assert!(result.is_err());
     }
 
@@ -571,7 +591,7 @@ mod tests {
             vec![create_test_approval(1)],
         );
 
-        let result: Result<(), VerificationError<()>> = verify_set_kyc(&payload);
+        let result: Result<(), VerificationError<()>> = verify_set_kyc(&payload, now);
         assert!(result.is_err());
 
         // Tier 5 with 2 approvals should succeed
@@ -584,7 +604,7 @@ mod tests {
             vec![create_test_approval(1), create_test_approval(2)],
         );
 
-        let result: Result<(), VerificationError<()>> = verify_set_kyc(&payload);
+        let result: Result<(), VerificationError<()>> = verify_set_kyc(&payload, now);
         assert!(result.is_ok());
     }
 
@@ -652,7 +672,7 @@ mod tests {
             now + EMERGENCY_SUSPEND_TIMEOUT,
         );
 
-        let result: Result<(), VerificationError<()>> = verify_emergency_suspend(&payload);
+        let result: Result<(), VerificationError<()>> = verify_emergency_suspend(&payload, now);
         assert!(result.is_ok());
     }
 
@@ -671,7 +691,7 @@ mod tests {
             now + EMERGENCY_SUSPEND_TIMEOUT,
         );
 
-        let result: Result<(), VerificationError<()>> = verify_emergency_suspend(&payload);
+        let result: Result<(), VerificationError<()>> = verify_emergency_suspend(&payload, now);
         assert!(result.is_err());
     }
 
@@ -691,12 +711,17 @@ mod tests {
 
     #[test]
     fn test_verify_approvals_no_duplicates() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
         let approvals = vec![
             create_test_approval(1),
             create_test_approval(1), // Duplicate
         ];
 
-        let result: Result<(), VerificationError<()>> = verify_approvals(&approvals);
+        let result: Result<(), VerificationError<()>> = verify_approvals(&approvals, now);
         assert!(result.is_err());
     }
 }
