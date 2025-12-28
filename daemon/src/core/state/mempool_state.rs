@@ -362,6 +362,14 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         self.block_version
     }
 
+    /// Get the timestamp to use for verification (uses current system time for mempool)
+    fn get_verification_timestamp(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
     /// Set the multisig state for an account
     async fn set_multisig_state(
         &mut self,

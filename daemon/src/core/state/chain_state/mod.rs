@@ -105,6 +105,9 @@ pub struct ChainState<'a, S: Storage> {
     block_version: BlockVersion,
     // All gas fees tracked
     gas_fee: u64,
+    // Block timestamp for deterministic verification (in seconds)
+    // None for mempool verification (uses system time)
+    block_timestamp: Option<u64>,
 }
 
 impl<'a, S: Storage> ChainState<'a, S> {
@@ -114,6 +117,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
         stable_topoheight: TopoHeight,
         topoheight: TopoHeight,
         block_version: BlockVersion,
+        block_timestamp: Option<u64>,
     ) -> Self {
         Self {
             storage,
@@ -125,6 +129,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             contracts: HashMap::new(),
             block_version,
             gas_fee: 0,
+            block_timestamp,
         }
     }
 
@@ -141,6 +146,29 @@ impl<'a, S: Storage> ChainState<'a, S> {
             stable_topoheight,
             topoheight,
             block_version,
+            None, // No block timestamp for mempool verification
+        )
+    }
+
+    /// Create a new ChainState with block timestamp for deterministic consensus validation
+    ///
+    /// Use this when verifying transactions during block validation.
+    /// The block_timestamp_secs should be the block's timestamp in seconds.
+    pub fn new_with_timestamp(
+        storage: &'a S,
+        environment: &'a Environment,
+        stable_topoheight: TopoHeight,
+        topoheight: TopoHeight,
+        block_version: BlockVersion,
+        block_timestamp_secs: u64,
+    ) -> Self {
+        Self::with(
+            StorageReference::Immutable(storage),
+            environment,
+            stable_topoheight,
+            topoheight,
+            block_version,
+            Some(block_timestamp_secs),
         )
     }
 
@@ -716,6 +744,19 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     /// Get the block version
     fn get_block_version(&self) -> BlockVersion {
         self.block_version
+    }
+
+    /// Get the timestamp to use for verification
+    ///
+    /// For block validation: returns the block timestamp (deterministic)
+    /// For mempool verification: returns current system time
+    fn get_verification_timestamp(&self) -> u64 {
+        self.block_timestamp.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        })
     }
 
     /// Set the multisig state for an account

@@ -74,6 +74,15 @@ pub trait BlockchainVerificationState<'a, E> {
     /// Get the block version in which TX is executed
     fn get_block_version(&self) -> BlockVersion;
 
+    /// Get the timestamp to use for verification
+    ///
+    /// For block validation (consensus): returns the block timestamp
+    /// For mempool verification: returns current system time
+    ///
+    /// This ensures deterministic consensus validation while allowing
+    /// flexibility for mempool operations.
+    fn get_verification_timestamp(&self) -> u64;
+
     /// Set the multisig state for an account
     async fn set_multisig_state(
         &mut self,

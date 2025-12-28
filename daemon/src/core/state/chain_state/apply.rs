@@ -131,6 +131,11 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         self.block_version
     }
 
+    /// Get the timestamp to use for verification (delegates to inner)
+    fn get_verification_timestamp(&self) -> u64 {
+        self.inner.get_verification_timestamp()
+    }
+
     async fn set_multisig_state(
         &mut self,
         account: &'a PublicKey,
@@ -475,6 +480,8 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         block: &'a Block,
         executor: std::sync::Arc<dyn tos_common::contract::ContractExecutor>,
     ) -> Self {
+        // Use block timestamp for deterministic consensus validation
+        let block_timestamp_secs = block.get_header().get_timestamp() / 1000;
         Self {
             inner: ChainState::with(
                 StorageReference::Mutable(storage),
@@ -482,6 +489,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 stable_topoheight,
                 topoheight,
                 block_version,
+                Some(block_timestamp_secs),
             ),
             burned_supply,
             contract_manager: ContractManager {

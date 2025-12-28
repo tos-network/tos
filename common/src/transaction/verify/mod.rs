@@ -4,19 +4,7 @@ mod kyc;
 mod state;
 mod zkp_cache;
 
-use std::{borrow::Cow, iter, sync::Arc, time::SystemTime};
-
-/// Get current Unix timestamp for KYC verification
-///
-/// This returns the current system time as Unix seconds.
-/// TODO: For block validation, this should be replaced with block timestamp
-/// to ensure deterministic consensus validation.
-fn get_current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+use std::{borrow::Cow, iter, sync::Arc};
 
 use anyhow::anyhow;
 // Balance simplification: RangeProof removed
@@ -319,32 +307,33 @@ impl Transaction {
                 }
             }
             // KYC transaction types - structural validation (dynamic parts)
-            // Use current system time for timestamp validation
-            // TODO: Replace with block timestamp for deterministic consensus validation
+            // Uses state.get_verification_timestamp() for deterministic consensus validation
+            // Block validation uses block timestamp; mempool uses system time
             TransactionType::SetKyc(payload) => {
-                let current_time = get_current_timestamp();
+                let current_time = state.get_verification_timestamp();
                 kyc::verify_set_kyc(payload, current_time)?;
             }
             TransactionType::RevokeKyc(payload) => {
-                let current_time = get_current_timestamp();
+                let current_time = state.get_verification_timestamp();
                 kyc::verify_revoke_kyc(payload, current_time)?;
             }
             TransactionType::RenewKyc(payload) => {
-                let current_time = get_current_timestamp();
+                let current_time = state.get_verification_timestamp();
                 kyc::verify_renew_kyc(payload, current_time)?;
             }
             TransactionType::BootstrapCommittee(payload) => {
                 kyc::verify_bootstrap_committee(payload)?;
             }
             TransactionType::RegisterCommittee(payload) => {
-                kyc::verify_register_committee(payload)?;
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_register_committee(payload, current_time)?;
             }
             TransactionType::UpdateCommittee(payload) => {
-                let current_time = get_current_timestamp();
+                let current_time = state.get_verification_timestamp();
                 kyc::verify_update_committee(payload, current_time)?;
             }
             TransactionType::EmergencySuspend(payload) => {
-                let current_time = get_current_timestamp();
+                let current_time = state.get_verification_timestamp();
                 kyc::verify_emergency_suspend(payload, current_time)?;
             }
         };
@@ -731,32 +720,32 @@ impl Transaction {
                 }
             }
             // KYC transaction types - structural validation (pre-verify)
-            // Use current system time for timestamp validation
-            // TODO: Replace with block timestamp for deterministic consensus validation
+            // Uses state.get_verification_timestamp() for deterministic consensus validation
             TransactionType::SetKyc(payload) => {
-                let current_time = get_current_timestamp();
+                let current_time = state.get_verification_timestamp();
                 kyc::verify_set_kyc(payload, current_time)?;
             }
             TransactionType::RevokeKyc(payload) => {
-                let current_time = get_current_timestamp();
+                let current_time = state.get_verification_timestamp();
                 kyc::verify_revoke_kyc(payload, current_time)?;
             }
             TransactionType::RenewKyc(payload) => {
-                let current_time = get_current_timestamp();
+                let current_time = state.get_verification_timestamp();
                 kyc::verify_renew_kyc(payload, current_time)?;
             }
             TransactionType::BootstrapCommittee(payload) => {
                 kyc::verify_bootstrap_committee(payload)?;
             }
             TransactionType::RegisterCommittee(payload) => {
-                kyc::verify_register_committee(payload)?;
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_register_committee(payload, current_time)?;
             }
             TransactionType::UpdateCommittee(payload) => {
-                let current_time = get_current_timestamp();
+                let current_time = state.get_verification_timestamp();
                 kyc::verify_update_committee(payload, current_time)?;
             }
             TransactionType::EmergencySuspend(payload) => {
-                let current_time = get_current_timestamp();
+                let current_time = state.get_verification_timestamp();
                 kyc::verify_emergency_suspend(payload, current_time)?;
             }
         };

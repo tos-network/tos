@@ -7,7 +7,7 @@
 // State-dependent validations (committee existence, member authorization, etc.)
 // are handled at execution time by the KycProvider.
 
-use crate::kyc::{is_valid_kyc_level, level_to_tier, CommitteeApproval};
+use crate::kyc::{is_valid_kyc_level, level_to_tier, CommitteeApproval, APPROVAL_EXPIRY_SECONDS};
 use crate::transaction::payload::{
     BootstrapCommitteePayload, EmergencySuspendPayload, RegisterCommitteePayload, RenewKycPayload,
     RevokeKycPayload, SetKycPayload, UpdateCommitteePayload,
@@ -245,9 +245,24 @@ pub fn verify_bootstrap_committee<E>(
 }
 
 /// Verify RegisterCommittee transaction payload
+///
+/// # Arguments
+/// * `payload` - The RegisterCommittee payload to verify
+/// * `current_time` - Current timestamp (block timestamp for deterministic validation)
 pub fn verify_register_committee<E>(
     payload: &RegisterCommitteePayload,
+    current_time: u64,
 ) -> Result<(), VerificationError<E>> {
+    // Validate approvals from parent committee
+    verify_approvals(payload.get_approvals(), current_time)?;
+
+    // RegisterCommittee requires at least 1 approval from parent committee
+    if payload.get_approvals().is_empty() {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "RegisterCommittee requires at least 1 approval from parent committee"
+        )));
+    }
+
     // Validate committee name
     if payload.get_name().is_empty() {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -483,13 +498,25 @@ fn verify_approvals<E>(
         }
     }
 
-    // Validate approval timestamps are reasonable (not in far future)
+    // Validate approval timestamps are reasonable
+    // 1. Not too far in the future (1 hour tolerance)
+    // 2. Not too old (expires after APPROVAL_EXPIRY_SECONDS)
     let max_future = current_time + 3600;
+    let min_valid = current_time.saturating_sub(APPROVAL_EXPIRY_SECONDS);
 
     for approval in approvals {
+        // Reject approvals from far future
         if approval.timestamp > max_future {
             return Err(VerificationError::AnyError(anyhow::anyhow!(
                 "Approval timestamp too far in the future"
+            )));
+        }
+
+        // Reject expired approvals (older than APPROVAL_EXPIRY_SECONDS)
+        if approval.timestamp < min_valid {
+            return Err(VerificationError::AnyError(anyhow::anyhow!(
+                "Approval has expired (older than {} seconds)",
+                APPROVAL_EXPIRY_SECONDS
             )));
         }
     }
