@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tos_common::{
     block::TopoHeight,
     crypto::{Hash, PublicKey},
-    kyc::{level_to_tier, KycData, KycStatus},
+    kyc::{level_to_tier, KycAppealRecord, KycData, KycStatus},
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
 
@@ -454,5 +454,59 @@ impl KycProvider for RocksStorage {
         // For now, return 0 as this is a statistics function
         // Could be implemented with a counter or index in the future
         Ok(0)
+    }
+
+    async fn submit_appeal(
+        &mut self,
+        user: &PublicKey,
+        original_committee_id: &Hash,
+        parent_committee_id: &Hash,
+        reason_hash: &Hash,
+        documents_hash: &Hash,
+        submitted_at: u64,
+        topoheight: TopoHeight,
+        tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "submitting KYC appeal for user {} from committee {} to parent {}",
+                user.as_address(self.is_mainnet()),
+                original_committee_id,
+                parent_committee_id
+            );
+        }
+
+        // Create appeal record
+        let appeal = KycAppealRecord::new(
+            original_committee_id.clone(),
+            parent_committee_id.clone(),
+            reason_hash.clone(),
+            documents_hash.clone(),
+            submitted_at,
+        );
+
+        // Store appeal record
+        self.insert_into_disk(Column::KycAppeal, user.as_bytes(), &appeal)?;
+
+        // Update metadata
+        if let Some(mut metadata) =
+            self.load_optional_from_disk::<_, KycMetadata>(Column::KycMetadata, user.as_bytes())?
+        {
+            metadata.topoheight = topoheight;
+            metadata.tx_hash = tx_hash.clone();
+            self.insert_into_disk(Column::KycMetadata, user.as_bytes(), &metadata)?;
+        }
+
+        Ok(())
+    }
+
+    async fn get_appeal(&self, user: &PublicKey) -> Result<Option<KycAppealRecord>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "getting KYC appeal for user {}",
+                user.as_address(self.is_mainnet())
+            );
+        }
+        self.load_optional_from_disk(Column::KycAppeal, user.as_bytes())
     }
 }

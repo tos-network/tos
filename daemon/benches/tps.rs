@@ -354,6 +354,14 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
         BlockVersion::Nobunaga
     }
 
+    fn get_verification_timestamp(&self) -> u64 {
+        // Return current time for benchmarks
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
     async fn set_multisig_state(
         &mut self,
         account: &'a CompressedPublicKey,

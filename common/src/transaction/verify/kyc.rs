@@ -9,8 +9,8 @@
 
 use crate::kyc::{is_valid_kyc_level, level_to_tier, CommitteeApproval, APPROVAL_EXPIRY_SECONDS};
 use crate::transaction::payload::{
-    BootstrapCommitteePayload, EmergencySuspendPayload, RegisterCommitteePayload, RenewKycPayload,
-    RevokeKycPayload, SetKycPayload, TransferKycPayload, UpdateCommitteePayload,
+    AppealKycPayload, BootstrapCommitteePayload, EmergencySuspendPayload, RegisterCommitteePayload,
+    RenewKycPayload, RevokeKycPayload, SetKycPayload, TransferKycPayload, UpdateCommitteePayload,
 };
 
 use super::VerificationError;
@@ -200,6 +200,42 @@ pub fn verify_transfer_kyc<E>(
     if payload.get_transferred_at() > max_future {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
             "Transfer timestamp too far in the future"
+        )));
+    }
+
+    Ok(())
+}
+
+/// Verify AppealKyc transaction payload
+///
+/// This validates the basic structure of an appeal transaction.
+/// State-dependent validations (original committee exists, parent committee exists,
+/// user has revoked KYC, parent is actually parent of original, etc.)
+/// are handled at execution time.
+pub fn verify_appeal_kyc<E>(
+    payload: &AppealKycPayload,
+    current_time: u64,
+) -> Result<(), VerificationError<E>> {
+    // Original and parent committee must be different
+    if payload.get_original_committee_id() == payload.get_parent_committee_id() {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Original committee and parent committee must be different"
+        )));
+    }
+
+    // Appeal submitted_at must not be in far future
+    let max_future = current_time + 3600; // 1 hour tolerance
+    if payload.get_submitted_at() > max_future {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Appeal submission timestamp too far in the future"
+        )));
+    }
+
+    // Reason hash and documents hash cannot be zero (empty)
+    let zero_hash = crate::crypto::Hash::zero();
+    if payload.get_reason_hash() == &zero_hash {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Appeal reason hash cannot be empty"
         )));
     }
 

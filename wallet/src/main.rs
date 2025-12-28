@@ -2680,6 +2680,25 @@ async fn transaction(
                     payload.get_dest_approvals().len()
                 ));
             }
+            TransactionType::AppealKyc(payload) => {
+                manager.message("Type: AppealKyc".to_string());
+                manager.message(format!(
+                    "  Account: {}",
+                    payload
+                        .get_account()
+                        .as_address(wallet.get_network().is_mainnet())
+                ));
+                manager.message(format!(
+                    "  Original Committee: {}",
+                    payload.get_original_committee_id()
+                ));
+                manager.message(format!(
+                    "  Parent Committee: {}",
+                    payload.get_parent_committee_id()
+                ));
+                manager.message(format!("  Reason Hash: {}", payload.get_reason_hash()));
+                manager.message(format!("  Submitted At: {}", payload.get_submitted_at()));
+            }
         }
     }
 

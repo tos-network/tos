@@ -17,12 +17,12 @@ use crate::{
     crypto::{Address, Hash, Signature},
     serializer::Serializer,
     transaction::{
-        extra_data::UnknownExtraDataFormat, multisig::MultiSig, BatchReferralRewardPayload,
-        BindReferrerPayload, BootstrapCommitteePayload, BurnPayload, DeployContractPayload,
-        EmergencySuspendPayload, EnergyPayload, FeeType, InvokeContractPayload, MultiSigPayload,
-        Reference, RegisterCommitteePayload, RenewKycPayload, RevokeKycPayload, SetKycPayload,
-        Transaction, TransactionType, TransferKycPayload, TransferPayload, TxVersion,
-        UpdateCommitteePayload,
+        extra_data::UnknownExtraDataFormat, multisig::MultiSig, AppealKycPayload,
+        BatchReferralRewardPayload, BindReferrerPayload, BootstrapCommitteePayload, BurnPayload,
+        DeployContractPayload, EmergencySuspendPayload, EnergyPayload, FeeType,
+        InvokeContractPayload, MultiSigPayload, Reference, RegisterCommitteePayload,
+        RenewKycPayload, RevokeKycPayload, SetKycPayload, Transaction, TransactionType,
+        TransferKycPayload, TransferPayload, TxVersion, UpdateCommitteePayload,
     },
 };
 pub use data::*;
@@ -82,6 +82,7 @@ pub enum RPCTransactionType<'a> {
     RevokeKyc(Cow<'a, RevokeKycPayload>),
     RenewKyc(Cow<'a, RenewKycPayload>),
     TransferKyc(Cow<'a, TransferKycPayload>),
+    AppealKyc(Cow<'a, AppealKycPayload>),
     BootstrapCommittee(Cow<'a, BootstrapCommitteePayload>),
     RegisterCommittee(Cow<'a, RegisterCommitteePayload>),
     UpdateCommittee(Cow<'a, UpdateCommitteePayload>),
@@ -122,6 +123,7 @@ impl<'a> RPCTransactionType<'a> {
             TransactionType::RevokeKyc(payload) => Self::RevokeKyc(Cow::Borrowed(payload)),
             TransactionType::RenewKyc(payload) => Self::RenewKyc(Cow::Borrowed(payload)),
             TransactionType::TransferKyc(payload) => Self::TransferKyc(Cow::Borrowed(payload)),
+            TransactionType::AppealKyc(payload) => Self::AppealKyc(Cow::Borrowed(payload)),
             TransactionType::BootstrapCommittee(payload) => {
                 Self::BootstrapCommittee(Cow::Borrowed(payload))
             }
@@ -177,6 +179,9 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::TransferKyc(payload) => {
                 TransactionType::TransferKyc(payload.into_owned())
+            }
+            RPCTransactionType::AppealKyc(payload) => {
+                TransactionType::AppealKyc(payload.into_owned())
             }
             RPCTransactionType::BootstrapCommittee(payload) => {
                 TransactionType::BootstrapCommittee(payload.into_owned())

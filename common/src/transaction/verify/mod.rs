@@ -62,6 +62,7 @@ impl Transaction {
                     | TransactionType::RevokeKyc(_)
                     | TransactionType::RenewKyc(_)
                     | TransactionType::TransferKyc(_)
+                    | TransactionType::AppealKyc(_)
                     | TransactionType::BootstrapCommittee(_)
                     | TransactionType::RegisterCommittee(_)
                     | TransactionType::UpdateCommittee(_)
@@ -341,6 +342,10 @@ impl Transaction {
                 let current_time = state.get_verification_timestamp();
                 kyc::verify_emergency_suspend(payload, current_time)?;
             }
+            TransactionType::AppealKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_appeal_kyc(payload, current_time)?;
+            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
@@ -428,6 +433,7 @@ impl Transaction {
             | TransactionType::RevokeKyc(_)
             | TransactionType::RenewKyc(_)
             | TransactionType::TransferKyc(_)
+            | TransactionType::AppealKyc(_)
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
@@ -743,6 +749,10 @@ impl Transaction {
                 let current_time = state.get_verification_timestamp();
                 kyc::verify_transfer_kyc(payload, current_time)?;
             }
+            TransactionType::AppealKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_appeal_kyc(payload, current_time)?;
+            }
             TransactionType::BootstrapCommittee(payload) => {
                 kyc::verify_bootstrap_committee(payload)?;
             }
@@ -927,6 +937,7 @@ impl Transaction {
             | TransactionType::RevokeKyc(_)
             | TransactionType::RenewKyc(_)
             | TransactionType::TransferKyc(_)
+            | TransactionType::AppealKyc(_)
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
@@ -1021,6 +1032,7 @@ impl Transaction {
             | TransactionType::RevokeKyc(_)
             | TransactionType::RenewKyc(_)
             | TransactionType::TransferKyc(_)
+            | TransactionType::AppealKyc(_)
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
@@ -1250,6 +1262,7 @@ impl Transaction {
             | TransactionType::RevokeKyc(_)
             | TransactionType::RenewKyc(_)
             | TransactionType::TransferKyc(_)
+            | TransactionType::AppealKyc(_)
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
@@ -1699,6 +1712,29 @@ impl Transaction {
                     );
                 }
             }
+            TransactionType::AppealKyc(payload) => {
+                state
+                    .submit_kyc_appeal(
+                        payload.get_account(),
+                        payload.get_original_committee_id(),
+                        payload.get_parent_committee_id(),
+                        payload.get_reason_hash(),
+                        payload.get_documents_hash(),
+                        payload.get_submitted_at(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "AppealKyc submitted - account: {:?}, original: {}, parent: {}",
+                        payload.get_account(),
+                        payload.get_original_committee_id(),
+                        payload.get_parent_committee_id()
+                    );
+                }
+            }
             TransactionType::BootstrapCommittee(payload) => {
                 // Convert CommitteeMemberInit to CommitteeMemberInfo
                 let members: Vec<crate::kyc::CommitteeMemberInfo> = payload
@@ -1920,6 +1956,7 @@ impl Transaction {
             | TransactionType::RevokeKyc(_)
             | TransactionType::RenewKyc(_)
             | TransactionType::TransferKyc(_)
+            | TransactionType::AppealKyc(_)
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)

@@ -646,6 +646,19 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
     ) -> Result<(), TestError> {
         Ok(())
     }
+
+    async fn submit_kyc_appeal(
+        &mut self,
+        _user: &'a CompressedPublicKey,
+        _original_committee_id: &'a Hash,
+        _parent_committee_id: &'a Hash,
+        _reason_hash: &'a Hash,
+        _documents_hash: &'a Hash,
+        _submitted_at: u64,
+        _tx_hash: &'a Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
 }
 
 #[tokio::test]

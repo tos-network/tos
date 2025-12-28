@@ -159,6 +159,9 @@ pub enum Column {
     // Emergency suspension data
     // {user_public_key} => {(reason_hash, expires_at)}
     KycEmergencySuspension,
+    // KYC appeal records
+    // {user_public_key} => {KycAppealRecord}
+    KycAppeal,
 
     // ===== Security Committee System =====
 

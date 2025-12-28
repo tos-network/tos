@@ -6,6 +6,7 @@
 // - RevokeKyc: Revoke user KYC (committee approval)
 // - RenewKyc: Renew expiring KYC (committee approval)
 // - TransferKyc: Transfer KYC across regions (dual committee approval)
+// - AppealKyc: Appeal rejected/revoked KYC to parent committee
 // - BootstrapCommittee: Create Global Committee (one-time, BOOTSTRAP_ADDRESS)
 // - RegisterCommittee: Create regional committee (parent committee approval)
 // - UpdateCommittee: Modify committee configuration (committee approval)
@@ -16,6 +17,7 @@
 // - RevokeKyc: 30,000 gas
 // - RenewKyc: 30,000 gas
 // - TransferKyc: 60,000 gas
+// - AppealKyc: 40,000 gas
 // - BootstrapCommittee: 100,000 gas
 // - RegisterCommittee: 80,000 gas
 // - UpdateCommittee: 40,000 gas
@@ -23,6 +25,7 @@
 //
 // Reference: TOS-KYC-Level-Design.md
 
+mod appeal;
 mod bootstrap;
 mod register;
 mod revoke;
@@ -30,6 +33,7 @@ mod set_kyc;
 mod transfer;
 mod update;
 
+pub use appeal::*;
 pub use bootstrap::*;
 pub use register::*;
 pub use revoke::*;

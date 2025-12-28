@@ -2282,6 +2282,7 @@ async fn get_account_history<S: Storage>(
                 | TransactionType::RevokeKyc(_)
                 | TransactionType::RenewKyc(_)
                 | TransactionType::TransferKyc(_)
+                | TransactionType::AppealKyc(_)
                 | TransactionType::BootstrapCommittee(_)
                 | TransactionType::RegisterCommittee(_)
                 | TransactionType::UpdateCommittee(_)

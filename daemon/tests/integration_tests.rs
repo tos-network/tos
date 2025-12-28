@@ -1201,6 +1201,8 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
         (TransactionType::EmergencySuspend(_), FeeType::Energy) => false,
         (TransactionType::TransferKyc(_), FeeType::TOS) => true,
         (TransactionType::TransferKyc(_), FeeType::Energy) => false,
+        (TransactionType::AppealKyc(_), FeeType::TOS) => true,
+        (TransactionType::AppealKyc(_), FeeType::Energy) => false,
     }
 }
 

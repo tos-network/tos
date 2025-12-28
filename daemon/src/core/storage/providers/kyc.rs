@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use tos_common::{
     block::TopoHeight,
     crypto::{Hash, PublicKey},
-    kyc::{KycData, KycStatus},
+    kyc::{KycAppealRecord, KycData, KycStatus},
 };
 
 /// Storage provider for user KYC data
@@ -202,6 +202,41 @@ pub trait KycProvider {
         user: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError>;
+
+    // ===== Appeal Operations =====
+
+    /// Submit a KYC appeal to parent committee
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key (appellant)
+    /// * `original_committee_id` - The committee that rejected/revoked KYC
+    /// * `parent_committee_id` - The parent committee (arbiter)
+    /// * `reason_hash` - Hash of appeal reason (full reason stored off-chain)
+    /// * `documents_hash` - Hash of supporting documents
+    /// * `submitted_at` - Appeal submission timestamp
+    /// * `topoheight` - The block height when appeal was submitted
+    /// * `tx_hash` - The transaction hash
+    ///
+    /// Note: This stores the appeal record on-chain. The actual appeal
+    /// review process happens off-chain by the parent committee.
+    async fn submit_appeal(
+        &mut self,
+        user: &PublicKey,
+        original_committee_id: &Hash,
+        parent_committee_id: &Hash,
+        reason_hash: &Hash,
+        documents_hash: &Hash,
+        submitted_at: u64,
+        topoheight: TopoHeight,
+        tx_hash: &Hash,
+    ) -> Result<(), BlockchainError>;
+
+    /// Get appeal info for a user
+    /// Returns appeal record if exists, None otherwise
+    async fn get_appeal(
+        &self,
+        user: &PublicKey,
+    ) -> Result<Option<KycAppealRecord>, BlockchainError>;
 
     // ===== Administrative Operations =====
 

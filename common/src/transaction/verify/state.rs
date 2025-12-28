@@ -282,6 +282,27 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         tx_hash: &'a Hash,
     ) -> Result<(), E>;
 
+    /// Submit a KYC appeal to parent committee
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key (appellant)
+    /// * `original_committee_id` - The committee that rejected/revoked KYC
+    /// * `parent_committee_id` - The parent committee (arbiter)
+    /// * `reason_hash` - Hash of appeal reason (full reason stored off-chain)
+    /// * `documents_hash` - Hash of supporting documents
+    /// * `submitted_at` - Appeal submission timestamp
+    /// * `tx_hash` - The transaction hash
+    async fn submit_kyc_appeal(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        original_committee_id: &'a Hash,
+        parent_committee_id: &'a Hash,
+        reason_hash: &'a Hash,
+        documents_hash: &'a Hash,
+        submitted_at: u64,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
     /// Emergency suspend a user's KYC
     ///
     /// # Arguments

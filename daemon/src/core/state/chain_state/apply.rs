@@ -542,6 +542,32 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             .await
     }
 
+    async fn submit_kyc_appeal(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        original_committee_id: &'a Hash,
+        parent_committee_id: &'a Hash,
+        reason_hash: &'a Hash,
+        documents_hash: &'a Hash,
+        submitted_at: u64,
+        tx_hash: &'a Hash,
+    ) -> Result<(), BlockchainError> {
+        // Call the KycProvider implementation
+        self.inner
+            .storage
+            .submit_appeal(
+                user,
+                original_committee_id,
+                parent_committee_id,
+                reason_hash,
+                documents_hash,
+                submitted_at,
+                self.inner.topoheight,
+                tx_hash,
+            )
+            .await
+    }
+
     async fn bootstrap_global_committee(
         &mut self,
         name: String,

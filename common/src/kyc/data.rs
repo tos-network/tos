@@ -200,6 +200,137 @@ impl Default for KycData {
     }
 }
 
+/// KYC Appeal Record
+/// Stored on-chain when a user submits an appeal to parent committee
+///
+/// The actual appeal review happens off-chain. This record tracks:
+/// - Which committee rejected/revoked the user's KYC
+/// - Which parent committee is reviewing the appeal
+/// - Hashes linking to off-chain appeal documents
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct KycAppealRecord {
+    /// The committee that rejected/revoked the KYC
+    pub original_committee_id: Hash,
+
+    /// The parent committee reviewing the appeal
+    pub parent_committee_id: Hash,
+
+    /// Hash of appeal reason (full reason stored off-chain)
+    pub reason_hash: Hash,
+
+    /// Hash of supporting documents
+    pub documents_hash: Hash,
+
+    /// When the appeal was submitted (Unix timestamp)
+    pub submitted_at: u64,
+
+    /// Status of the appeal
+    pub status: AppealStatus,
+}
+
+/// Status of a KYC appeal
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Copy)]
+#[repr(u8)]
+pub enum AppealStatus {
+    /// Appeal is pending review
+    Pending = 0,
+    /// Appeal is under review by parent committee
+    UnderReview = 1,
+    /// Appeal was approved - KYC reinstated
+    Approved = 2,
+    /// Appeal was rejected
+    Rejected = 3,
+    /// Appeal was withdrawn by user
+    Withdrawn = 4,
+}
+
+impl KycAppealRecord {
+    /// Create a new appeal record
+    pub fn new(
+        original_committee_id: Hash,
+        parent_committee_id: Hash,
+        reason_hash: Hash,
+        documents_hash: Hash,
+        submitted_at: u64,
+    ) -> Self {
+        Self {
+            original_committee_id,
+            parent_committee_id,
+            reason_hash,
+            documents_hash,
+            submitted_at,
+            status: AppealStatus::Pending,
+        }
+    }
+
+    /// Check if appeal is still pending
+    pub fn is_pending(&self) -> bool {
+        matches!(self.status, AppealStatus::Pending | AppealStatus::UnderReview)
+    }
+
+    /// Check if appeal was resolved (approved or rejected)
+    pub fn is_resolved(&self) -> bool {
+        matches!(
+            self.status,
+            AppealStatus::Approved | AppealStatus::Rejected | AppealStatus::Withdrawn
+        )
+    }
+}
+
+impl Serializer for AppealStatus {
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let byte = u8::read(reader)?;
+        match byte {
+            0 => Ok(AppealStatus::Pending),
+            1 => Ok(AppealStatus::UnderReview),
+            2 => Ok(AppealStatus::Approved),
+            3 => Ok(AppealStatus::Rejected),
+            4 => Ok(AppealStatus::Withdrawn),
+            _ => Err(ReaderError::InvalidValue),
+        }
+    }
+
+    fn write(&self, writer: &mut Writer) {
+        (*self as u8).write(writer);
+    }
+
+    fn size(&self) -> usize {
+        1
+    }
+}
+
+impl Serializer for KycAppealRecord {
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            original_committee_id: Hash::read(reader)?,
+            parent_committee_id: Hash::read(reader)?,
+            reason_hash: Hash::read(reader)?,
+            documents_hash: Hash::read(reader)?,
+            submitted_at: u64::read(reader)?,
+            status: AppealStatus::read(reader)?,
+        })
+    }
+
+    fn write(&self, writer: &mut Writer) {
+        self.original_committee_id.write(writer);
+        self.parent_committee_id.write(writer);
+        self.reason_hash.write(writer);
+        self.documents_hash.write(writer);
+        self.submitted_at.write(writer);
+        self.status.write(writer);
+    }
+
+    fn size(&self) -> usize {
+        // 32 + 32 + 32 + 32 + 8 + 1 = 137 bytes
+        self.original_committee_id.size()
+            + self.parent_committee_id.size()
+            + self.reason_hash.size()
+            + self.documents_hash.size()
+            + self.submitted_at.size()
+            + self.status.size()
+    }
+}
+
 impl Serializer for KycData {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let level = u16::read(reader)?;

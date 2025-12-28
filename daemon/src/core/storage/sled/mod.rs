@@ -1559,6 +1559,27 @@ impl crate::core::storage::KycProvider for SledStorage {
     ) -> Result<u64, BlockchainError> {
         Ok(0)
     }
+
+    async fn submit_appeal(
+        &mut self,
+        _user: &PublicKey,
+        _original_committee_id: &Hash,
+        _parent_committee_id: &Hash,
+        _reason_hash: &Hash,
+        _documents_hash: &Hash,
+        _submitted_at: u64,
+        _topoheight: TopoHeight,
+        _tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
+    async fn get_appeal(
+        &self,
+        _user: &PublicKey,
+    ) -> Result<Option<tos_common::kyc::KycAppealRecord>, BlockchainError> {
+        Ok(None)
+    }
 }
 
 // CommitteeProvider implementation for SledStorage

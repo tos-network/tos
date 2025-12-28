@@ -172,7 +172,7 @@ mod tests {
     use tos_common::{
         block::TopoHeight,
         crypto::Hash,
-        kyc::{KycData, KycStatus},
+        kyc::{KycAppealRecord, KycData, KycStatus},
     };
 
     /// Mock KYC provider for testing
@@ -360,6 +360,27 @@ mod tests {
             _current_time: u64,
         ) -> Result<u64, BlockchainError> {
             Ok(0)
+        }
+
+        async fn submit_appeal(
+            &mut self,
+            _user: &PublicKey,
+            _original_committee_id: &Hash,
+            _parent_committee_id: &Hash,
+            _reason_hash: &Hash,
+            _documents_hash: &Hash,
+            _submitted_at: u64,
+            _topoheight: TopoHeight,
+            _tx_hash: &Hash,
+        ) -> Result<(), BlockchainError> {
+            Ok(())
+        }
+
+        async fn get_appeal(
+            &self,
+            _user: &PublicKey,
+        ) -> Result<Option<KycAppealRecord>, BlockchainError> {
+            Ok(None)
         }
     }
 

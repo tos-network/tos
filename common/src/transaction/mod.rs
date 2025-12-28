@@ -57,6 +57,7 @@ pub enum TransactionType {
     RevokeKyc(RevokeKycPayload),
     RenewKyc(RenewKycPayload),
     TransferKyc(TransferKycPayload),
+    AppealKyc(AppealKycPayload),
     BootstrapCommittee(BootstrapCommitteePayload),
     RegisterCommittee(RegisterCommitteePayload),
     UpdateCommittee(UpdateCommitteePayload),
@@ -385,6 +386,10 @@ impl Serializer for TransactionType {
                 writer.write_u8(16);
                 payload.write(writer);
             }
+            TransactionType::AppealKyc(payload) => {
+                writer.write_u8(17);
+                payload.write(writer);
+            }
             TransactionType::BootstrapCommittee(payload) => {
                 writer.write_u8(12);
                 payload.write(writer);
@@ -438,6 +443,7 @@ impl Serializer for TransactionType {
             14 => TransactionType::UpdateCommittee(UpdateCommitteePayload::read(reader)?),
             15 => TransactionType::EmergencySuspend(EmergencySuspendPayload::read(reader)?),
             16 => TransactionType::TransferKyc(TransferKycPayload::read(reader)?),
+            17 => TransactionType::AppealKyc(AppealKycPayload::read(reader)?),
             _ => return Err(ReaderError::InvalidValue),
         })
     }
@@ -468,6 +474,7 @@ impl Serializer for TransactionType {
             TransactionType::RevokeKyc(payload) => payload.size(),
             TransactionType::RenewKyc(payload) => payload.size(),
             TransactionType::TransferKyc(payload) => payload.size(),
+            TransactionType::AppealKyc(payload) => payload.size(),
             TransactionType::BootstrapCommittee(payload) => payload.size(),
             TransactionType::RegisterCommittee(payload) => payload.size(),
             TransactionType::UpdateCommittee(payload) => payload.size(),
