@@ -214,6 +214,149 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         tx_hash: &'a Hash,
     ) -> Result<(), E>;
 
+    // ===== KYC System Operations =====
+
+    /// Set KYC data for a user
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    /// * `level` - The KYC level bitmask
+    /// * `verified_at` - The verification timestamp
+    /// * `data_hash` - SHA256 hash of full off-chain KycOffChainData
+    /// * `committee_id` - The committee that verified this KYC
+    /// * `tx_hash` - The transaction hash
+    async fn set_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        level: u16,
+        verified_at: u64,
+        data_hash: &'a Hash,
+        committee_id: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    /// Revoke KYC for a user
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    /// * `reason_hash` - Hash of revocation reason (stored off-chain)
+    /// * `tx_hash` - The transaction hash
+    async fn revoke_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        reason_hash: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    /// Renew KYC for a user
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    /// * `verified_at` - The new verification timestamp
+    /// * `data_hash` - The new off-chain data hash
+    /// * `tx_hash` - The transaction hash
+    async fn renew_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        verified_at: u64,
+        data_hash: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    /// Transfer KYC across regions (dual committee approval)
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    /// * `source_committee_id` - The source committee ID (releasing)
+    /// * `dest_committee_id` - The destination committee ID (accepting)
+    /// * `new_data_hash` - New off-chain data hash from destination committee
+    /// * `transferred_at` - Transfer timestamp
+    /// * `tx_hash` - The transaction hash
+    async fn transfer_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        source_committee_id: &'a Hash,
+        dest_committee_id: &'a Hash,
+        new_data_hash: &'a Hash,
+        transferred_at: u64,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    /// Emergency suspend a user's KYC
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    /// * `reason_hash` - Hash of suspension reason
+    /// * `expires_at` - When the emergency suspension expires
+    /// * `tx_hash` - The transaction hash
+    async fn emergency_suspend_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        reason_hash: &'a Hash,
+        expires_at: u64,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    /// Bootstrap the Global Committee (one-time operation)
+    ///
+    /// # Arguments
+    /// * `name` - Committee name
+    /// * `members` - Initial members
+    /// * `threshold` - Governance threshold
+    /// * `kyc_threshold` - KYC approval threshold
+    /// * `max_kyc_level` - Maximum KYC level this committee can approve
+    /// * `tx_hash` - The transaction hash
+    ///
+    /// # Returns
+    /// The committee ID
+    async fn bootstrap_global_committee(
+        &mut self,
+        name: String,
+        members: Vec<crate::kyc::CommitteeMemberInfo>,
+        threshold: u8,
+        kyc_threshold: u8,
+        max_kyc_level: u16,
+        tx_hash: &'a Hash,
+    ) -> Result<Hash, E>;
+
+    /// Register a new regional committee
+    ///
+    /// # Arguments
+    /// * `name` - Committee name
+    /// * `region` - The region this committee covers
+    /// * `members` - Initial members
+    /// * `threshold` - Governance threshold
+    /// * `kyc_threshold` - KYC approval threshold
+    /// * `max_kyc_level` - Maximum KYC level
+    /// * `parent_id` - Parent committee ID
+    /// * `tx_hash` - The transaction hash
+    ///
+    /// # Returns
+    /// The committee ID
+    #[allow(clippy::too_many_arguments)]
+    async fn register_committee(
+        &mut self,
+        name: String,
+        region: crate::kyc::KycRegion,
+        members: Vec<crate::kyc::CommitteeMemberInfo>,
+        threshold: u8,
+        kyc_threshold: u8,
+        max_kyc_level: u16,
+        parent_id: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<Hash, E>;
+
+    /// Update committee configuration
+    ///
+    /// # Arguments
+    /// * `committee_id` - The committee ID
+    /// * `update` - The update to apply
+    async fn update_committee(
+        &mut self,
+        committee_id: &'a Hash,
+        update: &crate::transaction::CommitteeUpdateData,
+    ) -> Result<(), E>;
+
     // ===== Referral System Operations =====
 
     /// Bind a referrer to a user

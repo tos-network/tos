@@ -73,6 +73,25 @@ pub trait KycProvider {
         tx_hash: &Hash,
     ) -> Result<(), BlockchainError>;
 
+    /// Transfer KYC to a new committee (cross-region transfer)
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    /// * `new_committee_id` - The new committee ID (destination)
+    /// * `new_data_hash` - The new off-chain data hash from destination committee
+    /// * `transferred_at` - The transfer timestamp
+    /// * `topoheight` - The block height when transferred
+    /// * `tx_hash` - The transaction hash
+    async fn transfer_kyc(
+        &mut self,
+        user: &PublicKey,
+        new_committee_id: &Hash,
+        new_data_hash: Hash,
+        transferred_at: u64,
+        topoheight: TopoHeight,
+        tx_hash: &Hash,
+    ) -> Result<(), BlockchainError>;
+
     /// Revoke KYC for a user
     ///
     /// # Arguments

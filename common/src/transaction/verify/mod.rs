@@ -61,6 +61,7 @@ impl Transaction {
                     | TransactionType::SetKyc(_)
                     | TransactionType::RevokeKyc(_)
                     | TransactionType::RenewKyc(_)
+                    | TransactionType::TransferKyc(_)
                     | TransactionType::BootstrapCommittee(_)
                     | TransactionType::RegisterCommittee(_)
                     | TransactionType::UpdateCommittee(_)
@@ -321,6 +322,10 @@ impl Transaction {
                 let current_time = state.get_verification_timestamp();
                 kyc::verify_renew_kyc(payload, current_time)?;
             }
+            TransactionType::TransferKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_transfer_kyc(payload, current_time)?;
+            }
             TransactionType::BootstrapCommittee(payload) => {
                 kyc::verify_bootstrap_committee(payload)?;
             }
@@ -422,6 +427,7 @@ impl Transaction {
             | TransactionType::SetKyc(_)
             | TransactionType::RevokeKyc(_)
             | TransactionType::RenewKyc(_)
+            | TransactionType::TransferKyc(_)
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
@@ -733,6 +739,10 @@ impl Transaction {
                 let current_time = state.get_verification_timestamp();
                 kyc::verify_renew_kyc(payload, current_time)?;
             }
+            TransactionType::TransferKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_transfer_kyc(payload, current_time)?;
+            }
             TransactionType::BootstrapCommittee(payload) => {
                 kyc::verify_bootstrap_committee(payload)?;
             }
@@ -916,6 +926,7 @@ impl Transaction {
             TransactionType::SetKyc(_)
             | TransactionType::RevokeKyc(_)
             | TransactionType::RenewKyc(_)
+            | TransactionType::TransferKyc(_)
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
@@ -1009,6 +1020,7 @@ impl Transaction {
             | TransactionType::SetKyc(_)
             | TransactionType::RevokeKyc(_)
             | TransactionType::RenewKyc(_)
+            | TransactionType::TransferKyc(_)
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
@@ -1237,6 +1249,7 @@ impl Transaction {
             | TransactionType::SetKyc(_)
             | TransactionType::RevokeKyc(_)
             | TransactionType::RenewKyc(_)
+            | TransactionType::TransferKyc(_)
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
@@ -1617,18 +1630,177 @@ impl Transaction {
                     );
                 }
             }
-            // KYC transaction types - execution handled by KYC provider
-            TransactionType::SetKyc(_)
-            | TransactionType::RevokeKyc(_)
-            | TransactionType::RenewKyc(_)
-            | TransactionType::BootstrapCommittee(_)
-            | TransactionType::RegisterCommittee(_)
-            | TransactionType::UpdateCommittee(_)
-            | TransactionType::EmergencySuspend(_) => {
-                // TODO: Implement KYC provider integration
-                // KYC transactions will be processed by the KYC provider
+            // KYC transaction types - execution handled by BlockchainApplyState
+            TransactionType::SetKyc(payload) => {
+                state
+                    .set_kyc(
+                        payload.get_account(),
+                        payload.get_level(),
+                        payload.get_verified_at(),
+                        payload.get_data_hash(),
+                        payload.get_committee_id(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("KYC transaction applied - type: {:?}", &self.data);
+                    debug!(
+                        "SetKyc applied - account: {:?}, level: {}",
+                        payload.get_account(),
+                        payload.get_level()
+                    );
+                }
+            }
+            TransactionType::RevokeKyc(payload) => {
+                state
+                    .revoke_kyc(payload.get_account(), payload.get_reason_hash(), tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("RevokeKyc applied - account: {:?}", payload.get_account());
+                }
+            }
+            TransactionType::RenewKyc(payload) => {
+                state
+                    .renew_kyc(
+                        payload.get_account(),
+                        payload.get_verified_at(),
+                        payload.get_data_hash(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("RenewKyc applied - account: {:?}", payload.get_account());
+                }
+            }
+            TransactionType::TransferKyc(payload) => {
+                state
+                    .transfer_kyc(
+                        payload.get_account(),
+                        payload.get_source_committee_id(),
+                        payload.get_dest_committee_id(),
+                        payload.get_new_data_hash(),
+                        payload.get_transferred_at(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "TransferKyc applied - account: {:?}, source: {}, dest: {}",
+                        payload.get_account(),
+                        payload.get_source_committee_id(),
+                        payload.get_dest_committee_id()
+                    );
+                }
+            }
+            TransactionType::BootstrapCommittee(payload) => {
+                // Convert CommitteeMemberInit to CommitteeMemberInfo
+                let members: Vec<crate::kyc::CommitteeMemberInfo> = payload
+                    .get_members()
+                    .iter()
+                    .map(|m| {
+                        crate::kyc::CommitteeMemberInfo::new(
+                            m.public_key.clone(),
+                            m.name.clone(),
+                            m.role,
+                        )
+                    })
+                    .collect();
+
+                let committee_id = state
+                    .bootstrap_global_committee(
+                        payload.get_name().to_string(),
+                        members,
+                        payload.get_threshold(),
+                        payload.get_kyc_threshold(),
+                        payload.get_max_kyc_level(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "BootstrapCommittee applied - name: {}, id: {}",
+                        payload.get_name(),
+                        committee_id
+                    );
+                }
+            }
+            TransactionType::RegisterCommittee(payload) => {
+                // Convert NewCommitteeMember to CommitteeMemberInfo
+                let members: Vec<crate::kyc::CommitteeMemberInfo> = payload
+                    .get_members()
+                    .iter()
+                    .map(|m| {
+                        crate::kyc::CommitteeMemberInfo::new(
+                            m.public_key.clone(),
+                            m.name.clone(),
+                            m.role,
+                        )
+                    })
+                    .collect();
+
+                let committee_id = state
+                    .register_committee(
+                        payload.get_name().to_string(),
+                        payload.get_region(),
+                        members,
+                        payload.get_threshold(),
+                        payload.get_kyc_threshold(),
+                        payload.get_max_kyc_level(),
+                        payload.get_parent_id(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "RegisterCommittee applied - name: {}, region: {:?}, id: {}",
+                        payload.get_name(),
+                        payload.get_region(),
+                        committee_id
+                    );
+                }
+            }
+            TransactionType::UpdateCommittee(payload) => {
+                state
+                    .update_committee(payload.get_committee_id(), payload.get_update())
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "UpdateCommittee applied - committee: {}, update: {:?}",
+                        payload.get_committee_id(),
+                        payload.get_update()
+                    );
+                }
+            }
+            TransactionType::EmergencySuspend(payload) => {
+                state
+                    .emergency_suspend_kyc(
+                        payload.get_account(),
+                        payload.get_reason_hash(),
+                        payload.get_expires_at(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "EmergencySuspend applied - account: {:?}, expires_at: {}",
+                        payload.get_account(),
+                        payload.get_expires_at()
+                    );
                 }
             }
         }
@@ -1747,6 +1919,7 @@ impl Transaction {
             | TransactionType::SetKyc(_)
             | TransactionType::RevokeKyc(_)
             | TransactionType::RenewKyc(_)
+            | TransactionType::TransferKyc(_)
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)

@@ -196,6 +196,43 @@ impl KycProvider for RocksStorage {
         Ok(())
     }
 
+    async fn transfer_kyc(
+        &mut self,
+        user: &PublicKey,
+        new_committee_id: &Hash,
+        new_data_hash: Hash,
+        transferred_at: u64,
+        topoheight: TopoHeight,
+        tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "transferring KYC for user {} to committee {}",
+                user.as_address(self.is_mainnet()),
+                new_committee_id
+            );
+        }
+
+        // Get existing KYC data
+        let mut kyc_data: KycData = self
+            .load_optional_from_disk(Column::KycData, user.as_bytes())?
+            .ok_or(BlockchainError::KycNotFound)?;
+
+        // Update verified_at and data_hash (keeping level and status unchanged)
+        kyc_data.renew(transferred_at, new_data_hash);
+        self.insert_into_disk(Column::KycData, user.as_bytes(), &kyc_data)?;
+
+        // Update metadata with new committee_id, topoheight and tx_hash
+        let metadata = KycMetadata {
+            committee_id: new_committee_id.clone(),
+            topoheight,
+            tx_hash: tx_hash.clone(),
+        };
+        self.insert_into_disk(Column::KycMetadata, user.as_bytes(), &metadata)?;
+
+        Ok(())
+    }
+
     async fn revoke_kyc(
         &mut self,
         user: &PublicKey,

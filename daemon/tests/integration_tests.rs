@@ -1199,6 +1199,8 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
         (TransactionType::UpdateCommittee(_), FeeType::Energy) => false,
         (TransactionType::EmergencySuspend(_), FeeType::TOS) => true,
         (TransactionType::EmergencySuspend(_), FeeType::Energy) => false,
+        (TransactionType::TransferKyc(_), FeeType::TOS) => true,
+        (TransactionType::TransferKyc(_), FeeType::Energy) => false,
     }
 }
 

@@ -21,7 +21,8 @@ use crate::{
         BindReferrerPayload, BootstrapCommitteePayload, BurnPayload, DeployContractPayload,
         EmergencySuspendPayload, EnergyPayload, FeeType, InvokeContractPayload, MultiSigPayload,
         Reference, RegisterCommitteePayload, RenewKycPayload, RevokeKycPayload, SetKycPayload,
-        Transaction, TransactionType, TransferPayload, TxVersion, UpdateCommitteePayload,
+        Transaction, TransactionType, TransferKycPayload, TransferPayload, TxVersion,
+        UpdateCommitteePayload,
     },
 };
 pub use data::*;
@@ -80,6 +81,7 @@ pub enum RPCTransactionType<'a> {
     SetKyc(Cow<'a, SetKycPayload>),
     RevokeKyc(Cow<'a, RevokeKycPayload>),
     RenewKyc(Cow<'a, RenewKycPayload>),
+    TransferKyc(Cow<'a, TransferKycPayload>),
     BootstrapCommittee(Cow<'a, BootstrapCommitteePayload>),
     RegisterCommittee(Cow<'a, RegisterCommitteePayload>),
     UpdateCommittee(Cow<'a, UpdateCommitteePayload>),
@@ -119,6 +121,7 @@ impl<'a> RPCTransactionType<'a> {
             TransactionType::SetKyc(payload) => Self::SetKyc(Cow::Borrowed(payload)),
             TransactionType::RevokeKyc(payload) => Self::RevokeKyc(Cow::Borrowed(payload)),
             TransactionType::RenewKyc(payload) => Self::RenewKyc(Cow::Borrowed(payload)),
+            TransactionType::TransferKyc(payload) => Self::TransferKyc(Cow::Borrowed(payload)),
             TransactionType::BootstrapCommittee(payload) => {
                 Self::BootstrapCommittee(Cow::Borrowed(payload))
             }
@@ -171,6 +174,9 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::RenewKyc(payload) => {
                 TransactionType::RenewKyc(payload.into_owned())
+            }
+            RPCTransactionType::TransferKyc(payload) => {
+                TransactionType::TransferKyc(payload.into_owned())
             }
             RPCTransactionType::BootstrapCommittee(payload) => {
                 TransactionType::BootstrapCommittee(payload.into_owned())

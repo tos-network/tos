@@ -249,6 +249,18 @@ mod tests {
             Ok(())
         }
 
+        async fn transfer_kyc(
+            &mut self,
+            _user: &PublicKey,
+            _new_committee_id: &Hash,
+            _new_data_hash: Hash,
+            _transferred_at: u64,
+            _topoheight: TopoHeight,
+            _tx_hash: &Hash,
+        ) -> Result<(), BlockchainError> {
+            Ok(())
+        }
+
         async fn get_effective_level(
             &self,
             _user: &PublicKey,

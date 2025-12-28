@@ -1437,6 +1437,18 @@ impl crate::core::storage::KycProvider for SledStorage {
         Err(BlockchainError::NotImplemented)
     }
 
+    async fn transfer_kyc(
+        &mut self,
+        _user: &PublicKey,
+        _new_committee_id: &Hash,
+        _new_data_hash: Hash,
+        _transferred_at: u64,
+        _topoheight: TopoHeight,
+        _tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::NotImplemented)
+    }
+
     async fn revoke_kyc(
         &mut self,
         _user: &PublicKey,

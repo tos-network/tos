@@ -56,6 +56,7 @@ pub enum TransactionType {
     SetKyc(SetKycPayload),
     RevokeKyc(RevokeKycPayload),
     RenewKyc(RenewKycPayload),
+    TransferKyc(TransferKycPayload),
     BootstrapCommittee(BootstrapCommitteePayload),
     RegisterCommittee(RegisterCommitteePayload),
     UpdateCommittee(UpdateCommitteePayload),
@@ -380,6 +381,10 @@ impl Serializer for TransactionType {
                 writer.write_u8(11);
                 payload.write(writer);
             }
+            TransactionType::TransferKyc(payload) => {
+                writer.write_u8(16);
+                payload.write(writer);
+            }
             TransactionType::BootstrapCommittee(payload) => {
                 writer.write_u8(12);
                 payload.write(writer);
@@ -424,7 +429,7 @@ impl Serializer for TransactionType {
             6 => TransactionType::AIMining(AIMiningPayload::read(reader)?),
             7 => TransactionType::BindReferrer(BindReferrerPayload::read(reader)?),
             8 => TransactionType::BatchReferralReward(BatchReferralRewardPayload::read(reader)?),
-            // KYC transaction types (9-15)
+            // KYC transaction types (9-16)
             9 => TransactionType::SetKyc(SetKycPayload::read(reader)?),
             10 => TransactionType::RevokeKyc(RevokeKycPayload::read(reader)?),
             11 => TransactionType::RenewKyc(RenewKycPayload::read(reader)?),
@@ -432,6 +437,7 @@ impl Serializer for TransactionType {
             13 => TransactionType::RegisterCommittee(RegisterCommitteePayload::read(reader)?),
             14 => TransactionType::UpdateCommittee(UpdateCommitteePayload::read(reader)?),
             15 => TransactionType::EmergencySuspend(EmergencySuspendPayload::read(reader)?),
+            16 => TransactionType::TransferKyc(TransferKycPayload::read(reader)?),
             _ => return Err(ReaderError::InvalidValue),
         })
     }
@@ -461,6 +467,7 @@ impl Serializer for TransactionType {
             TransactionType::SetKyc(payload) => payload.size(),
             TransactionType::RevokeKyc(payload) => payload.size(),
             TransactionType::RenewKyc(payload) => payload.size(),
+            TransactionType::TransferKyc(payload) => payload.size(),
             TransactionType::BootstrapCommittee(payload) => payload.size(),
             TransactionType::RegisterCommittee(payload) => payload.size(),
             TransactionType::UpdateCommittee(payload) => payload.size(),

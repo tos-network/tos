@@ -12,7 +12,7 @@ use tos_common::{
         AssetChanges, ChainState as ContractChainState, ContractCache, ContractEvent,
         ContractEventTracker, ContractExecutor, ContractOutput, ContractStorage,
     },
-    crypto::{Hash, Hashable, KeyPair, PublicKey},
+    crypto::{elgamal::CompressedPublicKey, Hash, Hashable, KeyPair, PublicKey},
     immutable::Immutable,
     network::Network,
     referral::{DistributionResult, ReferralRewardRatios, RewardDistribution},
@@ -553,6 +553,98 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         }
 
         Ok(DistributionResult::new(distributions))
+    }
+
+    // ===== KYC System Operations (stubs) =====
+
+    async fn set_kyc(
+        &mut self,
+        _user: &'a PublicKey,
+        _level: u16,
+        _verified_at: u64,
+        _data_hash: &'a Hash,
+        _committee_id: &'a Hash,
+        _tx_hash: &'a Hash,
+    ) -> Result<(), TestError> {
+        // Test stub - KYC not needed for referral tests
+        Ok(())
+    }
+
+    async fn revoke_kyc(
+        &mut self,
+        _user: &'a PublicKey,
+        _reason_hash: &'a Hash,
+        _tx_hash: &'a Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn renew_kyc(
+        &mut self,
+        _user: &'a PublicKey,
+        _verified_at: u64,
+        _data_hash: &'a Hash,
+        _tx_hash: &'a Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn transfer_kyc(
+        &mut self,
+        _user: &'a CompressedPublicKey,
+        _source_committee_id: &'a Hash,
+        _dest_committee_id: &'a Hash,
+        _new_data_hash: &'a Hash,
+        _transferred_at: u64,
+        _tx_hash: &'a Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn emergency_suspend_kyc(
+        &mut self,
+        _user: &'a PublicKey,
+        _reason_hash: &'a Hash,
+        _expires_at: u64,
+        _tx_hash: &'a Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn bootstrap_global_committee(
+        &mut self,
+        _name: String,
+        _members: Vec<tos_common::kyc::CommitteeMemberInfo>,
+        _threshold: u8,
+        _kyc_threshold: u8,
+        _max_kyc_level: u16,
+        _tx_hash: &'a Hash,
+    ) -> Result<Hash, TestError> {
+        // Return a dummy committee ID
+        Ok(Hash::zero())
+    }
+
+    async fn register_committee(
+        &mut self,
+        _name: String,
+        _region: tos_common::kyc::KycRegion,
+        _members: Vec<tos_common::kyc::CommitteeMemberInfo>,
+        _threshold: u8,
+        _kyc_threshold: u8,
+        _max_kyc_level: u16,
+        _parent_id: &'a Hash,
+        _tx_hash: &'a Hash,
+    ) -> Result<Hash, TestError> {
+        // Return a dummy committee ID
+        Ok(Hash::zero())
+    }
+
+    async fn update_committee(
+        &mut self,
+        _committee_id: &'a Hash,
+        _update: &tos_common::transaction::CommitteeUpdateData,
+    ) -> Result<(), TestError> {
+        Ok(())
     }
 }
 

@@ -10,7 +10,7 @@
 use crate::kyc::{is_valid_kyc_level, level_to_tier, CommitteeApproval, APPROVAL_EXPIRY_SECONDS};
 use crate::transaction::payload::{
     BootstrapCommitteePayload, EmergencySuspendPayload, RegisterCommitteePayload, RenewKycPayload,
-    RevokeKycPayload, SetKycPayload, UpdateCommitteePayload,
+    RevokeKycPayload, SetKycPayload, TransferKycPayload, UpdateCommitteePayload,
 };
 
 use super::VerificationError;
@@ -133,6 +133,73 @@ pub fn verify_renew_kyc<E>(
     if payload.get_verified_at() > max_future {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
             "Verification timestamp too far in the future"
+        )));
+    }
+
+    Ok(())
+}
+
+/// Verify TransferKyc transaction payload
+///
+/// # Arguments
+/// * `payload` - The TransferKyc payload to verify
+/// * `current_time` - Current timestamp (block timestamp for deterministic validation)
+///
+/// # Validation Rules
+/// 1. Source and destination committees must be different
+/// 2. Both source and destination must have at least 1 approval
+/// 3. All approvals must be valid (not expired, no duplicates)
+/// 4. transferred_at must be reasonable (not far in the future)
+pub fn verify_transfer_kyc<E>(
+    payload: &TransferKycPayload,
+    current_time: u64,
+) -> Result<(), VerificationError<E>> {
+    // Source and destination committees must be different
+    if payload.get_source_committee_id() == payload.get_dest_committee_id() {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Source and destination committees must be different"
+        )));
+    }
+
+    // Validate source approvals
+    verify_approvals(payload.get_source_approvals(), current_time)?;
+
+    // Source must have at least 1 approval
+    if payload.get_source_approvals().is_empty() {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "TransferKyc requires at least 1 approval from source committee"
+        )));
+    }
+
+    // Validate destination approvals
+    verify_approvals(payload.get_dest_approvals(), current_time)?;
+
+    // Destination must have at least 1 approval
+    if payload.get_dest_approvals().is_empty() {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "TransferKyc requires at least 1 approval from destination committee"
+        )));
+    }
+
+    // Check for duplicate approvers across both committees
+    // (same person cannot approve for both source and destination)
+    let mut all_approvers = std::collections::HashSet::new();
+    for approval in payload.get_source_approvals() {
+        all_approvers.insert(approval.member_pubkey.as_bytes());
+    }
+    for approval in payload.get_dest_approvals() {
+        if !all_approvers.insert(approval.member_pubkey.as_bytes()) {
+            return Err(VerificationError::AnyError(anyhow::anyhow!(
+                "Same member cannot approve for both source and destination committees"
+            )));
+        }
+    }
+
+    // Validate transferred_at is reasonable (not in far future)
+    let max_future = current_time + 3600;
+    if payload.get_transferred_at() > max_future {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Transfer timestamp too far in the future"
         )));
     }
 

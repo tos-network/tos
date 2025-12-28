@@ -440,6 +440,284 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         }
         Ok(())
     }
+
+    // ===== KYC System Operations =====
+
+    async fn set_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        level: u16,
+        verified_at: u64,
+        data_hash: &'a Hash,
+        committee_id: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<(), BlockchainError> {
+        use tos_common::kyc::KycData;
+
+        // Create KYC data (KycData::new takes level, verified_at, data_hash)
+        let kyc_data = KycData::new(level, verified_at, data_hash.clone());
+
+        // Call the KycProvider implementation
+        self.inner
+            .storage
+            .set_kyc(user, kyc_data, committee_id, self.inner.topoheight, tx_hash)
+            .await
+    }
+
+    async fn revoke_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        reason_hash: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<(), BlockchainError> {
+        // Call the KycProvider implementation
+        self.inner
+            .storage
+            .revoke_kyc(user, reason_hash, self.inner.topoheight, tx_hash)
+            .await
+    }
+
+    async fn renew_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        verified_at: u64,
+        data_hash: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<(), BlockchainError> {
+        // Call the KycProvider implementation
+        self.inner
+            .storage
+            .renew_kyc(
+                user,
+                verified_at,
+                data_hash.clone(),
+                self.inner.topoheight,
+                tx_hash,
+            )
+            .await
+    }
+
+    async fn transfer_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        _source_committee_id: &'a Hash,
+        dest_committee_id: &'a Hash,
+        new_data_hash: &'a Hash,
+        transferred_at: u64,
+        tx_hash: &'a Hash,
+    ) -> Result<(), BlockchainError> {
+        // Transfer KYC to a new committee
+        // This updates the committee_id while preserving the user's KYC level
+        // The source_committee validation is done at verification time
+        self.inner
+            .storage
+            .transfer_kyc(
+                user,
+                dest_committee_id,
+                new_data_hash.clone(),
+                transferred_at,
+                self.inner.topoheight,
+                tx_hash,
+            )
+            .await
+    }
+
+    async fn emergency_suspend_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        reason_hash: &'a Hash,
+        expires_at: u64,
+        tx_hash: &'a Hash,
+    ) -> Result<(), BlockchainError> {
+        // Call the KycProvider implementation
+        self.inner
+            .storage
+            .emergency_suspend(
+                user,
+                reason_hash,
+                expires_at,
+                self.inner.topoheight,
+                tx_hash,
+            )
+            .await
+    }
+
+    async fn bootstrap_global_committee(
+        &mut self,
+        name: String,
+        members: Vec<tos_common::kyc::CommitteeMemberInfo>,
+        threshold: u8,
+        kyc_threshold: u8,
+        max_kyc_level: u16,
+        tx_hash: &'a Hash,
+    ) -> Result<Hash, BlockchainError> {
+        use tos_common::kyc::SecurityCommittee;
+
+        // Get current timestamp from block
+        let timestamp = self.block.get_timestamp() / 1000;
+
+        // Convert member info to full committee members
+        let committee_members: Vec<_> = members
+            .into_iter()
+            .map(|m| m.into_member(timestamp))
+            .collect();
+
+        // Create the Global Committee
+        let committee = SecurityCommittee::new_global(
+            name,
+            committee_members,
+            threshold,
+            kyc_threshold,
+            max_kyc_level,
+            timestamp,
+        );
+
+        // Call the CommitteeProvider implementation
+        self.inner
+            .storage
+            .bootstrap_global_committee(committee, self.inner.topoheight, tx_hash)
+            .await
+    }
+
+    async fn register_committee(
+        &mut self,
+        name: String,
+        region: tos_common::kyc::KycRegion,
+        members: Vec<tos_common::kyc::CommitteeMemberInfo>,
+        threshold: u8,
+        kyc_threshold: u8,
+        max_kyc_level: u16,
+        parent_id: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<Hash, BlockchainError> {
+        use tos_common::kyc::SecurityCommittee;
+
+        // Get current timestamp from block
+        let timestamp = self.block.get_timestamp() / 1000;
+
+        // Convert member info to full committee members
+        let committee_members: Vec<_> = members
+            .into_iter()
+            .map(|m| m.into_member(timestamp))
+            .collect();
+
+        // Create the regional committee
+        let committee = SecurityCommittee::new_regional(
+            name,
+            region,
+            committee_members,
+            threshold,
+            kyc_threshold,
+            max_kyc_level,
+            parent_id.clone(),
+            timestamp,
+        );
+
+        // Call the CommitteeProvider implementation
+        self.inner
+            .storage
+            .register_committee(committee, parent_id, self.inner.topoheight, tx_hash)
+            .await
+    }
+
+    async fn update_committee(
+        &mut self,
+        committee_id: &'a Hash,
+        update: &tos_common::transaction::CommitteeUpdateData,
+    ) -> Result<(), BlockchainError> {
+        use tos_common::kyc::CommitteeStatus;
+        use tos_common::transaction::CommitteeUpdateData;
+
+        match update {
+            CommitteeUpdateData::AddMember {
+                public_key,
+                name,
+                role,
+            } => {
+                self.inner
+                    .storage
+                    .add_committee_member(
+                        committee_id,
+                        public_key,
+                        name.clone(),
+                        *role,
+                        self.inner.topoheight,
+                    )
+                    .await
+            }
+            CommitteeUpdateData::RemoveMember { public_key } => {
+                self.inner
+                    .storage
+                    .remove_committee_member(committee_id, public_key, self.inner.topoheight)
+                    .await
+            }
+            CommitteeUpdateData::UpdateMemberRole {
+                public_key,
+                new_role,
+            } => {
+                self.inner
+                    .storage
+                    .update_member_role(committee_id, public_key, *new_role, self.inner.topoheight)
+                    .await
+            }
+            CommitteeUpdateData::UpdateMemberStatus {
+                public_key,
+                new_status,
+            } => {
+                self.inner
+                    .storage
+                    .update_member_status(
+                        committee_id,
+                        public_key,
+                        *new_status,
+                        self.inner.topoheight,
+                    )
+                    .await
+            }
+            CommitteeUpdateData::UpdateThreshold { new_threshold } => {
+                self.inner
+                    .storage
+                    .update_committee_threshold(committee_id, *new_threshold, self.inner.topoheight)
+                    .await
+            }
+            CommitteeUpdateData::UpdateKycThreshold { new_kyc_threshold } => {
+                self.inner
+                    .storage
+                    .update_committee_kyc_threshold(
+                        committee_id,
+                        *new_kyc_threshold,
+                        self.inner.topoheight,
+                    )
+                    .await
+            }
+            CommitteeUpdateData::UpdateName { new_name } => {
+                self.inner
+                    .storage
+                    .update_committee_name(committee_id, new_name.clone(), self.inner.topoheight)
+                    .await
+            }
+            CommitteeUpdateData::SuspendCommittee => {
+                self.inner
+                    .storage
+                    .update_committee_status(
+                        committee_id,
+                        CommitteeStatus::Suspended,
+                        self.inner.topoheight,
+                    )
+                    .await
+            }
+            CommitteeUpdateData::ActivateCommittee => {
+                self.inner
+                    .storage
+                    .update_committee_status(
+                        committee_id,
+                        CommitteeStatus::Active,
+                        self.inner.topoheight,
+                    )
+                    .await
+            }
+        }
+    }
 }
 
 impl<'a, S: Storage> Deref for ApplicableChainState<'a, S> {

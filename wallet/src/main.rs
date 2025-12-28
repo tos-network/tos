@@ -2655,6 +2655,31 @@ async fn transaction(
                 ));
                 manager.message(format!("  Reason Hash: {}", payload.get_reason_hash()));
             }
+            TransactionType::TransferKyc(payload) => {
+                manager.message("Type: TransferKyc".to_string());
+                manager.message(format!(
+                    "  Account: {}",
+                    payload
+                        .get_account()
+                        .as_address(wallet.get_network().is_mainnet())
+                ));
+                manager.message(format!(
+                    "  Source Committee: {}",
+                    payload.get_source_committee_id()
+                ));
+                manager.message(format!(
+                    "  Dest Committee: {}",
+                    payload.get_dest_committee_id()
+                ));
+                manager.message(format!(
+                    "  Source Approvals: {}",
+                    payload.get_source_approvals().len()
+                ));
+                manager.message(format!(
+                    "  Dest Approvals: {}",
+                    payload.get_dest_approvals().len()
+                ));
+            }
         }
     }
 
