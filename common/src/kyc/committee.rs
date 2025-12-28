@@ -94,6 +94,76 @@ impl SecurityCommittee {
         }
     }
 
+    /// Compute committee ID from region, name, and version
+    ///
+    /// committee_id = blake3("TOS_COMMITTEE" || region || name || version)
+    pub fn compute_id(region: KycRegion, name: &str, version: u32) -> Hash {
+        use blake3::Hasher;
+        let mut hasher = Hasher::new();
+        hasher.update(b"TOS_COMMITTEE");
+        hasher.update(&[region as u8]);
+        hasher.update(name.as_bytes());
+        hasher.update(&version.to_le_bytes());
+        let hash = hasher.finalize();
+        Hash::new(hash.into())
+    }
+
+    /// Create a new Global Committee
+    ///
+    /// Global committee has no parent and covers the Global region
+    pub fn new_global(
+        name: String,
+        members: Vec<CommitteeMember>,
+        threshold: u8,
+        kyc_threshold: u8,
+        max_kyc_level: u16,
+        created_at: u64,
+    ) -> Self {
+        let id = Self::compute_id(KycRegion::Global, &name, 1);
+        Self {
+            id,
+            region: KycRegion::Global,
+            name,
+            members,
+            threshold,
+            kyc_threshold,
+            max_kyc_level,
+            status: CommitteeStatus::Active,
+            parent_id: None,
+            created_at,
+            updated_at: created_at,
+        }
+    }
+
+    /// Create a new Regional Committee
+    ///
+    /// Regional committee has a parent (either Global or another regional)
+    pub fn new_regional(
+        name: String,
+        region: KycRegion,
+        members: Vec<CommitteeMember>,
+        threshold: u8,
+        kyc_threshold: u8,
+        max_kyc_level: u16,
+        parent_id: Hash,
+        created_at: u64,
+    ) -> Self {
+        let id = Self::compute_id(region, &name, 1);
+        Self {
+            id,
+            region,
+            name,
+            members,
+            threshold,
+            kyc_threshold,
+            max_kyc_level,
+            status: CommitteeStatus::Active,
+            parent_id: Some(parent_id),
+            created_at,
+            updated_at: created_at,
+        }
+    }
+
     /// Calculate required threshold for an operation
     pub fn required_threshold(&self, operation: &OperationType, tier: Option<u8>) -> u8 {
         match operation {
@@ -629,6 +699,36 @@ impl Serializer for CommitteeApproval {
 
     fn size(&self) -> usize {
         self.member_pubkey.size() + self.signature.size() + self.timestamp.size()
+    }
+}
+
+/// Simplified member info for committee initialization
+///
+/// This type is used when creating or registering committees,
+/// without the status and timestamp fields that are set during creation.
+#[derive(Clone, Debug)]
+pub struct CommitteeMemberInfo {
+    /// Member's public key
+    pub public_key: PublicKey,
+    /// Human-readable name (optional)
+    pub name: Option<String>,
+    /// Member role
+    pub role: MemberRole,
+}
+
+impl CommitteeMemberInfo {
+    /// Create new member info
+    pub fn new(public_key: PublicKey, name: Option<String>, role: MemberRole) -> Self {
+        Self {
+            public_key,
+            name,
+            role,
+        }
+    }
+
+    /// Convert to full CommitteeMember with status and timestamp
+    pub fn into_member(self, joined_at: u64) -> CommitteeMember {
+        CommitteeMember::new(self.public_key, self.name, self.role, joined_at)
     }
 }
 

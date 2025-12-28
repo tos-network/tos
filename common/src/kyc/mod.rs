@@ -12,6 +12,8 @@ mod committee;
 mod data;
 mod error;
 mod flags;
+#[cfg(test)]
+mod integration_tests;
 mod region;
 mod status;
 
