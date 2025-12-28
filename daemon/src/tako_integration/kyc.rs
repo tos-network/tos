@@ -11,7 +11,9 @@ use tos_common::{
     crypto::PublicKey, kyc::KycData as TosKycData, serializer::Serializer, tokio::try_block_on,
 };
 // TAKO's KycProvider trait (aliased to avoid conflict with TOS's KycProvider)
-use tos_program_runtime::storage::{KycData as TakoKycData, KycProvider as TakoKycProvider};
+use tos_program_runtime::storage::{
+    DeterministicKycProvider, KycData as TakoKycData, KycProvider as TakoKycProvider,
+};
 use tos_tbpf::error::EbpfError;
 
 use crate::core::storage::KycProvider;
@@ -88,6 +90,15 @@ impl<'a, P: KycProvider + Send + Sync + ?Sized> TosKycAdapter<'a, P> {
         }
     }
 }
+
+/// SAFETY: TosKycAdapter is deterministic because:
+/// 1. It reads from RocksDB (on-chain state) via the TOS KycProvider
+/// 2. The `current_time` is passed in from block context, not SystemTime::now()
+/// 3. All state queries return the same result for the same block
+///
+/// This implementation enables TosKycAdapter to be used in consensus-critical
+/// smart contract execution contexts.
+impl<'a, P: KycProvider + Send + Sync + ?Sized> DeterministicKycProvider for TosKycAdapter<'a, P> {}
 
 impl<'a, P: KycProvider + Send + Sync + ?Sized> TakoKycProvider for TosKycAdapter<'a, P> {
     /// Check if a user has any KYC record
