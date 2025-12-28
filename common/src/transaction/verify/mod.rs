@@ -1,5 +1,6 @@
 mod contract;
 mod error;
+mod kyc;
 mod state;
 mod zkp_cache;
 
@@ -305,15 +306,27 @@ impl Transaction {
                     )));
                 }
             }
-            // KYC transaction types - validation handled by KYC verification logic
-            TransactionType::SetKyc(_)
-            | TransactionType::RevokeKyc(_)
-            | TransactionType::RenewKyc(_)
-            | TransactionType::BootstrapCommittee(_)
-            | TransactionType::RegisterCommittee(_)
-            | TransactionType::UpdateCommittee(_)
-            | TransactionType::EmergencySuspend(_) => {
-                // KYC transactions are validated by the KYC provider at execution time
+            // KYC transaction types - structural validation (dynamic parts)
+            TransactionType::SetKyc(payload) => {
+                kyc::verify_set_kyc(payload)?;
+            }
+            TransactionType::RevokeKyc(payload) => {
+                kyc::verify_revoke_kyc(payload)?;
+            }
+            TransactionType::RenewKyc(payload) => {
+                kyc::verify_renew_kyc(payload)?;
+            }
+            TransactionType::BootstrapCommittee(payload) => {
+                kyc::verify_bootstrap_committee(payload)?;
+            }
+            TransactionType::RegisterCommittee(payload) => {
+                kyc::verify_register_committee(payload)?;
+            }
+            TransactionType::UpdateCommittee(payload) => {
+                kyc::verify_update_committee(payload)?;
+            }
+            TransactionType::EmergencySuspend(payload) => {
+                kyc::verify_emergency_suspend(payload)?;
             }
         };
 
@@ -698,15 +711,27 @@ impl Transaction {
                     )));
                 }
             }
-            // KYC transaction types - validation handled by KYC verification logic
-            TransactionType::SetKyc(_)
-            | TransactionType::RevokeKyc(_)
-            | TransactionType::RenewKyc(_)
-            | TransactionType::BootstrapCommittee(_)
-            | TransactionType::RegisterCommittee(_)
-            | TransactionType::UpdateCommittee(_)
-            | TransactionType::EmergencySuspend(_) => {
-                // KYC transactions are validated by the KYC provider at execution time
+            // KYC transaction types - structural validation (pre-verify)
+            TransactionType::SetKyc(payload) => {
+                kyc::verify_set_kyc(payload)?;
+            }
+            TransactionType::RevokeKyc(payload) => {
+                kyc::verify_revoke_kyc(payload)?;
+            }
+            TransactionType::RenewKyc(payload) => {
+                kyc::verify_renew_kyc(payload)?;
+            }
+            TransactionType::BootstrapCommittee(payload) => {
+                kyc::verify_bootstrap_committee(payload)?;
+            }
+            TransactionType::RegisterCommittee(payload) => {
+                kyc::verify_register_committee(payload)?;
+            }
+            TransactionType::UpdateCommittee(payload) => {
+                kyc::verify_update_committee(payload)?;
+            }
+            TransactionType::EmergencySuspend(payload) => {
+                kyc::verify_emergency_suspend(payload)?;
             }
         };
 
