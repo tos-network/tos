@@ -637,7 +637,19 @@ pub fn verify_update_committee_with_state<E>(
                 )));
             }
         }
-        // AddMember: No additional validation needed (adding members is always safe)
+        crate::transaction::payload::CommitteeUpdateData::AddMember { .. } => {
+            let current_members = committee_info.member_count;
+
+            // After adding, new member count must not exceed MAX_COMMITTEE_MEMBERS
+            let new_member_count = current_members.saturating_add(1);
+            if new_member_count > MAX_COMMITTEE_MEMBERS {
+                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                    "Cannot add member: {} members would exceed maximum {} allowed",
+                    new_member_count,
+                    MAX_COMMITTEE_MEMBERS
+                )));
+            }
+        }
         // Other operations: No governance constraints to check
         _ => {}
     }

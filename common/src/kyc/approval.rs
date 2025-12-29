@@ -434,11 +434,13 @@ where
         // Check if approval is expired
         let is_expired = approval.is_expired(current_time);
 
-        // Check if approver is an active committee member
-        let is_active_member = committee
-            .members
-            .iter()
-            .any(|m| m.public_key == approval.member_pubkey && m.status == MemberStatus::Active);
+        // Check if approver is an active committee member with approval rights
+        // Observers cannot approve (role.can_approve() returns false for Observer)
+        let is_active_member = committee.members.iter().any(|m| {
+            m.public_key == approval.member_pubkey
+                && m.status == MemberStatus::Active
+                && m.role.can_approve()
+        });
 
         // Verify signature
         let message = build_message(approval);

@@ -1829,6 +1829,56 @@ impl Transaction {
                 }
             }
             TransactionType::AppealKyc(payload) => {
+                // Authorization check: only the account owner can submit their own appeal
+                if self.get_source() != payload.get_account() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: sender {:?} does not match appeal account {:?}",
+                        self.get_source(),
+                        payload.get_account()
+                    )));
+                }
+
+                // Verify original committee exists and is active
+                let original_committee = state
+                    .get_committee(payload.get_original_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Original committee not found: {}",
+                            payload.get_original_committee_id()
+                        ))
+                    })?;
+
+                // Verify parent committee exists
+                let parent_committee = state
+                    .get_committee(payload.get_parent_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Parent committee not found: {}",
+                            payload.get_parent_committee_id()
+                        ))
+                    })?;
+
+                // Verify the original committee's parent matches the claimed parent
+                if let Some(ref actual_parent_id) = original_committee.parent_id {
+                    if actual_parent_id != &parent_committee.id {
+                        return Err(VerificationError::AnyError(anyhow::anyhow!(
+                            "AppealKyc: claimed parent {} does not match original committee's actual parent {}",
+                            payload.get_parent_committee_id(),
+                            actual_parent_id
+                        )));
+                    }
+                } else {
+                    // Original committee is the global committee (no parent)
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: cannot appeal to parent - original committee {} is the global committee",
+                        payload.get_original_committee_id()
+                    )));
+                }
+
                 state
                     .submit_kyc_appeal(
                         payload.get_account(),
