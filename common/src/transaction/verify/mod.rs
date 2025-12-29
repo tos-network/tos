@@ -1807,6 +1807,9 @@ impl Transaction {
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("Destination: {}", e)))?;
 
+                // Transfer KYC to destination committee
+                // The max_kyc_level check is done inside transfer_kyc to ensure
+                // user's KYC level doesn't exceed destination committee's max level
                 state
                     .transfer_kyc(
                         payload.get_account(),
@@ -1815,6 +1818,7 @@ impl Transaction {
                         payload.get_new_data_hash(),
                         payload.get_transferred_at(),
                         tx_hash,
+                        dest_committee.max_kyc_level,
                     )
                     .await
                     .map_err(VerificationError::State)?;
@@ -1948,13 +1952,27 @@ impl Transaction {
                         ))
                     })?;
 
-                // Verify parent committee approvals
+                // Compute config hash from payload to bind signatures to full configuration
+                let members: Vec<_> = payload
+                    .get_members()
+                    .iter()
+                    .map(|m| (m.public_key.clone(), m.name.clone(), m.role))
+                    .collect();
+                let config_hash = crate::kyc::CommitteeApproval::compute_register_config_hash(
+                    &members,
+                    payload.get_threshold(),
+                    payload.get_kyc_threshold(),
+                    payload.get_max_kyc_level(),
+                );
+
+                // Verify parent committee approvals with config binding
                 let current_time = state.get_verification_timestamp();
                 crate::kyc::verify_register_committee_approvals(
                     &parent_committee,
                     payload.get_approvals(),
                     payload.get_name(),
                     payload.get_region(),
+                    &config_hash,
                     current_time,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;

@@ -321,6 +321,16 @@ pub fn verify_transfer_kyc_dest_approvals(
 }
 
 /// Verify approvals for EmergencySuspend operation
+///
+/// # Policy Decision
+/// Emergency suspend operations are allowed even if the issuing committee is suspended.
+/// Rationale: Emergency actions (e.g., responding to fraud, security incidents) must
+/// remain available regardless of committee operational status. A suspended committee
+/// may still need to protect users by issuing emergency suspensions.
+///
+/// However, **Dissolved** committees cannot issue emergency suspensions, as they
+/// no longer have operational authority.
+/// Approved: 2025-12-29
 pub fn verify_emergency_suspend_approvals(
     committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
@@ -329,8 +339,11 @@ pub fn verify_emergency_suspend_approvals(
     expires_at: u64,
     current_time: u64,
 ) -> Result<ApprovalVerificationResult, ApprovalError> {
-    // Note: Emergency operations may be allowed even if committee is suspended
-    // but for now we require active status
+    // POLICY DECISION: Emergency operations are allowed if committee is Active or Suspended,
+    // but NOT if Dissolved. Dissolved committees have no operational authority.
+    if committee.status == CommitteeStatus::Dissolved {
+        return Err(ApprovalError::CommitteeNotActive(committee.id.clone()));
+    }
 
     let build_message = |approval: &CommitteeApproval| {
         CommitteeApproval::build_emergency_suspend_message(
@@ -348,11 +361,15 @@ pub fn verify_emergency_suspend_approvals(
 }
 
 /// Verify approvals for RegisterCommittee operation
+///
+/// The `config_hash` binds the approval signatures to the full committee configuration
+/// (members, thresholds, max_kyc_level), preventing approval replay with different configs.
 pub fn verify_register_committee_approvals(
     parent_committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     name: &str,
     region: crate::kyc::KycRegion,
+    config_hash: &Hash,
     current_time: u64,
 ) -> Result<ApprovalVerificationResult, ApprovalError> {
     if parent_committee.status != CommitteeStatus::Active {
@@ -363,12 +380,14 @@ pub fn verify_register_committee_approvals(
 
     let parent_id = parent_committee.id.clone();
     let name = name.to_string();
+    let config_hash = config_hash.clone();
 
     let build_message = move |approval: &CommitteeApproval| {
         CommitteeApproval::build_register_committee_message(
             &parent_id,
             &name,
             region,
+            &config_hash,
             approval.timestamp,
         )
     };
@@ -413,6 +432,9 @@ pub fn verify_update_committee_approvals(
 }
 
 /// Internal function to verify approvals against a committee
+///
+/// This function deduplicates approvals by member_pubkey to prevent a single
+/// member's approval from being counted multiple times toward the threshold.
 fn verify_approvals_internal<F>(
     committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
@@ -423,14 +445,21 @@ fn verify_approvals_internal<F>(
 where
     F: Fn(&CommitteeApproval) -> Vec<u8>,
 {
+    use std::collections::HashSet;
+
     if approvals.is_empty() {
         return Err(ApprovalError::NoApprovals);
     }
 
     let mut approval_results = Vec::with_capacity(approvals.len());
     let mut valid_count = 0usize;
+    // Track seen approvers to prevent duplicate counting
+    let mut seen_approvers: HashSet<PublicKey> = HashSet::new();
 
     for approval in approvals {
+        // Check for duplicate approvers - each member can only approve once
+        let is_duplicate = seen_approvers.contains(&approval.member_pubkey);
+
         // Check if approval is expired
         let is_expired = approval.is_expired(current_time);
 
@@ -444,16 +473,19 @@ where
 
         // Verify signature
         let message = build_message(approval);
-        let signature_valid = if is_active_member && !is_expired {
+        let signature_valid = if is_active_member && !is_expired && !is_duplicate {
             approval.verify_signature(&message)
         } else {
             false
         };
 
-        let is_valid = is_active_member && signature_valid && !is_expired;
+        // Approval is valid only if not duplicate, not expired, is active member, and signature valid
+        let is_valid = !is_duplicate && is_active_member && signature_valid && !is_expired;
 
         if is_valid {
             valid_count += 1;
+            // Mark this approver as seen to prevent double-counting
+            seen_approvers.insert(approval.member_pubkey.clone());
         }
 
         approval_results.push(ApprovalCheckResult {

@@ -206,12 +206,17 @@ impl KycProvider for RocksStorage {
                 }
                 return Err(BlockchainError::KycRevoked);
             }
-            // Suspended, Active, and Expired statuses can be renewed
+            // POLICY DECISION: Suspended KYC can be renewed and reactivated.
+            // Rationale: Suspension is a temporary measure (e.g., pending investigation).
+            // Allowing renewal provides a streamlined path back to Active status once
+            // the suspension reason is resolved, without requiring full re-verification.
+            // This differs from Revoked status, which requires complete re-verification.
+            // Approved: 2025-12-29
             KycStatus::Suspended | KycStatus::Active | KycStatus::Expired => {
                 // Update verification timestamp and data hash
                 kyc_data.verified_at = new_verified_at;
                 kyc_data.data_hash = new_data_hash;
-                // Only set status to Active for these allowed states
+                // Set status to Active for these allowed states
                 kyc_data.status = KycStatus::Active;
             }
         }
@@ -238,6 +243,7 @@ impl KycProvider for RocksStorage {
         transferred_at: u64,
         topoheight: TopoHeight,
         tx_hash: &Hash,
+        dest_max_kyc_level: u16,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
@@ -276,6 +282,21 @@ impl KycProvider for RocksStorage {
             KycStatus::Active | KycStatus::Expired => {
                 // Allow transfer for Active and Expired statuses
             }
+        }
+
+        // Verify user's KYC level doesn't exceed destination committee's max level
+        // Security fix: Prevents transferring high-level KYC to committees not authorized
+        // to grant/hold that level, ensuring committee-level limits are enforced
+        if kyc_data.level > dest_max_kyc_level {
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "cannot transfer KYC for user {}: level {} exceeds destination max {}",
+                    user.as_address(self.is_mainnet()),
+                    kyc_data.level,
+                    dest_max_kyc_level
+                );
+            }
+            return Err(BlockchainError::KycLevelExceedsCommitteeMax);
         }
 
         // Update verified_at, data_hash, and set status to Active

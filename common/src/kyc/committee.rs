@@ -708,20 +708,78 @@ impl CommitteeApproval {
 
     /// Build domain-separated signing message for RegisterCommittee
     ///
-    /// Message format: "TOS_COMMITTEE_REG" || parent_id || new_committee_name || region || timestamp
+    /// Message format: "TOS_COMMITTEE_REG" || parent_id || name || region || config_hash || timestamp
+    ///
+    /// The config_hash binds the signature to the full committee configuration:
+    /// - members (public keys, names, roles)
+    /// - threshold
+    /// - kyc_threshold
+    /// - max_kyc_level
+    ///
+    /// This prevents replay attacks where valid approvals are reused with different configurations.
     pub fn build_register_committee_message(
         parent_id: &Hash,
         name: &str,
         region: KycRegion,
+        config_hash: &Hash,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(128);
+        let mut message = Vec::with_capacity(160);
         message.extend_from_slice(b"TOS_COMMITTEE_REG");
         message.extend_from_slice(parent_id.as_bytes());
         message.extend_from_slice(name.as_bytes());
         message.push(region as u8);
+        // Include config hash to bind signature to full configuration
+        message.extend_from_slice(config_hash.as_bytes());
         message.extend_from_slice(&timestamp.to_le_bytes());
         message
+    }
+
+    /// Compute deterministic hash of committee configuration for signature binding
+    ///
+    /// This hash covers all mutable configuration fields that should be protected
+    /// by the parent committee's approval signatures.
+    ///
+    /// Note: Members are sorted by pubkey bytes before hashing to ensure the hash
+    /// is order-independent. This allows signers to assemble the member list in
+    /// any order and still produce valid approvals.
+    pub fn compute_register_config_hash(
+        members: &[(
+            crate::crypto::elgamal::CompressedPublicKey,
+            Option<String>,
+            MemberRole,
+        )],
+        threshold: u8,
+        kyc_threshold: u8,
+        max_kyc_level: u16,
+    ) -> Hash {
+        use crate::serializer::Writer;
+
+        // Sort members by pubkey bytes to ensure order-independent hashing
+        let mut sorted_members: Vec<_> = members.iter().collect();
+        sorted_members.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+
+        let mut buffer = Vec::new();
+        let mut writer = Writer::new(&mut buffer);
+        // Write member count
+        writer.write_u16(sorted_members.len() as u16);
+        // Write each member's data deterministically (sorted by pubkey)
+        for (pubkey, name, role) in sorted_members {
+            writer.write_bytes(pubkey.as_bytes());
+            if let Some(n) = name {
+                writer.write_u8(1);
+                writer.write_string(n);
+            } else {
+                writer.write_u8(0);
+            }
+            writer.write_u8(*role as u8);
+        }
+        // Write thresholds and limits
+        writer.write_u8(threshold);
+        writer.write_u8(kyc_threshold);
+        writer.write_u16(max_kyc_level);
+
+        crate::crypto::hash(&buffer)
     }
 
     /// Build domain-separated signing message for UpdateCommittee

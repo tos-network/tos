@@ -47,6 +47,7 @@ enum TestError {
     CommitteeNotFound,
     GlobalCommitteeAlreadyBootstrapped,
     InvalidStatus,
+    KycLevelExceedsMax,
 }
 
 impl std::fmt::Display for TestError {
@@ -60,6 +61,9 @@ impl std::fmt::Display for TestError {
                 write!(f, "Global committee already bootstrapped")
             }
             TestError::InvalidStatus => write!(f, "Invalid status"),
+            TestError::KycLevelExceedsMax => {
+                write!(f, "KYC level exceeds destination committee max")
+            }
         }
     }
 }
@@ -570,10 +574,15 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for KycTestC
         new_data_hash: &'a Hash,
         transferred_at: u64,
         _tx_hash: &'a Hash,
+        dest_max_kyc_level: u16,
     ) -> Result<(), TestError> {
         let kyc = self.kyc_data.get_mut(user).ok_or(TestError::KycNotFound)?;
         if kyc.status == KycStatus::Revoked || kyc.status == KycStatus::Suspended {
             return Err(TestError::InvalidStatus);
+        }
+        // Verify KYC level doesn't exceed destination committee's max level
+        if kyc.level > dest_max_kyc_level {
+            return Err(TestError::KycLevelExceedsMax);
         }
         kyc.committee_id = dest_committee_id.clone();
         kyc.data_hash = new_data_hash.clone();
@@ -1161,6 +1170,7 @@ async fn test_kyc_transfer() {
             &new_data_hash,
             2000,
             &Hash::new([7u8; 32]),
+            100, // dest committee max_kyc_level
         )
         .await
         .expect("Should transfer KYC");
@@ -1253,6 +1263,7 @@ async fn test_kyc_suspended_cannot_transfer() {
             &Hash::new([8u8; 32]),
             2000,
             &Hash::new([9u8; 32]),
+            100, // dest committee max_kyc_level
         )
         .await;
     assert!(result.is_err(), "Should not transfer suspended KYC");

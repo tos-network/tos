@@ -505,6 +505,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         new_data_hash: &'a Hash,
         transferred_at: u64,
         tx_hash: &'a Hash,
+        dest_max_kyc_level: u16,
     ) -> Result<(), BlockchainError> {
         // Transfer KYC to a new committee
         // This updates the committee_id while preserving the user's KYC level
@@ -518,6 +519,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
                 transferred_at,
                 self.inner.topoheight,
                 tx_hash,
+                dest_max_kyc_level,
             )
             .await
     }

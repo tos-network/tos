@@ -19,6 +19,7 @@ wallet_sender/
 miner_wallet.db/
 publisher_wallet.db/
 final_test_wallet/
+review.codex.md
 
 # Python cache files
 __pycache__/
