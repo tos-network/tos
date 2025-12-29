@@ -265,7 +265,10 @@ impl KycAppealRecord {
 
     /// Check if appeal is still pending
     pub fn is_pending(&self) -> bool {
-        matches!(self.status, AppealStatus::Pending | AppealStatus::UnderReview)
+        matches!(
+            self.status,
+            AppealStatus::Pending | AppealStatus::UnderReview
+        )
     }
 
     /// Check if appeal was resolved (approved or rejected)

@@ -8,6 +8,7 @@
 //
 // Reference: TOS-KYC-Level-Design.md (v2.3)
 
+mod approval;
 mod committee;
 mod data;
 mod error;
@@ -17,6 +18,7 @@ mod integration_tests;
 mod region;
 mod status;
 
+pub use approval::*;
 pub use committee::*;
 pub use data::*;
 pub use error::*;

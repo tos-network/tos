@@ -239,6 +239,12 @@ pub fn verify_appeal_kyc<E>(
         )));
     }
 
+    if payload.get_documents_hash() == &zero_hash {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Appeal documents hash cannot be empty"
+        )));
+    }
+
     Ok(())
 }
 
@@ -486,7 +492,7 @@ pub fn verify_update_committee<E>(
         )));
     }
 
-    // Validate update-specific constraints
+    // Validate update-specific constraints (structural validation only)
     match payload.get_update() {
         crate::transaction::payload::CommitteeUpdateData::AddMember {
             name: Some(ref n), ..
@@ -532,6 +538,107 @@ pub fn verify_update_committee<E>(
                 )));
             }
         }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+/// Committee governance info for state-dependent validation
+pub struct CommitteeGovernanceInfo {
+    /// Current number of active members in the committee
+    pub member_count: usize,
+    /// Current governance threshold
+    pub threshold: u8,
+}
+
+/// Verify UpdateCommittee transaction payload with state-dependent validation
+///
+/// This function validates governance constraints that require committee state:
+/// - UpdateThreshold: new_threshold <= member_count AND new_threshold >= ceil(2/3 * members)
+/// - RemoveMember: remaining members >= threshold AND remaining members >= MIN_COMMITTEE_MEMBERS
+/// - UpdateKycThreshold: new_kyc_threshold <= member_count
+///
+/// # Arguments
+/// * `payload` - The UpdateCommittee payload to verify
+/// * `committee_info` - Current committee governance info (member count and threshold)
+/// * `current_time` - Current timestamp (block timestamp for deterministic validation)
+pub fn verify_update_committee_with_state<E>(
+    payload: &UpdateCommitteePayload,
+    committee_info: &CommitteeGovernanceInfo,
+    current_time: u64,
+) -> Result<(), VerificationError<E>> {
+    // First perform structural validation
+    verify_update_committee(payload, current_time)?;
+
+    // Now perform state-dependent governance validation
+    match payload.get_update() {
+        crate::transaction::payload::CommitteeUpdateData::UpdateThreshold { new_threshold } => {
+            let new_threshold = *new_threshold as usize;
+            let member_count = committee_info.member_count;
+
+            // Threshold must be <= member count
+            if new_threshold > member_count {
+                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                    "Governance threshold {} exceeds member count {}",
+                    new_threshold,
+                    member_count
+                )));
+            }
+
+            // Threshold must meet 2/3 rule: threshold >= ceil(2/3 * members)
+            let min_threshold = calculate_min_threshold(member_count);
+            if new_threshold < min_threshold {
+                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                    "Governance threshold {} is below minimum {} (2/3 of {} members)",
+                    new_threshold,
+                    min_threshold,
+                    member_count
+                )));
+            }
+        }
+        crate::transaction::payload::CommitteeUpdateData::RemoveMember { .. } => {
+            let current_members = committee_info.member_count;
+            let threshold = committee_info.threshold as usize;
+
+            // After removal, remaining members count
+            let remaining_members = current_members.saturating_sub(1);
+
+            // Remaining members must be >= threshold (otherwise committee becomes inoperable)
+            if remaining_members < threshold {
+                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                    "Cannot remove member: remaining {} members would be less than threshold {}",
+                    remaining_members,
+                    threshold
+                )));
+            }
+
+            // Remaining members must be >= MIN_COMMITTEE_MEMBERS (minimum viable committee)
+            if remaining_members < MIN_COMMITTEE_MEMBERS {
+                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                    "Cannot remove member: remaining {} members would be below minimum {} required",
+                    remaining_members,
+                    MIN_COMMITTEE_MEMBERS
+                )));
+            }
+        }
+        crate::transaction::payload::CommitteeUpdateData::UpdateKycThreshold {
+            new_kyc_threshold,
+        } => {
+            let new_kyc_threshold = *new_kyc_threshold as usize;
+            let member_count = committee_info.member_count;
+
+            // KYC threshold must be <= member count
+            if new_kyc_threshold > member_count {
+                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                    "KYC threshold {} exceeds member count {}",
+                    new_kyc_threshold,
+                    member_count
+                )));
+            }
+        }
+        // AddMember: No additional validation needed (adding members is always safe)
+        // Other operations: No governance constraints to check
         _ => {}
     }
 
@@ -853,5 +960,396 @@ mod tests {
 
         let result: Result<(), VerificationError<()>> = verify_approvals(&approvals, now);
         assert!(result.is_err());
+    }
+
+    // Tests for verify_update_committee_with_state
+
+    use crate::transaction::payload::CommitteeUpdateData;
+
+    fn create_update_committee_payload(
+        update: CommitteeUpdateData,
+        approvals: Vec<CommitteeApproval>,
+    ) -> UpdateCommitteePayload {
+        UpdateCommitteePayload::new(Hash::zero(), update, approvals)
+    }
+
+    #[test]
+    fn test_update_threshold_valid() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 5 members, min threshold = 4 (ceil(5*2/3))
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 5,
+            threshold: 4,
+        };
+
+        // Valid: threshold 4 <= 5 members AND 4 >= 4 (2/3 rule)
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateThreshold { new_threshold: 4 },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
+
+        // Valid: threshold 5 is also acceptable
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateThreshold { new_threshold: 5 },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_threshold_exceeds_member_count() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 5,
+            threshold: 4,
+        };
+
+        // Invalid: threshold 6 > 5 members
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateThreshold { new_threshold: 6 },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("exceeds member count"));
+    }
+
+    #[test]
+    fn test_update_threshold_below_two_thirds() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 6,
+            threshold: 4,
+        };
+
+        // Invalid: threshold 3 < 4 (ceil(6*2/3) = 4)
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateThreshold { new_threshold: 3 },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("below minimum"));
+    }
+
+    #[test]
+    fn test_remove_member_valid() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 5 members with threshold 4, removing one leaves 4 members >= threshold 4
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 5,
+            threshold: 4,
+        };
+
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::RemoveMember {
+                public_key: create_test_pubkey(99),
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_remove_member_would_break_threshold() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 4 members with threshold 4, removing one leaves 3 members < threshold 4
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 4,
+            threshold: 4,
+        };
+
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::RemoveMember {
+                public_key: create_test_pubkey(99),
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("less than threshold"));
+    }
+
+    #[test]
+    fn test_remove_member_would_break_minimum() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 3 members (minimum), threshold 2, removing one leaves 2 members < MIN_COMMITTEE_MEMBERS
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 3,
+            threshold: 2,
+        };
+
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::RemoveMember {
+                public_key: create_test_pubkey(99),
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("below minimum"));
+    }
+
+    #[test]
+    fn test_update_kyc_threshold_valid() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 5,
+            threshold: 4,
+        };
+
+        // Valid: KYC threshold 3 <= 5 members
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateKycThreshold {
+                new_kyc_threshold: 3,
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_kyc_threshold_exceeds_member_count() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 5,
+            threshold: 4,
+        };
+
+        // Invalid: KYC threshold 6 > 5 members
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateKycThreshold {
+                new_kyc_threshold: 6,
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("exceeds member count"));
+    }
+
+    #[test]
+    fn test_add_member_always_valid() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 5,
+            threshold: 4,
+        };
+
+        // AddMember should always pass state validation (adding is safe)
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::AddMember {
+                public_key: create_test_pubkey(99),
+                name: Some("New Member".to_string()),
+                role: MemberRole::Member,
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
+    }
+
+    // Tests for verify_appeal_kyc
+
+    use super::AppealKycPayload;
+
+    fn create_appeal_payload(
+        reason_hash: crate::crypto::Hash,
+        documents_hash: crate::crypto::Hash,
+        submitted_at: u64,
+    ) -> AppealKycPayload {
+        AppealKycPayload::new(
+            create_test_pubkey(1), // account
+            Hash::new([1u8; 32]),  // original_committee_id
+            Hash::new([2u8; 32]),  // parent_committee_id
+            reason_hash,
+            documents_hash,
+            submitted_at,
+        )
+    }
+
+    #[test]
+    fn test_verify_appeal_kyc_valid() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let payload = create_appeal_payload(
+            Hash::new([3u8; 32]), // Valid reason_hash (non-zero)
+            Hash::new([4u8; 32]), // Valid documents_hash (non-zero)
+            now,
+        );
+
+        let result: Result<(), VerificationError<()>> = verify_appeal_kyc(&payload, now);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_verify_appeal_kyc_same_committee_fails() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // Create payload where original and parent committee are the same
+        let committee_id = Hash::new([1u8; 32]);
+        let payload = AppealKycPayload::new(
+            create_test_pubkey(1),
+            committee_id.clone(),
+            committee_id, // Same as original
+            Hash::new([3u8; 32]),
+            Hash::new([4u8; 32]),
+            now,
+        );
+
+        let result: Result<(), VerificationError<()>> = verify_appeal_kyc(&payload, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("Original committee and parent committee must be different"));
+    }
+
+    #[test]
+    fn test_verify_appeal_kyc_future_timestamp_fails() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // submitted_at more than 1 hour in the future
+        let payload = create_appeal_payload(
+            Hash::new([3u8; 32]),
+            Hash::new([4u8; 32]),
+            now + 7200, // 2 hours in future
+        );
+
+        let result: Result<(), VerificationError<()>> = verify_appeal_kyc(&payload, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("too far in the future"));
+    }
+
+    #[test]
+    fn test_verify_appeal_kyc_empty_reason_hash_fails() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let payload = create_appeal_payload(
+            Hash::zero(), // Empty reason_hash
+            Hash::new([4u8; 32]),
+            now,
+        );
+
+        let result: Result<(), VerificationError<()>> = verify_appeal_kyc(&payload, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("Appeal reason hash cannot be empty"));
+    }
+
+    #[test]
+    fn test_verify_appeal_kyc_empty_documents_hash_fails() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let payload = create_appeal_payload(
+            Hash::new([3u8; 32]),
+            Hash::zero(), // Empty documents_hash
+            now,
+        );
+
+        let result: Result<(), VerificationError<()>> = verify_appeal_kyc(&payload, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("Appeal documents hash cannot be empty"));
+    }
+
+    #[test]
+    fn test_verify_appeal_kyc_both_hashes_empty_fails_on_reason_first() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let payload = create_appeal_payload(
+            Hash::zero(), // Empty reason_hash
+            Hash::zero(), // Empty documents_hash
+            now,
+        );
+
+        // Should fail on reason_hash first (since it's checked first)
+        let result: Result<(), VerificationError<()>> = verify_appeal_kyc(&payload, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("Appeal reason hash cannot be empty"));
     }
 }

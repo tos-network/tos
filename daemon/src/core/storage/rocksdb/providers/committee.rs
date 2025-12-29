@@ -605,23 +605,38 @@ impl CommitteeProvider for RocksStorage {
     }
 
     async fn get_all_committee_ids(&self) -> Result<Vec<Hash>, BlockchainError> {
-        // This is a simple implementation that would need optimization for large datasets
-        // Could maintain a separate list of all committee IDs
+        // Traverse the full committee hierarchy tree using BFS (iterative approach)
+        // This handles arbitrary depth and prevents infinite loops from circular references
+        use std::collections::HashSet;
+        use std::collections::VecDeque;
+
         let mut ids = Vec::new();
+        let mut visited: HashSet<Hash> = HashSet::new();
+        let mut queue: VecDeque<Hash> = VecDeque::new();
 
-        // Check if global committee exists
+        // Start from the global committee if it exists
         if let Some(global_id) = self.get_global_committee_id().await? {
-            ids.push(global_id.clone());
+            queue.push_back(global_id);
+        }
 
-            // Recursively get all child committees
-            fn collect_children(ids: &mut Vec<Hash>, children: Vec<SecurityCommittee>) {
-                for child in children {
-                    ids.push(child.id);
-                }
+        // BFS traversal of the committee hierarchy
+        while let Some(current_id) = queue.pop_front() {
+            // Skip if already visited (prevents infinite loops from circular references)
+            if visited.contains(&current_id) {
+                continue;
             }
 
-            let children = self.get_child_committees(&global_id).await?;
-            collect_children(&mut ids, children);
+            // Mark as visited and add to results
+            visited.insert(current_id.clone());
+            ids.push(current_id.clone());
+
+            // Get direct children and add them to the queue for processing
+            let children = self.get_child_committees(&current_id).await?;
+            for child in children {
+                if !visited.contains(&child.id) {
+                    queue.push_back(child.id);
+                }
+            }
         }
 
         Ok(ids)

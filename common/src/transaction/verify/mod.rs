@@ -1644,7 +1644,32 @@ impl Transaction {
                 }
             }
             // KYC transaction types - execution handled by BlockchainApplyState
+            // SECURITY: All KYC operations require approval verification
             TransactionType::SetKyc(payload) => {
+                // Get the committee and verify approvals
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                // Verify approvals (signatures, membership, threshold)
+                let current_time = state.get_verification_timestamp();
+                crate::kyc::verify_set_kyc_approvals(
+                    &committee,
+                    payload.get_approvals(),
+                    payload.get_account(),
+                    payload.get_level(),
+                    payload.get_data_hash(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
                 state
                     .set_kyc(
                         payload.get_account(),
@@ -1666,6 +1691,29 @@ impl Transaction {
                 }
             }
             TransactionType::RevokeKyc(payload) => {
+                // Get the committee and verify approvals
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                // Verify approvals (signatures, membership, threshold)
+                let current_time = state.get_verification_timestamp();
+                crate::kyc::verify_revoke_kyc_approvals(
+                    &committee,
+                    payload.get_approvals(),
+                    payload.get_account(),
+                    payload.get_reason_hash(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
                 state
                     .revoke_kyc(payload.get_account(), payload.get_reason_hash(), tx_hash)
                     .await
@@ -1676,6 +1724,29 @@ impl Transaction {
                 }
             }
             TransactionType::RenewKyc(payload) => {
+                // Get the committee and verify approvals
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                // Verify approvals (signatures, membership, threshold)
+                let current_time = state.get_verification_timestamp();
+                crate::kyc::verify_renew_kyc_approvals(
+                    &committee,
+                    payload.get_approvals(),
+                    payload.get_account(),
+                    payload.get_data_hash(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
                 state
                     .renew_kyc(
                         payload.get_account(),
@@ -1691,6 +1762,51 @@ impl Transaction {
                 }
             }
             TransactionType::TransferKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+
+                // Get and verify source committee approvals
+                let source_committee = state
+                    .get_committee(payload.get_source_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Source committee not found: {}",
+                            payload.get_source_committee_id()
+                        ))
+                    })?;
+
+                crate::kyc::verify_transfer_kyc_source_approvals(
+                    &source_committee,
+                    payload.get_source_approvals(),
+                    payload.get_dest_committee_id(),
+                    payload.get_account(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("Source: {}", e)))?;
+
+                // Get and verify destination committee approvals
+                let dest_committee = state
+                    .get_committee(payload.get_dest_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Destination committee not found: {}",
+                            payload.get_dest_committee_id()
+                        ))
+                    })?;
+
+                crate::kyc::verify_transfer_kyc_dest_approvals(
+                    &dest_committee,
+                    payload.get_dest_approvals(),
+                    payload.get_source_committee_id(),
+                    payload.get_account(),
+                    payload.get_new_data_hash(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("Destination: {}", e)))?;
+
                 state
                     .transfer_kyc(
                         payload.get_account(),
@@ -1770,6 +1886,29 @@ impl Transaction {
                 }
             }
             TransactionType::RegisterCommittee(payload) => {
+                // Get parent committee and verify approvals
+                let parent_committee = state
+                    .get_committee(payload.get_parent_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Parent committee not found: {}",
+                            payload.get_parent_id()
+                        ))
+                    })?;
+
+                // Verify parent committee approvals
+                let current_time = state.get_verification_timestamp();
+                crate::kyc::verify_register_committee_approvals(
+                    &parent_committee,
+                    payload.get_approvals(),
+                    payload.get_name(),
+                    payload.get_region(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
                 // Convert NewCommitteeMember to CommitteeMemberInfo
                 let members: Vec<crate::kyc::CommitteeMemberInfo> = payload
                     .get_members()
@@ -1807,6 +1946,58 @@ impl Transaction {
                 }
             }
             TransactionType::UpdateCommittee(payload) => {
+                // Get committee and verify approvals
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                // Validate governance constraints using committee state
+                let committee_info = kyc::CommitteeGovernanceInfo {
+                    member_count: committee.active_member_count(),
+                    threshold: committee.threshold,
+                };
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_update_committee_with_state(payload, &committee_info, current_time)?;
+
+                // Compute hash of update data for signature verification
+                let update_data_hash = {
+                    use crate::serializer::Serializer;
+                    let mut buffer = Vec::new();
+                    let mut writer = crate::serializer::Writer::new(&mut buffer);
+                    payload.get_update().write(&mut writer);
+                    crate::crypto::Hash::new(blake3::hash(&buffer).into())
+                };
+
+                // Get update type for message building
+                let update_type = match payload.get_update() {
+                    crate::transaction::CommitteeUpdateData::AddMember { .. } => 0u8,
+                    crate::transaction::CommitteeUpdateData::RemoveMember { .. } => 1u8,
+                    crate::transaction::CommitteeUpdateData::UpdateMemberRole { .. } => 2u8,
+                    crate::transaction::CommitteeUpdateData::UpdateMemberStatus { .. } => 3u8,
+                    crate::transaction::CommitteeUpdateData::UpdateThreshold { .. } => 4u8,
+                    crate::transaction::CommitteeUpdateData::UpdateKycThreshold { .. } => 5u8,
+                    crate::transaction::CommitteeUpdateData::UpdateName { .. } => 6u8,
+                    crate::transaction::CommitteeUpdateData::SuspendCommittee => 7u8,
+                    crate::transaction::CommitteeUpdateData::ActivateCommittee => 8u8,
+                };
+
+                // Verify committee approvals
+                crate::kyc::verify_update_committee_approvals(
+                    &committee,
+                    payload.get_approvals(),
+                    update_type,
+                    &update_data_hash,
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
                 state
                     .update_committee(payload.get_committee_id(), payload.get_update())
                     .await
@@ -1821,6 +2012,30 @@ impl Transaction {
                 }
             }
             TransactionType::EmergencySuspend(payload) => {
+                // Get committee and verify approvals
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                // Verify emergency suspend approvals (requires 2 members)
+                let current_time = state.get_verification_timestamp();
+                crate::kyc::verify_emergency_suspend_approvals(
+                    &committee,
+                    payload.get_approvals(),
+                    payload.get_account(),
+                    payload.get_reason_hash(),
+                    payload.get_expires_at(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
                 state
                     .emergency_suspend_kyc(
                         payload.get_account(),

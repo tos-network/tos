@@ -106,16 +106,7 @@ impl AppealKycPayload {
     }
 
     /// Consume and return inner values
-    pub fn consume(
-        self,
-    ) -> (
-        CompressedPublicKey,
-        Hash,
-        Hash,
-        Hash,
-        Hash,
-        u64,
-    ) {
+    pub fn consume(self) -> (CompressedPublicKey, Hash, Hash, Hash, Hash, u64) {
         (
             self.account,
             self.original_committee_id,

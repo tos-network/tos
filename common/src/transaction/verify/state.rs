@@ -216,6 +216,21 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
 
     // ===== KYC System Operations =====
 
+    /// Get a committee by ID
+    ///
+    /// # Arguments
+    /// * `committee_id` - The committee ID to look up
+    ///
+    /// # Returns
+    /// The committee if found, None otherwise
+    async fn get_committee(
+        &self,
+        committee_id: &'a Hash,
+    ) -> Result<Option<crate::kyc::SecurityCommittee>, E>;
+
+    /// Check if the global committee has been bootstrapped
+    async fn is_global_committee_bootstrapped(&self) -> Result<bool, E>;
+
     /// Set KYC data for a user
     ///
     /// # Arguments

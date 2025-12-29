@@ -427,6 +427,8 @@ pub enum BlockchainError {
     KycSuspended,
     #[error("Insufficient KYC level: required {0}, got {1}")]
     InsufficientKycLevel(u16, u16),
+    #[error("KYC level downgrade not allowed: current level {0}, attempted level {1}")]
+    KycDowngradeNotAllowed(u16, u16),
 
     // Committee system errors
     #[error("Committee not found")]

@@ -162,6 +162,9 @@ pub enum Column {
     // KYC appeal records
     // {user_public_key} => {KycAppealRecord}
     KycAppeal,
+    // Previous KYC status before emergency suspension (for proper restoration)
+    // {user_public_key} => {KycStatus}
+    KycEmergencyPreviousStatus,
 
     // ===== Security Committee System =====
 

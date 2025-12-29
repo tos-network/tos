@@ -659,6 +659,17 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
     ) -> Result<(), TestError> {
         Ok(())
     }
+
+    async fn get_committee(
+        &self,
+        _committee_id: &'a Hash,
+    ) -> Result<Option<tos_common::kyc::SecurityCommittee>, TestError> {
+        Ok(None)
+    }
+
+    async fn is_global_committee_bootstrapped(&self) -> Result<bool, TestError> {
+        Ok(false)
+    }
 }
 
 #[tokio::test]

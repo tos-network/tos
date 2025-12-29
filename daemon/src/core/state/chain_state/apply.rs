@@ -744,6 +744,17 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             }
         }
     }
+
+    async fn get_committee(
+        &self,
+        committee_id: &'a Hash,
+    ) -> Result<Option<tos_common::kyc::SecurityCommittee>, BlockchainError> {
+        self.inner.storage.get_committee(committee_id).await
+    }
+
+    async fn is_global_committee_bootstrapped(&self) -> Result<bool, BlockchainError> {
+        self.inner.storage.is_global_committee_bootstrapped().await
+    }
 }
 
 impl<'a, S: Storage> Deref for ApplicableChainState<'a, S> {

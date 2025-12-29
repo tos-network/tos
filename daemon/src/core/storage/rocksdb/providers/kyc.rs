@@ -124,6 +124,19 @@ impl KycProvider for RocksStorage {
             );
         }
 
+        // Check if user already has KYC and prevent level downgrade
+        let existing_kyc: Option<KycData> =
+            self.load_optional_from_disk(Column::KycData, user.as_bytes())?;
+        if let Some(existing) = existing_kyc {
+            // Reject if the new level is lower than the existing level
+            if kyc_data.level < existing.level {
+                return Err(BlockchainError::KycDowngradeNotAllowed(
+                    existing.level,
+                    kyc_data.level,
+                ));
+            }
+        }
+
         // Store KYC data
         self.insert_into_disk(Column::KycData, user.as_bytes(), &kyc_data)?;
 
@@ -181,7 +194,28 @@ impl KycProvider for RocksStorage {
             .load_optional_from_disk(Column::KycData, user.as_bytes())?
             .ok_or(BlockchainError::KycNotFound)?;
 
-        kyc_data.renew(new_verified_at, new_data_hash);
+        // Check current status before renewal - revoked KYC cannot be renewed
+        // Revoked users must go through full re-verification process
+        match kyc_data.status {
+            KycStatus::Revoked => {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "cannot renew KYC for user {}: KYC is revoked",
+                        user.as_address(self.is_mainnet())
+                    );
+                }
+                return Err(BlockchainError::KycRevoked);
+            }
+            // Suspended, Active, and Expired statuses can be renewed
+            KycStatus::Suspended | KycStatus::Active | KycStatus::Expired => {
+                // Update verification timestamp and data hash
+                kyc_data.verified_at = new_verified_at;
+                kyc_data.data_hash = new_data_hash;
+                // Only set status to Active for these allowed states
+                kyc_data.status = KycStatus::Active;
+            }
+        }
+
         self.insert_into_disk(Column::KycData, user.as_bytes(), &kyc_data)?;
 
         // Update metadata with new topoheight and tx_hash
@@ -218,8 +252,36 @@ impl KycProvider for RocksStorage {
             .load_optional_from_disk(Column::KycData, user.as_bytes())?
             .ok_or(BlockchainError::KycNotFound)?;
 
-        // Update verified_at and data_hash (keeping level and status unchanged)
-        kyc_data.renew(transferred_at, new_data_hash);
+        // Check KYC status before transfer - only Active or Expired can be transferred
+        // Revoked or Suspended KYC cannot be transferred to prevent reactivation bypass
+        match kyc_data.status {
+            KycStatus::Revoked => {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "cannot transfer KYC for user {}: KYC is revoked",
+                        user.as_address(self.is_mainnet())
+                    );
+                }
+                return Err(BlockchainError::KycRevoked);
+            }
+            KycStatus::Suspended => {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "cannot transfer KYC for user {}: KYC is suspended",
+                        user.as_address(self.is_mainnet())
+                    );
+                }
+                return Err(BlockchainError::KycSuspended);
+            }
+            KycStatus::Active | KycStatus::Expired => {
+                // Allow transfer for Active and Expired statuses
+            }
+        }
+
+        // Update verified_at, data_hash, and set status to Active
+        kyc_data.verified_at = transferred_at;
+        kyc_data.data_hash = new_data_hash;
+        kyc_data.status = KycStatus::Active;
         self.insert_into_disk(Column::KycData, user.as_bytes(), &kyc_data)?;
 
         // Update metadata with new committee_id, topoheight and tx_hash
@@ -369,11 +431,21 @@ impl KycProvider for RocksStorage {
             );
         }
 
-        // Update KYC status to Suspended
+        // Get current KYC data and save the previous status before suspension
         let mut kyc_data: KycData = self
             .load_optional_from_disk(Column::KycData, user.as_bytes())?
             .ok_or(BlockchainError::KycNotFound)?;
 
+        // Store the previous status before setting to Suspended
+        // This allows lift_emergency_suspension to restore the correct status
+        // (e.g., if user was Revoked before suspension, they should remain Revoked after lifting)
+        self.insert_into_disk(
+            Column::KycEmergencyPreviousStatus,
+            user.as_bytes(),
+            &kyc_data.status,
+        )?;
+
+        // Update KYC status to Suspended
         kyc_data.status = KycStatus::Suspended;
         self.insert_into_disk(Column::KycData, user.as_bytes(), &kyc_data)?;
 
@@ -416,16 +488,25 @@ impl KycProvider for RocksStorage {
             );
         }
 
-        // Restore KYC status to Active
+        // Restore KYC status to the previous status before suspension
         let mut kyc_data: KycData = self
             .load_optional_from_disk(Column::KycData, user.as_bytes())?
             .ok_or(BlockchainError::KycNotFound)?;
 
-        kyc_data.status = KycStatus::Active;
+        // Read the stored previous status from before the suspension
+        // For legacy records (before this fix), default to Active for backward compatibility
+        let previous_status: KycStatus = self
+            .load_optional_from_disk(Column::KycEmergencyPreviousStatus, user.as_bytes())?
+            .unwrap_or(KycStatus::Active);
+
+        kyc_data.status = previous_status;
         self.insert_into_disk(Column::KycData, user.as_bytes(), &kyc_data)?;
 
         // Remove emergency suspension data
         self.remove_from_disk(Column::KycEmergencySuspension, user.as_bytes())?;
+
+        // Remove the stored previous status as it's no longer needed
+        self.remove_from_disk(Column::KycEmergencyPreviousStatus, user.as_bytes())?;
 
         Ok(())
     }
@@ -441,6 +522,7 @@ impl KycProvider for RocksStorage {
         self.remove_from_disk(Column::KycData, user.as_bytes())?;
         self.remove_from_disk(Column::KycMetadata, user.as_bytes())?;
         self.remove_from_disk(Column::KycEmergencySuspension, user.as_bytes())?;
+        self.remove_from_disk(Column::KycEmergencyPreviousStatus, user.as_bytes())?;
 
         Ok(())
     }
@@ -500,7 +582,10 @@ impl KycProvider for RocksStorage {
         Ok(())
     }
 
-    async fn get_appeal(&self, user: &PublicKey) -> Result<Option<KycAppealRecord>, BlockchainError> {
+    async fn get_appeal(
+        &self,
+        user: &PublicKey,
+    ) -> Result<Option<KycAppealRecord>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
                 "getting KYC appeal for user {}",

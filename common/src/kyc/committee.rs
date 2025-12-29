@@ -533,6 +533,167 @@ impl CommitteeApproval {
     pub fn is_expired(&self, current_time: u64) -> bool {
         current_time.saturating_sub(self.timestamp) > APPROVAL_EXPIRY_SECONDS
     }
+
+    /// Verify the approval signature against a message
+    ///
+    /// Returns true if the signature is valid for the given message
+    pub fn verify_signature(&self, message: &[u8]) -> bool {
+        // Decompress public key and verify signature
+        match self.member_pubkey.decompress() {
+            Ok(decompressed_key) => self.signature.verify(message, &decompressed_key),
+            Err(_) => false,
+        }
+    }
+
+    /// Build domain-separated signing message for SetKyc operation
+    ///
+    /// Message format: "TOS_KYC_SET" || committee_id || account || level || data_hash || timestamp
+    pub fn build_set_kyc_message(
+        committee_id: &Hash,
+        account: &PublicKey,
+        level: u16,
+        data_hash: &Hash,
+        timestamp: u64,
+    ) -> Vec<u8> {
+        let mut message = Vec::with_capacity(128);
+        message.extend_from_slice(b"TOS_KYC_SET");
+        message.extend_from_slice(committee_id.as_bytes());
+        message.extend_from_slice(account.as_bytes());
+        message.extend_from_slice(&level.to_le_bytes());
+        message.extend_from_slice(data_hash.as_bytes());
+        message.extend_from_slice(&timestamp.to_le_bytes());
+        message
+    }
+
+    /// Build domain-separated signing message for RevokeKyc operation
+    ///
+    /// Message format: "TOS_KYC_REVOKE" || committee_id || account || reason_hash || timestamp
+    pub fn build_revoke_kyc_message(
+        committee_id: &Hash,
+        account: &PublicKey,
+        reason_hash: &Hash,
+        timestamp: u64,
+    ) -> Vec<u8> {
+        let mut message = Vec::with_capacity(128);
+        message.extend_from_slice(b"TOS_KYC_REVOKE");
+        message.extend_from_slice(committee_id.as_bytes());
+        message.extend_from_slice(account.as_bytes());
+        message.extend_from_slice(reason_hash.as_bytes());
+        message.extend_from_slice(&timestamp.to_le_bytes());
+        message
+    }
+
+    /// Build domain-separated signing message for RenewKyc operation
+    ///
+    /// Message format: "TOS_KYC_RENEW" || committee_id || account || data_hash || timestamp
+    pub fn build_renew_kyc_message(
+        committee_id: &Hash,
+        account: &PublicKey,
+        data_hash: &Hash,
+        timestamp: u64,
+    ) -> Vec<u8> {
+        let mut message = Vec::with_capacity(128);
+        message.extend_from_slice(b"TOS_KYC_RENEW");
+        message.extend_from_slice(committee_id.as_bytes());
+        message.extend_from_slice(account.as_bytes());
+        message.extend_from_slice(data_hash.as_bytes());
+        message.extend_from_slice(&timestamp.to_le_bytes());
+        message
+    }
+
+    /// Build domain-separated signing message for TransferKyc (source committee)
+    ///
+    /// Message format: "TOS_KYC_TRANSFER_SRC" || source_committee || dest_committee || account || timestamp
+    pub fn build_transfer_kyc_source_message(
+        source_committee: &Hash,
+        dest_committee: &Hash,
+        account: &PublicKey,
+        timestamp: u64,
+    ) -> Vec<u8> {
+        let mut message = Vec::with_capacity(128);
+        message.extend_from_slice(b"TOS_KYC_TRANSFER_SRC");
+        message.extend_from_slice(source_committee.as_bytes());
+        message.extend_from_slice(dest_committee.as_bytes());
+        message.extend_from_slice(account.as_bytes());
+        message.extend_from_slice(&timestamp.to_le_bytes());
+        message
+    }
+
+    /// Build domain-separated signing message for TransferKyc (destination committee)
+    ///
+    /// Message format: "TOS_KYC_TRANSFER_DST" || source_committee || dest_committee || account || new_data_hash || timestamp
+    pub fn build_transfer_kyc_dest_message(
+        source_committee: &Hash,
+        dest_committee: &Hash,
+        account: &PublicKey,
+        new_data_hash: &Hash,
+        timestamp: u64,
+    ) -> Vec<u8> {
+        let mut message = Vec::with_capacity(160);
+        message.extend_from_slice(b"TOS_KYC_TRANSFER_DST");
+        message.extend_from_slice(source_committee.as_bytes());
+        message.extend_from_slice(dest_committee.as_bytes());
+        message.extend_from_slice(account.as_bytes());
+        message.extend_from_slice(new_data_hash.as_bytes());
+        message.extend_from_slice(&timestamp.to_le_bytes());
+        message
+    }
+
+    /// Build domain-separated signing message for EmergencySuspend
+    ///
+    /// Message format: "TOS_KYC_EMERGENCY" || committee_id || account || reason_hash || expires_at || timestamp
+    pub fn build_emergency_suspend_message(
+        committee_id: &Hash,
+        account: &PublicKey,
+        reason_hash: &Hash,
+        expires_at: u64,
+        timestamp: u64,
+    ) -> Vec<u8> {
+        let mut message = Vec::with_capacity(136);
+        message.extend_from_slice(b"TOS_KYC_EMERGENCY");
+        message.extend_from_slice(committee_id.as_bytes());
+        message.extend_from_slice(account.as_bytes());
+        message.extend_from_slice(reason_hash.as_bytes());
+        message.extend_from_slice(&expires_at.to_le_bytes());
+        message.extend_from_slice(&timestamp.to_le_bytes());
+        message
+    }
+
+    /// Build domain-separated signing message for RegisterCommittee
+    ///
+    /// Message format: "TOS_COMMITTEE_REG" || parent_id || new_committee_name || region || timestamp
+    pub fn build_register_committee_message(
+        parent_id: &Hash,
+        name: &str,
+        region: KycRegion,
+        timestamp: u64,
+    ) -> Vec<u8> {
+        let mut message = Vec::with_capacity(128);
+        message.extend_from_slice(b"TOS_COMMITTEE_REG");
+        message.extend_from_slice(parent_id.as_bytes());
+        message.extend_from_slice(name.as_bytes());
+        message.push(region as u8);
+        message.extend_from_slice(&timestamp.to_le_bytes());
+        message
+    }
+
+    /// Build domain-separated signing message for UpdateCommittee
+    ///
+    /// Message format: "TOS_COMMITTEE_UPD" || committee_id || update_type || update_data_hash || timestamp
+    pub fn build_update_committee_message(
+        committee_id: &Hash,
+        update_type: u8,
+        update_data_hash: &Hash,
+        timestamp: u64,
+    ) -> Vec<u8> {
+        let mut message = Vec::with_capacity(96);
+        message.extend_from_slice(b"TOS_COMMITTEE_UPD");
+        message.extend_from_slice(committee_id.as_bytes());
+        message.push(update_type);
+        message.extend_from_slice(update_data_hash.as_bytes());
+        message.extend_from_slice(&timestamp.to_le_bytes());
+        message
+    }
 }
 
 // ===== Serializer Implementations =====
