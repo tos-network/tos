@@ -317,6 +317,16 @@ pub fn verify_bootstrap_committee<E>(
         )));
     }
 
+    // SECURITY: Ensure threshold doesn't exceed MAX_APPROVALS
+    // Otherwise governance operations become impossible (can't submit enough approvals)
+    if (payload.get_threshold() as usize) > MAX_APPROVALS {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Governance threshold {} exceeds maximum approvals allowed per transaction ({})",
+            payload.get_threshold(),
+            MAX_APPROVALS
+        )));
+    }
+
     // Validate KYC threshold
     if payload.get_kyc_threshold() == 0 {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -434,6 +444,16 @@ pub fn verify_register_committee<E>(
             "Governance threshold {} exceeds member count {}",
             payload.get_threshold(),
             member_count
+        )));
+    }
+
+    // SECURITY: Ensure threshold doesn't exceed MAX_APPROVALS
+    // Otherwise governance operations become impossible (can't submit enough approvals)
+    if (payload.get_threshold() as usize) > MAX_APPROVALS {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Governance threshold {} exceeds maximum approvals allowed per transaction ({})",
+            payload.get_threshold(),
+            MAX_APPROVALS
         )));
     }
 
@@ -594,6 +614,16 @@ pub fn verify_update_committee_with_state<E>(
                     new_threshold,
                     min_threshold,
                     member_count
+                )));
+            }
+
+            // SECURITY: Ensure threshold doesn't exceed MAX_APPROVALS
+            // Otherwise governance operations become impossible (can't submit enough approvals)
+            if new_threshold > MAX_APPROVALS {
+                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                    "Governance threshold {} exceeds maximum approvals allowed per transaction ({})",
+                    new_threshold,
+                    MAX_APPROVALS
                 )));
             }
         }

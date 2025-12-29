@@ -260,7 +260,32 @@ impl KycProvider for RocksStorage {
 
         // Check KYC status before transfer - only Active or Expired can be transferred
         // Revoked or Suspended KYC cannot be transferred to prevent reactivation bypass
-        match kyc_data.status {
+        // SECURITY: Check if suspension has expired (consistent with is_kyc_valid/get_effective_level)
+        let effective_status = if kyc_data.status == KycStatus::Suspended {
+            // Check if emergency suspension has expired
+            if let Some(suspension) = self.load_optional_from_disk::<_, EmergencySuspensionData>(
+                Column::KycEmergencySuspension,
+                user.as_bytes(),
+            )? {
+                if transferred_at >= suspension.expires_at {
+                    // Suspension has expired - use previous status
+                    self.load_optional_from_disk::<_, KycStatus>(
+                        Column::KycEmergencyPreviousStatus,
+                        user.as_bytes(),
+                    )?
+                    .unwrap_or(KycStatus::Active)
+                } else {
+                    KycStatus::Suspended
+                }
+            } else {
+                // No emergency suspension record, treat as regular suspension
+                KycStatus::Suspended
+            }
+        } else {
+            kyc_data.status
+        };
+
+        match effective_status {
             KycStatus::Revoked => {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!(

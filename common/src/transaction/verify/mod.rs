@@ -2194,6 +2194,27 @@ impl Transaction {
                 }
             }
             TransactionType::EmergencySuspend(payload) => {
+                // SECURITY: Verify that the committee is the user's verifying committee
+                // This prevents cross-committee denial-of-service attacks where any committee
+                // could suspend arbitrary users for 24 hours
+                let user_verifying_committee = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "EmergencySuspend: user has no KYC record to suspend"
+                        ))
+                    })?;
+
+                if &user_verifying_committee != payload.get_committee_id() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "EmergencySuspend: committee {} is not the user's verifying committee {}",
+                        payload.get_committee_id(),
+                        user_verifying_committee
+                    )));
+                }
+
                 // Get committee and verify approvals
                 let committee = state
                     .get_committee(payload.get_committee_id())
