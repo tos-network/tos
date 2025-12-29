@@ -1941,6 +1941,33 @@ pub struct GetKycResult {
     pub kyc: Option<KycRpcData>,
 }
 
+/// Parameters for get_kyc_batch RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetKycBatchParams<'a> {
+    /// List of addresses to query (max 100)
+    pub addresses: Cow<'a, Vec<Address>>,
+}
+
+/// Single entry in batch KYC result
+#[derive(Serialize, Deserialize)]
+pub struct KycBatchEntry {
+    /// Address queried
+    pub address: Address,
+    /// KYC data (None if user has no KYC)
+    pub kyc: Option<KycRpcData>,
+}
+
+/// Result of get_kyc_batch RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetKycBatchResult {
+    /// KYC data for each address
+    pub entries: Vec<KycBatchEntry>,
+    /// Number of addresses with valid KYC
+    pub valid_count: usize,
+    /// Number of addresses with any KYC (valid or expired)
+    pub kyc_count: usize,
+}
+
 /// Parameters for get_kyc_tier RPC method
 #[derive(Serialize, Deserialize)]
 pub struct GetKycTierParams<'a> {
@@ -2028,6 +2055,57 @@ pub struct GetCommitteeResult {
 pub struct GetGlobalCommitteeResult {
     pub committee: Option<CommitteeRpc>,
     pub is_bootstrapped: bool,
+}
+
+/// Parameters for list_committees RPC method
+#[derive(Serialize, Deserialize)]
+pub struct ListCommitteesParams {
+    /// Optional region filter (e.g., "Global", "NorthAmerica", "Europe")
+    #[serde(default)]
+    pub region: Option<String>,
+    /// Only include active committees
+    #[serde(default)]
+    pub active_only: bool,
+}
+
+/// Summary information about a committee (lightweight, for listing)
+#[derive(Serialize, Deserialize)]
+pub struct CommitteeSummary {
+    /// Committee ID
+    pub id: Hash,
+    /// Committee name
+    pub name: String,
+    /// Region (e.g., "Global", "NorthAmerica")
+    pub region: String,
+    /// Number of members
+    pub member_count: usize,
+    /// Number of active members
+    pub active_member_count: usize,
+    /// Governance threshold
+    pub threshold: u8,
+    /// KYC operation threshold
+    pub kyc_threshold: u8,
+    /// Maximum KYC level this committee can grant
+    pub max_kyc_level: u16,
+    /// Status (Active, Suspended, Dissolved)
+    pub status: String,
+    /// Parent committee ID (None for Global)
+    pub parent_id: Option<Hash>,
+    /// Whether this is the global committee
+    pub is_global: bool,
+    /// Created timestamp
+    pub created_at: u64,
+}
+
+/// Result of list_committees RPC method
+#[derive(Serialize, Deserialize)]
+pub struct ListCommitteesResult {
+    /// List of committee summaries
+    pub committees: Vec<CommitteeSummary>,
+    /// Total number of committees
+    pub total_count: usize,
+    /// Number of active committees
+    pub active_count: usize,
 }
 
 /// Parameters for get_committees_by_region RPC method

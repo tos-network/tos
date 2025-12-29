@@ -868,6 +868,7 @@ pub fn register_methods<S: Storage>(
     // KYC system
     handler.register_method("has_kyc", async_handler!(has_kyc::<S>));
     handler.register_method("get_kyc", async_handler!(get_kyc::<S>));
+    handler.register_method("get_kyc_batch", async_handler!(get_kyc_batch::<S>));
     handler.register_method("get_kyc_tier", async_handler!(get_kyc_tier::<S>));
     handler.register_method("is_kyc_valid", async_handler!(is_kyc_valid::<S>));
     handler.register_method("meets_kyc_level", async_handler!(meets_kyc_level::<S>));
@@ -880,6 +881,7 @@ pub fn register_methods<S: Storage>(
         "get_global_committee",
         async_handler!(get_global_committee::<S>),
     );
+    handler.register_method("list_committees", async_handler!(list_committees::<S>));
 
     if allow_mining_methods {
         handler.register_method(
@@ -4675,6 +4677,98 @@ async fn get_kyc<S: Storage>(context: &Context, body: Value) -> Result<Value, In
     Ok(json!(GetKycResult { kyc }))
 }
 
+/// Maximum number of addresses in a batch request
+const MAX_KYC_BATCH_SIZE: usize = 100;
+
+/// Get KYC data for multiple users in a single request
+///
+/// This is more efficient than multiple get_kyc calls for dApps
+/// that need to check KYC status of multiple users.
+async fn get_kyc_batch<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetKycBatchParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Validate batch size
+    if params.addresses.len() > MAX_KYC_BATCH_SIZE {
+        return Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
+            "Batch size exceeds maximum of {} addresses",
+            MAX_KYC_BATCH_SIZE
+        )));
+    }
+
+    // Validate network for all addresses
+    let is_mainnet = blockchain.get_network().is_mainnet();
+    for addr in params.addresses.iter() {
+        if addr.is_mainnet() != is_mainnet {
+            return Err(InternalRpcError::InvalidParamsAny(
+                BlockchainError::InvalidNetwork.into(),
+            ));
+        }
+    }
+
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Collect public keys
+    let public_keys: Vec<_> = params
+        .addresses
+        .iter()
+        .map(|a| a.get_public_key().clone())
+        .collect();
+
+    let storage = blockchain.get_storage().read().await;
+    let batch_results = storage
+        .get_kyc_batch(&public_keys)
+        .await
+        .context("Error while retrieving KYC batch data")?;
+
+    let mut entries = Vec::with_capacity(batch_results.len());
+    let mut valid_count = 0usize;
+    let mut kyc_count = 0usize;
+
+    for (i, (_pubkey, kyc_data)) in batch_results.into_iter().enumerate() {
+        let address = params.addresses[i].clone();
+        let kyc = kyc_data.map(|data| {
+            kyc_count += 1;
+            if data.is_valid(current_time) {
+                valid_count += 1;
+            }
+
+            let days_until_expiry = {
+                let days = data.days_until_expiry(current_time);
+                if days == u64::MAX {
+                    None
+                } else {
+                    Some(days)
+                }
+            };
+
+            KycRpcData {
+                level: data.level,
+                tier: data.get_tier(),
+                status: data.status.as_str().to_string(),
+                verified_at: data.verified_at,
+                expires_at: data.get_expires_at(),
+                days_until_expiry,
+                is_valid: data.is_valid(current_time),
+            }
+        });
+
+        entries.push(KycBatchEntry { address, kyc });
+    }
+
+    Ok(json!(GetKycBatchResult {
+        entries,
+        valid_count,
+        kyc_count,
+    }))
+}
+
 /// Get effective KYC tier for a user
 async fn get_kyc_tier<S: Storage>(
     context: &Context,
@@ -4849,6 +4943,89 @@ async fn get_global_committee<S: Storage>(
         committee,
         is_bootstrapped,
     }))
+}
+
+/// List all committees with optional filtering
+async fn list_committees<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: ListCommitteesParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    let storage = blockchain.get_storage().read().await;
+
+    // Get all committee IDs
+    let all_ids = storage
+        .get_all_committee_ids()
+        .await
+        .context("Error while retrieving committee IDs")?;
+
+    let mut committees = Vec::with_capacity(all_ids.len());
+    let mut active_count = 0usize;
+
+    for id in all_ids {
+        if let Some(committee) = storage
+            .get_committee(&id)
+            .await
+            .context("Error while retrieving committee")?
+        {
+            // Apply region filter if specified
+            if let Some(ref region_filter) = params.region {
+                if committee.region.as_str() != region_filter {
+                    continue;
+                }
+            }
+
+            // Apply active_only filter
+            let is_active = committee.status == tos_common::kyc::CommitteeStatus::Active;
+            if params.active_only && !is_active {
+                continue;
+            }
+
+            if is_active {
+                active_count += 1;
+            }
+
+            committees.push(convert_committee_to_summary(&committee));
+        }
+    }
+
+    let total_count = committees.len();
+
+    Ok(json!(ListCommitteesResult {
+        committees,
+        total_count,
+        active_count,
+    }))
+}
+
+/// Convert SecurityCommittee to lightweight summary format
+fn convert_committee_to_summary(
+    committee: &tos_common::kyc::SecurityCommittee,
+) -> CommitteeSummary {
+    use tos_common::kyc::MemberStatus;
+
+    let active_member_count = committee
+        .members
+        .iter()
+        .filter(|m| m.status == MemberStatus::Active)
+        .count();
+
+    CommitteeSummary {
+        id: committee.id.clone(),
+        name: committee.name.clone(),
+        region: committee.region.as_str().to_string(),
+        member_count: committee.members.len(),
+        active_member_count,
+        threshold: committee.threshold,
+        kyc_threshold: committee.kyc_threshold,
+        max_kyc_level: committee.max_kyc_level,
+        status: committee.status.as_str().to_string(),
+        parent_id: committee.parent_id.clone(),
+        is_global: committee.is_global(),
+        created_at: committee.created_at,
+    }
 }
 
 /// Convert SecurityCommittee to RPC-friendly format
