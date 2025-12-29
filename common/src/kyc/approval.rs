@@ -1,14 +1,85 @@
-// Approval Verification Module
-//
-// This module provides stateful verification of committee approvals
-// for KYC transactions. It verifies:
-// 1. Committee existence and active status
-// 2. Approver membership and active status
-// 3. Signature validity using domain-separated messages
-// 4. Threshold enforcement
-//
-// SECURITY: This is critical for consensus - all approval validations
-// must be deterministic and use chain state.
+//! # Approval Verification Module
+//!
+//! This module provides stateful verification of committee approvals
+//! for KYC transactions. It verifies:
+//! 1. Committee existence and active status
+//! 2. Approver membership and active status
+//! 3. Signature validity using domain-separated messages
+//! 4. Threshold enforcement
+//!
+//! # Threshold Requirements Summary
+//!
+//! All KYC operations require cryptographically signed approvals from active
+//! committee members. The required number of approvals varies by operation type.
+//!
+//! ## Threshold Calculation by Operation Type
+//!
+//! | Operation | Threshold Source | Formula | Example (7 members) |
+//! |-----------|-----------------|---------|---------------------|
+//! | SetKyc (Tier 1-4) | `kyc_threshold` | Fixed | 1 |
+//! | SetKyc (Tier 5+) | `kyc_threshold + 1` | High-tier bonus | 2 |
+//! | RevokeKyc | `kyc_threshold` | Fixed | 1 |
+//! | RenewKyc | `kyc_threshold` | Fixed | 1 |
+//! | TransferKyc | `kyc_threshold` | Both committees | 1 each |
+//! | EmergencySuspend | Fixed | Always 2 | 2 |
+//! | RegisterCommittee | `threshold` | Parent's governance | 5 (≥2/3) |
+//! | UpdateCommittee | `threshold` | Governance | 5 (≥2/3) |
+//! | AddMember | `threshold` | Governance | 5 (≥2/3) |
+//! | RemoveMember | `threshold` | Governance | 5 (≥2/3) |
+//! | AppealKyc | `threshold` | Parent committee | 5 (≥2/3) |
+//!
+//! ## Key Concepts
+//!
+//! ### Two Threshold Types
+//!
+//! Each committee has two separate thresholds:
+//!
+//! - **`kyc_threshold`**: For routine KYC operations (SetKyc, RevokeKyc, RenewKyc, TransferKyc)
+//!   - Typically set to 1-3 for efficiency
+//!   - Allows daily KYC approvals without requiring full committee consensus
+//!
+//! - **`threshold`** (governance threshold): For structural/governance changes
+//!   - Must be ≥ 2/3 of member count (enforced by `verify_update_committee_with_state`)
+//!   - Used for: RegisterCommittee, UpdateCommittee, AddMember, RemoveMember, AppealKyc
+//!   - Ensures strong consensus for important decisions
+//!
+//! ### RegisterCommittee Threshold
+//!
+//! Creating a new committee requires approval from the **parent committee**:
+//!
+//! ```text
+//! Required = parent_committee.threshold  (governance threshold)
+//! ```
+//!
+//! For example, if Global Committee has 11 members with threshold=8:
+//! - Creating a new regional committee requires 8 approvals from Global members
+//!
+//! ### High-Tier KYC Bonus
+//!
+//! For SetKyc operations at Tier 5 or higher, an additional approval is required:
+//!
+//! ```text
+//! Required = kyc_threshold + 1  (if tier >= 5)
+//! ```
+//!
+//! This adds extra security for high-value KYC levels.
+//!
+//! ### Emergency Operations
+//!
+//! Emergency operations have fixed thresholds regardless of committee configuration:
+//!
+//! - `EmergencySuspend`: 2 approvals (allows quick response)
+//! - `EmergencyRemoveMember`: 3 approvals
+//!
+//! ## Security
+//!
+//! - **Domain separation**: Each operation type has a unique message prefix
+//! - **Timestamp binding**: Approvals include timestamps to prevent replay
+//! - **Member validation**: Only active committee members can approve
+//! - **Cryptographic verification**: All signatures are verified against the message
+//!
+//! SECURITY: This is critical for consensus - all approval validations
+//! must be deterministic and use chain state.
 
 use crate::crypto::{Hash, PublicKey};
 use crate::kyc::{

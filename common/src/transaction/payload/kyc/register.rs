@@ -57,15 +57,60 @@ impl Serializer for NewCommitteeMember {
 
 /// RegisterCommitteePayload is used to create a regional committee
 ///
-/// This transaction requires parent committee's threshold approval
+/// # Threshold Requirements
 ///
-/// Requirements:
+/// This transaction requires approval from the **parent committee** based on the
+/// parent's governance threshold. The threshold calculation uses `required_threshold()`
+/// with `OperationType::RegisterCommittee`.
+///
+/// ## Approval Rules
+///
+/// | Parent Committee | Required Threshold | Example |
+/// |-----------------|-------------------|---------|
+/// | Global (11 members, threshold=8) | 8 approvals | 8/11 (73%) |
+/// | Regional (7 members, threshold=5) | 5 approvals | 5/7 (71%) |
+///
+/// The required threshold is the parent committee's **governance threshold**
+/// (the `threshold` field), NOT the `kyc_threshold`. This ensures that creating
+/// new committees requires strong consensus from the parent committee.
+///
+/// ## Verification Flow
+///
+/// 1. **Stateless verification** (`verify_register_committee`):
+///    - Validates at least 1 approval is provided
+///    - Validates committee name (non-empty, max 64 chars)
+///    - Validates member count (3-15 members)
+///    - Validates member roles (at least one Chair)
+///    - Validates governance threshold (>= 2/3 of members)
+///    - Validates approval timestamps (not expired, not in future)
+///
+/// 2. **Stateful verification** (`verify_register_committee_approvals`):
+///    - Loads parent committee from state
+///    - Verifies parent committee is active
+///    - Verifies each approver is an active parent committee member
+///    - Verifies cryptographic signatures using domain-separated messages
+///    - Enforces parent's governance threshold
+///
+/// ## Security Considerations
+///
+/// - **Domain separation**: Signatures include operation type prefix
+///   (`TOS_REGISTER_COMMITTEE:`) to prevent cross-operation replay attacks
+/// - **Timestamp binding**: Each approval includes a timestamp that is verified
+///   against the block timestamp to prevent replay attacks
+/// - **Member validation**: Only active parent committee members can approve
+/// - **Threshold enforcement**: Cannot create a committee with fewer approvals
+///   than the parent's governance threshold
+///
+/// # Other Requirements
+///
 /// - Parent committee must exist and be active
 /// - Parent's max_kyc_level must be >= new committee's max_kyc_level
-/// - Regional committees should have 7-11 members
-/// - Threshold must be >= 2/3 of members
+/// - Regional committees should have 7-11 members (3-15 allowed)
+/// - New committee's threshold must be >= 2/3 of its member count
 ///
-/// Gas cost: 80,000 gas
+/// # Gas Cost
+///
+/// 80,000 gas
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RegisterCommitteePayload {
     /// Committee name

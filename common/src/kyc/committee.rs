@@ -165,26 +165,73 @@ impl SecurityCommittee {
     }
 
     /// Calculate required threshold for an operation
+    ///
+    /// # Threshold Types
+    ///
+    /// This committee has two threshold values:
+    /// - `kyc_threshold`: For routine KYC operations (typically 1-3)
+    /// - `threshold`: For governance operations (must be >= 2/3 of members)
+    ///
+    /// # Threshold by Operation
+    ///
+    /// | Category | Operations | Threshold | Notes |
+    /// |----------|-----------|-----------|-------|
+    /// | **KYC (routine)** | SetKyc (Tier 1-4), RevokeKyc, RenewKyc, TransferKyc | `kyc_threshold` | Efficient daily operations |
+    /// | **KYC (high-tier)** | SetKyc (Tier 5+) | `kyc_threshold + 1` | Extra security for high-value |
+    /// | **Emergency** | EmergencySuspend | 2 (fixed) | Quick response capability |
+    /// | **Emergency** | EmergencyRemoveMember | 3 (fixed) | Slightly higher bar |
+    /// | **Governance** | AddMember, RemoveMember, UpdateThreshold, etc. | `threshold` | >= 2/3 consensus |
+    /// | **Child Committee** | RegisterCommittee | `threshold` | Parent committee's governance |
+    /// | **Appeal** | AppealKyc | `threshold` | Parent committee decides |
+    ///
+    /// # Examples
+    ///
+    /// ```text
+    /// Committee: 7 members, threshold=5, kyc_threshold=1
+    ///
+    /// SetKyc (Tier 2):      1 approval  (kyc_threshold)
+    /// SetKyc (Tier 5):      2 approvals (kyc_threshold + 1)
+    /// RevokeKyc:            1 approval  (kyc_threshold)
+    /// EmergencySuspend:     2 approvals (fixed)
+    /// AddMember:            5 approvals (threshold, >= 2/3)
+    /// RegisterCommittee:    5 approvals (threshold, parent decides)
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `operation` - The operation type to get threshold for
+    /// * `tier` - Optional KYC tier (only used for SetKyc)
+    ///
+    /// # Returns
+    ///
+    /// The required number of valid approvals for this operation
     pub fn required_threshold(&self, operation: &OperationType, tier: Option<u8>) -> u8 {
         match operation {
             // KYC operations: use kyc_threshold
+            // High-tier (5+) requires extra approval for security
             OperationType::SetKyc => match tier {
                 Some(t) if t >= 5 => self.kyc_threshold.saturating_add(1),
                 _ => self.kyc_threshold,
             },
             OperationType::RevokeKyc | OperationType::RenewKyc => self.kyc_threshold,
 
-            // Transfer KYC: requires approval from both committees
+            // Transfer KYC: requires approval from both source and destination committees
+            // Each committee uses its own kyc_threshold
             OperationType::TransferKyc => self.kyc_threshold,
 
-            // Appeal: handled by parent committee (uses parent's threshold)
+            // Appeal: handled by parent committee using parent's governance threshold
+            // This ensures appeals require strong consensus
             OperationType::AppealKyc => self.threshold,
 
-            // Emergency operations (fixed thresholds)
+            // Emergency operations: fixed thresholds for quick response
+            // EmergencySuspend: 2 (allows rapid action with minimal consensus)
+            // EmergencyRemoveMember: 3 (slightly higher bar for member removal)
             OperationType::EmergencySuspend => 2,
             OperationType::EmergencyRemoveMember => 3,
 
-            // Governance operations: >= 2/3 (use threshold)
+            // Governance operations: require >= 2/3 majority (use threshold)
+            // This includes creating child committees (RegisterCommittee)
+            // The parent committee's threshold applies when registering new committees
             OperationType::AddMember
             | OperationType::RemoveMember
             | OperationType::UpdateThreshold
