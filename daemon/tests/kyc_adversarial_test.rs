@@ -302,7 +302,10 @@ impl MockState {
         kyc.previous_status = Some(kyc.status);
         kyc.status = KycStatus::Suspended;
         // Use saturating arithmetic to prevent overflow
-        kyc.expires_at = Some(self.current_time.saturating_add(duration_hours.saturating_mul(3600)));
+        kyc.expires_at = Some(
+            self.current_time
+                .saturating_add(duration_hours.saturating_mul(3600)),
+        );
         Ok(())
     }
 
@@ -813,7 +816,10 @@ mod time_based_tests {
         // Verify: future_timestamp is in the future beyond allowed skew (1 hour)
         let max_skew = 3600u64; // 1 hour
         let is_future = future_timestamp > now.saturating_add(max_skew);
-        assert!(is_future, "Approval timestamp should be beyond allowed skew");
+        assert!(
+            is_future,
+            "Approval timestamp should be beyond allowed skew"
+        );
     }
 }
 
@@ -863,9 +869,11 @@ mod threshold_limit_tests {
         // Maximum members
         assert_eq!(MAX_COMMITTEE_MEMBERS, 21);
 
-        // Verify edge cases
-        assert!(2 < MIN_COMMITTEE_MEMBERS); // 2 members not allowed
-        assert!(22 > MAX_COMMITTEE_MEMBERS); // 22 members not allowed
+        // Verify edge cases using variables to avoid const assertion optimization
+        let two_members = 2usize;
+        let twenty_two_members = 22usize;
+        assert!(two_members < MIN_COMMITTEE_MEMBERS); // 2 members not allowed
+        assert!(twenty_two_members > MAX_COMMITTEE_MEMBERS); // 22 members not allowed
     }
 
     /// Test: KYC level boundaries
@@ -1185,7 +1193,8 @@ mod potential_remaining_bugs {
     #[test]
     fn test_empty_member_list_protection() {
         // Verify MIN_COMMITTEE_MEMBERS prevents empty committees
-        assert!(MIN_COMMITTEE_MEMBERS >= 3);
+        let min_members = MIN_COMMITTEE_MEMBERS;
+        assert!(min_members >= 3);
 
         // An empty member list would be a serious vulnerability
         let empty_members: Vec<CommitteeMember> = vec![];
@@ -1591,8 +1600,7 @@ mod signature_replay_tests {
         assert!(
             !meets_new_threshold,
             "Old approval count ({}) should not meet new threshold ({})",
-            collected_approvals,
-            new_threshold
+            collected_approvals, new_threshold
         );
 
         // In a real implementation, the approval context would include the threshold
@@ -1763,13 +1771,13 @@ mod signature_replay_tests {
 
         // User B should not have KYC (approval was for user A)
         assert!(
-            state.kyc_data.get(&user_b).is_none(),
+            !state.kyc_data.contains_key(&user_b),
             "User B should not have KYC from user A's approval"
         );
 
         // Verify user A has KYC
         assert!(
-            state.kyc_data.get(&user_a).is_some(),
+            state.kyc_data.contains_key(&user_a),
             "User A should have KYC"
         );
     }
@@ -2061,8 +2069,7 @@ mod overflow_underflow_tests {
         assert!(
             is_expired,
             "Zero timestamp should be considered expired (age: {} > expiry: {})",
-            age,
-            APPROVAL_EXPIRY_SECONDS
+            age, APPROVAL_EXPIRY_SECONDS
         );
     }
 
@@ -2219,7 +2226,10 @@ mod determinism_tests {
         let id3 = compute_committee_id("Committee A", timestamp + 1);
 
         assert_ne!(id1, id2, "Different names should produce different IDs");
-        assert_ne!(id1, id3, "Different timestamps should produce different IDs");
+        assert_ne!(
+            id1, id3,
+            "Different timestamps should produce different IDs"
+        );
     }
 
     /// Test: Member order independence for approval counting
@@ -2234,7 +2244,7 @@ mod determinism_tests {
             .collect();
 
         // Order 1: [0, 1, 2, 3]
-        let approvals_order1 = vec![
+        let approvals_order1 = [
             pubkeys[0].clone(),
             pubkeys[1].clone(),
             pubkeys[2].clone(),
@@ -2242,7 +2252,7 @@ mod determinism_tests {
         ];
 
         // Order 2: [3, 1, 0, 2]
-        let approvals_order2 = vec![
+        let approvals_order2 = [
             pubkeys[3].clone(),
             pubkeys[1].clone(),
             pubkeys[0].clone(),
@@ -2290,7 +2300,10 @@ mod determinism_tests {
         let hash2 = hash(data2);
         let hash3 = hash(data3);
 
-        assert_ne!(hash1, hash2, "Different data should produce different hashes");
+        assert_ne!(
+            hash1, hash2,
+            "Different data should produce different hashes"
+        );
         assert_ne!(
             hash1, hash3,
             "Even small differences should produce different hashes"
@@ -2321,10 +2334,7 @@ mod determinism_tests {
         let hash1 = hash(&msg1);
         let hash2 = hash(&msg2);
 
-        assert_eq!(
-            hash1, hash2,
-            "Same binding data should produce same hash"
-        );
+        assert_eq!(hash1, hash2, "Same binding data should produce same hash");
     }
 
     /// Test: Idempotent SetKyc - setting same KYC twice has same result
@@ -2438,7 +2448,7 @@ mod duplicate_injection_tests {
             .collect();
 
         // Simulate approval collection with duplicates
-        let approvals_with_duplicates = vec![
+        let approvals_with_duplicates = [
             pubkeys[0].clone(),
             pubkeys[1].clone(),
             pubkeys[0].clone(), // Duplicate of first
@@ -2628,10 +2638,7 @@ mod duplicate_injection_tests {
         );
 
         // Records should be keyed by different users (distinct entries)
-        assert_ne!(
-            user_a, user_b,
-            "User A and B should be distinct identities"
-        );
+        assert_ne!(user_a, user_b, "User A and B should be distinct identities");
 
         // Both have the same data_hash but are different KYC records
         assert_eq!(
@@ -2681,8 +2688,7 @@ mod verification_integration_tests {
         assert!(
             stateless_valid,
             "Stateless check: threshold {} should be <= member count {}",
-            threshold,
-            member_count
+            threshold, member_count
         );
 
         // Now add committee to state and verify stateful check agrees
@@ -2768,8 +2774,7 @@ mod verification_integration_tests {
         assert!(
             layer4_levels_consistent,
             "Layer 4: Child max_kyc_level {} must be <= parent max_kyc_level {}",
-            child.max_kyc_level,
-            parent.max_kyc_level
+            child.max_kyc_level, parent.max_kyc_level
         );
 
         // All layers agree the committees are valid
@@ -2842,7 +2847,11 @@ mod verification_integration_tests {
             CommitteeStatus::Suspended,
             "Suspended == Suspended"
         );
-        assert_eq!(dissolved, CommitteeStatus::Dissolved, "Dissolved == Dissolved");
+        assert_eq!(
+            dissolved,
+            CommitteeStatus::Dissolved,
+            "Dissolved == Dissolved"
+        );
 
         // Test that status can be used in pattern matching (API contract)
         let test_status = CommitteeStatus::Dissolved;
@@ -3164,10 +3173,7 @@ mod invalid_data_tests {
         );
 
         // Verify empty list is actually empty
-        assert!(
-            empty_approvals.is_empty(),
-            "Approval list should be empty"
-        );
+        assert!(empty_approvals.is_empty(), "Approval list should be empty");
     }
 
     /// Test: Hash::zero() is handled correctly (valid but represents no data)
@@ -3184,10 +3190,7 @@ mod invalid_data_tests {
 
         // Zero hash should equal another zero hash (consistency)
         let another_zero = Hash::zero();
-        assert_eq!(
-            zero_hash, another_zero,
-            "Two zero hashes should be equal"
-        );
+        assert_eq!(zero_hash, another_zero, "Two zero hashes should be equal");
 
         // Zero hash should be different from a computed hash
         use tos_common::crypto::hash;
@@ -3217,10 +3220,7 @@ mod invalid_data_tests {
 
         // SetKyc with zero hash should succeed (valid placeholder)
         let result = state.set_kyc(user.clone(), 255, committee_id, zero_hash);
-        assert!(
-            result.is_ok(),
-            "SetKyc with zero hash should succeed"
-        );
+        assert!(result.is_ok(), "SetKyc with zero hash should succeed");
     }
 
     /// Test: Empty committee name handling
@@ -3265,7 +3265,7 @@ mod invalid_data_tests {
         // Threshold 0 is invalid because:
         // 1. It would allow operations without any approvals
         // 2. It violates the 2/3 rule (0 < 5 * 2/3)
-        let min_required = (member_count * 2 + 2) / 3; // Ceiling of 2/3
+        let min_required = (member_count * 2).div_ceil(3); // Ceiling of 2/3
         assert!(
             (threshold as usize) < min_required,
             "Threshold 0 violates 2/3 minimum rule"
@@ -3299,7 +3299,7 @@ mod invalid_data_tests {
 
         // KYC threshold should also respect the 2/3 rule relative to committee size
         let member_count = 5usize;
-        let min_required = (member_count * 2 + 2) / 3;
+        let min_required = (member_count * 2).div_ceil(3);
         assert!(
             (kyc_threshold as usize) < min_required,
             "KYC threshold 0 violates 2/3 rule for {} members",
@@ -3368,11 +3368,7 @@ mod serialization_tests {
         let bytes = *public_key.as_bytes();
 
         // Verify bytes are 32 bytes (Ristretto point size)
-        assert_eq!(
-            bytes.len(),
-            32,
-            "Compressed public key should be 32 bytes"
-        );
+        assert_eq!(bytes.len(), 32, "Compressed public key should be 32 bytes");
 
         // Create another keypair and verify different keys have different bytes
         let keypair2 = KeyPair::new();
@@ -3742,7 +3738,9 @@ mod state_machine_tests {
 
         // PHASE 3: Suspend committee
         committee.status = CommitteeStatus::Suspended;
-        state.committees.insert(committee_id.clone(), committee.clone());
+        state
+            .committees
+            .insert(committee_id.clone(), committee.clone());
 
         // Verify suspension
         assert_eq!(
@@ -3881,7 +3879,8 @@ mod state_machine_tests {
         let committee_b_id = committee_b.id.clone();
         state.add_committee(committee_b);
 
-        let transfer_result = state.transfer_kyc(&user, &committee_id, &committee_b_id, Hash::zero());
+        let transfer_result =
+            state.transfer_kyc(&user, &committee_id, &committee_b_id, Hash::zero());
         assert!(
             transfer_result.is_err(),
             "Transfer should fail while KYC is Suspended"
@@ -3925,13 +3924,11 @@ mod state_machine_tests {
             renewal_result.is_err(),
             "Renewal should fail for Revoked KYC"
         );
-        assert_eq!(
-            renewal_result.unwrap_err(),
-            "Cannot renew revoked KYC"
-        );
+        assert_eq!(renewal_result.unwrap_err(), "Cannot renew revoked KYC");
 
         // Transfer should fail for revoked KYC
-        let transfer_result = state.transfer_kyc(&user, &committee_id, &committee_b_id, Hash::zero());
+        let transfer_result =
+            state.transfer_kyc(&user, &committee_id, &committee_b_id, Hash::zero());
         assert!(
             transfer_result.is_err(),
             "Transfer should fail for Revoked KYC"
