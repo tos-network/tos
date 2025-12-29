@@ -598,6 +598,7 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         _transferred_at: u64,
         _tx_hash: &'a Hash,
         _dest_max_kyc_level: u16,
+        _verification_timestamp: u64,
     ) -> Result<(), TestError> {
         Ok(())
     }

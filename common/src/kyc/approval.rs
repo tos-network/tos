@@ -411,7 +411,12 @@ pub fn verify_update_committee_approvals(
     update_data_hash: &Hash,
     current_time: u64,
 ) -> Result<ApprovalVerificationResult, ApprovalError> {
-    // Allow updates even if committee is suspended (to unsuspend it)
+    // SECURITY: Dissolved committees cannot be updated or reactivated.
+    // This prevents zombie committees from self-reanimating.
+    // Suspended committees CAN be updated (to unsuspend them).
+    if committee.status == CommitteeStatus::Dissolved {
+        return Err(ApprovalError::CommitteeNotActive(committee.id.clone()));
+    }
 
     let committee_id = committee.id.clone();
     let update_data_hash = update_data_hash.clone();

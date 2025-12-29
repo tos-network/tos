@@ -589,6 +589,7 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for KycTestC
         transferred_at: u64,
         _tx_hash: &'a Hash,
         dest_max_kyc_level: u16,
+        _verification_timestamp: u64,
     ) -> Result<(), TestError> {
         let kyc = self.kyc_data.get_mut(user).ok_or(TestError::KycNotFound)?;
         if kyc.status == KycStatus::Revoked || kyc.status == KycStatus::Suspended {
@@ -1184,7 +1185,8 @@ async fn test_kyc_transfer() {
             &new_data_hash,
             2000,
             &Hash::new([7u8; 32]),
-            100, // dest committee max_kyc_level
+            100,  // dest committee max_kyc_level
+            2000, // verification_timestamp
         )
         .await
         .expect("Should transfer KYC");
@@ -1277,7 +1279,8 @@ async fn test_kyc_suspended_cannot_transfer() {
             &Hash::new([8u8; 32]),
             2000,
             &Hash::new([9u8; 32]),
-            100, // dest committee max_kyc_level
+            100,  // dest committee max_kyc_level
+            2000, // verification_timestamp
         )
         .await;
     assert!(result.is_err(), "Should not transfer suspended KYC");

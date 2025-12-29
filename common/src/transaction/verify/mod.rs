@@ -1886,6 +1886,8 @@ impl Transaction {
                 // Transfer KYC to destination committee
                 // The max_kyc_level check is done inside transfer_kyc to ensure
                 // user's KYC level doesn't exceed destination committee's max level
+                // SECURITY FIX (Issue #26): Pass current_time (block/verification time) instead
+                // of payload time for suspension expiry check
                 state
                     .transfer_kyc(
                         payload.get_account(),
@@ -1895,6 +1897,7 @@ impl Transaction {
                         payload.get_transferred_at(),
                         tx_hash,
                         dest_committee.max_kyc_level,
+                        current_time,
                     )
                     .await
                     .map_err(VerificationError::State)?;
@@ -1968,6 +1971,16 @@ impl Transaction {
                         ))
                     })?;
 
+                // SECURITY FIX (Issue #29): Verify original committee is Active
+                // Appeals should only be accepted against active committees
+                if original_committee.status != crate::kyc::CommitteeStatus::Active {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: original committee {} is not active (status: {:?})",
+                        payload.get_original_committee_id(),
+                        original_committee.status
+                    )));
+                }
+
                 // Verify parent committee exists
                 let parent_committee = state
                     .get_committee(payload.get_parent_committee_id())
@@ -1979,6 +1992,16 @@ impl Transaction {
                             payload.get_parent_committee_id()
                         ))
                     })?;
+
+                // SECURITY FIX (Issue #29): Verify parent committee is Active
+                // Appeals must be submitted to active parent committees that can review them
+                if parent_committee.status != crate::kyc::CommitteeStatus::Active {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: parent committee {} is not active (status: {:?})",
+                        payload.get_parent_committee_id(),
+                        parent_committee.status
+                    )));
+                }
 
                 // Verify the original committee's parent matches the claimed parent
                 if let Some(ref actual_parent_id) = original_committee.parent_id {
@@ -2066,6 +2089,18 @@ impl Transaction {
                         ))
                     })?;
 
+                // SECURITY: Verify parent committee can manage the requested region
+                // Global committees can manage any region; regional committees can only
+                // manage their own region. This prevents unauthorized cross-region registration.
+                if !parent_committee.can_manage_region(&payload.get_region()) {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "Parent committee {} (region: {}) cannot register committees in region {}",
+                        payload.get_parent_id(),
+                        parent_committee.region,
+                        payload.get_region()
+                    )));
+                }
+
                 // Compute config hash from payload to bind signatures to full configuration
                 let members: Vec<_> = payload
                     .get_members()
@@ -2143,6 +2178,7 @@ impl Transaction {
                 // Validate governance constraints using committee state
                 let committee_info = kyc::CommitteeGovernanceInfo {
                     member_count: committee.active_member_count(),
+                    total_member_count: committee.total_member_count(),
                     threshold: committee.threshold,
                 };
                 let current_time = state.get_verification_timestamp();

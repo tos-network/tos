@@ -360,8 +360,18 @@ impl CommitteeProvider for RocksStorage {
             .iter_mut()
             .find(|m| m.public_key == *member_pubkey)
         {
-            member.status = new_status;
+            member.status = new_status.clone();
             self.insert_into_disk(Column::Committees, committee_id.as_bytes(), &committee)?;
+
+            // SECURITY FIX (Issue #28): When transitioning to MemberStatus::Removed,
+            // also remove the member from the MemberCommittees index.
+            // This prevents stale indexes where removed members still appear to be
+            // associated with committees they're no longer part of.
+            if new_status == MemberStatus::Removed {
+                self.remove_member_committee_index(member_pubkey, committee_id)
+                    .await?;
+            }
+
             Ok(())
         } else {
             Err(BlockchainError::MemberNotFound)
@@ -571,6 +581,24 @@ impl CommitteeProvider for RocksStorage {
             trace!("deleting committee {}", committee_id);
         }
 
+        // SECURITY FIX (Issue #27): Check if committee has children before deletion
+        // Deleting a parent committee would orphan children (their parent_id would point to
+        // a non-existent committee). Block deletion if children exist.
+        let children: Option<Vec<Hash>> =
+            self.load_optional_from_disk(Column::ChildCommittees, committee_id.as_bytes())?;
+        if let Some(ref child_list) = children {
+            if !child_list.is_empty() {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "cannot delete committee {}: has {} children",
+                        committee_id,
+                        child_list.len()
+                    );
+                }
+                return Err(BlockchainError::CommitteeHasChildren);
+            }
+        }
+
         // Get committee for cleanup
         if let Some(committee) = self.get_committee(committee_id).await? {
             // Remove from region index
@@ -593,7 +621,7 @@ impl CommitteeProvider for RocksStorage {
         // Delete the committee itself
         self.remove_from_disk(Column::Committees, committee_id.as_bytes())?;
 
-        // Delete child committees list
+        // Delete child committees list (should be empty at this point)
         self.remove_from_disk(Column::ChildCommittees, committee_id.as_bytes())?;
 
         Ok(())

@@ -79,10 +79,11 @@ pub trait KycProvider {
     /// * `user` - The user's public key
     /// * `new_committee_id` - The new committee ID (destination)
     /// * `new_data_hash` - The new off-chain data hash from destination committee
-    /// * `transferred_at` - The transfer timestamp
+    /// * `transferred_at` - The transfer timestamp (used as new verified_at)
     /// * `topoheight` - The block height when transferred
     /// * `tx_hash` - The transaction hash
     /// * `dest_max_kyc_level` - Destination committee's max KYC level (for validation)
+    /// * `verification_timestamp` - Block/verification time for checking suspension expiry
     async fn transfer_kyc(
         &mut self,
         user: &PublicKey,
@@ -92,6 +93,7 @@ pub trait KycProvider {
         topoheight: TopoHeight,
         tx_hash: &Hash,
         dest_max_kyc_level: u16,
+        verification_timestamp: u64,
     ) -> Result<(), BlockchainError>;
 
     /// Revoke KYC for a user

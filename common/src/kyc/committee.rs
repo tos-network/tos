@@ -261,6 +261,15 @@ impl SecurityCommittee {
             .count()
     }
 
+    /// Get total member count (including inactive/suspended/removed members)
+    ///
+    /// SECURITY: This count is used for MAX_COMMITTEE_MEMBERS enforcement
+    /// to prevent committees from bypassing limits by suspending members.
+    #[inline]
+    pub fn total_member_count(&self) -> usize {
+        self.members.len()
+    }
+
     /// Get member by public key
     pub fn get_member(&self, pubkey: &PublicKey) -> Option<&CommitteeMember> {
         self.members.iter().find(|m| &m.public_key == pubkey)

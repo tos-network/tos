@@ -457,6 +457,8 @@ pub enum BlockchainError {
     CommitteeNotActive,
     #[error("Invalid committee threshold")]
     InvalidCommitteeThreshold,
+    #[error("Cannot delete committee with active children")]
+    CommitteeHasChildren,
 }
 
 impl BlockchainError {

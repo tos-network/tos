@@ -342,6 +342,16 @@ pub fn verify_bootstrap_committee<E>(
         )));
     }
 
+    // SECURITY FIX (Issue #19): Ensure kyc_threshold doesn't exceed MAX_APPROVALS
+    // Otherwise KYC operations become impossible (can't submit enough approvals)
+    if (payload.get_kyc_threshold() as usize) > MAX_APPROVALS {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "KYC threshold {} exceeds maximum approvals allowed per transaction ({})",
+            payload.get_kyc_threshold(),
+            MAX_APPROVALS
+        )));
+    }
+
     // Validate max_kyc_level
     if !is_valid_kyc_level(payload.get_max_kyc_level()) {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -472,6 +482,16 @@ pub fn verify_register_committee<E>(
         )));
     }
 
+    // SECURITY FIX (Issue #19): Ensure kyc_threshold doesn't exceed MAX_APPROVALS
+    // Otherwise KYC operations become impossible (can't submit enough approvals)
+    if (payload.get_kyc_threshold() as usize) > MAX_APPROVALS {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "KYC threshold {} exceeds maximum approvals allowed per transaction ({})",
+            payload.get_kyc_threshold(),
+            MAX_APPROVALS
+        )));
+    }
+
     // Validate max_kyc_level
     if !is_valid_kyc_level(payload.get_max_kyc_level()) {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -568,6 +588,10 @@ pub fn verify_update_committee<E>(
 pub struct CommitteeGovernanceInfo {
     /// Current number of active members in the committee
     pub member_count: usize,
+    /// Total member count including inactive/suspended/removed members
+    /// SECURITY: Used for MAX_COMMITTEE_MEMBERS enforcement to prevent
+    /// committees from bypassing limits by suspending members.
+    pub total_member_count: usize,
     /// Current governance threshold
     pub threshold: u8,
 }
@@ -666,18 +690,81 @@ pub fn verify_update_committee_with_state<E>(
                     member_count
                 )));
             }
+
+            // SECURITY FIX (Issue #19): Ensure kyc_threshold doesn't exceed MAX_APPROVALS
+            // Otherwise KYC operations become impossible (can't submit enough approvals)
+            if new_kyc_threshold > MAX_APPROVALS {
+                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                    "KYC threshold {} exceeds maximum approvals allowed per transaction ({})",
+                    new_kyc_threshold,
+                    MAX_APPROVALS
+                )));
+            }
         }
         crate::transaction::payload::CommitteeUpdateData::AddMember { .. } => {
-            let current_members = committee_info.member_count;
-
-            // After adding, new member count must not exceed MAX_COMMITTEE_MEMBERS
-            let new_member_count = current_members.saturating_add(1);
-            if new_member_count > MAX_COMMITTEE_MEMBERS {
+            // SECURITY FIX (Issue #23): Use total member count (including inactive/suspended)
+            // for MAX_COMMITTEE_MEMBERS check. This prevents committees from bypassing the
+            // hard cap by suspending members and then adding new ones.
+            let total_members = committee_info.total_member_count;
+            let new_total_count = total_members.saturating_add(1);
+            if new_total_count > MAX_COMMITTEE_MEMBERS {
                 return Err(VerificationError::AnyError(anyhow::anyhow!(
-                    "Cannot add member: {} members would exceed maximum {} allowed",
-                    new_member_count,
+                    "Cannot add member: {} total members would exceed maximum {} allowed",
+                    new_total_count,
                     MAX_COMMITTEE_MEMBERS
                 )));
+            }
+
+            // SECURITY FIX (Issue #18): After adding a member, the current threshold may
+            // no longer meet the 2/3 governance invariant. Re-validate that:
+            // threshold >= ceil(2/3 * new_active_members)
+            // Note: This uses active member count since governance requires active members
+            let current_active = committee_info.member_count;
+            let new_active_count = current_active.saturating_add(1);
+            let threshold = committee_info.threshold as usize;
+            let min_threshold = calculate_min_threshold(new_active_count);
+            if threshold < min_threshold {
+                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                    "Cannot add member: current threshold {} would be below required minimum {} (2/3 of {} members). Increase threshold first.",
+                    threshold,
+                    min_threshold,
+                    new_active_count
+                )));
+            }
+        }
+        crate::transaction::payload::CommitteeUpdateData::UpdateMemberStatus {
+            new_status, ..
+        } => {
+            // SECURITY FIX (Issue #17): UpdateMemberStatus can deactivate members without
+            // checking governance invariants. When a member is set to Suspended or Removed,
+            // we must ensure that remaining active members >= threshold and >= MIN_COMMITTEE_MEMBERS.
+            use crate::kyc::MemberStatus;
+
+            // Only validate if the new status would make the member inactive
+            if *new_status == MemberStatus::Suspended || *new_status == MemberStatus::Removed {
+                let current_active = committee_info.member_count;
+                let threshold = committee_info.threshold as usize;
+
+                // After status change, one fewer active member
+                let remaining_active = current_active.saturating_sub(1);
+
+                // Remaining active members must be >= threshold
+                if remaining_active < threshold {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "Cannot deactivate member: remaining {} active members would be less than threshold {}",
+                        remaining_active,
+                        threshold
+                    )));
+                }
+
+                // Remaining active members must be >= MIN_COMMITTEE_MEMBERS
+                if remaining_active < MIN_COMMITTEE_MEMBERS {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "Cannot deactivate member: remaining {} active members would be below minimum {} required",
+                        remaining_active,
+                        MIN_COMMITTEE_MEMBERS
+                    )));
+                }
             }
         }
         // Other operations: No governance constraints to check
@@ -1025,6 +1112,7 @@ mod tests {
         // 5 members, min threshold = 4 (ceil(5*2/3))
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            total_member_count: 5,
             threshold: 4,
         };
 
@@ -1058,6 +1146,7 @@ mod tests {
 
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            total_member_count: 5,
             threshold: 4,
         };
 
@@ -1083,6 +1172,7 @@ mod tests {
 
         let committee_info = CommitteeGovernanceInfo {
             member_count: 6,
+            total_member_count: 6,
             threshold: 4,
         };
 
@@ -1109,6 +1199,7 @@ mod tests {
         // 5 members with threshold 4, removing one leaves 4 members >= threshold 4
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            total_member_count: 5,
             threshold: 4,
         };
 
@@ -1134,6 +1225,7 @@ mod tests {
         // 4 members with threshold 4, removing one leaves 3 members < threshold 4
         let committee_info = CommitteeGovernanceInfo {
             member_count: 4,
+            total_member_count: 4,
             threshold: 4,
         };
 
@@ -1161,6 +1253,7 @@ mod tests {
         // 3 members (minimum), threshold 2, removing one leaves 2 members < MIN_COMMITTEE_MEMBERS
         let committee_info = CommitteeGovernanceInfo {
             member_count: 3,
+            total_member_count: 3,
             threshold: 2,
         };
 
@@ -1187,6 +1280,7 @@ mod tests {
 
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            total_member_count: 5,
             threshold: 4,
         };
 
@@ -1212,6 +1306,7 @@ mod tests {
 
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            total_member_count: 5,
             threshold: 4,
         };
 
@@ -1239,10 +1334,11 @@ mod tests {
 
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            total_member_count: 5,
             threshold: 4,
         };
 
-        // AddMember should always pass state validation (adding is safe)
+        // AddMember should pass state validation (adding is safe within limits)
         let payload = create_update_committee_payload(
             CommitteeUpdateData::AddMember {
                 public_key: create_test_pubkey(99),

@@ -1446,6 +1446,7 @@ impl crate::core::storage::KycProvider for SledStorage {
         _topoheight: TopoHeight,
         _tx_hash: &Hash,
         _dest_max_kyc_level: u16,
+        _verification_timestamp: u64,
     ) -> Result<(), BlockchainError> {
         Err(BlockchainError::NotImplemented)
     }

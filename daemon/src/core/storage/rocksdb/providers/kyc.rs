@@ -206,13 +206,34 @@ impl KycProvider for RocksStorage {
                 }
                 return Err(BlockchainError::KycRevoked);
             }
-            // POLICY DECISION: Suspended KYC can be renewed and reactivated.
+            // SECURITY FIX (Issue #25): When status is Suspended, check if the previous_status
+            // was Revoked. This prevents attack: Revoked -> EmergencySuspend -> RenewKyc -> Active
+            // A revoked user should not be able to reactivate their KYC by going through suspension.
+            KycStatus::Suspended => {
+                // Check the stored previous status before suspension
+                let previous_status: Option<KycStatus> = self
+                    .load_optional_from_disk(Column::KycEmergencyPreviousStatus, user.as_bytes())?;
+                if previous_status == Some(KycStatus::Revoked) {
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!(
+                            "cannot renew KYC for user {}: previous status before suspension was Revoked",
+                            user.as_address(self.is_mainnet())
+                        );
+                    }
+                    return Err(BlockchainError::KycRevoked);
+                }
+                // Previous status was not Revoked, allow renewal
+                kyc_data.verified_at = new_verified_at;
+                kyc_data.data_hash = new_data_hash;
+                kyc_data.status = KycStatus::Active;
+            }
+            // POLICY DECISION: Suspended KYC can be renewed and reactivated (if previous was not Revoked).
             // Rationale: Suspension is a temporary measure (e.g., pending investigation).
             // Allowing renewal provides a streamlined path back to Active status once
             // the suspension reason is resolved, without requiring full re-verification.
             // This differs from Revoked status, which requires complete re-verification.
             // Approved: 2025-12-29
-            KycStatus::Suspended | KycStatus::Active | KycStatus::Expired => {
+            KycStatus::Active | KycStatus::Expired => {
                 // Update verification timestamp and data hash
                 kyc_data.verified_at = new_verified_at;
                 kyc_data.data_hash = new_data_hash;
@@ -244,6 +265,7 @@ impl KycProvider for RocksStorage {
         topoheight: TopoHeight,
         tx_hash: &Hash,
         dest_max_kyc_level: u16,
+        verification_timestamp: u64,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
@@ -260,14 +282,17 @@ impl KycProvider for RocksStorage {
 
         // Check KYC status before transfer - only Active or Expired can be transferred
         // Revoked or Suspended KYC cannot be transferred to prevent reactivation bypass
-        // SECURITY: Check if suspension has expired (consistent with is_kyc_valid/get_effective_level)
+        // SECURITY FIX (Issue #26): Use verification_timestamp (block time) instead of
+        // transferred_at (payload time, which can be up to 1 hour in future) to check
+        // suspension expiry. This prevents attackers from using future timestamps to
+        // bypass suspension.
         let effective_status = if kyc_data.status == KycStatus::Suspended {
             // Check if emergency suspension has expired
             if let Some(suspension) = self.load_optional_from_disk::<_, EmergencySuspensionData>(
                 Column::KycEmergencySuspension,
                 user.as_bytes(),
             )? {
-                if transferred_at >= suspension.expires_at {
+                if verification_timestamp >= suspension.expires_at {
                     // Suspension has expired - use previous status
                     self.load_optional_from_disk::<_, KycStatus>(
                         Column::KycEmergencyPreviousStatus,
@@ -532,20 +557,28 @@ impl KycProvider for RocksStorage {
             .load_optional_from_disk(Column::KycData, user.as_bytes())?
             .ok_or(BlockchainError::KycNotFound)?;
 
-        // Store the previous status before setting to Suspended
-        // This allows lift_emergency_suspension to restore the correct status
-        // (e.g., if user was Revoked before suspension, they should remain Revoked after lifting)
-        self.insert_into_disk(
-            Column::KycEmergencyPreviousStatus,
-            user.as_bytes(),
-            &kyc_data.status,
-        )?;
+        // SECURITY FIX (Issue #20): Only store the previous status if user is NOT already suspended.
+        // If user is already suspended, we must NOT overwrite the original previous_status.
+        // Otherwise, repeated EmergencySuspend calls would lose the true prior status.
+        // Example: Active -> Suspended (prev=Active) -> Suspended again (prev=Suspended) -> WRONG!
+        // With fix: Active -> Suspended (prev=Active) -> Suspended again (prev=Active still) -> CORRECT!
+        if kyc_data.status != KycStatus::Suspended {
+            // Store the previous status before setting to Suspended
+            // This allows lift_emergency_suspension to restore the correct status
+            // (e.g., if user was Revoked before suspension, they should remain Revoked after lifting)
+            self.insert_into_disk(
+                Column::KycEmergencyPreviousStatus,
+                user.as_bytes(),
+                &kyc_data.status,
+            )?;
+        }
+        // If already suspended, keep the existing previous_status unchanged
 
         // Update KYC status to Suspended
         kyc_data.status = KycStatus::Suspended;
         self.insert_into_disk(Column::KycData, user.as_bytes(), &kyc_data)?;
 
-        // Store emergency suspension data
+        // Store emergency suspension data (update reason_hash and expires_at for the new suspension)
         let suspension = EmergencySuspensionData {
             reason_hash: reason_hash.clone(),
             expires_at,
@@ -652,6 +685,18 @@ impl KycProvider for RocksStorage {
                 original_committee_id,
                 parent_committee_id
             );
+        }
+
+        // SECURITY FIX (Issue #24): Check if an appeal already exists for this user.
+        // This prevents overwriting pending appeals, which could be exploited to
+        // reset appeal timers or change appeal details without proper resolution.
+        if let Some(_existing_appeal) =
+            self.load_optional_from_disk::<_, KycAppealRecord>(Column::KycAppeal, user.as_bytes())?
+        {
+            return Err(BlockchainError::Any(anyhow::anyhow!(
+                "Appeal already pending for user {}, cannot overwrite",
+                user.as_address(self.is_mainnet())
+            )));
         }
 
         // Create appeal record

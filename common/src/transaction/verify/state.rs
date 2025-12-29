@@ -309,9 +309,10 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     /// * `source_committee_id` - The source committee ID (releasing)
     /// * `dest_committee_id` - The destination committee ID (accepting)
     /// * `new_data_hash` - New off-chain data hash from destination committee
-    /// * `transferred_at` - Transfer timestamp
+    /// * `transferred_at` - Transfer timestamp (used as new verified_at)
     /// * `tx_hash` - The transaction hash
     /// * `dest_max_kyc_level` - Destination committee's max KYC level (for validation)
+    /// * `verification_timestamp` - Block/verification time for checking suspension expiry
     async fn transfer_kyc(
         &mut self,
         user: &'a CompressedPublicKey,
@@ -321,6 +322,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         transferred_at: u64,
         tx_hash: &'a Hash,
         dest_max_kyc_level: u16,
+        verification_timestamp: u64,
     ) -> Result<(), E>;
 
     /// Submit a KYC appeal to parent committee
