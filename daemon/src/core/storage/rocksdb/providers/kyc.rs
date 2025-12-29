@@ -355,9 +355,33 @@ impl KycProvider for RocksStorage {
         let kyc_data: Option<KycData> =
             self.load_optional_from_disk(Column::KycData, user.as_bytes())?;
 
-        Ok(kyc_data
-            .map(|d| d.effective_level(current_time))
-            .unwrap_or(0))
+        match kyc_data {
+            Some(mut data) => {
+                // SECURITY: Check if user has emergency suspension that has expired
+                // If expired, treat as if the suspension was lifted (use previous status)
+                if data.status == KycStatus::Suspended {
+                    if let Some(suspension) = self
+                        .load_optional_from_disk::<_, EmergencySuspensionData>(
+                            Column::KycEmergencySuspension,
+                            user.as_bytes(),
+                        )?
+                    {
+                        if current_time >= suspension.expires_at {
+                            // Suspension has expired - restore previous status for calculation
+                            let previous_status: KycStatus = self
+                                .load_optional_from_disk(
+                                    Column::KycEmergencyPreviousStatus,
+                                    user.as_bytes(),
+                                )?
+                                .unwrap_or(KycStatus::Active);
+                            data.status = previous_status;
+                        }
+                    }
+                }
+                Ok(data.effective_level(current_time))
+            }
+            None => Ok(0),
+        }
     }
 
     async fn get_effective_tier(
@@ -387,7 +411,33 @@ impl KycProvider for RocksStorage {
         let kyc_data: Option<KycData> =
             self.load_optional_from_disk(Column::KycData, user.as_bytes())?;
 
-        Ok(kyc_data.map(|d| d.is_valid(current_time)).unwrap_or(false))
+        match kyc_data {
+            Some(mut data) => {
+                // SECURITY: Check if user has emergency suspension that has expired
+                // If expired, treat as if the suspension was lifted (use previous status)
+                if data.status == KycStatus::Suspended {
+                    if let Some(suspension) = self
+                        .load_optional_from_disk::<_, EmergencySuspensionData>(
+                            Column::KycEmergencySuspension,
+                            user.as_bytes(),
+                        )?
+                    {
+                        if current_time >= suspension.expires_at {
+                            // Suspension has expired - restore previous status for calculation
+                            let previous_status: KycStatus = self
+                                .load_optional_from_disk(
+                                    Column::KycEmergencyPreviousStatus,
+                                    user.as_bytes(),
+                                )?
+                                .unwrap_or(KycStatus::Active);
+                            data.status = previous_status;
+                        }
+                    }
+                }
+                Ok(data.is_valid(current_time))
+            }
+            None => Ok(false),
+        }
     }
 
     async fn get_verifying_committee(

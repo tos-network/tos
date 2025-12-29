@@ -675,6 +675,13 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         Ok(None)
     }
 
+    async fn get_kyc_status(
+        &self,
+        _user: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::kyc::KycStatus>, TestError> {
+        Ok(None)
+    }
+
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, TestError> {
         Ok(false)
     }

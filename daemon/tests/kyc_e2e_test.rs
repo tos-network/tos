@@ -520,6 +520,13 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for KycTestC
         Ok(self.kyc_data.get(user).map(|kyc| kyc.committee_id.clone()))
     }
 
+    async fn get_kyc_status(
+        &self,
+        user: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::kyc::KycStatus>, TestError> {
+        Ok(self.kyc_data.get(user).map(|kyc| kyc.status))
+    }
+
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, TestError> {
         Ok(self.global_committee_id.is_some())
     }

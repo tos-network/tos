@@ -1646,6 +1646,22 @@ impl Transaction {
             // KYC transaction types - execution handled by BlockchainApplyState
             // SECURITY: All KYC operations require approval verification
             TransactionType::SetKyc(payload) => {
+                // SECURITY: Check if user already has KYC from a different committee
+                // If so, they must use TransferKyc to change committees, not SetKyc
+                // This prevents cross-committee hijacking of users
+                if let Some(existing_committee) = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    if &existing_committee != payload.get_committee_id() {
+                        return Err(VerificationError::AnyError(anyhow::anyhow!(
+                            "SetKyc: user already has KYC from committee {}. Use TransferKyc to change committees.",
+                            existing_committee
+                        )));
+                    }
+                }
+
                 // Get the committee and verify approvals
                 let committee = state
                     .get_committee(payload.get_committee_id())
@@ -1899,6 +1915,44 @@ impl Transaction {
                         "AppealKyc: sender {:?} does not match appeal account {:?}",
                         self.get_source(),
                         payload.get_account()
+                    )));
+                }
+
+                // SECURITY: Verify that the user's verifying committee matches original_committee_id
+                // This prevents appeals against arbitrary committees
+                let user_verifying_committee = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "AppealKyc: user has no KYC record to appeal"
+                        ))
+                    })?;
+
+                if &user_verifying_committee != payload.get_original_committee_id() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: original_committee_id {} does not match user's verifying committee {}",
+                        payload.get_original_committee_id(),
+                        user_verifying_committee
+                    )));
+                }
+
+                // SECURITY: Verify that user has Revoked status (appeals are for revoked KYC)
+                let user_status = state
+                    .get_kyc_status(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "AppealKyc: user has no KYC record to appeal"
+                        ))
+                    })?;
+
+                if user_status != crate::kyc::KycStatus::Revoked {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: user KYC status is {:?}, only Revoked status can be appealed",
+                        user_status
                     )));
                 }
 

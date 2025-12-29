@@ -240,6 +240,18 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         user: &'a CompressedPublicKey,
     ) -> Result<Option<Hash>, E>;
 
+    /// Get the KYC status for a user
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    ///
+    /// # Returns
+    /// The KYC status if the user has KYC, None otherwise
+    async fn get_kyc_status(
+        &self,
+        user: &'a CompressedPublicKey,
+    ) -> Result<Option<crate::kyc::KycStatus>, E>;
+
     /// Check if the global committee has been bootstrapped
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, E>;
 
